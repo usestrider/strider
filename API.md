@@ -142,7 +142,8 @@ import { Chromium } from "effect-browser/chromium"        // CDP backend
 import { Firefox } from "effect-browser/firefox"          // BiDi backend
 import { WebKit } from "effect-browser/webkit"            // Playwright-patched builds; stock attach (iOS, WKWebView)
 import { Bidi } from "effect-browser/bidi"                // any BiDi endpoint (Safari Technology Preview, remote grids)
-import { BrowserTest } from "effect-browser/test"         // peer dependency: @effect/vitest
+import { BrowserTest } from "effect-browser/test"         // runner-agnostic test Layers
+import { VitestBrowser } from "effect-browser/test/vitest" // the Vitest adapter; peer dependency: @effect/vitest
 import { BrowserToolkit } from "effect-browser/ai"        // builds on effect/ai
 import * as Cdp from "effect-browser/cdp"                 // raw generated L0 commands, for power users
 
@@ -153,17 +154,30 @@ declare const Chromium: {
     readonly channel?: "stable" | "beta" | "canary"
     readonly executablePath?: LocalPath | string
     readonly args?: ReadonlyArray<string>
+    readonly profile?: LaunchProfile                     // default LaunchProfile.automation
   }): Layer<Browser, LaunchError, ChildProcessSpawner>
   connect(endpoint: Url | string, options?: { readonly headers?: Record<string, Redacted<string> | string> }):
     Layer<Browser, ConnectError, WebSocketConstructor>
 }
 // Firefox.launch / launchWith; WebKit.launch / launchWith / attach(endpoint); Bidi.connect(endpoint): same shape
 
+interface LaunchProfile {                                // a value you can inspect; the actual args and prefs are recorded in the launch span and trace
+  readonly name: "stock" | "automation" | "concurrent"
+  readonly args: ReadonlyArray<string>
+  readonly prefs: Readonly<Record<string, string | number | boolean>>
+}
+declare const LaunchProfile: {
+  readonly stock: LaunchProfile        // the browser's own defaults; nothing added
+  readonly automation: LaunchProfile   // first-run, sync and update prompts off; nothing a page can observe
+  readonly concurrent: LaunchProfile   // automation, plus background-timer and renderer throttling off, for many pages at once
+}
+
 program.pipe(Effect.provide(Chromium.launch))
 ```
 
 - **No platform packages of our own.** Launching needs only Effect's `ChildProcessSpawner` and `WebSocketConstructor` services, which `@effect/platform-node` and `@effect/platform-bun` provide.
 - **Backend layers can carry their known capabilities in their types,** so specialized features need no `Unsupported` case when the backend is chosen in code (P7). The mechanism is to be settled when the sketches are compiled: a capability-typed `Browser` service, or backend-specific accessors.
+- **Launch profiles are values, not hidden flags** (rule 23). `concurrent` changes what pages observe (timer cadence, background rendering), so it is opt-in and visible. No profile disables the back/forward cache, third-party storage partitioning or popup blocking: the model handles those hazards explicitly.
 - **A browser-download CLI,** if needed, starts as `effect-browser/install` plus a `bin`, not as a separate package.
 
 ## Entry points and cross-cutting settings
@@ -212,6 +226,7 @@ interface ContextOptions {
   readonly locale?: Locale | string
   readonly timezone?: TimeZoneId | string
   readonly permissions?: ReadonlyArray<Permission>
+  readonly focus?: "system" | "emulated"                 // default "system"; "emulated" makes every page report focus (owned contexts only)
 }
 ```
 
@@ -382,6 +397,7 @@ declare const Expect: {
   that<A>(observable: Observable<A>, condition: Condition<A>): Effect<void, ExpectationFailed | TargetGone>
   poll<A, E, R>(probe: Effect<A, E, R>, condition: Condition<A>): Effect<void, E | ExpectationFailed, R>
   soft<A, E, R>(self: Effect<A, E, R>): Effect<void, never, R | SoftExpectations>   // failures collected, reported at scope end
+  withInterval: Dual<Duration.Input>                     // re-check interval for conditions with no change signal; default 100 ms
 }
 declare const Cond: {
   not<A>(c: Condition<A>): Condition<A>                  // the wait is for the negation, and it passes when the element is missing
@@ -390,8 +406,8 @@ declare const Cond: {
 }
 ```
 
-- **How expectations evaluate.** One check runs immediately, then re-checks on a backoff schedule plus DOM-change invalidations, all within the deadline (`Browser.withTimeout` adjusts it). `Expect.that` also accepts a `Watchable`, which re-checks when the value changes instead of polling.
-- **What failure contains.** `ExpectationFailed{subject, condition, last, history, elapsed}`. `history` is the de-duplicated sequence of observed values with timestamps, which answers "was it ever right?". When nothing matched, the error adds an accessibility snapshot of the nearest existing ancestor and suggested locators.
+- **How expectations evaluate.** One check runs immediately. After that, a check runs on every change signal for the subject: a `Watchable` change, or a DOM mutation in the subject's subtree. Conditions with no change signal, such as layout and visibility, are also re-checked at a fixed interval (`Expect.withInterval`). There is no backoff, because backoff adds more lag the longer a test waits (rule 23). Everything runs on the live clock, within the deadline (`Browser.withTimeout` adjusts it).
+- **What failure contains.** `ExpectationFailed{subject, condition, last, history, elapsed, checks}`. `checks` counts the checks and names what triggered them. `history` is the de-duplicated sequence of observed values with timestamps, which answers "was it ever right?". When nothing matched, the error adds an accessibility snapshot of the nearest existing ancestor and suggested locators.
 
 ## State and events
 
@@ -495,10 +511,7 @@ declare const ResponseBody: {                           // exactly one kind of b
   bytes(data: Uint8Array, mimeType?: MimeType | string): ResponseBody
   file(path: LocalPath | string): ResponseBody
 }
-declare const Har: {
-  replay(path: LocalPath | string, options?: { notFound?: "fallthrough" | "abort"; update?: boolean }):
-    (target: Page | BrowserContext) => Effect<RouteRegistration, RouteError, Scope>
-}
+// HAR record and replay: Recordings, below
 ```
 
 ```ts
@@ -609,14 +622,74 @@ Snapshots:
 - **Diffs are explicit** (`snapshot.diff(previous)`), never an automatic switch between full and delta output.
 - **Visual-only UIs** (canvas, maps) need screenshots and coordinate actions. The toolkit offers those as an explicit tool set rather than a fallback.
 
+## Recordings: traces and HAR
+
+```ts
+declare const Trace: {
+  record(target: BrowserContext | Page): Effect<TraceRecording, TraceError, Scope>          // actions, logs, errors, console
+  recordWith(target: BrowserContext | Page, options: {
+    readonly screenshots?: "perAction" | "off"                                  // default "off"
+    readonly screencast?: "native" | { readonly polled: Duration.Input } | "off" // BiDi has no native screencast; default "off"
+    readonly domSnapshots?: boolean                                             // default false; needs control (below)
+    readonly network?: boolean                                                  // HAR entries, so snapshots render with their resources
+  }): Effect<TraceRecording, TraceError | Unsupported, Scope>
+}
+interface TraceRecording extends Registration {
+  exportTrace(path: LocalPath | string): Effect<LocalPath, TraceError>         // a zip that Playwright's trace viewer opens
+}
+
+declare const Har: {
+  record(target: BrowserContext | Page, options: {
+    readonly content: "embed" | "attach" | "omit"        // required: never inferred from a file extension
+    readonly detail?: "full" | "minimal"
+    readonly url?: UrlPattern
+    readonly webSocketFrames?: boolean                    // Unsupported on BiDi
+    readonly inFlightAtStop?: "wait" | "markIncomplete"
+  }): Effect<HarRecording, HarError | Unsupported, Scope>
+  replay(source: HarArchive | LocalPath | string): (target: Page | BrowserContext) => Effect<HarReplay, HarError, Scope>
+  replayWith(source: HarArchive | LocalPath | string, options: {
+    readonly match?: HarMatch                             // default: exact URL, method and body, for any method
+    readonly ambiguity?: "sequential" | "first" | "fail"  // default "sequential": identical requests replay in recorded order
+    readonly redirects?: "replayHops" | "fulfillFinal"
+    readonly incomplete?: "abort" | "skip"                // entries the recording never finished
+    readonly notFound?: "abort" | "fallthrough"           // default "abort"
+  }): (target: Page | BrowserContext) => Effect<HarReplay, HarError, Scope>
+}
+interface HarRecording extends Registration {
+  readonly entries: Watchable<number>
+  exportHar(path: LocalPath | string, options?: { readonly include?: ReadonlyArray<SecretClass> }): Effect<LocalPath, HarError>   // redacted unless included
+}
+interface HarReplay extends RouteRegistration { readonly misses: Watchable<number> }
+```
+
+- **Traces open in Playwright's trace viewer** (research/playwright-trace-format.md).
+  - We write format version 9. The viewer rejects files newer than itself, and version 10 is unreleased.
+  - Every public operation is already an `Effect.fn` span, so spans become the viewer's nested steps, and logs and errors become its log and error events.
+  - Actions carry our own names, never Playwright's, because the viewer special-cases Playwright's names and assumes their selector syntax.
+  - Timestamps come from a real monotonic clock, never Effect's `Clock`, so `TestClock` can't freeze them.
+- **Levels are opt-in, and their costs are stated.**
+  - Actions, logs, errors and console output are always recorded.
+  - Screenshots and the screencast cost bandwidth. BiDi has no native screencast, so it is polled at the interval you choose.
+  - DOM snapshots install Playwright's capture script in the page's main world, where it hooks CSSOM methods. That changes the page, so it needs control and never runs on attached or observed pages.
+- **Exports are explicit and redacted.** Both files cross a persistence boundary (`export*`). Classified fields are stripped under the active diagnostics preset, and raw content (bodies, snapshots, screenshots) is included only when asked for.
+- **HAR replay has one documented matching rule:** exact URL, method and body, for any method. Extra criteria are named matchers (`HarMatch.headers([...])`).
+  - Nothing is scored, and no CORS headers are added. Repeated headers stay separate.
+  - The archive is validated when opened; a bad archive fails with `HarError` instead of falling through to the network.
+  - Entries the recording never finished follow `incomplete` instead of stalling.
+  - There is no `update` mode: to re-record, use `Har.record`.
+- **HAR recording** records requests as sent. Timings follow the HAR spec, and an entry without a body says why. On BiDi, the body collectors start when the recording scope is acquired (research/har.md).
+
 ## Testing
+
+**Vitest first, ready for etest.** Everything a test needs is a Layer or a scoped Effect with a lifetime. Runner specifics sit behind one per-test service, `TestRun`. The Vitest adapter is the only runner code today. When `@effect/test` (etest) is ready, an etest adapter attaches the same Layers with `Test.provide` (research/effect-test-runner.md).
 
 ```ts
 import { layer } from "@effect/vitest"
 import { BrowserTest } from "effect-browser/test"
+import { VitestBrowser } from "effect-browser/test/vitest"
 import { Chromium } from "effect-browser/chromium"
 
-layer(BrowserTest.layer(Chromium.launch))("checkout", (it) => {
+layer(VitestBrowser.layer(Chromium.launch))("checkout", (it) => {
   it.effect("adds to cart", () =>
     Effect.gen(function* () {
       const page = yield* BrowserTest.page      // fresh context + page per test; closed after
@@ -626,16 +699,43 @@ layer(BrowserTest.layer(Chromium.launch))("checkout", (it) => {
 })
 ```
 
-`BrowserTest.layer(backend)` wraps any backend layer (`Chromium.launch`, `Firefox.launchWith(…)`, …) and provides:
+```ts
+// effect-browser/test: runner-agnostic
+declare const BrowserTest: {
+  browser<E, R>(backend: Layer<Browser, E, R>, options?: {
+    readonly restart?: "onCrash" | "onFailure" | "never"  // default "onCrash"
+  }): Layer<Browser, E, R>                                 // LaunchProfile.concurrent unless the backend sets a profile
+  readonly page: Effect<Page, PageError, Browser | TestRun | Scope>
+  pageWith(options: ContextOptions & { readonly trace?: "onFailure" | "always" | "off" }): Effect<Page, PageError, Browser | TestRun | Scope>
+}
+class TestRun extends Context.Service<TestRun, {          // per test, from the runner adapter
+  readonly info: TestInfo                                  // project, file, id, attempt, worker, shard
+  attach(artifact: TestArtifact): Effect<void>             // Vitest: recordArtifact; etest: attachments (proposed upstream)
+  readonly check: Effect<void>                             // one Expect check; etest counts assertions (proposed upstream)
+}>()("effect-browser/TestRun") {}
 
-- a browser shared by the suite;
-- a fresh context and page per test;
-- a live deadline clock under `TestClock`;
-- the `local` diagnostics preset;
-- traces and screenshots retained on failure, through finalizers that see the `Exit`;
-- a `TestInfo` service.
+// effect-browser/test/vitest
+declare const VitestBrowser: {
+  layer<E, R>(backend: Layer<Browser, E, R>, options?: { readonly restart?: "onCrash" | "onFailure" | "never" }):
+    Layer<Browser | TestRun, E, R>                         // BrowserTest.browser, plus TestRun from the current Vitest test
+}
+```
 
-There is no fixture magic: everything is a `Layer`, and dependencies are tracked in `R`.
+- **Defaults.** Each is visible and can be overridden:
+  - a browser per layer block, which is about one per file under Vitest's default isolation;
+  - a fresh context and page per test;
+  - `LaunchProfile.concurrent`, `focus: "emulated"` and the `local` diagnostics preset;
+  - restart `onCrash`;
+  - traces kept on failure, where an interrupted test counts as failed;
+  - a live deadline clock under `TestClock`.
+- **Parallelism** (research/test-parallelism.md).
+  - Files run in parallel across Vitest workers, each with its own browser. We recommend `maxWorkers: "50%"`.
+  - Concurrent tests within a file are opt-in (`layer(…, { concurrent: true })`), and each one gets its own `TestClock`.
+  - One browser for a whole run waits for etest's run-wide shared layers. Under Vitest, `Chromium.connect` to a browser you started yourself covers it.
+  - Sharding belongs to the runner. `TestInfo` makes artifact names unique per shard, worker, test and attempt.
+- **Contexts don't isolate everything.** Launch flags, the downloads directory, browser-wide commands, extensions, and OS focus, clipboard and GPU are shared. The library always scopes commands to the context it owns.
+- **Artifacts.** Traces and HARs attach through `TestRun.attach`. Under Vitest that is `recordArtifact`, with `effect-browser:trace` and `effect-browser:har` artifact types.
+- **No fixture magic.** Everything is a `Layer`, and dependencies are tracked in `R`.
 
 ## Errors as users see them
 
@@ -756,6 +856,9 @@ yield* report.finished
 
 ## Open questions
 
-None at the API level right now. Decided, with testing to be discussed further later:
+1. **How the Vitest adapter finds the current test.** @effect/vitest passes Vitest's test context to `it.effect` as an argument, not as a service, so `VitestBrowser.layer` can't read it from the environment. Recommendation: propose that @effect/vitest provide it as a service in every `it.effect`. Until then, tests pass it explicitly.
+
+Decided:
 - **The fake browser** stays internal first. Once stable, it becomes a narrow `effect-browser/testing` subpath for event- and lifecycle-level scenarios. It doesn't emulate a DOM: actions against fake pages fail with `Unsupported`.
 - **No Vitest reporter plugin.** The library stays runner-agnostic, and flakiness is classified from `test.retry` / `test.outcome` span attributes and `TestInfo`.
+- **Testing ships for Vitest first, behind `TestRun`,** so that moving to etest is a new adapter, not a redesign (revision 5.18).

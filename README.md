@@ -24,7 +24,7 @@ Each layer document has the same shape: purpose, top data models, interface sket
 | — | [reviews/](reviews/) | design reviews, one per draft |
 
 ```
-L2  API       Browser · BrowserContext · Page · Locator · Expect · Watchable · Observation · Route · Clock · Toolkit · BrowserTest
+L2  API       Browser · BrowserContext · Page · Locator · Expect · Watchable · Observation · Route · Clock · Trace · Har · Toolkit · BrowserTest
 L1  Model     ids · navigables · documents · realms · navigations · requests · obligations · declarations · readiness
 L0  Protocol  transports · sessions · generated commands and events · ingestion · backend adapters · capabilities
 ```
@@ -121,6 +121,12 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.18** settled testing:
+  - Vitest ships first, with runner specifics behind one per-test service (`TestRun`), so that moving to Sebastian Lorenz's `@effect/test` later is a new adapter;
+  - traces open in Playwright's trace viewer, and HAR recording and replay are explicit, with `update` removed;
+  - `Expect` re-checks on change signals plus a fixed interval, with no backoff;
+  - launch profiles and focus emulation are visible values;
+  - parallelism defaults to a browser per file and a fresh context per test.
 - **Revision 5.17** adopted declarative error matchers:
   - a per-backend table, cited to evidence (probe 24), classifies every error reply into L0's fixed set of tags;
   - `Rejected` gains a normalized `RejectReason`, so L1 never matches message text;
@@ -188,4 +194,4 @@ Each user-visible operation has one monotonic deadline covering everything it do
   - finding 7, dual `Observe` combinators that return both values: API.md;
   - finding 8, diagnostic presets: Diagnostics above;
   - the smaller items: CONCEPTS.md.
-- **Next:** discuss testing, then run the conformance probes (PROBES.md) against Chrome and Firefox. Compiling the API sketches against stub types is an optional cheap check of the error-channel and `E`/`R` claims.
+- **Next:** a consistency review (draft 5) of revisions 5.1–5.18, then L0: the codegen pipeline, the transports and the conformance probes (PROBES.md) against Chrome and Firefox. Compiling the API sketches against stub types is an optional cheap check of the error-channel and `E`/`R` claims.

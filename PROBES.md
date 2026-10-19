@@ -15,7 +15,7 @@
 9. **Event-loop sharing.** Does an `alert()` in a popup block evaluation in its same-site opener?
 10. **Stability sampling.** Measure native animation-frame cadence and the stable-frame count per backend and headless mode, including background tabs. Confirm that sampling stays independent of an injected application clock.
 11. **Partial CDP implementations** (Lightpanda and similar). Which methods return success without doing anything?
-12. **Pipe EOF.** Does Chrome exit when fd 3 and fd 4 close after the parent is SIGKILLed? Does Bun support the extra file descriptors?
+12. **Pipe EOF.** Does Chrome exit when fd 3 and fd 4 close after the parent is SIGKILLed? Do Bun and Deno support the extra file descriptors, including inside worker threads, where etest's executors run?
 13. **Browsing-context-group switches.** How does each backend reveal one: an opener change, a new WindowProxy, `sharedId` invalidation?
 14. **Safari BiDi on stable.** Does `safari:experimentalWebSocketUrl` work on stable Safari 27?
 15. **Navigations that keep the old document.** For a canceled navigation, a download or a 204/205, confirm the old realm stays usable and no wait depends on a replacement realm that never arrives.
@@ -35,6 +35,11 @@
 22. **Pause-on-start granularity.** Can new targets be paused per created context, per opener (popups), or only browser-wide by type? Covers CDP `setAutoAttach` filters and `autoAttachRelated`, and WebKit page proxies. A user-opened tab in an attached browser must never be paused unless browser-wide access was granted.
 23. **Interactivity evidence.** Per backend, can event listeners be listed (CDP `DOMDebugger.getEventListeners`; WebKit unconfirmed; BiDi has none)? What does that cost on large pages? On a corpus of known-inaccessible sites, how much do inferred interactivity and inferred names recover compared with the accessibility tree alone?
 24. **Error vocabulary.** Per backend, record the error reply for each of these: a stale node id, a detached frame, a closed target, an unknown method, an unsupported operation, invalid parameters, and a command sent to an ended session. The replies seed the error matcher tables and become drift-test fixtures.
+25. **Several clients on one browser.** Can several clients connect to one browser at once, each owning its own user contexts, on CDP (`createBrowserContext` with `disposeOnDetach`) and on Firefox's BiDi? When a client disconnects, are its contexts removed? This decides one browser per test run.
+26. **Many pages at once.** With one context per test and 1, 4 and 8 tests running concurrently, headless and headed, with and without `LaunchProfile.concurrent`:
+    - Do pages stay visible and keep rendering? Do timers keep their cadence?
+    - Does each new context's first page get its own window?
+    - What does `document.hasFocus()` report with `focus` set to `"emulated"` and to `"system"`?
 
 ## Hazard coverage
 
@@ -60,12 +65,12 @@ The hazards are catalogued in `research/platform-concept-model.md` §4.
 | H16 back/forward-cache restore | document continuity correlated; handles proven separately |
 | H17 a service worker answers a request | `servedBy`; lifecycle without `Sent`; bypass capability |
 | H18 service worker restart | realm cycles under a stable registration |
-| H19 rendering-based waits hang in hidden tabs | `NoRenderingOpportunity`; `activate()` |
+| H19 rendering-based waits hang in hidden tabs | `NoRenderingOpportunity`; `activate()`; `LaunchProfile.concurrent` (probe 26) |
 | H20 the click lands elsewhere | pre-check plus a guard on the trusted event |
 | H21 synthetic input is not user input | input fidelity; activation declared |
 | H22 transient activation expires | gated work chained in one gesture; evaluation with user activation |
 | H23 the file chooser doesn't pause | obligation armed before input |
-| H24 focus differs headless vs headed | page focused before key input |
+| H24 focus differs headless vs headed | page focused before key input; `focus: "emulated"` for owned contexts |
 | H25 IME composition | `insertText` primitive |
 | H26 shadow DOM retargeting | per-shadow-root hit testing; composed-tree queries |
 | H27 top layer and inert subtrees | `NotInert`, `BlockedByModal` |
