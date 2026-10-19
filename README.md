@@ -123,11 +123,11 @@ Each user-visible operation has one monotonic deadline covering everything it do
 ## Status
 
 - **Revision 5.20** added the CLI (CLI.md), for agents and people driving a live session from a shell:
-  - sessions are named, and every command names its session (`--session` or `EB_SESSION`), with no fallback;
+  - sessions and pages are named, and every command names its session (`--session` or `EB_SESSION`) and page (`-p`), with no fallback and no current page;
   - one daemon and one browser per session, in a session directory at a predictable path that is deleted at `stop`; hard kills are reported and pruned explicitly;
   - forks copy storage state into a new session, from a running session or a file saved with `state save`;
   - commands are the toolkit's tools and drive the live session, while the library runs self-contained programs;
-  - segments bridge the two: a file's default export, an `Effect` requiring `CurrentSession`, runs under `eb run` or inside any program, checked by the project's own `tsc`;
+  - segments bridge the two: a file's default export, an `Effect` requiring `CurrentSession`, finds its pages by name and runs under `eb run` or inside any program, checked by the project's own `tsc`;
   - `snapshot.ref(id)` now returns a lazy `Locator`, which removed a double `yield*`;
   - launches use a temporary profile by default (`FileSystem.makeTempDirectoryScoped`), and `userDataDir` names a directory you own.
 - **Revision 5.19** replaced `page.events.*` with a module per event type:

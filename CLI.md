@@ -24,6 +24,7 @@ interface SessionSpec {                                   // what `eb start` was
 }
 
 type Handle = PageHandle | WaitHandle | DownloadHandle | RegistrationHandle   // p1, w1, d1, r1: per session, printed on acquisition
+                                                          // a page takes its --name instead of p1 when given one
 
 interface CommandResult {                                 // text by default; --json for tools
   readonly page: Option<PageHandle>                       // every line names its page
@@ -38,9 +39,11 @@ interface CommandResult {                                 // text by default; --
 }
 
 class CurrentSession extends Context.Service<CurrentSession, {   // from "effect-browser": what a segment requires
-  readonly browser: BrowserHandle
-  readonly page: Page                                     // under `eb run`: the session's current page when the run started
-}>()("effect-browser/CurrentSession") {}
+  readonly context: BrowserContext                        // the session's one context: newPage, pages
+  page(name: string): Effect<Page, PageNotFound>          // by the handle the CLI shows: "shop", or "p2" if unnamed
+}>()("effect-browser/CurrentSession") {
+  static make(options: { readonly context: BrowserContext; readonly pages: Record<string, Page> }): CurrentSession["Service"]   // for programs and tests
+}
 ```
 
 ```
@@ -56,17 +59,17 @@ $XDG_RUNTIME_DIR/eb/            # per user; the OS temp directory where there is
 
 ```sh
 eb start --name checkout                   # session checkout · chromium · idle timeout 1 h
-eb -s checkout page new https://shop.test  # → p1, now the current page
-eb -s checkout snapshot                    # refs e1…, kept as p1's latest snapshot
-eb -s checkout fill e4 "ada@example.com"
-eb -s checkout fill e5 %password%          # a secret named at start; never echoed or recorded
-eb -s checkout click e9
-eb -s checkout next download               # → w1: waiting from now on
-eb -s checkout click 'role=button[name="Export CSV"]'
+eb -s checkout page new --name shop https://shop.test   # → shop (p1 without --name)
+eb -s checkout -p shop snapshot            # refs e1…, kept as shop's latest snapshot
+eb -s checkout -p shop fill e4 "ada@example.com"
+eb -s checkout -p shop fill e5 %password%  # a secret named at start; never echoed or recorded
+eb -s checkout -p shop click e9
+eb -s checkout -p shop next download       # → w1: waiting from now on
+eb -s checkout -p shop click 'role=button[name="Export CSV"]'
 eb -s checkout await w1                    # → d1 "export.csv", 12 KB
-eb -s checkout history console --level error
+eb -s checkout -p shop history console --level error
 eb -s checkout run pay.ts                  # a segment: the file's default export, run in the live session
-eb -s checkout route "**/analytics/**" abort      # → r1, a scoped handler; `eb remove r1` ends it
+eb -s checkout -p shop route "**/analytics/**" abort   # → r1, a scoped handler; `eb remove r1` ends it
 eb -s checkout state save ./auth/shop.state
 eb -s checkout export test checkout.test.ts
 eb stop -s checkout
@@ -76,16 +79,17 @@ eb start --name task-2 --fork checkout              # a fork from a running sess
 ```
 
 ```
-clicked button "Add to cart" on p1 · 412 ms
+clicked button "Add to cart" on shop · 412 ms
 since last: navigated to /cart · popup p2 opened · dialog "Leave site?" dismissed by policy
 ```
 
 ```ts
 // pay.ts: a segment, runnable under `eb run` or inside any program that provides CurrentSession
 export default Effect.gen(function* () {
-  const { page } = yield* CurrentSession
-  const popups = yield* Popup.next(page)
-  yield* page.getByText("Pay").click
+  const session = yield* CurrentSession
+  const shop = yield* session.page("shop")                // looked up first, so a missing page fails before any step
+  const popups = yield* Popup.next(shop)
+  yield* shop.getByText("Pay").click
   const popup = yield* popups
   yield* popup.getByLabel("Card number").fill("4242 4242 4242 4242")
   return { popup }                                        // returned handles move into the session, as p2
@@ -97,6 +101,8 @@ export default Effect.gen(function* () {
 **Sessions**
 - **Every command names its session.** It comes from `--session`/`-s` or `EB_SESSION`, and the flag wins. There is no fallback, even when only one session is running, because with several agents on one machine "the only session" is a race. The error lists the running sessions. Agent shells often don't keep environment variables between calls, so documentation and skills use the flag.
 - **Names are the ids.** They are unique, and starting a name that is taken fails instead of attaching. Handles belong to their session, so `p1` in one session has nothing to do with `p1` in another.
+- **Every page command names its page** with `--page`/`-p`. There is no current page and no fallback, even when the session has one page, for the same reason as sessions: an implicit selection is how agents act on the wrong tab (Stagehand followed focus; Chrome DevTools MCP raced on a global selected page). Pages take an optional `--name` when created, and the handle is that name or else `p1`.
+- **One context per session.** `--state` and `--fork` apply to it. Two logins at once, such as two users of a chat, are two sessions.
 - **One daemon and one browser per session.** Contexts share launch flags, the downloads directory and OS focus (API.md, Testing), so separate browsers keep concurrent agents apart, and a crash ends one session.
 - **Lifetime.** A session ends at `eb stop`, after its idle timeout, or when `--owner-pid` exits. Whichever applies is printed at start. `eb sessions` lists name, backend, pages, idle time and owner.
 
@@ -113,15 +119,16 @@ export default Effect.gen(function* () {
 - **Commands are the toolkit's tools.** They are defined once as Schemas, in an RPC group the daemon serves. The CLI, the MCP server and `BrowserToolkit` all derive from those definitions (API.md, Agents). Session commands (`start`, `stop`, `sessions`, `page`, `run`, `state`, `export`, `prune`) are added on top.
 - **Commands for the live session, the library for programs.** An agent loops by running commands. Self-contained programs use the library directly, run with node or bun. `state save`, `export` and segments (below) are the bridges, so there is no shell mini-language.
 - **Decisions are declarative commands.** `eb route <pattern> abort | continue | fulfill …` and `eb dialog handle accept | dismiss` register scoped handlers in the session and print a registration handle; `eb remove r1` ends one. A decision that needs logic belongs in a segment or a program.
-- **Targets** are a bare ref (`e9`), from the current page's latest snapshot, or a locator string that maps to exactly one `getBy*`: `role=button[name="Sign in"]`, `text="Add to cart"`, `label=Email`, `testid=cart`, `css=…`. Strings are parsed at the boundary, so a bad one fails immediately.
+- **Targets** are a bare ref (`e9`), checked against the named page's latest snapshot (a ref from another page's snapshot fails with a hint naming that page), or a locator string that maps to exactly one `getBy*`: `role=button[name="Sign in"]`, `text="Add to cart"`, `label=Email`, `testid=cart`, `css=…`. Strings are parsed at the boundary, so a bad one fails immediately.
 - **Events work across commands.** `eb next` subscribes in the session's scope and prints a wait handle, and `eb await` collects it under its own deadline. The since-last digest is `history`, read from where the previous command stopped.
 - **A failed request in the digest** got no response (a network, DNS or TLS error, or blocked by CORS, CSP or mixed content) or a status of 400 or more. Canceled requests, superseded by a navigation or aborted by the app, are not failures. Nothing is filtered by resource type, which would be a heuristic (rule 23). Identical failures are grouped with a count, and a long list shows the first few, then "+N more · `eb history network --failed`".
-- **Nothing changes implicitly.** The current page changes only with `eb page use`, never by following a popup or focus. Attaching to your own browser gives observed pages, and acting on one needs `eb control p3`.
+- **Nothing changes implicitly.** A popup is announced in the digest and gets a handle, but nothing follows it. Attaching to your own browser gives observed pages, and acting on one needs `eb control p3`.
 - **Failures say what happened:** the error's tag, its hint and the dispatch evidence ("the click may have reached the page"), with an exit code per error family. Interrupting a command (Ctrl-C) interrupts that command, never the session.
 
 **Segments**
 - **`eb run` runs a file's default export,** an `Effect` that requires `CurrentSession` and `Scope`. There are no named exports and no arguments; a file without a default `Effect` fails with a hint.
-- **The same segment runs anywhere.** `CurrentSession` is in the main entry point, so a program or test provides it (`Effect.provideService(CurrentSession, { browser, page })`) and reuses the segment unchanged.
+- **A segment finds its pages by name.** `session.page("shop")` fails with `PageNotFound`, whose hint lists the session's pages. Looking pages up first makes a missing one fail before any step runs.
+- **The same segment runs anywhere.** `CurrentSession` is in the main entry point, so a program or test provides it under the same names (`Effect.provideService(CurrentSession, CurrentSession.make({ context, pages: { shop: page } }))`) and reuses the segment unchanged.
 - **`eb run` provides `CurrentSession`, `Scope` and the daemon's platform services.** A segment that requires anything else fails with an error naming the missing service.
 - **The CLI doesn't type-check.** A segment is a file in your project, so your `tsc` checks it against the same effect-browser version the daemon runs from. Agent skills run `tsc --noEmit` before `eb run`, because a segment that fails halfway leaves its earlier steps done.
 - **It runs in its own scope, like a script.** Its routes, handlers and waits end with it. Handles it returns are transferred into the session and named, which is the explicit transfer CONCEPTS.md §3 already defines.
