@@ -27,6 +27,7 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
 - **Handles get members; decorators are dual combinators.** `Observe.*`, `Expect.*` and `Browser.with*` work both data-first and in `pipe`.
 - **No platform services at call sites.** Platform services appear only in the launch and connect layers, so `Scope` is the only requirement an ordinary call site can see.
 - **Immutable by default; mutable state is read through an `Effect`.** Handles, locators, snapshots, events and errors are immutable values. Anything that can change is never a plain field: `page.url`, `page.title`, `browser.capabilities`, page lists, and whether a handle still holds its access. Such reads are `Effect`s, evaluated when they run, so they can't go stale in a variable. Changes arrive on `events` streams. Internally this state lives in a `SubscriptionRef` (CONCEPTS.md §2), which the public API never exposes for writing. Mutability is avoided wherever an immutable value can do.
+- **Plain fields on live handles must be fixed, and say why.** A live handle (browser, context, page, frame, download, intercepted request) may expose a plain field only if the value can't change for the handle's lifetime. Each such field carries a one-line justification. Ids, `closed`, event streams and sub-handles bound to their parent (`keyboard`, `mouse`, `clock`, whose own state is again read through `Effect`s) are exempt by construction. A field that can't be justified becomes an `Effect`. Immutable values (snapshots, locators, navigations, dialogs) are exempt entirely.
 - **Locators are values,** resolved again on every attempt.
 - **Snapshots are named `read*`.** Retrying assertions take locators.
 - **Access is typed.** `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, like `ReadonlyArray` and `Array`. A helper that only reads takes `ReadonlyPage`, and a `Page` is accepted. Calling an action on a page you may only inspect is a compile error, and autocomplete doesn't offer it.
@@ -101,7 +102,7 @@ interface BrowserHandle {
   readonly newPage: Effect<Page, PageError, Scope>                                   // a fresh context + page, released together
   newPageWith(options: ContextOptions): Effect<Page, PageError, Scope>
   readonly pages: Effect<ReadonlyArray<ObservedPage>>                                // attach mode: what already exists
-  readonly defaultContext: ObservedContext
+  readonly defaultContext: ObservedContext                                           // fixed: exists for the whole connection
 }
 
 interface BrowserContext {
@@ -334,7 +335,7 @@ declare const Observe: {
 ```ts
 type RouteHandler<E, R> = (request: InterceptedRequest) => Effect<RouteDecision, E, R>   // E is logged; the default decision applies
 interface InterceptedRequest {
-  readonly request: RequestSnapshot
+  readonly request: RequestSnapshot                      // fixed: the request as paused at this phase
   readonly fetch: Effect<FetchedResponse, RouteError>     // perform it, then patch the response
   fetchWith(overrides: RequestOverrides): Effect<FetchedResponse, RouteError>
 }
@@ -370,8 +371,8 @@ declare const Dialog: {
 }
 
 interface Download {
-  readonly url: string
-  readonly suggestedFilename: string
+  readonly url: string                                   // fixed when the download begins
+  readonly suggestedFilename: string                     // fixed when the download begins
   readonly done: Effect<void, DownloadError>
   readonly stream: Stream<Uint8Array, DownloadError>
   saveAs(path: string): Effect<void, DownloadError>      // transfers from a remote browser where supported

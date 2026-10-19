@@ -44,12 +44,14 @@ Realms are siblings of documents, not children. The one exception that forces th
 
 **Immutable by default.** An entity is a set of immutable identity fields plus *one* `SubscriptionRef` holding its current state; anything that can change lives in that ref and nowhere else. Snapshots, events, outcomes and errors are immutable values. Lifetime ends are `Deferred`-backed `Effect`s. Readers always go through an `Effect` (`SubscriptionRef.get`), so a value is read when the effect runs, never captured stale in a field. Watchers use `changes`. Only the state fold (PROTOCOL.md) writes these refs. The public API exposes reads and event streams, never the refs themselves.
 
+**Identity fields must be fixed for the entity's lifetime, and say why.** Each plain field carries a one-line justification. Ids, `closed` and streams are exempt by construction. A field that can't be justified moves into `state`. Applying this rule moved three fields: a document's and a window realm's navigable (prerender activation moves both into the existing tab), `isInitialAboutBlank` (cleared by `document.open()`), and a navigation's kind (the Navigation API can intercept a cross-document navigation into a same-document one).
+
 ```ts
 // ── Containment ────────────────────────────────────────────
 interface BrowserModel {
   readonly id: BrowserId
   readonly backend: BackendInfo                         // fixed for the connection
-  readonly ownership: { _tag: "Launched"; process: ProcessInfo } | { _tag: "Attached"; endpoint: string }
+  readonly ownership: { _tag: "Launched"; process: ProcessInfo } | { _tag: "Attached"; endpoint: string }   // fixed: set when connecting
   readonly state: SubscriptionRef<{
     userContexts: ReadonlyMap<UserContextId, UserContextModel>
     capabilities: CapabilitySet                         // refined as probes complete
@@ -58,7 +60,7 @@ interface BrowserModel {
 }
 interface UserContextModel {
   readonly id: UserContextId
-  readonly isDefault: boolean
+  readonly isDefault: boolean                           // fixed: the default context exists for the whole connection
   readonly state: SubscriptionRef<{
     access: Access; release: "leaveOpen" | "removeOwned"
     pages: ReadonlyArray<NavigableId>
@@ -69,7 +71,7 @@ interface UserContextModel {
 }
 interface NavigableModel<S extends NavigableState = NavigableState> {   // Page and Frame share this
   readonly id: NavigableId
-  readonly kind: "page" | "frame"
+  readonly kind: "page" | "frame"                       // fixed: a frame never becomes top-level, nor the reverse
   readonly parent: Option<NavigableId>                  // a frame never changes parent
   readonly state: SubscriptionRef<S>
   readonly closed: Effect<CloseReason>
@@ -80,9 +82,9 @@ interface NavigableState {
   access: Access; release: ReleasePolicy; cleanupScope: Option<CleanupScopeId>
 }
 interface PageModel extends NavigableModel<PageState> {
-  readonly pageKind: "tab" | "popup" | "prerender" | "fenced"
-  readonly origin: { _tag: "Created" } | { _tag: "Opened"; opener: Option<NavigableId> } | { _tag: "Adopted" }
-  readonly originalOpener: Option<NavigableId>          // kept even under noopener
+  readonly pageKind: "tab" | "popup" | "prerender" | "fenced"   // fixed: an activated prerender page ends (PrerenderActivated)
+  readonly origin: { _tag: "Created" } | { _tag: "Opened"; opener: Option<NavigableId> } | { _tag: "Adopted" }   // fixed: how it came to exist
+  readonly originalOpener: Option<NavigableId>          // fixed at creation; kept even under noopener
 }
 interface PageState extends NavigableState {
   prompt: Option<PromptId>
@@ -90,13 +92,13 @@ interface PageState extends NavigableState {
 }
 interface DocumentModel {
   readonly id: DocumentId
-  readonly navigable: NavigableId
-  readonly origin: string
-  readonly navigation: Option<NavigationId>             // the committing navigation; None for the initial about:blank
-  readonly isInitialAboutBlank: boolean
-  readonly isErrorDocument: boolean
-  readonly restoredFrom: Option<DocumentId>             // only with correlating evidence
+  readonly origin: string                               // fixed for the document; document.domain changes only the effective domain
+  readonly navigation: Option<NavigationId>             // fixed: the committing navigation; None for the initial about:blank
+  readonly isErrorDocument: boolean                     // fixed: error documents are created as such
+  readonly restoredFrom: Option<DocumentId>             // fixed at creation; only with correlating evidence
   readonly state: SubscriptionRef<{
+    navigable: NavigableId                              // changes only on prerender activation
+    isInitialAboutBlank: boolean                        // cleared by document.open()
     generation: DocumentGeneration                      // bumped by document.open()
     url: string                                         // changes on same-document navigation
     lifecycle: "active" | "suspended" | { _tag: "ended"; reason: CloseReason }
@@ -106,10 +108,11 @@ interface DocumentModel {
 }
 interface RealmModel {
   readonly id: RealmId
-  readonly kind: { _tag: "window"; navigable: NavigableId; world: "main" | { isolated: string } }
+  readonly kind: { _tag: "window"; world: "main" | { isolated: string } }   // fixed: a realm never changes kind or world
     | { _tag: "dedicatedWorker"; owner: RealmId } | { _tag: "sharedWorker" }
     | { _tag: "serviceWorker"; registration: string } | { _tag: "worklet"; type: string }
   readonly state: SubscriptionRef<{
+    navigable: Option<NavigableId>                      // window realms; moves with its document on prerender activation
     documents: ReadonlyArray<DocumentId>                // usually one; two after initial-blank reuse
     lifecycle: "active" | "suspended" | { _tag: "destroyed"; reason: CloseReason }
   }>
@@ -118,8 +121,9 @@ interface RealmModel {
 // ── Navigation ─────────────────────────────────────────────
 interface NavigationModel {
   readonly id: NavigationId
-  readonly navigable: NavigableId
-  readonly kind: "crossDocument" | "fragment" | "historyApi" | "intercepted" | "traversal" | "reload" | "javascriptUrl" | "prerenderActivation"
+  readonly navigable: NavigableId                       // fixed: a navigation targets one navigable
+  readonly initiatedAs: "crossDocument" | "fragment" | "historyApi" | "traversal" | "reload" | "javascriptUrl" | "prerenderActivation"
+                                                        // fixed: how it started; interception or a download shows up in the outcome
   readonly status: SubscriptionRef<
     | { _tag: "pending" }
     | { _tag: "observed"; outcome: NavigationOutcome; evidence: Evidence }
@@ -148,7 +152,7 @@ interface ResponseSnapshot {
   readonly body: BodyAccess                             // availability is read through an Effect
 }
 interface ConnectionModel {                            // long-lived connections
-  readonly id: ConnectionId; readonly kind: "webSocket" | "eventSource"; readonly url: string; readonly navigable: NavigableId
+  readonly id: ConnectionId; readonly kind: "webSocket" | "eventSource"; readonly url: string; readonly navigable: NavigableId   // fixed at open
   readonly frames: Stream<ConnectionFrame>              // capability
   readonly closed: Effect<CloseReason>
 }
@@ -179,7 +183,7 @@ type Readiness = { _tag: "Ready" } | { _tag: "NotReady"; predicate: Predicate; r
 
 type CloseReason =
   | BrowserClosed | BrowserCrashed | ConnectionLost | ModelUnavailable
-  | UserContextRemoved | ObservationReleased | AccessReleased
+  | UserContextRemoved | ObservationReleased | AccessReleased | PrerenderActivated
   | PageClosed /* by: command | script | userContextRemoved | browser */ | PageCrashed
   | FrameDetached | DocumentReplaced | DocumentEvicted | DocumentDestroyed | DocumentUnloaded
   | RealmDestroyed
@@ -228,6 +232,7 @@ Cleanup groups can span sibling pages, independently of this graph.
   - `document.open()` keeps the epoch, starts a new generation, and returns readiness to `loading`.
   - A restored document gets the same id only when the adapter can correlate it; otherwise the old epoch ends with `DocumentUnloaded` and the new one carries `restoredFrom`.
   - Node and handle continuity are proven separately from document continuity.
+  - On prerender activation the prerender page ends with `PrerenderActivated`. Its document and realms move into the activating tab, and their `navigable` changes in state.
 - **Frames.** A frame is created synchronously, before any protocol notification arrives. It ends on container removal, or when its parent's document permanently ends; the adapter closes orphans itself because HTML never fires an event for them. A frame keeps its identity across process swaps; only its adapter session changes.
 - **Realms and worlds.**
   - **Kinds:** window (main or isolated world), dedicated, shared and service workers, and worklets. The kind is an open union.
