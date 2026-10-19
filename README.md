@@ -120,6 +120,11 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.9** settled the details of the access types:
+  - popups of inspected or observed pages are `ObservedPage`s;
+  - contexts have two levels (`ObservedContext`, `BrowserContext`), and reading storage needs control;
+  - there are no type guards for narrowing access;
+  - events are typed per access level.
 - **Revision 5.8** adopted rules 18–22. Registrations now return handles (`Registration`, `RouteRegistration` with `hits`, `HandlerRegistration`), error reasons carry hints, and the API has a naming grammar.
 - **Revision 5.7** split state from events:
   - `Watchable` for state: page status, URL, frames, download progress, page lists, capabilities.

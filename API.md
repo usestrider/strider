@@ -38,7 +38,7 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
 - **Unions of valid models; `Option` for what's truly optional.** Everything the library returns is a tagged union of its valid shapes rather than a record with optional fields: navigations, dialogs, request initiators, ownership. Genuinely optional values are `Option`, never `?:`, `undefined` or `null`. Input option bags keep `?:` to mean "use the default", but mutually exclusive alternatives are unions: a route body is JSON *or* text *or* bytes, and a screenshot covers the viewport *or* the full page *or* a clip *or* an element.
 - **Locators are values,** resolved again on every attempt.
 - **Snapshots are named `read*`.** Retrying assertions take locators.
-- **Access is typed.** `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, like `ReadonlyArray` and `Array`. A helper that only reads takes `ReadonlyPage`, and a `Page` is accepted. Calling an action on a page you may only inspect is a compile error, and autocomplete doesn't offer it.
+- **Access is typed.** Pages have three levels and contexts two. There are no type guards for narrowing, because access is a grant held by a `Scope`, not a fact about the page; `.inspect` and `.control` are the only way up. Pages are `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, like `ReadonlyArray` and `Array`. A helper that only reads takes `ReadonlyPage`, and a `Page` is accepted. Calling an action on a page you may only inspect is a compile error, and autocomplete doesn't offer it.
 - **Long, explicit names are fine.** `BrowserContext` avoids a clash with Effect's `Context`.
 - **Names encode behavior.** One grammar, so a call's semantics can be read from its name:
 
@@ -73,7 +73,7 @@ interface ObservedPage {                                // state and events only
   readonly url: Watchable<Url>                           // status.map(…): derived from the same source
   readonly frames: Watchable<FrameTree>
   readonly closed: Effect<CloseReason>                  // lifetime signal: waits as long as the page lives
-  readonly events: PageEvents                           // Observations: responses, requests, navigations, popups, dialogs, …
+  readonly events: ObservedPageEvents                   // ReadonlyPage and Page narrow this to ReadonlyPageEvents / PageEvents
   readonly inspect: Effect<ReadonlyPage, PageError, Scope>   // installs the utility world; page stays open
   readonly control: Effect<Page, PageError, Scope>           // access lasts for the scope; page stays open
 }
@@ -148,7 +148,13 @@ interface BrowserHandle {
   readonly defaultContext: ObservedContext                                           // fixed: exists for the whole connection
 }
 
-interface BrowserContext {
+interface ObservedContext {                              // a context we don't control, e.g. the default context when attached
+  readonly id: UserContextId
+  readonly pages: Watchable<ReadonlyArray<ObservedPage>>
+  readonly closed: Effect<CloseReason>
+  readonly control: Effect<BrowserContext, ContextError, Scope>   // explicit; reading storage needs it too
+}
+interface BrowserContext extends ObservedContext {        // two levels only: reads happen on pages
   readonly newPage: Effect<Page, PageError, Scope>       // closed with its unsolicited popups when the scope closes
   readonly pages: Watchable<ReadonlyArray<Page>>
   readonly exportStorageState: Effect<Redacted<StorageStateBytes>, StorageStateError>   // branded bytes; a Uint8Array subtype
@@ -373,27 +379,39 @@ interface Pending<A, E = never> extends Effect<A, E | TargetGone | Timeout> {   
   readonly poll: Effect<Option<Exit<A, E | TargetGone | Timeout>>>
 }
 
-interface PageEvents {                                    // page.events
-  response<B = Uint8Array, PE = never, PR = never>(filter: {
+interface ObservedPageEvents {                            // observe: protocol events only; nothing injected, nothing decided
+  response(filter: {
     readonly url: UrlPattern                              // required: "any response" as a first match is a footgun
+    readonly method?: HttpMethod | string
+    readonly status?: HttpStatus | number | ((status: HttpStatus) => boolean)
+  }): Observation<ResponseSnapshot, ResponseError>        // metadata only; bodies need inspect
+  request(filter: RequestFilter): Observation<RequestSnapshot, ObserveError>
+  readonly requests: Observation<RequestSnapshot>         // every request: for logging
+  readonly navigation: Observation<Navigation, NavigationError>
+  navigationWith(options: { url?: UrlPattern; waitUntil?: LoadState }): Observation<Navigation, NavigationError>
+  readonly popup: Observation<ObservedPage, ObserveError, Scope>   // popups of pages we don't control are only observed
+  popupWith(options: { url?: UrlPattern }): Observation<ObservedPage, ObserveError, Scope>
+  readonly console: Observation<ConsoleMessage>
+  readonly pageErrors: Observation<PageErrorEvent>
+}
+interface ReadonlyPageEvents extends ObservedPageEvents { // inspect: adds bodies, which need collection set up
+  response<B = Uint8Array, PE = never, PR = never>(filter: {
+    readonly url: UrlPattern
     readonly method?: HttpMethod | string
     readonly status?: HttpStatus | number | ((status: HttpStatus) => boolean)
     readonly body?: BodyDecoder<B>                        // Body.json(schema), Body.text, Body.bytes; collection is automatic
     readonly where?: (response: CapturedResponse<B>) => Effect<boolean, PE, PR>   // runs off the ingestion path
   }): Observation<CapturedResponse<B>, PE | ResponseError, PR>
-  request(filter: RequestFilter): Observation<RequestSnapshot, ObserveError>
-  readonly requests: Observation<RequestSnapshot>         // every request: for logging
-  readonly navigation: Observation<Navigation, NavigationError>
-  navigationWith(options: { url?: UrlPattern; waitUntil?: LoadState }): Observation<Navigation, NavigationError>
-  readonly popup: Observation<Page, ObserveError, Scope>  // the popup is acquired into the caller's Scope
+}
+interface PageEvents extends ReadonlyPageEvents {         // control: adds what acquires or decides
+  readonly popup: Observation<Page, ObserveError, Scope>  // narrower: a controlled page's popups are controlled, owned if it is
   popupWith(options: { url?: UrlPattern }): Observation<Page, ObserveError, Scope>
   readonly download: Observation<Download, ObserveError, Scope>
   dialog<DE, DR>(handler: (dialog: Dialog) => Effect<DialogDecision, DE, DR>): Observation<Dialog, DE | ObserveError, DR>
   fileChooser(files: FileInput | ReadonlyArray<FileInput>): Observation<void, ObserveError>
-  readonly console: Observation<ConsoleMessage>
-  readonly pageErrors: Observation<PageErrorEvent>
   readonly autoResolutions: Observation<AutoResolution>   // dialogs and paused requests decided by a default policy
 }
+// Observations only produce values, so the narrower types in PageEvents are valid overrides and Page stays a ReadonlyPage.
 ```
 
 **Events:**
@@ -682,12 +700,8 @@ yield* report.finished
 
 ## Open questions
 
-1. **Access-typed handles.** Is the `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page` split right? Open details:
-   - the access level of popups from inspected pages;
-   - two levels for contexts (`ObservedContext`, `BrowserContext`) or three;
-   - no type guards for narrowing listed pages.
-2. **Module layout.** One package with subpath exports (`/test`, `/ai`, `/cdp`) or several packages?
-3. **The ambiguity window.** What is the default stable-ambiguity window: about one second, or a number of rendering samples?
-4. **The AI snapshot format.** Adopt Playwright's YAML-like aria snapshot as-is, or define our own with diffs?
-5. **A fake browser for users.** Should the timeline-scripted fake browser (PROBES.md) be exposed for testing automation logic without a real browser, or stay internal?
-6. **A runner plugin.** Is a Vitest reporter needed for flaky-test classification, or do spans suffice?
+1. **Module layout.** One package with subpath exports (`/test`, `/ai`, `/cdp`) or several packages?
+2. **The ambiguity window.** What is the default stable-ambiguity window: about one second, or a number of rendering samples?
+3. **The AI snapshot format.** Adopt Playwright's YAML-like aria snapshot as-is, or define our own with diffs?
+4. **A fake browser for users.** Should the timeline-scripted fake browser (PROBES.md) be exposed for testing automation logic without a real browser, or stay internal?
+5. **A runner plugin.** Is a Vitest reporter needed for flaky-test classification, or do spans suffice?
