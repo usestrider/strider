@@ -192,7 +192,19 @@ This is a planning inventory from the research, not a conformance result. `?` me
 
 ## Open questions
 
-1. **Our own pipe spawn?** Use our own `node:child_process` spawn wrapped as a duplex `Socket`, which gives end-to-end backpressure, or Effect's `ChildProcess` extra file descriptors? Does Bun support the extra descriptors?
-2. **Codegen route.** Our own emitter, or JSON Schema → `SchemaRepresentation.toCodeDocument`, which BiDi could share through chromium-bidi's zod output?
-3. **Default validation policy** per environment, including Workers that need AOT compilation.
-4. **Upstream fixes.** Should Effect add a fail-fast `Socket` writer mode and pass `ws` options through, or do we keep our own constructor?
+1. **Codegen route.** Our own emitter over a small intermediate representation, or JSON Schema → `SchemaRepresentation.toCodeDocument`? (Under discussion.)
+
+Decided:
+- **Pipe transport** uses Effect's `ChildProcess` extra file descriptors behind our `Transport`:
+  - one long-lived outbox stream on fd 3;
+  - a single consumer on fd 4;
+  - stderr drained or ignored;
+  - a mandatory `forceKillAfter`.
+
+  Where extra descriptors are unavailable (Bun, probe 12), the backend layer uses the WebSocket transport as an explicit choice, never a silent switch.
+- **Validation policy** is the same in every environment, with no `NODE_ENV` switching:
+  - required events and command results are always decoded, with the JIT compiler;
+  - high-volume telemetry is decoded by its consumer;
+  - `trust` mode is an explicit opt-in layer;
+  - AOT compilation is an explicit build choice with the same semantics.
+- **Effect `Socket`:** ship our own small fail-fast transport and `ws` constructor now, and propose upstream a fail-fast writer mode and `ws` option passthrough, switching over once they're released.

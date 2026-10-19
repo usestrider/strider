@@ -121,6 +121,10 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.15** settled protocol questions:
+  - the pipe transport uses Effect's `ChildProcess`, with an explicit WebSocket fallback;
+  - the validation policy is uniform, with explicit `trust` and AOT;
+  - we ship our own fail-fast socket now and propose the fixes upstream.
 - **Revision 5.14** closed the native-model questions:
   - `inspect` may create isolated worlds but never scrolls, focuses or dispatches input;
   - stable-frame counts are per-backend defaults, shown in spans and errors and overridable per call;
