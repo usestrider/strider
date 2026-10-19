@@ -221,6 +221,16 @@ The MCP package is now a wrapper. Its source lives in PW `tools/` (`playwright-m
 
 **playwright-cli** spawns a detached daemon per session on a Unix socket, hosting the same backend. CLI plus skills is described as "more token-efficient" (`playwright-mcp/README.md:5-11`; `tools/cli-daemon/daemon.ts`).
 
+**playwright-cli's command surface** (PW `b335271`; `packages/playwright-core/src/tools/cli-daemon/commands.ts` and `tools/skills/playwright-cli/SKILL.md`, read 2026-10-19). It ships as `@playwright/cli` or `npx playwright cli`, with an agent skill.
+- **About 100 commands.** They cover input (`click e15`, `fill e5 "…" --submit`, `drag`, `upload`), `snapshot` and `find`, `eval`, `dialog-accept`/`dialog-dismiss`, tabs (`tab-new`, `tab-select 0`), `state-save`/`state-load`, cookie and storage get/set, emulation, `route`/`unroute`, `console`, `requests`/`response-body`, tracing, video, `recording-start`/`recording-stop` (prints Playwright code for what a person did), `generate-locator`, `highlight`, `run-code "async page => …"` or `--filename`, debugging (`pause-at`, `step-over`, `resume`), and WebMCP (`webmcp-list`/`webmcp-call`, page-provided tools treated as untrusted).
+- **There is no command that waits for or asserts on an event.**
+- **Sessions.** `-s=name`, or `PLAYWRIGHT_CLI_SESSION`. Without either, commands go to a default session. `list`, `close-all`, `kill-all` and `delete-data` manage sessions. A headless session shuts down after an hour without commands.
+- **Profiles** are in-memory by default; `--persistent` or `--profile=<dir>` makes one persistent.
+- **There is a current tab,** changed by `tab-select`.
+- **After every command it writes a snapshot of the current page to a file** and prints the link. `--raw` and `--json` change the output.
+- **Targets** are refs, CSS, or locator expressions as strings (`"getByRole('button', { name: 'Submit' })"`).
+- Where we differ by design (CLI.md, revision 5.20): no default session and no current page; waits that span commands (`next`/`await`); a digest of events instead of a snapshot after every command; segments are typed Effect files instead of JS strings; and a compact target grammar instead of code in quotes.
+
 ### Chrome DevTools MCP (ChromeDevTools/chrome-devtools-mcp)
 
 **Snapshot and uids**
