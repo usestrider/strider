@@ -23,10 +23,10 @@ Every claim here was **read** from source; nothing was run. The decision these n
   - hand-emitted interfaces with cast codecs;
   - PURE annotations everywhere;
   - `Redacted` sensitive members;
-  - Effect's `JsonPatch`.
+  - Effect's `JsonPatch`;
+  - declarative error matchers (revision 5.17).
 - **Recorded, not yet adopted:**
   - a validation mode set through one `Context.Reference`;
-  - declarative error matchers;
   - testing the generator once instead of the generated code (for the testing discussion).
 - **Not copied:**
   - closed enum types on outputs;
@@ -85,10 +85,10 @@ The `@distilled.cloud/*` packages (version 1.0.0-rc.15) are Effect SDKs for 89 p
    - `ResponseValidation` is one `Context.Reference` shared by every SDK. It defaults to lenient, is switched to strict only by providing a Layer (never an environment variable), and can be nested per call.
    - Our policy (decode by default, `trust` as an opt-in layer) can use the same mechanism.
    - Their lenient default exists because their specs are unreliable. Ours stays `decode`, because L1's state tracking needs correct data.
-10. **Declarative error matchers.**
+10. **Declarative error matchers** (adopted in revision 5.17).
     - A matcher is `{ code, status, message: string | { includes, matches }, body: { pointer: value }, headers }`. All its fields must match, and separate matchers are alternatives. The most specific match wins (one point per field), with ties broken by declaration order.
     - Rule: every error class must be one the protocol can actually raise. About 75 packages had declared a `ParseError` that no code path constructed.
-    - This is a candidate shape for L0's per-backend table that normalizes vendor error strings: probe-backed and patchable.
+    - Adopted as L0's per-backend matcher tables (PROTOCOL.md, Protocol client), with one difference: distilled's matchers pick among many generated classes per operation, while ours map onto L0's small fixed set of tags, with a normalized `RejectReason`. Their rule carries over as "a `RejectReason` that no table produces is removed."
 11. **Testing.**
     - Generated code isn't tested per package. The generator and the protocols are tested once, in `core`.
     - One test, `sdks.test.ts`, runs over every package and checks only the hand-written glue.

@@ -121,6 +121,10 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.17** adopted declarative error matchers:
+  - a per-backend table, cited to evidence (probe 24), classifies every error reply into L0's fixed set of tags;
+  - `Rejected` gains a normalized `RejectReason`, so L1 never matches message text;
+  - unmatched replies are `Rejected{Unrecognized}`, and the drift test catches reworded errors.
 - **Revision 5.16** settled the codegen route, after Alchemy's distilled and Effect's OpenAPI generator:
   - our own emitter over a committed, name-keyed protocol model;
   - corrections are JSON patches that cite evidence, fail when stale and are audited on each browser roll; our own annotations live in a separate overlay;
