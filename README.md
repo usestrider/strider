@@ -121,6 +121,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.13** closed the API open questions: the fake browser is internal first, with a narrow public subpath later and no DOM emulation; there is no runner plugin. Testing will be discussed further.
 - **Revision 5.12** settled snapshots:
   - a structured `Snapshot` tree with a Playwright-style text rendering;
   - `ariaSnapshot` (pure accessibility tree) vs `snapshot`, which adds inferred interactivity and names for inaccessible sites, every inference tagged with its evidence;

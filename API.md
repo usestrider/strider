@@ -755,5 +755,6 @@ yield* report.finished
 
 ## Open questions
 
-1. **A fake browser for users.** Should the timeline-scripted fake browser (PROBES.md) be exposed for testing automation logic without a real browser, or stay internal?
-2. **A runner plugin.** Is a Vitest reporter needed for flaky-test classification, or do spans suffice?
+None at the API level right now. Decided, with testing to be discussed further later:
+- **The fake browser** stays internal first. Once stable, it becomes a narrow `effect-browser/testing` subpath for event- and lifecycle-level scenarios. It doesn't emulate a DOM: actions against fake pages fail with `Unsupported`.
+- **No Vitest reporter plugin.** The library stays runner-agnostic, and flakiness is classified from `test.retry` / `test.outcome` span attributes and `TestInfo`.
