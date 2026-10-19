@@ -44,6 +44,7 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 9. **Declarations are acknowledged, timed and composed by fixed rules.** Init scripts, routes, overrides and clocks state the timing they need and fail rather than degrade. One precedence rule orders settings and handlers, and an ordered bundle orders scripts.
 10. **Small error channels, rich evidence.** An ordinary call fails with `TargetGone`, `Timeout` or its own domain error. Detail lives in `reason` fields and a shared diagnostic envelope.
 11. **Secrets are protected in diagnostics, and export is explicit.** `Redacted` goes in, classified fields come out wrapped, and secret-bearing exports are deliberate operations.
+12. **If it doesn't have to be a function, it's a value.** Operations without arguments are `Effect`s (`locator.click`, `browser.newPage`), and pure derivations are properties (`locator.first`). A member whose parameters are all optional is a default value plus `xWith(options)`. Cross-cutting settings such as timeouts are dual combinators, not option fields. Anything with a lifecycle requires `Scope`.
 
 ## Cross-cutting decisions
 
@@ -55,7 +56,7 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 | Context or page created by the library | control | close / remove | the `Scope` it was acquired in |
 | Popup of an owned page | control | close | the `Scope` that observed it; otherwise the opener's |
 | Attached browser | — | disconnect only | the `Browser` layer |
-| Discovered page or the default context | observe; upgrade with `inspect()` or `control()` (scoped) | leave open | none; the access upgrade is released with its `Scope` |
+| Discovered page or the default context | observe; upgrade with `inspect` or `control` (scoped) | leave open | none; the access upgrade is released with its `Scope` |
 | Popup of a leave-open page | observe | leave open | none |
 
 - **Access is typed.** `ObservedPage` exposes events only. `ReadonlyPage` adds isolated-world reads, locators, snapshots and screenshots. `Page` adds input, navigation, main-world evaluation and declarations. Calling a control method on an inspected page is a compile error.
@@ -109,6 +110,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.2** adopted the API conventions: anything that doesn't have to be a function is a value (an `Effect`, or a plain property for pure derivations). A member whose parameters are all optional becomes a default value plus `xWith(options)`. Timeouts and diagnostics move out of option bags into dual combinators (`Browser.withTimeout`).
 - **Revision 5.1** settled two decisions: every acquisition with a lifecycle requires `Scope` (contexts, pages, access upgrades, popups, downloads, handles, capability handles, declarations), which removed `withPage`/`withContext`; and `BrowserContext` is the context's name.
 - **Revision 5** restructured the design into balanced layers and folded in [review 4](reviews/04-draft-4.md):
   - finding 1, pause-on-start granularity: PROTOCOL.md, probe 22;

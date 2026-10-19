@@ -1,6 +1,6 @@
 # API: the ergonomic layer (L2)
 
-*Revision 5, 2026-10-18. These are sketches: names and signatures are provisional, nothing is implemented, and the types show shape rather than compile-verified code. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
+*Revision 5.2, 2026-10-18. These are sketches: names and signatures are provisional, nothing is implemented, and the types show shape rather than compile-verified code. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
 
 ## Purpose
 
@@ -13,93 +13,108 @@ This layer is what users write. It turns the native model into a small vocabular
 
 Error unions on reads, captures and evaluations are shortened in the sketches (`ReadError`, `CaptureError`). Like every operation, they also include `TargetGone | Timeout`.
 
-Design rules:
+## Conventions
 
-- **Handles get methods; decorators are dual combinators.** `locator.click()` is a method. `Observe.response(...)` and `Expect.toHaveText(...)` work both data-first and in `pipe`.
-- **Anything with a lifecycle requires `Scope`.** The following are acquired into the caller's `Scope` and released when it closes: contexts, pages, access upgrades, popups, downloads, handles, capability handles and every declaration (routes, dialog handlers, init scripts, overrides, clocks). Values with no remote lifetime need no `Scope`: locators, snapshots, captured bodies, storage-state bytes. Early release (`page.close()`) is always possible, and the scope's finalizer then does nothing.
-- **No platform services at call sites.** Platform services appear only in the layers that launch or connect, so `Scope` is the only requirement an ordinary call site can see.
-- **Locators are values.** A locator is resolved again on every attempt; it is never a stale handle.
-- **Snapshots are named `read*`.** Retrying assertions take locators. "Awaited a snapshot, then asserted" is therefore hard to write by accident.
-- **Ambient services are only for configuration.** Defaults (timeouts, diagnostics preset, strictness) come from `Context.Reference`s. There is no implicit "current page", except the explicit test layer.
-- **The name `BrowserContext` is deliberate.** It avoids a clash with Effect's `Context` module.
+- **If it doesn't have to be a function, it isn't one.**
+  - A member that takes no arguments is a value: an `Effect` for operations (`locator.click`, `page.reload`, `browser.newPage`, `tab.inspect`), a plain property for pure derivations (`locator.first`).
+  - A member whose parameters are all optional is the default value plus an `xWith(options)` function: `locator.click` / `locator.clickWith({ button: "right" })`.
+  - A member with required arguments is a function and may take trailing options: `goto(url)`, `fill(value)`, `dragTo(target, options)`.
+- **Cross-cutting settings are dual combinators, not option fields.** Timeouts and diagnostics apply to any effect: `button.click.pipe(Browser.withTimeout("5 seconds"))`. Option bags hold only what is specific to the operation.
+- **Anything with a lifecycle requires `Scope`.**
+  - **What it covers:** contexts, pages, access upgrades, popups, downloads, handles, capability handles and every declaration (routes, dialog handlers, init scripts, overrides, clocks). Each is acquired into the caller's `Scope` and released when that scope closes.
+  - **What doesn't need it:** values with no remote lifetime (locators, snapshots, captured bodies, storage-state bytes).
+  - **Early release** (`page.close`) is always possible; the finalizer then does nothing.
+- **Handles get members; decorators are dual combinators.** `Observe.*`, `Expect.*` and `Browser.with*` work both data-first and in `pipe`.
+- **No platform services at call sites.** Platform services appear only in the launch and connect layers, so `Scope` is the only requirement an ordinary call site can see.
+- **Locators are values,** resolved again on every attempt.
+- **Snapshots are named `read*`.** Retrying assertions take locators.
+- **Access is typed.** `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, like `ReadonlyArray` and `Array`. A helper that only reads takes `ReadonlyPage`, and a `Page` is accepted. Calling an action on a page you may only inspect is a compile error, and autocomplete doesn't offer it.
+- **Long, explicit names are fine.** `BrowserContext` avoids a clash with Effect's `Context`.
 
 ## Top data models
 
 ```ts
-type Access = "observe" | "inspect" | "control"
-
-interface ObservedPage {                    // events only
+interface ObservedPage {                                // events only
   readonly id: NavigableId
   readonly url: Effect<string>
-  readonly closed: Effect<CloseReason>      // completes when the page's lifetime ends
-  readonly events: PageEvents               // navigations, requests, console, dialogs, popups, downloads
-  inspect(): Effect<ReadonlyPage, PageError, Scope>   // installs the utility world; page stays open
-  control(): Effect<Page, PageError, Scope>           // access lasts for the scope; page stays open
+  readonly closed: Effect<CloseReason>                  // completes when the page's lifetime ends
+  readonly events: PageEvents                           // navigations, requests, console, dialogs, popups, downloads
+  readonly inspect: Effect<ReadonlyPage, PageError, Scope>   // installs the utility world; page stays open
+  readonly control: Effect<Page, PageError, Scope>           // access lasts for the scope; page stays open
 }
-interface ReadonlyPage extends ObservedPage { /* locators, reads, snapshots, screenshots — see below */ }
+interface ReadonlyPage extends ObservedPage { /* locators, reads, snapshots, screenshots — see Pages */ }
 interface Page extends ReadonlyPage { /* input, navigation, main-world evaluation, declarations */ }
 
-interface Navigation {                      // success value of goto/reload/back/forward
+interface Navigation {                                  // success value of goto/reload/back/forward
   readonly id: NavigationId
   readonly document: DocumentId
-  readonly response: Option<ResponseSnapshot>   // 404/500 is still a successful commit
+  readonly response: Option<ResponseSnapshot>           // 404/500 is still a successful commit
   readonly kind: "committed" | "sameDocument" | "restored" | "activated"
 }
 
-interface ResponseSnapshot {                // immutable; one redirect hop
+interface ResponseSnapshot {                            // immutable; one redirect hop
   readonly hop: RequestHopId
   readonly url: string
   readonly status: number
-  readonly headers: Headers                 // classified values arrive as Redacted
+  readonly headers: Headers                             // classified values arrive as Redacted
 }
 interface CapturedResponse<B> extends ResponseSnapshot { readonly body: B }
 
-interface AriaSnapshot {                    // for agents and structural assertions
+interface AriaSnapshot {                                // for agents and structural assertions
   readonly document: DocumentId
   readonly generation: DocumentGeneration
-  readonly text: string                     // YAML-like tree with [ref=eN]
-  ref(id: string): Effect<Locator, StaleRef>   // StaleRef{reason} once the document or generation moves on
+  readonly text: string                                 // YAML-like tree with [ref=eN]
+  ref(id: string): Effect<Locator, StaleRef>            // StaleRef{reason} once the document or generation moves on
 }
 ```
 
-`Page`, `Locator`, `Navigation` and the other model handles are `Equal`/`Hash` by identity (CONCEPTS.md §1), so they work as `HashMap` keys and in assertions.
+`Page`, `Locator`, `Navigation` and the other model handles are `Equal`/`Hash` by identity (CONCEPTS.md §1). A `ReadonlyPage` and a `Page` for the same tab are equal, because identity is the tab and not the access level.
 
-## Entry points
+## Entry points and cross-cutting settings
 
 ```ts
 class Browser extends Context.Service<Browser, BrowserHandle>()("effect-browser/Browser") {
-  static launch(options?: {
+  static readonly launch: Layer<Browser, LaunchError, ChildProcessSpawner>           // headless Chromium
+  static launchWith(options: {
     readonly backend?: "chromium" | "firefox" | "webkit"
     readonly headless?: boolean
     readonly executablePath?: string
     readonly args?: ReadonlyArray<string>
   }): Layer<Browser, LaunchError, ChildProcessSpawner>
-
   static connect(endpoint: string, options?: {
     readonly headers?: Record<string, Redacted<string> | string>
   }): Layer<Browser, ConnectError, WebSocketConstructor>
+
+  // dual combinators over any effect
+  static withTimeout: Dual<Duration.Input>            // one budget for everything inside; nested operations share it
+  static withDefaultTimeout: Dual<Duration.Input>     // default budget per operation inside
+  static withDiagnostics: Dual<"local" | "strict">
 }
+// Dual<X> = { (x: X): <A, E, R>(self: Effect<A, E, R>) => Effect<A, E, R>; <A, E, R>(self: Effect<A, E, R>, x: X): Effect<A, E, R> }
 
 interface BrowserHandle {
   readonly info: BackendInfo
-  newContext(options?: ContextOptions): Effect<BrowserContext, ContextError, Scope>   // owned; removed when the scope closes
-  newPage(options?: ContextOptions): Effect<Page, PageError, Scope>                    // a fresh context + page, released together
-  readonly pages: Effect<ReadonlyArray<ObservedPage>>   // attach mode: what already exists
+  readonly capabilities: CapabilitySet
+  readonly newContext: Effect<BrowserContext, ContextError, Scope>                   // owned; removed when the scope closes
+  newContextWith(options: ContextOptions): Effect<BrowserContext, ContextError, Scope>
+  readonly newPage: Effect<Page, PageError, Scope>                                   // a fresh context + page, released together
+  newPageWith(options: ContextOptions): Effect<Page, PageError, Scope>
+  readonly pages: Effect<ReadonlyArray<ObservedPage>>                                // attach mode: what already exists
   readonly defaultContext: ObservedContext
 }
 
 interface BrowserContext {
-  newPage(): Effect<Page, PageError, Scope>              // closed with its unsolicited popups when the scope closes
+  readonly newPage: Effect<Page, PageError, Scope>       // closed with its unsolicited popups when the scope closes
   readonly pages: Effect<ReadonlyArray<Page>>
-  readonly storageState: { export(): Effect<Redacted<Uint8Array>, StorageStateError> }
-  readonly clock: Clock                                   // context-wide timeline (opt-in)
+  readonly exportStorageState: Effect<Redacted<Uint8Array>, StorageStateError>
+  readonly clock: Clock                                  // context-wide timeline (opt-in)
   route<E, R>(pattern: UrlPattern, handler: RouteHandler<E, R>): Effect<void, RouteError, Scope | R>
   addInitScript(script: InitScriptSource, options?: InitScriptOptions): Effect<InitScript, DeclarationError, Scope>
   emulate(settings: Emulation): Effect<void, DeclarationError, Scope>
 }
 
 interface ContextOptions {
-  readonly storageState?: StorageState     // from StorageState.import(bytes)
+  readonly storageState?: StorageState                  // from StorageState.import(bytes)
   readonly viewport?: { width: number; height: number }
   readonly locale?: string
   readonly timezone?: string
@@ -117,28 +132,35 @@ interface ReadonlyPage extends ObservedPage {
   getByLabel(text: string | RegExp): ReadonlyLocator
   getByTestId(id: string): ReadonlyLocator
   locator(css: string): ReadonlyLocator
-  frame(locator: ReadonlyLocator): ReadonlyFrame          // enters an iframe by its element
-  // reads (one-shot)
+  frame(locator: ReadonlyLocator): ReadonlyFrame         // enters an iframe by its element
+  // one-shot reads
   readonly title: Effect<string, ReadError>
-  evaluate<Args extends ReadonlyArray<unknown>, A>(           // isolated world: no page globals
+  readonly snapshot: Effect<AriaSnapshot, ReadError>     // with refs, for agents
+  snapshotWith(options: { mode: "ai" | "full"; root?: ReadonlyLocator }): Effect<AriaSnapshot, ReadError>
+  readonly screenshot: Effect<Uint8Array, CaptureError>  // viewport, PNG
+  screenshotWith(options: ScreenshotOptions): Effect<Uint8Array, CaptureError>
+  readonly pdf: Effect<Uint8Array, CaptureError>
+  pdfWith(options: PdfOptions): Effect<Uint8Array, CaptureError>
+  evaluate<Args extends ReadonlyArray<unknown>, A>(    // isolated world: no page globals
     fn: (...args: Args) => A | Promise<A>, ...args: Args
   ): Effect<A, EvaluationError | TargetGone | Timeout>
-  snapshot(options?: { mode?: "ai" | "full" }): Effect<AriaSnapshot, ReadError>
-  screenshot(options?: ScreenshotOptions): Effect<Uint8Array, CaptureError>
-  pdf(options?: PdfOptions): Effect<Uint8Array, CaptureError>
 }
 
 interface Page extends ReadonlyPage {
-  // the locator methods above return Locator (with actions) instead of ReadonlyLocator
-  goto(url: string, options?: { waitUntil?: "commit" | "domcontentloaded" | "load"; timeout?: Duration.Input; accept?: ReadonlyArray<"download" | "noContent"> }):
+  // the locator members above return Locator (with actions) instead of ReadonlyLocator
+  readonly context: BrowserContext
+  goto(url: string, options?: { waitUntil?: LoadState; accept?: ReadonlyArray<"download" | "noContent"> }):
     Effect<Navigation, NavigationError | TargetGone | Timeout>
-  reload(options?: GotoOptions): Effect<Navigation, NavigationError | TargetGone | Timeout>
-  back(options?: GotoOptions): Effect<Option<Navigation>, NavigationError | TargetGone | Timeout>   // None: no history entry
-  forward(options?: GotoOptions): Effect<Option<Navigation>, NavigationError | TargetGone | Timeout>
-  evaluate<Args extends ReadonlyArray<unknown>, A>(
+  readonly reload: Effect<Navigation, NavigationError | TargetGone | Timeout>
+  reloadWith(options: { waitUntil?: LoadState }): Effect<Navigation, NavigationError | TargetGone | Timeout>
+  readonly back: Effect<Option<Navigation>, NavigationError | TargetGone | Timeout>    // None: no history entry
+  backWith(options: { waitUntil?: LoadState }): Effect<Option<Navigation>, NavigationError | TargetGone | Timeout>
+  readonly forward: Effect<Option<Navigation>, NavigationError | TargetGone | Timeout>
+  forwardWith(options: { waitUntil?: LoadState }): Effect<Option<Navigation>, NavigationError | TargetGone | Timeout>
+  evaluate<Args extends ReadonlyArray<unknown>, A>(    // main world
     fn: (...args: Args) => A | Promise<A>, ...args: Args
-  ): Effect<A, EvaluationError | TargetGone | Timeout>       // main world
-  evaluateWith<S extends Schema.Top>(schema: S, fn: (...args: any) => unknown, ...args: ReadonlyArray<unknown>):
+  ): Effect<A, EvaluationError | TargetGone | Timeout>
+  evaluateAs<S extends Schema.Top>(schema: S, fn: (...args: any) => unknown, ...args: ReadonlyArray<unknown>):
     Effect<S["Type"], EvaluationError | TargetGone | Timeout>
   evaluateHandle(fn: () => unknown): Effect<JSHandle, EvaluationError | TargetGone | Timeout, Scope>
   readonly keyboard: Keyboard
@@ -148,15 +170,16 @@ interface Page extends ReadonlyPage {
   onDialog<E, R>(handler: (dialog: Dialog) => Effect<DialogDecision, E, R>): Effect<void, DeclarationError, Scope | R>
   addInitScript(script: InitScriptSource, options?: InitScriptOptions): Effect<InitScript, DeclarationError, Scope>
   emulate(settings: Emulation): Effect<void, DeclarationError, Scope>
-  activate(): Effect<void, TargetGone>                        // bring to front; rendering-based waits need it
-  close(options?: { runBeforeUnload?: boolean }): Effect<void, CloseCanceled | TargetGone | Timeout>
+  readonly activate: Effect<void, TargetGone>            // bring to front; rendering-based waits need it
+  readonly close: Effect<void, TargetGone | Timeout>     // owned teardown: no beforeunload
+  closeWith(options: { runBeforeUnload: boolean }): Effect<void, CloseCanceled | TargetGone | Timeout>
 }
 ```
 
 Notes:
 
 - **Evaluated functions cross into the page.** They must be self-contained, and values travel as arguments. A `ReferenceError` from an evaluated function carries a hint saying so.
-- **Evaluation runs by value by default.** Results are serialized and deserialized. `evaluateWith(schema, …)` validates the result. Handles are opt-in and scoped. `{ userActivation: true }` (an options overload, not shown) runs the function as a user gesture where the backend supports it.
+- **Evaluation runs by value by default.** Results are serialized and deserialized. `evaluateAs(schema, …)` validates the result. Handles are opt-in and scoped. Running as a user gesture is an option on an `evaluateWith(options, fn, …args)` variant (not shown), where the backend supports it.
 - **Declarations are scoped registrations.** `route`, `onDialog`, `addInitScript` and `emulate` are removed when the caller's scope closes. In `@effect/vitest`'s `it.effect` that scope is already present; elsewhere, use `Effect.scoped`.
 
 ## Locators, actions and actionability
@@ -174,28 +197,33 @@ interface ReadonlyLocator extends Pipeable, Equal.Equal, Inspectable {
   and(other: ReadonlyLocator): ReadonlyLocator
   or(other: ReadonlyLocator): ReadonlyLocator
   nth(index: number): ReadonlyLocator
-  first(): ReadonlyLocator
-  last(): ReadonlyLocator
-  describe(label: string): ReadonlyLocator                    // used in errors and traces
+  readonly first: ReadonlyLocator                        // pure derivations are plain properties
+  readonly last: ReadonlyLocator
+  describe(label: string): ReadonlyLocator               // used in errors and traces
   // one-shot reads: no waiting, no retry
-  count(): Effect<number, ReadError>
-  readText(): Effect<string, ReadError>
-  readValue(): Effect<string, ReadError>
+  readonly count: Effect<number, ReadError>
+  readonly readText: Effect<string, ReadError>
+  readonly readValue: Effect<string, ReadError>
+  readonly isVisible: Effect<boolean, ReadError>
+  readonly all: Effect<ReadonlyArray<ReadonlyLocator>, ReadError>   // pinned to the current nth matches
+  readonly snapshot: Effect<AriaSnapshot, ReadError>
   readAttribute(name: string): Effect<Option<string>, ReadError>
-  isVisible(): Effect<boolean, ReadError>
-  all(): Effect<ReadonlyArray<ReadonlyLocator>, ReadError>    // pinned to the current nth matches
-  snapshot(): Effect<AriaSnapshot, ReadError>
 }
 
-interface Locator extends ReadonlyLocator {                   // chainers return Locator
-  click(options?: ClickOptions): Effect<void, ActionError | TargetGone | Timeout>
-  dblclick(options?: ClickOptions): Effect<void, ActionError | TargetGone | Timeout>
-  hover(options?: PointerOptions): Effect<void, ActionError | TargetGone | Timeout>
-  fill(value: string | Redacted<string>, options?: ActionOptions): Effect<void, ActionError | TargetGone | Timeout>
-  press(key: KeyName, options?: ActionOptions): Effect<void, ActionError | TargetGone | Timeout>
-  pressSequentially(text: string | Redacted<string>, options?: TypeOptions): Effect<void, ActionError | TargetGone | Timeout>
-  check(): Effect<void, ActionError | TargetGone | Timeout>
-  uncheck(): Effect<void, ActionError | TargetGone | Timeout>
+interface Locator extends ReadonlyLocator {             // chainers and first/last return Locator
+  readonly click: Effect<void, ActionError | TargetGone | Timeout>
+  clickWith(options: ClickOptions): Effect<void, ActionError | TargetGone | Timeout>
+  readonly dblclick: Effect<void, ActionError | TargetGone | Timeout>
+  dblclickWith(options: ClickOptions): Effect<void, ActionError | TargetGone | Timeout>
+  readonly hover: Effect<void, ActionError | TargetGone | Timeout>
+  hoverWith(options: PointerOptions): Effect<void, ActionError | TargetGone | Timeout>
+  readonly check: Effect<void, ActionError | TargetGone | Timeout>
+  readonly uncheck: Effect<void, ActionError | TargetGone | Timeout>
+  readonly focus: Effect<void, ActionError | TargetGone | Timeout>
+  readonly clear: Effect<void, ActionError | TargetGone | Timeout>
+  fill(value: string | Redacted<string>): Effect<void, ActionError | TargetGone | Timeout>
+  press(key: KeyName): Effect<void, ActionError | TargetGone | Timeout>
+  pressSequentially(text: string | Redacted<string>, options?: { delay?: Duration.Input }): Effect<void, ActionError | TargetGone | Timeout>
   selectOption(values: string | ReadonlyArray<string>): Effect<void, ActionError | TargetGone | Timeout>
   setInputFiles(files: FileInput | ReadonlyArray<FileInput>): Effect<void, ActionError | TargetGone | Timeout>
   dragTo(target: Locator, options?: DragOptions): Effect<void, ActionError | TargetGone | Timeout>
@@ -206,11 +234,10 @@ interface ClickOptions extends PointerOptions {
   readonly modifiers?: ReadonlyArray<"Alt" | "Control" | "Meta" | "Shift">
   readonly position?: { x: number; y: number }
   readonly checks?: Partial<Record<"visible" | "stable" | "enabled" | "notInert" | "inViewport" | "receivesPointer", boolean>>
-  readonly trial?: boolean                                    // run every check, dispatch nothing
-  readonly timeout?: Duration.Input
+  readonly trial?: boolean                               // run every check, dispatch nothing
 }
 
-const RelativeLocator: {                                      // only valid inside filter({ has })
+const RelativeLocator: {                                 // only valid inside filter({ has })
   getByRole(role: AriaRole, options?: RoleOptions): RelativeLocator
   getByText(text: string | RegExp): RelativeLocator
   locator(css: string): RelativeLocator
@@ -221,8 +248,8 @@ const RelativeLocator: {                                      // only valid insi
   - `click`/`hover`: visible, stable, enabled, notInert, inViewport, receivesPointer;
   - `fill`: visible, enabled, editable, notInert.
 
-  Turn off individual checks with `checks`; there is no blanket `force`.
-- **Strictness.** An action needs exactly one match. A *stable* ambiguity, meaning the same candidates across the sampling window, fails early with `ActionError{reason: StrictViolation{candidates, suggestions}}`. A *transient* ambiguity, such as a fading toast, is retried until the deadline.
+  Turn off individual checks with `clickWith({ checks })`; there is no blanket `force`.
+- **Strictness.** An action needs exactly one match. A *stable* ambiguity (the same candidates across the sampling window) fails early with `ActionError{reason: StrictViolation{candidates, suggestions}}`. A *transient* ambiguity, such as a fading toast, is retried until the deadline.
 - **`has:` takes only `RelativeLocator`.** That makes Playwright's silent "page-rooted locator inside `has`" mismatch a type error.
 - **Once only.** An action dispatches at most once per call. If a later step fails after input may have reached the page, the error carries that evidence and the action is never replayed.
 
@@ -230,33 +257,35 @@ const RelativeLocator: {                                      // only valid insi
 
 ```ts
 declare const Expect: {
-  // each is dual: Expect.toHaveText(locator, "1 item") or locator.pipe(Expect.toHaveText("1 item"))
-  toBeVisible: Dual<ReadonlyLocator, [options?: ExpectOptions]>
-  toBeHidden: Dual<ReadonlyLocator, [options?: ExpectOptions]>
-  toBeEnabled: Dual<ReadonlyLocator, [options?: ExpectOptions]>
-  toBeChecked: Dual<ReadonlyLocator, [options?: ExpectOptions]>
-  toBeFocused: Dual<ReadonlyLocator, [options?: ExpectOptions]>
-  toHaveText: Dual<ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>, options?: ExpectOptions]>
-  toHaveValue: Dual<ReadonlyLocator, [expected: string | RegExp, options?: ExpectOptions]>
-  toHaveAttribute: Dual<ReadonlyLocator, [name: string, expected?: string | RegExp, options?: ExpectOptions]>
-  toHaveCount: Dual<ReadonlyLocator, [count: number, options?: ExpectOptions]>
-  toMatchAriaSnapshot: Dual<ReadonlyLocator, [template: string, options?: ExpectOptions]>
-  toHaveURL: Dual<ReadonlyPage, [expected: string | RegExp, options?: ExpectOptions]>
-  toHaveTitle: Dual<ReadonlyPage, [expected: string | RegExp, options?: ExpectOptions]>
+  // no extra arguments: the matcher itself is the function
+  //   locator.pipe(Expect.toBeVisible)   or   Expect.toBeVisible(locator)
+  toBeVisible: (subject: ReadonlyLocator) => Effect<void, ExpectationFailed | TargetGone>
+  toBeHidden: (subject: ReadonlyLocator) => Effect<void, ExpectationFailed | TargetGone>
+  toBeEnabled: (subject: ReadonlyLocator) => Effect<void, ExpectationFailed | TargetGone>
+  toBeChecked: (subject: ReadonlyLocator) => Effect<void, ExpectationFailed | TargetGone>
+  toBeFocused: (subject: ReadonlyLocator) => Effect<void, ExpectationFailed | TargetGone>
+  // with arguments: dual
+  //   locator.pipe(Expect.toHaveText("1 item"))   or   Expect.toHaveText(locator, "1 item")
+  toHaveText: DualMatcher<ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>]>
+  toHaveValue: DualMatcher<ReadonlyLocator, [expected: string | RegExp]>
+  toHaveAttribute: DualMatcher<ReadonlyLocator, [name: string, expected?: string | RegExp]>
+  toHaveCount: DualMatcher<ReadonlyLocator, [count: number]>
+  toMatchAriaSnapshot: DualMatcher<ReadonlyLocator, [template: string]>
+  toHaveURL: DualMatcher<ReadonlyPage, [expected: string | RegExp]>
+  toHaveTitle: DualMatcher<ReadonlyPage, [expected: string | RegExp]>
   // the general form: any observable, any condition
-  that<A>(observable: Observable<A>, condition: Condition<A>, options?: ExpectOptions): Effect<void, ExpectationFailed | TargetGone>
-  poll<A, E, R>(probe: Effect<A, E, R>, condition: Condition<A>, options?: ExpectOptions): Effect<void, E | ExpectationFailed, R>
+  that<A>(observable: Observable<A>, condition: Condition<A>): Effect<void, ExpectationFailed | TargetGone>
+  poll<A, E, R>(probe: Effect<A, E, R>, condition: Condition<A>): Effect<void, E | ExpectationFailed, R>
   soft<A, E, R>(self: Effect<A, E, R>): Effect<void, never, R | SoftExpectations>   // failures collected, reported at scope end
 }
-// Dual<S, Args> = { (subject: S, ...args: Args): Effect<void, ExpectationFailed | TargetGone>; (...args: Args): (subject: S) => Effect<…> }
 declare const Cond: {
-  not<A>(c: Condition<A>): Condition<A>       // the wait is for the negation, and it passes when the element is missing
+  not<A>(c: Condition<A>): Condition<A>                  // the wait is for the negation, and it passes when the element is missing
   and<A>(...cs: ReadonlyArray<Condition<A>>): Condition<A>   // evaluated against one observation
   because<A>(why: string): (c: Condition<A>) => Condition<A>
 }
 ```
 
-- **How expectations evaluate.** One check runs immediately, then re-checks on a backoff schedule plus DOM-change invalidations, all within the call's deadline.
+- **How expectations evaluate.** One check runs immediately, then re-checks on a backoff schedule plus DOM-change invalidations, all within the deadline (`Browser.withTimeout` adjusts it).
 - **What failure contains.** `ExpectationFailed{subject, condition, last, history, elapsed}`. `history` is the de-duplicated sequence of observed values with timestamps, which answers "was it ever right?". When nothing matched, the error adds an accessibility snapshot of the nearest existing ancestor and suggested locators.
 
 ## Observation combinators
@@ -265,29 +294,33 @@ Every "wait for X caused by Y" is a combinator that decorates the trigger. It su
 
 ```ts
 declare const Observe: {
-  response<B = Uint8Array, PE = never, PR = never>(options: {
-    readonly url?: UrlPattern
+  // no arguments: the combinator itself
+  popup: <A, E, R>(trigger: Effect<A, E, R>) =>
+    Effect<readonly [A, Page], E | ObserveError | TargetGone | Timeout, R | Scope>
+  download: <A, E, R>(trigger: Effect<A, E, R>) =>
+    Effect<readonly [A, Download], E | ObserveError | TargetGone | Timeout, R | Scope>
+  navigation: <A, E, R>(trigger: Effect<A, E, R>) =>
+    Effect<readonly [A, Navigation], E | NavigationError | TargetGone | Timeout, R>
+  // optional configuration
+  popupWith(options: { url?: UrlPattern }): typeof Observe.popup
+  navigationWith(options: { url?: UrlPattern; waitUntil?: LoadState }): typeof Observe.navigation
+  // required arguments: a filter is mandatory, since "any response" is a footgun
+  response<B = Uint8Array, PE = never, PR = never>(filter: {
+    readonly url: UrlPattern
     readonly method?: string
     readonly status?: number | ((status: number) => boolean)
-    readonly body?: BodyDecoder<B>                          // e.g. Body.json(schema); collection is set up automatically
+    readonly body?: BodyDecoder<B>                       // Body.json(schema), Body.text, Body.bytes; collection is automatic
     readonly where?: (response: CapturedResponse<B>) => Effect<boolean, PE, PR>   // runs off the ingestion path
   }): <A, E, R>(trigger: Effect<A, E, R>) =>
     Effect<readonly [A, CapturedResponse<B>], E | PE | ResponseError | TargetGone | Timeout, R | PR>
-
-  request(options: RequestFilter): <A, E, R>(trigger: Effect<A, E, R>) =>
+  request(filter: RequestFilter): <A, E, R>(trigger: Effect<A, E, R>) =>
     Effect<readonly [A, RequestSnapshot], E | ObserveError | TargetGone | Timeout, R>
-  popup(options?: { url?: UrlPattern }): <A, E, R>(trigger: Effect<A, E, R>) =>
-    Effect<readonly [A, Page], E | ObserveError | TargetGone | Timeout, R | Scope>
-  download(): <A, E, R>(trigger: Effect<A, E, R>) =>
-    Effect<readonly [A, Download], E | ObserveError | TargetGone | Timeout, R | Scope>
-  navigation(options?: { url?: UrlPattern; waitUntil?: LoadState }): <A, E, R>(trigger: Effect<A, E, R>) =>
-    Effect<readonly [A, Navigation], E | NavigationError | TargetGone | Timeout, R>
   dialog<DE, DR>(handler: (dialog: Dialog) => Effect<DialogDecision, DE, DR>): <A, E, R>(trigger: Effect<A, E, R>) =>
     Effect<readonly [A, Dialog], E | DE | ObserveError | TargetGone | Timeout, R | DR>   // handler runs while the trigger runs
   fileChooser(files: FileInput | ReadonlyArray<FileInput>): <A, E, R>(trigger: Effect<A, E, R>) =>
     Effect<readonly [A, void], E | ObserveError | TargetGone | Timeout, R>
 }
-// each also has a data-first overload: Observe.response(trigger, options)
+// combinators with arguments also have a data-first overload: Observe.response(trigger, filter)
 ```
 
 - **Completion rule.** Both the trigger and the observation must complete. A trigger failure is never discarded.
@@ -301,17 +334,20 @@ declare const Observe: {
 type RouteHandler<E, R> = (request: InterceptedRequest) => Effect<RouteDecision, E, R>   // E is logged; the default decision applies
 interface InterceptedRequest {
   readonly request: RequestSnapshot
-  fetch(overrides?: RequestOverrides): Effect<FetchedResponse, RouteError>   // perform it, then patch the response
+  readonly fetch: Effect<FetchedResponse, RouteError>     // perform it, then patch the response
+  fetchWith(overrides: RequestOverrides): Effect<FetchedResponse, RouteError>
 }
 declare const Route: {
-  continue(overrides?: RequestOverrides): RouteDecision
+  readonly continue: RouteDecision
+  continueWith(overrides: RequestOverrides): RouteDecision
   fulfill(response: { status?: number; headers?: Headers; body?: Uint8Array | string; json?: unknown }): RouteDecision
-  abort(reason?: AbortReason): RouteDecision
-  readonly fallthrough: RouteDecision                       // next matching handler
+  readonly abort: RouteDecision
+  abortWith(reason: AbortReason): RouteDecision
+  readonly fallthrough: RouteDecision                    // next matching handler
 }
 declare const Har: {
   replay(path: string, options?: { notFound?: "fallthrough" | "abort"; update?: boolean }):
-    (page: Page | BrowserContext) => Effect<void, RouteError, Scope>
+    (target: Page | BrowserContext) => Effect<void, RouteError, Scope>
 }
 ```
 
@@ -327,17 +363,18 @@ interface Dialog {
   readonly default: Option<string>
 }
 declare const Dialog: {
-  accept(text?: string): DialogDecision
+  readonly accept: DialogDecision
   readonly dismiss: DialogDecision
+  respond(text: string): DialogDecision                  // prompt() with an answer
 }
 
 interface Download {
   readonly url: string
   readonly suggestedFilename: string
   readonly done: Effect<void, DownloadError>
-  saveAs(path: string): Effect<void, DownloadError>        // transfers from a remote browser where supported
+  readonly stream: Stream<Uint8Array, DownloadError>
+  saveAs(path: string): Effect<void, DownloadError>      // transfers from a remote browser where supported
   // the browser-side file is deleted when the acquiring scope closes, unless the backend's download policy keeps it
-  stream(): Stream<Uint8Array, DownloadError>
 }
 
 declare const StorageState: {
@@ -347,16 +384,16 @@ declare const StorageState: {
 
 - **Default dialog policy.** On owned pages, dialogs are dismissed after a short grace period, except `beforeunload`, which is accepted. On attached pages there is no default unless the caller opts in. Every automatic decision is published on `page.events.dialogs` and recorded on the operation that was running.
 - **Waiting on a dialog.** An operation blocked by a dialog that is about to be resolved waits within its deadline; it does not fail immediately.
-- **Storage state.** `storageState.export()` returns the full restorable state as `Redacted<Uint8Array>`. Writing it somewhere is an explicit, visible step. Diagnostic JSON of a context never contains secrets.
+- **Storage state.** `context.exportStorageState` returns the full restorable state as `Redacted<Uint8Array>`. Writing it somewhere is an explicit, visible step. Diagnostic JSON of a context never contains secrets.
 
 ## Page time
 
 ```ts
 interface Clock {
-  install(options: { mode: "fixed"; at: DateInput } | { mode: "offset"; by: Duration.Input } | { mode: "controlled"; at?: DateInput }):
-    Effect<void, DeclarationError, Scope>                     // needs before-author-script timing
+  install(mode: { mode: "fixed"; at: DateInput } | { mode: "offset"; by: Duration.Input } | { mode: "controlled"; at?: DateInput }):
+    Effect<void, DeclarationError, Scope>                // needs before-author-script timing
+  readonly resume: Effect<void, ClockError>
   pauseAt(at: DateInput): Effect<void, ClockError>
-  resume(): Effect<void, ClockError>
   runFor(duration: Duration.Input): Effect<void, ClockError>       // fires every due timer in order
   fastForward(duration: Duration.Input): Effect<void, ClockError>  // jumps; due timers fire at most once
   setFixedTime(at: DateInput): Effect<void, ClockError>
@@ -372,15 +409,15 @@ interface Clock {
 ```ts
 page.capability(Capability.AxTree)         // Effect<AxTreeReader, CapabilityError, Scope>   — reason: Unsupported{capability, backend}
 page.capability(Capability.Screencast)     // Effect<ScreencastControl, CapabilityError, Scope>
-browser.capabilities                        // the full set, with evidence and limitations
+browser.capabilities                       // the full set, with evidence and limitations
 ```
 
-Common methods are on every backend. Specialized features are reached through a capability handle bound to *this* page, so a feature from one browser can't authorize an operation on another.
+Common members are on every backend. Specialized features are reached through a capability handle bound to *this* page, so a feature from one browser can't authorize an operation on another.
 
 ## Agents
 
 ```ts
-const snap = yield* page.snapshot({ mode: "ai" })      // interactive elements get [ref=eN]; refs bound to document + generation
+const snap = yield* page.snapshot                      // interactive elements get [ref=eN]; refs bound to document + generation
 const button = yield* snap.ref("e12")                  // Locator; fails with StaleRef{reason} after navigation or document.open()
 
 // One toolkit definition serves an in-process model, an MCP server and a CLI.
@@ -403,7 +440,7 @@ McpServer.toolkit(toolkit)
 import { layer } from "@effect/vitest"
 import { BrowserTest } from "effect-browser/test"
 
-layer(BrowserTest.chromium())("checkout", (it) => {
+layer(BrowserTest.chromium)("checkout", (it) => {
   it.effect("adds to cart", () =>
     Effect.gen(function* () {
       const page = yield* BrowserTest.page      // fresh context + page per test; closed after
@@ -413,7 +450,7 @@ layer(BrowserTest.chromium())("checkout", (it) => {
 })
 ```
 
-`BrowserTest` layers provide:
+`BrowserTest` layers (`chromium`, `firefox`, `webkit`, and `launchWith(options)`) provide:
 
 - a browser shared by the suite;
 - a fresh context and page per test;
@@ -440,7 +477,7 @@ class ActionError extends Schema.TaggedError<ActionError>()("ActionError", {
 // NavigationError, EvaluationError, ResponseError, ExpectationFailed, RouteError, DeclarationError, … follow the same shape
 
 // recovery reads naturally:
-locator.click().pipe(
+locator.click.pipe(
   Effect.catchReason("ActionError", "StrictViolation", (v) => Console.log(v.suggestions)),
   Effect.catchTag("Timeout", (t) =>
     t.phase === "dispatchedUnconfirmed" ? recheckState : Effect.fail(t))
@@ -456,37 +493,36 @@ These are the checks for this layer. If a scenario needs protocol knowledge or r
 ```ts
 // 1. Log in once, reuse the session
 const state = yield* Effect.scoped(Effect.gen(function* () {
-  const ctx = yield* browser.newContext()
-  const page = yield* ctx.newPage()
+  const page = yield* browser.newPage
   yield* page.goto("https://app.example.com/login")
   yield* page.getByLabel("Email").fill("me@example.com")
   yield* page.getByLabel("Password").fill(Redacted.make(env.PASSWORD))
-  yield* page.getByRole("button", { name: "Sign in" }).click()
-  yield* page.getByText("Welcome").pipe(Expect.toBeVisible())
-  return yield* ctx.storageState.export()
+  yield* page.getByRole("button", { name: "Sign in" }).click
+  yield* page.getByText("Welcome").pipe(Expect.toBeVisible)
+  return yield* page.context.exportStorageState
 }))
-const page = yield* browser.newPage({ storageState: yield* StorageState.import(state) })
+const page = yield* browser.newPageWith({ storageState: yield* StorageState.import(state) })
 
 // 2. Click, then wait for a named outcome
-const [, nav] = yield* page.getByRole("link", { name: "Orders" }).click().pipe(
-  Observe.navigation({ url: "**/orders" }))
+const [, nav] = yield* page.getByRole("link", { name: "Orders" }).click.pipe(
+  Observe.navigationWith({ url: "**/orders" }))
 
 // 3. Popup with a dialog inside it
-const [, popup] = yield* page.getByText("Connect account").click().pipe(Observe.popup({ url: "**/oauth/**" }))
-yield* popup.getByRole("button", { name: "Allow" }).click().pipe(Observe.dialog(() => Effect.succeed(Dialog.accept())))
+const [, popup] = yield* page.getByText("Connect account").click.pipe(Observe.popup)
+yield* popup.getByRole("button", { name: "Allow" }).click.pipe(Observe.dialog(() => Effect.succeed(Dialog.accept)))
 
 // 4 + 9. Response body, decoded and filtered, without ordering subscriptions by hand
-const [, res] = yield* page.getByRole("button", { name: "Add to cart" }).click().pipe(
+const [, res] = yield* page.getByRole("button", { name: "Add to cart" }).click.pipe(
   Observe.response({ url: "**/api/cart", method: "POST", body: Body.json(Cart),
     where: (r) => Effect.succeed(r.body.items.length > 0) }))
 
 // 5. Download
-const [, file] = yield* page.getByText("Export CSV").click().pipe(Observe.download())
+const [, file] = yield* page.getByText("Export CSV").click.pipe(Observe.download)
 yield* file.saveAs("./export.csv")
 
 // 6. Concurrent pages, settings isolated by context
 yield* Effect.forEach(urls, (url) => Effect.scoped(Effect.gen(function* () {
-  const p = yield* browser.newPage({ locale: "de-DE" })     // context + page released per URL
+  const p = yield* browser.newPageWith({ locale: "de-DE" })   // context + page released per URL
   yield* p.goto(url)
   return yield* p.title
 })), { concurrency: 4 })
@@ -495,12 +531,12 @@ yield* Effect.forEach(urls, (url) => Effect.scoped(Effect.gen(function* () {
 const browser = yield* Browser                          // provided by Browser.connect(endpoint)
 const [first, second] = yield* browser.pages
 yield* Effect.scoped(Effect.gen(function* () {
-  const reader = yield* first.inspect()
-  const text = yield* reader.getByRole("heading").readText()
-  const tab = yield* second.control()
-  yield* tab.route("**/analytics/**", () => Effect.succeed(Route.abort()))
-  yield* tab.getByRole("button", { name: "Refresh" }).click()
-}))                                                          // route and access released; both tabs stay open
+  const reader = yield* first.inspect
+  const text = yield* reader.getByRole("heading").readText
+  const tab = yield* second.control
+  yield* tab.route("**/analytics/**", () => Effect.succeed(Route.abort))
+  yield* tab.getByRole("button", { name: "Refresh" }).click
+}))                                                     // route and access released; both tabs stay open
 
 // 8. Log requests until the page closes
 yield* page.events.requests.pipe(
@@ -510,22 +546,26 @@ yield* page.events.requests.pipe(
 // 10. Paused application time
 yield* page.clock.install({ mode: "controlled", at: "2026-01-01T09:00:00Z" })
 yield* page.goto("/session")
-yield* page.getByRole("button", { name: "Start" }).click()  // no page time passes
+yield* page.getByRole("button", { name: "Start" }).click   // no page time passes
 yield* page.clock.runFor("5 minutes")
-yield* page.getByText("Session expired").pipe(Expect.toBeVisible())
+yield* page.getByText("Session expired").pipe(Expect.toBeVisible)
 
 // 11. Ordered setup scripts
 const helper = yield* page.addInitScript(installTestHooks)
 yield* page.addInitScript(useTestHooks, { after: [helper] })   // dependencies only on equal or broader scope
 
-// 12. Operational failures stay typed and evidenced
-yield* page.locator("button[").click().pipe(                 // invalid selector: immediate, no waiting
+// 12. Operational failures stay typed and evidenced; timeouts are cross-cutting
+yield* page.locator("button[").click.pipe(              // invalid selector: immediate, no waiting
   Effect.catchReason("ActionError", "InvalidSelector", (e) => Console.log(e.message)))
+yield* page.getByRole("button", { name: "Pay" }).click.pipe(Browser.withTimeout("5 seconds"))
 ```
 
 ## Open questions
 
-1. **Access-typed handles.** Is the `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page` split the right shape (versus a generic access parameter)? `BrowserContext` is settled as a name.
+1. **Access-typed handles.** Is the `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page` split right? Open details:
+   - the access level of popups from inspected pages;
+   - two levels for contexts (`ObservedContext`, `BrowserContext`) or three;
+   - no type guards for narrowing listed pages.
 2. **Module layout.** One package with subpath exports (`/test`, `/ai`, `/cdp`) or several packages?
 3. **The ambiguity window.** What is the default stable-ambiguity window: about one second, or a number of rendering samples?
 4. **The AI snapshot format.** Adopt Playwright's YAML-like aria snapshot as-is, or define our own with diffs?
