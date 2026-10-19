@@ -120,6 +120,10 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.10** settled module layout:
+  - one package `effect-browser` with subpath exports and a single version;
+  - backends are imports (`effect-browser/chromium`, `/firefox`, `/webkit`, `/bidi`) that provide the `Browser` service;
+  - plus `/test`, `/ai` and raw `/cdp`.
 - **Revision 5.9** settled the details of the access types:
   - popups of inspected or observed pages are `ObservedPage`s;
   - contexts have two levels (`ObservedContext`, `BrowserContext`), and reading storage needs control;

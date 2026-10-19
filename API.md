@@ -115,21 +115,45 @@ interface AriaSnapshot {                                // for agents and struct
 
 `Page`, `Locator`, `Navigation` and the other model handles are `Equal`/`Hash` by identity (CONCEPTS.md §1). A `ReadonlyPage` and a `Page` for the same tab are equal, because identity is the tab and not the access level.
 
+## Modules and backends
+
+One package with subpath exports and a single version, the same model Effect v4 uses. Backends are imports, not option values, so only the protocol code you import is loaded:
+
+```ts
+import { Browser, Expect } from "effect-browser"          // API types, services, combinators
+import { Chromium } from "effect-browser/chromium"        // CDP backend
+import { Firefox } from "effect-browser/firefox"          // BiDi backend
+import { WebKit } from "effect-browser/webkit"            // Playwright-patched builds; stock attach (iOS, WKWebView)
+import { Bidi } from "effect-browser/bidi"                // any BiDi endpoint (Safari Technology Preview, remote grids)
+import { BrowserTest } from "effect-browser/test"         // peer dependency: @effect/vitest
+import { BrowserToolkit } from "effect-browser/ai"        // builds on effect/ai
+import * as Cdp from "effect-browser/cdp"                 // raw generated L0 commands, for power users
+
+declare const Chromium: {
+  readonly launch: Layer<Browser, LaunchError, ChildProcessSpawner>        // headless Chrome for Testing
+  launchWith(options: {
+    readonly headless?: boolean
+    readonly channel?: "stable" | "beta" | "canary"
+    readonly executablePath?: LocalPath | string
+    readonly args?: ReadonlyArray<string>
+  }): Layer<Browser, LaunchError, ChildProcessSpawner>
+  connect(endpoint: Url | string, options?: { readonly headers?: Record<string, Redacted<string> | string> }):
+    Layer<Browser, ConnectError, WebSocketConstructor>
+}
+// Firefox.launch / launchWith; WebKit.launch / launchWith / attach(endpoint); Bidi.connect(endpoint): same shape
+
+program.pipe(Effect.provide(Chromium.launch))
+```
+
+- **No platform packages of our own.** Launching needs only Effect's `ChildProcessSpawner` and `WebSocketConstructor` services, which `@effect/platform-node` and `@effect/platform-bun` provide.
+- **Backend layers can carry their known capabilities in their types,** so specialized features need no `Unsupported` case when the backend is chosen in code (P7). The mechanism is to be settled when the sketches are compiled: a capability-typed `Browser` service, or backend-specific accessors.
+- **A browser-download CLI,** if needed, starts as `effect-browser/install` plus a `bin`, not as a separate package.
+
 ## Entry points and cross-cutting settings
 
 ```ts
 class Browser extends Context.Service<Browser, BrowserHandle>()("effect-browser/Browser") {
-  static readonly launch: Layer<Browser, LaunchError, ChildProcessSpawner>           // headless Chromium
-  static launchWith(options: {
-    readonly backend?: "chromium" | "firefox" | "webkit"
-    readonly headless?: boolean
-    readonly executablePath?: string
-    readonly args?: ReadonlyArray<string>
-  }): Layer<Browser, LaunchError, ChildProcessSpawner>
-  static connect(endpoint: string, options?: {
-    readonly headers?: Record<string, Redacted<string> | string>
-  }): Layer<Browser, ConnectError, WebSocketConstructor>
-
+  // provided by a backend layer (Chromium.launch, Firefox.launch, …)
   // dual combinators over any effect
   static withTimeout: Dual<Duration.Input>            // one budget for everything inside; nested operations share it
   static withDefaultTimeout: Dual<Duration.Input>     // default budget per operation inside
@@ -526,7 +550,7 @@ interface Clock {
 ```ts
 page.capability(Capability.AxTree)         // Effect<AxTreeReader, CapabilityError, Scope>   — reason: Unsupported{capability, backend}
 page.capability(Capability.Screencast)     // Effect<ScreencastControl, CapabilityError, Scope>
-browser.capabilities                       // Effect<CapabilitySet>: the current set, with evidence and limitations
+browser.capabilities                       // Watchable<CapabilitySet>: the current set, with evidence and limitations
 ```
 
 Common members are on every backend. Specialized features are reached through a capability handle bound to *this* page, so a feature from one browser can't authorize an operation on another.
@@ -559,8 +583,9 @@ McpServer.toolkit(toolkit)
 ```ts
 import { layer } from "@effect/vitest"
 import { BrowserTest } from "effect-browser/test"
+import { Chromium } from "effect-browser/chromium"
 
-layer(BrowserTest.chromium)("checkout", (it) => {
+layer(BrowserTest.layer(Chromium.launch))("checkout", (it) => {
   it.effect("adds to cart", () =>
     Effect.gen(function* () {
       const page = yield* BrowserTest.page      // fresh context + page per test; closed after
@@ -570,7 +595,7 @@ layer(BrowserTest.chromium)("checkout", (it) => {
 })
 ```
 
-`BrowserTest` layers (`chromium`, `firefox`, `webkit`, and `launchWith(options)`) provide:
+`BrowserTest.layer(backend)` wraps any backend layer (`Chromium.launch`, `Firefox.launchWith(…)`, …) and provides:
 
 - a browser shared by the suite;
 - a fresh context and page per test;
@@ -651,7 +676,7 @@ yield* Effect.forEach(urls, (url) => Effect.scoped(Effect.gen(function* () {
 })), { concurrency: 4 })
 
 // 7. Attach, inspect one tab, control another, leave both open
-const browser = yield* Browser                          // provided by Browser.connect(endpoint)
+const browser = yield* Browser                          // provided by Chromium.connect(endpoint)
 const [first, second] = yield* browser.pages
 yield* Effect.scoped(Effect.gen(function* () {
   const reader = yield* first.inspect
@@ -700,8 +725,7 @@ yield* report.finished
 
 ## Open questions
 
-1. **Module layout.** One package with subpath exports (`/test`, `/ai`, `/cdp`) or several packages?
-2. **The ambiguity window.** What is the default stable-ambiguity window: about one second, or a number of rendering samples?
-3. **The AI snapshot format.** Adopt Playwright's YAML-like aria snapshot as-is, or define our own with diffs?
-4. **A fake browser for users.** Should the timeline-scripted fake browser (PROBES.md) be exposed for testing automation logic without a real browser, or stay internal?
-5. **A runner plugin.** Is a Vitest reporter needed for flaky-test classification, or do spans suffice?
+1. **The ambiguity window.** What is the default stable-ambiguity window: about one second, or a number of rendering samples?
+2. **The AI snapshot format.** Adopt Playwright's YAML-like aria snapshot as-is, or define our own with diffs?
+3. **A fake browser for users.** Should the timeline-scripted fake browser (PROBES.md) be exposed for testing automation logic without a real browser, or stay internal?
+4. **A runner plugin.** Is a Vitest reporter needed for flaky-test classification, or do spans suffice?
