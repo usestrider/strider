@@ -97,7 +97,7 @@ Tokens map to fold inputs: `resp(name)`, `req(name)`, `commit`, `load`, `dialog(
 - **Deadlines and ordering:** one deadline across nested waits and input permits; a final match versus the stream's terminal marker; the hand-off from snapshot to subscription.
 - **Network:** response-hop identity and body retention; a backend mismatch after partial dispatch.
 - **Storage:** codec round-trips of storage state and restoring into a fresh context.
-- **Ambiguity:** a stable ambiguity fails early; a transient one is retried.
+- **Ambiguity and dialogs:** ambiguity fails immediately with candidates and a visibility hint, and the dialog policy decides with no delay.
 - **State and events:**
   - a `Watchable` subscribed late sees the present, and `waitFor` succeeds even after intermediate stages were skipped;
   - a `.pending` latches a match that arrives before the await;

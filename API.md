@@ -62,6 +62,7 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
   - `StaleRef`: "refs end with their document; use a locator or take a new snapshot"
   - `Unsupported`: "supported on: chromium (CDP)"
   - `StrictViolation`: "2 matches; try `getByRole('button', { name: 'Save' })`"
+- **Explicit over implicit.** Nothing hidden may change behavior or add waiting. That rules out magic delays, grace periods and heuristic windows by default. If you want such behavior, ask for it in code: an `Expect`, a `waitFor`, an observation, or a named option. Actionability waiting is the documented contract of each action: named checks, adjustable per call, reported in errors. It is not a hidden heuristic.
 - **One way to do each thing.** No aliases, and no parallel mechanisms for the same job (that is why `withPage` went away). A convenience is allowed only where it is the dominant call site and is documented as its expansion: `page.url` is `page.status.map(…)`, `download.finished` is `status.waitFor(…)`, and `browser.newPage` is `newContext` followed by `newPage`.
 
 ## Top data models
@@ -190,6 +191,7 @@ interface BrowserContext extends ObservedContext {        // two levels only: re
 
 interface ContextOptions {
   readonly storageState?: StorageState                  // from StorageState.import(bytes)
+  readonly dialogs?: "dismiss" | "accept" | "leaveOpen"  // decision when no handler claims a dialog; default "dismiss"
   readonly viewport?: { width: CssPixels | number; height: CssPixels | number }   // CSS pixels by definition
   readonly locale?: Locale | string
   readonly timezone?: TimeZoneId | string
@@ -333,7 +335,7 @@ const RelativeLocator: {                                 // only valid inside fi
   - `fill`: visible, enabled, editable, notInert.
 
   Turn off individual checks with `clickWith({ checks })`; there is no blanket `force`.
-- **Strictness.** An action needs exactly one match. A *stable* ambiguity (the same candidates across the sampling window) fails early with `ActionError{reason: StrictViolation{candidates, suggestions}}`. A *transient* ambiguity, such as a fading toast, is retried until the deadline.
+- **Strictness.** An action needs exactly one match, and ambiguity fails immediately with `ActionError{reason: StrictViolation{candidates, suggestions, hint}}`. There is no retry window. Strictness counts every match, hidden ones included, and the hint says when narrowing would fix it, e.g. "1 of 2 matches is visible; add `.filter({ visible: true })`". If duplicates are expected to be transient (a fading toast), say so in the code: `yield* toast.pipe(Expect.toHaveCount(0))` before acting.
 - **`has:` takes only `RelativeLocator`.** That makes Playwright's silent "page-rooted locator inside `has`" mismatch a type error.
 - **Once only.** An action dispatches at most once per call. If a later step fails after input may have reached the page, the error carries that evidence and the action is never replayed.
 
@@ -523,8 +525,8 @@ declare const StorageState: {
 }
 ```
 
-- **Default dialog policy.** On owned pages, dialogs are dismissed after a short grace period, except `beforeunload`, which is accepted. On attached pages there is no default unless the caller opts in. Every automatic decision is published on `page.events.autoResolutions` and recorded on the operation that was running.
-- **Waiting on a dialog.** An operation blocked by a dialog that is about to be resolved waits within its deadline; it does not fail immediately.
+- **Default dialog policy.** It is explicit and has no delay. A context's `dialogs` option (`"dismiss"`, the default for owned contexts; `"accept"`; or `"leaveOpen"`) decides immediately when no handler claims a dialog. `beforeunload` is accepted under `"dismiss"`, so closing never hangs. On attached pages there is no default unless the caller sets one. Every automatic decision is published on `page.events.autoResolutions` and recorded on the operation that was running.
+- **Waiting on a dialog.** An operation blocked by a dialog that a handler or the policy is resolving waits within its deadline, normally just a round trip. Under `"leaveOpen"` it fails immediately with a hint naming the dialog.
 - **Storage state.** `context.exportStorageState` returns the full restorable state as `Redacted<Uint8Array>`. Writing it somewhere is an explicit, visible step. Diagnostic JSON of a context never contains secrets.
 
 ## Page time
@@ -725,7 +727,6 @@ yield* report.finished
 
 ## Open questions
 
-1. **The ambiguity window.** What is the default stable-ambiguity window: about one second, or a number of rendering samples?
-2. **The AI snapshot format.** Adopt Playwright's YAML-like aria snapshot as-is, or define our own with diffs?
-3. **A fake browser for users.** Should the timeline-scripted fake browser (PROBES.md) be exposed for testing automation logic without a real browser, or stay internal?
-4. **A runner plugin.** Is a Vitest reporter needed for flaky-test classification, or do spans suffice?
+1. **The AI snapshot format.** Adopt Playwright's YAML-like aria snapshot as-is, or define our own with diffs?
+2. **A fake browser for users.** Should the timeline-scripted fake browser (PROBES.md) be exposed for testing automation logic without a real browser, or stay internal?
+3. **A runner plugin.** Is a Vitest reporter needed for flaky-test classification, or do spans suffice?

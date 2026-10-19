@@ -319,8 +319,8 @@ Cleanup groups can span sibling pages, independently of this graph.
   - A dialog pauses the event loop of its agent and can block same-agent siblings. Blocking is recorded as confirmed or suspected.
   - `PromptBlocking{resolution: Pending}` is waitable within the caller's deadline; `None` is terminal.
   - Default policy, applied only to controlled targets:
-    - owned pages: dismiss after a grace period, except `beforeunload`, which is accepted;
-    - attached pages: no default unless the caller opts in.
+    - owned contexts: an explicit `dialogs` policy (`dismiss` by default, `accept`, or `leaveOpen`) decides immediately when no handler claims the dialog. `beforeunload` is accepted under `dismiss`. There is no grace period, so the policy adds no hidden lag;
+    - attached pages: no default unless the caller sets one.
   - Every automatic decision is published and recorded on relevant operations, with correlation but no claim of causation.
 - **File chooser.** It does not pause the page. It is armed before the triggering input, and its default is `Cancel`.
 - **Obligation lifecycle.** States are `pending → decisionSelected → sending → acknowledged | rejected | unknown`, plus `ended`.
@@ -398,7 +398,7 @@ Each predicate yields `Ready`, `NotReady{reason}` or an observation error. A rea
 | NotInert | not inside an inert subtree | `BlockedByModal{dialog}` |
 | InViewport | a content quad intersects the viewport (area > 0.99 CSS px²); scrolling is an action policy | `OutsideViewport` |
 | ReceivesPointer | at the action point, the composed-tree hit test (per shadow root, through iframes) lands on the target or a descendant; checked before dispatch *and* guarded on the first trusted event | `Covered{by}` |
-| Unique | exactly one match; ambiguity is classified as stable or transient across the sampling window | `Ambiguous{candidates, stable}` |
+| Unique | exactly one match (hidden matches count); actions fail immediately on ambiguity, with no retry window | `Ambiguous{candidates, visibleCount}` |
 | NetworkIdle(N, T) | no in-flight requests attributed to subtree N's active documents and their workers for T ms; long-lived connections, beacons, favicons and client-less service-worker fetches excluded | `LongPolling{requests}` |
 | DomQuiet(T) | no mutations in the composed subtree for T ms (shadow roots observed explicitly) | — |
 | PromptFree | no known prompt blocking the navigable | `PromptBlocking{prompt, resolution}` |
@@ -462,6 +462,6 @@ Compatible instantaneous checks are batched in one injected evaluation. No batch
 Browser-dependent unknowns are in [PROBES.md](PROBES.md). Design questions:
 
 1. **Isolated worlds and access.** Does creating an isolated world count as mutation for `inspect`? The current answer is no, and the stealth posture may override it.
-2. **Default sampling windows** for `Unique` (stable ambiguity) and `Stable` per backend.
+2. **The default sampling for `Stable` per backend.** It is part of the documented click contract (probe 10), not a hidden heuristic.
 3. **The neutral representation of partition keys** across Chromium, Firefox and WebKit.
 4. **The context-level page clock.** Does one timeline across pages need cross-page synchronization, or is replaying the log per page enough?

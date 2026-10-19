@@ -55,6 +55,7 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 20. **Every effect ends.** Waits run under the operation deadline, open-ended things are `Stream`s, and lifetime signals (`closed`) are the only exception.
 21. **Every error reason carries a hint.** The rendered message says what to do next.
 22. **One way to do each thing.** No aliases or parallel mechanisms. A convenience is allowed only at the dominant call site, and is documented as its expansion.
+23. **Explicit over implicit.** Nothing hidden may change behavior or add waiting: no magic delays, grace periods or heuristic windows by default. Such behavior is asked for in code (an `Expect`, a `waitFor`, an observation, a named option). Actionability waiting is the documented, adjustable contract of each action, not a heuristic.
 
 ## Cross-cutting decisions
 
@@ -120,6 +121,9 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.11** adopted rule 23, explicit over implicit:
+  - ambiguity fails immediately, with a visibility hint, and has no retry window;
+  - the dialog policy is an explicit context option that decides with no grace period.
 - **Revision 5.10** settled module layout:
   - one package `effect-browser` with subpath exports and a single version;
   - backends are imports (`effect-browser/chromium`, `/firefox`, `/webkit`, `/bidi`) that provide the `Browser` service;
@@ -157,7 +161,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
   - finding 3, `NotPermitted` vs `Unsupported` as reasons: Errors above;
   - finding 4, page time as one timeline per scope: CONCEPTS.md, API.md;
   - finding 5, dependencies only on equal-or-broader scope: CONCEPTS.md;
-  - finding 6, stable ambiguity fails early: API.md;
+  - finding 6, stable ambiguity fails early: API.md (superseded in 5.11: ambiguity fails immediately);
   - finding 7, dual `Observe` combinators that return both values: API.md;
   - finding 8, diagnostic presets: Diagnostics above;
   - the smaller items: CONCEPTS.md.
