@@ -142,3 +142,7 @@ export default Effect.gen(function* () {
 ## Open questions
 
 None. Type-checking was settled by leaving it to the project's own `tsc`, and failed requests by the rule under Commands.
+
+Candidates, not yet designed:
+- **Page-provided tools (WebMCP).** When a page registers tools for agents, one call can replace a sequence of clicks that a banner might block. Their names, schemas and results come from the page, so they are untrusted input.
+- **Searching a snapshot** instead of printing it, to keep output small. It would query the structured `Snapshot`, not grep its text.

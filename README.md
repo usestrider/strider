@@ -2,9 +2,9 @@
 
 *Design stage, revision 5 (2026-10-18). No implementation yet.*
 
-An Effect-native browser automation library that speaks browser protocols directly (CDP first, then WebDriver BiDi, then the WebKit inspector protocol) instead of wrapping Playwright. Its priorities, in order:
+An Effect-native browser automation library that speaks browser protocols directly (CDP first, then WebDriver BiDi, then the WebKit inspector protocol). It is not a better Playwright. The aim is better browser automation, written in better TypeScript with Effect, and better for agents. Prior art, Playwright included, is evidence of what works and what breaks, never a reason on its own. Its priorities, in order:
 
-1. **Ergonomics.** Call sites read like the task; mistakes are hard to write; errors explain themselves.
+1. **Ergonomics, for people and for agents.** Call sites read like the task; mistakes are hard to write; errors explain themselves.
 2. **Correctness under concurrency and interruption.** Scoped lifetimes, typed end reasons, no hangs, no silent replays.
 3. **Breadth.** Several backends behind one model, with capabilities stated per instance.
 4. **Performance and stealth.** Features are enabled on demand, and stealth is an architectural option.
