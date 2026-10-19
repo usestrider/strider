@@ -1,10 +1,10 @@
 # CONCEPTS: the native browser model
 
-*Status: draft 2, 2026-10-18, revised following [REVIEW.md](REVIEW.md). Sources: `research/*.md` (nine notes). Spec anchors use the conventions in `research/platform-concept-model.md`: `HTML#x` means `https://html.spec.whatwg.org/#x`, `BIDI#x` the WebDriver BiDi editor's draft, and so on.*
+*Status: draft 2, 2026-10-18, revised following [review 1](reviews/01-draft-1.md). Sources: `research/*.md` (nine notes). Spec anchors use the conventions in `research/platform-concept-model.md`: `HTML#x` means `https://html.spec.whatwg.org/#x`, `BIDI#x` the WebDriver BiDi editor's draft, and so on.*
 
 This document proposes **layer 1** of the library: a protocol-neutral, spec-grounded model of what a browser *is*, what a driver can observe, and what it can *do*. The ergonomic API belongs to layer 2 (the planned DESIGN.md), and its conveniences must be expressible here. The dependency works both ways: ordinary call sites must shape this model before its contracts are frozen. Browser facts, adapter observations and user-facing policies are distinguished throughout.
 
-The nine research notes remain historical evidence, not implementation guarantees. This revision corrects the contracts identified in REVIEW.md; backend behavior still requires the conformance probes in §9. No browser measurements are claimed by this revision.
+The nine research notes remain historical evidence, not implementation guarantees. This revision corrects the contracts identified in [review 1](reviews/01-draft-1.md); backend behavior still requires the conformance probes in §9. No browser measurements are claimed by this revision.
 
 ```
 L2  Ergonomic API      locators, actions, expectations, agent toolkit, test fixtures   (DESIGN.md)
@@ -17,7 +17,7 @@ L0  Protocol adapters  CDP · WebDriver BiDi · WebKit Inspector (patched / stoc
 
 ## 0. Principles
 
-These principles combine prior-art mechanisms with the corrections in REVIEW.md. They are proposed contracts; §9 distinguishes assumptions that need measurement.
+These principles combine prior-art mechanisms with the corrections in [review 1](reviews/01-draft-1.md). They are proposed contracts; §9 distinguishes assumptions that need measurement.
 
 **P1. Spec identity is primary; protocol identity is adapter-internal.**
 The public model is keyed by *navigable*, *document epoch*, *realm*, *navigation* and *request*, the concepts the HTML spec and BiDi use. CDP `targetId`, `sessionId`, `executionContextId` and `loaderId`, and WebKit `pageProxyId` and provisional target ids, never appear as primary identity. They change on events that leave spec identity untouched: out-of-process-iframe swaps, COOP process swaps, WebKit provisional pages and prerender activation (`platform-concept-model` §3.16; `webkit` §1.3; `playwright-internals` §2). Absorbing that churn in the adapter is the single largest ergonomic win available.
@@ -667,6 +667,6 @@ Write these examples before finalizing the public surface; revise L1 if they req
 
 ### 11.2 Review disposition
 
-[REVIEW.md](REVIEW.md) preserves the original findings. This revision addresses findings 1–10 in §§3.1/5, 2.8/4, 2.6, 3.1/3.3, 3.2, 2.11.2/2.12, 2.15, 1.3/2.5, 4, and 6 respectively. The ergonomic recommendations are incorporated as the shared deadline (§5.2), instance capabilities (§8), automatic body collection (§§2.12/4.1), observation-versus-policy split (§2.17), optional schema validation (§2.7), and portable storage state (§2.16). CDP clickCount is corrected in §2.10.
+[Review 1](reviews/01-draft-1.md) preserves the original findings. This revision addresses findings 1–10 in §§3.1/5, 2.8/4, 2.6, 3.1/3.3, 3.2, 2.11.2/2.12, 2.15, 1.3/2.5, 4, and 6 respectively. The ergonomic recommendations are incorporated as the shared deadline (§5.2), instance capabilities (§8), automatic body collection (§§2.12/4.1), observation-versus-policy split (§2.17), optional schema validation (§2.7), and portable storage state (§2.16). CDP clickCount is corrected in §2.10.
 
 The operation record and observation window are internal concepts first. Concrete public signatures, all acceptance examples above, and browser-dependent guarantees remain to be implemented and measured. The original research notes are unchanged; where a draft-1 interpretation conflicted with this revision, use the corrected contract here and keep the probe question open.
