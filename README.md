@@ -233,4 +233,4 @@ Each user-visible operation has one monotonic deadline covering everything it do
   - finding 7, dual `Observe` combinators that return both values: API.md (superseded in 5.19: event modules);
   - finding 8, diagnostic presets: Diagnostics above;
   - the smaller items: CONCEPTS.md.
-- **Next:** L0: the codegen pipeline, the transports and the conformance probes (PROBES.md) against Chrome and Firefox. Compiling the API sketches against stub types is an optional cheap check of the error-channel and `E`/`R` claims.
+- **Next:** start implementing, bottom-up. All three layers are designed (API.md, CONCEPTS.md, PROTOCOL.md), and none is built. Building starts at L0, the protocol layer, because the others sit on it: first the codegen pipeline and the transports, then the conformance probes (PROBES.md) against Chrome and Firefox, whose results settle questions the upper layers depend on. Compiling the API sketches against stub types is an optional cheap check of the error-channel and `E`/`R` claims.
