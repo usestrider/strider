@@ -112,7 +112,7 @@ interface Snapshot {                                    // a structured tree; te
   readonly root: SnapshotNode
   readonly text: string                                 // Playwright-style YAML aria snapshot, with evidence tags for inferred nodes
   readonly refs: ReadonlyMap<RefId, SnapshotNode>       // already branded
-  ref(id: RefId): Effect<Locator, StaleRef>            // StaleRef{reason} if the ref is from another snapshot, or the document or generation moved on
+  ref(id: RefId): Locator                              // lazy, like any locator; its actions fail with StaleRef{reason} once the document or generation moves on
   diff(previous: Snapshot): Effect<SnapshotDiff, SnapshotDiffError>   // explicit; fails if the documents differ
 }
 interface SnapshotNode {
@@ -146,17 +146,19 @@ import { Bidi } from "effect-browser/bidi"                // any BiDi endpoint (
 import { BrowserTest } from "effect-browser/test"         // runner-agnostic test Layers
 import { VitestBrowser } from "effect-browser/test/vitest" // the Vitest adapter; peer dependency: @effect/vitest
 import { BrowserToolkit } from "effect-browser/ai"        // builds on effect/ai
+import { Session } from "effect-browser/cli"              // what `eb run` provides to a file; the package's bin is the CLI (CLI.md)
 import * as Cdp from "effect-browser/cdp"                 // raw generated L0 commands, for power users
 
 declare const Chromium: {
-  readonly launch: Layer<Browser, LaunchError, ChildProcessSpawner>        // headless Chrome for Testing
+  readonly launch: Layer<Browser, LaunchError, ChildProcessSpawner | FileSystem>   // headless Chrome for Testing, temporary profile
   launchWith(options: {
     readonly headless?: boolean
     readonly channel?: "stable" | "beta" | "canary"
     readonly executablePath?: LocalPath | string
     readonly args?: ReadonlyArray<string>
     readonly profile?: LaunchProfile                     // default LaunchProfile.automation
-  }): Layer<Browser, LaunchError, ChildProcessSpawner>
+    readonly userDataDir?: LocalPath | string            // a profile directory you own; never deleted
+  }): Layer<Browser, LaunchError, ChildProcessSpawner | FileSystem>
   connect(endpoint: Url | string, options?: { readonly headers?: Record<string, Redacted<string> | string> }):
     Layer<Browser, ConnectError, WebSocketConstructor>
 }
@@ -176,7 +178,8 @@ declare const LaunchProfile: {
 program.pipe(Effect.provide(Chromium.launch))
 ```
 
-- **No platform packages of our own.** Launching needs only Effect's `ChildProcessSpawner` and `WebSocketConstructor` services, which `@effect/platform-node` and `@effect/platform-bun` provide.
+- **No platform packages of our own.** Launching needs only Effect's `ChildProcessSpawner`, `FileSystem` and `WebSocketConstructor` services, which `@effect/platform-node` and `@effect/platform-bun` provide.
+- **Profiles are temporary by default.** A launch acquires a directory with `FileSystem.makeTempDirectoryScoped` before the browser starts, and it is deleted after the browser exits. The profile, downloads and crash dumps never outlive the `Browser` layer. `userDataDir` names a directory you own instead: it is never deleted, and the browser locks it, so one browser uses it at a time. Reusing a login across browsers is storage state, not a shared profile.
 - **Backend layers can carry their known capabilities in their types,** so specialized features need no `Unsupported` case when the backend is chosen in code (P7). The mechanism is to be settled when the sketches are compiled: a capability-typed `Browser` service, or backend-specific accessors.
 - **Launch profiles are values, not hidden flags** (rule 23). `concurrent` changes what pages observe (timer cadence, background rendering), so it is opt-in and visible. No profile disables the back/forward cache, third-party storage partitioning or popup blocking: the model handles those hazards explicitly.
 - **A browser-download CLI,** if needed, starts as `effect-browser/install` plus a `bin`, not as a separate package.
@@ -595,9 +598,9 @@ Common members are on every backend. Specialized features are reached through a 
 ```ts
 const snap = yield* page.snapshot                      // aria + inferred interactivity; e.g. `- clickable "Add to cart" [ref=e9] [inferred: clickListener, cursorPointer]`
 const [id] = snap.refs.keys()                          // RefIds come from the snapshot, already branded
-const button = yield* snap.ref(id)                     // Locator; fails with StaleRef{reason} after navigation or document.open()
+const button = snap.ref(id)                            // a Locator, never rebound; acting fails with StaleRef{reason} after navigation or document.open()
 
-// One toolkit definition serves an in-process model, an MCP server and a CLI.
+// One toolkit definition serves an in-process model, an MCP server and the CLI (CLI.md).
 const toolkit = BrowserToolkit.make({
   page,
   secrets: { password: Redacted.make(env.PASSWORD) },  // the model sees %password%; substitution happens at dispatch

@@ -18,13 +18,14 @@ Each layer document has the same shape: purpose, top data models, interface sket
 | — | [README.md](README.md) | goals, principles, cross-cutting decisions, guarantees |
 | L2 | [API.md](API.md) | the public API: entry points, pages, locators, actions, expectations, state and events, network, clock, agents, testing, errors, call sites |
 | L1 | [CONCEPTS.md](CONCEPTS.md) | the native browser model: identities, data models, lifetimes, contracts |
+| — | [CLI.md](CLI.md) | the command line: named sessions, commands, files, storage and forks, export |
 | L0 | [PROTOCOL.md](PROTOCOL.md) | transports, protocol clients, code generation, ingestion, backend adapters, capabilities |
 | — | [PROBES.md](PROBES.md) | conformance probes, hazard coverage, deterministic model tests |
 | — | [research/](research/) | prior-art notes (historical evidence) |
 | — | [reviews/](reviews/) | design reviews, one per draft |
 
 ```
-L2  API       Browser · BrowserContext · Page · Locator · Expect · Watchable · event modules · Route · Clock · Trace · Har · Toolkit · BrowserTest
+L2  API       Browser · BrowserContext · Page · Locator · Expect · Watchable · event modules · Route · Clock · Trace · Har · Toolkit · BrowserTest · CLI
 L1  Model     ids · navigables · documents · realms · navigations · requests · obligations · declarations · readiness
 L0  Protocol  transports · sessions · generated commands and events · ingestion · backend adapters · capabilities
 ```
@@ -63,7 +64,7 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 
 | Resource | Access | Release policy | Cleanup group |
 |---|---|---|---|
-| Launched browser | control | close the process | the `Browser` layer |
+| Launched browser | control | close the process, then delete its temporary profile | the `Browser` layer |
 | Context or page created by the library | control | close / remove | the `Scope` it was acquired in |
 | Popup of an owned page | control | close | the `Scope` that acquired its opener |
 | Attached browser | — | disconnect only | the `Browser` layer |
@@ -121,6 +122,13 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.20** added the CLI (CLI.md), for agents and people driving a live session from a shell:
+  - sessions are named, and every command names its session (`--session` or `EB_SESSION`), with no fallback;
+  - one daemon and one browser per session, in a session directory at a predictable path that is deleted at `stop`; hard kills are reported and pruned explicitly;
+  - forks copy storage state into a new session, from a running session or a file saved with `state save`;
+  - commands are the toolkit's tools and cover the loop, while files (an `Effect` requiring `Session`) cover structure; files are type-checked and run in their own scope;
+  - `snapshot.ref(id)` now returns a lazy `Locator`, which removed a double `yield*`;
+  - launches use a temporary profile by default (`FileSystem.makeTempDirectoryScoped`), and `userDataDir` names a directory you own.
 - **Revision 5.19** replaced `page.events.*` with a module per event type:
   - `PageNavigation`, `Popup`, `NetworkRequest`, `NetworkResponse`, `ConsoleMessage`, `UncaughtException`, `Dialog`, `FileChooser`, `Download` and `AutoResolution`, each with the most specific accurate name and a prefix only where a bare name would clash;
   - three verbs each: `next` and `stream` subscribe from now on; `history` reads a bounded event log and never waits. There is no `last`, because its only distinctive use, reading what an action just caused, races;
@@ -201,4 +209,4 @@ Each user-visible operation has one monotonic deadline covering everything it do
   - finding 7, dual `Observe` combinators that return both values: API.md (superseded in 5.19: event modules);
   - finding 8, diagnostic presets: Diagnostics above;
   - the smaller items: CONCEPTS.md.
-- **Next:** a consistency review (draft 5) of revisions 5.1–5.19, then L0: the codegen pipeline, the transports and the conformance probes (PROBES.md) against Chrome and Firefox. Compiling the API sketches against stub types is an optional cheap check of the error-channel and `E`/`R` claims.
+- **Next:** a consistency review (draft 5) of revisions 5.1–5.20, then L0: the codegen pipeline, the transports and the conformance probes (PROBES.md) against Chrome and Firefox. Compiling the API sketches against stub types is an optional cheap check of the error-channel and `E`/`R` claims.

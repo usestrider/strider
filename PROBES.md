@@ -15,7 +15,7 @@
 9. **Event-loop sharing.** Does an `alert()` in a popup block evaluation in its same-site opener?
 10. **Stability sampling.** Measure native animation-frame cadence and the stable-frame count per backend and headless mode, including background tabs. Confirm that sampling stays independent of an injected application clock.
 11. **Partial CDP implementations** (Lightpanda and similar). Which methods return success without doing anything?
-12. **Pipe EOF.** Does Chrome exit when fd 3 and fd 4 close after the parent is SIGKILLed? Do Bun and Deno support the extra file descriptors, including inside worker threads, where etest's executors run?
+12. **Pipe EOF.** Does Chrome exit when fd 3 and fd 4 close after the parent is SIGKILLed? Does each backend exit when its transport drops that way, and what does it leave in its profile directory that would block the next launch (`eb prune`, CLI.md)? Do Bun and Deno support the extra file descriptors, including inside worker threads, where etest's executors run?
 13. **Browsing-context-group switches.** How does each backend reveal one: an opener change, a new WindowProxy, `sharedId` invalidation?
 14. **Safari BiDi on stable.** Does `safari:experimentalWebSocketUrl` work on stable Safari 27?
 15. **Navigations that keep the old document.** For a canceled navigation, a download or a 204/205, confirm the old realm stays usable and no wait depends on a replacement realm that never arrives.
