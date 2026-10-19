@@ -46,7 +46,7 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
   | Form | Meaning | Examples |
   |---|---|---|
   | verb | acts on the page, once | `click`, `fill`, `goto`, `route` |
-  | `read*`, `is*`, nouns | one-shot read; no waiting, no retry | `readText`, `isVisible`, `title`, `count`, `ConsoleMessage.last` |
+  | `read*`, `is*`, nouns | one-shot read; no waiting, no retry | `readText`, `isVisible`, `title`, `count`, `ConsoleMessage.history` |
   | `Watchable` members | state: read now, watch, `waitFor` | `status`, `url`, `download.status` |
   | `Expect.to*` | retries until the deadline | `Expect.toHaveText` |
   | `next`, `stream` | subscribe to an event type from now on | `Download.next(page)`, `NetworkRequest.stream(page)` |
@@ -228,7 +228,7 @@ interface ContextOptions {
   readonly timezone?: TimeZoneId | string
   readonly permissions?: ReadonlyArray<Permission>
   readonly focus?: "system" | "emulated"                 // default "system"; "emulated" makes every page report focus (owned contexts only)
-  readonly eventLog?: number                             // retained events per module and page, for last/history; default 100, 0 keeps none
+  readonly eventLog?: number                             // retained events per module and page, for history; default 100, 0 keeps none
 }
 ```
 
@@ -429,10 +429,9 @@ interface Watchable<A> extends Effect<A> {               // yield* reads the cur
   map<B>(f: (a: A) => B): Watchable<B>                   // derived from the same source, so never glitchy
 }
 
-interface EventModule<T, A, F, E = never> {               // every event module has these four verbs; T: targets, F: filter
+interface EventModule<T, A, F, E = never> {               // every event module has these three verbs; T: targets, F: filter
   next(target: T, filter?: F): Effect<Pending<A, E>, ObserveError, Scope>                     // subscribed when this returns
   stream(target: T, filter?: F): Effect<Stream<A, E | EventOverflow>, ObserveError, Scope>   // every match from now on
-  last(target: T, filter?: F): Effect<Option<A>>                                              // the latest retained match; never waits
   history(target: T, filter?: F): Effect<EventLog<A>>                                         // every retained match; never waits
 }
 interface Pending<A, E = never> extends Effect<A, E | TargetGone | Timeout> {   // yield* awaits the first match, under the deadline of the await
@@ -464,10 +463,10 @@ Each module has the most specific accurate name, with a prefix only where a bare
 **Events:**
 - **Subscribe, act, collect.** `next` and `stream` are subscribed by the time their effect returns, so code order is subscription order, and one action can have several outcomes. Filters apply before buffering, so unrelated traffic can't overflow a subscription.
 - **A late subscription is diagnosed, not hidden.** If a match arrived shortly before `next` subscribed, the `Timeout` names it in its hint: "a matching download started 12 ms before `Download.next` subscribed".
-- **`last` and `history` read what already happened.** They never subscribe or wait, so they can't catch what an action causes: right after a click, `Download.last` usually returns the previous download, because the download starts after the click returns. To wait for something that may already have happened, use `Expect.poll` on the read.
+- **Waits look forward; `history` looks back.** `history` never subscribes or waits, so it can't catch what an action causes: right after a click, the download usually isn't in it yet. There is deliberately no `last`. Its only use that `history` doesn't cover would be reading what an action just caused, which races and can return the previous match. To wait for something that may already have happened, use `Expect.poll` on `history`.
 - **Logs are bounded** by `ContextOptions.eventLog` (attached pages use the default), as Playwright's `page.consoleMessages()` and `requests()` are. Entries never decay: metadata is copied, without bodies, and handles live as long as their owner.
 - **Events report; handlers decide.** No event verb decides anything. Obligations are decided by scoped handlers: `page.route`, `Dialog.handle` and `FileChooser.handle`. A dialog blocks its page, so the click that opens one doesn't finish until it is decided, and the handler has to be registered first.
-- **Events reveal resources; they don't acquire them.** A popup belongs to the scope that acquired its opener, and a download's file to its context, so `Popup.next` and `Popup.last` return the same handle with one lifetime. The `Scope` on `next` and `stream` holds only the subscription. Ownership follows the opener: popups of owned pages are owned, and popups of attached pages stay open.
+- **Events reveal resources; they don't acquire them.** A popup belongs to the scope that acquired its opener, and a download's file to its context, so `Popup.next` and `Popup.history` return the same handle with one lifetime. The `Scope` on `next` and `stream` holds only the subscription. Ownership follows the opener: popups of owned pages are owned, and popups of attached pages stay open.
 - **Results outlive the subscription.** A captured response body is owned bytes, so it survives the subscription and even the page closing. A `Pending`'s deadline starts when it is awaited, not when it subscribes. If the owner (page or context) ends normally before a match, awaiting fails promptly with `TargetGone` rather than waiting for its deadline.
 - **Event streams end** normally when their owner ends normally or the acquiring scope closes. They fail with `TargetGone` on an abnormal end, and with `EventOverflow` past their bound.
 
@@ -863,7 +862,7 @@ yield* report.finished
 
 // 15. What already happened: reads, not subscriptions
 const errors = yield* UncaughtException.history(page)   // EventLog: entries, oldest first, and how many were dropped
-const lastCart = yield* NetworkResponse.last(page, { url: "**/api/cart" })   // Option<NetworkResponse>; metadata only
+const carts = yield* NetworkResponse.history(page, { url: "**/api/cart" })   // metadata only, never bodies
 ```
 
 ## Open questions

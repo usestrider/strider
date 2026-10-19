@@ -434,7 +434,7 @@ Compatible instantaneous checks are batched in one injected evaluation. No batch
   - **Correlation:** by the strongest identity available.
   - **Owner ends without a match:** fails promptly.
   - **Results:** a latched immutable result outlives the subscription.
-- **Event logs.** Each page and context keeps a bounded log per event kind, fed by the same fold as subscriptions. Entries are copied metadata or handles to resources owned elsewhere, never collected bodies, so nothing in a log decays. A log counts what it drops. Logs serve `last` and `history`, and the hint on a late subscription's `Timeout`, which names a match that arrived just before it subscribed.
+- **Event logs.** Each page and context keeps a bounded log per event kind, fed by the same fold as subscriptions. Entries are copied metadata or handles to resources owned elsewhere, never collected bodies, so nothing in a log decays. A log counts what it drops. Logs serve `history` and the hint on a late subscription's `Timeout`, which names a match that arrived just before it subscribed.
 - **Deadline.** There is one monotonic deadline per operation, inherited by nested calls and only ever shortened. Cleanup has its own budget. Deadline failures are `Timeout{phase}`, carrying the last observation and its de-duplicated history.
 - **Retries.** Retry decisions depend on the operation, its phase, the target binding, dispatch evidence and the remaining deadline, never on an error tag alone.
   - Locators re-resolve before dispatch.
@@ -448,7 +448,7 @@ Compatible instantaneous checks are batched in one injected evaluation. No batch
     - `waitFor` is level-triggered;
     - a late subscriber sees the present, not the past, which is safe because waits are level-triggered;
     - only state folded from protocol events is watchable.
-  - **Events** are subscribed eagerly: the subscription is live when `next` or `stream` returns, because a lazily subscribed event stream would race its own cause. Event streams are lossless up to a bound. Reading the event log (`last`, `history`) never waits.
+  - **Events** are subscribed eagerly: the subscription is live when `next` or `stream` returns, because a lazily subscribed event stream would race its own cause. Event streams are lossless up to a bound. Reading the event log (`history`) never waits.
   - **Normal end:** an event stream owned by an object ends successfully when the object ends normally, after draining what was already published.
   - **Abnormal end:** it fails with `TargetGone` on abnormal ends and with `EventOverflow` on overflow.
   - **Filtering:** declarative metadata prefilters run before buffering. Caller predicates run in subscriber workers, never on the ingestion path.
