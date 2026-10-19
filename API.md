@@ -331,7 +331,8 @@ interface ClickOptions extends PointerOptions {
   readonly button?: "left" | "right" | "middle"
   readonly modifiers?: ReadonlyArray<"Alt" | "Control" | "Meta" | "Shift">
   readonly position?: { x: CssPixels | number; y: CssPixels | number }   // CSS pixels from the element's padding box
-  readonly checks?: Partial<Record<"visible" | "stable" | "enabled" | "notInert" | "inViewport" | "receivesPointer", boolean>>
+  readonly checks?: Partial<Record<"visible" | "enabled" | "notInert" | "inViewport" | "receivesPointer", boolean>>
+    & { readonly stable?: boolean | { readonly frames: number } }   // default frames per backend; shown in spans and errors
   readonly trial?: boolean                               // run every check, dispatch nothing
 }
 

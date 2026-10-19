@@ -259,7 +259,7 @@ Cleanup groups can span sibling pages, independently of this graph.
   - **ownership**: `LeaveOpen`, or `Owned{release: close | remove, scope}`, which records what happens when we let go and which scope does it. One union, so a left-open resource can't carry a cleanup scope.
 
   Being a child in the model graph grants none of them.
-- **Access.** `observe` permits protocol events only. `inspect` adds isolated-world injection and reads: locators, readiness predicates, snapshots, screenshots, body reads. `control` adds input, navigation, main-world evaluation, declarations and obligation decisions. Discovered resources start at `observe`, and upgrading never changes release policy. An upgrade is held by the `Scope` that acquired it; once that scope closes, the upgraded handle fails with `TargetGone{reason: AccessReleased}` rather than silently keeping its powers. A declaration whose physical effect reaches past its target needs explicit wider access, or fails with `NotPermitted`. Access is a library contract, not a browser security boundary.
+- **Access.** `observe` permits protocol events only. `inspect` adds isolated-world injection and reads: locators, readiness predicates, snapshots, screenshots, body reads. `control` adds input, navigation, main-world evaluation, declarations and obligation decisions. Discovered resources start at `observe`, and upgrading never changes release policy. An upgrade is held by the `Scope` that acquired it; once that scope closes, the upgraded handle fails with `TargetGone{reason: AccessReleased}` rather than silently keeping its powers. A declaration whose physical effect reaches past its target needs explicit wider access, or fails with `NotPermitted`. Access is a library contract, not a browser security boundary. Creating an isolated world is not mutation, because page scripts can't see it. What `inspect` must never do is change visible page state: it never scrolls, focuses or dispatches input. An element screenshot below the fold is captured beyond the viewport rather than by scrolling the user's tab; where a backend can't do that, it fails with `NotPermitted` and a hint.
 - **Release and cleanup groups.**
   - Created resources are `Owned`.
   - The default context and pages that existed at attach are `LeaveOpen`.
@@ -376,10 +376,17 @@ Declarations are init scripts, routes, overrides, emulation, download and prompt
 - **Page time.** Application time is one timeline per scope: page by default, context optionally.
   - **Modes:** `fixed` (wall time frozen, timers live), `offset`, `controlled` (wall time, monotonic time, timers and animation frames driven explicitly), and `virtual` (a backend scheduler, as a capability).
   - **Replay.** Every operation is appended to a log that each new document and frame in scope replays, so the timeline survives navigation and covers same-origin frames. Workers are explicit opt-in.
+  - **Context-wide timelines** need no cross-page synchronization. Each operation is broadcast, in order, to every current document in the context and appended to the log that new pages replay. It completes once every document has acknowledged it, and a page that fails reports its own typed reason. Controlled and fixed clocks don't advance between operations, so pages stay in lockstep. After `resume`, while real time flows, pages may differ by milliseconds; this is documented, not corrected.
   - **Readiness.** Sampling uses native rendering, independent of the application clock; a paused clock never stalls actionability, and page time is never advanced implicitly. Where rendering really is frozen, readiness reports `ClockPaused`.
   - **Removal and restoration.** Removing the clock affects future documents. Restoring it in place is a capability; the simple path is an owned page that gets closed.
 - **Storage.**
-  - **Partitioning.** Storage is keyed by user context and partition key, and the partition key is opaque per backend.
+  - **Partitioning.** Storage is keyed by user context and partition key:
+    ```ts
+    type PartitionKey =
+      | { _tag: "Unpartitioned" }
+      | { _tag: "Partitioned"; topLevelSite: Site; crossSiteAncestor: Option<boolean>; vendor: Option<VendorPartition> }
+    ```
+    `topLevelSite` is the common core: CDP's cookie `partitionKey`, Firefox's `originAttributes` and BiDi's `storage.PartitionKey` all carry it. `crossSiteAncestor` is an `Option` because only Chromium reports it. Backend-specific detail, such as Chromium's nonces for anonymous iframes, goes in `vendor` and round-trips within the same backend only.
   - **`StorageState`.** It is portable into fresh contexts. Source context is provenance, not a restriction. Mismatched opaque partitions fail with `StorageStateError{Incompatible}`, and partial restores are reported.
   - **Export and import.** Export is an explicit, versioned codec to `Redacted<Uint8Array>`, and import validates it. Diagnostic JSON is never a persistence format.
 - **Permissions** are scoped to a user context and combined (AND) with Permissions Policy.
@@ -392,7 +399,7 @@ Each predicate yields `Ready`, `NotReady{reason}` or an observation error. A rea
 |---|---|---|
 | Connected | binding, generation and connectivity checked at use | `Replaced`, `Detached`, `Suspended` |
 | Visible | `checkVisibility({contentVisibilityAuto, opacityProperty, visibilityProperty})` and a non-empty rect; for `display: contents`, any visible child | `NoBox`, `ContentVisibilitySkipped` |
-| Stable | rect unchanged across *k* native rendering updates (initial defaults: 2 frames; 6 on WebKit/Windows), independent of the application clock | `NoRenderingOpportunity{lastFrameAt}`, `ClockPaused` |
+| Stable | rect unchanged across *k* native rendering updates, independent of the application clock. *k* is a per-backend default measured by probe 10 (initially 2, or 6 on WebKit/Windows). It is shown in the action's span and in any error ("waited for 2 stable frames"), and can be overridden per call | `NoRenderingOpportunity{lastFrameAt}`, `ClockPaused` |
 | Enabled | ARIA-disabled semantics: `disabled`, `fieldset` inheritance, `aria-disabled` | — |
 | Editable | enabled, not `readonly`/`aria-readonly`, and an editable element type | `NotEditableType` |
 | NotInert | not inside an inert subtree | `BlockedByModal{dialog}` |
@@ -459,9 +466,4 @@ Compatible instantaneous checks are batched in one injected evaluation. No batch
 
 ## 11. Open questions
 
-Browser-dependent unknowns are in [PROBES.md](PROBES.md). Design questions:
-
-1. **Isolated worlds and access.** Does creating an isolated world count as mutation for `inspect`? The current answer is no, and the stealth posture may override it.
-2. **The default sampling for `Stable` per backend.** It is part of the documented click contract (probe 10), not a hidden heuristic.
-3. **The neutral representation of partition keys** across Chromium, Firefox and WebKit.
-4. **The context-level page clock.** Does one timeline across pages need cross-page synchronization, or is replaying the log per page enough?
+Browser-dependent unknowns are in [PROBES.md](PROBES.md). No design questions are open at this layer right now.

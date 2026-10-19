@@ -121,6 +121,11 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.14** closed the native-model questions:
+  - `inspect` may create isolated worlds but never scrolls, focuses or dispatches input;
+  - stable-frame counts are per-backend defaults, shown in spans and errors and overridable per call;
+  - `PartitionKey` is a union with an opaque vendor part;
+  - context clocks use ordered broadcast with no cross-page synchronization.
 - **Revision 5.13** closed the API open questions: the fake browser is internal first, with a narrow public subpath later and no DOM emulation; there is no runner plugin. Testing will be discussed further.
 - **Revision 5.12** settled snapshots:
   - a structured `Snapshot` tree with a Playwright-style text rendering;
