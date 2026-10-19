@@ -1,6 +1,6 @@
 # API: the ergonomic layer (L2)
 
-*Revision 5.21, 2026-10-19. These are sketches: names and signatures are provisional, nothing is implemented, and the types show shape rather than compile-verified code. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
+*Revision 5.22, 2026-10-19. These are sketches: names and signatures are provisional, nothing is implemented, and the types show shape rather than compile-verified code. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
 
 ## Purpose
 
@@ -39,7 +39,7 @@ The README's principles, as they apply to this layer. The reasons live there; th
 - **Locators are values,** resolved again on every attempt. The one exception is a ref (`snapshot.ref(id)`), which is pinned to one node and fails with `StaleRef` rather than rebinding.
 
 **Names**
-- **Spec names first; long, explicit names are fine.** `UserContext` is the spec's and BiDi's term, and it avoids a clash with Effect's `Context`. A name gets a prefix only where a bare one would clash (`PageClock` beside Effect's `Clock`, `FileInput` beside the DOM's `File`), and where Effect already has the type, we use Effect's (`Headers` from `effect/http`).
+- **Spec names first, then Effect's types.** `UserContext` is the spec's and BiDi's term, and it avoids Effect's `Context`. Where Effect has the type, we use it: `Headers`, `HttpMethod`, `HttpServerResponse`, `HttpClientRequest` and `HttpIncomingMessage` from `effect/http`, `DateTime.Input`, and `Config`. Our own names get a prefix only where a bare one would clash with the DOM (`FileInput`) or with Effect (`PageClock`, `EventHistory`, `HttpStatusCode`). Long, explicit names are fine.
 - **Names encode behavior** (principle 18):
 
   | Form | Meaning | Examples |
@@ -100,10 +100,12 @@ type PageNavigation =                                   // success value of goto
 interface NetworkResponse {                             // immutable; one redirect hop. NetworkRequest is its request-side twin
   readonly hop: RequestHopId
   readonly url: Url
-  readonly status: HttpStatus
+  readonly status: HttpStatusCode                       // a branded number, so it goes wherever Effect HTTP expects a status
   readonly headers: Headers                             // Effect's Headers (effect/http); classified values are redacted
 }
-interface CapturedResponse<B> extends NetworkResponse { readonly body: B }
+interface CapturedResponse<B> extends NetworkResponse, HttpIncomingMessage<ResponseError> {   // owned bytes, readable with Effect's decoders
+  readonly body: B                                      // what the subscription's body decoder produced
+}
 
 interface Snapshot<L extends ReadonlyLocator = ReadonlyLocator> {   // a structured tree; text is one rendering of it; L follows the page's access
   readonly document: DocumentId
@@ -150,18 +152,21 @@ import * as Cdp from "effect-browser/cdp"                 // raw generated L0 co
 
 declare const Chromium: {
   readonly launch: Layer<Browser, LaunchError, ChildProcessSpawner | FileSystem>   // headless Chrome for Testing, temporary profile
-  launchWith(options: {
-    readonly headless?: boolean                          // default true
-    readonly channel?: "stable" | "beta" | "canary"      // default: Chrome for Testing, not an installed channel
-    readonly executablePath?: LocalPath | string
-    readonly args?: ReadonlyArray<string>
-    readonly profile?: LaunchProfile                     // default LaunchProfile.automation
-    readonly userDataDir?: LocalPath | string            // a profile directory you own; never deleted
-  }): Layer<Browser, LaunchError, ChildProcessSpawner | FileSystem>
+  launchWith(options: LaunchOptions): Layer<Browser, LaunchError, ChildProcessSpawner | FileSystem>
+  launchConfig(options: Config.Wrap<LaunchOptions>): Layer<Browser, LaunchError | ConfigError, ChildProcessSpawner | FileSystem>   // e.g. the executable path from CI's environment
   connect(endpoint: Url | string, options?: { readonly headers?: Record<string, Redacted<string> | string> }):
     Layer<Browser, ConnectError, WebSocketConstructor>
 }
-// Firefox.launch / launchWith; WebKit.launch / launchWith / attach(endpoint); Bidi.connect(endpoint): same shape
+// Firefox.launch / launchWith / launchConfig; WebKit.launch / launchWith / launchConfig / attach(endpoint); Bidi.connect(endpoint): same shape
+
+interface LaunchOptions {
+  readonly headless?: boolean                            // default true
+  readonly channel?: "stable" | "beta" | "canary"        // default: Chrome for Testing, not an installed channel
+  readonly executablePath?: LocalPath | string
+  readonly args?: ReadonlyArray<string>
+  readonly profile?: LaunchProfile                       // default LaunchProfile.automation
+  readonly userDataDir?: LocalPath | string              // a profile directory you own; never deleted
+}
 
 interface LaunchProfile {                                // a value you can inspect; the actual args and prefs are recorded in the launch span and trace
   readonly name: "stock" | "automation" | "concurrent"
@@ -456,12 +461,12 @@ interface Watchable<A> extends Effect<A> {               // yield* reads the cur
 interface EventModule<T, A, F, E = never> {               // every event module has these three verbs; T: targets, F: filter
   next(target: T, filter?: F): Effect<Pending<A, E>, ObserveError, Scope>                     // subscribed when this returns
   stream(target: T, filter?: F): Effect<Stream<A, E | EventOverflow>, ObserveError, Scope>   // every match from now on
-  history(target: T, filter?: F): Effect<EventLog<A>>                                         // every retained match; never waits
+  history(target: T, filter?: F): Effect<EventHistory<A>>                                     // every retained match; never waits
 }
 interface Pending<A, E = never> extends Effect<A, E | TargetGone | Timeout> {   // yield* awaits the first match, under the deadline of the await
   readonly poll: Effect<Option<Exit<A, E | TargetGone | Timeout>>>
 }
-interface EventLog<A> {
+interface EventHistory<A> {
   readonly entries: ReadonlyArray<A>                     // oldest first
   readonly dropped: number                               // matches the cap discarded, so a truncated log doesn't look complete
 }
@@ -474,7 +479,7 @@ interface EventLog<A> {
 | `PageNavigation` | `PageNavigation` | `url`; `next` also takes `waitUntil` | any page |
 | `Popup` | `Page` from a `Page`, otherwise `ObservedPage` | `url` | any page |
 | `NetworkRequest` | `NetworkRequest` | `RequestFilter`; `next` requires `url` | any page or context |
-| `NetworkResponse` | `NetworkResponse`, or `CapturedResponse<B>` given `body` | `url`, `method`, `status`; `next` requires `url`. `body` (`Body.json(schema)`, `Body.text`, `Body.bytes`) and `where` need inspect and apply to `next` and `stream` | any page or context |
+| `NetworkResponse` | `NetworkResponse`, or `CapturedResponse<B>` given `body` | `url`, `method`, `status`; `next` requires `url`. `body` (any decoder of an `HttpIncomingMessage`, such as `HttpIncomingMessage.schemaBodyJson(Cart)`) and `where` need inspect and apply to `next` and `stream` | any page or context |
 | `ConsoleMessage` | `ConsoleMessage` | `level`, `text` | any page or context |
 | `UncaughtException` | `UncaughtException`: thrown errors and unhandled rejections | `message` | any page or context |
 | `Dialog` | `Dialog` | `_tag` | any page; `Dialog.handle` needs `Page` |
@@ -506,26 +511,25 @@ Each module has the most specific accurate name, with a prefix only where a bare
 ```ts
 type RouteHandler<E, R> = (request: InterceptedRequest) => Effect<RouteDecision, E, R>   // E is logged; the default decision applies
 interface InterceptedRequest {
-  readonly request: NetworkRequest                       // fixed: the request as paused at this phase
-  readonly fetch: Effect<FetchedResponse, RouteError>     // perform it, then patch the response
-  fetchWith(overrides: RequestOverrides): Effect<FetchedResponse, RouteError>
+  readonly request: NetworkRequest                       // fixed: the request as paused at this phase; .toHttpClientRequest for HttpClient
+  readonly fetch: Effect<HttpClientResponse, RouteError>  // let the browser perform it, then fulfil with a patched response
+  fetchWith(change: (request: HttpClientRequest) => HttpClientRequest): Effect<HttpClientResponse, RouteError>
 }
 declare const Route: {
   readonly continue: RouteDecision
-  continueWith(overrides: RequestOverrides): RouteDecision
-  fulfill(response: { status?: HttpStatus | number; headers?: Headers; body?: ResponseBody }): RouteDecision   // no body: empty
+  continueWith(change: (request: HttpClientRequest) => HttpClientRequest): RouteDecision   // a change the backend can't apply fails with Unsupported
+  fulfill(response: HttpServerResponse): RouteDecision   // HttpServerResponse.json, .text, .uint8Array, .stream, .file, .fromClientResponse
   readonly abort: RouteDecision
   abortWith(reason: AbortReason): RouteDecision
   readonly fallthrough: RouteDecision                    // next matching handler
 }
-declare const ResponseBody: {                           // exactly one kind of body
-  json(value: unknown): ResponseBody
-  text(text: string): ResponseBody
-  bytes(data: Uint8Array, mimeType?: MimeType | string): ResponseBody
-  file(path: LocalPath | string): ResponseBody
-}
 // HAR recording: Recordings, below
+
+yield* page.route("**/api/user", () => Effect.succeed(Route.fulfill(HttpServerResponse.jsonUnsafe({ name: "Ada" }))))
+yield* page.route("**/api/**", () => Effect.succeed(Route.continueWith(HttpClientRequest.setHeader("x-test", "1"))))
 ```
+
+- **Requests and responses are Effect's HTTP types.** A fulfilled response is an `HttpServerResponse` and a request change is an `HttpClientRequest` transform, so everything `effect/http` offers for building them applies. What each backend can change differs (CDP: URL, method, headers and body; BiDi adds cookies), and a change it can't apply fails with `Unsupported` naming the field rather than being dropped.
 
 ```ts
 interface Registration { readonly remove: Effect<void> }          // idempotent; the scope's finalizer becomes a no-op
@@ -589,12 +593,12 @@ declare const StorageState: {
 ```ts
 interface PageClock {
   install(mode:
-    | { readonly mode: "fixed"; readonly at: DateInput }          // wall time frozen at `at`; timers run
+    | { readonly mode: "fixed"; readonly at: DateTime.Input }     // wall time frozen at `at`; timers run
     | { readonly mode: "offset"; readonly by: Duration.Input }    // wall time shifted; everything else real
-    | { readonly mode: "controlled"; readonly at: DateInput }     // wall time, monotonic time, timers and frames move only when told
+    | { readonly mode: "controlled"; readonly at: DateTime.Input }   // wall time, monotonic time, timers and frames move only when told
   ): Effect<Registration, DeclarationError, Scope>                 // needs before-author-script timing
   adjust(duration: Duration.Input): Effect<void, ClockError>      // controlled: advances, firing every due timer in order
-  setTime(at: DateInput): Effect<void, ClockError>                // fixed or controlled: jumps; due timers fire at most once, like waking from sleep
+  setTime(at: DateTime.Input): Effect<void, ClockError>           // fixed or controlled: jumps; due timers fire at most once, like waking from sleep
   readonly resume: Effect<void, ClockError>                       // real time again, from now
 }
 ```
@@ -624,7 +628,7 @@ const button = snap.ref(id)                            // a Locator pinned to on
 // One toolkit definition serves an in-process model, an MCP server and the CLI (CLI.md).
 const toolkit = BrowserToolkit.make({
   context,                                             // the model works in this context; every page tool names its page
-  secrets: { password: Redacted.make(env.PASSWORD) },  // the model sees %password%; substitution happens at dispatch
+  secrets: { password: yield* Config.Redacted("PASSWORD") },   // the model sees %password%; substitution happens at dispatch
   capture: CapturePolicy.strict                        // required: what snapshots and screenshots may contain
 })
 // tools: pages, newPage(url, name?), goto(page, url), back(page), snapshot(page), click(page, target),
@@ -639,6 +643,7 @@ McpServer.toolkit(toolkit)
 - **No tool waits after it acts.** Each result carries the outcome of the call, then a digest of what the event logs recorded since the previous call: navigations, popups, dialogs and who decided them, downloads, uncaught exceptions, console errors and failed requests. Its boundaries are calls, not time windows, and it reports what was seen without claiming what caused it.
 - **Changes are diffed, not guessed.** Whether the page changed is a question for `snapshot.diff`, asked explicitly.
 - **Waiting is a tool like any other:** `next` and `await` for events, `expect` for conditions.
+- **Failures go back to the model.** Tools are `effect/ai` `Tool`s with `failureMode: "return"`, so an `ActionError`, `Timeout` or `StaleRef` reaches the model as data, hint included, instead of ending the conversation.
 
 Snapshots:
 - **Many sites aren't accessible.** Clickable `<div>`s have no role and icon buttons have no name, so the default `snapshot` adds two kinds of inferred information to the accessibility tree:
@@ -681,8 +686,8 @@ interface HarRecording extends Registration {
 }
 ```
 
-- **Spans are the record.** Every public operation is already an `Effect.fn` span, so whatever tracer you install, OpenTelemetry for any backend included, already receives the trace. `Trace.record` adds what spans can't carry: page-side captures (screenshots, screencast, DOM snapshots) as span attachments, and the export.
-- **Playwright's zip is one export.** `exportTrace` writes format version 9, which Playwright's trace viewer opens (research/playwright-trace-format.md).
+- **Spans are the record.** Every public operation is already an `Effect.fn` span, so whatever tracer you install already receives the trace: `effect/observability`'s OTLP exporters for any OpenTelemetry backend, or `effect/devtools` to watch it live in Effect's DevTools. `Trace.record` adds what spans can't carry: page-side captures (screenshots, screencast, DOM snapshots) as span attachments, and the export.
+- **Playwright's zip is one export.** `exportTrace` writes format version 9, which Playwright's trace viewer opens (research/playwright-trace-format.md). The archive, like a HAR recorded with `content: "attach"`, is written as a stream with `effect/encoding`'s `Zip` (in flight).
   - The viewer rejects files newer than itself, and version 10 is unreleased.
   - Spans become the viewer's nested steps, and logs and errors become its log and error events.
   - Actions carry our own names, never Playwright's, because the viewer special-cases Playwright's names and assumes their selector syntax.
@@ -737,6 +742,7 @@ declare const VitestBrowser: {
 - **Parallelism** (research/test-parallelism.md). Files run in parallel across Vitest workers, each with its own browser. Concurrent tests within a file are opt-in (`layer(…, { concurrent: true })`). One browser for a whole run waits for etest's run-wide shared layers.
 - **Contexts don't isolate everything.** Launch flags, the downloads directory, browser-wide commands, extensions, and OS focus, clipboard and GPU are shared. The library always scopes commands to the context it owns.
 - **No fixture magic.** Everything is a `Layer`, and dependencies are tracked in `R`.
+- **`Expect` and etest's assertions.** Under etest, `Expect` will fail with `AssertionError`-shaped data and record into the attempt's `AssertionRecord`. It keeps its own retry loop, because it re-checks on change signals, which etest's interval-based `eventually` can't do.
 
 ## Errors as users see them
 
@@ -776,7 +782,7 @@ const state = yield* Effect.scoped(Effect.gen(function* () {
   const page = yield* browser.newPage
   yield* page.goto("https://app.example.com/login")
   yield* page.getByLabel("Email").fill("me@example.com")
-  yield* page.getByLabel("Password").fill(Redacted.make(env.PASSWORD))
+  yield* page.getByLabel("Password").fill(yield* Config.Redacted("PASSWORD"))
   yield* page.getByRole("button", { name: "Sign in" }).click
   yield* page.getByText("Welcome").pipe(Expect.toBeVisible)
   return yield* page.context.exportStorageState
@@ -796,7 +802,7 @@ yield* Dialog.handle(popup, Dialog.acceptAll)            // a dialog blocks its 
 yield* popup.getByRole("button", { name: "Allow" }).click
 
 // 4 + 9. Response body, decoded and filtered
-const added = yield* NetworkResponse.next(page, { url: "**/api/cart", method: "POST", body: Body.json(Cart),
+const added = yield* NetworkResponse.next(page, { url: "**/api/cart", method: "POST", body: HttpIncomingMessage.schemaBodyJson(Cart),
   where: (r) => Effect.succeed(r.body.items.length > 0) })
 yield* page.getByRole("button", { name: "Add to cart" }).click
 const res = yield* added                                 // CapturedResponse<Cart>
@@ -864,7 +870,7 @@ yield* page.status.waitFor((s) => s._tag === "Open" && s.document.readiness === 
 yield* report.finished
 
 // 15. What already happened: reads, not subscriptions
-const errors = yield* UncaughtException.history(page)   // EventLog: entries, oldest first, and how many were dropped
+const errors = yield* UncaughtException.history(page)   // EventHistory: entries, oldest first, and how many were dropped
 const carts = yield* NetworkResponse.history(page, { url: "**/api/cart" })   // metadata only, never bodies
 
 // 16. Structure, matched explicitly

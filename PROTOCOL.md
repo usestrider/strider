@@ -1,6 +1,6 @@
 # PROTOCOL: transports, protocol clients and backend adapters (L0)
 
-*Revision 5, 2026-10-18. A condensed sketch drawn from draft 4 of the native model (commit `6cc0bc1`) and the research notes, especially `research/effect-building-blocks.md`, `research/non-js-cdp-clients.md`, `research/puppeteer-and-chromium-bidi.md`, `research/webdriver-bidi.md` and `research/webkit.md`.*
+*Revision 5.22, 2026-10-19. A condensed sketch drawn from draft 4 of the native model (commit `6cc0bc1`) and the research notes, especially `research/effect-building-blocks.md`, `research/non-js-cdp-clients.md`, `research/puppeteer-and-chromium-bidi.md`, `research/webdriver-bidi.md` and `research/webkit.md`.*
 
 ## Purpose
 
@@ -65,7 +65,7 @@ interface ErrorMatcher {
 | Transport | Details |
 |---|---|
 | **Pipe** (launched Chromium; patched WebKit) | fd 3 in, fd 4 out, NUL-framed JSON. One long-lived outbox stream feeds fd 3, because a finite stream would send EOF and disconnect the browser. Spawned with `forceKillAfter`, and stderr is drained or ignored |
-| **WebSocket** (remote CDP, BiDi, iOS) | Our own `ws` constructor with `maxPayload` of about 256 MiB and no `perMessageDeflate`. Headers are allowed for remote providers |
+| **WebSocket** (remote CDP, BiDi, iOS) | Our own `ws` constructor with `maxPayload` of about 256 MiB (a `ByteSize`) and no `perMessageDeflate`. Headers are allowed for remote providers |
 
 - **One reader per connection.** Writes fail promptly after close. Effect 4.0.5's `Socket` writer *waits* for a reconnection after a disconnect, so L0 wraps it to fail instead.
 - **No reconnect.** A new connection is a new model namespace (CONCEPTS.md §1).
@@ -185,7 +185,7 @@ Adapter responsibilities:
   - CDP: out-of-process-iframe swaps (`frameDetached{swap}` followed by an iframe target), and prerender activation, where the main frame is re-keyed.
   - WebKit: provisional pages (`didCommitProvisionalTarget`).
   - BiDi: route events to sessions client-side, because the wire carries no subscription id.
-- **The initialization gate.** Configure a target before its scripts run, then publish it as Ready:
+- **The initialization gate** (a `Latch`). Configure a target before its scripts run, then publish it as Ready:
   - **CDP:** `setAutoAttach{flatten, waitForDebuggerOnStart}`, applied recursively. Configure while paused (frame-tree snapshot, events buffered until the tree is known, required declarations), then `runIfWaitingForDebugger`, always run in a finalizer.
   - **WebKit:** `Target.resume`.
   - **BiDi:** native scoped declarations.
@@ -197,7 +197,8 @@ Adapter responsibilities:
   - Overrides are serialized per physical scope.
   - The page clock compiles to an environment-phase script that replays the clock's operation log.
 - **Obligation delivery** to the protocol (`Fetch.*`, `network.*`, `handleJavaScriptDialog`, `handleUserPrompt`, `Dialog.*`).
-- **Capability evidence.** Probe only in owned, disposable targets or with read-only checks, never by mutating adopted pages. Cache results per backend revision and configuration.
+- **Capability evidence.** Probe only in owned, disposable targets or with read-only checks, never by mutating adopted pages. Cache results per backend revision and configuration, in a `Cache`.
+- **Domain enablement** goes through an `RcMap` keyed by session and domain: the first subscriber enables a domain, and the last scope to close disables it (principle 8).
 
 ### Pause-on-start granularity
 

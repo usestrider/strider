@@ -1,6 +1,6 @@
 # CLI: driving a live session from the command line
 
-*Revision 5.21, 2026-10-19. These are sketches, like API.md: names are provisional. The binary is `eb` here, but `eb` is already AWS Elastic Beanstalk's CLI, so the real name follows the project's.*
+*Revision 5.22, 2026-10-19. These are sketches, like API.md: names are provisional. The binary is `eb` here, but `eb` is already AWS Elastic Beanstalk's CLI, so the real name follows the project's.*
 
 ## Purpose
 
@@ -20,13 +20,13 @@ interface SessionSpec {                                   // what `eb start` was
     | { readonly _tag: "File"; readonly path: LocalPath }            // --state ./auth/shop.state
     | { readonly _tag: "Fork"; readonly session: SessionName }       // --fork shop-login: copied in memory, nothing on disk
   readonly lifetime: { readonly idle: Duration; readonly ownerPid: Option<number> }   // default: 1 hour idle
-  readonly secrets: ReadonlyArray<SecretName>             // --secret password=env:PASSWORD, used as %password%
+  readonly secrets: ReadonlyArray<SecretName>             // --secret password=PASSWORD: Config.Redacted("PASSWORD") from the daemon's ConfigProvider; used as %password%
 }
 
 type Handle = PageHandle | WaitHandle | DownloadHandle | RegistrationHandle   // p1, w1, d1, r1: per session, printed on acquisition
                                                           // a page takes its --name instead of p1 when given one
 
-interface CommandResult {                                 // text by default; --json for tools
+interface CommandResult {                                 // text by default; --json for tools, NDJSON (effect/encoding) for streams
   readonly page: Option<PageHandle>                       // every line names its page
   readonly outcome:
     | { readonly _tag: "Ok"; readonly value: string }
@@ -114,7 +114,7 @@ export default Effect.gen(function* () {
   - Saving is explicit (principle 11), and `stop` never saves. `start --state` prints the state's age and its earliest cookie expiry.
 
 **Commands**
-- **Commands are the toolkit's tools.** They are defined once as Schemas, in an RPC group the daemon serves. The CLI, the MCP server and `BrowserToolkit` all derive from those definitions (API.md, Agents). Session commands (`start`, `stop`, `sessions`, `page`, `run`, `state`, `export`, `prune`) are added on top.
+- **Commands are the toolkit's tools.** Each is an `effect/ai` `Tool`, defined once with Schemas. The daemon serves them as an `effect/rpc` group over an `effect/socket` `SocketServer`, the commands are `effect/cli` `Command`s derived from them, and the MCP server and `BrowserToolkit` use them directly (API.md, Agents). Session commands (`start`, `stop`, `sessions`, `page`, `run`, `state`, `export`, `prune`) are added on top.
 - **Commands for the live session, the library for programs.** An agent loops by running commands. Self-contained programs use the library directly, run with node or bun. `state save` and `export` are the bridges to programs, segments (below) bring code into a live session, and there is no shell mini-language.
 - **Decisions are declarative commands.** `eb route <pattern> abort | continue | fulfill …` and `eb dialog handle accept | dismiss` register scoped handlers in the session and print a registration handle; `eb remove r1` ends one. A decision that needs logic belongs in a segment or a program.
 - **Targets** are a bare ref (`e9`), checked against the named page's latest snapshot (a ref from another page's snapshot fails with a hint naming that page), or a locator string that maps to exactly one `getBy*`: `role=button[name="Sign in"]`, `text="Add to cart"`, `label=Email`, `testid=cart`, `css=…`. Strings are parsed at the boundary, so a bad one fails immediately.

@@ -41,13 +41,13 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 5. **Waits look forward; reads look back.** A wait sees only what happens after it starts, so to catch what an action causes, start waiting before the action. What already happened is a separate read of a bounded log, never mixed into a wait. A wait that started too late says so in its timeout.
 6. **Obligations get exactly one decision.** Paused requests, dialogs and file choosers get one locally selected decision, a default when handlers fail, and tracked remote acknowledgement.
 7. **Capabilities belong to instances.** A missing capability is a typed `Unsupported` reason or a missing method, never a silent no-op.
-8. **Protocol features are demand-driven.** Domains and subscriptions are reference-counted, so a stealth configuration that never enables `Runtime` remains possible.
+8. **Protocol features are demand-driven.** Domains and subscriptions are reference-counted (an `RcMap`), so a stealth configuration that never enables `Runtime` remains possible.
 9. **Declarations are acknowledged, timed and composed by fixed rules.** Init scripts, routes, overrides and clocks state the timing they need and fail rather than degrade. One precedence rule orders settings and handlers, and an ordered bundle orders scripts.
 10. **Small error channels, rich evidence.** An ordinary call fails with `TargetGone`, `Timeout` or its own domain error. Detail lives in `reason` fields and a shared diagnostic envelope.
 11. **Secrets are protected in diagnostics, and export is explicit.** `Redacted` goes in, classified fields come out wrapped, and secret-bearing exports are deliberate operations.
 12. **If it doesn't have to be a function, it's a value.** Operations without arguments are `Effect`s (`locator.click`, `browser.newPage`), and pure derivations are properties (`locator.first`). A member whose parameters are all optional is a default value plus `xWith(options)`. Cross-cutting settings such as timeouts are dual combinators, not option fields. Anything with a lifecycle requires `Scope`.
 13. **Immutable by default; mutable state lives in a `Ref` and is read through an `Effect`.** Entities are immutable identity plus one `SubscriptionRef` of state. Snapshots, events and errors are immutable. Nothing that can change is exposed as a plain field, so every read happens at the moment its effect runs. A plain field on a live handle or entity is a claim that it never changes, so it carries a one-line justification.
-14. **Brand liberally.** Ids and meaningful strings and numbers are branded types with validating schemas (`Url`, `UrlPattern`, `HttpStatus`, `LocalPath`/`RemotePath`, `CssPixels`, …). Outputs are always branded. Tokens are accepted back only in branded or opaque form, and are checked against their origin when used. These are produced values that only mean something relative to where they came from: ids, snapshot refs, registration handles. Other inputs require the brand where meanings could be confused, and otherwise parse plain strings at the boundary.
+14. **Brand liberally.** Ids and meaningful strings and numbers are branded types with validating schemas (`Url`, `UrlPattern`, `HttpStatusCode`, `LocalPath`/`RemotePath`, `CssPixels`, …). Outputs are always branded. Tokens are accepted back only in branded or opaque form, and are checked against their origin when used. These are produced values that only mean something relative to where they came from: ids, snapshot refs, registration handles. Other inputs require the brand where meanings could be confused, and otherwise parse plain strings at the boundary.
 15. **Unions of valid models; `Option` for what's truly optional.** Fields that only make sense together form a tagged union of valid shapes, so impossible states can't be built. Genuinely optional values are `Option`, never `?:`, `undefined` or `null`. Input option bags keep `?:` for "use the default", and their mutually exclusive alternatives are unions.
 16. **State is watchable; each event type is a module.** A `Watchable` reads now, streams changes (conflated, starting from the current value) and waits level-triggered. An event module (`Popup`, `Download`, `NetworkResponse`, …) has three verbs: `next` (subscribe now, await the first match later) and `stream` (every match from now on) subscribe eagerly; `history` reads a bounded log and never waits. Events report and handlers decide, and seeing an event acquires nothing.
 17. **No public fibers, no writable `Deferred`s or `Ref`s.** Callers own concurrency (`Effect.forkScoped`). The library exposes only read-only views of what it latches and stores.
@@ -92,7 +92,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ### Diagnostics and secrets
 
-- **Redaction.** Secret inputs accept `Redacted`. Credential, cookie and typed-text fields are classified as sensitive even when passed as plain strings. Classified fields are never rendered in spans, logs, errors or snapshots.
+- **Redaction.** Secret inputs accept `Redacted`, and sketches read them with `Config.Redacted`. Credential, cookie and typed-text fields are classified as sensitive even when passed as plain strings. Classified fields are never rendered in spans, logs, errors or snapshots. Values whose detail depends on the preset implement Effect's `Redactable`, so Effect's own logging and tracing apply the preset, in user code too.
 - **Presets.** Diagnostics come in two presets, set through a `Context.Reference`:
   - `local`: paths and titles included; query, fragment, userinfo and classified fields stripped.
   - `strict`: origins only and no titles, for production, exported traces and agents.
@@ -102,7 +102,8 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ### Observability
 
-- **Spans.** Every public operation is an `Effect.fn` span. Attempts, readiness observations and automatically resolved dialogs become span events, which is Playwright's call log as structured data. Protocol commands are debug-level child spans.
+- **Spans.** Every public operation is an `Effect.fn` span. Attempts, readiness observations and automatically resolved dialogs become span events, so each operation carries its step-by-step log as structured data. Protocol commands are debug-level child spans. `effect/observability` exports them over OTLP, and `effect/devtools` shows them live.
+- **Metrics.** `Metric`s count operations by verb and outcome, actionability attempts per action, `Timeout`s by phase, `EventOverflow`s, protocol commands by method and latency, and obligations decided by policy. They export through `effect/observability` (OTLP or Prometheus).
 - **Wording.** "No matching event observed" is never reported as "the action had no effect".
 
 ## Guarantees at a glance
@@ -122,6 +123,14 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.22** applied [review 6](reviews/06-draft-5-effect.md), which checked the design against Effect's own modules, unstable and in-flight ones included:
+  - routes use `effect/http`: `Route.fulfill(HttpServerResponse)` and `continueWith` with an `HttpClientRequest` transform, replacing `ResponseBody` and `RequestOverrides`; a captured response is an `HttpIncomingMessage`, so `Body` gave way to Effect's decoders;
+  - preset-dependent values implement `Redactable`, so Effect's own logs and spans apply the diagnostics preset;
+  - names avoid Effect's: `EventHistory`, `HttpStatusCode`; Effect's `HttpMethod` and `DateTime.Input` are used directly;
+  - secrets come from `Config.Redacted`, and backends gain `launchConfig`;
+  - traces and HAR attachments are written with the in-flight `effect/encoding` `Zip`, spans go to `effect/observability` or `effect/devtools`, and `Metric`s are added;
+  - tools return failures to the model (`failureMode: "return"`); the CLI is built from `effect/cli`, `effect/rpc` and `effect/socket`; internal mechanisms name their Effect primitives (CONCEPTS.md §9);
+  - kept, because Effect lacks them: `Watchable`, `Pending`, inherited deadlines and failing subscriber buffers. The first three are upstream candidates.
 - **Revision 5.21** applied [review 5](reviews/05-draft-5.md), which checked every feature shared with Playwright against our own principles:
   - the agent toolkit follows the CLI: every page tool names its page, waiting is `next`/`await`/`expect`, and a digest between calls replaces `ActionReport.observed` and its settling window;
   - a snapshot's refs carry its page's access, `evaluate` always means the isolated world (the main world is `evaluateWith({ world: "main" })`), and results are typed `Serialized<A>`;

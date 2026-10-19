@@ -1,6 +1,6 @@
 # CONCEPTS: the native browser model (L1)
 
-*Revision 5.21, 2026-10-19. A condensed restatement of draft 4 (commit `6cc0bc1`), with [review 4](reviews/04-draft-4.md) folded in. The reasoning behind each contract is in that draft and in [reviews/](reviews/); this document keeps the decisions. Spec anchors: `HTML#x` is `https://html.spec.whatwg.org/#x`; `BIDI#x` is the WebDriver BiDi editor's draft.*
+*Revision 5.22, 2026-10-19. A condensed restatement of draft 4 (commit `6cc0bc1`), with [review 4](reviews/04-draft-4.md) folded in. The reasoning behind each contract is in that draft and in [reviews/](reviews/); this document keeps the decisions. Spec anchors: `HTML#x` is `https://html.spec.whatwg.org/#x`; `BIDI#x` is the WebDriver BiDi editor's draft.*
 
 ## Purpose
 
@@ -39,7 +39,7 @@ Realms are siblings of documents, not children. The one exception that forces th
 | `Url` | an absolute URL | WHATWG URL parse |
 | `UrlPattern` | a matcher (glob or URLPattern), never navigated to | pattern compile |
 | `Origin`, `Site` | scheme+host+port; registrable-domain site (partition keys) | derived from `Url` |
-| `HttpStatus` | 100–599 | integer range |
+| `HttpStatusCode` | 100–599 | integer range |
 | `HeaderName` | case-normalized header name | token grammar |
 | `CookieName`, `CookieDomain` | cookie attributes | RFC 6265 grammar |
 | `LocalPath`, `RemotePath` | a path on the driver's machine vs. on the browser's host | non-empty; never interchangeable |
@@ -195,7 +195,7 @@ interface RequestSnapshot {
   readonly resourceType: ResourceType; readonly servedBy: "network" | "cache" | "serviceWorker"
 }
 interface ResponseSnapshot {
-  readonly hop: RequestHopId; readonly status: HttpStatus; readonly url: Url; readonly headers: Headers
+  readonly hop: RequestHopId; readonly status: HttpStatusCode; readonly url: Url; readonly headers: Headers
   readonly body: BodyAccess                             // availability is read through an Effect
 }
 interface ConnectionModel {                            // long-lived connections
@@ -453,10 +453,24 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
 - **No public fibers, no writable `Deferred`s or `Ref`s.**
   - **Internal:** the model's background work (state folds, handlers, resolvers) runs in fibers scoped to the owning entity. `Deferred`s latch first matches, lifetime ends and obligation decisions; `Deferred.succeed` returning `false` enforces a single winner.
   - **Public:** only read-only views cross the API: `Effect`, `Watchable`, `Pending`, and `Stream` from eager subscriptions.
+- **Effect primitives behind these mechanisms.** Named so the implementation uses them rather than rebuilding them:
+
+  | Mechanism | Effect module |
+  |---|---|
+  | domains and subscriptions enabled on demand (principle 8) | `RcMap`, keyed by session and domain; the last scope to close disables |
+  | input serialized per page (§5) | `Semaphore`, one permit per page |
+  | the initialization gate (PROTOCOL.md) | `Latch` |
+  | compatible instantaneous checks batched into one evaluation (§8) | `Request` and `RequestResolver`, which also batch reads across concurrent fibers |
+  | capability evidence per backend revision | `Cache` |
+  | init-script dependencies and cycle checks (§7) | `Graph` |
+  | handlers and resolvers scoped to their entity | `FiberSet`, `FiberMap` |
+  | the persisted ownership ledger (§3) | `KeyValueStore` (`effect/persistence`) |
+  | byte limits: payloads, body capture, queues | `ByteSize` |
+  | single-winner decisions and latched first matches | `Deferred` |
 
 ## 10. Secrets and diagnostics
 
-- **Classified fields.** Credentials, cookie values, typed text, and authentication and cookie headers are classified. They are wrapped as `Redacted` on the way out, and protected by the central diagnostic serializer even after being unwrapped for transport.
+- **Classified fields.** Credentials, cookie values, typed text, and authentication and cookie headers are classified. They are wrapped as `Redacted` on the way out. Values with preset-dependent detail (URLs, titles, descriptions) implement Effect's `Redactable` and render from the preset in the current fiber's context, so Effect's logs, spans, errors and inspection redact them the same way, in user code too. Sensitive header names join `Headers.CurrentRedactedNames`.
 - **Descriptions** use ids and preset-dependent URL detail (README.md); the default preset is origins only.
 - **Raw content** (bodies, console arguments, DOM snapshots, screenshots) may contain secrets echoed by the page. It is recorded as metadata by default and exported only under an explicit capture policy. There is no taint tracking.
 - **Agent secret placeholders** are substituted at dispatch, inside L1. A page can still echo a secret into other channels, so capture policy applies to anything sent to a model.
