@@ -38,12 +38,10 @@ interface CommandResult {                                 // text by default; --
   readonly files: ReadonlyArray<LocalPath>                // screenshots, snapshots, traces: written to artifacts/, only the path printed
 }
 
-class CurrentSession extends Context.Service<CurrentSession, {   // from "effect-browser": what a segment requires
+class CurrentSession extends Context.Service<CurrentSession, {   // from "effect-browser/cli"; provided only by `eb run`
   readonly context: BrowserContext                        // the session's one context: newPage, pages
   page(name: string): Effect<Page, PageNotFound>          // by the handle the CLI shows: "shop", or "p2" if unnamed
-}>()("effect-browser/CurrentSession") {
-  static make(options: { readonly context: BrowserContext; readonly pages: Record<string, Page> }): CurrentSession["Service"]   // for programs and tests
-}
+}>()("effect-browser/cli/CurrentSession") {}
 ```
 
 ```
@@ -84,7 +82,7 @@ since last: navigated to /cart · popup p2 opened · dialog "Leave site?" dismis
 ```
 
 ```ts
-// pay.ts: a segment, runnable under `eb run` or inside any program that provides CurrentSession
+// pay.ts: a segment, run with `eb run` against a live session
 export default Effect.gen(function* () {
   const session = yield* CurrentSession
   const shop = yield* session.page("shop")                // looked up first, so a missing page fails before any step
@@ -117,7 +115,7 @@ export default Effect.gen(function* () {
 
 **Commands**
 - **Commands are the toolkit's tools.** They are defined once as Schemas, in an RPC group the daemon serves. The CLI, the MCP server and `BrowserToolkit` all derive from those definitions (API.md, Agents). Session commands (`start`, `stop`, `sessions`, `page`, `run`, `state`, `export`, `prune`) are added on top.
-- **Commands for the live session, the library for programs.** An agent loops by running commands. Self-contained programs use the library directly, run with node or bun. `state save`, `export` and segments (below) are the bridges, so there is no shell mini-language.
+- **Commands for the live session, the library for programs.** An agent loops by running commands. Self-contained programs use the library directly, run with node or bun. `state save` and `export` are the bridges to programs, segments (below) bring code into a live session, and there is no shell mini-language.
 - **Decisions are declarative commands.** `eb route <pattern> abort | continue | fulfill …` and `eb dialog handle accept | dismiss` register scoped handlers in the session and print a registration handle; `eb remove r1` ends one. A decision that needs logic belongs in a segment or a program.
 - **Targets** are a bare ref (`e9`), checked against the named page's latest snapshot (a ref from another page's snapshot fails with a hint naming that page), or a locator string that maps to exactly one `getBy*`: `role=button[name="Sign in"]`, `text="Add to cart"`, `label=Email`, `testid=cart`, `css=…`. Strings are parsed at the boundary, so a bad one fails immediately.
 - **Events work across commands.** `eb next` subscribes in the session's scope and prints a wait handle, and `eb await` collects it under its own deadline. The since-last digest is `history`, read from where the previous command stopped.
@@ -128,14 +126,14 @@ export default Effect.gen(function* () {
 **Segments**
 - **`eb run` runs a file's default export,** an `Effect` that requires `CurrentSession` and `Scope`. There are no named exports and no arguments; a file without a default `Effect` fails with a hint.
 - **A segment finds its pages by name.** `session.page("shop")` fails with `PageNotFound`, whose hint lists the session's pages. Looking pages up first makes a missing one fail before any step runs.
-- **The same segment runs anywhere.** `CurrentSession` is in the main entry point, so a program or test provides it under the same names (`Effect.provideService(CurrentSession, CurrentSession.make({ context, pages: { shop: page } }))`) and reuses the segment unchanged.
+- **Segments belong to the CLI.** `CurrentSession` comes from `effect-browser/cli`, and only `eb run` provides it. Programs and tests pass pages around as values, as they always do, and never construct a session.
 - **`eb run` provides `CurrentSession`, `Scope` and the daemon's platform services.** A segment that requires anything else fails with an error naming the missing service.
 - **The CLI doesn't type-check.** A segment is a file in your project, so your `tsc` checks it against the same effect-browser version the daemon runs from. Agent skills run `tsc --noEmit` before `eb run`, because a segment that fails halfway leaves its earlier steps done.
 - **It runs in its own scope, like a script.** Its routes, handlers and waits end with it. Handles it returns are transferred into the session and named, which is the explicit transfer CONCEPTS.md §3 already defines.
 - **Segments use locators, not refs.** A ref only means something inside its session.
 
 **Export**
-- `eb export test` writes the session as a Vitest test. Refs become the role-and-name locators their snapshots suggest, secrets become config placeholders, `--state` becomes its path, `run` becomes an import of the segment provided with `CurrentSession`, and failed commands are left out.
+- `eb export test` writes the session as a Vitest test. Refs become the role-and-name locators their snapshots suggest, secrets become config placeholders, `--state` becomes its path, failed commands are left out, and each `run` becomes a marked placeholder naming its file. Export lists those placeholders, because a segment only runs inside a session.
 
 **Client**
 - **`eb` forwards argv over the socket without loading Effect.** Loading Effect costs about 600 ms per process, and agents run hundreds of commands. etest's `serve` uses the same trick. The daemon holds the model.
