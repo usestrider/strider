@@ -50,6 +50,11 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 15. **Unions of valid models; `Option` for what's truly optional.** Fields that only make sense together form a tagged union of valid shapes, so impossible states can't be built. Genuinely optional values are `Option`, never `?:`, `undefined` or `null`. Input option bags keep `?:` for "use the default", and their mutually exclusive alternatives are unions.
 16. **State is watchable; events are observed.** A `Watchable` reads now, streams changes (conflated, starting from the current value) and waits level-triggered. An `Observation` is subscribed eagerly and comes in three forms: around a trigger, `.pending` (arm now, await later) and `.stream` (every match). Watching shows the present; to see events from the beginning, subscribe before their cause.
 17. **No public fibers, no writable `Deferred`s or `Ref`s.** Callers own concurrency (`Effect.forkScoped`). The library exposes only read-only views of what it latches and stores.
+18. **Names encode behavior.** Verbs act, `read*`/`is*`/nouns read once, `Expect.to*` retries, `events.*` observes, `on*` registers a handler, `new*` creates, `*With` configures a member, `with*` configures any effect (grammar in API.md).
+19. **Every scoped acquisition returns a handle.** Never `void`: registrations have `remove` and, where useful, state such as `hits`.
+20. **Every effect ends.** Waits run under the operation deadline, open-ended things are `Stream`s, and lifetime signals (`closed`) are the only exception.
+21. **Every error reason carries a hint.** The rendered message says what to do next.
+22. **One way to do each thing.** No aliases or parallel mechanisms. A convenience is allowed only at the dominant call site, and is documented as its expansion.
 
 ## Cross-cutting decisions
 
@@ -115,6 +120,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.8** adopted rules 18–22. Registrations now return handles (`Registration`, `RouteRegistration` with `hits`, `HandlerRegistration`), error reasons carry hints, and the API has a naming grammar.
 - **Revision 5.7** split state from events:
   - `Watchable` for state: page status, URL, frames, download progress, page lists, capabilities.
   - `Observation` under `page.events.*` for events, in three forms: around a trigger, `.pending` and `.stream`.

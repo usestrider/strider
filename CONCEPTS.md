@@ -434,7 +434,7 @@ Compatible instantaneous checks are batched in one injected evaluation. No batch
   - Locators re-resolve before dispatch.
   - Explicit refs never rebind.
   - Nothing that may have dispatched is repeated automatically.
-- **Errors (L1 view).** Lifetime ends surface as `TargetGone{reason: CloseReason}` and deadlines as `Timeout`. Everything else is a domain error per verb family whose `reason` includes `NotPermitted`, `Unsupported` and `BackendFailure{Rejected | IncompatibleResponse}`. All of them carry the diagnostic envelope. Defects are reserved for bugs. `SessionSwapped` is internal.
+- **Errors (L1 view).** Lifetime ends surface as `TargetGone{reason: CloseReason}` and deadlines as `Timeout`. Everything else is a domain error per verb family whose `reason` includes `NotPermitted`, `Unsupported` and `BackendFailure{Rejected | IncompatibleResponse}`. All of them carry the diagnostic envelope, and every reason carries a one-line remediation `hint`. Defects are reserved for bugs. `SessionSwapped` is internal.
 - **State and event streams have different contracts.**
   - **State** (`Watchable`) is a read-only view of an entity's state ref:
     - reading it is an `Effect`;

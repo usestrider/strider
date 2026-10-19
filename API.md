@@ -40,6 +40,29 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
 - **Snapshots are named `read*`.** Retrying assertions take locators.
 - **Access is typed.** `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, like `ReadonlyArray` and `Array`. A helper that only reads takes `ReadonlyPage`, and a `Page` is accepted. Calling an action on a page you may only inspect is a compile error, and autocomplete doesn't offer it.
 - **Long, explicit names are fine.** `BrowserContext` avoids a clash with Effect's `Context`.
+- **Names encode behavior.** One grammar, so a call's semantics can be read from its name:
+
+  | Form | Meaning | Examples |
+  |---|---|---|
+  | verb | acts on the page, once | `click`, `fill`, `goto`, `route` |
+  | `read*`, `is*`, nouns | one-shot read; no waiting, no retry | `readText`, `isVisible`, `title`, `count` |
+  | `Watchable` members | state: read now, watch, `waitFor` | `status`, `url`, `download.status` |
+  | `Expect.to*` | retries until the deadline | `Expect.toHaveText` |
+  | `events.*` | an `Observation` of something caused | `page.events.response(…)` |
+  | `on*` | a scoped handler registration | `onDialog` |
+  | `new*` | creates an owned resource | `newPage`, `newContext` |
+  | `*With` | the configured form of a member | `clickWith`, `newPageWith` |
+  | `with*` (dual) | a cross-cutting setting over any effect | `Browser.withTimeout` |
+  | `export*` / `import` | crosses a persistence boundary; carries secrets | `exportStorageState`, `StorageState.import` |
+
+- **Every scoped acquisition returns a handle, never `void`.** Registrations (routes, dialog handlers, init scripts, overrides, clocks) return handles with an idempotent `remove` and, where useful, state such as `hits: Watchable<number>`. You can then release early or inspect without nesting another `Effect.scoped`, and the scope's finalizer becomes a no-op.
+- **Every effect ends.** Each library operation that waits does so under the operation deadline, and anything open-ended is a `Stream` whose consumer decides when to stop. The single exception is lifetime signals (`closed`), which wait exactly as long as the resource lives.
+- **Every error reason carries a hint,** a one-line fix that is shown in the rendered message:
+  - `NotPermitted`: "call `.control` on this page"
+  - `StaleRef`: "refs end with their document; use a locator or take a new snapshot"
+  - `Unsupported`: "supported on: chromium (CDP)"
+  - `StrictViolation`: "2 matches; try `getByRole('button', { name: 'Save' })`"
+- **One way to do each thing.** No aliases, and no parallel mechanisms for the same job (that is why `withPage` went away). A convenience is allowed only where it is the dominant call site and is documented as its expansion: `page.url` is `page.status.map(…)`, `download.finished` is `status.waitFor(…)`, and `browser.newPage` is `newContext` followed by `newPage`.
 
 ## Top data models
 
@@ -130,9 +153,9 @@ interface BrowserContext {
   readonly pages: Watchable<ReadonlyArray<Page>>
   readonly exportStorageState: Effect<Redacted<StorageStateBytes>, StorageStateError>   // branded bytes; a Uint8Array subtype
   readonly clock: Clock                                  // context-wide timeline (opt-in)
-  route<E, R>(pattern: UrlPattern, handler: RouteHandler<E, R>): Effect<void, RouteError, Scope | R>
+  route<E, R>(pattern: UrlPattern, handler: RouteHandler<E, R>): Effect<RouteRegistration, RouteError, Scope | R>
   addInitScript(script: InitScriptSource, options?: InitScriptOptions): Effect<InitScript, DeclarationError, Scope>
-  emulate(settings: Emulation): Effect<void, DeclarationError, Scope>
+  emulate(settings: Emulation): Effect<Registration, DeclarationError, Scope>
 }
 
 interface ContextOptions {
@@ -191,10 +214,10 @@ interface Page extends ReadonlyPage {
   readonly keyboard: Keyboard
   readonly mouse: Mouse
   readonly clock: Clock
-  route<E, R>(pattern: UrlPattern, handler: RouteHandler<E, R>): Effect<void, RouteError, Scope | R>
-  onDialog<E, R>(handler: (dialog: Dialog) => Effect<DialogDecision, E, R>): Effect<void, DeclarationError, Scope | R>
+  route<E, R>(pattern: UrlPattern, handler: RouteHandler<E, R>): Effect<RouteRegistration, RouteError, Scope | R>
+  onDialog<E, R>(handler: (dialog: Dialog) => Effect<DialogDecision, E, R>): Effect<HandlerRegistration, DeclarationError, Scope | R>
   addInitScript(script: InitScriptSource, options?: InitScriptOptions): Effect<InitScript, DeclarationError, Scope>
-  emulate(settings: Emulation): Effect<void, DeclarationError, Scope>
+  emulate(settings: Emulation): Effect<Registration, DeclarationError, Scope>
   readonly activate: Effect<void, TargetGone>            // bring to front; rendering-based waits need it
   readonly close: Effect<void, TargetGone | Timeout>     // owned teardown: no beforeunload
   closeWith(options: { runBeforeUnload: boolean }): Effect<void, CloseCanceled | TargetGone | Timeout>
@@ -411,8 +434,15 @@ declare const ResponseBody: {                           // exactly one kind of b
 }
 declare const Har: {
   replay(path: LocalPath | string, options?: { notFound?: "fallthrough" | "abort"; update?: boolean }):
-    (target: Page | BrowserContext) => Effect<void, RouteError, Scope>
+    (target: Page | BrowserContext) => Effect<RouteRegistration, RouteError, Scope>
 }
+```
+
+```ts
+interface Registration { readonly remove: Effect<void> }          // idempotent; the scope's finalizer becomes a no-op
+interface RouteRegistration extends Registration { readonly hits: Watchable<number> }
+interface HandlerRegistration extends Registration { readonly handled: Watchable<number> }
+interface InitScript extends Registration { readonly id: InitScriptId }   // also usable in { after: [...] }
 ```
 
 - **The handler's return type is the obligation.** A handler that fails, is interrupted, or leaves its scope gets the default decision (continue). A paused request is never left hanging.
@@ -460,7 +490,7 @@ declare const StorageState: {
 ```ts
 interface Clock {
   install(mode: { mode: "fixed"; at: DateInput } | { mode: "offset"; by: Duration.Input } | { mode: "controlled"; at?: DateInput }):
-    Effect<void, DeclarationError, Scope>                // needs before-author-script timing
+    Effect<Registration, DeclarationError, Scope>        // needs before-author-script timing
   readonly resume: Effect<void, ClockError>
   pauseAt(at: DateInput): Effect<void, ClockError>
   runFor(duration: Duration.Input): Effect<void, ClockError>       // fires every due timer in order
@@ -547,6 +577,9 @@ class ActionError extends Schema.TaggedError<ActionError>()("ActionError", {
   reason: Schema.Union([StrictViolation, NotEditable, InvalidSelector, InvalidOption, NotPermitted, Unsupported, BackendFailure]),
   diagnostics: Diagnostics }) {}
 // NavigationError, EvaluationError, ResponseError, ExpectationFailed, RouteError, DeclarationError, … follow the same shape
+// every reason carries `hint: string`, e.g.
+class NotPermitted extends Schema.TaggedError<NotPermitted>()("NotPermitted", {
+  required: Schema.Literals(["inspect", "control", "browserWide"]), hint: Schema.String }) {}   // "call `.control` on this page"
 
 // recovery reads naturally:
 locator.click.pipe(
@@ -606,8 +639,9 @@ yield* Effect.scoped(Effect.gen(function* () {
   const reader = yield* first.inspect
   const text = yield* reader.getByRole("heading").readText
   const tab = yield* second.control
-  yield* tab.route("**/analytics/**", () => Effect.succeed(Route.abort))
+  const blocked = yield* tab.route("**/analytics/**", () => Effect.succeed(Route.abort))
   yield* tab.getByRole("button", { name: "Refresh" }).click
+  yield* Console.log(`blocked ${yield* blocked.hits} analytics calls`)
 }))                                                     // route and access released; both tabs stay open
 
 // 8. Log requests until the page closes
