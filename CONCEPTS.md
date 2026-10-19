@@ -62,6 +62,8 @@ Realms are siblings of documents, not children. The one exception that forces th
 
 **Identity fields must be fixed for the entity's lifetime, and say why.** Each plain field carries a one-line justification. Ids, `closed` and streams are exempt by construction. A field that can't be justified moves into `state`. Applying this rule moved three fields: a document's and a window realm's navigable (prerender activation moves both into the existing tab), `isInitialAboutBlank` (cleared by `document.open()`), and a navigation's kind (the Navigation API can intercept a cross-document navigation into a same-document one).
 
+**Unions of valid models, not optional fields.** When fields only make sense together, the model is a tagged union of its valid shapes, so impossible combinations can't be built: a page with a parent, a worker realm attached to a tab, a left-open page with a cleanup scope. A value that is genuinely optional, such as an opener the backend didn't report, is an `Option`, never `?:`, `undefined` or `null`. Generated L0 wire types mirror the protocol's optional keys, and adapters convert them at the L0→L1 boundary.
+
 ```ts
 // ── Containment ────────────────────────────────────────────
 interface BrowserModel {
@@ -74,64 +76,89 @@ interface BrowserModel {
   }>
   readonly closed: Effect<CloseReason>
 }
+
+type Ownership =                                        // replaces release policy + optional cleanup scope
+  | { _tag: "LeaveOpen" }                               // discovered or attached: never destroyed by us
+  | { _tag: "Owned"; release: "close" | "remove"; scope: CleanupScopeId }
+
 interface UserContextModel {
   readonly id: UserContextId
   readonly isDefault: boolean                           // fixed: the default context exists for the whole connection
   readonly state: SubscriptionRef<{
-    access: Access; release: "leaveOpen" | "removeOwned"
+    access: Access; ownership: Ownership
     pages: ReadonlyArray<NavigableId>
     declarations: DeclarationSet                        // §7
     promptPolicy: PromptPolicy                          // §5
   }>
   readonly closed: Effect<CloseReason>
 }
-interface NavigableModel<S extends NavigableState = NavigableState> {   // Page and Frame share this
-  readonly id: NavigableId
-  readonly kind: "page" | "frame"                       // fixed: a frame never becomes top-level, nor the reverse
-  readonly parent: Option<NavigableId>                  // a frame never changes parent
-  readonly state: SubscriptionRef<S>
-  readonly closed: Effect<CloseReason>
-}
+
+type NavigableModel = PageModel | FrameModel             // a page never has a parent; a frame always does
 interface NavigableState {
   children: ReadonlyArray<NavigableId>
   activeDocument: DocumentId
-  access: Access; release: ReleasePolicy; cleanupScope: Option<CleanupScopeId>
+  access: Access; ownership: Ownership
 }
-interface PageModel extends NavigableModel<PageState> {
+interface PageModel {
+  readonly _tag: "Page"
+  readonly id: NavigableId
   readonly pageKind: "tab" | "popup" | "prerender" | "fenced"   // fixed: an activated prerender page ends (PrerenderActivated)
-  readonly origin: { _tag: "Created" } | { _tag: "Opened"; opener: Option<NavigableId> } | { _tag: "Adopted" }   // fixed: how it came to exist
-  readonly originalOpener: Option<NavigableId>          // fixed at creation; kept even under noopener
+  readonly origin:                                      // fixed: how it came to exist
+    | { _tag: "Created" }
+    | { _tag: "Opened"; originalOpener: Option<NavigableId> }   // None: the backend didn't report it; kept even under noopener
+    | { _tag: "Adopted"; originalOpener: Option<NavigableId> }
+  readonly state: SubscriptionRef<NavigableState & { prompt: Option<PromptId>; input: InputState }>
+  readonly closed: Effect<CloseReason>
 }
-interface PageState extends NavigableState {
-  prompt: Option<PromptId>
-  input: InputState                                     // §5
+interface FrameModel {
+  readonly _tag: "Frame"
+  readonly id: NavigableId
+  readonly parent: NavigableId                          // fixed: a frame never changes parent
+  readonly state: SubscriptionRef<NavigableState>
+  readonly closed: Effect<CloseReason>
 }
+
 interface DocumentModel {
   readonly id: DocumentId
   readonly origin: Origin                               // fixed for the document; document.domain changes only the effective domain
-  readonly navigation: Option<NavigationId>             // fixed: the committing navigation; None for the initial about:blank
-  readonly isErrorDocument: boolean                     // fixed: error documents are created as such
-  readonly restoredFrom: Option<DocumentId>             // fixed at creation; only with correlating evidence
+  readonly createdBy:                                   // fixed: replaces optional navigation/restoredFrom and the error flag
+    | { _tag: "InitialBlank" }
+    | { _tag: "Navigation"; navigation: NavigationId }
+    | { _tag: "ErrorPage"; navigation: NavigationId }   // H10: a failed navigation that still committed
+    | { _tag: "Restored"; navigation: NavigationId; from: DocumentId }   // only with correlating evidence
+    | { _tag: "Adopted" }                               // existed before we attached
   readonly state: SubscriptionRef<{
     navigable: NavigableId                              // changes only on prerender activation
     isInitialAboutBlank: boolean                        // cleared by document.open()
     generation: DocumentGeneration                      // bumped by document.open()
     url: Url                                            // changes on same-document navigation
-    lifecycle: "active" | "suspended" | { _tag: "ended"; reason: CloseReason }
+    lifecycle: { _tag: "Active" } | { _tag: "Suspended" } | { _tag: "Ended"; reason: CloseReason }
     readiness: "loading" | "interactive" | "complete"   // current state; can return to loading
     loading: LoadingResult                              // per generation; post-commit failure lives here
   }>
 }
-interface RealmModel {
+
+type RealmModel = WindowRealmModel | WorkerRealmModel   // only window realms belong to a tab
+type RealmLifecycle = { _tag: "Active" } | { _tag: "Suspended" } | { _tag: "Destroyed"; reason: CloseReason }
+interface WindowRealmModel {
+  readonly _tag: "Window"
   readonly id: RealmId
-  readonly kind: { _tag: "window"; world: "main" | { isolated: string } }   // fixed: a realm never changes kind or world
-    | { _tag: "dedicatedWorker"; owner: RealmId } | { _tag: "sharedWorker" }
-    | { _tag: "serviceWorker"; registrationScope: Url } | { _tag: "worklet"; type: string }
+  readonly world: { _tag: "Main" } | { _tag: "Isolated"; name: string }   // fixed: a realm never changes world
   readonly state: SubscriptionRef<{
-    navigable: Option<NavigableId>                      // window realms; moves with its document on prerender activation
-    documents: ReadonlyArray<DocumentId>                // usually one; two after initial-blank reuse
-    lifecycle: "active" | "suspended" | { _tag: "destroyed"; reason: CloseReason }
+    navigable: NavigableId                              // moves with its document on prerender activation
+    documents: NonEmptyReadonlyArray<DocumentId>        // usually one; two after initial-blank reuse
+    lifecycle: RealmLifecycle
   }>
+}
+interface WorkerRealmModel {
+  readonly _tag: "Worker"
+  readonly id: RealmId
+  readonly worker:                                      // fixed: a realm never changes kind
+    | { _tag: "Dedicated"; owner: RealmId }
+    | { _tag: "Shared" }
+    | { _tag: "Service"; registrationScope: Url }
+    | { _tag: "Worklet"; type: string }
+  readonly state: SubscriptionRef<{ lifecycle: RealmLifecycle }>
 }
 
 // ── Navigation ─────────────────────────────────────────────
@@ -141,25 +168,29 @@ interface NavigationModel {
   readonly initiatedAs: "crossDocument" | "fragment" | "historyApi" | "traversal" | "reload" | "javascriptUrl" | "prerenderActivation"
                                                         // fixed: how it started; interception or a download shows up in the outcome
   readonly status: SubscriptionRef<
-    | { _tag: "pending" }
-    | { _tag: "observed"; outcome: NavigationOutcome; evidence: Evidence }
-    | { _tag: "unresolved"; lastObserved: Evidence }>
+    | { _tag: "Pending" }
+    | { _tag: "Observed"; outcome: NavigationOutcome; evidence: Evidence }
+    | { _tag: "Unresolved"; lastObserved: Evidence }>
 }
 type NavigationOutcome =
-  | { _tag: "Committed"; document: DocumentId; response: Option<ResponseRef> }
+  | { _tag: "Committed"; document: DocumentId; response: Option<ResponseRef> }   // None: about:blank, data:, and so on
   | { _tag: "SameDocument"; document: DocumentId; via: "fragment" | "historyApi" | "intercepted" }
   | { _tag: "Restored"; document: DocumentId }        // back/forward cache
   | { _tag: "Activated"; document: DocumentId }       // prerender
   | { _tag: "Download"; download: DownloadId }        // old document stays
   | { _tag: "NoContent"; status: 204 | 205 }          // old document stays
-  | { _tag: "Failed"; error: NetError; errorDocument: Option<DocumentId> }
+  | { _tag: "Failed"; error: NetError; errorDocument: Option<DocumentId> }   // None: no error page correlated (yet)
   | { _tag: "Superseded"; by: NavigationId }
   | { _tag: "Canceled"; reason: "beforeunload" | "navigateEvent" | "sandbox" | "unloading" | "traversalInProgress" }
   | { _tag: "NoOp"; reason: "javascriptNonString" | "noHistoryEntry" }
 
 // ── Network: immutable snapshots; a request's progress is a stream of them ──
 interface RequestSnapshot {
-  readonly hop: RequestHopId; readonly navigable: Option<NavigableId>; readonly navigation: Option<NavigationId>
+  readonly hop: RequestHopId
+  readonly initiator:                                   // replaces optional navigable + navigation
+    | { _tag: "Document"; navigable: NavigableId; navigation: Option<NavigationId> }   // None: a subresource
+    | { _tag: "Worker"; realm: RealmId }
+    | { _tag: "Unattributed" }                           // e.g. a client-less service-worker fetch
   readonly method: HttpMethod; readonly url: Url; readonly headers: Headers   // classified values are Redacted
   readonly resourceType: ResourceType; readonly servedBy: "network" | "cache" | "serviceWorker"
 }
@@ -179,20 +210,22 @@ interface ObligationModel {
     | { _tag: "PausedRequest"; hop: RequestHopId; phase: "request" | "response" | "auth"; occurrence: number }
     | { _tag: "Prompt"; prompt: PromptSnapshot }
     | { _tag: "FileChooser"; navigable: NavigableId; multiple: boolean }
-  readonly state: SubscriptionRef<"pending" | "decisionSelected" | "sending" | "acknowledged" | "rejected" | "unknown" | "ended">
+  readonly state: SubscriptionRef<
+    | { _tag: "Pending" } | { _tag: "DecisionSelected"; decision: Decision } | { _tag: "Sending"; decision: Decision }
+    | { _tag: "Acknowledged"; decision: Decision } | { _tag: "Rejected"; decision: Decision; error: BackendFailure }
+    | { _tag: "Unknown"; decision: Decision; evidence: Evidence } | { _tag: "Ended"; reason: CloseReason }>
 }
 
-// ── Access, release, operations ────────────────────────────
+// ── Access, operations ─────────────────────────────────────
 type Access = "observe" | "inspect" | "control"
-type ReleasePolicy = "leaveOpen" | "closeOwned" | "removeOwned"
 interface OperationRecord {                            // internal; inspected through an Effect
   readonly id: OperationId
   readonly state: Ref<{
-    dispatch: "notSent" | "mayHaveBeenSent" | "acknowledged"
+    dispatch: { _tag: "NotSent" } | { _tag: "MayHaveBeenSent" } | { _tag: "Acknowledged"; result: "ok" | "rejected" }
     progress: ReadonlyArray<StepEvidence>               // per command: unsent | uncertain | ok | rejected
-    observation: "pending" | { observed: unknown } | { unknown: Evidence }
+    observation: { _tag: "Pending" } | { _tag: "Observed"; value: unknown } | { _tag: "Unknown"; evidence: Evidence }
     caller: "waiting" | "completed" | "failed" | "interrupted"
-    cleanup: "notNeeded" | "pending" | "completed" | { failed: string }
+    cleanup: { _tag: "NotNeeded" } | { _tag: "Pending" } | { _tag: "Completed" } | { _tag: "Failed"; cause: string }
   }>
 }
 type Readiness = { _tag: "Ready" } | { _tag: "NotReady"; predicate: Predicate; reason: NotReadyReason; observedAt: number }
@@ -223,16 +256,15 @@ Cleanup groups can span sibling pages, independently of this graph.
 
 - **Three separate decisions.** Every remote resource carries:
   - **access**: what we may do to it;
-  - **release policy**: what happens to it when we let go;
-  - **cleanup group**: which scope releases it.
+  - **ownership**: `LeaveOpen`, or `Owned{release: close | remove, scope}`, which records what happens when we let go and which scope does it. One union, so a left-open resource can't carry a cleanup scope.
 
   Being a child in the model graph grants none of them.
 - **Access.** `observe` permits protocol events only. `inspect` adds isolated-world injection and reads: locators, readiness predicates, snapshots, screenshots, body reads. `control` adds input, navigation, main-world evaluation, declarations and obligation decisions. Discovered resources start at `observe`, and upgrading never changes release policy. An upgrade is held by the `Scope` that acquired it; once that scope closes, the upgraded handle fails with `TargetGone{reason: AccessReleased}` rather than silently keeping its powers. A declaration whose physical effect reaches past its target needs explicit wider access, or fails with `NotPermitted`. Access is a library contract, not a browser security boundary.
 - **Release and cleanup groups.**
-  - Created resources are owned: `closeOwned` or `removeOwned`.
-  - The default context and pages that existed at attach are `leaveOpen`.
+  - Created resources are `Owned`.
+  - The default context and pages that existed at attach are `LeaveOpen`.
   - **Every acquisition requires a `Scope`, and that scope is the cleanup group.** This covers contexts, pages, access upgrades, popups, downloads, handles, capability handles and every declaration. Values with no remote lifetime (locators, snapshots, captured bodies) need none. An early `close` makes the finalizer a no-op.
-  - A popup of an owned page is released with the scope that observed it (`Observe.popup`). If nobody asked for it, it is released with the scope that acquired its opener, even if the opener has already closed. A popup of a `leaveOpen` page is `observe`/`leaveOpen`.
+  - A popup of an owned page is released with the scope that observed it (`Observe.popup`). If nobody asked for it, it is released with the scope that acquired its opener, even if the opener has already closed. A popup of a `LeaveOpen` page is `observe`/`LeaveOpen`.
   - Transfer to another scope is explicit and atomic with respect to shutdown. Ambiguous opener evidence never implies ownership.
 - **Ownership ledger.** The connection records owned resources, groups and transfers. A persisted ledger yields *reclamation candidates* only. Automatic destructive reclaim across connections needs verified browser incarnation, resource identity and claimant coordination, and is deferred.
 - **Requesting a close is not ending a lifetime.** `closeWith({runBeforeUnload: true})` can be refused (`CloseCanceled`), and the page stays usable. A close timeout leaves closure unconfirmed rather than fabricating `PageClosed`. Teardown of owned resources uses a bounded close without beforeunload.
@@ -246,7 +278,7 @@ Cleanup groups can span sibling pages, independently of this graph.
 - **Document lifecycle.** `Active ⇄ Suspended` (back/forward cache, only with confirmed evidence) and `→ Ended{reason}`.
   - Readiness events are accepted only for the matching epoch and generation.
   - `document.open()` keeps the epoch, starts a new generation, and returns readiness to `loading`.
-  - A restored document gets the same id only when the adapter can correlate it; otherwise the old epoch ends with `DocumentUnloaded` and the new one carries `restoredFrom`.
+  - A restored document gets the same id only when the adapter can correlate it; otherwise the old epoch ends with `DocumentUnloaded` and the new one is `createdBy: Restored{from}`.
   - Node and handle continuity are proven separately from document continuity.
   - On prerender activation the prerender page ends with `PrerenderActivated`. Its document and realms move into the activating tab, and their `navigable` changes in state.
 - **Frames.** A frame is created synchronously, before any protocol notification arrives. It ends on container removal, or when its parent's document permanently ends; the adapter closes orphans itself because HTML never fires an event for them. A frame keeps its identity across process swaps; only its adapter session changes.

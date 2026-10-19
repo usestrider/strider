@@ -33,6 +33,7 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
   - **Inputs** require the brand where two meanings could be confused at one call site: local vs remote paths (`File.local` / `File.remote`), CSS vs device pixels.
   - **Elsewhere, inputs accept a plain string** when the member name already fixes its meaning (`goto(url)`, `route(pattern)`). The string is parsed at the boundary, and a bad one fails immediately with an invalid-input reason, never by waiting.
   - **Tokens are never accepted as plain strings.** A token is a produced value whose meaning depends on where it came from: ids, snapshot refs, document generations, registration handles such as `InitScript`, operation ids. It is accepted only in its branded or opaque form. A brand doesn't prove provenance, so tokens are also checked against their origin when used: a `RefId` from another snapshot or document fails with `StaleRef`, and an `InitScript` from a closed scope fails as a dependency. Values whose meaning is intrinsic (`Url`, `HttpStatus`) round-trip freely.
+- **Unions of valid models; `Option` for what's truly optional.** Everything the library returns is a tagged union of its valid shapes rather than a record with optional fields: navigations, dialogs, request initiators, ownership. Genuinely optional values are `Option`, never `?:`, `undefined` or `null`. Input option bags keep `?:` to mean "use the default", but mutually exclusive alternatives are unions: a route body is JSON *or* text *or* bytes, and a screenshot covers the viewport *or* the full page *or* a clip *or* an element.
 - **Locators are values,** resolved again on every attempt.
 - **Snapshots are named `read*`.** Retrying assertions take locators.
 - **Access is typed.** `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, like `ReadonlyArray` and `Array`. A helper that only reads takes `ReadonlyPage`, and a `Page` is accepted. Calling an action on a page you may only inspect is a compile error, and autocomplete doesn't offer it.
@@ -52,12 +53,13 @@ interface ObservedPage {                                // events only
 interface ReadonlyPage extends ObservedPage { /* locators, reads, snapshots, screenshots — see Pages */ }
 interface Page extends ReadonlyPage { /* input, navigation, main-world evaluation, declarations */ }
 
-interface Navigation {                                  // success value of goto/reload/back/forward
-  readonly id: NavigationId
-  readonly document: DocumentId
-  readonly response: Option<ResponseSnapshot>           // 404/500 is still a successful commit
-  readonly kind: "committed" | "sameDocument" | "restored" | "activated"
-}
+type Navigation =                                       // success value of goto/reload/back/forward
+  | { readonly _tag: "Committed"; readonly id: NavigationId; readonly document: DocumentId
+      readonly response: Option<ResponseSnapshot> }      // 404/500 is still a commit; None for about:blank, data:, …
+  | { readonly _tag: "SameDocument"; readonly id: NavigationId; readonly document: DocumentId
+      readonly via: "fragment" | "historyApi" | "intercepted" }
+  | { readonly _tag: "Restored"; readonly id: NavigationId; readonly document: DocumentId }   // back/forward cache
+  | { readonly _tag: "Activated"; readonly id: NavigationId; readonly document: DocumentId }  // prerender
 
 interface ResponseSnapshot {                            // immutable; one redirect hop
   readonly hop: RequestHopId
@@ -146,7 +148,10 @@ interface ReadonlyPage extends ObservedPage {
   readonly snapshot: Effect<AriaSnapshot, ReadError>     // with refs, for agents
   snapshotWith(options: { mode: "ai" | "full"; root?: ReadonlyLocator }): Effect<AriaSnapshot, ReadError>
   readonly screenshot: Effect<Uint8Array, CaptureError>  // viewport, PNG
-  screenshotWith(options: ScreenshotOptions): Effect<Uint8Array, CaptureError>
+  screenshotWith(options: {
+    area?: { _tag: "Viewport" } | { _tag: "FullPage" } | { _tag: "Clip"; rect: Rect<CssPixels> } | { _tag: "Element"; locator: ReadonlyLocator }
+    format?: { _tag: "Png" } | { _tag: "Jpeg"; quality: number }   // quality exists only for JPEG
+  }): Effect<Uint8Array, CaptureError>
   readonly pdf: Effect<Uint8Array, CaptureError>
   pdfWith(options: PdfOptions): Effect<Uint8Array, CaptureError>
   evaluate<Args extends ReadonlyArray<unknown>, A>(    // isolated world: no page globals
@@ -354,10 +359,16 @@ interface InterceptedRequest {
 declare const Route: {
   readonly continue: RouteDecision
   continueWith(overrides: RequestOverrides): RouteDecision
-  fulfill(response: { status?: HttpStatus | number; headers?: Headers; body?: Uint8Array | string; json?: unknown }): RouteDecision
+  fulfill(response: { status?: HttpStatus | number; headers?: Headers; body?: ResponseBody }): RouteDecision   // no body: empty
   readonly abort: RouteDecision
   abortWith(reason: AbortReason): RouteDecision
   readonly fallthrough: RouteDecision                    // next matching handler
+}
+declare const ResponseBody: {                           // exactly one kind of body
+  json(value: unknown): ResponseBody
+  text(text: string): ResponseBody
+  bytes(data: Uint8Array, mimeType?: MimeType | string): ResponseBody
+  file(path: LocalPath | string): ResponseBody
 }
 declare const Har: {
   replay(path: LocalPath | string, options?: { notFound?: "fallthrough" | "abort"; update?: boolean }):
@@ -371,15 +382,17 @@ declare const Har: {
 ## Dialogs, downloads, storage, permissions
 
 ```ts
-interface Dialog {
-  readonly kind: "alert" | "confirm" | "prompt" | "beforeunload"
-  readonly message: string
-  readonly default: Option<string>
-}
-declare const Dialog: {
-  readonly accept: DialogDecision
-  readonly dismiss: DialogDecision
-  respond(text: string): DialogDecision                  // prompt() with an answer
+type Dialog =                                          // each shape offers only the decisions valid for it
+  | { readonly _tag: "Alert"; readonly message: string; readonly accept: DialogDecision }
+  | { readonly _tag: "Confirm"; readonly message: string; readonly accept: DialogDecision; readonly dismiss: DialogDecision }
+  | { readonly _tag: "Prompt"; readonly message: string; readonly defaultValue: string
+      readonly accept: DialogDecision                    // answers with defaultValue
+      respond(text: string): DialogDecision
+      readonly dismiss: DialogDecision }
+  | { readonly _tag: "BeforeUnload"; readonly leave: DialogDecision; readonly stay: DialogDecision }
+declare const Dialog: {                                  // ready-made handlers; match on _tag for anything finer
+  readonly acceptAll: (dialog: Dialog) => Effect<DialogDecision>    // Alert/Confirm/Prompt: accept; BeforeUnload: leave
+  readonly dismissAll: (dialog: Dialog) => Effect<DialogDecision>   // Alert: accept; Confirm/Prompt: dismiss; BeforeUnload: stay
 }
 
 interface Download {
@@ -443,7 +456,8 @@ const toolkit = BrowserToolkit.make({
 })
 // tools: navigate, snapshot, click(ref), fill(ref, text | %secret%), press, select, scroll, screenshot, back, wait, tabs
 // tool parameters are Schemas, so a model's "e12" is decoded to a RefId before the handler runs
-// each action returns ActionReport { dispatch, observed: { navigations, dialogs, popups, downloads, domChanged } }
+// each action returns ActionReport { dispatch, observed: { navigations, dialogs, popups, downloads,
+//   dom: { _tag: "Changed" } | { _tag: "Unchanged" } | { _tag: "NotObserved" } } }
 LanguageModel.generateText({ prompt, toolkit })
 McpServer.toolkit(toolkit)
 ```
@@ -525,7 +539,7 @@ const [, nav] = yield* page.getByRole("link", { name: "Orders" }).click.pipe(
 
 // 3. Popup with a dialog inside it
 const [, popup] = yield* page.getByText("Connect account").click.pipe(Observe.popup)
-yield* popup.getByRole("button", { name: "Allow" }).click.pipe(Observe.dialog(() => Effect.succeed(Dialog.accept)))
+yield* popup.getByRole("button", { name: "Allow" }).click.pipe(Observe.dialog(Dialog.acceptAll))
 
 // 4 + 9. Response body, decoded and filtered, without ordering subscriptions by hand
 const [, res] = yield* page.getByRole("button", { name: "Add to cart" }).click.pipe(

@@ -47,6 +47,7 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 12. **If it doesn't have to be a function, it's a value.** Operations without arguments are `Effect`s (`locator.click`, `browser.newPage`), and pure derivations are properties (`locator.first`). A member whose parameters are all optional is a default value plus `xWith(options)`. Cross-cutting settings such as timeouts are dual combinators, not option fields. Anything with a lifecycle requires `Scope`.
 13. **Immutable by default; mutable state lives in a `Ref` and is read through an `Effect`.** Entities are immutable identity plus one `SubscriptionRef` of state. Snapshots, events and errors are immutable. Nothing that can change is exposed as a plain field, so every read happens at the moment its effect runs. A plain field on a live handle or entity is a claim that it never changes, so it carries a one-line justification.
 14. **Brand liberally.** Ids and meaningful strings and numbers are branded types with validating schemas (`Url`, `UrlPattern`, `HttpStatus`, `LocalPath`/`RemotePath`, `CssPixels`, …). Outputs are always branded. Tokens are accepted back only in branded or opaque form, and are checked against their origin when used. These are produced values that only mean something relative to where they came from: ids, snapshot refs, registration handles. Other inputs require the brand where meanings could be confused, and otherwise parse plain strings at the boundary.
+15. **Unions of valid models; `Option` for what's truly optional.** Fields that only make sense together form a tagged union of valid shapes, so impossible states can't be built. Genuinely optional values are `Option`, never `?:`, `undefined` or `null`. Input option bags keep `?:` for "use the default", and their mutually exclusive alternatives are unions.
 
 ## Cross-cutting decisions
 
@@ -112,6 +113,16 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.6** replaced optional fields with unions of valid models:
+  - `Ownership` (left open, or owned with a release and a scope);
+  - `PageModel | FrameModel` (only frames have parents);
+  - `WindowRealmModel | WorkerRealmModel` (only window realms belong to a tab);
+  - a document's `createdBy`;
+  - a request's `initiator`;
+  - obligation and operation states that carry their data;
+  - public `Navigation`, `Dialog` (each kind offers only its valid decisions) and `ActionReport.dom`.
+
+  Route bodies and screenshot areas became input unions.
 - **Revision 5.5** made branding a rule: per-kind id brands, value brands for URLs, patterns, statuses, headers, paths, pixels, locales and agent refs. File inputs are now `File.local`/`File.remote`/`File.bytes`, so local and remote paths can't be confused.
 - **Revision 5.4** required plain fields to be fixed and to say why. Auditing with that rule moved three identity fields into state: a document's and a window realm's navigable (prerender activation), `isInitialAboutBlank` (`document.open()`), and a navigation's kind, now `initiatedAs`, with interception visible in the outcome. It also added `PrerenderActivated` as a close reason.
 - **Revision 5.3** made immutability the default: model entities are identity plus one `SubscriptionRef` of state, and mutable values (`url`, `title`, `capabilities`, page lists, held access) are read through `Effect`s. An upgraded handle whose scope has closed fails with `AccessReleased`.
