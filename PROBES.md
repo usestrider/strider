@@ -60,7 +60,7 @@ The hazards are catalogued in `research/platform-concept-model.md` §4.
 | H11 navigation produces no document | `Download`, `NoContent` |
 | H12 navigation ignored during traversal or unload | `Canceled` only with evidence |
 | H13 initial `about:blank` reuse | realms are siblings of documents |
-| H14 a dialog blocks sibling pages | confirmed vs suspected blocking; `Pending` is waitable; auto-resolutions reported |
+| H14 a dialog blocks sibling pages | confirmed vs suspected blocking; a pending prompt resolution is waitable; auto-resolutions reported |
 | H15 beforeunload needs activation | `CloseCanceled`; the page stays usable |
 | H16 back/forward-cache restore | document continuity correlated; handles proven separately |
 | H17 a service worker answers a request | `servedBy`; lifecycle without `Sent`; bypass capability |
@@ -90,7 +90,7 @@ FakeBrowser.timeline("--resp(cart)--commit--load--|", ({ page }) =>
   Effect.gen(function* () {
     const cart = yield* NetworkResponse.next(page, { url: "**/api/cart" })     // subscribed at tick 0
     yield* TestClock.adjust("20 millis")                                       // the response arrives at tick 2
-    expect((yield* cart).url).toContain("/api/cart")                          // latched before the await
+    expect((yield* Deferred.await(cart)).url).toContain("/api/cart")          // latched before the await
   }))
 ```
 
@@ -107,7 +107,7 @@ Tokens map to fold inputs: `resp(name)`, `req(name)`, `commit`, `load`, `dialog(
 - **Ambiguity and dialogs:** ambiguity fails immediately with candidates and a visibility hint, and the dialog policy decides with no delay.
 - **State and events:**
   - a `Watchable` subscribed late sees the present, and `waitFor` succeeds even after intermediate stages were skipped;
-  - a `next` latches a match that arrives before the await;
+  - a `next` latches a match that arrives before the await, and its deadline runs from `next`;
   - a `stream` acquired before the trigger misses nothing;
   - a `next` subscribed just after its match times out with a hint naming that match;
   - `history` keeps the newest entries past the cap and counts the rest in `dropped`;

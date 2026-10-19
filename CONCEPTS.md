@@ -1,6 +1,6 @@
 # CONCEPTS: the native browser model (L1)
 
-*Revision 5.22, 2026-10-19. A condensed restatement of draft 4 (commit `6cc0bc1`), with [review 4](reviews/04-draft-4.md) folded in. The reasoning behind each contract is in that draft and in [reviews/](reviews/); this document keeps the decisions. Spec anchors: `HTML#x` is `https://html.spec.whatwg.org/#x`; `BIDI#x` is the WebDriver BiDi editor's draft.*
+*Revision 5.23, 2026-10-19. A condensed restatement of draft 4 (commit `6cc0bc1`), with [review 4](reviews/04-draft-4.md) folded in. The reasoning behind each contract is in that draft and in [reviews/](reviews/); this document keeps the decisions. Spec anchors: `HTML#x` is `https://html.spec.whatwg.org/#x`; `BIDI#x` is the WebDriver BiDi editor's draft.*
 
 ## Purpose
 
@@ -433,7 +433,7 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
   - **Owner ends without a match:** fails promptly.
   - **Results:** a latched immutable result outlives the subscription.
 - **Event logs.** Each page and context keeps a bounded log per event kind, fed by the same fold as subscriptions. Entries are copied metadata or handles to resources owned elsewhere, never collected bodies, so nothing in a log decays. A log counts what it drops. Logs serve `history`, the digest that agent tools and CLI commands return between calls, and the hint on a late subscription's `Timeout`, which names a match that arrived just before it subscribed.
-- **Deadline.** There is one monotonic deadline per operation, inherited by nested calls and only ever shortened. Cleanup has its own budget. Deadline failures are `Timeout{phase}`, carrying the last observation and its de-duplicated history.
+- **Deadline.** There is one monotonic deadline per operation, inherited by nested calls and only ever shortened. It lives in `Deadline.Current`, an absolute instant on the live clock, set only by `Deadline.within`; an operation with no enclosing deadline gets `Deadline.DefaultBudget` from when it starts. An event wait takes its deadline at `next`. Cleanup has its own budget. Deadline failures are `Timeout{phase}`, carrying the last observation and its de-duplicated history.
 - **Retries.** Retry decisions depend on the operation, its phase, the target binding, dispatch evidence and the remaining deadline, never on an error tag alone.
   - Locators re-resolve before dispatch.
   - Explicit refs never rebind.
@@ -452,7 +452,7 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
   - **Filtering:** declarative metadata prefilters run before buffering. Caller predicates run in subscriber workers, never on the ingestion path.
 - **No public fibers, no writable `Deferred`s or `Ref`s.**
   - **Internal:** the model's background work (state folds, handlers, resolvers) runs in fibers scoped to the owning entity. `Deferred`s latch first matches, lifetime ends and obligation decisions; `Deferred.succeed` returning `false` enforces a single winner.
-  - **Public:** only read-only views cross the API: `Effect`, `Watchable`, `Pending`, and `Stream` from eager subscriptions.
+  - **Public:** only read-only views cross the API: `Effect`, `Watchable`, `ReadonlyDeferred`, and `Stream` from eager subscriptions.
 - **Effect primitives behind these mechanisms.** Named so the implementation uses them rather than rebuilding them:
 
   | Mechanism | Effect module |
@@ -466,7 +466,8 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
   | handlers and resolvers scoped to their entity | `FiberSet`, `FiberMap` |
   | the persisted ownership ledger (§3) | `KeyValueStore` (`effect/persistence`) |
   | byte limits: payloads, body capture, queues | `ByteSize` |
-  | single-winner decisions and latched first matches | `Deferred` |
+  | single-winner decisions and latched first matches | `Deferred`; callers get its read side, `ReadonlyDeferred` |
+  | `Expect`'s re-checks on change signals | `Reactivity`: the model invalidates keys (a `Watchable` change, a subtree mutation), and `Reactivity.stream` re-runs the check |
 
 ## 10. Secrets and diagnostics
 

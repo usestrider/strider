@@ -23,6 +23,7 @@ Each layer document has the same shape: purpose, top data models, interface sket
 | — | [PROBES.md](PROBES.md) | conformance probes, hazard coverage, deterministic model tests |
 | — | [research/](research/) | prior-art notes (historical evidence) |
 | — | [reviews/](reviews/) | design reviews, one per draft |
+| — | [upstream/](upstream/) | drafts of proposals for upstream projects, for the maintainer to post |
 
 ```
 L2  API       Browser · UserContext · Page · Locator · Expect · Watchable · event modules · Route · PageClock · Trace · Har · Toolkit · BrowserTest · CLI
@@ -76,7 +77,7 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 
 ### One deadline per operation
 
-Each user-visible operation has one monotonic deadline covering everything it does: queueing for input, setting up observation, resolving the locator, actionability, dispatch and the postcondition. Nested calls inherit the remaining budget and can only shorten it. Cleanup gets its own bounded budget. Library deadlines run on a live clock even inside `TestClock` tests. Defaults come from a `Context.Reference`, and every option accepts `Duration.Input`.
+Each user-visible operation has one monotonic deadline covering everything it does: queueing for input, setting up observation, resolving the locator, actionability, dispatch and the postcondition. An explicit `Deadline.within` encloses everything inside it, and nested calls can only shorten it; an operation with no enclosing deadline gets the default budget (30 seconds, `Deadline.withDefaultBudget`). Cleanup gets its own bounded budget. Deadlines run on a live clock even inside `TestClock` tests, and every option accepts `Duration.Input`.
 
 ### Errors
 
@@ -97,7 +98,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
   - `local`: paths and titles included; query, fragment, userinfo and classified fields stripped.
   - `strict`: origins only and no titles, for production, exported traces and agents.
 
-  `strict` is the default everywhere, tests included; `Browser.withDiagnostics("local")` selects the other.
+  `strict` is the default everywhere, tests included; `Diagnostics.withPreset("local")` selects the other.
 - **Raw content.** Bodies, console output, DOM snapshots and screenshots can contain secrets the page echoed. They need an explicit capture policy before leaving the process. There is no claim of taint tracking.
 
 ### Observability
@@ -123,6 +124,11 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.23** moved the cross-cutting settings off `Browser` and onto Effect's own shapes:
+  - `next` hands out a `ReadonlyDeferred`, the read side of Effect's `Deferred`, proposed upstream ([upstream/effect-readonly-deferred.md](upstream/effect-readonly-deferred.md)); its deadline is set at `next`, and `Pending` is gone;
+  - a `Deadline` module (`within`, `withDefaultBudget`, `remaining`, and the `Current` and `DefaultBudget` references) replaces `Browser.withTimeout` and `withDefaultTimeout`; an explicit deadline wins over the default budget;
+  - `Diagnostics.withPreset` replaces `Browser.withDiagnostics`, so `Browser` is only the service;
+  - `Expect` re-checks through `Reactivity`.
 - **Revision 5.22** applied [review 6](reviews/06-draft-5-effect.md), which checked the design against Effect's own modules, unstable and in-flight ones included:
   - routes use `effect/http`: `Route.fulfill(HttpServerResponse)` and `continueWith` with an `HttpClientRequest` transform, replacing `ResponseBody` and `RequestOverrides`; a captured response is an `HttpIncomingMessage`, so `Body` gave way to Effect's decoders;
   - preset-dependent values implement `Redactable`, so Effect's own logs and spans apply the diagnostics preset;

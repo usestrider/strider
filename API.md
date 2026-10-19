@@ -1,6 +1,6 @@
 # API: the ergonomic layer (L2)
 
-*Revision 5.22, 2026-10-19. These are sketches: names and signatures are provisional, nothing is implemented, and the types show shape rather than compile-verified code. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
+*Revision 5.23, 2026-10-19. These are sketches: names and signatures are provisional, nothing is implemented, and the types show shape rather than compile-verified code. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
 
 ## Purpose
 
@@ -22,13 +22,13 @@ The README's principles, as they apply to this layer. The reasons live there; th
   - No arguments: a value, which is an `Effect` for operations (`locator.click`, `browser.newPage`, `tab.inspect`) or a plain property for pure derivations (`locator.first`).
   - All-optional parameters: the default value plus `xWith(options)`, as in `click` / `clickWith({ button: "right" })`.
   - Required arguments: a function, with trailing options (`goto(url)`, `dragTo(target, options)`).
-- **Handles get members; cross-cutting settings are dual combinators** that work data-first and in `pipe`: `Expect.*` and `Browser.with*`, as in `button.click.pipe(Browser.withTimeout("5 seconds"))`. Option bags hold only what is specific to one operation.
+- **Handles get members; cross-cutting settings are dual combinators** that work data-first and in `pipe`: `Expect.*`, `Deadline.*` and `Diagnostics.*`, as in `button.click.pipe(Deadline.within("5 seconds"))`. Option bags hold only what is specific to one operation.
 - **Events are modules, not members.** `Download.next(page)` subscribes, and the action that causes the download comes on the next line (State and events).
 
 **Lifetimes**
 - **Anything with a lifecycle requires `Scope`:** contexts, pages, access upgrades, handles, capability handles and every declaration (routes, dialog and file-chooser handlers, init scripts, overrides, clocks). Values with no remote lifetime (locators, snapshots, captured bodies, storage-state bytes) need none. Seeing an event acquires nothing: a popup belongs to the scope that acquired its opener, and a download's file to its context.
 - **Every scoped acquisition returns a handle,** never `void`, with an idempotent `remove` and, where useful, state such as `hits: Watchable<number>`. Releasing early (`page.close`, `remove`) makes the finalizer a no-op.
-- **No public fibers, and no writable `Deferred`s or `Ref`s.** The library never forks for you; fork your own consumers with `Effect.forkScoped`.
+- **No public fibers, and no writable `Deferred`s or `Ref`s.** The library never forks for you; fork your own consumers with `Effect.forkScoped`. A latched result is handed out as a `ReadonlyDeferred`.
 - **No platform services at call sites.** They appear only in the launch and connect layers, so `Scope` is the only requirement an ordinary call site sees.
 
 **Values and types**
@@ -52,12 +52,12 @@ The README's principles, as they apply to this layer. The reasons live there; th
   | `handle` | a scoped handler that decides an obligation | `Dialog.handle(page, Dialog.acceptAll)` |
   | `new*` | creates an owned resource | `newPage`, `newContext` |
   | `*With` | the configured form of a member | `clickWith`, `newPageWith` |
-  | `with*` (dual) | a cross-cutting setting over any effect | `Browser.withTimeout` |
+  | `with*`, `within` (dual) | a cross-cutting setting over any effect | `Deadline.within`, `Deadline.withDefaultBudget`, `Diagnostics.withPreset` |
   | `export*` / `import` | crosses a persistence boundary; carries secrets | `exportStorageState`, `StorageState.import` |
 
 **Behavior**
 - **Explicit over implicit** (rule 23). Nothing hidden changes behavior or adds waiting: no magic delays, grace periods or heuristic windows. Every default is stated where its option is declared and recorded in the operation's span, and no helper changes a default on your behalf. Actionability waiting is each action's documented contract: named checks, adjustable per call, reported in errors.
-- **Every effect ends.** Waits run under the operation deadline, open-ended things are `Stream`s, and lifetime signals (`closed`) are the only exception.
+- **Every effect ends.** Waits run under a deadline, open-ended things are `Stream`s, and lifetime signals (`closed`) are the only exception.
 - **Every error reason carries a hint,** shown in the rendered message:
   - `NotPermitted`: "call `.control` on this page"
   - `StaleRef`: "refs end with their document; use a locator or take a new snapshot"
@@ -191,12 +191,17 @@ program.pipe(Effect.provide(Chromium.launch))
 ## Entry points and cross-cutting settings
 
 ```ts
-class Browser extends Context.Service<Browser, BrowserHandle>()("effect-browser/Browser") {
-  // provided by a backend layer (Chromium.launch, Firefox.launch, …)
-  // dual combinators over any effect
-  static withTimeout: Dual<Duration.Input>            // one budget for everything inside; nested operations share it
-  static withDefaultTimeout: Dual<Duration.Input>     // budget per operation inside; 30 seconds unless set, recorded in each span
-  static withDiagnostics: Dual<"local" | "strict">
+class Browser extends Context.Service<Browser, BrowserHandle>()("effect-browser/Browser") {}   // provided by a backend layer (Chromium.launch, …)
+
+declare const Deadline: {                                // dual combinators over any effect
+  within: Dual<Duration.Input>                           // one deadline for everything inside, shared; nesting can only shorten it
+  withDefaultBudget: Dual<Duration.Input>                // what an operation gets when no deadline encloses it; 30 seconds unless set
+  readonly remaining: Effect<Option<Duration>>           // time left before the enclosing deadline
+  readonly Current: Context.Reference<Option<MonotonicInstant>>   // read freely; set only through within
+  readonly DefaultBudget: Context.Reference<Duration>    // withDefaultBudget is Effect.provideService on this reference
+}
+declare const Diagnostics: {
+  withPreset: Dual<"local" | "strict">                   // how Redactable values render inside; "strict" unless set
 }
 // Dual<X> = { (x: X): <A, E, R>(self: Effect<A, E, R>) => Effect<A, E, R>; <A, E, R>(self: Effect<A, E, R>, x: X): Effect<A, E, R> }
 
@@ -435,7 +440,7 @@ declare const AriaPattern: {                             // matched against aria
 }
 ```
 
-- **How expectations evaluate.** One check runs immediately. After that, a check runs on every change signal for the subject: a `Watchable` change, or a DOM mutation in the subject's subtree. Conditions with no change signal, such as layout and visibility, are also re-checked at a fixed interval (`Expect.withInterval`). There is no backoff, because backoff adds more lag the longer a test waits (rule 23). Everything runs on the live clock, within the deadline (`Browser.withTimeout` adjusts it).
+- **How expectations evaluate.** An expectation is `Reactivity.stream(keys, check)`: one check runs immediately, and another each time the model invalidates a key the subject depends on (a `Watchable` change, or a DOM mutation in the subject's subtree). Conditions with no change signal, such as layout and visibility, are also re-checked at a fixed interval (`Expect.withInterval`). There is no backoff, because backoff adds more lag the longer a test waits (rule 23). Everything runs on the live clock, within the deadline (`Deadline.within` adjusts it).
 - **Accumulating failures is Effect's job.** To check several things and report every failure, use `Effect.validate` or `Effect.all(…, { mode: "result" })`; there is no separate soft-expectation mechanism.
 - **What failure contains.** `ExpectationFailed{subject, condition, last, history, elapsed, checks}`. `checks` counts the checks and names what triggered them. `history` is the de-duplicated sequence of observed values with timestamps, which answers "was it ever right?". When nothing matched, the error adds an accessibility snapshot of the nearest existing ancestor and suggested locators.
 
@@ -459,12 +464,9 @@ interface Watchable<A> extends Effect<A> {               // yield* reads the cur
 }
 
 interface EventModule<T, A, F, E = never> {               // every event module has these three verbs; T: targets, F: filter
-  next(target: T, filter?: F): Effect<Pending<A, E>, ObserveError, Scope>                     // subscribed when this returns
+  next(target: T, filter?: F): Effect<ReadonlyDeferred<A, E | TargetGone | Timeout>, ObserveError, Scope>   // subscribed when this returns; await with Deferred.await
   stream(target: T, filter?: F): Effect<Stream<A, E | EventOverflow>, ObserveError, Scope>   // every match from now on
   history(target: T, filter?: F): Effect<EventHistory<A>>                                     // every retained match; never waits
-}
-interface Pending<A, E = never> extends Effect<A, E | TargetGone | Timeout> {   // yield* awaits the first match, under the deadline of the await
-  readonly poll: Effect<Option<Exit<A, E | TargetGone | Timeout>>>
 }
 interface EventHistory<A> {
   readonly entries: ReadonlyArray<A>                     // oldest first
@@ -497,7 +499,8 @@ Each module has the most specific accurate name, with a prefix only where a bare
   - To wait for something that may already have happened, use `Expect.that` on `history`.
 - **Events report; handlers decide.** Obligations are decided only by scoped handlers: `page.route`, `Dialog.handle` and `FileChooser.handle`. A dialog blocks its page, so the click that opens one doesn't finish until it is decided, and the handler is registered first.
 - **Events reveal resources; they don't acquire them.** `Popup.next` and `Popup.history` return the same handle, owned by the scope that acquired its opener; the `Scope` on `next` and `stream` holds only the subscription. Popups of owned pages are owned, and popups of attached pages stay open.
-- **Results outlive the subscription.** A captured response body is owned bytes, so it survives the subscription and even the page closing. A `Pending`'s deadline starts when it is awaited, not when it subscribes. If the owner (page or context) ends normally before a match, awaiting fails promptly with `TargetGone` rather than waiting for its deadline.
+- **A wait's deadline is set where the wait starts.** `next` hands out the read side of the `Deferred` that latches the first match (a `ReadonlyDeferred`, proposed upstream: upstream/effect-readonly-deferred.md). Its timer comes from the deadline in force at `next`, so the budget is stated where the wait begins: `Download.next(page).pipe(Deadline.within("2 minutes"))`. Time spent in your own steps before you await counts against it. Awaiting always ends: in the match, in `TargetGone` as soon as the owner ends, or in `Timeout`, which fails the deferred rather than interrupting it, because interruption means the caller cancelled. If upstream declines the type, `next` returns the awaiting `Effect` instead, with the same timing.
+- **Results outlive the subscription.** A captured response body is owned bytes, so it survives the subscription and even the page closing.
 - **Event streams end** normally when their owner ends normally or the acquiring scope closes. They fail with `TargetGone` on an abnormal end, and with `EventOverflow` past their bound.
 
 **State:**
@@ -792,12 +795,12 @@ const page = yield* browser.newPageWith({ storageState: yield* StorageState.impo
 // 2. Click, then wait for a named outcome
 const orders = yield* PageNavigation.next(page, { url: "**/orders" })   // subscribed before the click
 yield* page.getByRole("link", { name: "Orders" }).click
-const nav = yield* orders
+const nav = yield* Deferred.await(orders)
 
 // 3. Popup with a dialog inside it
 const popups = yield* Popup.next(page)
 yield* page.getByText("Connect account").click
-const popup = yield* popups                              // a Page, owned by the scope that acquired `page`
+const popup = yield* Deferred.await(popups)              // a Page, owned by the scope that acquired `page`
 yield* Dialog.handle(popup, Dialog.acceptAll)            // a dialog blocks its page, so the decision is registered first
 yield* popup.getByRole("button", { name: "Allow" }).click
 
@@ -805,12 +808,12 @@ yield* popup.getByRole("button", { name: "Allow" }).click
 const added = yield* NetworkResponse.next(page, { url: "**/api/cart", method: "POST", body: HttpIncomingMessage.schemaBodyJson(Cart),
   where: (r) => Effect.succeed(r.body.items.length > 0) })
 yield* page.getByRole("button", { name: "Add to cart" }).click
-const res = yield* added                                 // CapturedResponse<Cart>
+const res = yield* Deferred.await(added)                 // CapturedResponse<Cart>
 
 // 5. Download
 const download = yield* Download.next(page)
 yield* page.getByText("Export CSV").click
-const file = yield* download
+const file = yield* Deferred.await(download)
 yield* file.saveAs("./export.csv")
 
 // 6. Concurrent pages, settings isolated by context
@@ -853,18 +856,18 @@ yield* page.addInitScript(useTestHooks, { after: [helper] })   // dependencies o
 // 12. Operational failures stay typed and evidenced; timeouts are cross-cutting
 yield* page.locator("button[").click.pipe(              // invalid selector: immediate, no waiting
   Effect.catchReason("ActionError", "InvalidSelector", (e) => Console.log(e.message)))
-yield* page.getByRole("button", { name: "Pay" }).click.pipe(Browser.withTimeout("5 seconds"))
+yield* page.getByRole("button", { name: "Pay" }).click.pipe(Deadline.within("5 seconds"))
 
 // 13. One action, several outcomes, collected later
 const checkout = yield* Popup.next(page)
 const order = yield* NetworkResponse.next(page, { url: "**/api/order" })
 yield* page.getByRole("button", { name: "Pay" }).click
-const [tab, placed] = yield* Effect.all([checkout, order])   // each latched, even if it arrived during the click
+const [tab, placed] = yield* Effect.all([Deferred.await(checkout), Deferred.await(order)])   // each latched, even if it arrived during the click
 
 // 14. Watch state while doing other work
 const pdf = yield* Download.next(page)
 yield* page.getByText("Export PDF").click
-const report = yield* pdf
+const report = yield* Deferred.await(pdf)
 yield* report.status.changes.pipe(Stream.runForEach(renderProgress), Effect.forkScoped)   // fork first: watching shows the present
 yield* page.status.waitFor((s) => s._tag === "Open" && s.document.readiness === "complete")
 yield* report.finished

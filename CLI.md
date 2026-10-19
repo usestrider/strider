@@ -1,6 +1,6 @@
 # CLI: driving a live session from the command line
 
-*Revision 5.22, 2026-10-19. These are sketches, like API.md: names are provisional. The binary is `eb` here, but `eb` is already AWS Elastic Beanstalk's CLI, so the real name follows the project's.*
+*Revision 5.23, 2026-10-19. These are sketches, like API.md: names are provisional. The binary is `eb` here, but `eb` is already AWS Elastic Beanstalk's CLI, so the real name follows the project's.*
 
 ## Purpose
 
@@ -62,7 +62,7 @@ eb -s checkout -p shop snapshot            # refs e1…, kept as shop's latest s
 eb -s checkout -p shop fill e4 "ada@example.com"
 eb -s checkout -p shop fill e5 %password%  # a secret named at start; never echoed or recorded
 eb -s checkout -p shop click e9
-eb -s checkout -p shop next download       # → w1: waiting from now on
+eb -s checkout -p shop next download --within 2m   # → w1: waiting from now on, for at most 2 minutes
 eb -s checkout -p shop click 'role=button[name="Export CSV"]'
 eb -s checkout await w1                    # → d1 "export.csv", 12 KB
 eb -s checkout -p shop history console --level error
@@ -88,7 +88,7 @@ export default Effect.gen(function* () {
   const shop = yield* session.page("shop")                // looked up first, so a missing page fails before any step
   const popups = yield* Popup.next(shop)
   yield* shop.getByText("Pay").click
-  const popup = yield* popups
+  const popup = yield* Deferred.await(popups)
   yield* popup.getByLabel("Card number").fill("4242 4242 4242 4242")
   return { popup }                                        // returned handles move into the session, as p2
 })
@@ -118,7 +118,7 @@ export default Effect.gen(function* () {
 - **Commands for the live session, the library for programs.** An agent loops by running commands. Self-contained programs use the library directly, run with node or bun. `state save` and `export` are the bridges to programs, segments (below) bring code into a live session, and there is no shell mini-language.
 - **Decisions are declarative commands.** `eb route <pattern> abort | continue | fulfill …` and `eb dialog handle accept | dismiss` register scoped handlers in the session and print a registration handle; `eb remove r1` ends one. A decision that needs logic belongs in a segment or a program.
 - **Targets** are a bare ref (`e9`), checked against the named page's latest snapshot (a ref from another page's snapshot fails with a hint naming that page), or a locator string that maps to exactly one `getBy*`: `role=button[name="Sign in"]`, `text="Add to cart"`, `label=Email`, `testid=cart`, `css=…`. Strings are parsed at the boundary, so a bad one fails immediately.
-- **Events work across commands.** `eb next` subscribes in the session's scope and prints a wait handle, and `eb await` collects it under its own deadline. The since-last digest is `history`, read from where the previous command stopped.
+- **Events work across commands.** `eb next` subscribes in the session's scope and prints a wait handle, and `eb await` collects it. The wait's deadline starts at `next` (`--within`, or the default budget), so a wait an agent leaves too long reports `Timeout` when collected. The since-last digest is `history`, read from where the previous command stopped.
 - **A failed request in the digest** got no response (a network, DNS or TLS error, or blocked by CORS, CSP or mixed content) or a status of 400 or more. Canceled requests, superseded by a navigation or aborted by the app, are not failures. Nothing is filtered by resource type, which would be a heuristic (rule 23). Identical failures are grouped with a count, and a long list shows the first few, then "+N more · `eb history network --failed`".
 - **Nothing changes implicitly.** A popup is announced in the digest and gets a handle, but nothing follows it. Attaching to your own browser gives observed pages, and acting on one needs `eb control p3`.
 - **Failures say what happened:** the error's tag, its hint and the dispatch evidence ("the click may have reached the page"), with an exit code per error family. Interrupting a command (Ctrl-C) interrupts that command, never the session.
