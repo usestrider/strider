@@ -173,9 +173,9 @@ Cleanup groups can span sibling pages, independently of this graph.
 - **Release and cleanup groups.**
   - Created resources are owned: `closeOwned` or `removeOwned`.
   - The default context and pages that existed at attach are `leaveOpen`.
-  - `newPage` uses its context's group, and `withPage` creates a narrower one.
-  - A popup of an owned page joins its opener's group and is closed with it, even if the opener has already closed. A popup of a `leaveOpen` page is `observe`/`leaveOpen`.
-  - Transfer between groups is explicit and atomic with respect to shutdown. Ambiguous opener evidence never implies ownership.
+  - **Every acquisition requires a `Scope`, and that scope is the cleanup group.** This covers contexts, pages, access upgrades, popups, downloads, handles, capability handles and every declaration. Values with no remote lifetime (locators, snapshots, captured bodies) need none. An early `close()` makes the finalizer a no-op.
+  - A popup of an owned page is released with the scope that observed it (`Observe.popup`). If nobody asked for it, it is released with the scope that acquired its opener, even if the opener has already closed. A popup of a `leaveOpen` page is `observe`/`leaveOpen`.
+  - Transfer to another scope is explicit and atomic with respect to shutdown. Ambiguous opener evidence never implies ownership.
 - **Ownership ledger.** The connection records owned resources, groups and transfers. A persisted ledger yields *reclamation candidates* only. Automatic destructive reclaim across connections needs verified browser incarnation, resource identity and claimant coordination, and is deferred.
 - **Requesting a close is not ending a lifetime.** `close({runBeforeUnload: true})` can be refused (`CloseCanceled`), and the page stays usable. A close timeout leaves closure unconfirmed rather than fabricating `PageClosed`. Teardown of owned resources uses a bounded close without beforeunload.
 - **Lifetime signal and `within`.** Each object has a single-assignment `closed: Effect<CloseReason>`. `within(effect): Effect<A, E | TargetGone, R>` arbitrates completion against the end of the lifetime and delivers the typed reason; closing a `Scope` alone would only interrupt. Caller interruption remains interruption. Whichever of completion or end wins the race is recorded once.

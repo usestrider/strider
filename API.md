@@ -7,7 +7,7 @@
 This layer is what users write. It turns the native model into a small vocabulary of browsers, contexts, pages, locators, actions, expectations and observations, with the following properties:
 
 - No protocol knowledge.
-- No `Scope` at ordinary call sites.
+- `Scope` only where something with a lifecycle is acquired.
 - One deadline per call.
 - Errors that say what happened.
 
@@ -16,7 +16,8 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
 Design rules:
 
 - **Handles get methods; decorators are dual combinators.** `locator.click()` is a method. `Observe.response(...)` and `Expect.toHaveText(...)` work both data-first and in `pipe`.
-- **Methods have `R = never`.** Platform services appear only in the layers that launch or connect.
+- **Anything with a lifecycle requires `Scope`.** The following are acquired into the caller's `Scope` and released when it closes: contexts, pages, access upgrades, popups, downloads, handles, capability handles and every declaration (routes, dialog handlers, init scripts, overrides, clocks). Values with no remote lifetime need no `Scope`: locators, snapshots, captured bodies, storage-state bytes. Early release (`page.close()`) is always possible, and the scope's finalizer then does nothing.
+- **No platform services at call sites.** Platform services appear only in the layers that launch or connect, so `Scope` is the only requirement an ordinary call site can see.
 - **Locators are values.** A locator is resolved again on every attempt; it is never a stale handle.
 - **Snapshots are named `read*`.** Retrying assertions take locators. "Awaited a snapshot, then asserted" is therefore hard to write by accident.
 - **Ambient services are only for configuration.** Defaults (timeouts, diagnostics preset, strictness) come from `Context.Reference`s. There is no implicit "current page", except the explicit test layer.
@@ -32,8 +33,8 @@ interface ObservedPage {                    // events only
   readonly url: Effect<string>
   readonly closed: Effect<CloseReason>      // completes when the page's lifetime ends
   readonly events: PageEvents               // navigations, requests, console, dialogs, popups, downloads
-  inspect(): Effect<ReadonlyPage, PageError>
-  control(): Effect<Page, PageError>
+  inspect(): Effect<ReadonlyPage, PageError, Scope>   // installs the utility world; page stays open
+  control(): Effect<Page, PageError, Scope>           // access lasts for the scope; page stays open
 }
 interface ReadonlyPage extends ObservedPage { /* locators, reads, snapshots, screenshots — see below */ }
 interface Page extends ReadonlyPage { /* input, navigation, main-world evaluation, declarations */ }
@@ -81,16 +82,14 @@ class Browser extends Context.Service<Browser, BrowserHandle>()("effect-browser/
 
 interface BrowserHandle {
   readonly info: BackendInfo
-  newContext(options?: ContextOptions): Effect<BrowserContext, ContextError>   // owned; cleaned up with the browser
-  newPage(options?: ContextOptions): Effect<Page, PageError>                    // a fresh context + page, owned together
-  withContext<A, E, R>(options: ContextOptions, f: (ctx: BrowserContext) => Effect<A, E, R>): Effect<A, E | ContextError, R>
+  newContext(options?: ContextOptions): Effect<BrowserContext, ContextError, Scope>   // owned; removed when the scope closes
+  newPage(options?: ContextOptions): Effect<Page, PageError, Scope>                    // a fresh context + page, released together
   readonly pages: Effect<ReadonlyArray<ObservedPage>>   // attach mode: what already exists
   readonly defaultContext: ObservedContext
 }
 
 interface BrowserContext {
-  newPage(): Effect<Page, PageError>
-  withPage<A, E, R>(f: (page: Page) => Effect<A, E, R>): Effect<A, E | PageError, R>  // closes page and its popups on exit
+  newPage(): Effect<Page, PageError, Scope>              // closed with its unsolicited popups when the scope closes
   readonly pages: Effect<ReadonlyArray<Page>>
   readonly storageState: { export(): Effect<Redacted<Uint8Array>, StorageStateError> }
   readonly clock: Clock                                   // context-wide timeline (opt-in)
@@ -158,7 +157,7 @@ Notes:
 
 - **Evaluated functions cross into the page.** They must be self-contained, and values travel as arguments. A `ReferenceError` from an evaluated function carries a hint saying so.
 - **Evaluation runs by value by default.** Results are serialized and deserialized. `evaluateWith(schema, …)` validates the result. Handles are opt-in and scoped. `{ userActivation: true }` (an options overload, not shown) runs the function as a user gesture where the backend supports it.
-- **Declarations are scoped registrations.** `route`, `onDialog`, `addInitScript` and `emulate` are removed when the caller's scope closes. In `@effect/vitest`'s `it.effect` and inside `withPage` that scope is already present.
+- **Declarations are scoped registrations.** `route`, `onDialog`, `addInitScript` and `emulate` are removed when the caller's scope closes. In `@effect/vitest`'s `it.effect` that scope is already present; elsewhere, use `Effect.scoped`.
 
 ## Locators, actions and actionability
 
@@ -278,9 +277,9 @@ declare const Observe: {
   request(options: RequestFilter): <A, E, R>(trigger: Effect<A, E, R>) =>
     Effect<readonly [A, RequestSnapshot], E | ObserveError | TargetGone | Timeout, R>
   popup(options?: { url?: UrlPattern }): <A, E, R>(trigger: Effect<A, E, R>) =>
-    Effect<readonly [A, Page], E | ObserveError | TargetGone | Timeout, R>
+    Effect<readonly [A, Page], E | ObserveError | TargetGone | Timeout, R | Scope>
   download(): <A, E, R>(trigger: Effect<A, E, R>) =>
-    Effect<readonly [A, Download], E | ObserveError | TargetGone | Timeout, R>
+    Effect<readonly [A, Download], E | ObserveError | TargetGone | Timeout, R | Scope>
   navigation(options?: { url?: UrlPattern; waitUntil?: LoadState }): <A, E, R>(trigger: Effect<A, E, R>) =>
     Effect<readonly [A, Navigation], E | NavigationError | TargetGone | Timeout, R>
   dialog<DE, DR>(handler: (dialog: Dialog) => Effect<DialogDecision, DE, DR>): <A, E, R>(trigger: Effect<A, E, R>) =>
@@ -294,7 +293,7 @@ declare const Observe: {
 - **Completion rule.** Both the trigger and the observation must complete. A trigger failure is never discarded.
 - **When the owner ends first.** If the owner (page or context) ends normally before a match, the combinator fails promptly with `TargetGone` rather than waiting for its deadline.
 - **Results outlive the window.** A captured response body is owned bytes, so it survives the observation window and even the page closing.
-- **Popups.** A popup returned by `Observe.popup` joins its opener's cleanup group. `popup.transferTo(group)` moves it to another group.
+- **Popups.** A popup returned by `Observe.popup` is acquired into the caller's `Scope`. A popup nobody asked for is released with the scope that acquired its opener. Ownership follows the opener: popups of owned pages are owned, popups of attached pages stay open.
 
 ## Network
 
@@ -337,6 +336,7 @@ interface Download {
   readonly suggestedFilename: string
   readonly done: Effect<void, DownloadError>
   saveAs(path: string): Effect<void, DownloadError>        // transfers from a remote browser where supported
+  // the browser-side file is deleted when the acquiring scope closes, unless the backend's download policy keeps it
   stream(): Stream<Uint8Array, DownloadError>
 }
 
@@ -370,8 +370,8 @@ interface Clock {
 ## Capabilities
 
 ```ts
-page.capability(Capability.AxTree)         // Effect<AxTreeReader, CapabilityError>      — reason: Unsupported{capability, backend}
-page.capability(Capability.Screencast)     // Effect<ScreencastControl, CapabilityError>
+page.capability(Capability.AxTree)         // Effect<AxTreeReader, CapabilityError, Scope>   — reason: Unsupported{capability, backend}
+page.capability(Capability.Screencast)     // Effect<ScreencastControl, CapabilityError, Scope>
 browser.capabilities                        // the full set, with evidence and limitations
 ```
 
@@ -455,7 +455,8 @@ These are the checks for this layer. If a scenario needs protocol knowledge or r
 
 ```ts
 // 1. Log in once, reuse the session
-const state = yield* browser.withContext({}, (ctx) => Effect.gen(function* () {
+const state = yield* Effect.scoped(Effect.gen(function* () {
+  const ctx = yield* browser.newContext()
   const page = yield* ctx.newPage()
   yield* page.goto("https://app.example.com/login")
   yield* page.getByLabel("Email").fill("me@example.com")
@@ -484,19 +485,22 @@ const [, file] = yield* page.getByText("Export CSV").click().pipe(Observe.downlo
 yield* file.saveAs("./export.csv")
 
 // 6. Concurrent pages, settings isolated by context
-yield* Effect.forEach(urls, (url) => browser.withContext({ locale: "de-DE" }, (ctx) =>
-  ctx.withPage((p) => p.goto(url).pipe(Effect.andThen(p.title)))), { concurrency: 4 })
+yield* Effect.forEach(urls, (url) => Effect.scoped(Effect.gen(function* () {
+  const p = yield* browser.newPage({ locale: "de-DE" })     // context + page released per URL
+  yield* p.goto(url)
+  return yield* p.title
+})), { concurrency: 4 })
 
 // 7. Attach, inspect one tab, control another, leave both open
 const browser = yield* Browser                          // provided by Browser.connect(endpoint)
 const [first, second] = yield* browser.pages
-const reader = yield* first.inspect()
-const text = yield* reader.getByRole("heading").readText()
-const tab = yield* second.control()
 yield* Effect.scoped(Effect.gen(function* () {
+  const reader = yield* first.inspect()
+  const text = yield* reader.getByRole("heading").readText()
+  const tab = yield* second.control()
   yield* tab.route("**/analytics/**", () => Effect.succeed(Route.abort()))
   yield* tab.getByRole("button", { name: "Refresh" }).click()
-}))                                                          // route removed; tabs stay open
+}))                                                          // route and access released; both tabs stay open
 
 // 8. Log requests until the page closes
 yield* page.events.requests.pipe(
@@ -521,9 +525,8 @@ yield* page.locator("button[").click().pipe(                 // invalid selector
 
 ## Open questions
 
-1. **Naming.** Is `Page`/`ReadonlyPage`/`ObservedPage` clearer than generic access parameters? Is `BrowserContext` acceptable, or is a shorter name better (`Session`, `Profile`)?
+1. **Access-typed handles.** Is the `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page` split the right shape (versus a generic access parameter)? `BrowserContext` is settled as a name.
 2. **Module layout.** One package with subpath exports (`/test`, `/ai`, `/cdp`) or several packages?
-3. **Route scope.** Should routes need `Scope`, or be page-owned with an explicit handle? The sketch uses `Scope` for symmetry with other declarations.
-4. **The ambiguity window.** What is the default stable-ambiguity window: about one second, or a number of rendering samples?
-5. **The AI snapshot format.** Adopt Playwright's YAML-like aria snapshot as-is, or define our own with diffs?
-6. **A runner plugin.** Is a Vitest reporter needed for flaky-test classification, or do spans suffice?
+3. **The ambiguity window.** What is the default stable-ambiguity window: about one second, or a number of rendering samples?
+4. **The AI snapshot format.** Adopt Playwright's YAML-like aria snapshot as-is, or define our own with diffs?
+5. **A runner plugin.** Is a Vitest reporter needed for flaky-test classification, or do spans suffice?

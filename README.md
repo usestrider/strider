@@ -34,7 +34,7 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 ## Principles
 
 1. **Spec identity, not protocol identity.** The public model is keyed by navigable, document, realm, navigation and request, with ids minted by the library. Protocol ids (CDP targets, sessions, execution contexts) change on process swaps and stay inside the adapters.
-2. **Lifetimes are scopes with typed end reasons.** Three separate decisions govern every remote resource: how much we may do to it (access), whether we may destroy it (release policy), and which scope cleans it up (cleanup group).
+2. **Lifetimes are scopes with typed end reasons.** Three separate decisions govern every remote resource: how much we may do to it (access), whether we may destroy it (release policy), and which scope cleans it up (cleanup group). Anything with a lifecycle is acquired into a `Scope`.
 3. **Interruption stops waiting; it never pretends to cancel.** No protocol can cancel an in-flight command. Interrupting abandons the reply and runs compensations (release held input, resolve paused requests). Whether a mutation reached the browser is recorded as evidence.
 4. **State is folded before it is published.** Events update the model in order before anyone observes them. Losing integrity (overload, an undecodable lifecycle event) is an explicit failure, never a silent drop.
 5. **Subscribe before trigger, structurally.** Every "wait for X caused by Y" subscribes before Y runs, and no API makes users order these themselves.
@@ -52,10 +52,10 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 | Resource | Access | Release policy | Cleanup group |
 |---|---|---|---|
 | Launched browser | control | close the process | the `Browser` layer |
-| Context or page created by the library | control | close / remove | its parent (`withPage` / `withContext` narrow it) |
-| Popup of an owned page | control | close | the opener's group; can be transferred explicitly |
+| Context or page created by the library | control | close / remove | the `Scope` it was acquired in |
+| Popup of an owned page | control | close | the `Scope` that observed it; otherwise the opener's |
 | Attached browser | — | disconnect only | the `Browser` layer |
-| Discovered page or the default context | observe; upgrade with `inspect()` or `control()` | leave open | none |
+| Discovered page or the default context | observe; upgrade with `inspect()` or `control()` (scoped) | leave open | none; the access upgrade is released with its `Scope` |
 | Popup of a leave-open page | observe | leave open | none |
 
 - **Access is typed.** `ObservedPage` exposes events only. `ReadonlyPage` adds isolated-world reads, locators, snapshots and screenshots. `Page` adds input, navigation, main-world evaluation and declarations. Calling a control method on an inspected page is a compile error.
@@ -109,6 +109,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.1** settled two decisions: every acquisition with a lifecycle requires `Scope` (contexts, pages, access upgrades, popups, downloads, handles, capability handles, declarations), which removed `withPage`/`withContext`; and `BrowserContext` is the context's name.
 - **Revision 5** restructured the design into balanced layers and folded in [review 4](reviews/04-draft-4.md):
   - finding 1, pause-on-start granularity: PROTOCOL.md, probe 22;
   - finding 2, `Inspect` access: this file, API.md, CONCEPTS.md;
