@@ -32,6 +32,22 @@ Realms are siblings of documents, not children. The one exception that forces th
 | `HandleRef = {realm, binding, lease}` | handle acquired by a caller |
 | `PromptId`, `DownloadId`, `InterceptId`, `OperationId`, … | on creation |
 
+**Brand liberally.** Every id, and every string or number that means more than "some text" or "some quantity", is a branded type defined by a `Schema` that validates at the boundary. Ids are distinct brands per kind, so a `DocumentId` can never be passed where a `NavigableId` is expected. Value brands used by the model:
+
+| Brand | Meaning | Validated as |
+|---|---|---|
+| `Url` | an absolute URL | WHATWG URL parse |
+| `UrlPattern` | a matcher (glob or URLPattern), never navigated to | pattern compile |
+| `Origin`, `Site` | scheme+host+port; registrable-domain site (partition keys) | derived from `Url` |
+| `HttpStatus` | 100–599 | integer range |
+| `HeaderName` | case-normalized header name | token grammar |
+| `CookieName`, `CookieDomain` | cookie attributes | RFC 6265 grammar |
+| `LocalPath`, `RemotePath` | a path on the driver's machine vs. on the browser's host | non-empty; never interchangeable |
+| `CssPixels`, `DevicePixels` | layout units vs. device pixels (differ by device pixel ratio) | finite number |
+| `Locale`, `TimeZoneId` | BCP 47 tag; IANA zone | `Intl` validation |
+| `RefId` | an agent snapshot ref (`e12`) | `^e\d+$` |
+| `SecretName` | an agent secret placeholder | identifier grammar |
+
 **Model objects are values.** References are `Equal`/`Hash` by immutable identity within their connection. Mutable state (URL, connectivity, descriptions) never affects hashing. Two independently acquired handle leases are not equal even when they point at the same remote object, because each owns its own release. Event payloads are immutable snapshots, and reading live state is an explicit operation.
 
 **Staleness of a `NodeRef`:**
@@ -51,7 +67,7 @@ Realms are siblings of documents, not children. The one exception that forces th
 interface BrowserModel {
   readonly id: BrowserId
   readonly backend: BackendInfo                         // fixed for the connection
-  readonly ownership: { _tag: "Launched"; process: ProcessInfo } | { _tag: "Attached"; endpoint: string }   // fixed: set when connecting
+  readonly ownership: { _tag: "Launched"; process: ProcessInfo } | { _tag: "Attached"; endpoint: Url }   // fixed: set when connecting
   readonly state: SubscriptionRef<{
     userContexts: ReadonlyMap<UserContextId, UserContextModel>
     capabilities: CapabilitySet                         // refined as probes complete
@@ -92,7 +108,7 @@ interface PageState extends NavigableState {
 }
 interface DocumentModel {
   readonly id: DocumentId
-  readonly origin: string                               // fixed for the document; document.domain changes only the effective domain
+  readonly origin: Origin                               // fixed for the document; document.domain changes only the effective domain
   readonly navigation: Option<NavigationId>             // fixed: the committing navigation; None for the initial about:blank
   readonly isErrorDocument: boolean                     // fixed: error documents are created as such
   readonly restoredFrom: Option<DocumentId>             // fixed at creation; only with correlating evidence
@@ -100,7 +116,7 @@ interface DocumentModel {
     navigable: NavigableId                              // changes only on prerender activation
     isInitialAboutBlank: boolean                        // cleared by document.open()
     generation: DocumentGeneration                      // bumped by document.open()
-    url: string                                         // changes on same-document navigation
+    url: Url                                            // changes on same-document navigation
     lifecycle: "active" | "suspended" | { _tag: "ended"; reason: CloseReason }
     readiness: "loading" | "interactive" | "complete"   // current state; can return to loading
     loading: LoadingResult                              // per generation; post-commit failure lives here
@@ -110,7 +126,7 @@ interface RealmModel {
   readonly id: RealmId
   readonly kind: { _tag: "window"; world: "main" | { isolated: string } }   // fixed: a realm never changes kind or world
     | { _tag: "dedicatedWorker"; owner: RealmId } | { _tag: "sharedWorker" }
-    | { _tag: "serviceWorker"; registration: string } | { _tag: "worklet"; type: string }
+    | { _tag: "serviceWorker"; registrationScope: Url } | { _tag: "worklet"; type: string }
   readonly state: SubscriptionRef<{
     navigable: Option<NavigableId>                      // window realms; moves with its document on prerender activation
     documents: ReadonlyArray<DocumentId>                // usually one; two after initial-blank reuse
@@ -144,15 +160,15 @@ type NavigationOutcome =
 // ── Network: immutable snapshots; a request's progress is a stream of them ──
 interface RequestSnapshot {
   readonly hop: RequestHopId; readonly navigable: Option<NavigableId>; readonly navigation: Option<NavigationId>
-  readonly method: string; readonly url: string; readonly headers: Headers   // classified values are Redacted
+  readonly method: HttpMethod; readonly url: Url; readonly headers: Headers   // classified values are Redacted
   readonly resourceType: ResourceType; readonly servedBy: "network" | "cache" | "serviceWorker"
 }
 interface ResponseSnapshot {
-  readonly hop: RequestHopId; readonly status: number; readonly url: string; readonly headers: Headers
+  readonly hop: RequestHopId; readonly status: HttpStatus; readonly url: Url; readonly headers: Headers
   readonly body: BodyAccess                             // availability is read through an Effect
 }
 interface ConnectionModel {                            // long-lived connections
-  readonly id: ConnectionId; readonly kind: "webSocket" | "eventSource"; readonly url: string; readonly navigable: NavigableId   // fixed at open
+  readonly id: ConnectionId; readonly kind: "webSocket" | "eventSource"; readonly url: Url; readonly navigable: NavigableId   // fixed at open
   readonly frames: Stream<ConnectionFrame>              // capability
   readonly closed: Effect<CloseReason>
 }

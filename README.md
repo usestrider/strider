@@ -46,6 +46,7 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 11. **Secrets are protected in diagnostics, and export is explicit.** `Redacted` goes in, classified fields come out wrapped, and secret-bearing exports are deliberate operations.
 12. **If it doesn't have to be a function, it's a value.** Operations without arguments are `Effect`s (`locator.click`, `browser.newPage`), and pure derivations are properties (`locator.first`). A member whose parameters are all optional is a default value plus `xWith(options)`. Cross-cutting settings such as timeouts are dual combinators, not option fields. Anything with a lifecycle requires `Scope`.
 13. **Immutable by default; mutable state lives in a `Ref` and is read through an `Effect`.** Entities are immutable identity plus one `SubscriptionRef` of state. Snapshots, events and errors are immutable. Nothing that can change is exposed as a plain field, so every read happens at the moment its effect runs. A plain field on a live handle or entity is a claim that it never changes, so it carries a one-line justification.
+14. **Brand liberally.** Ids and meaningful strings and numbers are branded types with validating schemas (`Url`, `UrlPattern`, `HttpStatus`, `LocalPath`/`RemotePath`, `CssPixels`, …). Outputs are always branded. Inputs require the brand where meanings could be confused, and otherwise parse plain strings at the boundary.
 
 ## Cross-cutting decisions
 
@@ -111,6 +112,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.5** made branding a rule: per-kind id brands, value brands for URLs, patterns, statuses, headers, paths, pixels, locales and agent refs. File inputs are now `File.local`/`File.remote`/`File.bytes`, so local and remote paths can't be confused.
 - **Revision 5.4** required plain fields to be fixed and to say why. Auditing with that rule moved three identity fields into state: a document's and a window realm's navigable (prerender activation), `isInitialAboutBlank` (`document.open()`), and a navigation's kind, now `initiatedAs`, with interception visible in the outcome. It also added `PrerenderActivated` as a close reason.
 - **Revision 5.3** made immutability the default: model entities are identity plus one `SubscriptionRef` of state, and mutable values (`url`, `title`, `capabilities`, page lists, held access) are read through `Effect`s. An upgraded handle whose scope has closed fails with `AccessReleased`.
 - **Revision 5.2** adopted the API conventions: anything that doesn't have to be a function is a value (an `Effect`, or a plain property for pure derivations). A member whose parameters are all optional becomes a default value plus `xWith(options)`. Timeouts and diagnostics move out of option bags into dual combinators (`Browser.withTimeout`).

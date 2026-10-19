@@ -28,6 +28,10 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
 - **No platform services at call sites.** Platform services appear only in the launch and connect layers, so `Scope` is the only requirement an ordinary call site can see.
 - **Immutable by default; mutable state is read through an `Effect`.** Handles, locators, snapshots, events and errors are immutable values. Anything that can change is never a plain field: `page.url`, `page.title`, `browser.capabilities`, page lists, and whether a handle still holds its access. Such reads are `Effect`s, evaluated when they run, so they can't go stale in a variable. Changes arrive on `events` streams. Internally this state lives in a `SubscriptionRef` (CONCEPTS.md §2), which the public API never exposes for writing. Mutability is avoided wherever an immutable value can do.
 - **Plain fields on live handles must be fixed, and say why.** A live handle (browser, context, page, frame, download, intercepted request) may expose a plain field only if the value can't change for the handle's lifetime. Each such field carries a one-line justification. Ids, `closed`, event streams and sub-handles bound to their parent (`keyboard`, `mouse`, `clock`, whose own state is again read through `Effect`s) are exempt by construction. A field that can't be justified becomes an `Effect`. Immutable values (snapshots, locators, navigations, dialogs) are exempt entirely.
+- **Brand liberally.** Every id and every meaningful string or number is a branded type (CONCEPTS.md §1): `Url`, `UrlPattern`, `HttpStatus`, `HeaderName`, `LocalPath`/`RemotePath`, `CssPixels`/`DevicePixels`, `Locale`, `RefId`, …
+  - **Outputs** are always branded.
+  - **Inputs** require the brand where two meanings could be confused at one call site: local vs remote paths (`File.local` / `File.remote`), CSS vs device pixels.
+  - **Elsewhere, inputs accept a plain string** when the member name already fixes its meaning (`goto(url)`, `route(pattern)`). The string is parsed at the boundary, and a bad one fails immediately with an invalid-input reason, never by waiting.
 - **Locators are values,** resolved again on every attempt.
 - **Snapshots are named `read*`.** Retrying assertions take locators.
 - **Access is typed.** `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, like `ReadonlyArray` and `Array`. A helper that only reads takes `ReadonlyPage`, and a `Page` is accepted. Calling an action on a page you may only inspect is a compile error, and autocomplete doesn't offer it.
@@ -56,9 +60,9 @@ interface Navigation {                                  // success value of goto
 
 interface ResponseSnapshot {                            // immutable; one redirect hop
   readonly hop: RequestHopId
-  readonly url: string
-  readonly status: number
-  readonly headers: Headers                             // classified values arrive as Redacted
+  readonly url: Url
+  readonly status: HttpStatus
+  readonly headers: Headers                             // keyed by HeaderName; classified values arrive as Redacted
 }
 interface CapturedResponse<B> extends ResponseSnapshot { readonly body: B }
 
@@ -66,7 +70,7 @@ interface AriaSnapshot {                                // for agents and struct
   readonly document: DocumentId
   readonly generation: DocumentGeneration
   readonly text: string                                 // YAML-like tree with [ref=eN]
-  ref(id: string): Effect<Locator, StaleRef>            // StaleRef{reason} once the document or generation moves on
+  ref(id: RefId | string): Effect<Locator, StaleRef>   // strings from model output are parsed; StaleRef{reason} once the document or generation moves on
 }
 ```
 
@@ -117,9 +121,9 @@ interface BrowserContext {
 
 interface ContextOptions {
   readonly storageState?: StorageState                  // from StorageState.import(bytes)
-  readonly viewport?: { width: number; height: number }
-  readonly locale?: string
-  readonly timezone?: string
+  readonly viewport?: { width: CssPixels | number; height: CssPixels | number }   // CSS pixels by definition
+  readonly locale?: Locale | string
+  readonly timezone?: TimeZoneId | string
   readonly permissions?: ReadonlyArray<Permission>
 }
 ```
@@ -151,7 +155,7 @@ interface ReadonlyPage extends ObservedPage {
 interface Page extends ReadonlyPage {
   // the locator members above return Locator (with actions) instead of ReadonlyLocator
   readonly context: BrowserContext                      // fixed: a page never changes context
-  goto(url: string, options?: { waitUntil?: LoadState; accept?: ReadonlyArray<"download" | "noContent"> }):
+  goto(url: Url | string, options?: { waitUntil?: LoadState; accept?: ReadonlyArray<"download" | "noContent"> }):
     Effect<Navigation, NavigationError | TargetGone | Timeout>
   readonly reload: Effect<Navigation, NavigationError | TargetGone | Timeout>
   reloadWith(options: { waitUntil?: LoadState }): Effect<Navigation, NavigationError | TargetGone | Timeout>
@@ -234,9 +238,15 @@ interface Locator extends ReadonlyLocator {             // chainers and first/la
 interface ClickOptions extends PointerOptions {
   readonly button?: "left" | "right" | "middle"
   readonly modifiers?: ReadonlyArray<"Alt" | "Control" | "Meta" | "Shift">
-  readonly position?: { x: number; y: number }
+  readonly position?: { x: CssPixels | number; y: CssPixels | number }   // CSS pixels from the element's padding box
   readonly checks?: Partial<Record<"visible" | "stable" | "enabled" | "notInert" | "inViewport" | "receivesPointer", boolean>>
   readonly trial?: boolean                               // run every check, dispatch nothing
+}
+
+declare const File: {                                    // FileInput: the brand is required, so paths can't be confused
+  local(path: LocalPath | string): FileInput             // read on this machine, uploaded if the browser is remote
+  remote(path: RemotePath): FileInput                    // already on the browser's host (BiDi input.setFiles semantics)
+  bytes(name: FileName | string, mimeType: MimeType | string, data: Uint8Array): FileInput
 }
 
 const RelativeLocator: {                                 // only valid inside filter({ has })
@@ -310,7 +320,7 @@ declare const Observe: {
   response<B = Uint8Array, PE = never, PR = never>(filter: {
     readonly url: UrlPattern
     readonly method?: string
-    readonly status?: number | ((status: number) => boolean)
+    readonly status?: HttpStatus | number | ((status: HttpStatus) => boolean)
     readonly body?: BodyDecoder<B>                       // Body.json(schema), Body.text, Body.bytes; collection is automatic
     readonly where?: (response: CapturedResponse<B>) => Effect<boolean, PE, PR>   // runs off the ingestion path
   }): <A, E, R>(trigger: Effect<A, E, R>) =>
@@ -342,13 +352,13 @@ interface InterceptedRequest {
 declare const Route: {
   readonly continue: RouteDecision
   continueWith(overrides: RequestOverrides): RouteDecision
-  fulfill(response: { status?: number; headers?: Headers; body?: Uint8Array | string; json?: unknown }): RouteDecision
+  fulfill(response: { status?: HttpStatus | number; headers?: Headers; body?: Uint8Array | string; json?: unknown }): RouteDecision
   readonly abort: RouteDecision
   abortWith(reason: AbortReason): RouteDecision
   readonly fallthrough: RouteDecision                    // next matching handler
 }
 declare const Har: {
-  replay(path: string, options?: { notFound?: "fallthrough" | "abort"; update?: boolean }):
+  replay(path: LocalPath | string, options?: { notFound?: "fallthrough" | "abort"; update?: boolean }):
     (target: Page | BrowserContext) => Effect<void, RouteError, Scope>
 }
 ```
@@ -371,11 +381,11 @@ declare const Dialog: {
 }
 
 interface Download {
-  readonly url: string                                   // fixed when the download begins
-  readonly suggestedFilename: string                     // fixed when the download begins
+  readonly url: Url                                      // fixed when the download begins
+  readonly suggestedFilename: FileName                   // fixed when the download begins
   readonly done: Effect<void, DownloadError>
   readonly stream: Stream<Uint8Array, DownloadError>
-  saveAs(path: string): Effect<void, DownloadError>      // transfers from a remote browser where supported
+  saveAs(path: LocalPath | string): Effect<void, DownloadError>   // always a local path; transfers from a remote browser where supported
   // the browser-side file is deleted when the acquiring scope closes, unless the backend's download policy keeps it
 }
 

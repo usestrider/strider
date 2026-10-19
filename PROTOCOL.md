@@ -79,7 +79,7 @@ type ProtocolError =
 
 **Policy:**
 
-- **Shape of the output.** Domain modules with branded ids, `Schema.Opaque` named types and `/*#__PURE__*/` calls. Types-only declarations are kept separate from codecs.
+- **Shape of the output.** Domain modules with *branded* ids (every protocol `…Id` type gets its own brand per backend, e.g. `CdpTargetId`, `BidiContextId`, so ids never cross protocols or kinds), `Schema.Opaque` named types and `/*#__PURE__*/` calls. Types-only declarations are kept separate from codecs.
 - **Tolerance.**
   - Enums are open: known literals plus a string fallback.
   - Experimental fields are optional.
