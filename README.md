@@ -24,7 +24,7 @@ Each layer document has the same shape: purpose, top data models, interface sket
 | — | [reviews/](reviews/) | design reviews, one per draft |
 
 ```
-L2  API       Browser · BrowserContext · Page · Locator · Expect · Observe · Route · Clock · Toolkit · BrowserTest
+L2  API       Browser · BrowserContext · Page · Locator · Expect · Watchable · Observation · Route · Clock · Toolkit · BrowserTest
 L1  Model     ids · navigables · documents · realms · navigations · requests · obligations · declarations · readiness
 L0  Protocol  transports · sessions · generated commands and events · ingestion · backend adapters · capabilities
 ```
@@ -64,7 +64,7 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 | Discovered page or the default context | observe; upgrade with `inspect` or `control` (scoped) | leave open | none; the access upgrade is released with its `Scope` |
 | Popup of a leave-open page | observe | leave open | none |
 
-- **Access is typed.** `ObservedPage` exposes events only. `ReadonlyPage` adds isolated-world reads, locators, snapshots and screenshots. `Page` adds input, navigation, main-world evaluation and declarations. Calling a control method on an inspected page is a compile error.
+- **Access is typed.** `ObservedPage` exposes state and events only. `ReadonlyPage` adds isolated-world reads, locators, snapshots and screenshots. `Page` adds input, navigation, main-world evaluation and declarations. Calling a control method on an inspected page is a compile error.
 - **Wider effects need wider access.** A declaration whose physical effect is wider than its target, such as a browser-global intercept on BiDi, needs explicit wider access. Without it the call fails with `NotPermitted`.
 
 ### One deadline per operation
