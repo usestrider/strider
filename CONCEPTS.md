@@ -32,7 +32,7 @@ Realms are siblings of documents, not children. The one exception that forces th
 | `HandleRef = {realm, binding, lease}` | handle acquired by a caller |
 | `PromptId`, `DownloadId`, `InterceptId`, `OperationId`, … | on creation |
 
-**Brand liberally.** Every id, and every string or number that means more than "some text" or "some quantity", is a branded type defined by a `Schema` that validates at the boundary. Ids are distinct brands per kind, so a `DocumentId` can never be passed where a `NavigableId` is expected. Value brands used by the model:
+**Brand liberally.** Every id, and every string or number that means more than "some text" or "some quantity", is a branded type defined by a `Schema` that validates at the boundary. Ids are distinct brands per kind, so a `DocumentId` can never be passed where a `NavigableId` is expected. **Tokens**, meaning produced values whose meaning depends on their origin (ids, `RefId`, `DocumentGeneration`, registration handles, `OperationId`), are accepted back only in branded or opaque form, never as plain strings or numbers. They are also checked against their origin when used, because a brand alone doesn't prove provenance. Value brands used by the model:
 
 | Brand | Meaning | Validated as |
 |---|---|---|

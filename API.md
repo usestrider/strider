@@ -32,6 +32,7 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
   - **Outputs** are always branded.
   - **Inputs** require the brand where two meanings could be confused at one call site: local vs remote paths (`File.local` / `File.remote`), CSS vs device pixels.
   - **Elsewhere, inputs accept a plain string** when the member name already fixes its meaning (`goto(url)`, `route(pattern)`). The string is parsed at the boundary, and a bad one fails immediately with an invalid-input reason, never by waiting.
+  - **Tokens are never accepted as plain strings.** A token is a produced value whose meaning depends on where it came from: ids, snapshot refs, document generations, registration handles such as `InitScript`, operation ids. It is accepted only in its branded or opaque form. A brand doesn't prove provenance, so tokens are also checked against their origin when used: a `RefId` from another snapshot or document fails with `StaleRef`, and an `InitScript` from a closed scope fails as a dependency. Values whose meaning is intrinsic (`Url`, `HttpStatus`) round-trip freely.
 - **Locators are values,** resolved again on every attempt.
 - **Snapshots are named `read*`.** Retrying assertions take locators.
 - **Access is typed.** `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, like `ReadonlyArray` and `Array`. A helper that only reads takes `ReadonlyPage`, and a `Page` is accepted. Calling an action on a page you may only inspect is a compile error, and autocomplete doesn't offer it.
@@ -70,7 +71,8 @@ interface AriaSnapshot {                                // for agents and struct
   readonly document: DocumentId
   readonly generation: DocumentGeneration
   readonly text: string                                 // YAML-like tree with [ref=eN]
-  ref(id: RefId | string): Effect<Locator, StaleRef>   // strings from model output are parsed; StaleRef{reason} once the document or generation moves on
+  ref(id: RefId): Effect<Locator, StaleRef>            // StaleRef{reason} if the ref is from another snapshot, or the document or generation moved on
+  readonly refs: ReadonlyMap<RefId, RefSummary>        // role, name and state for each ref, already branded
 }
 ```
 
@@ -112,7 +114,7 @@ interface BrowserHandle {
 interface BrowserContext {
   readonly newPage: Effect<Page, PageError, Scope>       // closed with its unsolicited popups when the scope closes
   readonly pages: Effect<ReadonlyArray<Page>>
-  readonly exportStorageState: Effect<Redacted<Uint8Array>, StorageStateError>
+  readonly exportStorageState: Effect<Redacted<StorageStateBytes>, StorageStateError>   // branded bytes; a Uint8Array subtype
   readonly clock: Clock                                  // context-wide timeline (opt-in)
   route<E, R>(pattern: UrlPattern, handler: RouteHandler<E, R>): Effect<void, RouteError, Scope | R>
   addInitScript(script: InitScriptSource, options?: InitScriptOptions): Effect<InitScript, DeclarationError, Scope>
@@ -390,7 +392,7 @@ interface Download {
 }
 
 declare const StorageState: {
-  import(bytes: Redacted<Uint8Array>): Effect<StorageState, StorageStateError>
+  import(bytes: Redacted<StorageStateBytes | Uint8Array>): Effect<StorageState, StorageStateError>   // accepts bytes read back from disk; validates either way
 }
 ```
 
@@ -430,7 +432,8 @@ Common members are on every backend. Specialized features are reached through a 
 
 ```ts
 const snap = yield* page.snapshot                      // interactive elements get [ref=eN]; refs bound to document + generation
-const button = yield* snap.ref("e12")                  // Locator; fails with StaleRef{reason} after navigation or document.open()
+const [id] = snap.refs.keys()                          // RefIds come from the snapshot, already branded
+const button = yield* snap.ref(id)                     // Locator; fails with StaleRef{reason} after navigation or document.open()
 
 // One toolkit definition serves an in-process model, an MCP server and a CLI.
 const toolkit = BrowserToolkit.make({
@@ -439,6 +442,7 @@ const toolkit = BrowserToolkit.make({
   capture: CapturePolicy.strict                        // what snapshots and screenshots may contain
 })
 // tools: navigate, snapshot, click(ref), fill(ref, text | %secret%), press, select, scroll, screenshot, back, wait, tabs
+// tool parameters are Schemas, so a model's "e12" is decoded to a RefId before the handler runs
 // each action returns ActionReport { dispatch, observed: { navigations, dialogs, popups, downloads, domChanged } }
 LanguageModel.generateText({ prompt, toolkit })
 McpServer.toolkit(toolkit)
