@@ -71,17 +71,58 @@ type ProtocolError =
 
 ## Code generation
 
-| Backend | Source |
+```
+CDP JSON ────┐                              patches/   corrections, audited
+BiDi CDDL ───┼─ parse ─▶ protocol model ─▶  overlay/   our annotations       ─▶ emit ─▶ generated modules
+WebKit JSON ─┘           (committed)                                                   (committed)
+```
+
+| Backend | Source (vendored and pinned) |
 |---|---|
 | CDP | `devtools-protocol` PDL/JSON, pinned per Chromium major |
 | BiDi | the spec's CDDL, plus extension specs and vendor grammars (Selenium's normalizer is the model) |
 | WebKit | the `protocol.json` shipped inside each Playwright WebKit build; the upstream inspector JSON for stock WebKit |
 
+```ts
+interface ProtocolModel {                        // one committed JSON file per backend revision
+  readonly backend: "cdp" | "bidi" | "webkit"
+  readonly revision: string                      // Chromium major, spec commit, WebKit build
+  readonly shapes: Record<ShapeId, Shape>        // keyed "Domain#Name", never by array position
+}
+type Shape =
+  | { kind: "command"; params: ShapeId; result: ShapeId; traits: Traits }
+  | { kind: "event"; params: ShapeId; traits: Traits }
+  | { kind: "struct"; members: Record<string, Member>; traits: Traits }
+  | { kind: "union"; by: "discriminator" | "shape" | "requestId"; cases: ReadonlyArray<ShapeId>; traits: Traits }
+  | { kind: "enum"; values: ReadonlyArray<string>; traits: Traits }
+  | { kind: "id"; brand: string; traits: Traits }                // CdpTargetId, BidiContextId, …
+  | { kind: "list" | "map" | "scalar"; … }
+interface Traits {                               // spec facts plus overlay annotations
+  readonly status: "stable" | "experimental" | "deprecated"
+  readonly sensitive?: true                      // decodes as Redacted
+  readonly compensation?: CompensationKind
+  readonly createsResource?: true                // late replies route to an owner for adoption
+  readonly session?: "browser" | "target"
+}
+```
+
+**Pipeline:**
+
+- **Committed model and output.** Three parsers produce one protocol model per backend revision. It is keyed by name, so patch pointers survive browser rolls (CDP's own JSON uses arrays whose indexes shift). One emitter writes formatted modules. CI never regenerates; it checks that regeneration reproduces what is committed. A regeneration is a deliberate change whose diff names the commands and events that were renamed or removed.
+- **Corrections** (`patches/`) are claims that a spec is wrong about the wire. They are JSON patches over the model, applied with Effect's `JsonPatch`. Each file says what the spec states, what the browser does, and the probe or recorded trace that showed it, so it doubles as the upstream bug report. A pointer that no longer resolves fails the run. On each browser roll an audit rebuilds without each file and lists the ones the new spec has absorbed.
+- **Annotations** (`overlay/`) are our own semantics, which no upstream will absorb, so the audit skips them: id brands, compensation, resource-creating commands, session scope and sensitive members.
+- **Coverage report.** Every spec item is emitted, excluded by policy or approximated, with a reason code, in a committed report. A roll's diff shows anything newly dropped. Nothing is dropped silently.
+
 **Policy:**
 
-- **Shape of the output.** Domain modules with *branded* ids (every protocol `…Id` type gets its own brand per backend, e.g. `CdpTargetId`, `BidiContextId`, so ids never cross protocols or kinds), `Schema.Opaque` named types and `/*#__PURE__*/` calls. Types-only declarations are kept separate from codecs.
+- **Shape of the output.** Domain modules with per-kind branded ids, so ids never cross protocols or kinds, and `Schema.Opaque` named types.
+  - Each type is a hand-emitted interface plus a codec cast to it (`export const X = Schema.suspend(() => …) as any as Schema.Codec<X>`), so the compiler never infers types from schema generics. Recursive types (DOM nodes, stack traces) are emitted in dependency order.
+  - Every top-level call is `/*#__PURE__*/`, including the call a class extends, so unused domains tree-shake.
+  - Commands and events are data: a method, codecs and traits. All behavior lives in the hand-written client, so a behavior change never needs a regeneration.
+- **Sensitive members decode as `Redacted`**: cookie values, auth credentials, `Authorization` headers, inserted text. L0 traffic captured in diagnostics therefore can't leak secrets.
+- **Measured, not gated:** typecheck time and memory, and bundle size per subpath, recorded on each regeneration.
 - **Tolerance.**
-  - Enums are open: known literals plus a string fallback.
+  - Enums are open in both directions: known literals plus a string fallback, in output types too, so an unknown value never arrives typed as a known one.
   - Experimental fields are optional.
   - Deprecated items are excluded unless explicitly allowed.
   - BiDi unions are generated by kind: discriminated, ordered-by-shape, or correlated by request id.
@@ -192,9 +233,10 @@ This is a planning inventory from the research, not a conformance result. `?` me
 
 ## Open questions
 
-1. **Codegen route.** Our own emitter over a small intermediate representation, or JSON Schema → `SchemaRepresentation.toCodeDocument`? (Under discussion.)
-
-Decided:
+None. Decided:
+- **Codegen route:** our own emitter over a committed protocol model, with audited corrections and a separate overlay (Code generation above). The pipeline follows Alchemy's distilled.
+  - `SchemaRepresentation.toCodeDocument` was rejected because it takes no options and the representation can't carry brands, `/*#__PURE__*/` or opaque types. Effect's OpenAPI generator, which uses it, has to rewrite JSON Schema before it and swap whole entries by name after it.
+  - Smithy as the model format was rejected because distilled's generator is HTTP-bound, and events, sessions and BiDi union kinds would all need custom traits.
 - **Pipe transport** uses Effect's `ChildProcess` extra file descriptors behind our `Transport`:
   - one long-lived outbox stream on fd 3;
   - a single consumer on fd 4;

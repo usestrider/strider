@@ -1,6 +1,6 @@
 # PROBES: conformance probes, hazard coverage and model tests
 
-*Revision 5, 2026-10-18. The specs leave key orderings and identities undefined, and the research disagrees in places. These questions are to be measured, not argued. The probe suite is also the adapters' regression suite: recorded traffic must decode against the generated schemas, and recorded behavior is re-run on each browser roll. Probe numbers are stable across revisions.*
+*Revision 5, 2026-10-18. The specs leave key orderings and identities undefined, and the research disagrees in places. These questions are to be measured, not argued. The probe suite is also the adapters' regression suite: recorded traffic must decode against the generated schemas, and recorded behavior is re-run on each browser roll. Probe results and recorded traces are also the evidence that spec corrections cite (PROTOCOL.md, Code generation). Probe numbers are stable across revisions.*
 
 ## Conformance probes (run against each backend)
 

@@ -121,6 +121,10 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.16** settled the codegen route, after Alchemy's distilled and Effect's OpenAPI generator:
+  - our own emitter over a committed, name-keyed protocol model;
+  - corrections are JSON patches that cite evidence, fail when stale and are audited on each browser roll; our own annotations live in a separate overlay;
+  - a coverage report, hand-emitted interfaces with cast codecs, and sensitive members as `Redacted`.
 - **Revision 5.15** settled protocol questions:
   - the pipe transport uses Effect's `ChildProcess`, with an explicit WebSocket fallback;
   - the validation policy is uniform, with explicit `trust` and AOT;
@@ -180,4 +184,4 @@ Each user-visible operation has one monotonic deadline covering everything it do
   - finding 7, dual `Observe` combinators that return both values: API.md;
   - finding 8, diagnostic presets: Diagnostics above;
   - the smaller items: CONCEPTS.md.
-- **Next:** run the conformance probes (PROBES.md) against Chrome and Firefox, and settle naming and module layout. Compiling the API sketches against stub types is an optional cheap check of the error-channel and `E`/`R` claims.
+- **Next:** discuss testing, then run the conformance probes (PROBES.md) against Chrome and Firefox. Compiling the API sketches against stub types is an optional cheap check of the error-channel and `E`/`R` claims.
