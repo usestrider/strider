@@ -1,0 +1,122 @@
+# effect-browser (working name)
+
+*Design stage, revision 5 (2026-10-18). No implementation yet.*
+
+An Effect-native browser automation library that speaks browser protocols directly (CDP first, then WebDriver BiDi, then the WebKit inspector protocol) instead of wrapping Playwright. Its priorities, in order:
+
+1. **Ergonomics.** Call sites read like the task; mistakes are hard to write; errors explain themselves.
+2. **Correctness under concurrency and interruption.** Scoped lifetimes, typed end reasons, no hangs, no silent replays.
+3. **Breadth.** Several backends behind one model, with capabilities stated per instance.
+4. **Performance and stealth.** Features are enabled on demand, and stealth is an architectural option.
+
+## Documents
+
+Each layer document has the same shape: purpose, top data models, interface sketch, key contracts, open questions. They aim for similar depth, and none contains implementation detail. The reasoning behind each contract lives in `reviews/` and in draft 4 of the native model (commit `6cc0bc1`); these documents keep the decisions, not the debate.
+
+| Layer | Document | What it covers |
+|---|---|---|
+| — | [README.md](README.md) | goals, principles, cross-cutting decisions, guarantees |
+| L2 | [API.md](API.md) | the public API: entry points, pages, locators, actions, expectations, observation, network, clock, agents, testing, errors, call sites |
+| L1 | [CONCEPTS.md](CONCEPTS.md) | the native browser model: identities, data models, lifetimes, contracts |
+| L0 | [PROTOCOL.md](PROTOCOL.md) | transports, protocol clients, code generation, ingestion, backend adapters, capabilities |
+| — | [PROBES.md](PROBES.md) | conformance probes, hazard coverage, deterministic model tests |
+| — | [research/](research/) | prior-art notes (historical evidence) |
+| — | [reviews/](reviews/) | design reviews, one per draft |
+
+```
+L2  API       Browser · BrowserContext · Page · Locator · Expect · Observe · Route · Clock · Toolkit · BrowserTest
+L1  Model     ids · navigables · documents · realms · navigations · requests · obligations · declarations · readiness
+L0  Protocol  transports · sessions · generated commands and events · ingestion · backend adapters · capabilities
+```
+
+Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees call-site conveniences; L0 never decides policy.
+
+## Principles
+
+1. **Spec identity, not protocol identity.** The public model is keyed by navigable, document, realm, navigation and request, with ids minted by the library. Protocol ids (CDP targets, sessions, execution contexts) change on process swaps and stay inside the adapters.
+2. **Lifetimes are scopes with typed end reasons.** Three separate decisions govern every remote resource: how much we may do to it (access), whether we may destroy it (release policy), and which scope cleans it up (cleanup group).
+3. **Interruption stops waiting; it never pretends to cancel.** No protocol can cancel an in-flight command. Interrupting abandons the reply and runs compensations (release held input, resolve paused requests). Whether a mutation reached the browser is recorded as evidence.
+4. **State is folded before it is published.** Events update the model in order before anyone observes them. Losing integrity (overload, an undecodable lifecycle event) is an explicit failure, never a silent drop.
+5. **Subscribe before trigger, structurally.** Every "wait for X caused by Y" subscribes before Y runs, and no API makes users order these themselves.
+6. **Obligations get exactly one decision.** Paused requests, dialogs and file choosers get one locally selected decision, a default when handlers fail, and tracked remote acknowledgement.
+7. **Capabilities belong to instances.** A missing capability is a typed `Unsupported` reason or a missing method, never a silent no-op.
+8. **Protocol features are demand-driven.** Domains and subscriptions are reference-counted, so a stealth configuration that never enables `Runtime` remains possible.
+9. **Declarations are acknowledged, timed and composed by fixed rules.** Init scripts, routes, overrides and clocks state the timing they need and fail rather than degrade. One precedence rule orders settings and handlers, and an ordered bundle orders scripts.
+10. **Small error channels, rich evidence.** An ordinary call fails with `TargetGone`, `Timeout` or its own domain error. Detail lives in `reason` fields and a shared diagnostic envelope.
+11. **Secrets are protected in diagnostics, and export is explicit.** `Redacted` goes in, classified fields come out wrapped, and secret-bearing exports are deliberate operations.
+
+## Cross-cutting decisions
+
+### Access, ownership and cleanup
+
+| Resource | Access | Release policy | Cleanup group |
+|---|---|---|---|
+| Launched browser | control | close the process | the `Browser` layer |
+| Context or page created by the library | control | close / remove | its parent (`withPage` / `withContext` narrow it) |
+| Popup of an owned page | control | close | the opener's group; can be transferred explicitly |
+| Attached browser | — | disconnect only | the `Browser` layer |
+| Discovered page or the default context | observe; upgrade with `inspect()` or `control()` | leave open | none |
+| Popup of a leave-open page | observe | leave open | none |
+
+- **Access is typed.** `ObservedPage` exposes events only. `ReadonlyPage` adds isolated-world reads, locators, snapshots and screenshots. `Page` adds input, navigation, main-world evaluation and declarations. Calling a control method on an inspected page is a compile error.
+- **Wider effects need wider access.** A declaration whose physical effect is wider than its target, such as a browser-global intercept on BiDi, needs explicit wider access. Without it the call fails with `NotPermitted`.
+
+### One deadline per operation
+
+Each user-visible operation has one monotonic deadline covering everything it does: queueing for input, setting up observation, resolving the locator, actionability, dispatch and the postcondition. Nested calls inherit the remaining budget and can only shorten it. Cleanup gets its own bounded budget. Library deadlines run on a live clock even inside `TestClock` tests. Defaults come from a `Context.Reference`, and every option accepts `Duration.Input`.
+
+### Errors
+
+| Family | Tag | Meaning |
+|---|---|---|
+| Lifetime | `TargetGone{target, reason}` | Something the operation needed ended. `reason` is a `CloseReason`: page closed, frame detached, document replaced, connection lost, and so on |
+| Deadline | `Timeout{operation, phase}` | `phase` is `resolving \| waitingForCondition \| dispatchedUnconfirmed \| postcondition` |
+| Domain | one per verb family: `ActionError`, `NavigationError`, `EvaluationError`, `ResponseError`, `ExpectationFailed`, `RouteError`, `DeclarationError`, … | `reason` covers invalid input, `StrictViolation`, `NotPermitted{required}`, `Unsupported{capability}` and `BackendFailure` |
+
+- **Evidence.** Every failure carries the same diagnostic envelope: operation id, dispatch state (`NotSent | MayHaveBeenSent | Acknowledged`), per-step progress, the last observation and cleanup notes. A caller asking "did my click happen?" reads the evidence. Nothing is retried automatically once a mutation may have reached the page.
+- **Two different "can't" reasons.** `NotPermitted` means "you haven't granted the access this needs", and the fix is a different call. `Unsupported` means "this backend cannot do it", and the fix is a different backend. Both are reasons inside the verb's own error, so they never add tags. `BrowserError.isUnsupported(e)` and `isNotPermitted(e)` work across verb families.
+- **Defects are bugs only.** Defects are reserved for programming and invariant failures. External backend failures stay typed, and caller-supplied error and requirement types pass through every combinator unchanged.
+
+### Diagnostics and secrets
+
+- **Redaction.** Secret inputs accept `Redacted`. Credential, cookie and typed-text fields are classified as sensitive even when passed as plain strings. Classified fields are never rendered in spans, logs, errors or snapshots.
+- **Presets.** Diagnostics come in two presets, set through a `Context.Reference`:
+  - `local`: paths and titles included; query, fragment, userinfo and classified fields stripped.
+  - `strict`: origins only and no titles, for production, exported traces and agents.
+
+  `strict` is the default, and `BrowserTest` layers select `local`.
+- **Raw content.** Bodies, console output, DOM snapshots and screenshots can contain secrets the page echoed. They need an explicit capture policy before leaving the process. There is no claim of taint tracking.
+
+### Observability
+
+- **Spans.** Every public operation is an `Effect.fn` span. Attempts, readiness observations and automatically resolved dialogs become span events, which is Playwright's call log as structured data. Protocol commands are debug-level child spans.
+- **Wording.** "No matching event observed" is never reported as "the action had no effect".
+
+## Guarantees at a glance
+
+| Area | Guaranteed | Given a capability | Best-effort | Unknown until probed |
+|---|---|---|---|---|
+| Identity | Library ids stable within a connection across process swaps; explicit refs never silently rebind | — | Correlating a restored back/forward-cache document with its earlier epoch | Backend id continuity (probes 2, 3) |
+| Lifetimes | Typed end reason for every lifetime; destruction only of owned resources; interruption stays interruption | Prompt notice of remote ends | — | Detach events for orphaned frames (probe 8) |
+| Access | Typed access levels; wider physical effects need wider access | Scoped pause-on-start (PROTOCOL.md) | — | Pause granularity per backend (probe 22) |
+| Navigation | Outcomes only with evidence, otherwise `Timeout{phase: postcondition}` | Back/forward-cache `Restored`, prerender `Activated` | Detecting browsing-context-group switches | Missing terminal events (probe 4) |
+| Declarations | Acknowledged or failed; requested timing met or `Unsupported`; fixed composition rules | Before-author-script timing | Restoring external state | Popup inheritance (probe 18) |
+| Obligations | One decision; fallback only while pending; no contradictory second decision | Acknowledged remote resolution | — | Behavior on connection loss (probe 19) |
+| Input | Serialized per page; bounded release of held input on interruption | Trusted input; evaluation with user activation | Release after transport loss | — |
+| Readiness | Every predicate yields `Ready` or `NotReady{reason}` within the deadline | Rendering-based predicates | Network-idle attribution | Stable-frame cadence (probe 10) |
+| Errors | Small typed families with evidence; caller `E`/`R` preserved | — | — | — |
+| Secrets | Wrapped and classified fields never rendered; explicit export | — | Capture-policy sanitization | — |
+
+## Status
+
+- **Revision 5** restructured the design into balanced layers and folded in [review 4](reviews/04-draft-4.md):
+  - finding 1, pause-on-start granularity: PROTOCOL.md, probe 22;
+  - finding 2, `Inspect` access: this file, API.md, CONCEPTS.md;
+  - finding 3, `NotPermitted` vs `Unsupported` as reasons: Errors above;
+  - finding 4, page time as one timeline per scope: CONCEPTS.md, API.md;
+  - finding 5, dependencies only on equal-or-broader scope: CONCEPTS.md;
+  - finding 6, stable ambiguity fails early: API.md;
+  - finding 7, dual `Observe` combinators that return both values: API.md;
+  - finding 8, diagnostic presets: Diagnostics above;
+  - the smaller items: CONCEPTS.md.
+- **Next:** run the conformance probes (PROBES.md) against Chrome and Firefox, and settle naming and module layout. Compiling the API sketches against stub types is an optional cheap check of the error-channel and `E`/`R` claims.
