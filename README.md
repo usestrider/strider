@@ -126,7 +126,8 @@ Each user-visible operation has one monotonic deadline covering everything it do
   - sessions are named, and every command names its session (`--session` or `EB_SESSION`), with no fallback;
   - one daemon and one browser per session, in a session directory at a predictable path that is deleted at `stop`; hard kills are reported and pruned explicitly;
   - forks copy storage state into a new session, from a running session or a file saved with `state save`;
-  - commands are the toolkit's tools and cover the loop, while files (an `Effect` requiring `Session`) cover structure; files are type-checked and run in their own scope;
+  - commands are the toolkit's tools and drive the live session, while the library runs self-contained programs;
+  - segments bridge the two: a file's default export, an `Effect` requiring `CurrentSession`, runs under `eb run` or inside any program, checked by the project's own `tsc`;
   - `snapshot.ref(id)` now returns a lazy `Locator`, which removed a double `yield*`;
   - launches use a temporary profile by default (`FileSystem.makeTempDirectoryScoped`), and `userDataDir` names a directory you own.
 - **Revision 5.19** replaced `page.events.*` with a module per event type:

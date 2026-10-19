@@ -146,7 +146,7 @@ import { Bidi } from "effect-browser/bidi"                // any BiDi endpoint (
 import { BrowserTest } from "effect-browser/test"         // runner-agnostic test Layers
 import { VitestBrowser } from "effect-browser/test/vitest" // the Vitest adapter; peer dependency: @effect/vitest
 import { BrowserToolkit } from "effect-browser/ai"        // builds on effect/ai
-import { Session } from "effect-browser/cli"              // what `eb run` provides to a file; the package's bin is the CLI (CLI.md)
+// the package's bin is the CLI (CLI.md); segments it runs require CurrentSession, from "effect-browser"
 import * as Cdp from "effect-browser/cdp"                 // raw generated L0 commands, for power users
 
 declare const Chromium: {

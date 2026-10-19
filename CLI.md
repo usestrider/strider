@@ -37,11 +37,10 @@ interface CommandResult {                                 // text by default; --
   readonly files: ReadonlyArray<LocalPath>                // screenshots, snapshots, traces: written to artifacts/, only the path printed
 }
 
-class Session extends Context.Service<Session, {          // what `eb run` provides to a file
-  readonly name: SessionName
+class CurrentSession extends Context.Service<CurrentSession, {   // from "effect-browser": what a segment requires
   readonly browser: BrowserHandle
-  readonly page: Page                                     // the current page when the run started
-}>()("effect-browser/cli/Session") {}
+  readonly page: Page                                     // under `eb run`: the session's current page when the run started
+}>()("effect-browser/CurrentSession") {}
 ```
 
 ```
@@ -66,7 +65,8 @@ eb -s checkout next download               # → w1: waiting from now on
 eb -s checkout click 'role=button[name="Export CSV"]'
 eb -s checkout await w1                    # → d1 "export.csv", 12 KB
 eb -s checkout history console --level error
-eb -s checkout run pay.ts                  # structure goes in a file, run in the same session
+eb -s checkout run pay.ts                  # a segment: the file's default export, run in the live session
+eb -s checkout route "**/analytics/**" abort      # → r1, a scoped handler; `eb remove r1` ends it
 eb -s checkout state save ./auth/shop.state
 eb -s checkout export test checkout.test.ts
 eb stop -s checkout
@@ -81,9 +81,9 @@ since last: navigated to /cart · popup p2 opened · dialog "Leave site?" dismis
 ```
 
 ```ts
-// pay.ts: an ordinary Effect; the session provides its requirements
+// pay.ts: a segment, runnable under `eb run` or inside any program that provides CurrentSession
 export default Effect.gen(function* () {
-  const { page } = yield* Session
+  const { page } = yield* CurrentSession
   const popups = yield* Popup.next(page)
   yield* page.getByText("Pay").click
   const popup = yield* popups
@@ -111,26 +111,29 @@ export default Effect.gen(function* () {
 
 **Commands**
 - **Commands are the toolkit's tools.** They are defined once as Schemas, in an RPC group the daemon serves. The CLI, the MCP server and `BrowserToolkit` all derive from those definitions (API.md, Agents). Session commands (`start`, `stop`, `sessions`, `page`, `run`, `state`, `export`, `prune`) are added on top.
-- **Commands cover the loop; files cover structure.** Loops, branches and several outcomes of one action go in a file, so there is no shell mini-language.
+- **Commands for the live session, the library for programs.** An agent loops by running commands. Self-contained programs use the library directly, run with node or bun. `state save`, `export` and segments (below) are the bridges, so there is no shell mini-language.
+- **Decisions are declarative commands.** `eb route <pattern> abort | continue | fulfill …` and `eb dialog handle accept | dismiss` register scoped handlers in the session and print a registration handle; `eb remove r1` ends one. A decision that needs logic belongs in a segment or a program.
 - **Targets** are a bare ref (`e9`), from the current page's latest snapshot, or a locator string that maps to exactly one `getBy*`: `role=button[name="Sign in"]`, `text="Add to cart"`, `label=Email`, `testid=cart`, `css=…`. Strings are parsed at the boundary, so a bad one fails immediately.
 - **Events work across commands.** `eb next` subscribes in the session's scope and prints a wait handle, and `eb await` collects it under its own deadline. The since-last digest is `history`, read from where the previous command stopped.
+- **A failed request in the digest** got no response (a network, DNS or TLS error, or blocked by CORS, CSP or mixed content) or a status of 400 or more. Canceled requests, superseded by a navigation or aborted by the app, are not failures. Nothing is filtered by resource type, which would be a heuristic (rule 23). Identical failures are grouped with a count, and a long list shows the first few, then "+N more · `eb history network --failed`".
 - **Nothing changes implicitly.** The current page changes only with `eb page use`, never by following a popup or focus. Attaching to your own browser gives observed pages, and acting on one needs `eb control p3`.
 - **Failures say what happened:** the error's tag, its hint and the dispatch evidence ("the click may have reached the page"), with an exit code per error family. Interrupting a command (Ctrl-C) interrupts that command, never the session.
 
-**Files**
-- **A file's default export is an `Effect`** that requires `Session` and `Scope`, so the type checker sees what it needs.
-- **It is type-checked against the public API before it runs,** so a misuse fails before anything touches the page. This is on by default; its latency is to be measured with TypeScript's native compiler before we promise it.
+**Segments**
+- **`eb run` runs a file's default export,** an `Effect` that requires `CurrentSession` and `Scope`. There are no named exports and no arguments; a file without a default `Effect` fails with a hint.
+- **The same segment runs anywhere.** `CurrentSession` is in the main entry point, so a program or test provides it (`Effect.provideService(CurrentSession, { browser, page })`) and reuses the segment unchanged.
+- **`eb run` provides `CurrentSession`, `Scope` and the daemon's platform services.** A segment that requires anything else fails with an error naming the missing service.
+- **The CLI doesn't type-check.** A segment is a file in your project, so your `tsc` checks it against the same effect-browser version the daemon runs from. Agent skills run `tsc --noEmit` before `eb run`, because a segment that fails halfway leaves its earlier steps done.
 - **It runs in its own scope, like a script.** Its routes, handlers and waits end with it. Handles it returns are transferred into the session and named, which is the explicit transfer CONCEPTS.md §3 already defines.
-- **Files use locators, not refs.** A ref only means something inside its session.
+- **Segments use locators, not refs.** A ref only means something inside its session.
 
 **Export**
-- `eb export test` writes the session as a Vitest test. Refs become the role-and-name locators their snapshots suggest, secrets become config placeholders, `--state` becomes its path, `run` becomes an import of the file, and failed commands are left out.
+- `eb export test` writes the session as a Vitest test. Refs become the role-and-name locators their snapshots suggest, secrets become config placeholders, `--state` becomes its path, `run` becomes an import of the segment provided with `CurrentSession`, and failed commands are left out.
 
 **Client**
-- **`eb` forwards argv over the socket without loading Effect.** Loading Effect costs about 600 ms per process, and agents run hundreds of commands. etest's `serve` uses the same trick. The daemon holds the model and the compiler.
+- **`eb` forwards argv over the socket without loading Effect.** Loading Effect costs about 600 ms per process, and agents run hundreds of commands. etest's `serve` uses the same trick. The daemon holds the model.
 - **Packaging** is the `effect-browser/cli` subpath plus a `bin`, not a separate package (revision 5.10).
 
 ## Open questions
 
-1. **Type-checking latency.** If checking a file with TypeScript's native compiler, kept warm in the daemon, isn't fast enough to stay on by default, checking becomes opt-in with `--check`.
-2. **What counts as a failed request in the digest.** A network error certainly does, but should a 4xx? Measured against real agent transcripts once there is an implementation.
+None. Type-checking was settled by leaving it to the project's own `tsc`, and failed requests by the rule under Commands.
