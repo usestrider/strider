@@ -4,7 +4,7 @@
 
 ## Purpose
 
-This layer is what users write. It turns the native model into a small vocabulary of browsers, contexts, pages, locators, actions, expectations and observations, with the following properties:
+This layer is what users write. It turns the native model into a small vocabulary of browsers, contexts, pages, locators, actions, expectations and events, with the following properties:
 
 - No protocol knowledge.
 - `Scope` only where something with a lifecycle is acquired.
@@ -21,15 +21,16 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
   - A member with required arguments is a function and may take trailing options: `goto(url)`, `fill(value)`, `dragTo(target, options)`.
 - **Cross-cutting settings are dual combinators, not option fields.** Timeouts and diagnostics apply to any effect: `button.click.pipe(Browser.withTimeout("5 seconds"))`. Option bags hold only what is specific to the operation.
 - **Anything with a lifecycle requires `Scope`.**
-  - **What it covers:** contexts, pages, access upgrades, popups, downloads, handles, capability handles and every declaration (routes, dialog handlers, init scripts, overrides, clocks). Each is acquired into the caller's `Scope` and released when that scope closes.
+  - **What it covers:** contexts, pages, access upgrades, handles, capability handles and every declaration (routes, dialog and file-chooser handlers, init scripts, overrides, clocks). Each is acquired into the caller's `Scope` and released when that scope closes.
+  - **Seeing an event acquires nothing.** A popup belongs to the scope that acquired its opener, and a download's file to its context.
   - **What doesn't need it:** values with no remote lifetime (locators, snapshots, captured bodies, storage-state bytes).
   - **Early release** (`page.close`) is always possible; the finalizer then does nothing.
-- **Handles get members; decorators are dual combinators.** `Expect.*` and `Browser.with*` work both data-first and in `pipe`. Event observations are applied to a trigger the same way: `click.pipe(page.events.popup)`.
-- **State is a `Watchable`; events are an `Observation`** (see State and events). State can be read at any time and waited on safely. Events must be subscribed to before their cause, and the API makes that subscription explicit.
+- **Handles get members; decorators are dual combinators.** `Expect.*` and `Browser.with*` work both data-first and in `pipe`.
+- **State is a `Watchable`; each event type is a module** (see State and events). State can be read at any time and waited on safely. Events are not page members: `Download.next(page)` subscribes, and the action that causes the download comes on the next line.
 - **No public fibers, no writable `Deferred`s or `Ref`s.** The library never forks on the caller's behalf and never returns a `Fiber`. Callers fork their own consumers with `Effect.forkScoped`. Internally, `Deferred`s latch results and `SubscriptionRef`s hold state, but only read-only views cross the API.
 - **No platform services at call sites.** Platform services appear only in the launch and connect layers, so `Scope` is the only requirement an ordinary call site can see.
-- **Immutable by default; mutable state is read through an `Effect`.** Handles, locators, snapshots, events and errors are immutable values. Anything that can change is never a plain field: `page.url`, `page.title`, `browser.capabilities`, page lists, and whether a handle still holds its access. Such reads are `Effect`s, evaluated when they run, so they can't go stale in a variable. Changes arrive on `events` streams. Internally this state lives in a `SubscriptionRef` (CONCEPTS.md §2), which the public API never exposes for writing. Mutability is avoided wherever an immutable value can do.
-- **Plain fields on live handles must be fixed, and say why.** A live handle (browser, context, page, frame, download, intercepted request) may expose a plain field only if the value can't change for the handle's lifetime. Each such field carries a one-line justification. Ids, `closed`, event streams and sub-handles bound to their parent (`keyboard`, `mouse`, `clock`, whose own state is again read through `Effect`s) are exempt by construction. A field that can't be justified becomes an `Effect`. Immutable values (snapshots, locators, navigations, dialogs) are exempt entirely.
+- **Immutable by default; mutable state is read through an `Effect`.** Handles, locators, snapshots, events and errors are immutable values. Anything that can change is never a plain field: `page.url`, `page.title`, `browser.capabilities`, page lists, and whether a handle still holds its access. Such reads are `Effect`s, evaluated when they run, so they can't go stale in a variable. Changes arrive on a `Watchable`'s `changes`. Internally this state lives in a `SubscriptionRef` (CONCEPTS.md §2), which the public API never exposes for writing. Mutability is avoided wherever an immutable value can do.
+- **Plain fields on live handles must be fixed, and say why.** A live handle (browser, context, page, frame, download, intercepted request) may expose a plain field only if the value can't change for the handle's lifetime. Each such field carries a one-line justification. Ids, `closed` and sub-handles bound to their parent (`keyboard`, `mouse`, `clock`, whose own state is again read through `Effect`s) are exempt by construction. A field that can't be justified becomes an `Effect`. Immutable values (snapshots, locators, navigations, dialogs) are exempt entirely.
 - **Brand liberally.** Every id and every meaningful string or number is a branded type (CONCEPTS.md §1): `Url`, `UrlPattern`, `HttpStatus`, `HeaderName`, `LocalPath`/`RemotePath`, `CssPixels`/`DevicePixels`, `Locale`, `RefId`, …
   - **Outputs** are always branded.
   - **Inputs** require the brand where two meanings could be confused at one call site: local vs remote paths (`File.local` / `File.remote`), CSS vs device pixels.
@@ -45,11 +46,11 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
   | Form | Meaning | Examples |
   |---|---|---|
   | verb | acts on the page, once | `click`, `fill`, `goto`, `route` |
-  | `read*`, `is*`, nouns | one-shot read; no waiting, no retry | `readText`, `isVisible`, `title`, `count` |
+  | `read*`, `is*`, nouns | one-shot read; no waiting, no retry | `readText`, `isVisible`, `title`, `count`, `ConsoleMessage.last` |
   | `Watchable` members | state: read now, watch, `waitFor` | `status`, `url`, `download.status` |
   | `Expect.to*` | retries until the deadline | `Expect.toHaveText` |
-  | `events.*` | an `Observation` of something caused | `page.events.response(…)` |
-  | `on*` | a scoped handler registration | `onDialog` |
+  | `next`, `stream` | subscribe to an event type from now on | `Download.next(page)`, `NetworkRequest.stream(page)` |
+  | `handle` | a scoped handler that decides an obligation | `Dialog.handle(page, Dialog.acceptAll)` |
   | `new*` | creates an owned resource | `newPage`, `newContext` |
   | `*With` | the configured form of a member | `clickWith`, `newPageWith` |
   | `with*` (dual) | a cross-cutting setting over any effect | `Browser.withTimeout` |
@@ -62,7 +63,8 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
   - `StaleRef`: "refs end with their document; use a locator or take a new snapshot"
   - `Unsupported`: "supported on: chromium (CDP)"
   - `StrictViolation`: "2 matches; try `getByRole('button', { name: 'Save' })`"
-- **Explicit over implicit.** Nothing hidden may change behavior or add waiting. Helpers that make explicit behavior simpler are welcome, but they stay opt-in. That rules out magic delays, grace periods and heuristic windows by default. If you want such behavior, ask for it in code: an `Expect`, a `waitFor`, an observation, or a named option. Actionability waiting is the documented contract of each action: named checks, adjustable per call, reported in errors. It is not a hidden heuristic.
+  - `Timeout` awaiting a `next`: "a matching download started 12 ms before `Download.next` subscribed; call it before the action that causes it"
+- **Explicit over implicit.** Nothing hidden may change behavior or add waiting. Helpers that make explicit behavior simpler are welcome, but they stay opt-in. That rules out magic delays, grace periods and heuristic windows by default. If you want such behavior, ask for it in code: an `Expect`, a `waitFor`, a `next`, or a named option. Actionability waiting is the documented contract of each action: named checks, adjustable per call, reported in errors. It is not a hidden heuristic.
 - **One way to do each thing.** No aliases, and no parallel mechanisms for the same job (that is why `withPage` went away). A convenience is allowed only where it is the dominant call site and is documented as its expansion: `page.url` is `page.status.map(…)`, `download.finished` is `status.waitFor(…)`, and `browser.newPage` is `newContext` followed by `newPage`.
 
 ## Top data models
@@ -74,7 +76,6 @@ interface ObservedPage {                                // state and events only
   readonly url: Watchable<Url>                           // status.map(…): derived from the same source
   readonly frames: Watchable<FrameTree>
   readonly closed: Effect<CloseReason>                  // lifetime signal: waits as long as the page lives
-  readonly events: ObservedPageEvents                   // ReadonlyPage and Page narrow this to ReadonlyPageEvents / PageEvents
   readonly inspect: Effect<ReadonlyPage, PageError, Scope>   // installs the utility world; page stays open
   readonly control: Effect<Page, PageError, Scope>           // access lasts for the scope; page stays open
 }
@@ -89,21 +90,21 @@ interface DocumentStatus {
 }
 interface Page extends ReadonlyPage { /* input, navigation, main-world evaluation, declarations */ }
 
-type Navigation =                                       // success value of goto/reload/back/forward
+type PageNavigation =                                   // success value of goto/reload/back/forward; also an event type
   | { readonly _tag: "Committed"; readonly id: NavigationId; readonly document: DocumentId
-      readonly response: Option<ResponseSnapshot> }      // 404/500 is still a commit; None for about:blank, data:, …
+      readonly response: Option<NetworkResponse> }       // 404/500 is still a commit; None for about:blank, data:, …
   | { readonly _tag: "SameDocument"; readonly id: NavigationId; readonly document: DocumentId
       readonly via: "fragment" | "historyApi" | "intercepted" }
   | { readonly _tag: "Restored"; readonly id: NavigationId; readonly document: DocumentId }   // back/forward cache
   | { readonly _tag: "Activated"; readonly id: NavigationId; readonly document: DocumentId }  // prerender
 
-interface ResponseSnapshot {                            // immutable; one redirect hop
+interface NetworkResponse {                             // immutable; one redirect hop. NetworkRequest is its request-side twin
   readonly hop: RequestHopId
   readonly url: Url
   readonly status: HttpStatus
   readonly headers: Headers                             // keyed by HeaderName; classified values arrive as Redacted
 }
-interface CapturedResponse<B> extends ResponseSnapshot { readonly body: B }
+interface CapturedResponse<B> extends NetworkResponse { readonly body: B }
 
 interface Snapshot {                                    // a structured tree; text is one rendering of it
   readonly document: DocumentId
@@ -130,7 +131,7 @@ type InteractivityEvidence = "clickListener" | "cursorPointer" | "tabindex" | "c
 type SnapshotDiff = { readonly added: ReadonlyArray<SnapshotNode>; readonly removed: ReadonlyArray<RefId>; readonly changed: ReadonlyArray<SnapshotNode>; readonly text: string }
 ```
 
-`Page`, `Locator`, `Navigation` and the other model handles are `Equal`/`Hash` by identity (CONCEPTS.md §1). A `ReadonlyPage` and a `Page` for the same tab are equal, because identity is the tab and not the access level.
+`Page`, `Locator`, `PageNavigation` and the other model handles are `Equal`/`Hash` by identity (CONCEPTS.md §1). A `ReadonlyPage` and a `Page` for the same tab are equal, because identity is the tab and not the access level.
 
 ## Modules and backends
 
@@ -227,6 +228,7 @@ interface ContextOptions {
   readonly timezone?: TimeZoneId | string
   readonly permissions?: ReadonlyArray<Permission>
   readonly focus?: "system" | "emulated"                 // default "system"; "emulated" makes every page report focus (owned contexts only)
+  readonly eventLog?: number                             // retained events per module and page, for last/history; default 100, 0 keeps none
 }
 ```
 
@@ -263,13 +265,13 @@ interface Page extends ReadonlyPage {
   // the locator members above return Locator (with actions) instead of ReadonlyLocator
   readonly context: BrowserContext                      // fixed: a page never changes context
   goto(url: Url | string, options?: { waitUntil?: LoadState; accept?: ReadonlyArray<"download" | "noContent"> }):
-    Effect<Navigation, NavigationError | TargetGone | Timeout>
-  readonly reload: Effect<Navigation, NavigationError | TargetGone | Timeout>
-  reloadWith(options: { waitUntil?: LoadState }): Effect<Navigation, NavigationError | TargetGone | Timeout>
-  readonly back: Effect<Option<Navigation>, NavigationError | TargetGone | Timeout>    // None: no history entry
-  backWith(options: { waitUntil?: LoadState }): Effect<Option<Navigation>, NavigationError | TargetGone | Timeout>
-  readonly forward: Effect<Option<Navigation>, NavigationError | TargetGone | Timeout>
-  forwardWith(options: { waitUntil?: LoadState }): Effect<Option<Navigation>, NavigationError | TargetGone | Timeout>
+    Effect<PageNavigation, NavigationError | TargetGone | Timeout>
+  readonly reload: Effect<PageNavigation, NavigationError | TargetGone | Timeout>
+  reloadWith(options: { waitUntil?: LoadState }): Effect<PageNavigation, NavigationError | TargetGone | Timeout>
+  readonly back: Effect<Option<PageNavigation>, NavigationError | TargetGone | Timeout>    // None: no history entry
+  backWith(options: { waitUntil?: LoadState }): Effect<Option<PageNavigation>, NavigationError | TargetGone | Timeout>
+  readonly forward: Effect<Option<PageNavigation>, NavigationError | TargetGone | Timeout>
+  forwardWith(options: { waitUntil?: LoadState }): Effect<Option<PageNavigation>, NavigationError | TargetGone | Timeout>
   evaluate<Args extends ReadonlyArray<unknown>, A>(    // main world
     fn: (...args: Args) => A | Promise<A>, ...args: Args
   ): Effect<A, EvaluationError | TargetGone | Timeout>
@@ -280,7 +282,6 @@ interface Page extends ReadonlyPage {
   readonly mouse: Mouse
   readonly clock: Clock
   route<E, R>(pattern: UrlPattern, handler: RouteHandler<E, R>): Effect<RouteRegistration, RouteError, Scope | R>
-  onDialog<E, R>(handler: (dialog: Dialog) => Effect<DialogDecision, E, R>): Effect<HandlerRegistration, DeclarationError, Scope | R>
   addInitScript(script: InitScriptSource, options?: InitScriptOptions): Effect<InitScript, DeclarationError, Scope>
   emulate(settings: Emulation): Effect<Registration, DeclarationError, Scope>
   readonly activate: Effect<void, TargetGone>            // bring to front; rendering-based waits need it
@@ -293,7 +294,7 @@ Notes:
 
 - **Evaluated functions cross into the page.** They must be self-contained, and values travel as arguments. A `ReferenceError` from an evaluated function carries a hint saying so.
 - **Evaluation runs by value by default.** Results are serialized and deserialized. `evaluateAs(schema, …)` validates the result. Handles are opt-in and scoped. Running as a user gesture is an option on an `evaluateWith(options, fn, …args)` variant (not shown), where the backend supports it.
-- **Declarations are scoped registrations.** `route`, `onDialog`, `addInitScript` and `emulate` are removed when the caller's scope closes. In `@effect/vitest`'s `it.effect` that scope is already present; elsewhere, use `Effect.scoped`.
+- **Declarations are scoped registrations.** `route`, `addInitScript`, `emulate`, `Dialog.handle` and `FileChooser.handle` are removed when the caller's scope closes. In `@effect/vitest`'s `it.effect` that scope is already present; elsewhere, use `Effect.scoped`.
 
 ## Locators, actions and actionability
 
@@ -416,8 +417,8 @@ Two kinds of things change over time, and they get different types on purpose. R
 | | State | Events |
 |---|---|---|
 | Examples | page status and URL, frame tree, download progress, page lists, capabilities | responses, requests, navigations, popups, dialogs, downloads, console messages |
-| Type | `Watchable<A>` | `Observation<A, E, R>` |
-| Late subscriber gets | the current value, so nothing that matters is missed | nothing from before it subscribed, so subscribing is explicit and eager |
+| Type | `Watchable<A>` | a module per event type (`Download`, `NetworkResponse`, …) |
+| Late subscriber gets | the current value, so nothing that matters is missed | nothing from before it subscribed; what already happened is a separate read of a bounded log |
 | Slow consumer gets | the latest value (conflated) | every match, losslessly, up to a bound (`EventOverflow`) |
 
 ```ts
@@ -428,72 +429,60 @@ interface Watchable<A> extends Effect<A> {               // yield* reads the cur
   map<B>(f: (a: A) => B): Watchable<B>                   // derived from the same source, so never glitchy
 }
 
-interface Observation<A, E = never, R = never> {
-  // 1. around a trigger: the first match, plus the trigger's own result
-  <X, TE, TR>(trigger: Effect<X, TE, TR>): Effect<readonly [X, A], TE | E | TargetGone | Timeout, TR | R>
-  // 2. arm now, await later: the first match is latched
-  readonly pending: Effect<Pending<A, E>, ObserveError, Scope | R>
-  // 3. every match from now on: subscribed before this effect returns
-  readonly stream: Effect<Stream<A, E | EventOverflow>, ObserveError, Scope | R>
+interface EventModule<T, A, F, E = never> {               // every event module has these four verbs; T: targets, F: filter
+  next(target: T, filter?: F): Effect<Pending<A, E>, ObserveError, Scope>                     // subscribed when this returns
+  stream(target: T, filter?: F): Effect<Stream<A, E | EventOverflow>, ObserveError, Scope>   // every match from now on
+  last(target: T, filter?: F): Effect<Option<A>>                                              // the latest retained match; never waits
+  history(target: T, filter?: F): Effect<EventLog<A>>                                         // every retained match; never waits
 }
-interface Pending<A, E = never> extends Effect<A, E | TargetGone | Timeout> {   // yield* awaits, under the deadline of the await
+interface Pending<A, E = never> extends Effect<A, E | TargetGone | Timeout> {   // yield* awaits the first match, under the deadline of the await
   readonly poll: Effect<Option<Exit<A, E | TargetGone | Timeout>>>
 }
+interface EventLog<A> {
+  readonly entries: ReadonlyArray<A>                     // oldest first
+  readonly dropped: number                               // matches the cap discarded, so a truncated log doesn't look complete
+}
 
-interface ObservedPageEvents {                            // observe: protocol events only; nothing injected, nothing decided
-  response(filter: {
-    readonly url: UrlPattern                              // required: "any response" as a first match is a footgun
-    readonly method?: HttpMethod | string
-    readonly status?: HttpStatus | number | ((status: HttpStatus) => boolean)
-  }): Observation<ResponseSnapshot, ResponseError>        // metadata only; bodies need inspect
-  request(filter: RequestFilter): Observation<RequestSnapshot, ObserveError>
-  readonly requests: Observation<RequestSnapshot>         // every request: for logging
-  readonly navigation: Observation<Navigation, NavigationError>
-  navigationWith(options: { url?: UrlPattern; waitUntil?: LoadState }): Observation<Navigation, NavigationError>
-  readonly popup: Observation<ObservedPage, ObserveError, Scope>   // popups of pages we don't control are only observed
-  popupWith(options: { url?: UrlPattern }): Observation<ObservedPage, ObserveError, Scope>
-  readonly console: Observation<ConsoleMessage>
-  readonly pageErrors: Observation<PageErrorEvent>
-}
-interface ReadonlyPageEvents extends ObservedPageEvents { // inspect: adds bodies, which need collection set up
-  response<B = Uint8Array, PE = never, PR = never>(filter: {
-    readonly url: UrlPattern
-    readonly method?: HttpMethod | string
-    readonly status?: HttpStatus | number | ((status: HttpStatus) => boolean)
-    readonly body?: BodyDecoder<B>                        // Body.json(schema), Body.text, Body.bytes; collection is automatic
-    readonly where?: (response: CapturedResponse<B>) => Effect<boolean, PE, PR>   // runs off the ingestion path
-  }): Observation<CapturedResponse<B>, PE | ResponseError, PR>
-}
-interface PageEvents extends ReadonlyPageEvents {         // control: adds what acquires or decides
-  readonly popup: Observation<Page, ObserveError, Scope>  // narrower: a controlled page's popups are controlled, owned if it is
-  popupWith(options: { url?: UrlPattern }): Observation<Page, ObserveError, Scope>
-  readonly download: Observation<Download, ObserveError, Scope>
-  dialog<DE, DR>(handler: (dialog: Dialog) => Effect<DialogDecision, DE, DR>): Observation<Dialog, DE | ObserveError, DR>
-  fileChooser(files: FileInput | ReadonlyArray<FileInput>): Observation<void, ObserveError>
-  readonly autoResolutions: Observation<AutoResolution>   // dialogs and paused requests decided by a default policy
-}
-// Observations only produce values, so the narrower types in PageEvents are valid overrides and Page stays a ReadonlyPage.
+// in use: call sites 2–5, 13 and 15
 ```
 
+| Module | Emits | Filter | Targets |
+|---|---|---|---|
+| `PageNavigation` | `PageNavigation` | `url`; `next` also takes `waitUntil` | any page |
+| `Popup` | `Page` from a `Page`, otherwise `ObservedPage` | `url` | any page |
+| `NetworkRequest` | `NetworkRequest` | `RequestFilter`; `next` requires `url` | any page or context |
+| `NetworkResponse` | `NetworkResponse`, or `CapturedResponse<B>` given `body` | `url`, `method`, `status`; `next` requires `url`. `body` (`Body.json(schema)`, `Body.text`, `Body.bytes`) and `where` need inspect and apply to `next` and `stream` | any page or context |
+| `ConsoleMessage` | `ConsoleMessage` | `level`, `text` | any page or context |
+| `UncaughtException` | `UncaughtException`: thrown errors and unhandled rejections | `message` | any page or context |
+| `Dialog` | `Dialog` | `_tag` | any page; `Dialog.handle` needs `Page` |
+| `FileChooser` | `FileChooser` | — | `Page` |
+| `Download` | `Download` | `url` | `Page` or `BrowserContext` |
+| `AutoResolution` | `AutoResolution`: an obligation decided by a default policy | — | `Page` or `BrowserContext` |
+
+Each module has the most specific accurate name, with a prefix only where a bare name would clash with the fetch `Request`/`Response` or DOM `Navigation` globals. `ConsoleMessage` avoids Effect's `Console`, and `UncaughtException` avoids our `PageError` and the `*Error` suffix our failures use.
+
 **Events:**
-- **Every event observation is eager.** `.pending` and `.stream` are subscribed by the time their effect returns, and the trigger form subscribes before it runs the trigger. Filters apply before buffering, so unrelated traffic can't overflow a subscription.
-- **Completing around a trigger.** Both the trigger and the first match must complete, and a trigger failure is never discarded. If the owner (page or context) ends normally before a match, the observation fails promptly with `TargetGone` rather than waiting for its deadline.
-- **Results outlive the observation.** A captured response body is owned bytes, so it survives the observation and even the page closing. A `Pending`'s deadline starts when it is awaited, not when it is armed.
+- **Subscribe, act, collect.** `next` and `stream` are subscribed by the time their effect returns, so code order is subscription order, and one action can have several outcomes. Filters apply before buffering, so unrelated traffic can't overflow a subscription.
+- **A late subscription is diagnosed, not hidden.** If a match arrived shortly before `next` subscribed, the `Timeout` names it in its hint: "a matching download started 12 ms before `Download.next` subscribed".
+- **`last` and `history` read what already happened.** They never subscribe or wait, so they can't catch what an action causes: right after a click, `Download.last` usually returns the previous download, because the download starts after the click returns. To wait for something that may already have happened, use `Expect.poll` on the read.
+- **Logs are bounded** by `ContextOptions.eventLog` (attached pages use the default), as Playwright's `page.consoleMessages()` and `requests()` are. Entries never decay: metadata is copied, without bodies, and handles live as long as their owner.
+- **Events report; handlers decide.** No event verb decides anything. Obligations are decided by scoped handlers: `page.route`, `Dialog.handle` and `FileChooser.handle`. A dialog blocks its page, so the click that opens one doesn't finish until it is decided, and the handler has to be registered first.
+- **Events reveal resources; they don't acquire them.** A popup belongs to the scope that acquired its opener, and a download's file to its context, so `Popup.next` and `Popup.last` return the same handle with one lifetime. The `Scope` on `next` and `stream` holds only the subscription. Ownership follows the opener: popups of owned pages are owned, and popups of attached pages stay open.
+- **Results outlive the subscription.** A captured response body is owned bytes, so it survives the subscription and even the page closing. A `Pending`'s deadline starts when it is awaited, not when it subscribes. If the owner (page or context) ends normally before a match, awaiting fails promptly with `TargetGone` rather than waiting for its deadline.
 - **Event streams end** normally when their owner ends normally or the acquiring scope closes. They fail with `TargetGone` on an abnormal end, and with `EventOverflow` past their bound.
-- **Popups.** A popup from `page.events.popup` is acquired into the caller's `Scope`. A popup nobody asked for is released with the scope that acquired its opener. Ownership follows the opener: popups of owned pages are owned, and popups of attached pages stay open.
 
 **State:**
 - **Watching gives you the present, not the past.** `changes` starts with the current value and conflates, so intermediate stages can be skipped. To see transitions from the beginning, subscribe before the cause, or fork the consumer right after you get the handle.
 - **Waits are level-triggered.** `waitFor` checks the current value and then the changes, so skipped stages don't matter.
 - **The terminal state is data.** `changes` emits the terminal state (`Closed{reason}`, `Completed`, …) last and then ends. It doesn't fail, because the union already says why it ended.
-- **Only state the model folds from protocol events is watchable.** Reads that need a round trip (DOM reads, `title`) stay plain `Effect`s rather than hiding a poll.
+- **Only state the model folds from protocol events is watchable.** Reads that need a round trip (DOM reads, `title`) stay plain `Effect`s rather than hiding a poll. An event log is not state: its changes are just the events again, and a level-triggered wait on it would match old events.
 
 ## Network
 
 ```ts
 type RouteHandler<E, R> = (request: InterceptedRequest) => Effect<RouteDecision, E, R>   // E is logged; the default decision applies
 interface InterceptedRequest {
-  readonly request: RequestSnapshot                      // fixed: the request as paused at this phase
+  readonly request: NetworkRequest                       // fixed: the request as paused at this phase
   readonly fetch: Effect<FetchedResponse, RouteError>     // perform it, then patch the response
   fetchWith(overrides: RequestOverrides): Effect<FetchedResponse, RouteError>
 }
@@ -535,9 +524,19 @@ type Dialog =                                          // each shape offers only
       respond(text: string): DialogDecision
       readonly dismiss: DialogDecision }
   | { readonly _tag: "BeforeUnload"; readonly leave: DialogDecision; readonly stay: DialogDecision }
-declare const Dialog: {                                  // ready-made handlers; match on _tag for anything finer
+declare const Dialog: EventModule<ObservedPage, Dialog, DialogFilter> & {
+  handle<E, R>(page: Page, handler: (dialog: Dialog) => Effect<DialogDecision, E, R>): Effect<HandlerRegistration, DeclarationError, Scope | R>
+  // ready-made handlers; match on _tag for anything finer
   readonly acceptAll: (dialog: Dialog) => Effect<DialogDecision>    // Alert/Confirm/Prompt: accept; BeforeUnload: leave
   readonly dismissAll: (dialog: Dialog) => Effect<DialogDecision>   // Alert: accept; Confirm/Prompt: dismiss; BeforeUnload: stay
+}
+
+type FileChooser =                                     // doesn't pause the page; Cancel when no handler decides
+  | { readonly _tag: "Single"; select(file: FileInput): FileChooserDecision; readonly cancel: FileChooserDecision }
+  | { readonly _tag: "Multiple"; select(files: ReadonlyArray<FileInput>): FileChooserDecision; readonly cancel: FileChooserDecision }
+declare const FileChooser: EventModule<Page, FileChooser, never> & {
+  handle<E, R>(page: Page, handler: (chooser: FileChooser) => Effect<FileChooserDecision, E, R>): Effect<HandlerRegistration, DeclarationError, Scope | R>
+  choose(files: FileInput | ReadonlyArray<FileInput>): (chooser: FileChooser) => Effect<FileChooserDecision, ActionError>   // fails on a Single chooser given several files, so Cancel applies
 }
 
 interface Download {
@@ -549,7 +548,7 @@ interface Download {
   readonly finished: Effect<void, DownloadError>          // status.waitFor(finished), under the deadline
   readonly stream: Stream<Uint8Array, DownloadError>
   saveAs(path: LocalPath | string): Effect<void, DownloadError>   // always a local path; transfers from a remote browser where supported
-  // the browser-side file is deleted when the acquiring scope closes, unless the backend's download policy keeps it
+  // the browser-side file is deleted when its context closes, unless the backend's download policy keeps it; saveAs copies it out first
 }
 
 declare const StorageState: {
@@ -557,7 +556,7 @@ declare const StorageState: {
 }
 ```
 
-- **Default dialog policy.** It is explicit and has no delay. A context's `dialogs` option (`"dismiss"`, the default for owned contexts; `"accept"`; or `"leaveOpen"`) decides immediately when no handler claims a dialog. `beforeunload` is accepted under `"dismiss"`, so closing never hangs. On attached pages there is no default unless the caller sets one. Every automatic decision is published on `page.events.autoResolutions` and recorded on the operation that was running.
+- **Default dialog policy.** It is explicit and has no delay. A context's `dialogs` option (`"dismiss"`, the default for owned contexts; `"accept"`; or `"leaveOpen"`) decides immediately when no handler claims a dialog. `beforeunload` is accepted under `"dismiss"`, so closing never hangs. On attached pages there is no default unless the caller sets one. Every automatic decision is an `AutoResolution` event and is recorded on the operation that was running.
 - **Waiting on a dialog.** An operation blocked by a dialog that a handler or the policy is resolving waits within its deadline, normally just a round trip. Under `"leaveOpen"` it fails immediately with a hint naming the dialog.
 - **Storage state.** `context.exportStorageState` returns the full restorable state as `Redacted<Uint8Array>`. Writing it somewhere is an explicit, visible step. Diagnostic JSON of a context never contains secrets.
 
@@ -745,7 +744,7 @@ class TargetGone extends Schema.TaggedError<TargetGone>()("TargetGone", {
 class Timeout extends Schema.TaggedError<Timeout>()("Timeout", {
   operation: Schema.String,
   phase: Schema.Literals(["resolving", "waitingForCondition", "dispatchedUnconfirmed", "postcondition"]),
-  last: Schema.Option(Observation), history: Schema.Array(Observation), diagnostics: Diagnostics }) {}
+  last: Schema.Option(ObservedValue), history: Schema.Array(ObservedValue), diagnostics: Diagnostics }) {}
 class ActionError extends Schema.TaggedError<ActionError>()("ActionError", {
   action: Schema.String,
   reason: Schema.Union([StrictViolation, NotEditable, InvalidSelector, InvalidOption, NotPermitted, Unsupported, BackendFailure]),
@@ -783,20 +782,27 @@ const state = yield* Effect.scoped(Effect.gen(function* () {
 const page = yield* browser.newPageWith({ storageState: yield* StorageState.import(state) })
 
 // 2. Click, then wait for a named outcome
-const [, nav] = yield* page.getByRole("link", { name: "Orders" }).click.pipe(
-  page.events.navigationWith({ url: "**/orders" }))
+const orders = yield* PageNavigation.next(page, { url: "**/orders" })   // subscribed before the click
+yield* page.getByRole("link", { name: "Orders" }).click
+const nav = yield* orders
 
 // 3. Popup with a dialog inside it
-const [, popup] = yield* page.getByText("Connect account").click.pipe(page.events.popup)
-yield* popup.getByRole("button", { name: "Allow" }).click.pipe(popup.events.dialog(Dialog.acceptAll))
+const popups = yield* Popup.next(page)
+yield* page.getByText("Connect account").click
+const popup = yield* popups                              // a Page, owned by the scope that acquired `page`
+yield* Dialog.handle(popup, Dialog.acceptAll)            // a dialog blocks its page, so the decision is registered first
+yield* popup.getByRole("button", { name: "Allow" }).click
 
-// 4 + 9. Response body, decoded and filtered, without ordering subscriptions by hand
-const [, res] = yield* page.getByRole("button", { name: "Add to cart" }).click.pipe(
-  page.events.response({ url: "**/api/cart", method: "POST", body: Body.json(Cart),
-    where: (r) => Effect.succeed(r.body.items.length > 0) }))
+// 4 + 9. Response body, decoded and filtered
+const added = yield* NetworkResponse.next(page, { url: "**/api/cart", method: "POST", body: Body.json(Cart),
+  where: (r) => Effect.succeed(r.body.items.length > 0) })
+yield* page.getByRole("button", { name: "Add to cart" }).click
+const res = yield* added                                 // CapturedResponse<Cart>
 
 // 5. Download
-const [, file] = yield* page.getByText("Export CSV").click.pipe(page.events.download)
+const download = yield* Download.next(page)
+yield* page.getByText("Export CSV").click
+const file = yield* download
 yield* file.saveAs("./export.csv")
 
 // 6. Concurrent pages, settings isolated by context
@@ -819,7 +825,7 @@ yield* Effect.scoped(Effect.gen(function* () {
 }))                                                     // route and access released; both tabs stay open
 
 // 8. Log requests until the page closes
-const requests = yield* page.events.requests.stream     // subscribed now, so nothing is missed
+const requests = yield* NetworkRequest.stream(page)     // subscribed now, so nothing is missed
 yield* requests.pipe(
   Stream.filter((r) => r.resourceType === "fetch"),
   Stream.runForEach((r) => Console.log(r.method, r.url)),
@@ -841,17 +847,23 @@ yield* page.locator("button[").click.pipe(              // invalid selector: imm
   Effect.catchReason("ActionError", "InvalidSelector", (e) => Console.log(e.message)))
 yield* page.getByRole("button", { name: "Pay" }).click.pipe(Browser.withTimeout("5 seconds"))
 
-// 13. Arm now, collect later, across several steps
-const cart = yield* page.events.response({ url: "**/api/cart" }).pending
-yield* page.getByRole("button", { name: "Add to cart" }).click
-yield* page.getByRole("button", { name: "Checkout" }).click
-const placed = yield* cart                               // latched, even if it arrived during the clicks
+// 13. One action, several outcomes, collected later
+const checkout = yield* Popup.next(page)
+const order = yield* NetworkResponse.next(page, { url: "**/api/order" })
+yield* page.getByRole("button", { name: "Pay" }).click
+const [tab, placed] = yield* Effect.all([checkout, order])   // each latched, even if it arrived during the click
 
 // 14. Watch state while doing other work
-const [, report] = yield* page.getByText("Export PDF").click.pipe(page.events.download)
+const pdf = yield* Download.next(page)
+yield* page.getByText("Export PDF").click
+const report = yield* pdf
 yield* report.status.changes.pipe(Stream.runForEach(renderProgress), Effect.forkScoped)   // fork first: watching shows the present
 yield* page.status.waitFor((s) => s._tag === "Open" && s.document.readiness === "complete")
 yield* report.finished
+
+// 15. What already happened: reads, not subscriptions
+const errors = yield* UncaughtException.history(page)   // EventLog: entries, oldest first, and how many were dropped
+const lastCart = yield* NetworkResponse.last(page, { url: "**/api/cart" })   // Option<NetworkResponse>; metadata only
 ```
 
 ## Open questions

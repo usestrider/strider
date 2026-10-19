@@ -88,7 +88,7 @@ These run against synthetic protocol traffic with an injected clock. They check 
 ```ts
 FakeBrowser.timeline("--resp(cart)--commit--load--|", ({ page }) =>
   Effect.gen(function* () {
-    const cart = yield* page.events.response({ url: "**/api/cart" }).pending   // armed at tick 0
+    const cart = yield* NetworkResponse.next(page, { url: "**/api/cart" })     // subscribed at tick 0
     yield* TestClock.adjust("20 millis")                                       // the response arrives at tick 2
     expect((yield* cart).url).toContain("/api/cart")                          // latched before the await
   }))
@@ -107,8 +107,10 @@ Tokens map to fold inputs: `resp(name)`, `req(name)`, `commit`, `load`, `dialog(
 - **Ambiguity and dialogs:** ambiguity fails immediately with candidates and a visibility hint, and the dialog policy decides with no delay.
 - **State and events:**
   - a `Watchable` subscribed late sees the present, and `waitFor` succeeds even after intermediate stages were skipped;
-  - a `.pending` latches a match that arrives before the await;
-  - a `.stream` acquired before the trigger misses nothing;
+  - a `next` latches a match that arrives before the await;
+  - a `stream` acquired before the trigger misses nothing;
+  - a `next` subscribed just after its match times out with a hint naming that match;
+  - `history` keeps the newest entries past the cap and counts the rest in `dropped`;
   - `changes` ends after the terminal state.
 - **Ownership ledger:** persisted candidates never trigger automatic cleanup.
 - **Types:** API sketches preserve caller `E` and `R`.

@@ -16,7 +16,7 @@ Each layer document has the same shape: purpose, top data models, interface sket
 | Layer | Document | What it covers |
 |---|---|---|
 | — | [README.md](README.md) | goals, principles, cross-cutting decisions, guarantees |
-| L2 | [API.md](API.md) | the public API: entry points, pages, locators, actions, expectations, observation, network, clock, agents, testing, errors, call sites |
+| L2 | [API.md](API.md) | the public API: entry points, pages, locators, actions, expectations, state and events, network, clock, agents, testing, errors, call sites |
 | L1 | [CONCEPTS.md](CONCEPTS.md) | the native browser model: identities, data models, lifetimes, contracts |
 | L0 | [PROTOCOL.md](PROTOCOL.md) | transports, protocol clients, code generation, ingestion, backend adapters, capabilities |
 | — | [PROBES.md](PROBES.md) | conformance probes, hazard coverage, deterministic model tests |
@@ -24,7 +24,7 @@ Each layer document has the same shape: purpose, top data models, interface sket
 | — | [reviews/](reviews/) | design reviews, one per draft |
 
 ```
-L2  API       Browser · BrowserContext · Page · Locator · Expect · Watchable · Observation · Route · Clock · Trace · Har · Toolkit · BrowserTest
+L2  API       Browser · BrowserContext · Page · Locator · Expect · Watchable · event modules · Route · Clock · Trace · Har · Toolkit · BrowserTest
 L1  Model     ids · navigables · documents · realms · navigations · requests · obligations · declarations · readiness
 L0  Protocol  transports · sessions · generated commands and events · ingestion · backend adapters · capabilities
 ```
@@ -37,7 +37,7 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 2. **Lifetimes are scopes with typed end reasons.** Three separate decisions govern every remote resource: how much we may do to it (access), whether we may destroy it (release policy), and which scope cleans it up (cleanup group). Anything with a lifecycle is acquired into a `Scope`.
 3. **Interruption stops waiting; it never pretends to cancel.** No protocol can cancel an in-flight command. Interrupting abandons the reply and runs compensations (release held input, resolve paused requests). Whether a mutation reached the browser is recorded as evidence.
 4. **State is folded before it is published.** Events update the model in order before anyone observes them. Losing integrity (overload, an undecodable lifecycle event) is an explicit failure, never a silent drop.
-5. **Subscribe before trigger, structurally.** Every "wait for X caused by Y" subscribes before Y runs, and no API makes users order these themselves.
+5. **Subscribe before trigger, visibly.** Every "wait for X caused by Y" subscribes before Y runs. Subscribing is its own step (`Download.next(page)`) written before the action, so the order is in the code, and a subscription made too late times out with a hint naming the match it missed.
 6. **Obligations get exactly one decision.** Paused requests, dialogs and file choosers get one locally selected decision, a default when handlers fail, and tracked remote acknowledgement.
 7. **Capabilities belong to instances.** A missing capability is a typed `Unsupported` reason or a missing method, never a silent no-op.
 8. **Protocol features are demand-driven.** Domains and subscriptions are reference-counted, so a stealth configuration that never enables `Runtime` remains possible.
@@ -48,14 +48,14 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 13. **Immutable by default; mutable state lives in a `Ref` and is read through an `Effect`.** Entities are immutable identity plus one `SubscriptionRef` of state. Snapshots, events and errors are immutable. Nothing that can change is exposed as a plain field, so every read happens at the moment its effect runs. A plain field on a live handle or entity is a claim that it never changes, so it carries a one-line justification.
 14. **Brand liberally.** Ids and meaningful strings and numbers are branded types with validating schemas (`Url`, `UrlPattern`, `HttpStatus`, `LocalPath`/`RemotePath`, `CssPixels`, …). Outputs are always branded. Tokens are accepted back only in branded or opaque form, and are checked against their origin when used. These are produced values that only mean something relative to where they came from: ids, snapshot refs, registration handles. Other inputs require the brand where meanings could be confused, and otherwise parse plain strings at the boundary.
 15. **Unions of valid models; `Option` for what's truly optional.** Fields that only make sense together form a tagged union of valid shapes, so impossible states can't be built. Genuinely optional values are `Option`, never `?:`, `undefined` or `null`. Input option bags keep `?:` for "use the default", and their mutually exclusive alternatives are unions.
-16. **State is watchable; events are observed.** A `Watchable` reads now, streams changes (conflated, starting from the current value) and waits level-triggered. An `Observation` is subscribed eagerly and comes in three forms: around a trigger, `.pending` (arm now, await later) and `.stream` (every match). Watching shows the present; to see events from the beginning, subscribe before their cause.
+16. **State is watchable; each event type is a module.** A `Watchable` reads now, streams changes (conflated, starting from the current value) and waits level-triggered. An event module (`Popup`, `Download`, `NetworkResponse`, …) has four verbs: `next` (subscribe now, await the first match later) and `stream` (every match from now on) subscribe eagerly; `last` and `history` read a bounded log and never wait. Events report and handlers decide, and seeing an event acquires nothing.
 17. **No public fibers, no writable `Deferred`s or `Ref`s.** Callers own concurrency (`Effect.forkScoped`). The library exposes only read-only views of what it latches and stores.
-18. **Names encode behavior.** Verbs act, `read*`/`is*`/nouns read once, `Expect.to*` retries, `events.*` observes, `on*` registers a handler, `new*` creates, `*With` configures a member, `with*` configures any effect (grammar in API.md).
+18. **Names encode behavior.** Verbs act, `read*`/`is*`/nouns read once, `Expect.to*` retries, `next`/`stream` subscribe to events, `handle` registers a deciding handler, `new*` creates, `*With` configures a member, `with*` configures any effect (grammar in API.md).
 19. **Every scoped acquisition returns a handle.** Never `void`: registrations have `remove` and, where useful, state such as `hits`.
 20. **Every effect ends.** Waits run under the operation deadline, open-ended things are `Stream`s, and lifetime signals (`closed`) are the only exception.
 21. **Every error reason carries a hint.** The rendered message says what to do next.
 22. **One way to do each thing.** No aliases or parallel mechanisms. A convenience is allowed only at the dominant call site, and is documented as its expansion.
-23. **Explicit over implicit.** Nothing hidden may change behavior or add waiting: no magic delays, grace periods or heuristic windows by default. Such behavior is asked for in code (an `Expect`, a `waitFor`, an observation, a named option). Helpers that make explicit behavior simpler are welcome, but they stay opt-in. Actionability waiting is the documented, adjustable contract of each action, not a heuristic.
+23. **Explicit over implicit.** Nothing hidden may change behavior or add waiting: no magic delays, grace periods or heuristic windows by default. Such behavior is asked for in code (an `Expect`, a `waitFor`, a `next`, a named option). Helpers that make explicit behavior simpler are welcome, but they stay opt-in. Actionability waiting is the documented, adjustable contract of each action, not a heuristic.
 
 ## Cross-cutting decisions
 
@@ -65,7 +65,7 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 |---|---|---|---|
 | Launched browser | control | close the process | the `Browser` layer |
 | Context or page created by the library | control | close / remove | the `Scope` it was acquired in |
-| Popup of an owned page | control | close | the `Scope` that observed it; otherwise the opener's |
+| Popup of an owned page | control | close | the `Scope` that acquired its opener |
 | Attached browser | — | disconnect only | the `Browser` layer |
 | Discovered page or the default context | observe; upgrade with `inspect` or `control` (scoped) | leave open | none; the access upgrade is released with its `Scope` |
 | Popup of a leave-open page | observe | leave open | none |
@@ -121,6 +121,13 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.19** replaced `page.events.*` with a module per event type:
+  - `PageNavigation`, `Popup`, `NetworkRequest`, `NetworkResponse`, `ConsoleMessage`, `UncaughtException`, `Dialog`, `FileChooser`, `Download` and `AutoResolution`, each with the most specific accurate name and a prefix only where a bare name would clash;
+  - four verbs each: `next` and `stream` subscribe from now on; `last` and `history` read a bounded event log and never wait;
+  - the trigger form is gone. Subscribing is a visible step before the action (principle 5 reworded), and a late subscription times out with a hint naming the match it missed;
+  - events report and handlers decide: `Dialog.handle` and `FileChooser.handle` replace `onDialog` and the deciding observations;
+  - seeing an event acquires nothing: a popup belongs to its opener's scope and a download's file to its context;
+  - `Navigation`, `RequestSnapshot` and `ResponseSnapshot` became `PageNavigation`, `NetworkRequest` and `NetworkResponse` at L2.
 - **Revision 5.18** settled testing:
   - Vitest ships first, with runner specifics behind one per-test service (`TestRun`), so that moving to Sebastian Lorenz's `@effect/test` later is a new adapter;
   - traces open in Playwright's trace viewer, and HAR recording and replay are explicit, with `update` removed;
@@ -165,7 +172,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
 - **Revision 5.8** adopted rules 18–22. Registrations now return handles (`Registration`, `RouteRegistration` with `hits`, `HandlerRegistration`), error reasons carry hints, and the API has a naming grammar.
 - **Revision 5.7** split state from events:
   - `Watchable` for state: page status, URL, frames, download progress, page lists, capabilities.
-  - `Observation` under `page.events.*` for events, in three forms: around a trigger, `.pending` and `.stream`.
+  - `Observation` under `page.events.*` for events, in three forms: around a trigger, `.pending` and `.stream` (superseded in 5.19 by event modules).
   - This replaces the free-floating `Observe.*` combinators, which never said what they observed, and the lazily subscribed `page.events` streams, which could race their cause.
   - It also adds the no-public-fibers and no-writable-`Deferred` rules, informed by RxJS's hot/cold and subject lessons.
   - The names `Watchable` and `Observation` are settled.
@@ -191,7 +198,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
   - finding 4, page time as one timeline per scope: CONCEPTS.md, API.md;
   - finding 5, dependencies only on equal-or-broader scope: CONCEPTS.md;
   - finding 6, stable ambiguity fails early: API.md (superseded in 5.11: ambiguity fails immediately);
-  - finding 7, dual `Observe` combinators that return both values: API.md;
+  - finding 7, dual `Observe` combinators that return both values: API.md (superseded in 5.19: event modules);
   - finding 8, diagnostic presets: Diagnostics above;
   - the smaller items: CONCEPTS.md.
-- **Next:** a consistency review (draft 5) of revisions 5.1–5.18, then L0: the codegen pipeline, the transports and the conformance probes (PROBES.md) against Chrome and Firefox. Compiling the API sketches against stub types is an optional cheap check of the error-channel and `E`/`R` claims.
+- **Next:** a consistency review (draft 5) of revisions 5.1–5.19, then L0: the codegen pipeline, the transports and the conformance probes (PROBES.md) against Chrome and Firefox. Compiling the API sketches against stub types is an optional cheap check of the error-channel and `E`/`R` claims.

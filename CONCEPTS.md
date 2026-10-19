@@ -250,7 +250,7 @@ Browser lifetime + cleanup scope
       ├─ Realms (linked to documents)
       ├─ navigation and operation records
       └─ obligation managers
-Caller scopes own handles, subscriptions, observation windows and declarations.
+Caller scopes own handles, subscriptions and declarations.
 Cleanup groups can span sibling pages, independently of this graph.
 ```
 
@@ -263,8 +263,8 @@ Cleanup groups can span sibling pages, independently of this graph.
 - **Release and cleanup groups.**
   - Created resources are `Owned`.
   - The default context and pages that existed at attach are `LeaveOpen`.
-  - **Every acquisition requires a `Scope`, and that scope is the cleanup group.** This covers contexts, pages, access upgrades, popups, downloads, handles, capability handles and every declaration. Values with no remote lifetime (locators, snapshots, captured bodies) need none. An early `close` makes the finalizer a no-op.
-  - A popup of an owned page is released with the scope that observed it (`page.events.popup`). If nobody asked for it, it is released with the scope that acquired its opener, even if the opener has already closed. A popup of a `LeaveOpen` page is `observe`/`LeaveOpen`.
+  - **Every acquisition requires a `Scope`, and that scope is the cleanup group.** This covers contexts, pages, access upgrades, handles, capability handles and every declaration. Values with no remote lifetime (locators, snapshots, captured bodies) need none. An early `close` makes the finalizer a no-op.
+  - **Seeing an event acquires nothing.** A popup of an owned page is released with the scope that acquired its opener, even if the opener has already closed; subscribing to it changes nothing. A popup of a `LeaveOpen` page is `observe`/`LeaveOpen`. A download's file belongs to its context.
   - Transfer to another scope is explicit and atomic with respect to shutdown. Ambiguous opener evidence never implies ownership.
 - **Ownership ledger.** The connection records owned resources, groups and transfers. A persisted ledger yields *reclamation candidates* only. Automatic destructive reclaim across connections needs verified browser incarnation, resource identity and claimant coordination, and is deferred.
 - **Requesting a close is not ending a lifetime.** `closeWith({runBeforeUnload: true})` can be refused (`CloseCanceled`), and the page stays usable. A close timeout leaves closure unconfirmed rather than fabricating `PageClosed`. Teardown of owned resources uses a bounded close without beforeunload.
@@ -428,14 +428,13 @@ Compatible instantaneous checks are batched in one injected evaluation. No batch
 | obligation decision | fallback applies | resolver continues | no contradictory decision |
 | resource creation | nothing created | may exist | late-reply adoption or cleanup |
 
-- **Observation windows.** A window is the internal resource behind every event observation (`page.events.*`) in all three modes: around a trigger, `.pending` and `.stream`.
-  - **Before the trigger:** it acquires subscriptions, collectors and handlers, including remote enablement. If that fails, the trigger never runs.
+- **Subscriptions.** A subscription is the internal resource behind an event module's `next` and `stream`.
+  - **Before it returns:** it acquires collectors and remote enablement, so the caller's next line already runs subscribed. If that fails, the caller gets `ObserveError` before reaching its action.
   - **Revision boundary:** it sets one between the current-state snapshot and the live subscription.
-  - **Concurrency:** handlers run alongside the trigger.
   - **Correlation:** by the strongest identity available.
-  - **Completion:** both the trigger and the observation must complete. A trigger failure is never discarded, and caller `E` and `R` are preserved.
   - **Owner ends without a match:** fails promptly.
-  - **Results:** a latched immutable result outlives the window.
+  - **Results:** a latched immutable result outlives the subscription.
+- **Event logs.** Each page and context keeps a bounded log per event kind, fed by the same fold as subscriptions. Entries are copied metadata or handles to resources owned elsewhere, never collected bodies, so nothing in a log decays. A log counts what it drops. Logs serve `last` and `history`, and the hint on a late subscription's `Timeout`, which names a match that arrived just before it subscribed.
 - **Deadline.** There is one monotonic deadline per operation, inherited by nested calls and only ever shortened. Cleanup has its own budget. Deadline failures are `Timeout{phase}`, carrying the last observation and its de-duplicated history.
 - **Retries.** Retry decisions depend on the operation, its phase, the target binding, dispatch evidence and the remaining deadline, never on an error tag alone.
   - Locators re-resolve before dispatch.
@@ -449,7 +448,7 @@ Compatible instantaneous checks are batched in one injected evaluation. No batch
     - `waitFor` is level-triggered;
     - a late subscriber sees the present, not the past, which is safe because waits are level-triggered;
     - only state folded from protocol events is watchable.
-  - **Events** (`Observation`) are subscribed eagerly. The subscription is live when the acquiring effect returns, or before the trigger runs; a lazily subscribed event stream would race its own cause. Event streams are lossless up to a bound.
+  - **Events** are subscribed eagerly: the subscription is live when `next` or `stream` returns, because a lazily subscribed event stream would race its own cause. Event streams are lossless up to a bound. Reading the event log (`last`, `history`) never waits.
   - **Normal end:** an event stream owned by an object ends successfully when the object ends normally, after draining what was already published.
   - **Abnormal end:** it fails with `TargetGone` on abnormal ends and with `EventOverflow` on overflow.
   - **Filtering:** declarative metadata prefilters run before buffering. Caller predicates run in subscriber workers, never on the ingestion path.
