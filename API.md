@@ -1,6 +1,6 @@
 # API: the ergonomic layer (L2)
 
-*Revision 5.2, 2026-10-18. These are sketches: names and signatures are provisional, nothing is implemented, and the types show shape rather than compile-verified code. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
+*Revision 5.21, 2026-10-19. These are sketches: names and signatures are provisional, nothing is implemented, and the types show shape rather than compile-verified code. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
 
 ## Purpose
 
@@ -15,33 +15,32 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
 
 ## Conventions
 
-- **If it doesn't have to be a function, it isn't one.**
-  - A member that takes no arguments is a value: an `Effect` for operations (`locator.click`, `page.reload`, `browser.newPage`, `tab.inspect`), a plain property for pure derivations (`locator.first`).
-  - A member whose parameters are all optional is the default value plus an `xWith(options)` function: `locator.click` / `locator.clickWith({ button: "right" })`.
-  - A member with required arguments is a function and may take trailing options: `goto(url)`, `fill(value)`, `dragTo(target, options)`.
-- **Cross-cutting settings are dual combinators, not option fields.** Timeouts and diagnostics apply to any effect: `button.click.pipe(Browser.withTimeout("5 seconds"))`. Option bags hold only what is specific to the operation.
-- **Anything with a lifecycle requires `Scope`.**
-  - **What it covers:** contexts, pages, access upgrades, handles, capability handles and every declaration (routes, dialog and file-chooser handlers, init scripts, overrides, clocks). Each is acquired into the caller's `Scope` and released when that scope closes.
-  - **Seeing an event acquires nothing.** A popup belongs to the scope that acquired its opener, and a download's file to its context.
-  - **What doesn't need it:** values with no remote lifetime (locators, snapshots, captured bodies, storage-state bytes).
-  - **Early release** (`page.close`) is always possible; the finalizer then does nothing.
-- **Handles get members; decorators are dual combinators.** `Expect.*` and `Browser.with*` work both data-first and in `pipe`.
-- **State is a `Watchable`; each event type is a module** (see State and events). State can be read at any time and waited on safely. Events are not page members: `Download.next(page)` subscribes, and the action that causes the download comes on the next line.
-- **No public fibers, no writable `Deferred`s or `Ref`s.** The library never forks on the caller's behalf and never returns a `Fiber`. Callers fork their own consumers with `Effect.forkScoped`. Internally, `Deferred`s latch results and `SubscriptionRef`s hold state, but only read-only views cross the API.
-- **No platform services at call sites.** Platform services appear only in the launch and connect layers, so `Scope` is the only requirement an ordinary call site can see.
-- **Immutable by default; mutable state is read through an `Effect`.** Handles, locators, snapshots, events and errors are immutable values. Anything that can change is never a plain field: `page.url`, `page.title`, `browser.capabilities`, page lists, and whether a handle still holds its access. Such reads are `Effect`s, evaluated when they run, so they can't go stale in a variable. Changes arrive on a `Watchable`'s `changes`. Internally this state lives in a `SubscriptionRef` (CONCEPTS.md §2), which the public API never exposes for writing. Mutability is avoided wherever an immutable value can do.
-- **Plain fields on live handles must be fixed, and say why.** A live handle (browser, context, page, frame, download, intercepted request) may expose a plain field only if the value can't change for the handle's lifetime. Each such field carries a one-line justification. Ids, `closed` and sub-handles bound to their parent (`keyboard`, `mouse`, `clock`, whose own state is again read through `Effect`s) are exempt by construction. A field that can't be justified becomes an `Effect`. Immutable values (snapshots, locators, navigations, dialogs) are exempt entirely.
-- **Brand liberally.** Every id and every meaningful string or number is a branded type (CONCEPTS.md §1): `Url`, `UrlPattern`, `HttpStatus`, `HeaderName`, `LocalPath`/`RemotePath`, `CssPixels`/`DevicePixels`, `Locale`, `RefId`, …
-  - **Outputs** are always branded.
-  - **Inputs** require the brand where two meanings could be confused at one call site: local vs remote paths (`File.local` / `File.remote`), CSS vs device pixels.
-  - **Elsewhere, inputs accept a plain string** when the member name already fixes its meaning (`goto(url)`, `route(pattern)`). The string is parsed at the boundary, and a bad one fails immediately with an invalid-input reason, never by waiting.
-  - **Tokens are never accepted as plain strings.** A token is a produced value whose meaning depends on where it came from: ids, snapshot refs, document generations, registration handles such as `InitScript`, operation ids. It is accepted only in its branded or opaque form. A brand doesn't prove provenance, so tokens are also checked against their origin when used: a `RefId` from another snapshot or document fails with `StaleRef`, and an `InitScript` from a closed scope fails as a dependency. Values whose meaning is intrinsic (`Url`, `HttpStatus`) round-trip freely.
-- **Unions of valid models; `Option` for what's truly optional.** Everything the library returns is a tagged union of its valid shapes rather than a record with optional fields: navigations, dialogs, request initiators, ownership. Genuinely optional values are `Option`, never `?:`, `undefined` or `null`. Input option bags keep `?:` to mean "use the default", but mutually exclusive alternatives are unions: a route body is JSON *or* text *or* bytes, and a screenshot covers the viewport *or* the full page *or* a clip *or* an element.
-- **Locators are values,** resolved again on every attempt.
-- **Snapshots are named `read*`.** Retrying assertions take locators.
-- **Access is typed.** Pages have three levels and contexts two. There are no type guards for narrowing, because access is a grant held by a `Scope`, not a fact about the page; `.inspect` and `.control` are the only way up. Pages are `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, like `ReadonlyArray` and `Array`. A helper that only reads takes `ReadonlyPage`, and a `Page` is accepted. Calling an action on a page you may only inspect is a compile error, and autocomplete doesn't offer it.
-- **Long, explicit names are fine.** `BrowserContext` avoids a clash with Effect's `Context`.
-- **Names encode behavior.** One grammar, so a call's semantics can be read from its name:
+The README's principles, as they apply to this layer. The reasons live there; these are the rules.
+
+**Members**
+- **If it doesn't have to be a function, it isn't one** (principle 12).
+  - No arguments: a value, which is an `Effect` for operations (`locator.click`, `browser.newPage`, `tab.inspect`) or a plain property for pure derivations (`locator.first`).
+  - All-optional parameters: the default value plus `xWith(options)`, as in `click` / `clickWith({ button: "right" })`.
+  - Required arguments: a function, with trailing options (`goto(url)`, `dragTo(target, options)`).
+- **Handles get members; cross-cutting settings are dual combinators** that work data-first and in `pipe`: `Expect.*` and `Browser.with*`, as in `button.click.pipe(Browser.withTimeout("5 seconds"))`. Option bags hold only what is specific to one operation.
+- **Events are modules, not members.** `Download.next(page)` subscribes, and the action that causes the download comes on the next line (State and events).
+
+**Lifetimes**
+- **Anything with a lifecycle requires `Scope`:** contexts, pages, access upgrades, handles, capability handles and every declaration (routes, dialog and file-chooser handlers, init scripts, overrides, clocks). Values with no remote lifetime (locators, snapshots, captured bodies, storage-state bytes) need none. Seeing an event acquires nothing: a popup belongs to the scope that acquired its opener, and a download's file to its context.
+- **Every scoped acquisition returns a handle,** never `void`, with an idempotent `remove` and, where useful, state such as `hits: Watchable<number>`. Releasing early (`page.close`, `remove`) makes the finalizer a no-op.
+- **No public fibers, and no writable `Deferred`s or `Ref`s.** The library never forks for you; fork your own consumers with `Effect.forkScoped`.
+- **No platform services at call sites.** They appear only in the launch and connect layers, so `Scope` is the only requirement an ordinary call site sees.
+
+**Values and types**
+- **Immutable by default.** Handles, locators, snapshots, events and errors are immutable. Anything that can change is read through an `Effect` or a `Watchable` (`page.url`, `page.title`, `browser.capabilities`, page lists, held access), so it can't go stale in a variable. A plain field on a live handle must be fixed for the handle's lifetime and say why in a comment; ids, `closed` and sub-handles bound to their parent (`keyboard`, `mouse`, `clock`) are exempt.
+- **Brand liberally** (principle 14). Outputs are always branded. Inputs require the brand only where two meanings could be confused (`FileInput.local` / `FileInput.remote`, CSS vs device pixels); elsewhere a plain string is parsed at the boundary and fails at once if it is bad (`goto(url)`, `route(pattern)`). Tokens (ids, refs, generations, registration handles) are accepted only in branded form, and are checked against their origin when used.
+- **Unions of valid models; `Option` for what's truly optional** (principle 15). Input option bags keep `?:` for "use the default", and mutually exclusive inputs are unions: a route body is JSON *or* text *or* bytes.
+- **Access is typed.** `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, like `ReadonlyArray` ⊂ `Array`; contexts have two levels. `.inspect` and `.control` are the only way up, with no type guards, because access is a grant held by a `Scope`. A helper that only reads takes a `ReadonlyPage`, and calling an action on a page you may only inspect is a compile error. A subtype never changes what an inherited member does.
+- **Locators are values,** resolved again on every attempt. The one exception is a ref (`snapshot.ref(id)`), which is pinned to one node and fails with `StaleRef` rather than rebinding.
+
+**Names**
+- **Spec names first; long, explicit names are fine.** `UserContext` is the spec's and BiDi's term, and it avoids a clash with Effect's `Context`. A name gets a prefix only where a bare one would clash (`PageClock` beside Effect's `Clock`, `FileInput` beside the DOM's `File`), and where Effect already has the type, we use Effect's (`Headers` from `effect/http`).
+- **Names encode behavior** (principle 18):
 
   | Form | Meaning | Examples |
   |---|---|---|
@@ -56,16 +55,16 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
   | `with*` (dual) | a cross-cutting setting over any effect | `Browser.withTimeout` |
   | `export*` / `import` | crosses a persistence boundary; carries secrets | `exportStorageState`, `StorageState.import` |
 
-- **Every scoped acquisition returns a handle, never `void`.** Registrations (routes, dialog handlers, init scripts, overrides, clocks) return handles with an idempotent `remove` and, where useful, state such as `hits: Watchable<number>`. You can then release early or inspect without nesting another `Effect.scoped`, and the scope's finalizer becomes a no-op.
-- **Every effect ends.** Each library operation that waits does so under the operation deadline, and anything open-ended is a `Stream` whose consumer decides when to stop. The single exception is lifetime signals (`closed`), which wait exactly as long as the resource lives.
-- **Every error reason carries a hint,** a one-line fix that is shown in the rendered message:
+**Behavior**
+- **Explicit over implicit** (rule 23). Nothing hidden changes behavior or adds waiting: no magic delays, grace periods or heuristic windows. Every default is stated where its option is declared and recorded in the operation's span, and no helper changes a default on your behalf. Actionability waiting is each action's documented contract: named checks, adjustable per call, reported in errors.
+- **Every effect ends.** Waits run under the operation deadline, open-ended things are `Stream`s, and lifetime signals (`closed`) are the only exception.
+- **Every error reason carries a hint,** shown in the rendered message:
   - `NotPermitted`: "call `.control` on this page"
   - `StaleRef`: "refs end with their document; use a locator or take a new snapshot"
   - `Unsupported`: "supported on: chromium (CDP)"
   - `StrictViolation`: "2 matches; try `getByRole('button', { name: 'Save' })`"
   - `Timeout` awaiting a `next`: "a matching download started 12 ms before `Download.next` subscribed; call it before the action that causes it"
-- **Explicit over implicit.** Nothing hidden may change behavior or add waiting. Helpers that make explicit behavior simpler are welcome, but they stay opt-in. That rules out magic delays, grace periods and heuristic windows by default. If you want such behavior, ask for it in code: an `Expect`, a `waitFor`, a `next`, or a named option. Actionability waiting is the documented contract of each action: named checks, adjustable per call, reported in errors. It is not a hidden heuristic.
-- **One way to do each thing.** No aliases, and no parallel mechanisms for the same job (that is why `withPage` went away). A convenience is allowed only where it is the dominant call site and is documented as its expansion: `page.url` is `page.status.map(…)`, `download.finished` is `status.waitFor(…)`, and `browser.newPage` is `newContext` followed by `newPage`.
+- **One way to do each thing** (principle 22). A convenience exists only at the dominant call site, documented as its expansion: `page.url` is `page.status.map(…)`, `download.finished` is `status.waitFor(…)`, and `browser.newPage` is `newContext` followed by `newPage`.
 
 ## Top data models
 
@@ -102,17 +101,17 @@ interface NetworkResponse {                             // immutable; one redire
   readonly hop: RequestHopId
   readonly url: Url
   readonly status: HttpStatus
-  readonly headers: Headers                             // keyed by HeaderName; classified values arrive as Redacted
+  readonly headers: Headers                             // Effect's Headers (effect/http); classified values are redacted
 }
 interface CapturedResponse<B> extends NetworkResponse { readonly body: B }
 
-interface Snapshot {                                    // a structured tree; text is one rendering of it
+interface Snapshot<L extends ReadonlyLocator = ReadonlyLocator> {   // a structured tree; text is one rendering of it; L follows the page's access
   readonly document: DocumentId
   readonly generation: DocumentGeneration
   readonly root: SnapshotNode
-  readonly text: string                                 // Playwright-style YAML aria snapshot, with evidence tags for inferred nodes
+  readonly text: string                                 // the YAML rendering agents already read, plus evidence tags for inferred nodes
   readonly refs: ReadonlyMap<RefId, SnapshotNode>       // already branded
-  ref(id: RefId): Locator                              // lazy, like any locator; its actions fail with StaleRef{reason} once the document or generation moves on
+  ref(id: RefId): L                                    // pinned to one node, never rebound; acting fails with StaleRef{reason} once the document or generation moves on
   diff(previous: Snapshot): Effect<SnapshotDiff, SnapshotDiffError>   // explicit; fails if the documents differ
 }
 interface SnapshotNode {
@@ -152,8 +151,8 @@ import * as Cdp from "effect-browser/cdp"                 // raw generated L0 co
 declare const Chromium: {
   readonly launch: Layer<Browser, LaunchError, ChildProcessSpawner | FileSystem>   // headless Chrome for Testing, temporary profile
   launchWith(options: {
-    readonly headless?: boolean
-    readonly channel?: "stable" | "beta" | "canary"
+    readonly headless?: boolean                          // default true
+    readonly channel?: "stable" | "beta" | "canary"      // default: Chrome for Testing, not an installed channel
     readonly executablePath?: LocalPath | string
     readonly args?: ReadonlyArray<string>
     readonly profile?: LaunchProfile                     // default LaunchProfile.automation
@@ -191,7 +190,7 @@ class Browser extends Context.Service<Browser, BrowserHandle>()("effect-browser/
   // provided by a backend layer (Chromium.launch, Firefox.launch, …)
   // dual combinators over any effect
   static withTimeout: Dual<Duration.Input>            // one budget for everything inside; nested operations share it
-  static withDefaultTimeout: Dual<Duration.Input>     // default budget per operation inside
+  static withDefaultTimeout: Dual<Duration.Input>     // budget per operation inside; 30 seconds unless set, recorded in each span
   static withDiagnostics: Dual<"local" | "strict">
 }
 // Dual<X> = { (x: X): <A, E, R>(self: Effect<A, E, R>) => Effect<A, E, R>; <A, E, R>(self: Effect<A, E, R>, x: X): Effect<A, E, R> }
@@ -199,31 +198,31 @@ class Browser extends Context.Service<Browser, BrowserHandle>()("effect-browser/
 interface BrowserHandle {
   readonly info: BackendInfo                                                         // fixed for the connection
   readonly capabilities: Watchable<CapabilitySet>                                    // refined as probes complete
-  readonly newContext: Effect<BrowserContext, ContextError, Scope>                   // owned; removed when the scope closes
-  newContextWith(options: ContextOptions): Effect<BrowserContext, ContextError, Scope>
+  readonly newContext: Effect<UserContext, UserContextError, Scope>                   // owned; removed when the scope closes
+  newContextWith(options: UserContextOptions): Effect<UserContext, UserContextError, Scope>
   readonly newPage: Effect<Page, PageError, Scope>                                   // a fresh context + page, released together
-  newPageWith(options: ContextOptions): Effect<Page, PageError, Scope>
+  newPageWith(options: UserContextOptions): Effect<Page, PageError, Scope>
   readonly pages: Watchable<ReadonlyArray<ObservedPage>>                             // attach mode: what exists, and changes
-  readonly defaultContext: ObservedContext                                           // fixed: exists for the whole connection
+  readonly defaultContext: ObservedUserContext                                           // fixed: exists for the whole connection
 }
 
-interface ObservedContext {                              // a context we don't control, e.g. the default context when attached
+interface ObservedUserContext {                              // a context we don't control, e.g. the default context when attached
   readonly id: UserContextId
   readonly pages: Watchable<ReadonlyArray<ObservedPage>>
   readonly closed: Effect<CloseReason>
-  readonly control: Effect<BrowserContext, ContextError, Scope>   // explicit; reading storage needs it too
+  readonly control: Effect<UserContext, UserContextError, Scope>   // explicit; reading storage needs it too
 }
-interface BrowserContext extends ObservedContext {        // two levels only: reads happen on pages
+interface UserContext extends ObservedUserContext {        // two levels only: reads happen on pages
   readonly newPage: Effect<Page, PageError, Scope>       // closed with its unsolicited popups when the scope closes
   readonly pages: Watchable<ReadonlyArray<Page>>
   readonly exportStorageState: Effect<Redacted<StorageStateBytes>, StorageStateError>   // branded bytes; a Uint8Array subtype
-  readonly clock: Clock                                  // context-wide timeline (opt-in)
+  readonly clock: PageClock                              // context-wide timeline (opt-in)
   route<E, R>(pattern: UrlPattern, handler: RouteHandler<E, R>): Effect<RouteRegistration, RouteError, Scope | R>
   addInitScript(script: InitScriptSource, options?: InitScriptOptions): Effect<InitScript, DeclarationError, Scope>
   emulate(settings: Emulation): Effect<Registration, DeclarationError, Scope>
 }
 
-interface ContextOptions {
+interface UserContextOptions {                          // an unset option keeps the browser's own value unless a default is stated
   readonly storageState?: StorageState                  // from StorageState.import(bytes)
   readonly dialogs?: "dismiss" | "accept" | "leaveOpen"  // decision when no handler claims a dialog; default "dismiss"
   readonly viewport?: { width: CssPixels | number; height: CssPixels | number }   // CSS pixels by definition
@@ -240,9 +239,10 @@ interface ContextOptions {
 ```ts
 interface ReadonlyPage extends ObservedPage {
   // locators
+  // a string matches as a case-insensitive substring unless exact: true; a RegExp is used as given
   getByRole(role: AriaRole, options?: { name?: string | RegExp; exact?: boolean }): ReadonlyLocator
   getByText(text: string | RegExp, options?: { exact?: boolean }): ReadonlyLocator
-  getByLabel(text: string | RegExp): ReadonlyLocator
+  getByLabel(text: string | RegExp, options?: { exact?: boolean }): ReadonlyLocator
   getByTestId(id: string): ReadonlyLocator
   locator(css: string): ReadonlyLocator
   frame(locator: ReadonlyLocator): ReadonlyFrame         // enters an iframe by its element
@@ -250,7 +250,7 @@ interface ReadonlyPage extends ObservedPage {
   readonly title: Effect<string, ReadError>
   readonly ariaSnapshot: Effect<Snapshot, ReadError>     // the accessibility tree only: what assistive technology sees
   readonly snapshot: Effect<Snapshot, ReadError>         // accessibility tree + inferred interactivity, every inferred node tagged with its evidence
-  snapshotWith(options: { sources?: "aria" | "aria+interactivity"; root?: ReadonlyLocator; depth?: number; interactiveOnly?: boolean }):
+  snapshotWith(options: { sources?: "aria" | "aria+interactivity"; root?: ReadonlyLocator; depth?: number; interactiveOnly?: boolean }):   // defaults: aria+interactivity, the whole page, every level, every node
     Effect<Snapshot, ReadError>                          // size is explicit: no automatic truncation
   readonly screenshot: Effect<Uint8Array, CaptureError>  // viewport, PNG
   screenshotWith(options: {
@@ -259,15 +259,15 @@ interface ReadonlyPage extends ObservedPage {
   }): Effect<Uint8Array, CaptureError>
   readonly pdf: Effect<Uint8Array, CaptureError>
   pdfWith(options: PdfOptions): Effect<Uint8Array, CaptureError>
-  evaluate<Args extends ReadonlyArray<unknown>, A>(    // isolated world: no page globals
+  evaluate<Args extends ReadonlyArray<unknown>, A>(    // the isolated world, on every page: page globals are invisible
     fn: (...args: Args) => A | Promise<A>, ...args: Args
-  ): Effect<A, EvaluationError | TargetGone | Timeout>
+  ): Effect<Serialized<A>, EvaluationError | TargetGone | Timeout>
 }
 
 interface Page extends ReadonlyPage {
-  // the locator members above return Locator (with actions) instead of ReadonlyLocator
-  readonly context: BrowserContext                      // fixed: a page never changes context
-  goto(url: Url | string, options?: { waitUntil?: LoadState; accept?: ReadonlyArray<"download" | "noContent"> }):
+  // the locator and snapshot members above return Locator and Snapshot<Locator> instead of the read-only forms
+  readonly context: UserContext                      // fixed: a page never changes context
+  goto(url: Url | string, options?: { waitUntil?: LoadState; accept?: ReadonlyArray<"download" | "noContent"> }):   // defaults: commit; a download or 204 is a NavigationError
     Effect<PageNavigation, NavigationError | TargetGone | Timeout>
   readonly reload: Effect<PageNavigation, NavigationError | TargetGone | Timeout>
   reloadWith(options: { waitUntil?: LoadState }): Effect<PageNavigation, NavigationError | TargetGone | Timeout>
@@ -275,15 +275,16 @@ interface Page extends ReadonlyPage {
   backWith(options: { waitUntil?: LoadState }): Effect<Option<PageNavigation>, NavigationError | TargetGone | Timeout>
   readonly forward: Effect<Option<PageNavigation>, NavigationError | TargetGone | Timeout>
   forwardWith(options: { waitUntil?: LoadState }): Effect<Option<PageNavigation>, NavigationError | TargetGone | Timeout>
-  evaluate<Args extends ReadonlyArray<unknown>, A>(    // main world
+  evaluateWith<Args extends ReadonlyArray<unknown>, A>(   // the world is always spelled out; the main world needs control
+    options: { readonly world: "isolated" | "main"; readonly userGesture?: boolean },
     fn: (...args: Args) => A | Promise<A>, ...args: Args
-  ): Effect<A, EvaluationError | TargetGone | Timeout>
-  evaluateAs<S extends Schema.Top>(schema: S, fn: (...args: any) => unknown, ...args: ReadonlyArray<unknown>):
-    Effect<S["Type"], EvaluationError | TargetGone | Timeout>
-  evaluateHandle(fn: () => unknown): Effect<JSHandle, EvaluationError | TargetGone | Timeout, Scope>
+  ): Effect<Serialized<A>, EvaluationError | TargetGone | Timeout>
+  evaluateHandle<Args extends ReadonlyArray<unknown>>(    // the isolated world, like evaluate
+    fn: (...args: Args) => unknown, ...args: Args
+  ): Effect<JSHandle, EvaluationError | TargetGone | Timeout, Scope>
   readonly keyboard: Keyboard
   readonly mouse: Mouse
-  readonly clock: Clock
+  readonly clock: PageClock
   route<E, R>(pattern: UrlPattern, handler: RouteHandler<E, R>): Effect<RouteRegistration, RouteError, Scope | R>
   addInitScript(script: InitScriptSource, options?: InitScriptOptions): Effect<InitScript, DeclarationError, Scope>
   emulate(settings: Emulation): Effect<Registration, DeclarationError, Scope>
@@ -291,12 +292,25 @@ interface Page extends ReadonlyPage {
   readonly close: Effect<void, TargetGone | Timeout>     // owned teardown: no beforeunload
   closeWith(options: { runBeforeUnload: boolean }): Effect<void, CloseCanceled | TargetGone | Timeout>
 }
+
+type LoadState = "commit" | "domContentLoaded" | "load"  // goto, reload, back and forward resolve at commit unless waitUntil asks for more
+
+type Serialized<A> =                                   // what actually arrives: defined once, next to our serializer, the same on every backend
+  A extends string | number | boolean | bigint | null | undefined | Date | RegExp ? A
+  : A extends ReadonlyMap<infer K, infer V> ? Map<Serialized<K>, Serialized<V>>
+  : A extends ReadonlySet<infer T> ? Set<Serialized<T>>
+  : A extends ReadonlyArray<infer T> ? Array<Serialized<T>>
+  : A extends Node ? NotSerializable<"DOM nodes don't cross by value; use evaluateHandle">
+  : A extends Function | symbol ? never
+  : { [K in keyof A as A[K] extends Function | symbol ? never : K]: Serialized<A[K]> }   // class instances arrive as their data
 ```
 
 Notes:
 
 - **Evaluated functions cross into the page.** They must be self-contained, and values travel as arguments. A `ReferenceError` from an evaluated function carries a hint saying so.
-- **Evaluation runs by value by default.** Results are serialized and deserialized. `evaluateAs(schema, …)` validates the result. Handles are opt-in and scoped. Running as a user gesture is an option on an `evaluateWith(options, fn, …args)` variant (not shown), where the backend supports it.
+- **One name per world.** `evaluate` always runs in the isolated world, so a helper that takes a `ReadonlyPage` behaves the same when it is given a `Page`. The main world is `evaluateWith({ world: "main" }, …)`, only on `Page`, so it is visible at every call site that uses it. So is running as a user gesture, where the backend supports it.
+- **The type says what arrives.** Results cross by value, typed `Serialized<A>`. To validate a result instead of trusting the function's type, decode it: `.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Cart)))`. Handles are opt-in and scoped.
+- **Navigation resolves at commit.** That is when a navigation has succeeded. Waiting for `domContentLoaded` or `load` is an extra wait you ask for with `waitUntil`, and the span records which state was waited for.
 - **Declarations are scoped registrations.** `route`, `addInitScript`, `emulate`, `Dialog.handle` and `FileChooser.handle` are removed when the caller's scope closes. In `@effect/vitest`'s `it.effect` that scope is already present; elsewhere, use `Effect.scoped`.
 
 ## Locators, actions and actionability
@@ -340,7 +354,7 @@ interface Locator extends ReadonlyLocator {             // chainers and first/la
   readonly clear: Effect<void, ActionError | TargetGone | Timeout>
   fill(value: string | Redacted<string>): Effect<void, ActionError | TargetGone | Timeout>
   press(key: KeyName): Effect<void, ActionError | TargetGone | Timeout>
-  pressSequentially(text: string | Redacted<string>, options?: { delay?: Duration.Input }): Effect<void, ActionError | TargetGone | Timeout>
+  pressSequentially(text: string | Redacted<string>, options?: { delay?: Duration.Input }): Effect<void, ActionError | TargetGone | Timeout>   // delay default 0
   selectOption(values: string | ReadonlyArray<string>): Effect<void, ActionError | TargetGone | Timeout>
   setInputFiles(files: FileInput | ReadonlyArray<FileInput>): Effect<void, ActionError | TargetGone | Timeout>
   dragTo(target: Locator, options?: DragOptions): Effect<void, ActionError | TargetGone | Timeout>
@@ -355,7 +369,7 @@ interface ClickOptions extends PointerOptions {
   readonly trial?: boolean                               // run every check, dispatch nothing
 }
 
-declare const File: {                                    // FileInput: the brand is required, so paths can't be confused
+declare const FileInput: {                               // the brand is required, so paths can't be confused
   local(path: LocalPath | string): FileInput             // read on this machine, uploaded if the browser is remote
   remote(path: RemotePath): FileInput                    // already on the browser's host (BiDi input.setFiles semantics)
   bytes(name: FileName | string, mimeType: MimeType | string, data: Uint8Array): FileInput
@@ -394,23 +408,30 @@ declare const Expect: {
   toHaveValue: DualMatcher<ReadonlyLocator, [expected: string | RegExp]>
   toHaveAttribute: DualMatcher<ReadonlyLocator, [name: string, expected?: string | RegExp]>
   toHaveCount: DualMatcher<ReadonlyLocator, [count: number]>
-  toMatchAriaSnapshot: DualMatcher<ReadonlyLocator, [template: string]>
+  toMatchAria: DualMatcher<ReadonlyLocator, [pattern: AriaPattern]>
   toHaveURL: DualMatcher<ReadonlyPage, [expected: string | RegExp]>
   toHaveTitle: DualMatcher<ReadonlyPage, [expected: string | RegExp]>
-  // the general form: any observable, any condition
-  that<A>(observable: Observable<A>, condition: Condition<A>): Effect<void, ExpectationFailed | TargetGone>
-  poll<A, E, R>(probe: Effect<A, E, R>, condition: Condition<A>): Effect<void, E | ExpectationFailed, R>
-  soft<A, E, R>(self: Effect<A, E, R>): Effect<void, never, R | SoftExpectations>   // failures collected, reported at scope end
-  withInterval: Dual<Duration.Input>                     // re-check interval for conditions with no change signal; default 100 ms
+  // the general form: a subject and a condition
+  //   a Watchable is re-checked on each change; any other Effect is re-run at the interval
+  that<A, E, R>(subject: Effect<A, E, R>, condition: Condition<A>): Effect<void, E | ExpectationFailed | TargetGone, R>
+  withInterval: Dual<Duration.Input>                     // re-check interval for subjects with no change signal; default 100 ms
 }
-declare const Cond: {
+declare const Condition: {
   not<A>(c: Condition<A>): Condition<A>                  // the wait is for the negation, and it passes when the element is missing
   and<A>(...cs: ReadonlyArray<Condition<A>>): Condition<A>   // evaluated against one observation
   because<A>(why: string): (c: Condition<A>) => Condition<A>
 }
+declare const AriaPattern: {                             // matched against ariaSnapshot; how children match is always stated
+  node(role: AriaRole, name: string | RegExp, children: ChildrenPattern): AriaPattern   // "" means no accessible name
+  text(value: string | RegExp): AriaPattern
+  exactly(...children: ReadonlyArray<AriaPattern>): ChildrenPattern     // these children, in this order, and no others
+  including(...children: ReadonlyArray<AriaPattern>): ChildrenPattern   // these children in this order; others may come between
+  readonly unchecked: ChildrenPattern                                   // children are not compared
+}
 ```
 
 - **How expectations evaluate.** One check runs immediately. After that, a check runs on every change signal for the subject: a `Watchable` change, or a DOM mutation in the subject's subtree. Conditions with no change signal, such as layout and visibility, are also re-checked at a fixed interval (`Expect.withInterval`). There is no backoff, because backoff adds more lag the longer a test waits (rule 23). Everything runs on the live clock, within the deadline (`Browser.withTimeout` adjusts it).
+- **Accumulating failures is Effect's job.** To check several things and report every failure, use `Effect.validate` or `Effect.all(…, { mode: "result" })`; there is no separate soft-expectation mechanism.
 - **What failure contains.** `ExpectationFailed{subject, condition, last, history, elapsed, checks}`. `checks` counts the checks and names what triggered them. `history` is the de-duplicated sequence of observed values with timestamps, which answers "was it ever right?". When nothing matched, the error adds an accessibility snapshot of the nearest existing ancestor and suggested locators.
 
 ## State and events
@@ -458,21 +479,19 @@ interface EventLog<A> {
 | `UncaughtException` | `UncaughtException`: thrown errors and unhandled rejections | `message` | any page or context |
 | `Dialog` | `Dialog` | `_tag` | any page; `Dialog.handle` needs `Page` |
 | `FileChooser` | `FileChooser` | — | `Page` |
-| `Download` | `Download` | `url` | `Page` or `BrowserContext` |
-| `AutoResolution` | `AutoResolution`: an obligation decided by a default policy | — | `Page` or `BrowserContext` |
+| `Download` | `Download` | `url` | `Page` or `UserContext` |
+| `AutoResolution` | `AutoResolution`: an obligation decided by a default policy | — | `Page` or `UserContext` |
 
 Each module has the most specific accurate name, with a prefix only where a bare name would clash with the fetch `Request`/`Response` or DOM `Navigation` globals. `ConsoleMessage` avoids Effect's `Console`, and `UncaughtException` avoids our `PageError` and the `*Error` suffix our failures use.
 
 **Events:**
-- **Subscribe, act, collect.** `next` and `stream` are subscribed by the time their effect returns, so code order is subscription order, and one action can have several outcomes. Filters apply before buffering, so unrelated traffic can't overflow a subscription.
-- **A late subscription is diagnosed, not hidden.** If a match arrived shortly before `next` subscribed, the `Timeout` names it in its hint: "a matching download started 12 ms before `Download.next` subscribed".
-- **Waits look forward; `history` looks back.** `history` answers questions you couldn't ask in advance: debugging, failure reports, agents and the CLI, and events from before you had a handle, such as a popup's first requests.
-  - It never subscribes or waits, so it can't catch what an action causes: right after a click, the download usually isn't in it yet. There is deliberately no `last`, because its only use that `history` doesn't cover would be exactly that race.
-  - It isn't a complete record: the log is capped, so a missing entry proves nothing unless `dropped` is 0. Complete records come from a `stream` opened at the start, or from `Har.record`. All three read the same network model.
-  - To wait for something that may already have happened, use `Expect.poll` on `history`.
-- **Logs are bounded** by `ContextOptions.eventLog` (attached pages use the default), as Playwright's `page.consoleMessages()` and `requests()` are. Entries never decay: metadata is copied, without bodies, and handles live as long as their owner.
-- **Events report; handlers decide.** No event verb decides anything. Obligations are decided by scoped handlers: `page.route`, `Dialog.handle` and `FileChooser.handle`. A dialog blocks its page, so the click that opens one doesn't finish until it is decided, and the handler has to be registered first.
-- **Events reveal resources; they don't acquire them.** A popup belongs to the scope that acquired its opener, and a download's file to its context, so `Popup.next` and `Popup.history` return the same handle with one lifetime. The `Scope` on `next` and `stream` holds only the subscription. Ownership follows the opener: popups of owned pages are owned, and popups of attached pages stay open.
+- **Subscribe, act, collect.** `next` and `stream` are subscribed by the time their effect returns, so code order is subscription order, and one action can have several outcomes. Filters apply before buffering, so unrelated traffic can't overflow a subscription. A subscription made too late is diagnosed: its `Timeout` names the match that arrived just before it subscribed.
+- **`history` looks back.** It answers questions you couldn't ask in advance (debugging, failure reports, agents, the CLI, a popup's first requests) and never subscribes or waits, so it can't catch what an action causes; that is why there is no `last`.
+  - The log is capped by `UserContextOptions.eventLog`, so a missing entry proves nothing unless `dropped` is 0. Complete records come from a `stream` opened at the start, or from `Har.record`.
+  - Entries never decay: metadata is copied, without bodies, and handles live as long as their owner.
+  - To wait for something that may already have happened, use `Expect.that` on `history`.
+- **Events report; handlers decide.** Obligations are decided only by scoped handlers: `page.route`, `Dialog.handle` and `FileChooser.handle`. A dialog blocks its page, so the click that opens one doesn't finish until it is decided, and the handler is registered first.
+- **Events reveal resources; they don't acquire them.** `Popup.next` and `Popup.history` return the same handle, owned by the scope that acquired its opener; the `Scope` on `next` and `stream` holds only the subscription. Popups of owned pages are owned, and popups of attached pages stay open.
 - **Results outlive the subscription.** A captured response body is owned bytes, so it survives the subscription and even the page closing. A `Pending`'s deadline starts when it is awaited, not when it subscribes. If the owner (page or context) ends normally before a match, awaiting fails promptly with `TargetGone` rather than waiting for its deadline.
 - **Event streams end** normally when their owner ends normally or the acquiring scope closes. They fail with `TargetGone` on an abnormal end, and with `EventOverflow` past their bound.
 
@@ -505,7 +524,7 @@ declare const ResponseBody: {                           // exactly one kind of b
   bytes(data: Uint8Array, mimeType?: MimeType | string): ResponseBody
   file(path: LocalPath | string): ResponseBody
 }
-// HAR record and replay: Recordings, below
+// HAR recording: Recordings, below
 ```
 
 ```ts
@@ -568,18 +587,20 @@ declare const StorageState: {
 ## Page time
 
 ```ts
-interface Clock {
-  install(mode: { mode: "fixed"; at: DateInput } | { mode: "offset"; by: Duration.Input } | { mode: "controlled"; at?: DateInput }):
-    Effect<Registration, DeclarationError, Scope>        // needs before-author-script timing
-  readonly resume: Effect<void, ClockError>
-  pauseAt(at: DateInput): Effect<void, ClockError>
-  runFor(duration: Duration.Input): Effect<void, ClockError>       // fires every due timer in order
-  fastForward(duration: Duration.Input): Effect<void, ClockError>  // jumps; due timers fire at most once
-  setFixedTime(at: DateInput): Effect<void, ClockError>
+interface PageClock {
+  install(mode:
+    | { readonly mode: "fixed"; readonly at: DateInput }          // wall time frozen at `at`; timers run
+    | { readonly mode: "offset"; readonly by: Duration.Input }    // wall time shifted; everything else real
+    | { readonly mode: "controlled"; readonly at: DateInput }     // wall time, monotonic time, timers and frames move only when told
+  ): Effect<Registration, DeclarationError, Scope>                 // needs before-author-script timing
+  adjust(duration: Duration.Input): Effect<void, ClockError>      // controlled: advances, firing every due timer in order
+  setTime(at: DateInput): Effect<void, ClockError>                // fixed or controlled: jumps; due timers fire at most once, like waking from sleep
+  readonly resume: Effect<void, ClockError>                       // real time again, from now
 }
 ```
 
-- **One timeline per scope.** `page.clock` is a single timeline covering every document and frame of the page across navigations. Each operation is appended to a log that new documents replay, which is how Playwright's clock works. `context.clock` is the same thing, context-wide.
+- **Effect's words.** `adjust` and `setTime` mean what they mean on `TestClock`, so a test reads the same whichever clock it moves.
+- **One timeline per scope.** `page.clock` covers every document and frame of the page, because a test's time must not reset when the page navigates. Each operation is appended to a log that new documents replay. `context.clock` is the same thing, context-wide.
 - **Actionability keeps working.** Readiness sampling uses native rendering, not the page's clock, so a paused clock does not stall `click`. Nothing advances page time implicitly.
 - **Separate clocks.** Page time never touches library deadlines, and `TestClock` never touches the page.
 
@@ -598,30 +619,33 @@ Common members are on every backend. Specialized features are reached through a 
 ```ts
 const snap = yield* page.snapshot                      // aria + inferred interactivity; e.g. `- clickable "Add to cart" [ref=e9] [inferred: clickListener, cursorPointer]`
 const [id] = snap.refs.keys()                          // RefIds come from the snapshot, already branded
-const button = snap.ref(id)                            // a Locator, never rebound; acting fails with StaleRef{reason} after navigation or document.open()
+const button = snap.ref(id)                            // a Locator pinned to one node; acting fails with StaleRef{reason} after navigation or document.open()
 
 // One toolkit definition serves an in-process model, an MCP server and the CLI (CLI.md).
 const toolkit = BrowserToolkit.make({
-  page,
+  context,                                             // the model works in this context; every page tool names its page
   secrets: { password: Redacted.make(env.PASSWORD) },  // the model sees %password%; substitution happens at dispatch
-  capture: CapturePolicy.strict                        // what snapshots and screenshots may contain
+  capture: CapturePolicy.strict                        // required: what snapshots and screenshots may contain
 })
-// tools: navigate, snapshot, click(ref), fill(ref, text | %secret%), press, select, scroll, screenshot, back, wait, tabs
-// tool parameters are Schemas, so a model's "e12" is decoded to a RefId before the handler runs
-// each action returns ActionReport { dispatch, observed: { navigations, dialogs, popups, downloads,
-//   dom: { _tag: "Changed" } | { _tag: "Unchanged" } | { _tag: "NotObserved" } } }
+// tools: pages, newPage(url, name?), goto(page, url), back(page), snapshot(page), click(page, target),
+//   fill(page, target, text | %secret%), press(page, key), select(page, target, values), scroll(page, target),
+//   screenshot(page), next(page, event, filter) → a wait handle, await(wait), expect(page, target, condition),
+//   history(page, event, filter)
+// parameters are Schemas: a model's "e12" is decoded to a RefId and checked against that page's latest snapshot
 LanguageModel.generateText({ prompt, toolkit })
 McpServer.toolkit(toolkit)
 ```
 
-`observed` reports what was seen. It never claims "no effect"; if nothing was observed, the report says exactly that.
+- **No tool waits after it acts.** Each result carries the outcome of the call, then a digest of what the event logs recorded since the previous call: navigations, popups, dialogs and who decided them, downloads, uncaught exceptions, console errors and failed requests. Its boundaries are calls, not time windows, and it reports what was seen without claiming what caused it.
+- **Changes are diffed, not guessed.** Whether the page changed is a question for `snapshot.diff`, asked explicitly.
+- **Waiting is a tool like any other:** `next` and `await` for events, `expect` for conditions.
 
 Snapshots:
 - **Many sites aren't accessible.** Clickable `<div>`s have no role and icon buttons have no name, so the default `snapshot` adds two kinds of inferred information to the accessibility tree:
   - *inferred interactivity:* click listeners where the backend can list them, `cursor: pointer`, `tabindex`, `contenteditable`, `onclick`;
   - *inferred names:* visible text, `title`, `placeholder`, `alt`, a nearby label.
 - **Every inference is tagged with its evidence** in both the value and the text, so a model or a reader can tell `button "Save"` from `clickable "Save" [inferred: cursorPointer]`.
-- **`ariaSnapshot` is the pure accessibility tree,** used by `Expect.toMatchAriaSnapshot`.
+- **`ariaSnapshot` is the pure accessibility tree,** which `Expect.toMatchAria` matches against.
 - **Same node, same ref** within a document generation, so a renamed button keeps its ref.
 - **Diffs are explicit** (`snapshot.diff(previous)`), never an automatic switch between full and delta output.
 - **Visual-only UIs** (canvas, maps) need screenshots and coordinate actions. The toolkit offers those as an explicit tool set rather than a fallback.
@@ -630,45 +654,37 @@ Snapshots:
 
 ```ts
 declare const Trace: {
-  record(target: BrowserContext | Page): Effect<TraceRecording, TraceError, Scope>          // actions, logs, errors, console
-  recordWith(target: BrowserContext | Page, options: {
+  record(target: UserContext | Page): Effect<TraceRecording, TraceError, Scope>          // spans, logs, errors and console; nothing captured from the page
+  recordWith(target: UserContext | Page, options: {
     readonly screenshots?: "perAction" | "off"                                  // default "off"
     readonly screencast?: "native" | { readonly polled: Duration.Input } | "off" // BiDi has no native screencast; default "off"
     readonly domSnapshots?: boolean                                             // default false; needs control (below)
-    readonly network?: boolean                                                  // HAR entries, so snapshots render with their resources
+    readonly network?: boolean                                                  // default false; HAR entries, so snapshots render with their resources
   }): Effect<TraceRecording, TraceError | Unsupported, Scope>
 }
 interface TraceRecording extends Registration {
-  exportTrace(path: LocalPath | string): Effect<LocalPath, TraceError>         // a zip that Playwright's trace viewer opens
+  exportTrace(path: LocalPath | string): Effect<LocalPath, TraceError>         // Playwright's trace-viewer zip, format 9
 }
 
 declare const Har: {
-  record(target: BrowserContext | Page, options: {
+  record(target: UserContext | Page, options: {
     readonly content: "embed" | "attach" | "omit"        // required: never inferred from a file extension
-    readonly detail?: "full" | "minimal"
-    readonly url?: UrlPattern
-    readonly webSocketFrames?: boolean                    // Unsupported on BiDi
-    readonly inFlightAtStop?: "wait" | "markIncomplete"
+    readonly detail?: "full" | "minimal"                  // default "full"
+    readonly url?: UrlPattern                             // default: every request
+    readonly webSocketFrames?: boolean                    // default false; Unsupported on BiDi
+    readonly inFlightAtStop?: "wait" | "markIncomplete"   // default "markIncomplete": stopping never waits unless asked
   }): Effect<HarRecording, HarError | Unsupported, Scope>
-  replay(source: HarArchive | LocalPath | string): (target: Page | BrowserContext) => Effect<HarReplay, HarError, Scope>
-  replayWith(source: HarArchive | LocalPath | string, options: {
-    readonly match?: HarMatch                             // default: exact URL, method and body, for any method
-    readonly ambiguity?: "sequential" | "first" | "fail"  // default "sequential": identical requests replay in recorded order
-    readonly redirects?: "replayHops" | "fulfillFinal"
-    readonly incomplete?: "abort" | "skip"                // entries the recording never finished
-    readonly notFound?: "abort" | "fallthrough"           // default "abort"
-  }): (target: Page | BrowserContext) => Effect<HarReplay, HarError, Scope>
 }
 interface HarRecording extends Registration {
   readonly entries: Watchable<number>
   exportHar(path: LocalPath | string, options?: { readonly include?: ReadonlyArray<SecretClass> }): Effect<LocalPath, HarError>   // redacted unless included
 }
-interface HarReplay extends RouteRegistration { readonly misses: Watchable<number> }
 ```
 
-- **Traces open in Playwright's trace viewer** (research/playwright-trace-format.md).
-  - We write format version 9. The viewer rejects files newer than itself, and version 10 is unreleased.
-  - Every public operation is already an `Effect.fn` span, so spans become the viewer's nested steps, and logs and errors become its log and error events.
+- **Spans are the record.** Every public operation is already an `Effect.fn` span, so whatever tracer you install, OpenTelemetry for any backend included, already receives the trace. `Trace.record` adds what spans can't carry: page-side captures (screenshots, screencast, DOM snapshots) as span attachments, and the export.
+- **Playwright's zip is one export.** `exportTrace` writes format version 9, which Playwright's trace viewer opens (research/playwright-trace-format.md).
+  - The viewer rejects files newer than itself, and version 10 is unreleased.
+  - Spans become the viewer's nested steps, and logs and errors become its log and error events.
   - Actions carry our own names, never Playwright's, because the viewer special-cases Playwright's names and assumes their selector syntax.
   - Timestamps come from a real monotonic clock, never Effect's `Clock`, so `TestClock` can't freeze them.
 - **Levels are opt-in, and their costs are stated.**
@@ -676,16 +692,12 @@ interface HarReplay extends RouteRegistration { readonly misses: Watchable<numbe
   - Screenshots and the screencast cost bandwidth. BiDi has no native screencast, so it is polled at the interval you choose.
   - DOM snapshots install Playwright's capture script in the page's main world, where it hooks CSSOM methods. That changes the page, so it needs control and never runs on attached or observed pages.
 - **Exports are explicit and redacted.** Both files cross a persistence boundary (`export*`). Classified fields are stripped under the active diagnostics preset, and raw content (bodies, snapshots, screenshots) is included only when asked for.
-- **HAR replay has one documented matching rule:** exact URL, method and body, for any method. Extra criteria are named matchers (`HarMatch.headers([...])`).
-  - Nothing is scored, and no CORS headers are added. Repeated headers stay separate.
-  - The archive is validated when opened; a bad archive fails with `HarError` instead of falling through to the network.
-  - Entries the recording never finished follow `incomplete` instead of stalling.
-  - There is no `update` mode: to re-record, use `Har.record`.
 - **HAR recording** records requests as sent. Timings follow the HAR spec, and an entry without a body says why. On BiDi, the body collectors start when the recording scope is acquired (research/har.md).
+- **HAR replay is deferred.** Mocking the network is `route`'s job, and replay is test infrastructure that will be reworked with etest.
 
 ## Testing
 
-**Vitest first, ready for etest.** Everything a test needs is a Layer or a scoped Effect with a lifetime. Runner specifics sit behind one per-test service, `TestRun`. The Vitest adapter is the only runner code today. When `@effect/test` (etest) is ready, an etest adapter attaches the same Layers with `Test.provide` (research/effect-test-runner.md).
+**Vitest first, ready for etest.** Everything a test needs is a Layer or a scoped Effect with a lifetime. Runner specifics sit behind one per-test service, `TestRun`. When `@effect/test` (etest) is ready, an etest adapter attaches the same Layers with `Test.provide` (research/effect-test-runner.md).
 
 ```ts
 import { layer } from "@effect/vitest"
@@ -696,7 +708,7 @@ import { Chromium } from "effect-browser/chromium"
 layer(VitestBrowser.layer(Chromium.launch))("checkout", (it) => {
   it.effect("adds to cart", () =>
     Effect.gen(function* () {
-      const page = yield* BrowserTest.page      // fresh context + page per test; closed after
+      const page = yield* BrowserTest.page      // a fresh context and page per test, closed after
       yield* page.goto("/shop")
       // …
     }))
@@ -706,39 +718,24 @@ layer(VitestBrowser.layer(Chromium.launch))("checkout", (it) => {
 ```ts
 // effect-browser/test: runner-agnostic
 declare const BrowserTest: {
-  browser<E, R>(backend: Layer<Browser, E, R>, options?: {
-    readonly restart?: "onCrash" | "onFailure" | "never"  // default "onCrash"
-  }): Layer<Browser, E, R>                                 // LaunchProfile.concurrent unless the backend sets a profile
-  readonly page: Effect<Page, PageError, Browser | TestRun | Scope>
-  pageWith(options: ContextOptions & { readonly trace?: "onFailure" | "always" | "off" }): Effect<Page, PageError, Browser | TestRun | Scope>
+  readonly page: Effect<Page, PageError, Browser | Scope>                     // Browser, then newPage
+  pageWith(options: UserContextOptions): Effect<Page, PageError, Browser | Scope>
 }
 class TestRun extends Context.Service<TestRun, {          // per test, from the runner adapter
   readonly info: TestInfo                                  // project, file, id, attempt, worker, shard
-  attach(artifact: TestArtifact): Effect<void>             // Vitest: recordArtifact; etest: attachments (proposed upstream)
-  readonly check: Effect<void>                             // one Expect check; etest counts assertions (proposed upstream)
+  attach(artifact: TestArtifact): Effect<void>             // Vitest: recordArtifact
 }>()("effect-browser/TestRun") {}
 
 // effect-browser/test/vitest
 declare const VitestBrowser: {
-  layer<E, R>(backend: Layer<Browser, E, R>, options?: { readonly restart?: "onCrash" | "onFailure" | "never" }):
-    Layer<Browser | TestRun, E, R>                         // BrowserTest.browser, plus TestRun from the current Vitest test
+  layer<E, R>(backend: Layer<Browser, E, R>): Layer<Browser | TestRun, E, R>   // the backend you pass, unchanged, plus TestRun from the current test
 }
 ```
 
-- **Defaults.** Each is visible and can be overridden:
-  - a browser per layer block, which is about one per file under Vitest's default isolation;
-  - a fresh context and page per test;
-  - `LaunchProfile.concurrent`, `focus: "emulated"` and the `local` diagnostics preset;
-  - restart `onCrash`;
-  - traces kept on failure, where an interrupted test counts as failed;
-  - a live deadline clock under `TestClock`.
-- **Parallelism** (research/test-parallelism.md).
-  - Files run in parallel across Vitest workers, each with its own browser. We recommend `maxWorkers: "50%"`.
-  - Concurrent tests within a file are opt-in (`layer(…, { concurrent: true })`), and each one gets its own `TestClock`.
-  - One browser for a whole run waits for etest's run-wide shared layers. Under Vitest, `Chromium.connect` to a browser you started yourself covers it.
-  - Sharding belongs to the runner. `TestInfo` makes artifact names unique per shard, worker, test and attempt.
+- **Nothing changes because it's a test.** The layer launches exactly the backend you pass. Profile, focus, diagnostics and tracing are whatever the test chose, as anywhere else: a suite that runs many pages at once says `Chromium.launchWith({ profile: LaunchProfile.concurrent })` and `pageWith({ focus: "emulated" })`, and a test that wants a trace calls `Trace.record` and attaches the export with `TestRun.attach` (under Vitest, `recordArtifact`).
+- **Lifetimes.** One browser per layer block, which is about one per file under Vitest's default isolation, and a fresh context and page per test. Deadlines run on a live clock even under `TestClock`.
+- **Parallelism** (research/test-parallelism.md). Files run in parallel across Vitest workers, each with its own browser. Concurrent tests within a file are opt-in (`layer(…, { concurrent: true })`). One browser for a whole run waits for etest's run-wide shared layers.
 - **Contexts don't isolate everything.** Launch flags, the downloads directory, browser-wide commands, extensions, and OS focus, clipboard and GPU are shared. The library always scopes commands to the context it owns.
-- **Artifacts.** Traces and HARs attach through `TestRun.attach`. Under Vitest that is `recordArtifact`, with `effect-browser:trace` and `effect-browser:har` artifact types.
 - **No fixture magic.** Everything is a `Layer`, and dependencies are tracked in `R`.
 
 ## Errors as users see them
@@ -840,7 +837,7 @@ yield* requests.pipe(
 yield* page.clock.install({ mode: "controlled", at: "2026-01-01T09:00:00Z" })
 yield* page.goto("/session")
 yield* page.getByRole("button", { name: "Start" }).click   // no page time passes
-yield* page.clock.runFor("5 minutes")
+yield* page.clock.adjust("5 minutes")
 yield* page.getByText("Session expired").pipe(Expect.toBeVisible)
 
 // 11. Ordered setup scripts
@@ -869,6 +866,11 @@ yield* report.finished
 // 15. What already happened: reads, not subscriptions
 const errors = yield* UncaughtException.history(page)   // EventLog: entries, oldest first, and how many were dropped
 const carts = yield* NetworkResponse.history(page, { url: "**/api/cart" })   // metadata only, never bodies
+
+// 16. Structure, matched explicitly
+yield* page.getByRole("navigation").pipe(Expect.toMatchAria(
+  AriaPattern.node("navigation", "Main", AriaPattern.including(
+    AriaPattern.node("link", "Orders", AriaPattern.unchecked)))))
 ```
 
 ## Open questions

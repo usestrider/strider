@@ -25,7 +25,7 @@ Each layer document has the same shape: purpose, top data models, interface sket
 | — | [reviews/](reviews/) | design reviews, one per draft |
 
 ```
-L2  API       Browser · BrowserContext · Page · Locator · Expect · Watchable · event modules · Route · Clock · Trace · Har · Toolkit · BrowserTest · CLI
+L2  API       Browser · UserContext · Page · Locator · Expect · Watchable · event modules · Route · PageClock · Trace · Har · Toolkit · BrowserTest · CLI
 L1  Model     ids · navigables · documents · realms · navigations · requests · obligations · declarations · readiness
 L0  Protocol  transports · sessions · generated commands and events · ingestion · backend adapters · capabilities
 ```
@@ -56,7 +56,7 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 20. **Every effect ends.** Waits run under the operation deadline, open-ended things are `Stream`s, and lifetime signals (`closed`) are the only exception.
 21. **Every error reason carries a hint.** The rendered message says what to do next.
 22. **One way to do each thing.** No aliases or parallel mechanisms. A convenience is allowed only at the dominant call site, and is documented as its expansion.
-23. **Explicit over implicit.** Nothing hidden may change behavior or add waiting: no magic delays, grace periods or heuristic windows by default. Such behavior is asked for in code (an `Expect`, a `waitFor`, a `next`, a named option). Helpers that make explicit behavior simpler are welcome, but they stay opt-in. Actionability waiting is the documented, adjustable contract of each action, not a heuristic.
+23. **Explicit over implicit.** Nothing hidden may change behavior or add waiting: no magic delays, grace periods or heuristic windows by default. Such behavior is asked for in code (an `Expect`, a `waitFor`, a `next`, a named option). Helpers that make explicit behavior simpler are welcome, but they stay opt-in. Every default is stated where it is declared and recorded in the operation's span, and no helper changes a default on your behalf. Actionability waiting is the documented, adjustable contract of each action, not a heuristic.
 
 ## Cross-cutting decisions
 
@@ -97,7 +97,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
   - `local`: paths and titles included; query, fragment, userinfo and classified fields stripped.
   - `strict`: origins only and no titles, for production, exported traces and agents.
 
-  `strict` is the default, and `BrowserTest` layers select `local`.
+  `strict` is the default everywhere, tests included; `Browser.withDiagnostics("local")` selects the other.
 - **Raw content.** Bodies, console output, DOM snapshots and screenshots can contain secrets the page echoed. They need an explicit capture policy before leaving the process. There is no claim of taint tracking.
 
 ### Observability
@@ -116,12 +116,20 @@ Each user-visible operation has one monotonic deadline covering everything it do
 | Declarations | Acknowledged or failed; requested timing met or `Unsupported`; fixed composition rules | Before-author-script timing | Restoring external state | Popup inheritance (probe 18) |
 | Obligations | One decision; fallback only while pending; no contradictory second decision | Acknowledged remote resolution | — | Behavior on connection loss (probe 19) |
 | Input | Serialized per page; bounded release of held input on interruption | Trusted input; evaluation with user activation | Release after transport loss | — |
-| Readiness | Every predicate yields `Ready` or `NotReady{reason}` within the deadline | Rendering-based predicates | Network-idle attribution | Stable-frame cadence (probe 10) |
+| Readiness | Every predicate yields `Ready` or `NotReady{reason}` within the deadline | Rendering-based predicates | — | Stable-frame cadence (probe 10) |
 | Errors | Small typed families with evidence; caller `E`/`R` preserved | — | — | — |
 | Secrets | Wrapped and classified fields never rendered; explicit export | — | Capture-policy sanitization | — |
 
 ## Status
 
+- **Revision 5.21** applied [review 5](reviews/05-draft-5.md), which checked every feature shared with Playwright against our own principles:
+  - the agent toolkit follows the CLI: every page tool names its page, waiting is `next`/`await`/`expect`, and a digest between calls replaces `ActionReport.observed` and its settling window;
+  - a snapshot's refs carry its page's access, `evaluate` always means the isolated world (the main world is `evaluateWith({ world: "main" })`), and results are typed `Serialized<A>`;
+  - names follow the naming rule: `UserContext` (the spec's term, replacing `BrowserContext`), `PageClock`, `FileInput`, `Condition`, and Effect's own `Headers`;
+  - the page clock uses Effect's `adjust`/`setTime`; `Expect.soft` and `Expect.poll` are gone; `toMatchAria` takes a typed pattern whose child matching is always stated;
+  - navigations resolve at commit unless `waitUntil` asks for more, and the network-idle and DOM-quiet predicates are removed;
+  - HAR replay is deferred, the testing helpers change no defaults, and traces are spans with Playwright's zip as one export;
+  - every default is stated where it is declared and recorded in its span.
 - **Revision 5.20** added the CLI (CLI.md), for agents and people driving a live session from a shell:
   - sessions and pages are named, and every command names its session (`--session` or `EB_SESSION`) and page (`-p`), with no fallback and no current page;
   - one daemon and one browser per session, in a session directory at a predictable path that is deleted at `stop`; hard kills are reported and pruned explicitly;
@@ -210,4 +218,4 @@ Each user-visible operation has one monotonic deadline covering everything it do
   - finding 7, dual `Observe` combinators that return both values: API.md (superseded in 5.19: event modules);
   - finding 8, diagnostic presets: Diagnostics above;
   - the smaller items: CONCEPTS.md.
-- **Next:** a consistency review (draft 5) of revisions 5.1–5.20, then L0: the codegen pipeline, the transports and the conformance probes (PROBES.md) against Chrome and Firefox. Compiling the API sketches against stub types is an optional cheap check of the error-channel and `E`/`R` claims.
+- **Next:** L0: the codegen pipeline, the transports and the conformance probes (PROBES.md) against Chrome and Firefox. Compiling the API sketches against stub types is an optional cheap check of the error-channel and `E`/`R` claims.

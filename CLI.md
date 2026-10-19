@@ -1,6 +1,6 @@
 # CLI: driving a live session from the command line
 
-*Revision 5.20, 2026-10-19. These are sketches, like API.md: names are provisional. The binary is `eb` here, but `eb` is already AWS Elastic Beanstalk's CLI, so the real name follows the project's.*
+*Revision 5.21, 2026-10-19. These are sketches, like API.md: names are provisional. The binary is `eb` here, but `eb` is already AWS Elastic Beanstalk's CLI, so the real name follows the project's.*
 
 ## Purpose
 
@@ -39,8 +39,8 @@ interface CommandResult {                                 // text by default; --
 }
 
 class CurrentSession extends Context.Service<CurrentSession, {   // from "effect-browser/cli"; provided only by `eb run`
-  readonly context: BrowserContext                        // the session's one context: newPage, pages
-  page(name: string): Effect<Page, PageNotFound>          // by the handle the CLI shows: "shop", or "p2" if unnamed
+  readonly context: UserContext                           // the session's one context: newPage, pages
+  page(name: PageName | string): Effect<Page, PageNotFound>   // by name only; a generated handle like p2 is a token (principle 14)
 }>()("effect-browser/cli/CurrentSession") {}
 ```
 
@@ -99,7 +99,7 @@ export default Effect.gen(function* () {
 **Sessions**
 - **Every command names its session.** It comes from `--session`/`-s` or `EB_SESSION`, and the flag wins. There is no fallback, even when only one session is running, because with several agents on one machine "the only session" is a race. The error lists the running sessions. Agent shells often don't keep environment variables between calls, so documentation and skills use the flag.
 - **Names are the ids.** They are unique, and starting a name that is taken fails instead of attaching. Handles belong to their session, so `p1` in one session has nothing to do with `p1` in another.
-- **Every page command names its page** with `--page`/`-p`. There is no current page and no fallback, even when the session has one page, for the same reason as sessions: an implicit selection is how agents act on the wrong tab (Stagehand followed focus; Chrome DevTools MCP raced on a global selected page). Pages take an optional `--name` when created, and the handle is that name or else `p1`.
+- **Every page command names its page** with `--page`/`-p`. There is no current page and no fallback, even when the session has one page, for the same reason as sessions: an implicit selection is how agents act on the wrong tab (Stagehand followed focus; Chrome DevTools MCP raced on a global selected page). Pages take an optional `--name` when created, and the handle is that name or else `p1`. A page opened without one, such as a popup, is named later with `eb -s checkout -p p2 page name consent`.
 - **One context per session.** `--state` and `--fork` apply to it. Two logins at once, such as two users of a chat, are two sessions.
 - **One daemon and one browser per session.** Contexts share launch flags, the downloads directory and OS focus (API.md, Testing), so separate browsers keep concurrent agents apart, and a crash ends one session.
 - **Lifetime.** A session ends at `eb stop`, after its idle timeout, or when `--owner-pid` exits. Whichever applies is printed at start. `eb sessions` lists name, backend, pages, idle time and owner.
@@ -125,7 +125,7 @@ export default Effect.gen(function* () {
 
 **Segments**
 - **`eb run` runs a file's default export,** an `Effect` that requires `CurrentSession` and `Scope`. There are no named exports and no arguments; a file without a default `Effect` fails with a hint.
-- **A segment finds its pages by name.** `session.page("shop")` fails with `PageNotFound`, whose hint lists the session's pages. Looking pages up first makes a missing one fail before any step runs.
+- **A segment finds its pages by name.** `session.page("shop")` fails with `PageNotFound`, whose hint lists the session's pages. Only names are accepted, never generated handles such as `p2`. Looking pages up first makes a missing one fail before any step runs.
 - **Segments belong to the CLI.** `CurrentSession` comes from `effect-browser/cli`, and only `eb run` provides it. Programs and tests pass pages around as values, as they always do, and never construct a session.
 - **`eb run` provides `CurrentSession`, `Scope` and the daemon's platform services.** A segment that requires anything else fails with an error naming the missing service.
 - **The CLI doesn't type-check.** A segment is a file in your project, so your `tsc` checks it against the same effect-browser version the daemon runs from. Agent skills run `tsc --noEmit` before `eb run`, because a segment that fails halfway leaves its earlier steps done.

@@ -1,6 +1,6 @@
 # CONCEPTS: the native browser model (L1)
 
-*Revision 5, 2026-10-18. A condensed restatement of draft 4 (commit `6cc0bc1`), with [review 4](reviews/04-draft-4.md) folded in. The reasoning behind each contract is in that draft and in [reviews/](reviews/); this document keeps the decisions. Spec anchors: `HTML#x` is `https://html.spec.whatwg.org/#x`; `BIDI#x` is the WebDriver BiDi editor's draft.*
+*Revision 5.21, 2026-10-19. A condensed restatement of draft 4 (commit `6cc0bc1`), with [review 4](reviews/04-draft-4.md) folded in. The reasoning behind each contract is in that draft and in [reviews/](reviews/); this document keeps the decisions. Spec anchors: `HTML#x` is `https://html.spec.whatwg.org/#x`; `BIDI#x` is the WebDriver BiDi editor's draft.*
 
 ## Purpose
 
@@ -232,7 +232,7 @@ type Readiness = { _tag: "Ready" } | { _tag: "NotReady"; predicate: Predicate; r
 
 type CloseReason =
   | BrowserClosed | BrowserCrashed | ConnectionLost | ModelUnavailable
-  | UserContextRemoved | ObservationReleased | AccessReleased | PrerenderActivated
+  | UserContextRemoved | AccessReleased | PrerenderActivated
   | PageClosed /* by: command | script | userContextRemoved | browser */ | PageCrashed
   | FrameDetached | DocumentReplaced | DocumentEvicted | DocumentDestroyed | DocumentUnloaded
   | RealmDestroyed
@@ -305,7 +305,7 @@ Cleanup groups can span sibling pages, independently of this graph.
   - **Success:** `Committed`, `SameDocument`, `Restored`, `Activated`. An HTTP 404/500 document is a successful commit.
   - **`back`/`forward`:** `NoOp{noHistoryEntry}` becomes `None`.
   - **Failure:** everything else becomes `NavigationError{reason}`. `Download` and `NoContent` count as failures unless the call accepts them.
-  - **`waitUntil: load`** waits on the resulting document and generation within the same deadline.
+  - **`waitUntil`:** a navigation resolves at commit. `domContentLoaded` or `load`, when asked for, waits on the resulting document and generation within the same deadline.
 
 ## 5. Input and obligations
 
@@ -336,7 +336,7 @@ Cleanup groups can span sibling pages, independently of this graph.
 - **Requests and hops.** A request id spans the redirect chain. Each hop has its own identity, snapshot, response and body access, so a held 302 never becomes the next hop's 200. Snapshots record explicitly when information (such as CDP's extra-info events) is missing.
 - **Request lifecycle.** `Sent → ResponseStarted → Completed | Failed`.
   - A service-worker response can start without `Sent`.
-  - Requests of a destroyed document may never terminate. They leave readiness accounting and are tracked as detached, and no network failure is fabricated for them.
+  - Requests of a destroyed document may never terminate. They are tracked as detached, and no network failure is fabricated for them.
   - The adapter keeps raw facts per request and emits each model event once its prerequisites are present.
 - **Interception** is a declaration plus a stream of obligations.
   - Backend enablement is reconciled from the union of active patterns, and is never disabled while a request is paused.
@@ -347,10 +347,10 @@ Cleanup groups can span sibling pages, independently of this graph.
   - Defaults are continue for request and response, and `DefaultAuth` for auth.
   - BiDi cannot scope intercepts to a user context, so emulating that needs browser-wide access (§3).
 - **Bodies.** A body may be unavailable for a stated reason: not collected, evicted, a redirect, streaming, or over a limit.
-  - When a caller expresses interest, collection is acquired automatically *before* the trigger; BiDi needs a collector before the request starts.
+  - A `body` in a `next` or `stream` filter acquires collection before that call returns; BiDi needs a collector before the request starts.
   - Ordinary results are owned bytes. Large or streaming bodies use explicit caller-scoped leases.
 - **Service workers.** Interception may see a request twice or never. Bypassing service workers is a capability.
-- **Long-lived connections.** WebSocket and EventSource connections are modelled but excluded from network idle. Observing frames and mocking them are separate capabilities.
+- **Long-lived connections.** WebSocket and EventSource connections are modelled. Observing frames and mocking them are separate capabilities.
 
 ## 7. Declarations
 
@@ -406,11 +406,9 @@ Each predicate yields `Ready`, `NotReady{reason}` or an observation error. A rea
 | InViewport | a content quad intersects the viewport (area > 0.99 CSS px²); scrolling is an action policy | `OutsideViewport` |
 | ReceivesPointer | at the action point, the composed-tree hit test (per shadow root, through iframes) lands on the target or a descendant; checked before dispatch *and* guarded on the first trusted event | `Covered{by}` |
 | Unique | exactly one match (hidden matches count); actions fail immediately on ambiguity, with no retry window | `Ambiguous{candidates, visibleCount}` |
-| NetworkIdle(N, T) | no in-flight requests attributed to subtree N's active documents and their workers for T ms; long-lived connections, beacons, favicons and client-less service-worker fetches excluded | `LongPolling{requests}` |
-| DomQuiet(T) | no mutations in the composed subtree for T ms (shadow roots observed explicitly) | — |
 | PromptFree | no known prompt blocking the navigable | `PromptBlocking{prompt, resolution}` |
 
-Compatible instantaneous checks are batched in one injected evaluation. No batch is an atomic guarantee that covers the input that follows it.
+There are no time-window predicates such as network idle or DOM quiet: waiting for T ms of silence is a heuristic (rule 23). Compatible instantaneous checks are batched in one injected evaluation. No batch is an atomic guarantee that covers the input that follows it.
 
 ## 9. Operations
 
@@ -434,7 +432,7 @@ Compatible instantaneous checks are batched in one injected evaluation. No batch
   - **Correlation:** by the strongest identity available.
   - **Owner ends without a match:** fails promptly.
   - **Results:** a latched immutable result outlives the subscription.
-- **Event logs.** Each page and context keeps a bounded log per event kind, fed by the same fold as subscriptions. Entries are copied metadata or handles to resources owned elsewhere, never collected bodies, so nothing in a log decays. A log counts what it drops. Logs serve `history` and the hint on a late subscription's `Timeout`, which names a match that arrived just before it subscribed.
+- **Event logs.** Each page and context keeps a bounded log per event kind, fed by the same fold as subscriptions. Entries are copied metadata or handles to resources owned elsewhere, never collected bodies, so nothing in a log decays. A log counts what it drops. Logs serve `history`, the digest that agent tools and CLI commands return between calls, and the hint on a late subscription's `Timeout`, which names a match that arrived just before it subscribed.
 - **Deadline.** There is one monotonic deadline per operation, inherited by nested calls and only ever shortened. Cleanup has its own budget. Deadline failures are `Timeout{phase}`, carrying the last observation and its de-duplicated history.
 - **Retries.** Retry decisions depend on the operation, its phase, the target binding, dispatch evidence and the remaining deadline, never on an error tag alone.
   - Locators re-resolve before dispatch.
