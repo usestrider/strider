@@ -42,58 +42,88 @@ Realms are siblings of documents, not children. The one exception that forces th
 
 ## 2. Top data models
 
+**Immutable by default.** An entity is a set of immutable identity fields plus *one* `SubscriptionRef` holding its current state; anything that can change lives in that ref and nowhere else. Snapshots, events, outcomes and errors are immutable values. Lifetime ends are `Deferred`-backed `Effect`s. Readers always go through an `Effect` (`SubscriptionRef.get`), so a value is read when the effect runs, never captured stale in a field. Watchers use `changes`. Only the state fold (PROTOCOL.md) writes these refs. The public API exposes reads and event streams, never the refs themselves.
+
 ```ts
 // ── Containment ────────────────────────────────────────────
 interface BrowserModel {
-  id: BrowserId; backend: BackendInfo; capabilities: CapabilitySet
-  ownership: { _tag: "Launched"; process: ProcessInfo } | { _tag: "Attached"; endpoint: string }
-  userContexts: SubscriptionRef<ReadonlyMap<UserContextId, UserContextModel>>
-  closed: Effect<CloseReason>
+  readonly id: BrowserId
+  readonly backend: BackendInfo                         // fixed for the connection
+  readonly ownership: { _tag: "Launched"; process: ProcessInfo } | { _tag: "Attached"; endpoint: string }
+  readonly state: SubscriptionRef<{
+    userContexts: ReadonlyMap<UserContextId, UserContextModel>
+    capabilities: CapabilitySet                         // refined as probes complete
+  }>
+  readonly closed: Effect<CloseReason>
 }
 interface UserContextModel {
-  id: UserContextId; isDefault: boolean
-  access: Access; release: "leaveOpen" | "removeOwned"
-  pages: SubscriptionRef<ReadonlyArray<NavigableId>>
-  declarations: DeclarationSet                         // §7
-  promptPolicy: PromptPolicy                           // §5
+  readonly id: UserContextId
+  readonly isDefault: boolean
+  readonly state: SubscriptionRef<{
+    access: Access; release: "leaveOpen" | "removeOwned"
+    pages: ReadonlyArray<NavigableId>
+    declarations: DeclarationSet                        // §7
+    promptPolicy: PromptPolicy                          // §5
+  }>
+  readonly closed: Effect<CloseReason>
 }
-interface NavigableModel {                             // Page and Frame share this
-  id: NavigableId; kind: "page" | "frame"
-  parent: Option<NavigableId>; children: SubscriptionRef<ReadonlyArray<NavigableId>>
-  activeDocument: SubscriptionRef<DocumentModel>
-  access: Access; release: ReleasePolicy; cleanupGroup: Option<CleanupGroupId>
-  closed: Effect<CloseReason>
+interface NavigableModel<S extends NavigableState = NavigableState> {   // Page and Frame share this
+  readonly id: NavigableId
+  readonly kind: "page" | "frame"
+  readonly parent: Option<NavigableId>                  // a frame never changes parent
+  readonly state: SubscriptionRef<S>
+  readonly closed: Effect<CloseReason>
 }
-interface PageModel extends NavigableModel {
-  pageKind: "tab" | "popup" | "prerender" | "fenced"
-  origin: { _tag: "Created" } | { _tag: "Opened"; opener: Option<NavigableId> } | { _tag: "Adopted" }
-  originalOpener: Option<NavigableId>                 // kept even under noopener
-  prompt: SubscriptionRef<Option<PromptModel>>
+interface NavigableState {
+  children: ReadonlyArray<NavigableId>
+  activeDocument: DocumentId
+  access: Access; release: ReleasePolicy; cleanupScope: Option<CleanupScopeId>
+}
+interface PageModel extends NavigableModel<PageState> {
+  readonly pageKind: "tab" | "popup" | "prerender" | "fenced"
+  readonly origin: { _tag: "Created" } | { _tag: "Opened"; opener: Option<NavigableId> } | { _tag: "Adopted" }
+  readonly originalOpener: Option<NavigableId>          // kept even under noopener
+}
+interface PageState extends NavigableState {
+  prompt: Option<PromptId>
   input: InputState                                     // §5
 }
 interface DocumentModel {
-  id: DocumentId; generation: DocumentGeneration; url: string; origin: string
-  navigation: Option<NavigationId>                      // None for the initial about:blank
-  state: "active" | "suspended" | { _tag: "ended"; reason: CloseReason }
-  readiness: "loading" | "interactive" | "complete"     // current state; can return to loading
-  loading: LoadingResult                                // per generation; post-commit failure lives here
-  isInitialAboutBlank: boolean; isErrorDocument: boolean
-  restoredFrom: Option<DocumentId>                      // only with correlating evidence
+  readonly id: DocumentId
+  readonly navigable: NavigableId
+  readonly origin: string
+  readonly navigation: Option<NavigationId>             // the committing navigation; None for the initial about:blank
+  readonly isInitialAboutBlank: boolean
+  readonly isErrorDocument: boolean
+  readonly restoredFrom: Option<DocumentId>             // only with correlating evidence
+  readonly state: SubscriptionRef<{
+    generation: DocumentGeneration                      // bumped by document.open()
+    url: string                                         // changes on same-document navigation
+    lifecycle: "active" | "suspended" | { _tag: "ended"; reason: CloseReason }
+    readiness: "loading" | "interactive" | "complete"   // current state; can return to loading
+    loading: LoadingResult                              // per generation; post-commit failure lives here
+  }>
 }
 interface RealmModel {
-  id: RealmId
-  kind: { _tag: "window"; navigable: NavigableId; world: "main" | { isolated: string } }
-      | { _tag: "dedicatedWorker"; owner: RealmId } | { _tag: "sharedWorker" }
-      | { _tag: "serviceWorker"; registration: string } | { _tag: "worklet"; type: string }
-  documents: ReadonlyArray<DocumentId>                  // usually one; two after initial-blank reuse
-  state: "active" | "suspended" | { _tag: "destroyed"; reason: CloseReason }
+  readonly id: RealmId
+  readonly kind: { _tag: "window"; navigable: NavigableId; world: "main" | { isolated: string } }
+    | { _tag: "dedicatedWorker"; owner: RealmId } | { _tag: "sharedWorker" }
+    | { _tag: "serviceWorker"; registration: string } | { _tag: "worklet"; type: string }
+  readonly state: SubscriptionRef<{
+    documents: ReadonlyArray<DocumentId>                // usually one; two after initial-blank reuse
+    lifecycle: "active" | "suspended" | { _tag: "destroyed"; reason: CloseReason }
+  }>
 }
 
 // ── Navigation ─────────────────────────────────────────────
 interface NavigationModel {
-  id: NavigationId; navigable: NavigableId
-  kind: "crossDocument" | "fragment" | "historyApi" | "intercepted" | "traversal" | "reload" | "javascriptUrl" | "prerenderActivation"
-  status: { _tag: "pending" } | { _tag: "observed"; outcome: NavigationOutcome; evidence: Evidence } | { _tag: "unresolved"; lastObserved: Evidence }
+  readonly id: NavigationId
+  readonly navigable: NavigableId
+  readonly kind: "crossDocument" | "fragment" | "historyApi" | "intercepted" | "traversal" | "reload" | "javascriptUrl" | "prerenderActivation"
+  readonly status: SubscriptionRef<
+    | { _tag: "pending" }
+    | { _tag: "observed"; outcome: NavigationOutcome; evidence: Evidence }
+    | { _tag: "unresolved"; lastObserved: Evidence }>
 }
 type NavigationOutcome =
   | { _tag: "Committed"; document: DocumentId; response: Option<ResponseRef> }
@@ -107,41 +137,49 @@ type NavigationOutcome =
   | { _tag: "Canceled"; reason: "beforeunload" | "navigateEvent" | "sandbox" | "unloading" | "traversalInProgress" }
   | { _tag: "NoOp"; reason: "javascriptNonString" | "noHistoryEntry" }
 
-// ── Network ────────────────────────────────────────────────
+// ── Network: immutable snapshots; a request's progress is a stream of them ──
 interface RequestSnapshot {
-  hop: RequestHopId; navigable: Option<NavigableId>; navigation: Option<NavigationId>
-  method: string; url: string; headers: Headers       // classified values are Redacted
-  resourceType: ResourceType; servedBy: "network" | "cache" | "serviceWorker"
+  readonly hop: RequestHopId; readonly navigable: Option<NavigableId>; readonly navigation: Option<NavigationId>
+  readonly method: string; readonly url: string; readonly headers: Headers   // classified values are Redacted
+  readonly resourceType: ResourceType; readonly servedBy: "network" | "cache" | "serviceWorker"
 }
-interface ResponseSnapshot { hop: RequestHopId; status: number; url: string; headers: Headers; body: BodyAccess }
+interface ResponseSnapshot {
+  readonly hop: RequestHopId; readonly status: number; readonly url: string; readonly headers: Headers
+  readonly body: BodyAccess                             // availability is read through an Effect
+}
 interface ConnectionModel {                            // long-lived connections
-  id: ConnectionId; kind: "webSocket" | "eventSource"; url: string; navigable: NavigableId
-  frames: Stream<ConnectionFrame>                        // capability
+  readonly id: ConnectionId; readonly kind: "webSocket" | "eventSource"; readonly url: string; readonly navigable: NavigableId
+  readonly frames: Stream<ConnectionFrame>              // capability
+  readonly closed: Effect<CloseReason>
 }
 
 // ── Obligations ────────────────────────────────────────────
-type Obligation =
-  | { _tag: "PausedRequest"; hop: RequestHopId; phase: "request" | "response" | "auth"; occurrence: number }
-  | { _tag: "Prompt"; prompt: PromptModel }
-  | { _tag: "FileChooser"; navigable: NavigableId; multiple: boolean }
-type ObligationState = "pending" | "decisionSelected" | "sending" | "acknowledged" | "rejected" | "unknown" | "ended"
+interface ObligationModel {
+  readonly subject:
+    | { _tag: "PausedRequest"; hop: RequestHopId; phase: "request" | "response" | "auth"; occurrence: number }
+    | { _tag: "Prompt"; prompt: PromptSnapshot }
+    | { _tag: "FileChooser"; navigable: NavigableId; multiple: boolean }
+  readonly state: SubscriptionRef<"pending" | "decisionSelected" | "sending" | "acknowledged" | "rejected" | "unknown" | "ended">
+}
 
 // ── Access, release, operations ────────────────────────────
 type Access = "observe" | "inspect" | "control"
 type ReleasePolicy = "leaveOpen" | "closeOwned" | "removeOwned"
-interface OperationRecord {
-  id: OperationId
-  dispatch: "notSent" | "mayHaveBeenSent" | "acknowledged"
-  progress: ReadonlyArray<StepEvidence>                  // per command: unsent | uncertain | ok | rejected
-  observation: "pending" | { observed: unknown } | { unknown: Evidence }
-  caller: "waiting" | "completed" | "failed" | "interrupted"
-  cleanup: "notNeeded" | "pending" | "completed" | { failed: string }
+interface OperationRecord {                            // internal; inspected through an Effect
+  readonly id: OperationId
+  readonly state: Ref<{
+    dispatch: "notSent" | "mayHaveBeenSent" | "acknowledged"
+    progress: ReadonlyArray<StepEvidence>               // per command: unsent | uncertain | ok | rejected
+    observation: "pending" | { observed: unknown } | { unknown: Evidence }
+    caller: "waiting" | "completed" | "failed" | "interrupted"
+    cleanup: "notNeeded" | "pending" | "completed" | { failed: string }
+  }>
 }
 type Readiness = { _tag: "Ready" } | { _tag: "NotReady"; predicate: Predicate; reason: NotReadyReason; observedAt: number }
 
 type CloseReason =
   | BrowserClosed | BrowserCrashed | ConnectionLost | ModelUnavailable
-  | UserContextRemoved | ObservationReleased
+  | UserContextRemoved | ObservationReleased | AccessReleased
   | PageClosed /* by: command | script | userContextRemoved | browser */ | PageCrashed
   | FrameDetached | DocumentReplaced | DocumentEvicted | DocumentDestroyed | DocumentUnloaded
   | RealmDestroyed
@@ -169,7 +207,7 @@ Cleanup groups can span sibling pages, independently of this graph.
   - **cleanup group**: which scope releases it.
 
   Being a child in the model graph grants none of them.
-- **Access.** `observe` permits protocol events only. `inspect` adds isolated-world injection and reads: locators, readiness predicates, snapshots, screenshots, body reads. `control` adds input, navigation, main-world evaluation, declarations and obligation decisions. Discovered resources start at `observe`, and upgrading never changes release policy. A declaration whose physical effect reaches past its target needs explicit wider access, or fails with `NotPermitted`. Access is a library contract, not a browser security boundary.
+- **Access.** `observe` permits protocol events only. `inspect` adds isolated-world injection and reads: locators, readiness predicates, snapshots, screenshots, body reads. `control` adds input, navigation, main-world evaluation, declarations and obligation decisions. Discovered resources start at `observe`, and upgrading never changes release policy. An upgrade is held by the `Scope` that acquired it; once that scope closes, the upgraded handle fails with `TargetGone{reason: AccessReleased}` rather than silently keeping its powers. A declaration whose physical effect reaches past its target needs explicit wider access, or fails with `NotPermitted`. Access is a library contract, not a browser security boundary.
 - **Release and cleanup groups.**
   - Created resources are owned: `closeOwned` or `removeOwned`.
   - The default context and pages that existed at attach are `leaveOpen`.

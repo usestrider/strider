@@ -26,6 +26,7 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
   - **Early release** (`page.close`) is always possible; the finalizer then does nothing.
 - **Handles get members; decorators are dual combinators.** `Observe.*`, `Expect.*` and `Browser.with*` work both data-first and in `pipe`.
 - **No platform services at call sites.** Platform services appear only in the launch and connect layers, so `Scope` is the only requirement an ordinary call site can see.
+- **Immutable by default; mutable state is read through an `Effect`.** Handles, locators, snapshots, events and errors are immutable values. Anything that can change is never a plain field: `page.url`, `page.title`, `browser.capabilities`, page lists, and whether a handle still holds its access. Such reads are `Effect`s, evaluated when they run, so they can't go stale in a variable. Changes arrive on `events` streams. Internally this state lives in a `SubscriptionRef` (CONCEPTS.md §2), which the public API never exposes for writing. Mutability is avoided wherever an immutable value can do.
 - **Locators are values,** resolved again on every attempt.
 - **Snapshots are named `read*`.** Retrying assertions take locators.
 - **Access is typed.** `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, like `ReadonlyArray` and `Array`. A helper that only reads takes `ReadonlyPage`, and a `Page` is accepted. Calling an action on a page you may only inspect is a compile error, and autocomplete doesn't offer it.
@@ -93,8 +94,8 @@ class Browser extends Context.Service<Browser, BrowserHandle>()("effect-browser/
 // Dual<X> = { (x: X): <A, E, R>(self: Effect<A, E, R>) => Effect<A, E, R>; <A, E, R>(self: Effect<A, E, R>, x: X): Effect<A, E, R> }
 
 interface BrowserHandle {
-  readonly info: BackendInfo
-  readonly capabilities: CapabilitySet
+  readonly info: BackendInfo                                                         // fixed for the connection
+  readonly capabilities: Effect<CapabilitySet>                                       // refined as probes complete
   readonly newContext: Effect<BrowserContext, ContextError, Scope>                   // owned; removed when the scope closes
   newContextWith(options: ContextOptions): Effect<BrowserContext, ContextError, Scope>
   readonly newPage: Effect<Page, PageError, Scope>                                   // a fresh context + page, released together
@@ -148,7 +149,7 @@ interface ReadonlyPage extends ObservedPage {
 
 interface Page extends ReadonlyPage {
   // the locator members above return Locator (with actions) instead of ReadonlyLocator
-  readonly context: BrowserContext
+  readonly context: BrowserContext                      // fixed: a page never changes context
   goto(url: string, options?: { waitUntil?: LoadState; accept?: ReadonlyArray<"download" | "noContent"> }):
     Effect<Navigation, NavigationError | TargetGone | Timeout>
   readonly reload: Effect<Navigation, NavigationError | TargetGone | Timeout>
@@ -409,7 +410,7 @@ interface Clock {
 ```ts
 page.capability(Capability.AxTree)         // Effect<AxTreeReader, CapabilityError, Scope>   — reason: Unsupported{capability, backend}
 page.capability(Capability.Screencast)     // Effect<ScreencastControl, CapabilityError, Scope>
-browser.capabilities                       // the full set, with evidence and limitations
+browser.capabilities                       // Effect<CapabilitySet>: the current set, with evidence and limitations
 ```
 
 Common members are on every backend. Specialized features are reached through a capability handle bound to *this* page, so a feature from one browser can't authorize an operation on another.

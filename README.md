@@ -45,6 +45,7 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 10. **Small error channels, rich evidence.** An ordinary call fails with `TargetGone`, `Timeout` or its own domain error. Detail lives in `reason` fields and a shared diagnostic envelope.
 11. **Secrets are protected in diagnostics, and export is explicit.** `Redacted` goes in, classified fields come out wrapped, and secret-bearing exports are deliberate operations.
 12. **If it doesn't have to be a function, it's a value.** Operations without arguments are `Effect`s (`locator.click`, `browser.newPage`), and pure derivations are properties (`locator.first`). A member whose parameters are all optional is a default value plus `xWith(options)`. Cross-cutting settings such as timeouts are dual combinators, not option fields. Anything with a lifecycle requires `Scope`.
+13. **Immutable by default; mutable state lives in a `Ref` and is read through an `Effect`.** Entities are immutable identity plus one `SubscriptionRef` of state. Snapshots, events and errors are immutable. Nothing that can change is exposed as a plain field, so every read happens at the moment its effect runs.
 
 ## Cross-cutting decisions
 
@@ -110,6 +111,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.3** made immutability the default: model entities are identity plus one `SubscriptionRef` of state, and mutable values (`url`, `title`, `capabilities`, page lists, held access) are read through `Effect`s. An upgraded handle whose scope has closed fails with `AccessReleased`.
 - **Revision 5.2** adopted the API conventions: anything that doesn't have to be a function is a value (an `Effect`, or a plain property for pure derivations). A member whose parameters are all optional becomes a default value plus `xWith(options)`. Timeouts and diagnostics move out of option bags into dual combinators (`Browser.withTimeout`).
 - **Revision 5.1** settled two decisions: every acquisition with a lifecycle requires `Scope` (contexts, pages, access upgrades, popups, downloads, handles, capability handles, declarations), which removed `withPage`/`withContext`; and `BrowserContext` is the context's name.
 - **Revision 5** restructured the design into balanced layers and folded in [review 4](reviews/04-draft-4.md):

@@ -109,12 +109,12 @@ transport ─► dispatcher ─► per-session ordered fold ─► publisher ─
 ```ts
 interface BackendAdapter {
   readonly info: BackendInfo                                     // product, version, protocol revision
-  readonly capabilities: CapabilitySet                           // static profile + probed evidence
+  readonly capabilities: SubscriptionRef<CapabilitySet>          // static profile, refined by probed evidence
   connect(transport: Transport): Effect<AdapterConnection, ConnectError, Scope>
 }
 interface AdapterConnection {
   readonly model: ModelSink                                      // feeds the L1 fold: created/ended/changed facts with evidence
-  readonly correlation: CorrelationTables                        // L1 ids ⇄ protocol ids, per session generation
+  readonly correlation: Effect<CorrelationTables>                // L1 ids ⇄ protocol ids, per session generation; held in a Ref
   initialize(target: TargetRef, revision: DeclarationRevision): Effect<Ready, InitializationFailed>
   apply(declaration: Declaration): Effect<Acknowledged, DeclarationError>   // compile per backend; acknowledge or fail
   resolve(obligation: Obligation, decision: Decision): Effect<Acknowledged, ProtocolError>
