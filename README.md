@@ -18,6 +18,7 @@ Each layer document has the same shape: purpose, top data models, interface sket
 | — | [README.md](README.md) | goals, principles, cross-cutting decisions, guarantees |
 | L2 | [API.md](API.md) | the public API: entry points, pages, locators, actions, expectations, state and events, network, clock, agents, testing, errors, call sites |
 | L1 | [CONCEPTS.md](CONCEPTS.md) | the native browser model: identities, data models, lifetimes, contracts |
+| — | [sketch/](sketch/) | the whole public API as declarations type-checked against Effect 4.0.5, with the acceptance scenarios and the rules the types enforce (`npm run check`) |
 | — | [CLI.md](CLI.md) | the command line: named sessions, commands, files, storage and forks, export |
 | L0 | [PROTOCOL.md](PROTOCOL.md) | transports, protocol clients, code generation, ingestion, backend adapters, capabilities |
 | — | [PROBES.md](PROBES.md) | conformance probes, hazard coverage, deterministic model tests |
