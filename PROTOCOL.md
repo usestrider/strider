@@ -117,6 +117,7 @@ interface Traits {                               // spec facts plus overlay anno
 
 - **Shape of the output.** Domain modules with per-kind branded ids, so ids never cross protocols or kinds, and `Schema.Opaque` named types.
   - Each type is a hand-emitted interface plus a codec cast to it (`export const X = Schema.suspend(() => …) as any as Schema.Codec<X>`), so the compiler never infers types from schema generics. Recursive types (DOM nodes, stack traces) are emitted in dependency order.
+  - Types-only declarations are kept separate from codecs: one model, two renderers.
   - Every top-level call is `/*#__PURE__*/`, including the call a class extends, so unused domains tree-shake.
   - Commands and events are data: a method, codecs and traits. All behavior lives in the hand-written client, so a behavior change never needs a regeneration.
 - **Sensitive members decode as `Redacted`**: cookie values, auth credentials, `Authorization` headers, inserted text. L0 traffic captured in diagnostics therefore can't leak secrets.
@@ -234,7 +235,7 @@ This is a planning inventory from the research, not a conformance result. `?` me
 ## Open questions
 
 None. Decided:
-- **Codegen route:** our own emitter over a committed protocol model, with audited corrections and a separate overlay (Code generation above). The pipeline follows Alchemy's distilled.
+- **Codegen route:** our own emitter over a committed protocol model, with audited corrections and a separate overlay (Code generation above). The pipeline follows Alchemy's distilled; the lessons and sources are in [research/codegen-prior-art.md](research/codegen-prior-art.md).
   - `SchemaRepresentation.toCodeDocument` was rejected because it takes no options and the representation can't carry brands, `/*#__PURE__*/` or opaque types. Effect's OpenAPI generator, which uses it, has to rewrite JSON Schema before it and swap whole entries by name after it.
   - Smithy as the model format was rejected because distilled's generator is HTTP-bound, and events, sessions and BiDi union kinds would all need custom traits.
 - **Pipe transport** uses Effect's `ChildProcess` extra file descriptors behind our `Transport`:
