@@ -120,6 +120,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
   - `Observation` under `page.events.*` for events, in three forms: around a trigger, `.pending` and `.stream`.
   - This replaces the free-floating `Observe.*` combinators, which never said what they observed, and the lazily subscribed `page.events` streams, which could race their cause.
   - It also adds the no-public-fibers and no-writable-`Deferred` rules, informed by RxJS's hot/cold and subject lessons.
+  - The names `Watchable` and `Observation` are settled.
 - **Revision 5.6** replaced optional fields with unions of valid models:
   - `Ownership` (left open, or owned with a release and a scope);
   - `PageModel | FrameModel` (only frames have parents);

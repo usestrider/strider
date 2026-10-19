@@ -655,6 +655,5 @@ yield* report.finished
 2. **Module layout.** One package with subpath exports (`/test`, `/ai`, `/cdp`) or several packages?
 3. **The ambiguity window.** What is the default stable-ambiguity window: about one second, or a number of rendering samples?
 4. **The AI snapshot format.** Adopt Playwright's YAML-like aria snapshot as-is, or define our own with diffs?
-5. **Names.** `Watchable` and `Observation`, versus `Live`, `Signal` or `EventFeed`. `Signal` would suggest TC39 signal semantics we don't have, and `Observer` means the consumer in RxJS.
-6. **A fake browser for users.** Should the timeline-scripted fake browser (PROBES.md) be exposed for testing automation logic without a real browser, or stay internal?
-7. **A runner plugin.** Is a Vitest reporter needed for flaky-test classification, or do spans suffice?
+5. **A fake browser for users.** Should the timeline-scripted fake browser (PROBES.md) be exposed for testing automation logic without a real browser, or stay internal?
+6. **A runner plugin.** Is a Vitest reporter needed for flaky-test classification, or do spans suffice?
