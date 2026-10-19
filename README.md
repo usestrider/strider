@@ -55,7 +55,7 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 20. **Every effect ends.** Waits run under the operation deadline, open-ended things are `Stream`s, and lifetime signals (`closed`) are the only exception.
 21. **Every error reason carries a hint.** The rendered message says what to do next.
 22. **One way to do each thing.** No aliases or parallel mechanisms. A convenience is allowed only at the dominant call site, and is documented as its expansion.
-23. **Explicit over implicit.** Nothing hidden may change behavior or add waiting: no magic delays, grace periods or heuristic windows by default. Such behavior is asked for in code (an `Expect`, a `waitFor`, an observation, a named option). Actionability waiting is the documented, adjustable contract of each action, not a heuristic.
+23. **Explicit over implicit.** Nothing hidden may change behavior or add waiting: no magic delays, grace periods or heuristic windows by default. Such behavior is asked for in code (an `Expect`, a `waitFor`, an observation, a named option). Helpers that make explicit behavior simpler are welcome, but they stay opt-in. Actionability waiting is the documented, adjustable contract of each action, not a heuristic.
 
 ## Cross-cutting decisions
 
@@ -121,6 +121,11 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.12** settled snapshots:
+  - a structured `Snapshot` tree with a Playwright-style text rendering;
+  - `ariaSnapshot` (pure accessibility tree) vs `snapshot`, which adds inferred interactivity and names for inaccessible sites, every inference tagged with its evidence;
+  - same node, same ref;
+  - explicit diffs and explicit size limits.
 - **Revision 5.11** adopted rule 23, explicit over implicit:
   - ambiguity fails immediately, with a visibility hint, and has no retry window;
   - the dialog policy is an explicit context option that decides with no grace period.

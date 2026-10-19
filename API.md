@@ -62,7 +62,7 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
   - `StaleRef`: "refs end with their document; use a locator or take a new snapshot"
   - `Unsupported`: "supported on: chromium (CDP)"
   - `StrictViolation`: "2 matches; try `getByRole('button', { name: 'Save' })`"
-- **Explicit over implicit.** Nothing hidden may change behavior or add waiting. That rules out magic delays, grace periods and heuristic windows by default. If you want such behavior, ask for it in code: an `Expect`, a `waitFor`, an observation, or a named option. Actionability waiting is the documented contract of each action: named checks, adjustable per call, reported in errors. It is not a hidden heuristic.
+- **Explicit over implicit.** Nothing hidden may change behavior or add waiting. Helpers that make explicit behavior simpler are welcome, but they stay opt-in. That rules out magic delays, grace periods and heuristic windows by default. If you want such behavior, ask for it in code: an `Expect`, a `waitFor`, an observation, or a named option. Actionability waiting is the documented contract of each action: named checks, adjustable per call, reported in errors. It is not a hidden heuristic.
 - **One way to do each thing.** No aliases, and no parallel mechanisms for the same job (that is why `withPage` went away). A convenience is allowed only where it is the dominant call site and is documented as its expansion: `page.url` is `page.status.map(…)`, `download.finished` is `status.waitFor(…)`, and `browser.newPage` is `newContext` followed by `newPage`.
 
 ## Top data models
@@ -105,13 +105,29 @@ interface ResponseSnapshot {                            // immutable; one redire
 }
 interface CapturedResponse<B> extends ResponseSnapshot { readonly body: B }
 
-interface AriaSnapshot {                                // for agents and structural assertions
+interface Snapshot {                                    // a structured tree; text is one rendering of it
   readonly document: DocumentId
   readonly generation: DocumentGeneration
-  readonly text: string                                 // YAML-like tree with [ref=eN]
+  readonly root: SnapshotNode
+  readonly text: string                                 // Playwright-style YAML aria snapshot, with evidence tags for inferred nodes
+  readonly refs: ReadonlyMap<RefId, SnapshotNode>       // already branded
   ref(id: RefId): Effect<Locator, StaleRef>            // StaleRef{reason} if the ref is from another snapshot, or the document or generation moved on
-  readonly refs: ReadonlyMap<RefId, RefSummary>        // role, name and state for each ref, already branded
+  diff(previous: Snapshot): Effect<SnapshotDiff, SnapshotDiffError>   // explicit; fails if the documents differ
 }
+interface SnapshotNode {
+  readonly ref: Option<RefId>                           // same node, same ref within a document generation
+  readonly role:                                        // where the role came from is always visible
+    | { readonly _tag: "Aria"; readonly role: AriaRole }
+    | { readonly _tag: "Inferred"; readonly role: "clickable" | "editable" | "focusable"; readonly evidence: NonEmptyReadonlyArray<InteractivityEvidence> }
+  readonly name:
+    | { readonly _tag: "Accessible"; readonly value: string }
+    | { readonly _tag: "Inferred"; readonly value: string; readonly from: "text" | "title" | "placeholder" | "alt" | "nearbyLabel" }
+    | { readonly _tag: "None" }
+  readonly states: ReadonlySet<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed">
+  readonly children: ReadonlyArray<SnapshotNode>
+}
+type InteractivityEvidence = "clickListener" | "cursorPointer" | "tabindex" | "contentEditable" | "onclickAttribute"
+type SnapshotDiff = { readonly added: ReadonlyArray<SnapshotNode>; readonly removed: ReadonlyArray<RefId>; readonly changed: ReadonlyArray<SnapshotNode>; readonly text: string }
 ```
 
 `Page`, `Locator`, `Navigation` and the other model handles are `Equal`/`Hash` by identity (CONCEPTS.md §1). A `ReadonlyPage` and a `Page` for the same tab are equal, because identity is the tab and not the access level.
@@ -212,8 +228,10 @@ interface ReadonlyPage extends ObservedPage {
   frame(locator: ReadonlyLocator): ReadonlyFrame         // enters an iframe by its element
   // one-shot reads
   readonly title: Effect<string, ReadError>
-  readonly snapshot: Effect<AriaSnapshot, ReadError>     // with refs, for agents
-  snapshotWith(options: { mode: "ai" | "full"; root?: ReadonlyLocator }): Effect<AriaSnapshot, ReadError>
+  readonly ariaSnapshot: Effect<Snapshot, ReadError>     // the accessibility tree only: what assistive technology sees
+  readonly snapshot: Effect<Snapshot, ReadError>         // accessibility tree + inferred interactivity, every inferred node tagged with its evidence
+  snapshotWith(options: { sources?: "aria" | "aria+interactivity"; root?: ReadonlyLocator; depth?: number; interactiveOnly?: boolean }):
+    Effect<Snapshot, ReadError>                          // size is explicit: no automatic truncation
   readonly screenshot: Effect<Uint8Array, CaptureError>  // viewport, PNG
   screenshotWith(options: {
     area?: { _tag: "Viewport" } | { _tag: "FullPage" } | { _tag: "Clip"; rect: Rect<CssPixels> } | { _tag: "Element"; locator: ReadonlyLocator }
@@ -286,7 +304,7 @@ interface ReadonlyLocator extends Pipeable, Equal.Equal, Inspectable {
   readonly readValue: Effect<string, ReadError>
   readonly isVisible: Effect<boolean, ReadError>
   readonly all: Effect<ReadonlyArray<ReadonlyLocator>, ReadError>   // pinned to the current nth matches
-  readonly snapshot: Effect<AriaSnapshot, ReadError>
+  readonly snapshot: Effect<Snapshot, ReadError>
   readAttribute(name: string): Effect<Option<string>, ReadError>
 }
 
@@ -560,7 +578,7 @@ Common members are on every backend. Specialized features are reached through a 
 ## Agents
 
 ```ts
-const snap = yield* page.snapshot                      // interactive elements get [ref=eN]; refs bound to document + generation
+const snap = yield* page.snapshot                      // aria + inferred interactivity; e.g. `- clickable "Add to cart" [ref=e9] [inferred: clickListener, cursorPointer]`
 const [id] = snap.refs.keys()                          // RefIds come from the snapshot, already branded
 const button = yield* snap.ref(id)                     // Locator; fails with StaleRef{reason} after navigation or document.open()
 
@@ -579,6 +597,16 @@ McpServer.toolkit(toolkit)
 ```
 
 `observed` reports what was seen. It never claims "no effect"; if nothing was observed, the report says exactly that.
+
+Snapshots:
+- **Many sites aren't accessible.** Clickable `<div>`s have no role and icon buttons have no name, so the default `snapshot` adds two kinds of inferred information to the accessibility tree:
+  - *inferred interactivity:* click listeners where the backend can list them, `cursor: pointer`, `tabindex`, `contenteditable`, `onclick`;
+  - *inferred names:* visible text, `title`, `placeholder`, `alt`, a nearby label.
+- **Every inference is tagged with its evidence** in both the value and the text, so a model or a reader can tell `button "Save"` from `clickable "Save" [inferred: cursorPointer]`.
+- **`ariaSnapshot` is the pure accessibility tree,** used by `Expect.toMatchAriaSnapshot`.
+- **Same node, same ref** within a document generation, so a renamed button keeps its ref.
+- **Diffs are explicit** (`snapshot.diff(previous)`), never an automatic switch between full and delta output.
+- **Visual-only UIs** (canvas, maps) need screenshots and coordinate actions. The toolkit offers those as an explicit tool set rather than a fallback.
 
 ## Testing
 
@@ -727,6 +755,5 @@ yield* report.finished
 
 ## Open questions
 
-1. **The AI snapshot format.** Adopt Playwright's YAML-like aria snapshot as-is, or define our own with diffs?
-2. **A fake browser for users.** Should the timeline-scripted fake browser (PROBES.md) be exposed for testing automation logic without a real browser, or stay internal?
-3. **A runner plugin.** Is a Vitest reporter needed for flaky-test classification, or do spans suffice?
+1. **A fake browser for users.** Should the timeline-scripted fake browser (PROBES.md) be exposed for testing automation logic without a real browser, or stay internal?
+2. **A runner plugin.** Is a Vitest reporter needed for flaky-test classification, or do spans suffice?

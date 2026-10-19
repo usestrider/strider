@@ -186,6 +186,7 @@ This is a planning inventory from the research, not a conformance result. `?` me
 | evaluation with user activation | ✓ | ✓ (probe 20) | ✓ (probe 20) | ✓ | ? | ? |
 | page time: virtual / injected | ✓/✓ | ✗/✓ | ✗/✓ | ✗/✓ | ✗/? | ✗/? |
 | WebSocket frames | ✓ | ✗ | ✗ | ✓ | ✓ | ✗ |
+| event-listener listing (snapshot evidence) | ✓ | via `goog:cdp` | ✗ | ? | ? | ✗ |
 
 \* Firefox accepts a `provideResponse` body only at the request phase.
 

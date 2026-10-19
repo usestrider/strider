@@ -33,6 +33,7 @@
     - installation before author script;
     - teardown.
 22. **Pause-on-start granularity.** Can new targets be paused per created context, per opener (popups), or only browser-wide by type? Covers CDP `setAutoAttach` filters and `autoAttachRelated`, and WebKit page proxies. A user-opened tab in an attached browser must never be paused unless browser-wide access was granted.
+23. **Interactivity evidence.** Per backend, can event listeners be listed (CDP `DOMDebugger.getEventListeners`; WebKit unconfirmed; BiDi has none)? What does that cost on large pages? On a corpus of known-inaccessible sites, how much do inferred interactivity and inferred names recover compared with the accessibility tree alone?
 
 ## Hazard coverage
 
