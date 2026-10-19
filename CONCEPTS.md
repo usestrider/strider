@@ -264,7 +264,7 @@ Cleanup groups can span sibling pages, independently of this graph.
   - Created resources are `Owned`.
   - The default context and pages that existed at attach are `LeaveOpen`.
   - **Every acquisition requires a `Scope`, and that scope is the cleanup group.** This covers contexts, pages, access upgrades, popups, downloads, handles, capability handles and every declaration. Values with no remote lifetime (locators, snapshots, captured bodies) need none. An early `close` makes the finalizer a no-op.
-  - A popup of an owned page is released with the scope that observed it (`Observe.popup`). If nobody asked for it, it is released with the scope that acquired its opener, even if the opener has already closed. A popup of a `LeaveOpen` page is `observe`/`LeaveOpen`.
+  - A popup of an owned page is released with the scope that observed it (`page.events.popup`). If nobody asked for it, it is released with the scope that acquired its opener, even if the opener has already closed. A popup of a `LeaveOpen` page is `observe`/`LeaveOpen`.
   - Transfer to another scope is explicit and atomic with respect to shutdown. Ambiguous opener evidence never implies ownership.
 - **Ownership ledger.** The connection records owned resources, groups and transfers. A persisted ledger yields *reclamation candidates* only. Automatic destructive reclaim across connections needs verified browser incarnation, resource identity and claimant coordination, and is deferred.
 - **Requesting a close is not ending a lifetime.** `closeWith({runBeforeUnload: true})` can be refused (`CloseCanceled`), and the page stays usable. A close timeout leaves closure unconfirmed rather than fabricating `PageClosed`. Teardown of owned resources uses a bounded close without beforeunload.
@@ -421,7 +421,7 @@ Compatible instantaneous checks are batched in one injected evaluation. No batch
 | obligation decision | fallback applies | resolver continues | no contradictory decision |
 | resource creation | nothing created | may exist | late-reply adoption or cleanup |
 
-- **Observation windows.** A window is the internal resource behind every `Observe.*` combinator.
+- **Observation windows.** A window is the internal resource behind every event observation (`page.events.*`) in all three modes: around a trigger, `.pending` and `.stream`.
   - **Before the trigger:** it acquires subscriptions, collectors and handlers, including remote enablement. If that fails, the trigger never runs.
   - **Revision boundary:** it sets one between the current-state snapshot and the live subscription.
   - **Concurrency:** handlers run alongside the trigger.
@@ -435,10 +435,20 @@ Compatible instantaneous checks are batched in one injected evaluation. No batch
   - Explicit refs never rebind.
   - Nothing that may have dispatched is repeated automatically.
 - **Errors (L1 view).** Lifetime ends surface as `TargetGone{reason: CloseReason}` and deadlines as `Timeout`. Everything else is a domain error per verb family whose `reason` includes `NotPermitted`, `Unsupported` and `BackendFailure{Rejected | IncompatibleResponse}`. All of them carry the diagnostic envelope. Defects are reserved for bugs. `SessionSwapped` is internal.
-- **Event streams.**
-  - **Normal end:** a stream owned by an object ends successfully when the object ends normally, after draining what was already published.
+- **State and event streams have different contracts.**
+  - **State** (`Watchable`) is a read-only view of an entity's state ref:
+    - reading it is an `Effect`;
+    - `changes` starts with the current value, conflates, drops consecutive equal values, and ends after emitting the terminal state as data;
+    - `waitFor` is level-triggered;
+    - a late subscriber sees the present, not the past, which is safe because waits are level-triggered;
+    - only state folded from protocol events is watchable.
+  - **Events** (`Observation`) are subscribed eagerly. The subscription is live when the acquiring effect returns, or before the trigger runs; a lazily subscribed event stream would race its own cause. Event streams are lossless up to a bound.
+  - **Normal end:** an event stream owned by an object ends successfully when the object ends normally, after draining what was already published.
   - **Abnormal end:** it fails with `TargetGone` on abnormal ends and with `EventOverflow` on overflow.
   - **Filtering:** declarative metadata prefilters run before buffering. Caller predicates run in subscriber workers, never on the ingestion path.
+- **No public fibers, no writable `Deferred`s or `Ref`s.**
+  - **Internal:** the model's background work (state folds, handlers, resolvers) runs in fibers scoped to the owning entity. `Deferred`s latch first matches, lifetime ends and obligation decisions; `Deferred.succeed` returning `false` enforces a single winner.
+  - **Public:** only read-only views cross the API: `Effect`, `Watchable`, `Pending`, and `Stream` from eager subscriptions.
 
 ## 10. Secrets and diagnostics
 

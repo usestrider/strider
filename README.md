@@ -48,6 +48,8 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 13. **Immutable by default; mutable state lives in a `Ref` and is read through an `Effect`.** Entities are immutable identity plus one `SubscriptionRef` of state. Snapshots, events and errors are immutable. Nothing that can change is exposed as a plain field, so every read happens at the moment its effect runs. A plain field on a live handle or entity is a claim that it never changes, so it carries a one-line justification.
 14. **Brand liberally.** Ids and meaningful strings and numbers are branded types with validating schemas (`Url`, `UrlPattern`, `HttpStatus`, `LocalPath`/`RemotePath`, `CssPixels`, …). Outputs are always branded. Tokens are accepted back only in branded or opaque form, and are checked against their origin when used. These are produced values that only mean something relative to where they came from: ids, snapshot refs, registration handles. Other inputs require the brand where meanings could be confused, and otherwise parse plain strings at the boundary.
 15. **Unions of valid models; `Option` for what's truly optional.** Fields that only make sense together form a tagged union of valid shapes, so impossible states can't be built. Genuinely optional values are `Option`, never `?:`, `undefined` or `null`. Input option bags keep `?:` for "use the default", and their mutually exclusive alternatives are unions.
+16. **State is watchable; events are observed.** A `Watchable` reads now, streams changes (conflated, starting from the current value) and waits level-triggered. An `Observation` is subscribed eagerly and comes in three forms: around a trigger, `.pending` (arm now, await later) and `.stream` (every match). Watching shows the present; to see events from the beginning, subscribe before their cause.
+17. **No public fibers, no writable `Deferred`s or `Ref`s.** Callers own concurrency (`Effect.forkScoped`). The library exposes only read-only views of what it latches and stores.
 
 ## Cross-cutting decisions
 
@@ -113,6 +115,11 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.7** split state from events:
+  - `Watchable` for state: page status, URL, frames, download progress, page lists, capabilities.
+  - `Observation` under `page.events.*` for events, in three forms: around a trigger, `.pending` and `.stream`.
+  - This replaces the free-floating `Observe.*` combinators, which never said what they observed, and the lazily subscribed `page.events` streams, which could race their cause.
+  - It also adds the no-public-fibers and no-writable-`Deferred` rules, informed by RxJS's hot/cold and subject lessons.
 - **Revision 5.6** replaced optional fields with unions of valid models:
   - `Ownership` (left open, or owned with a release and a scope);
   - `PageModel | FrameModel` (only frames have parents);

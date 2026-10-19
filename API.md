@@ -24,7 +24,9 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
   - **What it covers:** contexts, pages, access upgrades, popups, downloads, handles, capability handles and every declaration (routes, dialog handlers, init scripts, overrides, clocks). Each is acquired into the caller's `Scope` and released when that scope closes.
   - **What doesn't need it:** values with no remote lifetime (locators, snapshots, captured bodies, storage-state bytes).
   - **Early release** (`page.close`) is always possible; the finalizer then does nothing.
-- **Handles get members; decorators are dual combinators.** `Observe.*`, `Expect.*` and `Browser.with*` work both data-first and in `pipe`.
+- **Handles get members; decorators are dual combinators.** `Expect.*` and `Browser.with*` work both data-first and in `pipe`. Event observations are applied to a trigger the same way: `click.pipe(page.events.popup)`.
+- **State is a `Watchable`; events are an `Observation`** (see State and events). State can be read at any time and waited on safely. Events must be subscribed to before their cause, and the API makes that subscription explicit.
+- **No public fibers, no writable `Deferred`s or `Ref`s.** The library never forks on the caller's behalf and never returns a `Fiber`. Callers fork their own consumers with `Effect.forkScoped`. Internally, `Deferred`s latch results and `SubscriptionRef`s hold state, but only read-only views cross the API.
 - **No platform services at call sites.** Platform services appear only in the launch and connect layers, so `Scope` is the only requirement an ordinary call site can see.
 - **Immutable by default; mutable state is read through an `Effect`.** Handles, locators, snapshots, events and errors are immutable values. Anything that can change is never a plain field: `page.url`, `page.title`, `browser.capabilities`, page lists, and whether a handle still holds its access. Such reads are `Effect`s, evaluated when they run, so they can't go stale in a variable. Changes arrive on `events` streams. Internally this state lives in a `SubscriptionRef` (CONCEPTS.md §2), which the public API never exposes for writing. Mutability is avoided wherever an immutable value can do.
 - **Plain fields on live handles must be fixed, and say why.** A live handle (browser, context, page, frame, download, intercepted request) may expose a plain field only if the value can't change for the handle's lifetime. Each such field carries a one-line justification. Ids, `closed`, event streams and sub-handles bound to their parent (`keyboard`, `mouse`, `clock`, whose own state is again read through `Effect`s) are exempt by construction. A field that can't be justified becomes an `Effect`. Immutable values (snapshots, locators, navigations, dialogs) are exempt entirely.
@@ -42,15 +44,25 @@ Error unions on reads, captures and evaluations are shortened in the sketches (`
 ## Top data models
 
 ```ts
-interface ObservedPage {                                // events only
+interface ObservedPage {                                // state and events only
   readonly id: NavigableId
-  readonly url: Effect<string>
-  readonly closed: Effect<CloseReason>                  // completes when the page's lifetime ends
-  readonly events: PageEvents                           // navigations, requests, console, dialogs, popups, downloads
+  readonly status: Watchable<PageStatus>                 // one consistent snapshot; ends with Closed{reason}
+  readonly url: Watchable<Url>                           // status.map(…): derived from the same source
+  readonly frames: Watchable<FrameTree>
+  readonly closed: Effect<CloseReason>                  // lifetime signal: waits as long as the page lives
+  readonly events: PageEvents                           // Observations: responses, requests, navigations, popups, dialogs, …
   readonly inspect: Effect<ReadonlyPage, PageError, Scope>   // installs the utility world; page stays open
   readonly control: Effect<Page, PageError, Scope>           // access lasts for the scope; page stays open
 }
 interface ReadonlyPage extends ObservedPage { /* locators, reads, snapshots, screenshots — see Pages */ }
+type PageStatus =
+  | { readonly _tag: "Open"; readonly url: Url; readonly document: DocumentStatus; readonly prompt: Option<PromptSnapshot> }
+  | { readonly _tag: "Closed"; readonly reason: CloseReason }
+interface DocumentStatus {
+  readonly id: DocumentId
+  readonly readiness: "loading" | "interactive" | "complete"
+  readonly lifecycle: "active" | "suspended"
+}
 interface Page extends ReadonlyPage { /* input, navigation, main-world evaluation, declarations */ }
 
 type Navigation =                                       // success value of goto/reload/back/forward
@@ -104,18 +116,18 @@ class Browser extends Context.Service<Browser, BrowserHandle>()("effect-browser/
 
 interface BrowserHandle {
   readonly info: BackendInfo                                                         // fixed for the connection
-  readonly capabilities: Effect<CapabilitySet>                                       // refined as probes complete
+  readonly capabilities: Watchable<CapabilitySet>                                    // refined as probes complete
   readonly newContext: Effect<BrowserContext, ContextError, Scope>                   // owned; removed when the scope closes
   newContextWith(options: ContextOptions): Effect<BrowserContext, ContextError, Scope>
   readonly newPage: Effect<Page, PageError, Scope>                                   // a fresh context + page, released together
   newPageWith(options: ContextOptions): Effect<Page, PageError, Scope>
-  readonly pages: Effect<ReadonlyArray<ObservedPage>>                                // attach mode: what already exists
+  readonly pages: Watchable<ReadonlyArray<ObservedPage>>                             // attach mode: what exists, and changes
   readonly defaultContext: ObservedContext                                           // fixed: exists for the whole connection
 }
 
 interface BrowserContext {
   readonly newPage: Effect<Page, PageError, Scope>       // closed with its unsolicited popups when the scope closes
-  readonly pages: Effect<ReadonlyArray<Page>>
+  readonly pages: Watchable<ReadonlyArray<Page>>
   readonly exportStorageState: Effect<Redacted<StorageStateBytes>, StorageStateError>   // branded bytes; a Uint8Array subtype
   readonly clock: Clock                                  // context-wide timeline (opt-in)
   route<E, R>(pattern: UrlPattern, handler: RouteHandler<E, R>): Effect<void, RouteError, Scope | R>
@@ -304,48 +316,75 @@ declare const Cond: {
 }
 ```
 
-- **How expectations evaluate.** One check runs immediately, then re-checks on a backoff schedule plus DOM-change invalidations, all within the deadline (`Browser.withTimeout` adjusts it).
+- **How expectations evaluate.** One check runs immediately, then re-checks on a backoff schedule plus DOM-change invalidations, all within the deadline (`Browser.withTimeout` adjusts it). `Expect.that` also accepts a `Watchable`, which re-checks when the value changes instead of polling.
 - **What failure contains.** `ExpectationFailed{subject, condition, last, history, elapsed}`. `history` is the de-duplicated sequence of observed values with timestamps, which answers "was it ever right?". When nothing matched, the error adds an accessibility snapshot of the nearest existing ancestor and suggested locators.
 
-## Observation combinators
+## State and events
 
-Every "wait for X caused by Y" is a combinator that decorates the trigger. It subscribes, and installs any collectors and handlers, *before* the trigger runs. It returns the trigger's own value alongside the observation, and preserves the trigger's `E` and `R`.
+Two kinds of things change over time, and they get different types on purpose. RxJS draws the same line (`BehaviorSubject` vs hot `Subject`), and so does the industry's move to signals for state and streams for events.
+
+| | State | Events |
+|---|---|---|
+| Examples | page status and URL, frame tree, download progress, page lists, capabilities | responses, requests, navigations, popups, dialogs, downloads, console messages |
+| Type | `Watchable<A>` | `Observation<A, E, R>` |
+| Late subscriber gets | the current value, so nothing that matters is missed | nothing from before it subscribed, so subscribing is explicit and eager |
+| Slow consumer gets | the latest value (conflated) | every match, losslessly, up to a bound (`EventOverflow`) |
 
 ```ts
-declare const Observe: {
-  // no arguments: the combinator itself
-  popup: <A, E, R>(trigger: Effect<A, E, R>) =>
-    Effect<readonly [A, Page], E | ObserveError | TargetGone | Timeout, R | Scope>
-  download: <A, E, R>(trigger: Effect<A, E, R>) =>
-    Effect<readonly [A, Download], E | ObserveError | TargetGone | Timeout, R | Scope>
-  navigation: <A, E, R>(trigger: Effect<A, E, R>) =>
-    Effect<readonly [A, Navigation], E | NavigationError | TargetGone | Timeout, R>
-  // optional configuration
-  popupWith(options: { url?: UrlPattern }): typeof Observe.popup
-  navigationWith(options: { url?: UrlPattern; waitUntil?: LoadState }): typeof Observe.navigation
-  // required arguments: a filter is mandatory, since "any response" is a footgun
-  response<B = Uint8Array, PE = never, PR = never>(filter: {
-    readonly url: UrlPattern
-    readonly method?: string
-    readonly status?: HttpStatus | number | ((status: HttpStatus) => boolean)
-    readonly body?: BodyDecoder<B>                       // Body.json(schema), Body.text, Body.bytes; collection is automatic
-    readonly where?: (response: CapturedResponse<B>) => Effect<boolean, PE, PR>   // runs off the ingestion path
-  }): <A, E, R>(trigger: Effect<A, E, R>) =>
-    Effect<readonly [A, CapturedResponse<B>], E | PE | ResponseError | TargetGone | Timeout, R | PR>
-  request(filter: RequestFilter): <A, E, R>(trigger: Effect<A, E, R>) =>
-    Effect<readonly [A, RequestSnapshot], E | ObserveError | TargetGone | Timeout, R>
-  dialog<DE, DR>(handler: (dialog: Dialog) => Effect<DialogDecision, DE, DR>): <A, E, R>(trigger: Effect<A, E, R>) =>
-    Effect<readonly [A, Dialog], E | DE | ObserveError | TargetGone | Timeout, R | DR>   // handler runs while the trigger runs
-  fileChooser(files: FileInput | ReadonlyArray<FileInput>): <A, E, R>(trigger: Effect<A, E, R>) =>
-    Effect<readonly [A, void], E | ObserveError | TargetGone | Timeout, R>
+interface Watchable<A> extends Effect<A> {               // yield* reads the current value
+  readonly changes: Stream<A>                            // current value first, then each distinct change; ends after the terminal state
+  waitFor<B extends A>(refinement: Refinement<A, B>): Effect<B, Timeout | TargetGone>   // level-triggered, under the deadline
+  waitFor(predicate: Predicate<A>): Effect<A, Timeout | TargetGone>
+  map<B>(f: (a: A) => B): Watchable<B>                   // derived from the same source, so never glitchy
 }
-// combinators with arguments also have a data-first overload: Observe.response(trigger, filter)
+
+interface Observation<A, E = never, R = never> {
+  // 1. around a trigger: the first match, plus the trigger's own result
+  <X, TE, TR>(trigger: Effect<X, TE, TR>): Effect<readonly [X, A], TE | E | TargetGone | Timeout, TR | R>
+  // 2. arm now, await later: the first match is latched
+  readonly pending: Effect<Pending<A, E>, ObserveError, Scope | R>
+  // 3. every match from now on: subscribed before this effect returns
+  readonly stream: Effect<Stream<A, E | EventOverflow>, ObserveError, Scope | R>
+}
+interface Pending<A, E = never> extends Effect<A, E | TargetGone | Timeout> {   // yield* awaits, under the deadline of the await
+  readonly poll: Effect<Option<Exit<A, E | TargetGone | Timeout>>>
+}
+
+interface PageEvents {                                    // page.events
+  response<B = Uint8Array, PE = never, PR = never>(filter: {
+    readonly url: UrlPattern                              // required: "any response" as a first match is a footgun
+    readonly method?: HttpMethod | string
+    readonly status?: HttpStatus | number | ((status: HttpStatus) => boolean)
+    readonly body?: BodyDecoder<B>                        // Body.json(schema), Body.text, Body.bytes; collection is automatic
+    readonly where?: (response: CapturedResponse<B>) => Effect<boolean, PE, PR>   // runs off the ingestion path
+  }): Observation<CapturedResponse<B>, PE | ResponseError, PR>
+  request(filter: RequestFilter): Observation<RequestSnapshot, ObserveError>
+  readonly requests: Observation<RequestSnapshot>         // every request: for logging
+  readonly navigation: Observation<Navigation, NavigationError>
+  navigationWith(options: { url?: UrlPattern; waitUntil?: LoadState }): Observation<Navigation, NavigationError>
+  readonly popup: Observation<Page, ObserveError, Scope>  // the popup is acquired into the caller's Scope
+  popupWith(options: { url?: UrlPattern }): Observation<Page, ObserveError, Scope>
+  readonly download: Observation<Download, ObserveError, Scope>
+  dialog<DE, DR>(handler: (dialog: Dialog) => Effect<DialogDecision, DE, DR>): Observation<Dialog, DE | ObserveError, DR>
+  fileChooser(files: FileInput | ReadonlyArray<FileInput>): Observation<void, ObserveError>
+  readonly console: Observation<ConsoleMessage>
+  readonly pageErrors: Observation<PageErrorEvent>
+  readonly autoResolutions: Observation<AutoResolution>   // dialogs and paused requests decided by a default policy
+}
 ```
 
-- **Completion rule.** Both the trigger and the observation must complete. A trigger failure is never discarded.
-- **When the owner ends first.** If the owner (page or context) ends normally before a match, the combinator fails promptly with `TargetGone` rather than waiting for its deadline.
-- **Results outlive the window.** A captured response body is owned bytes, so it survives the observation window and even the page closing.
-- **Popups.** A popup returned by `Observe.popup` is acquired into the caller's `Scope`. A popup nobody asked for is released with the scope that acquired its opener. Ownership follows the opener: popups of owned pages are owned, popups of attached pages stay open.
+**Events:**
+- **Every event observation is eager.** `.pending` and `.stream` are subscribed by the time their effect returns, and the trigger form subscribes before it runs the trigger. Filters apply before buffering, so unrelated traffic can't overflow a subscription.
+- **Completing around a trigger.** Both the trigger and the first match must complete, and a trigger failure is never discarded. If the owner (page or context) ends normally before a match, the observation fails promptly with `TargetGone` rather than waiting for its deadline.
+- **Results outlive the observation.** A captured response body is owned bytes, so it survives the observation and even the page closing. A `Pending`'s deadline starts when it is awaited, not when it is armed.
+- **Event streams end** normally when their owner ends normally or the acquiring scope closes. They fail with `TargetGone` on an abnormal end, and with `EventOverflow` past their bound.
+- **Popups.** A popup from `page.events.popup` is acquired into the caller's `Scope`. A popup nobody asked for is released with the scope that acquired its opener. Ownership follows the opener: popups of owned pages are owned, and popups of attached pages stay open.
+
+**State:**
+- **Watching gives you the present, not the past.** `changes` starts with the current value and conflates, so intermediate stages can be skipped. To see transitions from the beginning, subscribe before the cause, or fork the consumer right after you get the handle.
+- **Waits are level-triggered.** `waitFor` checks the current value and then the changes, so skipped stages don't matter.
+- **The terminal state is data.** `changes` emits the terminal state (`Closed{reason}`, `Completed`, …) last and then ends. It doesn't fail, because the union already says why it ended.
+- **Only state the model folds from protocol events is watchable.** Reads that need a round trip (DOM reads, `title`) stay plain `Effect`s rather than hiding a poll.
 
 ## Network
 
@@ -398,7 +437,10 @@ declare const Dialog: {                                  // ready-made handlers;
 interface Download {
   readonly url: Url                                      // fixed when the download begins
   readonly suggestedFilename: FileName                   // fixed when the download begins
-  readonly done: Effect<void, DownloadError>
+  readonly status: Watchable<
+    | { readonly _tag: "InProgress"; readonly received: number; readonly total: Option<number> }
+    | { readonly _tag: "Completed" } | { readonly _tag: "Canceled" } | { readonly _tag: "Failed"; readonly reason: string }>
+  readonly finished: Effect<void, DownloadError>          // status.waitFor(finished), under the deadline
   readonly stream: Stream<Uint8Array, DownloadError>
   saveAs(path: LocalPath | string): Effect<void, DownloadError>   // always a local path; transfers from a remote browser where supported
   // the browser-side file is deleted when the acquiring scope closes, unless the backend's download policy keeps it
@@ -409,7 +451,7 @@ declare const StorageState: {
 }
 ```
 
-- **Default dialog policy.** On owned pages, dialogs are dismissed after a short grace period, except `beforeunload`, which is accepted. On attached pages there is no default unless the caller opts in. Every automatic decision is published on `page.events.dialogs` and recorded on the operation that was running.
+- **Default dialog policy.** On owned pages, dialogs are dismissed after a short grace period, except `beforeunload`, which is accepted. On attached pages there is no default unless the caller opts in. Every automatic decision is published on `page.events.autoResolutions` and recorded on the operation that was running.
 - **Waiting on a dialog.** An operation blocked by a dialog that is about to be resolved waits within its deadline; it does not fail immediately.
 - **Storage state.** `context.exportStorageState` returns the full restorable state as `Redacted<Uint8Array>`. Writing it somewhere is an explicit, visible step. Diagnostic JSON of a context never contains secrets.
 
@@ -535,19 +577,19 @@ const page = yield* browser.newPageWith({ storageState: yield* StorageState.impo
 
 // 2. Click, then wait for a named outcome
 const [, nav] = yield* page.getByRole("link", { name: "Orders" }).click.pipe(
-  Observe.navigationWith({ url: "**/orders" }))
+  page.events.navigationWith({ url: "**/orders" }))
 
 // 3. Popup with a dialog inside it
-const [, popup] = yield* page.getByText("Connect account").click.pipe(Observe.popup)
-yield* popup.getByRole("button", { name: "Allow" }).click.pipe(Observe.dialog(Dialog.acceptAll))
+const [, popup] = yield* page.getByText("Connect account").click.pipe(page.events.popup)
+yield* popup.getByRole("button", { name: "Allow" }).click.pipe(popup.events.dialog(Dialog.acceptAll))
 
 // 4 + 9. Response body, decoded and filtered, without ordering subscriptions by hand
 const [, res] = yield* page.getByRole("button", { name: "Add to cart" }).click.pipe(
-  Observe.response({ url: "**/api/cart", method: "POST", body: Body.json(Cart),
+  page.events.response({ url: "**/api/cart", method: "POST", body: Body.json(Cart),
     where: (r) => Effect.succeed(r.body.items.length > 0) }))
 
 // 5. Download
-const [, file] = yield* page.getByText("Export CSV").click.pipe(Observe.download)
+const [, file] = yield* page.getByText("Export CSV").click.pipe(page.events.download)
 yield* file.saveAs("./export.csv")
 
 // 6. Concurrent pages, settings isolated by context
@@ -569,9 +611,11 @@ yield* Effect.scoped(Effect.gen(function* () {
 }))                                                     // route and access released; both tabs stay open
 
 // 8. Log requests until the page closes
-yield* page.events.requests.pipe(
+const requests = yield* page.events.requests.stream     // subscribed now, so nothing is missed
+yield* requests.pipe(
   Stream.filter((r) => r.resourceType === "fetch"),
-  Stream.runForEach((r) => Console.log(r.method, r.url)))   // ends normally on close; fails on crash
+  Stream.runForEach((r) => Console.log(r.method, r.url)),
+  Effect.forkScoped)                                     // background; ends normally on close, fails on crash
 
 // 10. Paused application time
 yield* page.clock.install({ mode: "controlled", at: "2026-01-01T09:00:00Z" })
@@ -588,6 +632,18 @@ yield* page.addInitScript(useTestHooks, { after: [helper] })   // dependencies o
 yield* page.locator("button[").click.pipe(              // invalid selector: immediate, no waiting
   Effect.catchReason("ActionError", "InvalidSelector", (e) => Console.log(e.message)))
 yield* page.getByRole("button", { name: "Pay" }).click.pipe(Browser.withTimeout("5 seconds"))
+
+// 13. Arm now, collect later, across several steps
+const cart = yield* page.events.response({ url: "**/api/cart" }).pending
+yield* page.getByRole("button", { name: "Add to cart" }).click
+yield* page.getByRole("button", { name: "Checkout" }).click
+const placed = yield* cart                               // latched, even if it arrived during the clicks
+
+// 14. Watch state while doing other work
+const [, report] = yield* page.getByText("Export PDF").click.pipe(page.events.download)
+yield* report.status.changes.pipe(Stream.runForEach(renderProgress), Effect.forkScoped)   // fork first: watching shows the present
+yield* page.status.waitFor((s) => s._tag === "Open" && s.document.readiness === "complete")
+yield* report.finished
 ```
 
 ## Open questions
@@ -599,4 +655,6 @@ yield* page.getByRole("button", { name: "Pay" }).click.pipe(Browser.withTimeout(
 2. **Module layout.** One package with subpath exports (`/test`, `/ai`, `/cdp`) or several packages?
 3. **The ambiguity window.** What is the default stable-ambiguity window: about one second, or a number of rendering samples?
 4. **The AI snapshot format.** Adopt Playwright's YAML-like aria snapshot as-is, or define our own with diffs?
-5. **A runner plugin.** Is a Vitest reporter needed for flaky-test classification, or do spans suffice?
+5. **Names.** `Watchable` and `Observation`, versus `Live`, `Signal` or `EventFeed`. `Signal` would suggest TC39 signal semantics we don't have, and `Observer` means the consumer in RxJS.
+6. **A fake browser for users.** Should the timeline-scripted fake browser (PROBES.md) be exposed for testing automation logic without a real browser, or stay internal?
+7. **A runner plugin.** Is a Vitest reporter needed for flaky-test classification, or do spans suffice?

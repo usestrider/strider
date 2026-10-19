@@ -74,7 +74,21 @@ The hazards are catalogued in `research/platform-concept-model.md` §4.
 
 ## Deterministic model tests
 
-These run against synthetic protocol traffic with an injected clock. They check L1 and L0 logic, not browser behavior:
+These run against synthetic protocol traffic with an injected clock. They check L1 and L0 logic, not browser behavior.
+
+**Timelines.** Most of these tests are about *when* things happen relative to each other, so a fake browser is driven by marble-style timelines, after RxJS's `TestScheduler`, under `TestClock`. Each character is one virtual tick, and each named token is a scripted model event:
+
+```ts
+FakeBrowser.timeline("--resp(cart)--commit--load--|", ({ page }) =>
+  Effect.gen(function* () {
+    const cart = yield* page.events.response({ url: "**/api/cart" }).pending   // armed at tick 0
+    yield* TestClock.adjust("20 millis")                                       // the response arrives at tick 2
+    expect((yield* cart).url).toContain("/api/cart")                          // latched before the await
+  }))
+```
+
+Tokens map to fold inputs: `resp(name)`, `req(name)`, `commit`, `load`, `dialog(kind)`, `popup`, `crash`, and `|` for a normal close. The timeline sits on the in-memory transport, so the same tests also exercise ingestion. Cases:
+
 
 - **Lifetimes and interruption:** a typed lifetime end versus caller interruption; late resource replies after a cleanup group has shut down; transfer racing cleanup; tearing down controlled `leaveOpen` resources.
 - **Declarations:** out-of-order override release; a failed override apply; preload dependency validation (only equal or broader scope).
@@ -84,5 +98,10 @@ These run against synthetic protocol traffic with an injected clock. They check 
 - **Network:** response-hop identity and body retention; a backend mismatch after partial dispatch.
 - **Storage:** codec round-trips of storage state and restoring into a fresh context.
 - **Ambiguity:** a stable ambiguity fails early; a transient one is retried.
+- **State and events:**
+  - a `Watchable` subscribed late sees the present, and `waitFor` succeeds even after intermediate stages were skipped;
+  - a `.pending` latches a match that arrives before the await;
+  - a `.stream` acquired before the trigger misses nothing;
+  - `changes` ends after the terminal state.
 - **Ownership ledger:** persisted candidates never trigger automatic cleanup.
 - **Types:** API sketches preserve caller `E` and `R`.
