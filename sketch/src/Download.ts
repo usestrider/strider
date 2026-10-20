@@ -35,7 +35,7 @@ import type * as Watchable from "./Watchable.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const Id = Schema.String.pipe(Schema.brand("~effect-browser/Download/Id"))
+export const Id = Schema.String.pipe(Schema.brand("~@usestrider/browser/Download/Id"))
 
 /**
  * Id of a download.
@@ -69,7 +69,7 @@ export const Status = Schema.Union([
  */
 export type Status = typeof Status.Type
 
-const TypeId = "~effect-browser/Download"
+const TypeId = "~@usestrider/browser/Download"
 
 /**
  * A download.
@@ -78,7 +78,7 @@ const TypeId = "~effect-browser/Download"
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Deferred, Download, Page } from "effect-browser"
+ * import { Deferred, Download, Page } from "@usestrider/browser"
  *
  * const exportCsv = Effect.fn("exportCsv")(function*(page: Page.Page) {
  *   const next = yield* Download.next(page)
@@ -207,7 +207,7 @@ export declare const history: (
  * @category reasons
  * @since 0.1.0
  */
-export class DownloadCanceled extends Schema.Error<DownloadCanceled>("effect-browser/Download/DownloadCanceled")({
+export class DownloadCanceled extends Schema.Error<DownloadCanceled>("@usestrider/browser/Download/DownloadCanceled")({
   _tag: Schema.tag("DownloadCanceled"),
   hint: Schema.String
 }) {
@@ -223,7 +223,7 @@ export class DownloadCanceled extends Schema.Error<DownloadCanceled>("effect-bro
  * @category reasons
  * @since 0.1.0
  */
-export class DownloadFailed extends Schema.Error<DownloadFailed>("effect-browser/Download/DownloadFailed")({
+export class DownloadFailed extends Schema.Error<DownloadFailed>("@usestrider/browser/Download/DownloadFailed")({
   _tag: Schema.tag("DownloadFailed"),
   why: Schema.String,
   hint: Schema.String
@@ -257,7 +257,7 @@ export const DownloadErrorReason = Schema.Union([
  */
 export type DownloadErrorReason = typeof DownloadErrorReason.Type
 
-const DownloadErrorTypeId = "~effect-browser/Download/DownloadError"
+const DownloadErrorTypeId = "~@usestrider/browser/Download/DownloadError"
 
 /**
  * Error for a download operation that failed.

@@ -19,7 +19,7 @@ import * as Schema from "effect/Schema"
  * @category schemas
  * @since 0.1.0
  */
-export const Locale = Schema.String.pipe(Schema.brand("~effect-browser/Emulation/Locale"))
+export const Locale = Schema.String.pipe(Schema.brand("~@usestrider/browser/Emulation/Locale"))
 
 /**
  * A BCP 47 locale, such as `de-DE`.
@@ -37,7 +37,7 @@ export type Locale = typeof Locale.Type
  * @category schemas
  * @since 0.1.0
  */
-export const TimeZoneId = Schema.String.pipe(Schema.brand("~effect-browser/Emulation/TimeZoneId"))
+export const TimeZoneId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Emulation/TimeZoneId"))
 
 /**
  * An IANA time zone, such as `Europe/Berlin`.
@@ -129,7 +129,7 @@ export interface Geolocation {
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Page } from "effect-browser"
+ * import { Page } from "@usestrider/browser"
  *
  * const offlineDark = Effect.fn("offlineDark")(function*(page: Page.Page) {
  *   yield* page.emulate({ media: { colorScheme: "dark" }, network: "offline" })

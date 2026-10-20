@@ -1,5 +1,5 @@
 /**
- * What `eb run` provides to a segment (`effect-browser/cli`).
+ * What `strider run` provides to a segment (`@usestrider/browser/cli`).
  *
  * A segment is a file whose default export is an effect, run against a live CLI session (CLI.md). Programs
  * and tests never construct a session; they pass pages as values. Pages are found by name only: generated
@@ -22,7 +22,7 @@ import type * as UserContext from "../UserContext.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const PageName = Schema.String.pipe(Schema.brand("~effect-browser/cli/CurrentSession/PageName"))
+export const PageName = Schema.String.pipe(Schema.brand("~@usestrider/browser/cli/CurrentSession/PageName"))
 
 /**
  * A page name chosen with `--name`.
@@ -52,14 +52,14 @@ export interface CurrentSession {
 }
 
 /**
- * The service tag for `CurrentSession`, provided only by `eb run`.
+ * The service tag for `CurrentSession`, provided only by `strider run`.
  *
  * **Example** (A segment that pays in a popup)
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Deferred, Popup } from "effect-browser"
- * import { CurrentSession } from "effect-browser/cli"
+ * import { Deferred, Popup } from "@usestrider/browser"
+ * import { CurrentSession } from "@usestrider/browser/cli"
  *
  * export default Effect.gen(function*() {
  *   const session = yield* CurrentSession.CurrentSession
@@ -78,7 +78,7 @@ export interface CurrentSession {
  */
 export declare const CurrentSession: Context.Service<CurrentSession, CurrentSession>
 
-const PageNotFoundTypeId = "~effect-browser/cli/CurrentSession/PageNotFound"
+const PageNotFoundTypeId = "~@usestrider/browser/cli/CurrentSession/PageNotFound"
 
 /**
  * Error for a page name the session doesn't have. Its hint lists the session's page names.

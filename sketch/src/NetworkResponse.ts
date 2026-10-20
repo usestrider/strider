@@ -37,7 +37,7 @@ import type * as UserContext from "./UserContext.ts"
  */
 export const StatusCode = Schema.Int.pipe(
   Schema.check(Schema.isBetween({ minimum: 100, maximum: 599 })),
-  Schema.brand("~effect-browser/NetworkResponse/StatusCode")
+  Schema.brand("~@usestrider/browser/NetworkResponse/StatusCode")
 )
 
 /**
@@ -56,7 +56,7 @@ export type StatusCode = typeof StatusCode.Type
  * @category models
  * @since 0.1.0
  */
-export class NetworkResponse extends Schema.Class<NetworkResponse>("effect-browser/NetworkResponse")({
+export class NetworkResponse extends Schema.Class<NetworkResponse>("@usestrider/browser/NetworkResponse")({
   hop: NetworkRequest.HopId,
   url: Url.Url,
   status: StatusCode,
@@ -133,7 +133,7 @@ export interface Filter {
  * ```ts import.meta.vitest
  * import { Effect, Schema } from "effect"
  * import { HttpIncomingMessage } from "effect/http"
- * import { Deferred, NetworkResponse, Page } from "effect-browser"
+ * import { Deferred, NetworkResponse, Page } from "@usestrider/browser"
  *
  * const Cart = Schema.Struct({ items: Schema.Array(Schema.Struct({ id: Schema.String })) })
  *
@@ -232,7 +232,7 @@ export declare const history: (
  * @category reasons
  * @since 0.1.0
  */
-export class BodyUnavailable extends Schema.Error<BodyUnavailable>("effect-browser/NetworkResponse/BodyUnavailable")({
+export class BodyUnavailable extends Schema.Error<BodyUnavailable>("@usestrider/browser/NetworkResponse/BodyUnavailable")({
   _tag: Schema.tag("BodyUnavailable"),
   why: Schema.Literals(["notCollected", "evicted", "redirect", "streaming", "overLimit"]),
   hint: Schema.String
@@ -260,7 +260,7 @@ export const ResponseErrorReason = Schema.Union([BodyUnavailable, Reason.Backend
  */
 export type ResponseErrorReason = typeof ResponseErrorReason.Type
 
-const ResponseErrorTypeId = "~effect-browser/NetworkResponse/ResponseError"
+const ResponseErrorTypeId = "~@usestrider/browser/NetworkResponse/ResponseError"
 
 /**
  * Error for a response body that couldn't be read.

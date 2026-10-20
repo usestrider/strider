@@ -62,7 +62,7 @@ export type Serialized<A> = A extends string | number | boolean | bigint | null 
   : A extends Function | symbol ? never
   : { [K in keyof A as A[K] extends Function | symbol ? never : K]: Serialized<A[K]> }
 
-const TypeId = "~effect-browser/JSHandle"
+const TypeId = "~@usestrider/browser/JSHandle"
 
 /**
  * A reference to a value that stays in one realm.
@@ -76,7 +76,7 @@ const TypeId = "~effect-browser/JSHandle"
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Page } from "effect-browser"
+ * import { Page } from "@usestrider/browser"
  *
  * const bodyTag = Effect.fn("bodyTag")(function*(page: Page.Page) {
  *   const body = yield* page.evaluateHandle(() => document.body)
@@ -151,7 +151,7 @@ export const JSHandleErrorReason = Schema.Union([
  */
 export type JSHandleErrorReason = typeof JSHandleErrorReason.Type
 
-const JSHandleErrorTypeId = "~effect-browser/JSHandle/JSHandleError"
+const JSHandleErrorTypeId = "~@usestrider/browser/JSHandle/JSHandleError"
 
 /**
  * Error for a handle operation that failed.

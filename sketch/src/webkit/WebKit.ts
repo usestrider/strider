@@ -1,5 +1,5 @@
 /**
- * The WebKit backend (`effect-browser/webkit`): Playwright-patched WebKit builds, launched, and stock WebKit
+ * The WebKit backend (`@usestrider/browser/webkit`): Playwright-patched WebKit builds, launched, and stock WebKit
  * targets, attached.
  *
  * Protocol failures carry the inspector error under `metadata.webkit`.
@@ -34,8 +34,8 @@ declare module "../Reason.ts" {
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Browser } from "effect-browser"
- * import { WebKit } from "effect-browser/webkit"
+ * import { Browser } from "@usestrider/browser"
+ * import { WebKit } from "@usestrider/browser/webkit"
  *
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()

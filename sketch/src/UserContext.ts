@@ -40,7 +40,7 @@ import type * as Watchable from "./Watchable.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const Id = Schema.String.pipe(Schema.brand("~effect-browser/UserContext/Id"))
+export const Id = Schema.String.pipe(Schema.brand("~@usestrider/browser/UserContext/Id"))
 
 /**
  * Id of a user context.
@@ -51,7 +51,7 @@ export const Id = Schema.String.pipe(Schema.brand("~effect-browser/UserContext/I
  */
 export type Id = typeof Id.Type
 
-const TypeId = "~effect-browser/UserContext"
+const TypeId = "~@usestrider/browser/UserContext"
 
 /**
  * A context you can observe but not control, such as the default context when attached.
@@ -178,7 +178,7 @@ export interface UserContext extends ObservedUserContext {
    *
    * ```ts import.meta.vitest
    * import { Effect } from "effect"
-   * import { Page } from "effect-browser"
+   * import { Page } from "@usestrider/browser"
    *
    * const allowLocation = Effect.fn("allowLocation")(function*(page: Page.Page) {
    *   yield* page.context.grant(["geolocation"], { origin: "https://maps.example.com" })
@@ -274,7 +274,7 @@ export const UserContextErrorReason = Schema.Union([
  */
 export type UserContextErrorReason = typeof UserContextErrorReason.Type
 
-const UserContextErrorTypeId = "~effect-browser/UserContext/UserContextError"
+const UserContextErrorTypeId = "~@usestrider/browser/UserContext/UserContextError"
 
 /**
  * Error for a context that couldn't be created or controlled, or whose storage couldn't be read.

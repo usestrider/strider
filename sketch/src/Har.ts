@@ -121,7 +121,7 @@ export declare const record: (
  * @category reasons
  * @since 0.1.0
  */
-export class WriteFailed extends Schema.Error<WriteFailed>("effect-browser/Har/WriteFailed")({
+export class WriteFailed extends Schema.Error<WriteFailed>("@usestrider/browser/Har/WriteFailed")({
   _tag: Schema.tag("WriteFailed"),
   path: Schema.String,
   hint: Schema.String,
@@ -150,7 +150,7 @@ export const HarErrorReason = Schema.Union([WriteFailed, Reason.NotPermitted, Re
  */
 export type HarErrorReason = typeof HarErrorReason.Type
 
-const HarErrorTypeId = "~effect-browser/Har/HarError"
+const HarErrorTypeId = "~@usestrider/browser/Har/HarError"
 
 /**
  * Error for a HAR that couldn't be recorded or exported.

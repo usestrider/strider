@@ -10,7 +10,7 @@
 import * as Predicate from "effect/Predicate"
 import type * as AriaRole from "./AriaRole.ts"
 
-const TypeId = "~effect-browser/AriaPattern"
+const TypeId = "~@usestrider/browser/AriaPattern"
 
 /**
  * A pattern for one node of the accessibility tree.
@@ -23,7 +23,7 @@ export interface AriaPattern {
   readonly [TypeId]: typeof TypeId
 }
 
-const ChildrenTypeId = "~effect-browser/AriaPattern/Children"
+const ChildrenTypeId = "~@usestrider/browser/AriaPattern/Children"
 
 /**
  * How a node's children are matched.

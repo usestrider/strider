@@ -7,7 +7,7 @@
 import * as Predicate from "effect/Predicate"
 import type * as P from "effect/Predicate"
 
-const TypeId = "~effect-browser/Condition"
+const TypeId = "~@usestrider/browser/Condition"
 
 /**
  * A described predicate over `A`.

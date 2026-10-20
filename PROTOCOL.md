@@ -214,7 +214,7 @@ The capability is `pauseScope: "context" | "related" | "opener" | "browser"`. A 
 
 ## Backends and order
 
-Each backend ships as its own subpath export (`effect-browser/chromium`, `/firefox`, `/webkit`, `/bidi`) that provides the `Browser` service, so unused protocol code is never loaded. Generated L0 commands are available raw at `effect-browser/cdp` (and later `/bidi-protocol`) for power users.
+Each backend ships as its own subpath export (`@usestrider/browser/chromium`, `/firefox`, `/webkit`, `/bidi`) that provides the `Browser` service, so unused protocol code is never loaded. Generated L0 commands are available raw at `@usestrider/browser/cdp` (and later `/bidi-protocol`) for power users.
 
 
 1. **CDP:** launched Chromium; remote endpoints.

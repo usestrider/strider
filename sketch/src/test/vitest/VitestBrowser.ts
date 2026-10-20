@@ -1,5 +1,5 @@
 /**
- * The Vitest adapter (`effect-browser/test/vitest`; peer dependency: `@effect/vitest`).
+ * The Vitest adapter (`@usestrider/browser/test/vitest`; peer dependency: `@effect/vitest`).
  *
  * When etest ships, an etest adapter attaches the same layers with `Test.provide`.
  *
@@ -17,9 +17,9 @@ import type * as TestRun from "../TestRun.ts"
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Browser } from "effect-browser"
- * import { Chromium } from "effect-browser/chromium"
- * import { VitestBrowser } from "effect-browser/test/vitest"
+ * import { Browser } from "@usestrider/browser"
+ * import { Chromium } from "@usestrider/browser/chromium"
+ * import { VitestBrowser } from "@usestrider/browser/test/vitest"
  *
  * const test = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage({ focus: "emulated" })

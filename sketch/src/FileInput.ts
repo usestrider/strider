@@ -18,7 +18,7 @@ import type * as FilePath from "./FilePath.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const FileName = Schema.String.pipe(Schema.brand("~effect-browser/FileInput/FileName"))
+export const FileName = Schema.String.pipe(Schema.brand("~@usestrider/browser/FileInput/FileName"))
 
 /**
  * A file name, without a directory.
@@ -36,7 +36,7 @@ export type FileName = typeof FileName.Type
  * @category schemas
  * @since 0.1.0
  */
-export const MimeType = Schema.String.pipe(Schema.brand("~effect-browser/FileInput/MimeType"))
+export const MimeType = Schema.String.pipe(Schema.brand("~@usestrider/browser/FileInput/MimeType"))
 
 /**
  * A MIME type, such as `text/csv`.
@@ -47,7 +47,7 @@ export const MimeType = Schema.String.pipe(Schema.brand("~effect-browser/FileInp
  */
 export type MimeType = typeof MimeType.Type
 
-const TypeId = "~effect-browser/FileInput"
+const TypeId = "~@usestrider/browser/FileInput"
 
 /**
  * A file to upload, with where its bytes come from.
@@ -71,7 +71,7 @@ export interface FileInput {
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { FileInput, Page } from "effect-browser"
+ * import { FileInput, Page } from "@usestrider/browser"
  *
  * const upload = Effect.fn("upload")(function*(page: Page.Page) {
  *   yield* page.getByLabel("Avatar").setInputFiles(FileInput.local("./avatar.png"))

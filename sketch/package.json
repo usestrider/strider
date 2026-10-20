@@ -1,9 +1,9 @@
 {
-  "name": "effect-browser",
+  "name": "@usestrider/browser",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Type-checked sketch of the effect-browser public API. Declarations only; nothing here runs.",
+  "description": "Type-checked sketch of Strider's public API. Declarations only; nothing here runs.",
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",

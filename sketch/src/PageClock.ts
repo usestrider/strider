@@ -45,7 +45,7 @@ export type Mode =
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Expect, Page } from "effect-browser"
+ * import { Expect, Page } from "@usestrider/browser"
  *
  * const sessionExpires = Effect.fn("sessionExpires")(function*(page: Page.Page) {
  *   yield* page.clock.install({ mode: "controlled", at: "2026-01-01T09:00:00Z" })
@@ -86,7 +86,7 @@ export interface PageClock {
  * @category reasons
  * @since 0.1.0
  */
-export class NotInstalled extends Schema.Error<NotInstalled>("effect-browser/PageClock/NotInstalled")({
+export class NotInstalled extends Schema.Error<NotInstalled>("@usestrider/browser/PageClock/NotInstalled")({
   _tag: Schema.tag("NotInstalled"),
   hint: Schema.String
 }) {
@@ -102,7 +102,7 @@ export class NotInstalled extends Schema.Error<NotInstalled>("effect-browser/Pag
  * @category reasons
  * @since 0.1.0
  */
-export class WrongMode extends Schema.Error<WrongMode>("effect-browser/PageClock/WrongMode")({
+export class WrongMode extends Schema.Error<WrongMode>("@usestrider/browser/PageClock/WrongMode")({
   _tag: Schema.tag("WrongMode"),
   mode: Schema.Literals(["fixed", "offset", "controlled"]),
   hint: Schema.String
@@ -130,7 +130,7 @@ export const PageClockErrorReason = Schema.Union([NotInstalled, WrongMode, Reaso
  */
 export type PageClockErrorReason = typeof PageClockErrorReason.Type
 
-const PageClockErrorTypeId = "~effect-browser/PageClock/PageClockError"
+const PageClockErrorTypeId = "~@usestrider/browser/PageClock/PageClockError"
 
 /**
  * Error for a clock operation that failed.

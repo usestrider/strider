@@ -1,7 +1,7 @@
-/** A CLI segment (CLI.md): `eb -s checkout run segment.ts`. Its pages are found by name. */
+/** A CLI segment (CLI.md): `strider -s checkout run segment.ts`. Its pages are found by name. */
 import { Effect } from "effect"
-import { Deferred, Popup } from "effect-browser"
-import { CurrentSession } from "effect-browser/cli"
+import { Deferred, Popup } from "@usestrider/browser"
+import { CurrentSession } from "@usestrider/browser/cli"
 
 export default Effect.gen(function*() {
   const session = yield* CurrentSession.CurrentSession

@@ -21,7 +21,7 @@ import {
   Route,
   StorageState,
   UncaughtException
-} from "effect-browser"
+} from "@usestrider/browser"
 
 // 1. Log in once, reuse the session
 export const loginOnce = Effect.gen(function*() {

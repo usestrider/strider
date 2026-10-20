@@ -1,5 +1,5 @@
 /**
- * The generic BiDi backend (`effect-browser/bidi`): any WebDriver BiDi endpoint, such as Safari Technology
+ * The generic BiDi backend (`@usestrider/browser/bidi`): any WebDriver BiDi endpoint, such as Safari Technology
  * Preview or a remote grid.
  *
  * Protocol failures carry the BiDi error under `metadata.bidi`.
@@ -26,8 +26,8 @@ declare module "../Reason.ts" {
  *
  * ```ts import.meta.vitest
  * import { Config, Effect } from "effect"
- * import { Browser } from "effect-browser"
- * import { Bidi } from "effect-browser/bidi"
+ * import { Browser } from "@usestrider/browser"
+ * import { Bidi } from "@usestrider/browser/bidi"
  *
  * const program = Effect.gen(function*() {
  *   const token = yield* Config.Redacted("GRID_TOKEN")

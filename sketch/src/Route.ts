@@ -28,7 +28,7 @@ import * as Reason from "./Reason.ts"
 import * as Url from "./Url.ts"
 import type * as Watchable from "./Watchable.ts"
 
-const DecisionTypeId = "~effect-browser/Route/Decision"
+const DecisionTypeId = "~@usestrider/browser/Route/Decision"
 
 /**
  * What happens to an intercepted request.
@@ -118,7 +118,7 @@ export {
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
  * import { HttpClientRequest } from "effect/http"
- * import { Page, Route } from "effect-browser"
+ * import { Page, Route } from "@usestrider/browser"
  *
  * const tagApiCalls = Effect.fn("tagApiCalls")(function*(page: Page.Page) {
  *   yield* page.route("https://shop.example.com/api/**", () =>
@@ -142,7 +142,7 @@ export declare const continueWith: (
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
  * import { HttpServerResponse } from "effect/http"
- * import { Page, Route } from "effect-browser"
+ * import { Page, Route } from "@usestrider/browser"
  *
  * const stubUser = Effect.fn("stubUser")(function*(page: Page.Page) {
  *   yield* page.route("https://shop.example.com/api/user", () =>
@@ -246,7 +246,7 @@ export const RouteErrorReason = Schema.Union([
  */
 export type RouteErrorReason = typeof RouteErrorReason.Type
 
-const RouteErrorTypeId = "~effect-browser/Route/RouteError"
+const RouteErrorTypeId = "~@usestrider/browser/Route/RouteError"
 
 /**
  * Error for a route that couldn't be registered, or a fetch inside a handler that failed.

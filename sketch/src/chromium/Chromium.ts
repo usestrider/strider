@@ -1,5 +1,5 @@
 /**
- * The Chromium backend (`effect-browser/chromium`): Chromium, Chrome and Edge over the Chrome DevTools
+ * The Chromium backend (`@usestrider/browser/chromium`): Chromium, Chrome and Edge over the Chrome DevTools
  * Protocol.
  *
  * Launching uses Chrome for Testing unless a channel or executable is given. Protocol failures carry the CDP
@@ -35,8 +35,8 @@ declare module "../Reason.ts" {
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Browser } from "effect-browser"
- * import { Chromium } from "effect-browser/chromium"
+ * import { Browser } from "@usestrider/browser"
+ * import { Chromium } from "@usestrider/browser/chromium"
  *
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()

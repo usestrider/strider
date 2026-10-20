@@ -39,7 +39,7 @@ import type * as MonotonicInstant from "./MonotonicInstant.ts"
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Deadline, Page } from "effect-browser"
+ * import { Deadline, Page } from "@usestrider/browser"
  *
  * const checkout = Effect.fn("checkout")(function*(page: Page.Page) {
  *   yield* page.getByLabel("Card number").fill("4242 4242 4242 4242")
@@ -109,7 +109,7 @@ export declare const CurrentDeadline: Context.Reference<Option.Option<MonotonicI
  */
 export declare const DefaultBudget: Context.Reference<Duration.Duration>
 
-const TimeoutTypeId = "~effect-browser/Deadline/Timeout"
+const TimeoutTypeId = "~@usestrider/browser/Deadline/Timeout"
 
 /**
  * Error for an operation that ran out of budget, with where it got to.
@@ -130,7 +130,7 @@ const TimeoutTypeId = "~effect-browser/Deadline/Timeout"
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Deadline, Page } from "effect-browser"
+ * import { Deadline, Page } from "@usestrider/browser"
  *
  * const pay = Effect.fn("pay")(function*(page: Page.Page, recheck: Effect.Effect<void>) {
  *   yield* page.getByRole("button", { name: "Pay" }).click().pipe(

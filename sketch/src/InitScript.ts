@@ -18,7 +18,7 @@ import type * as FilePath from "./FilePath.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const Id = Schema.String.pipe(Schema.brand("~effect-browser/InitScript/Id"))
+export const Id = Schema.String.pipe(Schema.brand("~@usestrider/browser/InitScript/Id"))
 
 /**
  * Id of an init script.

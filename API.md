@@ -18,8 +18,8 @@ Excerpts name each operation's own module error (`PageError`, `LocatorError`). L
 The README's principles, as they apply to this layer, written the way Effect's own modules are (review 7). The reasons live there; these are the rules.
 
 **Modules**
-- **Modules are namespaces.** The package exports each module as one, as Effect does: `import { Browser, Download, Page } from "effect-browser"`. Types are written `Page.Page`, `Download.Download` and `Locator.Locator`, like `Deferred.Deferred`. Inside a module, names are short, because the namespace supplies the context: `UserContext.Options`, `CookieJar.Input`, `PageNavigation.Filter`, `Download.Id`. Access levels keep their full names (`Page.ReadonlyPage`, `OriginStorage.ReadonlyOriginStorage`), as Effect writes `Record.ReadonlyRecord`; a bare `Readonly` would shadow TypeScript's own.
-- **Backends and surfaces are subpaths,** each with its own barrel: `effect-browser/chromium`, `/firefox`, `/webkit`, `/bidi`, `/ai`, `/test`, `/test/vitest` and `/cli`.
+- **Modules are namespaces.** The package exports each module as one, as Effect does: `import { Browser, Download, Page } from "@usestrider/browser"`. Types are written `Page.Page`, `Download.Download` and `Locator.Locator`, like `Deferred.Deferred`. Inside a module, names are short, because the namespace supplies the context: `UserContext.Options`, `CookieJar.Input`, `PageNavigation.Filter`, `Download.Id`. Access levels keep their full names (`Page.ReadonlyPage`, `OriginStorage.ReadonlyOriginStorage`), as Effect writes `Record.ReadonlyRecord`; a bare `Readonly` would shadow TypeScript's own.
+- **Backends and surfaces are subpaths,** each with its own barrel: `@usestrider/browser/chromium`, `/firefox`, `/webkit`, `/bidi`, `/ai`, `/test`, `/test/vitest` and `/cli`.
 - **Brands are Schemas in the module that owns them,** a Schema value and a type with one name, as Effect's `EntityId` is: `Download.Id`, `UserContext.Id`, `Snapshot.RefId`, `Keyboard.Key`. Values with no single owner have small modules of their own: `Url` (`Url.Url`, `Url.Pattern`, `Url.Origin`, `Url.Site`), `FilePath` (`Local`, `Remote`), `Pixels` (`Css`, `Device`), `AriaRole` and `MonotonicInstant`. URLs are stored as strings, as Effect's own `HttpClientRequest.url` is, because a `URL` object can be changed in place and compares by reference; `effect/http`'s `Url` module is how one is changed (`Url.fromString(url)`, its setters, then `href`). A file that imports both `Url` modules aliases one.
 
 **Members**
@@ -44,7 +44,7 @@ The README's principles, as they apply to this layer, written the way Effect's o
 - **Brand liberally** (principle 14). Outputs are always branded. Inputs require the brand only where two meanings could be confused (`FileInput.local` / `FileInput.remote`, CSS vs device pixels); elsewhere a plain string is parsed at the boundary and fails at once if it is bad (`goto(url)`, `route(pattern)`). Tokens (ids, refs, generations, registration handles) are accepted only in branded form, and are checked against their origin when used.
 - **Unions of valid models; `Option` for what's truly optional** (principle 15). Optional inputs are written `?: T | undefined`, as Effect writes them, so callers under `exactOptionalPropertyTypes` can pass `undefined`. Mutually exclusive inputs are unions: a cookie's scope is a URL *or* a domain and path.
 - **Access is typed.** `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, like `ReadonlyArray` ⊂ `Array`; contexts have two levels. `.inspect` and `.control` are the only way up, because access is a grant held by a `Scope`. A helper that only reads takes a `Page.ReadonlyPage`, and calling an action on a page you may only inspect is a compile error. A subtype never changes what an inherited member does.
-- **Every handle is identified, pipeable and inspectable.** Each public type has a string TypeId (`"~effect-browser/Page"`), and each module a kind guard (`Page.isPage`, `Locator.isLocator`, `Download.isDownload`). Guards identify kinds, never access: `Page.isPage` narrows to `ObservedPage`. Handles are `Pipeable`, so `page.pipe(Expect.toHaveURL(…))` works, and `Inspectable`, so logging one shows a description rendered under the diagnostics preset.
+- **Every handle is identified, pipeable and inspectable.** Each public type has a string TypeId (`"~@usestrider/browser/Page"`), and each module a kind guard (`Page.isPage`, `Locator.isLocator`, `Download.isDownload`). Guards identify kinds, never access: `Page.isPage` narrows to `ObservedPage`. Handles are `Pipeable`, so `page.pipe(Expect.toHaveURL(…))` works, and `Inspectable`, so logging one shows a description rendered under the diagnostics preset.
 - **Locators are values,** resolved again on every attempt. The one exception is a ref (`snapshot.ref(id)`), which is pinned to one node and fails with `StaleRef` rather than rebinding.
 
 **Errors**
@@ -124,7 +124,7 @@ const PageNavigation = Schema.Union([
 ])
 
 // NetworkResponse: immutable; one redirect hop. NetworkRequest is its request-side twin
-class NetworkResponse extends Schema.Class<NetworkResponse>("effect-browser/NetworkResponse")({
+class NetworkResponse extends Schema.Class<NetworkResponse>("@usestrider/browser/NetworkResponse")({
   hop: NetworkRequest.HopId,
   url: Url.Url,
   status: StatusCode,                                   // a branded Int from 100 to 599, so it goes wherever Effect HTTP expects a status
@@ -136,7 +136,7 @@ interface CapturedResponse<B> extends NetworkResponse, HttpIncomingMessage<Respo
 }
 
 // Snapshot: the tree is data; the refs are bound to the page it came from
-class Data extends Schema.Class<Data>("effect-browser/Snapshot/Data")({
+class Data extends Schema.Class<Data>("@usestrider/browser/Snapshot/Data")({
   document: Target.DocumentId,
   generation: Generation,
   root: Node,
@@ -170,16 +170,16 @@ interface Node {
 One package with subpath exports and a single version, the same model Effect v4 uses. Backends are imports, not option values, so only the protocol code you import is loaded:
 
 ```ts
-import { Browser, Expect, Page } from "effect-browser"    // API modules: types, services, combinators
-import { Chromium } from "effect-browser/chromium"        // CDP backend
-import { Firefox } from "effect-browser/firefox"          // BiDi backend
-import { WebKit } from "effect-browser/webkit"            // Playwright-patched builds; stock attach (iOS, WKWebView)
-import { Bidi } from "effect-browser/bidi"                // any BiDi endpoint (Safari Technology Preview, remote grids)
-import { TestRun } from "effect-browser/test"             // runner-agnostic test support
-import { VitestBrowser } from "effect-browser/test/vitest" // the Vitest adapter; peer dependency: @effect/vitest
-import { BrowserToolkit, CapturePolicy } from "effect-browser/ai"   // builds on effect/ai
-// the package's bin is the CLI (CLI.md); effect-browser/cli has only what `eb run` provides to segments
-import * as Cdp from "effect-browser/cdp"                 // raw generated L0 commands, for power users
+import { Browser, Expect, Page } from "@usestrider/browser"    // API modules: types, services, combinators
+import { Chromium } from "@usestrider/browser/chromium"        // CDP backend
+import { Firefox } from "@usestrider/browser/firefox"          // BiDi backend
+import { WebKit } from "@usestrider/browser/webkit"            // Playwright-patched builds; stock attach (iOS, WKWebView)
+import { Bidi } from "@usestrider/browser/bidi"                // any BiDi endpoint (Safari Technology Preview, remote grids)
+import { TestRun } from "@usestrider/browser/test"             // runner-agnostic test support
+import { VitestBrowser } from "@usestrider/browser/test/vitest" // the Vitest adapter; peer dependency: @effect/vitest
+import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"   // builds on effect/ai
+// the package's bin is the CLI (CLI.md); @usestrider/browser/cli has only what `strider run` provides to segments
+import * as Cdp from "@usestrider/browser/cdp"                 // raw generated L0 commands, for power users
 
 // Chromium (and Firefox: the same three; WebKit: layer, layerConfig, layerAttach; Bidi: layerConnect)
 declare const layer: (options?: Browser.LaunchOptions | undefined) =>   // headless Chrome for Testing, temporary profile
@@ -200,7 +200,7 @@ interface LaunchOptions {
 }
 
 // LaunchProfile: a value you can inspect; the actual args and prefs are recorded in the launch span and trace
-class LaunchProfile extends Schema.Class<LaunchProfile>("effect-browser/LaunchProfile")({
+class LaunchProfile extends Schema.Class<LaunchProfile>("@usestrider/browser/LaunchProfile")({
   name: Schema.Literals(["stock", "automation", "concurrent"]),
   args: Schema.Array(Schema.String),
   prefs: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Number, Schema.Boolean]))
@@ -217,7 +217,7 @@ program.pipe(Effect.provide(Chromium.layer()))
 - **Launch and connect fail with `Browser.BrowserError`.** Its reasons are `ExecutableNotFound{searched}`, `ProcessExited{code, stderrTail}`, `IncompatibleRevision`, `ConnectionFailed{stage}` and `InvalidInput`.
 - **Backend layers can carry their known capabilities in their types,** so specialized features need no `Unsupported` case when the backend is chosen in code (P7). The mechanism is still open: a capability-typed `Browser` service, or backend-specific accessors.
 - **Launch profiles are values, not hidden flags** (rule 23). `concurrent` changes what pages observe (timer cadence, background rendering), so it is opt-in and visible. No profile disables the back/forward cache, third-party storage partitioning or popup blocking: the model handles those hazards explicitly.
-- **A browser-download CLI,** if needed, starts as `effect-browser/install` plus a `bin`, not as a separate package.
+- **A browser-download CLI,** if needed, starts as `@usestrider/browser/install` plus a `bin`, not as a separate package.
 
 ## Entry points and cross-cutting settings
 
@@ -735,7 +735,7 @@ interface CookieJar {
   readonly clear: Effect<void, CookieJarError>
 }
 declare const toCookie: (cookie: Cookie) => Cookies.Cookie            // to effect/http's Cookie, unredacting the value explicitly
-class Cookie extends Schema.Class<Cookie>("effect-browser/CookieJar/Cookie")({   // Effect's cookie attributes plus what only browsers store
+class Cookie extends Schema.Class<Cookie>("@usestrider/browser/CookieJar/Cookie")({   // Effect's cookie attributes plus what only browsers store
   name: Name, value: Schema.Redacted(Schema.String),     // values are classified
   domain: Domain, path: Schema.String,
   expires: Schema.Option(Schema.DateTimeUtc),            // None: a session cookie
@@ -753,7 +753,7 @@ interface Input {
 }
 
 // StorageState: cookies, localStorage and IndexedDB, per partition
-class StorageState extends Schema.Class<StorageState>("effect-browser/StorageState")({
+class StorageState extends Schema.Class<StorageState>("@usestrider/browser/StorageState")({
   cookies: Schema.Array(CookieJar.Cookie),
   origins: Schema.Array(OriginState)                     // origin, partition, localStorage entries, IndexedDB databases; values Redacted
 }) {}
@@ -886,9 +886,9 @@ interface Recording extends Declaration.Registration {
 
 ```ts
 import { layer } from "@effect/vitest"
-import { Browser } from "effect-browser"
-import { Chromium } from "effect-browser/chromium"
-import { VitestBrowser } from "effect-browser/test/vitest"
+import { Browser } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { VitestBrowser } from "@usestrider/browser/test/vitest"
 
 layer(VitestBrowser.layer(Chromium.layer()))("checkout", (it) => {
   it.effect("adds to cart", () =>
@@ -901,14 +901,14 @@ layer(VitestBrowser.layer(Chromium.layer()))("checkout", (it) => {
 ```
 
 ```ts
-// effect-browser/test: runner-agnostic
+// @usestrider/browser/test: runner-agnostic
 interface TestRun {                                      // per test, from the runner adapter
   readonly info: TestInfo                                // project, file, id, attempt, worker, shard
   attach(artifact: TestArtifact): Effect<void>           // Vitest: recordArtifact
 }
 declare const TestRun: Context.Service<TestRun, TestRun>
 
-// effect-browser/test/vitest
+// @usestrider/browser/test/vitest
 declare const layer: <E, R>(backend: Layer<Browser.Browser, E, R>) => Layer<Browser.Browser | TestRun.TestRun, E, R>   // the backend you pass, unchanged, plus TestRun from the current test
 
 // Browser: the fake browser, for event and lifecycle tests
@@ -928,7 +928,7 @@ declare const layerTest: (timeline: string) => Layer<Browser>   // the first pag
 
 ```ts
 // Reason: shared reasons, each a Schema.Error class with a hint
-class NotPermitted extends Schema.Error<NotPermitted>("effect-browser/Reason/NotPermitted")({
+class NotPermitted extends Schema.Error<NotPermitted>("@usestrider/browser/Reason/NotPermitted")({
   _tag: Schema.tag("NotPermitted"),
   required: Schema.Literals(["inspect", "control", "browserWide"]),
   hint: Schema.String                                    // "call `.control` on this page"
@@ -937,7 +937,7 @@ class NotPermitted extends Schema.Error<NotPermitted>("effect-browser/Reason/Not
 // EvaluationThrown{exception}, NotSerializable{path}
 
 // Locator: the module's own reasons, then the module's error
-class StrictViolation extends Schema.Error<StrictViolation>("effect-browser/Locator/StrictViolation")({
+class StrictViolation extends Schema.Error<StrictViolation>("@usestrider/browser/Locator/StrictViolation")({
   _tag: Schema.tag("StrictViolation"),
   candidates: Schema.Array(Schema.Struct({ description: Schema.String, visible: Schema.Boolean })),
   suggestions: Schema.Array(Schema.String),              // e.g. getByRole('button', { name: 'Save' })
@@ -1096,7 +1096,7 @@ yield* page.getByRole("navigation").pipe(Expect.toMatchAria(
 1. **How the Vitest adapter finds the current test.** @effect/vitest passes Vitest's test context to `it.effect` as an argument, not as a service, so `VitestBrowser.layer` can't read it from the environment. Recommendation: propose that @effect/vitest provide it as a service in every `it.effect`. Until then, tests pass it explicitly.
 
 Decided:
-- **The fake browser is `Browser.layerTest(timeline)`,** public and `@stability experimental` (revision 5.25, review 7). It doesn't emulate a DOM: actions against fake pages fail with `Unsupported`. This replaces "internal first, a narrow `effect-browser/testing` subpath later" (5.13).
+- **The fake browser is `Browser.layerTest(timeline)`,** public and `@stability experimental` (revision 5.25, review 7). It doesn't emulate a DOM: actions against fake pages fail with `Unsupported`. This replaces "internal first, a narrow `@usestrider/browser/testing` subpath later" (5.13).
 - **No `BrowserTest` helpers.** A test opens its page with `Browser.newPage()` (5.25, reversing 5.18 and 5.21).
 - **No Vitest reporter plugin.** The library stays runner-agnostic, and flakiness is classified from `test.retry` / `test.outcome` span attributes and `TestInfo`.
 - **Testing ships for Vitest first, behind `TestRun`,** so that moving to etest is a new adapter, not a redesign (revision 5.18).

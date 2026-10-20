@@ -21,7 +21,7 @@ import type * as Pipeable from "effect/Pipeable"
 import * as Predicate from "effect/Predicate"
 import type * as Types from "effect/Types"
 
-const TypeId = "~effect-browser/Deferred/ReadonlyDeferred"
+const TypeId = "~@usestrider/browser/Deferred/ReadonlyDeferred"
 
 /**
  * A result that someone else completes, and that you can only read.

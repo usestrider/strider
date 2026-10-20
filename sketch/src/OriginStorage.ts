@@ -44,7 +44,7 @@ export interface ReadonlyOriginStorage {
  *
  * ```ts import.meta.vitest
  * import { Effect, Option } from "effect"
- * import { Page } from "effect-browser"
+ * import { Page } from "@usestrider/browser"
  *
  * const useDarkTheme = Effect.fn("useDarkTheme")(function*(page: Page.Page) {
  *   const theme = yield* page.localStorage.get("theme")
@@ -95,7 +95,7 @@ export const OriginStorageErrorReason = Schema.Union([
  */
 export type OriginStorageErrorReason = typeof OriginStorageErrorReason.Type
 
-const OriginStorageErrorTypeId = "~effect-browser/OriginStorage/OriginStorageError"
+const OriginStorageErrorTypeId = "~@usestrider/browser/OriginStorage/OriginStorageError"
 
 /**
  * Error for an origin storage operation that failed.

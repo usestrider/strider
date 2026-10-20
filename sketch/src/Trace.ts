@@ -77,7 +77,7 @@ export interface Recording extends Declaration.Registration {
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Page, Trace } from "effect-browser"
+ * import { Page, Trace } from "@usestrider/browser"
  *
  * const traced = Effect.fn("traced")(function*(page: Page.Page) {
  *   const recording = yield* Trace.record(page.context, { screenshots: "perAction" })
@@ -103,7 +103,7 @@ export declare const record: (
  * @category reasons
  * @since 0.1.0
  */
-export class WriteFailed extends Schema.Error<WriteFailed>("effect-browser/Trace/WriteFailed")({
+export class WriteFailed extends Schema.Error<WriteFailed>("@usestrider/browser/Trace/WriteFailed")({
   _tag: Schema.tag("WriteFailed"),
   path: Schema.String,
   hint: Schema.String,
@@ -132,7 +132,7 @@ export const TraceErrorReason = Schema.Union([WriteFailed, Reason.NotPermitted, 
  */
 export type TraceErrorReason = typeof TraceErrorReason.Type
 
-const TraceErrorTypeId = "~effect-browser/Trace/TraceError"
+const TraceErrorTypeId = "~@usestrider/browser/Trace/TraceError"
 
 /**
  * Error for a trace that couldn't be recorded or exported.

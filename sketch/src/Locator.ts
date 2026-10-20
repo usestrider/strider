@@ -33,7 +33,7 @@ import * as Reason from "./Reason.ts"
 import type * as Snapshot from "./Snapshot.ts"
 import type * as Target from "./Target.ts"
 
-const TypeId = "~effect-browser/Locator"
+const TypeId = "~@usestrider/browser/Locator"
 
 /**
  * Settings for `getByRole`.
@@ -405,7 +405,7 @@ type ActionEffect = Effect.Effect<void, LocatorError | Target.TargetGone | Deadl
  *
  * ```ts import.meta.vitest
  * import { Config, Effect } from "effect"
- * import { Page } from "effect-browser"
+ * import { Page } from "@usestrider/browser"
  *
  * const signIn = Effect.fn("signIn")(function*(page: Page.Page) {
  *   yield* page.getByLabel("Email").fill("me@example.com")
@@ -550,7 +550,7 @@ export interface RelativeLocator extends Queries<RelativeLocator> {
  * **Example** (Rows that contain a Delete button)
  *
  * ```ts import.meta.vitest
- * import { Locator, Page } from "effect-browser"
+ * import { Locator, Page } from "@usestrider/browser"
  *
  * const deletableRows = (page: Page.Page) =>
  *   page.getByRole("row").filter({ has: Locator.relative.getByRole("button", { name: "Delete" }) })
@@ -587,7 +587,7 @@ export interface ReadonlyFrameLocator extends Queries<ReadonlyLocator> {
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Page } from "effect-browser"
+ * import { Page } from "@usestrider/browser"
  *
  * const pay = Effect.fn("pay")(function*(page: Page.Page) {
  *   const payment = page.frame(page.locator("iframe#payment"))
@@ -624,7 +624,7 @@ export interface FrameLocator extends ReadonlyFrameLocator {
  * @category reasons
  * @since 0.1.0
  */
-export class StrictViolation extends Schema.Error<StrictViolation>("effect-browser/Locator/StrictViolation")({
+export class StrictViolation extends Schema.Error<StrictViolation>("@usestrider/browser/Locator/StrictViolation")({
   _tag: Schema.tag("StrictViolation"),
   candidates: Schema.Array(Schema.Struct({ description: Schema.String, visible: Schema.Boolean })),
   suggestions: Schema.Array(Schema.String),
@@ -650,7 +650,7 @@ export class StrictViolation extends Schema.Error<StrictViolation>("effect-brows
  * @category reasons
  * @since 0.1.0
  */
-export class StaleRef extends Schema.Error<StaleRef>("effect-browser/Locator/StaleRef")({
+export class StaleRef extends Schema.Error<StaleRef>("@usestrider/browser/Locator/StaleRef")({
   _tag: Schema.tag("StaleRef"),
   why: Schema.Literals(["Replaced", "Detached", "Suspended", "BindingLost", "OtherSnapshot"]),
   hint: Schema.String
@@ -667,7 +667,7 @@ export class StaleRef extends Schema.Error<StaleRef>("effect-browser/Locator/Sta
  * @category reasons
  * @since 0.1.0
  */
-export class NotEditable extends Schema.Error<NotEditable>("effect-browser/Locator/NotEditable")({
+export class NotEditable extends Schema.Error<NotEditable>("@usestrider/browser/Locator/NotEditable")({
   _tag: Schema.tag("NotEditable"),
   element: Schema.String,
   hint: Schema.String
@@ -684,7 +684,7 @@ export class NotEditable extends Schema.Error<NotEditable>("effect-browser/Locat
  * @category reasons
  * @since 0.1.0
  */
-export class FileUnreadable extends Schema.Error<FileUnreadable>("effect-browser/Locator/FileUnreadable")({
+export class FileUnreadable extends Schema.Error<FileUnreadable>("@usestrider/browser/Locator/FileUnreadable")({
   _tag: Schema.tag("FileUnreadable"),
   path: Schema.String,
   hint: Schema.String,
@@ -724,7 +724,7 @@ export const LocatorErrorReason = Schema.Union([
  */
 export type LocatorErrorReason = typeof LocatorErrorReason.Type
 
-const LocatorErrorTypeId = "~effect-browser/Locator/LocatorError"
+const LocatorErrorTypeId = "~@usestrider/browser/Locator/LocatorError"
 
 /**
  * Error for a locator action or read that failed.
@@ -739,7 +739,7 @@ const LocatorErrorTypeId = "~effect-browser/Locator/LocatorError"
  *
  * ```ts import.meta.vitest
  * import { Console, Effect } from "effect"
- * import { Page } from "effect-browser"
+ * import { Page } from "@usestrider/browser"
  *
  * const save = Effect.fn("save")(function*(page: Page.Page) {
  *   yield* page.getByText("Save").click().pipe(

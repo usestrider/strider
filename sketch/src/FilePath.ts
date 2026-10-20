@@ -17,7 +17,7 @@ import * as Schema from "effect/Schema"
  * @category schemas
  * @since 0.1.0
  */
-export const Local = Schema.String.pipe(Schema.brand("~effect-browser/FilePath/Local"))
+export const Local = Schema.String.pipe(Schema.brand("~@usestrider/browser/FilePath/Local"))
 
 /**
  * A path on the machine running your program.
@@ -35,7 +35,7 @@ export type Local = typeof Local.Type
  * @category schemas
  * @since 0.1.0
  */
-export const Remote = Schema.String.pipe(Schema.brand("~effect-browser/FilePath/Remote"))
+export const Remote = Schema.String.pipe(Schema.brand("~@usestrider/browser/FilePath/Remote"))
 
 /**
  * A path on the browser's host; never interchangeable with a local path.

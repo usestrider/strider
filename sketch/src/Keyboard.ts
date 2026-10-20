@@ -26,7 +26,7 @@ import type * as Target from "./Target.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const Key = Schema.String.pipe(Schema.brand("~effect-browser/Keyboard/Key"))
+export const Key = Schema.String.pipe(Schema.brand("~@usestrider/browser/Keyboard/Key"))
 
 /**
  * A key value from the UI Events `key` list, such as `"Enter"`, `"a"` or `"ArrowDown"`.
@@ -99,7 +99,7 @@ export interface HeldKey {
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Page } from "effect-browser"
+ * import { Page } from "@usestrider/browser"
  *
  * const selectRange = Effect.fn("selectRange")(function*(page: Page.Page) {
  *   yield* Effect.scoped(Effect.gen(function*() {
@@ -164,7 +164,7 @@ export const KeyboardErrorReason = Schema.Union([
  */
 export type KeyboardErrorReason = typeof KeyboardErrorReason.Type
 
-const KeyboardErrorTypeId = "~effect-browser/Keyboard/KeyboardError"
+const KeyboardErrorTypeId = "~@usestrider/browser/Keyboard/KeyboardError"
 
 /**
  * Error for a keyboard operation that failed.

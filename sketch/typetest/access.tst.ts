@@ -4,7 +4,7 @@
  */
 import { Deferred as EffectDeferred, Effect, Schema } from "effect"
 import { HttpIncomingMessage } from "effect/http"
-import { Deferred, Download, JSHandle, Locator, NetworkRequest, NetworkResponse, Page, Snapshot } from "effect-browser"
+import { Deferred, Download, JSHandle, Locator, NetworkRequest, NetworkResponse, Page, Snapshot } from "@usestrider/browser"
 import { describe, expect, it } from "tstyche"
 
 declare const observed: Page.ObservedPage

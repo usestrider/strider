@@ -24,7 +24,7 @@ import * as Reason from "./Reason.ts"
 import type * as Subscription from "./Subscription.ts"
 import type * as Target from "./Target.ts"
 
-const DecisionTypeId = "~effect-browser/FileChooser/Decision"
+const DecisionTypeId = "~@usestrider/browser/FileChooser/Decision"
 
 /**
  * How a file chooser is answered.
@@ -126,7 +126,7 @@ export declare const history: (
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { FileChooser, FileInput, Page } from "effect-browser"
+ * import { FileChooser, FileInput, Page } from "@usestrider/browser"
  *
  * const uploadReport = Effect.fn("uploadReport")(function*(page: Page.Page) {
  *   yield* FileChooser.handle(page, FileChooser.choose(FileInput.local("./report.pdf")))
@@ -177,7 +177,7 @@ export const FileChooserErrorReason = Schema.Union([Reason.InvalidInput])
  */
 export type FileChooserErrorReason = typeof FileChooserErrorReason.Type
 
-const FileChooserErrorTypeId = "~effect-browser/FileChooser/FileChooserError"
+const FileChooserErrorTypeId = "~@usestrider/browser/FileChooser/FileChooserError"
 
 /**
  * Error for files that don't fit the chooser.

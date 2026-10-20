@@ -17,7 +17,7 @@ import * as Schema from "effect/Schema"
  * @category models
  * @since 0.1.0
  */
-export class LaunchProfile extends Schema.Class<LaunchProfile>("effect-browser/LaunchProfile")({
+export class LaunchProfile extends Schema.Class<LaunchProfile>("@usestrider/browser/LaunchProfile")({
   name: Schema.Literals(["stock", "automation", "concurrent"]),
   args: Schema.Array(Schema.String),
   prefs: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Number, Schema.Boolean]))

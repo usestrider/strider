@@ -28,7 +28,7 @@ import * as Target from "./Target.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const RefId = Schema.String.pipe(Schema.brand("~effect-browser/Snapshot/RefId"))
+export const RefId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Snapshot/RefId"))
 
 /**
  * A ref an agent can act on, such as `e12`.
@@ -51,7 +51,7 @@ export type RefId = typeof RefId.Type
  * @category schemas
  * @since 0.1.0
  */
-export const Generation = Schema.Number.pipe(Schema.brand("~effect-browser/Snapshot/Generation"))
+export const Generation = Schema.Number.pipe(Schema.brand("~@usestrider/browser/Snapshot/Generation"))
 
 /**
  * A document generation.
@@ -150,7 +150,7 @@ export declare const Node: Schema.Codec<Node, NodeEncoded>
  * @category models
  * @since 0.1.0
  */
-export class Data extends Schema.Class<Data>("effect-browser/Snapshot/Data")({
+export class Data extends Schema.Class<Data>("@usestrider/browser/Snapshot/Data")({
   document: Target.DocumentId,
   generation: Generation,
   root: Node,
@@ -164,14 +164,14 @@ export class Data extends Schema.Class<Data>("effect-browser/Snapshot/Data")({
  * @category models
  * @since 0.1.0
  */
-export class Diff extends Schema.Class<Diff>("effect-browser/Snapshot/Diff")({
+export class Diff extends Schema.Class<Diff>("@usestrider/browser/Snapshot/Diff")({
   added: Schema.Array(Node),
   removed: Schema.Array(RefId),
   changed: Schema.Array(Node),
   text: Schema.String
 }) {}
 
-const TypeId = "~effect-browser/Snapshot"
+const TypeId = "~@usestrider/browser/Snapshot"
 
 /**
  * A snapshot of a page, whose refs carry the page's access.
@@ -185,7 +185,7 @@ const TypeId = "~effect-browser/Snapshot"
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Page, Snapshot } from "effect-browser"
+ * import { Page, Snapshot } from "@usestrider/browser"
  *
  * const clickRef = Effect.fn("clickRef")(function*(page: Page.Page, id: Snapshot.RefId) {
  *   const snapshot = yield* page.snapshot()
@@ -267,7 +267,7 @@ export interface Options {
  * @category reasons
  * @since 0.1.0
  */
-export class DocumentsDiffer extends Schema.Error<DocumentsDiffer>("effect-browser/Snapshot/DocumentsDiffer")({
+export class DocumentsDiffer extends Schema.Error<DocumentsDiffer>("@usestrider/browser/Snapshot/DocumentsDiffer")({
   _tag: Schema.tag("DocumentsDiffer"),
   documents: Schema.Tuple([Target.DocumentId, Target.DocumentId]),
   hint: Schema.String
@@ -277,7 +277,7 @@ export class DocumentsDiffer extends Schema.Error<DocumentsDiffer>("effect-brows
   }
 }
 
-const SnapshotErrorTypeId = "~effect-browser/Snapshot/SnapshotError"
+const SnapshotErrorTypeId = "~@usestrider/browser/Snapshot/SnapshotError"
 
 /**
  * Error for a snapshot operation that failed.

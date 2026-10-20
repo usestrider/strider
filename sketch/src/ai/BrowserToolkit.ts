@@ -1,5 +1,5 @@
 /**
- * The agent toolkit (`effect-browser/ai`): one definition that serves an in-process model, an MCP server and
+ * The agent toolkit (`@usestrider/browser/ai`): one definition that serves an in-process model, an MCP server and
  * the CLI.
  *
  * Every page tool names its page; there is no current tab. No tool waits after it acts: each result carries
@@ -27,7 +27,7 @@ import type * as CapturePolicy from "./CapturePolicy.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const SecretName = Schema.String.pipe(Schema.brand("~effect-browser/ai/BrowserToolkit/SecretName"))
+export const SecretName = Schema.String.pipe(Schema.brand("~@usestrider/browser/ai/BrowserToolkit/SecretName"))
 
 /**
  * The name of a secret an agent refers to as `%name%`; the value is substituted only at dispatch.
@@ -111,8 +111,8 @@ export interface MakeOptions {
  *
  * ```ts import.meta.vitest
  * import { Config, Effect } from "effect"
- * import { Page } from "effect-browser"
- * import { BrowserToolkit, CapturePolicy } from "effect-browser/ai"
+ * import { Page } from "@usestrider/browser"
+ * import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
  *
  * const tools = Effect.fn("tools")(function*(page: Page.Page) {
  *   return yield* BrowserToolkit.make({

@@ -35,13 +35,13 @@ export const isReadonlyDeferred: (u: unknown) => u is ReadonlyDeferred<unknown, 
 1. **Should `ReadonlyDeferred` be yieldable,** so `yield* deferred` awaits it? That would read better at call sites. It's independent of the split, and `Deferred` itself isn't yieldable in v4, so it may be a deliberate choice.
 2. **Name.** `ReadonlyDeferred` follows `ReadonlyArray` and `AtomRef.ReadonlyRef`. `Queue`'s split names its two sides by operation (`Enqueue`/`Dequeue`), which has no natural equivalent here.
 
-## Motivation from effect-browser
+## Motivation from Strider
 
 `Download.next(page)` subscribes to downloads and hands back the first match when it arrives. The library completes the deferred: with the match, with `TargetGone` when the page ends, or with a typed `Timeout` when the wait's deadline passes. The caller only awaits or polls. Today the library has to define its own read-only wrapper type for this.
 
 ## A possible follow-up: `Deadline`
 
-Effect has no deadline that nested calls inherit. `Effect.timeout` interrupts from outside, so an operation can't fail with its own evidence of how far it got. effect-browser defines:
+Effect has no deadline that nested calls inherit. `Effect.timeout` interrupts from outside, so an operation can't fail with its own evidence of how far it got. Strider, an Effect-native browser automation library, defines:
 
 ```ts
 Deadline.within: Dual<Duration.Input>          // provides min(outer, now + duration), as an absolute instant on the live clock
@@ -51,4 +51,4 @@ Deadline.CurrentDeadline: Context.Reference<Option<MonotonicInstant>>
 Deadline.DefaultBudget: Context.Reference<Duration>
 ```
 
-Operations read `Deadline.CurrentDeadline` and fail with their own typed error when it passes. If this shape works for effect-browser, it may be worth proposing separately, so that HTTP clients, SQL and other libraries could honor the same budget.
+Operations read `Deadline.CurrentDeadline` and fail with their own typed error when it passes. If this shape works for Strider, it may be worth proposing separately, so that HTTP clients, SQL and other libraries could honor the same budget.

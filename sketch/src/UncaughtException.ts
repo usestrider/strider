@@ -23,7 +23,7 @@ import type * as UserContext from "./UserContext.ts"
  * @category models
  * @since 0.1.0
  */
-export class UncaughtException extends Schema.Class<UncaughtException>("effect-browser/UncaughtException")({
+export class UncaughtException extends Schema.Class<UncaughtException>("@usestrider/browser/UncaughtException")({
   kind: Schema.Literals(["thrown", "unhandledRejection"]),
   name: Schema.String,
   message: Schema.String,
@@ -89,7 +89,7 @@ export declare const stream: <PE = never, PR = never>(
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Page, UncaughtException } from "effect-browser"
+ * import { Page, UncaughtException } from "@usestrider/browser"
  *
  * const errorsSoFar = Effect.fn("errorsSoFar")(function*(page: Page.ObservedPage) {
  *   const errors = yield* UncaughtException.history(page)

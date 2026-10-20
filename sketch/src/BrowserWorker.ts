@@ -34,7 +34,7 @@ import type * as UserContext from "./UserContext.ts"
  */
 export type Kind = "dedicated" | "shared" | "service"
 
-const TypeId = "~effect-browser/BrowserWorker"
+const TypeId = "~@usestrider/browser/BrowserWorker"
 
 /**
  * A worker you can observe but not evaluate in.
@@ -217,7 +217,7 @@ export const BrowserWorkerErrorReason = Schema.Union([
  */
 export type BrowserWorkerErrorReason = typeof BrowserWorkerErrorReason.Type
 
-const BrowserWorkerErrorTypeId = "~effect-browser/BrowserWorker/BrowserWorkerError"
+const BrowserWorkerErrorTypeId = "~@usestrider/browser/BrowserWorker/BrowserWorkerError"
 
 /**
  * Error for an evaluation in a worker that failed.

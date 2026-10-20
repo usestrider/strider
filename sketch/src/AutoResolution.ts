@@ -58,7 +58,7 @@ export type Subject = typeof Subject.Type
  * @category models
  * @since 0.1.0
  */
-export class AutoResolution extends Schema.Class<AutoResolution>("effect-browser/AutoResolution")({
+export class AutoResolution extends Schema.Class<AutoResolution>("@usestrider/browser/AutoResolution")({
   subject: Subject,
   decision: Schema.String,
   policy: Schema.String,

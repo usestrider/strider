@@ -1,9 +1,9 @@
 /**
- * Runner-agnostic test support (`effect-browser/test`).
+ * Runner-agnostic test support (`@usestrider/browser/test`).
  *
  * Nothing changes because it's a test: profile, focus, diagnostics and tracing are whatever the test chose.
  * A test gets its page from `Browser.newPage()`, like any program. A runner adapter, such as
- * `effect-browser/test/vitest`, provides `TestRun` so that traces and screenshots attach to the test that
+ * `@usestrider/browser/test/vitest`, provides `TestRun` so that traces and screenshots attach to the test that
  * made them.
  *
  * @stability unstable
@@ -21,7 +21,7 @@ import * as FilePath from "../FilePath.ts"
  * @category models
  * @since 0.1.0
  */
-export class TestInfo extends Schema.Class<TestInfo>("effect-browser/test/TestInfo")({
+export class TestInfo extends Schema.Class<TestInfo>("@usestrider/browser/test/TestInfo")({
   project: Schema.String,
   file: Schema.String,
   /**

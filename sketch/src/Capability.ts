@@ -19,7 +19,7 @@ import type * as Pixels from "./Pixels.ts"
 import * as Reason from "./Reason.ts"
 import type * as Target from "./Target.ts"
 
-const TypeId = "~effect-browser/Capability"
+const TypeId = "~@usestrider/browser/Capability"
 
 /**
  * A specialized feature, whose handle has type `H`.
@@ -131,7 +131,7 @@ export const CapabilityErrorReason = Schema.Union([Reason.NotPermitted, Reason.U
  */
 export type CapabilityErrorReason = typeof CapabilityErrorReason.Type
 
-const CapabilityErrorTypeId = "~effect-browser/Capability/CapabilityError"
+const CapabilityErrorTypeId = "~@usestrider/browser/Capability/CapabilityError"
 
 /**
  * Error for a capability that couldn't be acquired or used.

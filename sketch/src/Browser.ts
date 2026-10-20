@@ -2,7 +2,7 @@
  * The `Browser` service, its accessors, and the settings every backend shares.
  *
  * A backend layer provides `Browser`: `Chromium.layer()` launches one, `Chromium.layerConnect(endpoint)`
- * attaches to one. Backends are imports, not option values (`effect-browser/chromium`, `/firefox`, `/webkit`,
+ * attaches to one. Backends are imports, not option values (`@usestrider/browser/chromium`, `/firefox`, `/webkit`,
  * `/bidi`), so only the protocol code you import is loaded. A launch uses a temporary profile, acquired with
  * `FileSystem.makeTempDirectoryScoped` before the browser starts and deleted after it exits.
  *
@@ -33,7 +33,7 @@ import type * as Target from "./Target.ts"
 import type * as UserContext from "./UserContext.ts"
 import type * as Watchable from "./Watchable.ts"
 
-const TypeId = "~effect-browser/Browser"
+const TypeId = "~@usestrider/browser/Browser"
 
 /**
  * What the connected browser is; fixed for the connection.
@@ -42,7 +42,7 @@ const TypeId = "~effect-browser/Browser"
  * @category models
  * @since 0.1.0
  */
-export class Info extends Schema.Class<Info>("effect-browser/Browser/Info")({
+export class Info extends Schema.Class<Info>("@usestrider/browser/Browser/Info")({
   product: Schema.String,
   version: Schema.String,
   protocol: Schema.Literals(["cdp", "bidi", "webkit"]),
@@ -84,7 +84,7 @@ export type CapabilityEntry = typeof CapabilityEntry.Type
  * @category models
  * @since 0.1.0
  */
-export class CapabilitySet extends Schema.Class<CapabilitySet>("effect-browser/Browser/CapabilitySet")({
+export class CapabilitySet extends Schema.Class<CapabilitySet>("@usestrider/browser/Browser/CapabilitySet")({
   entries: Schema.Array(CapabilityEntry)
 }) {
   /**
@@ -162,7 +162,7 @@ export const isBrowser = (u: unknown): u is Browser => Predicate.hasProperty(u, 
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Browser } from "effect-browser"
+ * import { Browser } from "@usestrider/browser"
  *
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage({ emulation: { locale: "de-DE" } })
@@ -269,7 +269,7 @@ export interface ConnectOptions {
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
  * import { TestClock } from "effect/testing"
- * import { Browser, Deferred, NetworkResponse } from "effect-browser"
+ * import { Browser, Deferred, NetworkResponse } from "@usestrider/browser"
  *
  * const test = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
@@ -336,7 +336,7 @@ export declare const TraceProtocolCommands: Context.Reference<boolean>
  * @category reasons
  * @since 0.1.0
  */
-export class ExecutableNotFound extends Schema.Error<ExecutableNotFound>("effect-browser/Browser/ExecutableNotFound")({
+export class ExecutableNotFound extends Schema.Error<ExecutableNotFound>("@usestrider/browser/Browser/ExecutableNotFound")({
   _tag: Schema.tag("ExecutableNotFound"),
   searched: Schema.Array(Schema.String),
   hint: Schema.String
@@ -353,7 +353,7 @@ export class ExecutableNotFound extends Schema.Error<ExecutableNotFound>("effect
  * @category reasons
  * @since 0.1.0
  */
-export class ProcessExited extends Schema.Error<ProcessExited>("effect-browser/Browser/ProcessExited")({
+export class ProcessExited extends Schema.Error<ProcessExited>("@usestrider/browser/Browser/ProcessExited")({
   _tag: Schema.tag("ProcessExited"),
   code: Schema.Option(Schema.Int),
   stderrTail: Schema.String,
@@ -372,7 +372,7 @@ export class ProcessExited extends Schema.Error<ProcessExited>("effect-browser/B
  * @since 0.1.0
  */
 export class IncompatibleRevision extends Schema.Error<IncompatibleRevision>(
-  "effect-browser/Browser/IncompatibleRevision"
+  "@usestrider/browser/Browser/IncompatibleRevision"
 )({
   _tag: Schema.tag("IncompatibleRevision"),
   revision: Schema.String,
@@ -390,7 +390,7 @@ export class IncompatibleRevision extends Schema.Error<IncompatibleRevision>(
  * @category reasons
  * @since 0.1.0
  */
-export class ConnectionFailed extends Schema.Error<ConnectionFailed>("effect-browser/Browser/ConnectionFailed")({
+export class ConnectionFailed extends Schema.Error<ConnectionFailed>("@usestrider/browser/Browser/ConnectionFailed")({
   _tag: Schema.tag("ConnectionFailed"),
   stage: Schema.Literals(["refused", "handshake"]),
   hint: Schema.String,
@@ -425,7 +425,7 @@ export const BrowserErrorReason = Schema.Union([
  */
 export type BrowserErrorReason = typeof BrowserErrorReason.Type
 
-const BrowserErrorTypeId = "~effect-browser/Browser/BrowserError"
+const BrowserErrorTypeId = "~@usestrider/browser/Browser/BrowserError"
 
 /**
  * Error for a browser that couldn't be launched or connected to.

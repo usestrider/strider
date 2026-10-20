@@ -47,7 +47,7 @@ import * as Url from "./Url.ts"
 import type * as UserContext from "./UserContext.ts"
 import type * as Watchable from "./Watchable.ts"
 
-const TypeId = "~effect-browser/Page"
+const TypeId = "~@usestrider/browser/Page"
 
 /**
  * Schema for the state of a page's current document.
@@ -445,7 +445,7 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
    *
    * ```ts import.meta.vitest
    * import { Effect } from "effect"
-   * import { Page } from "effect-browser"
+   * import { Page } from "@usestrider/browser"
    *
    * const now = Effect.fn("now")(function*(page: Page.ReadonlyPage) {
    *   const when: Date = yield* page.evaluate(() => new Date())
@@ -470,7 +470,7 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Expect, Page } from "effect-browser"
+ * import { Expect, Page } from "@usestrider/browser"
  *
  * const search = Effect.fn("search")(function*(page: Page.Page, query: string) {
  *   yield* page.goto("https://shop.example.com")
@@ -575,7 +575,7 @@ export interface Page extends ReadonlyPage {
    *
    * ```ts import.meta.vitest
    * import { Effect } from "effect"
-   * import { Page } from "effect-browser"
+   * import { Page } from "@usestrider/browser"
    *
    * const installHooks = Effect.fn("installHooks")(function*(page: Page.Page) {
    *   const helper = yield* page.addInitScript({ source: "window.__hooks = []" })
@@ -654,7 +654,7 @@ export declare const withUserGesture: <A, E, R>(self: Effect.Effect<A, E, R>) =>
  * @category reasons
  * @since 0.1.0
  */
-export class InitializationFailed extends Schema.Error<InitializationFailed>("effect-browser/Page/InitializationFailed")({
+export class InitializationFailed extends Schema.Error<InitializationFailed>("@usestrider/browser/Page/InitializationFailed")({
   _tag: Schema.tag("InitializationFailed"),
   step: Schema.String,
   hint: Schema.String
@@ -671,7 +671,7 @@ export class InitializationFailed extends Schema.Error<InitializationFailed>("ef
  * @category reasons
  * @since 0.1.0
  */
-export class CloseCanceled extends Schema.Error<CloseCanceled>("effect-browser/Page/CloseCanceled")({
+export class CloseCanceled extends Schema.Error<CloseCanceled>("@usestrider/browser/Page/CloseCanceled")({
   _tag: Schema.tag("CloseCanceled"),
   hint: Schema.String
 }) {
@@ -712,7 +712,7 @@ export const PageErrorReason = Schema.Union([
  */
 export type PageErrorReason = typeof PageErrorReason.Type
 
-const PageErrorTypeId = "~effect-browser/Page/PageError"
+const PageErrorTypeId = "~@usestrider/browser/Page/PageError"
 
 /**
  * Error for a page operation that failed: navigation, evaluation, capture, reads, or setting the page up.
@@ -721,7 +721,7 @@ const PageErrorTypeId = "~effect-browser/Page/PageError"
  *
  * ```ts import.meta.vitest
  * import { Effect, Option } from "effect"
- * import { Page } from "effect-browser"
+ * import { Page } from "@usestrider/browser"
  *
  * const tryOpen = Effect.fn("tryOpen")(function*(page: Page.Page, url: string) {
  *   return yield* page.goto(url).pipe(

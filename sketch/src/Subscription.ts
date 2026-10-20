@@ -71,7 +71,7 @@ export interface History<A> {
  *
  * ```ts import.meta.vitest
  * import { Effect, Schema } from "effect"
- * import { NetworkRequest, Page, Subscription } from "effect-browser"
+ * import { NetworkRequest, Page, Subscription } from "@usestrider/browser"
  *
  * const RequestHistory = Subscription.History(NetworkRequest.NetworkRequest)
  *
@@ -114,7 +114,7 @@ export const SubscriptionErrorReason = Schema.Union([
  */
 export type SubscriptionErrorReason = typeof SubscriptionErrorReason.Type
 
-const SubscriptionErrorTypeId = "~effect-browser/Subscription/SubscriptionError"
+const SubscriptionErrorTypeId = "~@usestrider/browser/Subscription/SubscriptionError"
 
 /**
  * Error for a subscription that couldn't be set up, such as a filter the backend can't apply.
@@ -152,7 +152,7 @@ export class SubscriptionError extends Schema.TaggedError<SubscriptionError>(Sub
 export const isSubscriptionError = (u: unknown): u is SubscriptionError =>
   Predicate.hasProperty(u, SubscriptionErrorTypeId)
 
-const EventOverflowTypeId = "~effect-browser/Subscription/EventOverflow"
+const EventOverflowTypeId = "~@usestrider/browser/Subscription/EventOverflow"
 
 /**
  * Error for a stream whose consumer fell further behind than its buffer allows.

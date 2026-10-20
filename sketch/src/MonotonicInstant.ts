@@ -16,7 +16,7 @@ import * as Schema from "effect/Schema"
  * @category schemas
  * @since 0.1.0
  */
-export const MonotonicInstant = Schema.Number.pipe(Schema.brand("~effect-browser/MonotonicInstant"))
+export const MonotonicInstant = Schema.Number.pipe(Schema.brand("~@usestrider/browser/MonotonicInstant"))
 
 /**
  * Nanoseconds on the live monotonic clock; never `TestClock` time.

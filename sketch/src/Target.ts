@@ -20,7 +20,7 @@ import * as Diagnostics from "./Diagnostics.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const NavigableId = Schema.String.pipe(Schema.brand("~effect-browser/Target/NavigableId"))
+export const NavigableId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/NavigableId"))
 
 /**
  * Id of a navigable: a page or a frame.
@@ -38,7 +38,7 @@ export type NavigableId = typeof NavigableId.Type
  * @category schemas
  * @since 0.1.0
  */
-export const DocumentId = Schema.String.pipe(Schema.brand("~effect-browser/Target/DocumentId"))
+export const DocumentId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/DocumentId"))
 
 /**
  * Id of one document.
@@ -56,7 +56,7 @@ export type DocumentId = typeof DocumentId.Type
  * @category schemas
  * @since 0.1.0
  */
-export const RealmId = Schema.String.pipe(Schema.brand("~effect-browser/Target/RealmId"))
+export const RealmId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/RealmId"))
 
 /**
  * Id of one JavaScript realm.
@@ -155,7 +155,7 @@ export const EventOrigin = Schema.Union([
  */
 export type EventOrigin = typeof EventOrigin.Type
 
-const TargetGoneTypeId = "~effect-browser/Target/TargetGone"
+const TargetGoneTypeId = "~@usestrider/browser/Target/TargetGone"
 
 /**
  * Error for an operation whose target ended before or while it ran.
@@ -170,7 +170,7 @@ const TargetGoneTypeId = "~effect-browser/Target/TargetGone"
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Page } from "effect-browser"
+ * import { Page } from "@usestrider/browser"
  *
  * const dismiss = Effect.fn("dismiss")(function*(popup: Page.Page) {
  *   yield* popup.getByRole("button", { name: "Close" }).click().pipe(

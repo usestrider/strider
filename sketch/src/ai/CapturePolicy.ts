@@ -22,7 +22,7 @@ import * as Schema from "effect/Schema"
  * @category models
  * @since 0.1.0
  */
-export class CapturePolicy extends Schema.Class<CapturePolicy>("effect-browser/ai/CapturePolicy")({
+export class CapturePolicy extends Schema.Class<CapturePolicy>("@usestrider/browser/ai/CapturePolicy")({
   screenshots: Schema.Literals(["allowed", "denied"]),
   snapshotText: Schema.Literals(["full", "redacted"]),
   consoleText: Schema.Literals(["full", "redacted", "omitted"])

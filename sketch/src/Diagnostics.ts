@@ -22,7 +22,7 @@ import * as MonotonicInstant from "./MonotonicInstant.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const OperationId = Schema.String.pipe(Schema.brand("~effect-browser/Diagnostics/OperationId"))
+export const OperationId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Diagnostics/OperationId"))
 
 /**
  * Id that links an operation's span, its diagnostics and its trace entry.
@@ -148,7 +148,7 @@ export type CleanupState = typeof CleanupState.Type
  * @category models
  * @since 0.1.0
  */
-export class Diagnostics extends Schema.Class<Diagnostics>("effect-browser/Diagnostics")({
+export class Diagnostics extends Schema.Class<Diagnostics>("@usestrider/browser/Diagnostics")({
   operationId: OperationId,
   dispatch: DispatchState,
   progress: Schema.Array(StepEvidence),
@@ -203,7 +203,7 @@ export declare const CurrentPreset: Context.Reference<Preset>
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Diagnostics, Page } from "effect-browser"
+ * import { Diagnostics, Page } from "@usestrider/browser"
  *
  * const openCart = Effect.fn("openCart")(function*(page: Page.Page) {
  *   yield* page.goto("https://shop.example.com/cart?session=abc")

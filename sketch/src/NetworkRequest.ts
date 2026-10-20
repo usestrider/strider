@@ -29,7 +29,7 @@ import type * as UserContext from "./UserContext.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const Id = Schema.String.pipe(Schema.brand("~effect-browser/NetworkRequest/Id"))
+export const Id = Schema.String.pipe(Schema.brand("~@usestrider/browser/NetworkRequest/Id"))
 
 /**
  * Id of a request, shared by its redirect hops.
@@ -47,7 +47,7 @@ export type Id = typeof Id.Type
  * @category schemas
  * @since 0.1.0
  */
-export const HopId = Schema.String.pipe(Schema.brand("~effect-browser/NetworkRequest/HopId"))
+export const HopId = Schema.String.pipe(Schema.brand("~@usestrider/browser/NetworkRequest/HopId"))
 
 /**
  * Id of one redirect hop of a request: the request id and how many redirects preceded it.
@@ -107,7 +107,7 @@ export const Initiator = Schema.Union([
   Schema.TaggedStruct("Document", {
     navigable: Target.NavigableId,
     // PageNavigation.Id's brand, declared here so the module graph stays acyclic
-    navigation: Schema.Option(Schema.String.pipe(Schema.brand("~effect-browser/PageNavigation/Id")))
+    navigation: Schema.Option(Schema.String.pipe(Schema.brand("~@usestrider/browser/PageNavigation/Id")))
   }),
   Schema.TaggedStruct("Worker", { realm: Target.RealmId }),
   Schema.TaggedStruct("Unattributed", {})
@@ -148,7 +148,7 @@ export const Method = Schema.Literals([
  * @category models
  * @since 0.1.0
  */
-export class NetworkRequest extends Schema.Class<NetworkRequest>("effect-browser/NetworkRequest")({
+export class NetworkRequest extends Schema.Class<NetworkRequest>("@usestrider/browser/NetworkRequest")({
   hop: HopId,
   method: Method,
   url: Url.Url,
@@ -215,7 +215,7 @@ export declare const next: <PE = never, PR = never>(
  *
  * ```ts import.meta.vitest
  * import { Console, Effect, Stream } from "effect"
- * import { NetworkRequest, Page } from "effect-browser"
+ * import { NetworkRequest, Page } from "@usestrider/browser"
  *
  * const logFetches = Effect.fn("logFetches")(function*(page: Page.ObservedPage) {
  *   const requests = yield* NetworkRequest.stream(page, { resourceType: "fetch" })

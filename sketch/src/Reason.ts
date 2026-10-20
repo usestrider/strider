@@ -42,7 +42,7 @@ export interface Reason {
  * @category reasons
  * @since 0.1.0
  */
-export class InvalidInput extends Schema.Error<InvalidInput>("effect-browser/Reason/InvalidInput")({
+export class InvalidInput extends Schema.Error<InvalidInput>("@usestrider/browser/Reason/InvalidInput")({
   _tag: Schema.tag("InvalidInput"),
   input: Schema.String,
   expected: Schema.String,
@@ -65,7 +65,7 @@ export class InvalidInput extends Schema.Error<InvalidInput>("effect-browser/Rea
  * @category reasons
  * @since 0.1.0
  */
-export class NotPermitted extends Schema.Error<NotPermitted>("effect-browser/Reason/NotPermitted")({
+export class NotPermitted extends Schema.Error<NotPermitted>("@usestrider/browser/Reason/NotPermitted")({
   _tag: Schema.tag("NotPermitted"),
   required: Schema.Literals(["inspect", "control", "browserWide"]),
   hint: Schema.String
@@ -89,7 +89,7 @@ export class NotPermitted extends Schema.Error<NotPermitted>("effect-browser/Rea
  * @category reasons
  * @since 0.1.0
  */
-export class Unsupported extends Schema.Error<Unsupported>("effect-browser/Reason/Unsupported")({
+export class Unsupported extends Schema.Error<Unsupported>("@usestrider/browser/Reason/Unsupported")({
   _tag: Schema.tag("Unsupported"),
   capability: Schema.String,
   backend: Schema.String,
@@ -144,7 +144,7 @@ export interface BackendMetadata extends Metadata {}
  * @category reasons
  * @since 0.1.0
  */
-export class BackendFailure extends Schema.Error<BackendFailure>("effect-browser/Reason/BackendFailure")({
+export class BackendFailure extends Schema.Error<BackendFailure>("@usestrider/browser/Reason/BackendFailure")({
   _tag: Schema.tag("BackendFailure"),
   kind: Schema.Literals(["Rejected", "IncompatibleResponse"]),
   method: Schema.String,
@@ -169,7 +169,7 @@ export class BackendFailure extends Schema.Error<BackendFailure>("effect-browser
  * @category reasons
  * @since 0.1.0
  */
-export class EvaluationThrown extends Schema.Error<EvaluationThrown>("effect-browser/Reason/EvaluationThrown")({
+export class EvaluationThrown extends Schema.Error<EvaluationThrown>("@usestrider/browser/Reason/EvaluationThrown")({
   _tag: Schema.tag("EvaluationThrown"),
   exception: Schema.Struct({
     name: Schema.String,
@@ -197,7 +197,7 @@ export class EvaluationThrown extends Schema.Error<EvaluationThrown>("effect-bro
  * @category reasons
  * @since 0.1.0
  */
-export class NotSerializable extends Schema.Error<NotSerializable>("effect-browser/Reason/NotSerializable")({
+export class NotSerializable extends Schema.Error<NotSerializable>("@usestrider/browser/Reason/NotSerializable")({
   _tag: Schema.tag("NotSerializable"),
   path: Schema.String,
   hint: Schema.String

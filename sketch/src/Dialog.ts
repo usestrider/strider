@@ -29,7 +29,7 @@ import type * as Target from "./Target.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const PromptId = Schema.String.pipe(Schema.brand("~effect-browser/Dialog/PromptId"))
+export const PromptId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Dialog/PromptId"))
 
 /**
  * Id of a user prompt.
@@ -40,7 +40,7 @@ export const PromptId = Schema.String.pipe(Schema.brand("~effect-browser/Dialog/
  */
 export type PromptId = typeof PromptId.Type
 
-const DecisionTypeId = "~effect-browser/Dialog/Decision"
+const DecisionTypeId = "~@usestrider/browser/Dialog/Decision"
 
 /**
  * How a dialog is answered.
@@ -170,7 +170,7 @@ export declare const history: (
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Dialog, Page } from "effect-browser"
+ * import { Dialog, Page } from "@usestrider/browser"
  *
  * const deleteAccount = Effect.fn("deleteAccount")(function*(page: Page.Page) {
  *   yield* Dialog.handle(page, (dialog) =>

@@ -1,6 +1,6 @@
 # sketch
 
-The whole public API of effect-browser, declared in the package's real shape and checked. Nothing here runs: functions are `declare`d, while Schemas, errors and guards are written out, because their types come from the code. When implementation starts, each module's declarations are replaced by code and its JSDoc stays.
+The whole public API of Strider (`@usestrider/browser`), declared in the package's real shape and checked. Nothing here runs: functions are `declare`d, while Schemas, errors and guards are written out, because their types come from the code. When implementation starts, each module's declarations are replaced by code and its JSDoc stays.
 
 ## Layout
 
@@ -33,7 +33,7 @@ The whole public API of effect-browser, declared in the package's real shape and
 Every public declaration follows Effect's contract (`.agents/skills/jsdocs/` in the Effect repository):
 
 - one paragraph that starts with what it does, then optional **When to use** (starting "Use to", "Use when", "Use as" or "Use with"), **Details** and **Gotchas**, in that order;
-- `**Example** (Title)` sections, one fenced ` ```ts import.meta.vitest ` block each, importing from `"effect-browser"` as a user would;
+- `**Example** (Title)` sections, one fenced ` ```ts import.meta.vitest ` block each, importing from `"@usestrider/browser"` as a user would;
 - tags in this order: `@see`, `@stability`, `@category`, `@since`. Roots need all but `@see`; members may add `@default`.
 
 Until 1.0, `@stability` is `unstable`, or `experimental` for what rests on an upstream proposal or an in-flight module. `@since` is `0.1.0`.
@@ -49,7 +49,7 @@ Until 1.0, `@stability` is `unstable`, or `experimental` for what rests on an up
   jsdocs.json            the effect-jsdocs model: every API with parsed sections, examples, tags, @see links and import guidance
 ```
 
-Each manifest entry gives the module's name (`effect-browser/Page`), its export path, its source file, its JSON file with a SHA-256, and the barrel it is re-exported from (`effect-browser`), which is how a page shows `import { Page } from "effect-browser"`.
+Each manifest entry gives the module's name (`@usestrider/browser/Page`), its export path, its source file, its JSON file with a SHA-256, and the barrel it is re-exported from (`@usestrider/browser`), which is how a page shows `import { Page } from "@usestrider/browser"`.
 
 Modules are found from `package.json`'s export map, as Effect's site finds them: every file a pattern matches, except barrels (marked `// @barrel:`) and `internal/`. TypeDoc runs per module with `@stability` added to its block tags and external symbols excluded, which keeps inherited Schema members out. Effect-style modules open with an untagged JSDoc block, which TypeDoc ignores, so the script attaches it as the module's comment.
 

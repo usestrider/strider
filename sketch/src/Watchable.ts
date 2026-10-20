@@ -15,7 +15,7 @@ import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
 import type * as Target from "./Target.ts"
 
-const TypeId = "~effect-browser/Watchable"
+const TypeId = "~@usestrider/browser/Watchable"
 
 /**
  * A read-only view of state that changes.
@@ -32,7 +32,7 @@ const TypeId = "~effect-browser/Watchable"
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Page } from "effect-browser"
+ * import { Page } from "@usestrider/browser"
  *
  * const loaded = Effect.fn("loaded")(function*(page: Page.ObservedPage) {
  *   yield* page.status.waitFor((status) => status._tag === "Open" && status.document.readiness === "complete")

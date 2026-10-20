@@ -1,5 +1,5 @@
 /**
- * The Firefox backend (`effect-browser/firefox`): Firefox over WebDriver BiDi.
+ * The Firefox backend (`@usestrider/browser/firefox`): Firefox over WebDriver BiDi.
  *
  * Protocol failures carry the BiDi error under `metadata.bidi`.
  *
@@ -33,8 +33,8 @@ declare module "../Reason.ts" {
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Browser } from "effect-browser"
- * import { Firefox } from "effect-browser/firefox"
+ * import { Browser } from "@usestrider/browser"
+ * import { Firefox } from "@usestrider/browser/firefox"
  *
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()

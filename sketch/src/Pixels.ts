@@ -16,7 +16,7 @@ import * as Schema from "effect/Schema"
  * @category schemas
  * @since 0.1.0
  */
-export const Css = Schema.Number.pipe(Schema.brand("~effect-browser/Pixels/Css"))
+export const Css = Schema.Number.pipe(Schema.brand("~@usestrider/browser/Pixels/Css"))
 
 /**
  * A length in CSS pixels: layout units.
@@ -34,7 +34,7 @@ export type Css = typeof Css.Type
  * @category schemas
  * @since 0.1.0
  */
-export const Device = Schema.Number.pipe(Schema.brand("~effect-browser/Pixels/Device"))
+export const Device = Schema.Number.pipe(Schema.brand("~@usestrider/browser/Pixels/Device"))
 
 /**
  * A length in device pixels: CSS pixels times the device pixel ratio.

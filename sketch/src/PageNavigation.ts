@@ -28,7 +28,7 @@ import * as Url from "./Url.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const Id = Schema.String.pipe(Schema.brand("~effect-browser/PageNavigation/Id"))
+export const Id = Schema.String.pipe(Schema.brand("~@usestrider/browser/PageNavigation/Id"))
 
 /**
  * Id of one navigation.
@@ -130,7 +130,7 @@ export interface NextFilter extends Filter {
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Deferred, Page, PageNavigation } from "effect-browser"
+ * import { Deferred, Page, PageNavigation } from "@usestrider/browser"
  *
  * const openOrders = Effect.fn("openOrders")(function*(page: Page.Page) {
  *   const orders = yield* PageNavigation.next(page, { url: "https://shop.example.com/orders" })
@@ -189,7 +189,7 @@ export declare const history: (
  * @category reasons
  * @since 0.1.0
  */
-export class NavigationFailed extends Schema.Error<NavigationFailed>("effect-browser/PageNavigation/NavigationFailed")({
+export class NavigationFailed extends Schema.Error<NavigationFailed>("@usestrider/browser/PageNavigation/NavigationFailed")({
   _tag: Schema.tag("NavigationFailed"),
   url: Schema.Option(Url.Url),
   netError: Schema.String,
@@ -213,7 +213,7 @@ export class NavigationFailed extends Schema.Error<NavigationFailed>("effect-bro
  * @since 0.1.0
  */
 export class NavigationCanceled extends Schema.Error<NavigationCanceled>(
-  "effect-browser/PageNavigation/NavigationCanceled"
+  "@usestrider/browser/PageNavigation/NavigationCanceled"
 )({
   _tag: Schema.tag("NavigationCanceled"),
   url: Schema.Option(Url.Url),
@@ -233,7 +233,7 @@ export class NavigationCanceled extends Schema.Error<NavigationCanceled>(
  * @since 0.1.0
  */
 export class NavigationSuperseded extends Schema.Error<NavigationSuperseded>(
-  "effect-browser/PageNavigation/NavigationSuperseded"
+  "@usestrider/browser/PageNavigation/NavigationSuperseded"
 )({
   _tag: Schema.tag("NavigationSuperseded"),
   url: Schema.Option(Url.Url),
@@ -252,7 +252,7 @@ export class NavigationSuperseded extends Schema.Error<NavigationSuperseded>(
  * @category reasons
  * @since 0.1.0
  */
-export class BecameDownload extends Schema.Error<BecameDownload>("effect-browser/PageNavigation/BecameDownload")({
+export class BecameDownload extends Schema.Error<BecameDownload>("@usestrider/browser/PageNavigation/BecameDownload")({
   _tag: Schema.tag("BecameDownload"),
   url: Schema.Option(Url.Url),
   hint: Schema.String
@@ -269,7 +269,7 @@ export class BecameDownload extends Schema.Error<BecameDownload>("effect-browser
  * @category reasons
  * @since 0.1.0
  */
-export class NoContent extends Schema.Error<NoContent>("effect-browser/PageNavigation/NoContent")({
+export class NoContent extends Schema.Error<NoContent>("@usestrider/browser/PageNavigation/NoContent")({
   _tag: Schema.tag("NoContent"),
   url: Schema.Option(Url.Url),
   hint: Schema.String

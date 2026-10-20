@@ -1,9 +1,9 @@
 /** Call sites for the areas beyond the acceptance scenarios: input, frames, storage, workers, reads, tests. */
 import { Config, Console, Effect, Option, Stream } from "effect"
-import { Browser, BrowserWorker, Deadline, Deferred, Download, FileInput, NetworkConnection, Page } from "effect-browser"
-import { BrowserToolkit, CapturePolicy } from "effect-browser/ai"
-import { Chromium } from "effect-browser/chromium"
-import { VitestBrowser } from "effect-browser/test/vitest"
+import { Browser, BrowserWorker, Deadline, Deferred, Download, FileInput, NetworkConnection, Page } from "@usestrider/browser"
+import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
+import { Chromium } from "@usestrider/browser/chromium"
+import { VitestBrowser } from "@usestrider/browser/test/vitest"
 
 // Keyboard and mouse: held input is scoped, so a failed step never leaves Shift down
 export const multiSelect = Effect.fn("multiSelect")(function*(page: Page.Page) {

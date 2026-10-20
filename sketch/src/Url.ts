@@ -22,7 +22,7 @@ import * as Schema from "effect/Schema"
  * @category schemas
  * @since 0.1.0
  */
-export const Url = Schema.String.pipe(Schema.brand("~effect-browser/Url/Url"))
+export const Url = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url/Url"))
 
 /**
  * An absolute URL after WHATWG parsing; immutable and equal by value.
@@ -38,7 +38,7 @@ export const Url = Schema.String.pipe(Schema.brand("~effect-browser/Url/Url"))
  * ```ts import.meta.vitest
  * import { Effect, Result } from "effect"
  * import { Url as HttpUrl } from "effect/http"
- * import { Page } from "effect-browser"
+ * import { Page } from "@usestrider/browser"
  *
  * const pathOf = Effect.fn("pathOf")(function*(page: Page.ObservedPage) {
  *   const url = yield* page.url
@@ -59,7 +59,7 @@ export type Url = typeof Url.Type
  * @category schemas
  * @since 0.1.0
  */
-export const Pattern = Schema.String.pipe(Schema.brand("~effect-browser/Url/Pattern"))
+export const Pattern = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url/Pattern"))
 
 /**
  * A URL pattern, matched against URLs and never navigated to.
@@ -83,7 +83,7 @@ export type Pattern = typeof Pattern.Type
  * @category schemas
  * @since 0.1.0
  */
-export const Origin = Schema.String.pipe(Schema.brand("~effect-browser/Url/Origin"))
+export const Origin = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url/Origin"))
 
 /**
  * An origin: scheme, host and port.
@@ -101,7 +101,7 @@ export type Origin = typeof Origin.Type
  * @category schemas
  * @since 0.1.0
  */
-export const Site = Schema.String.pipe(Schema.brand("~effect-browser/Url/Site"))
+export const Site = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url/Site"))
 
 /**
  * A site: a scheme and registrable domain, as used in storage partition keys.

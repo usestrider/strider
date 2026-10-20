@@ -26,7 +26,7 @@ import * as Url from "./Url.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const Name = Schema.String.pipe(Schema.brand("~effect-browser/CookieJar/Name"))
+export const Name = Schema.String.pipe(Schema.brand("~@usestrider/browser/CookieJar/Name"))
 
 /**
  * A cookie name.
@@ -44,7 +44,7 @@ export type Name = typeof Name.Type
  * @category schemas
  * @since 0.1.0
  */
-export const Domain = Schema.String.pipe(Schema.brand("~effect-browser/CookieJar/Domain"))
+export const Domain = Schema.String.pipe(Schema.brand("~@usestrider/browser/CookieJar/Domain"))
 
 /**
  * A cookie domain, such as `.example.com`.
@@ -90,7 +90,7 @@ export type PartitionKey = typeof PartitionKey.Type
  * @category models
  * @since 0.1.0
  */
-export class Cookie extends Schema.Class<Cookie>("effect-browser/CookieJar/Cookie")({
+export class Cookie extends Schema.Class<Cookie>("@usestrider/browser/CookieJar/Cookie")({
   name: Name,
   value: Schema.Redacted(Schema.String),
   domain: Domain,
@@ -181,7 +181,7 @@ export interface Match {
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Page } from "effect-browser"
+ * import { Page } from "@usestrider/browser"
  *
  * const enableBeta = Effect.fn("enableBeta")(function*(page: Page.Page) {
  *   const sent = yield* page.context.cookies.listFor("https://app.example.com")
@@ -249,7 +249,7 @@ export const CookieJarErrorReason = Schema.Union([
  */
 export type CookieJarErrorReason = typeof CookieJarErrorReason.Type
 
-const CookieJarErrorTypeId = "~effect-browser/CookieJar/CookieJarError"
+const CookieJarErrorTypeId = "~@usestrider/browser/CookieJar/CookieJarError"
 
 /**
  * Error for a cookie operation that failed.

@@ -52,7 +52,7 @@ export interface HandlerRegistration extends Registration {
  * @category reasons
  * @since 0.1.0
  */
-export class TimingUnsupported extends Schema.Error<TimingUnsupported>("effect-browser/Declaration/TimingUnsupported")({
+export class TimingUnsupported extends Schema.Error<TimingUnsupported>("@usestrider/browser/Declaration/TimingUnsupported")({
   _tag: Schema.tag("TimingUnsupported"),
   needed: Schema.Literal("beforeAuthorScript"),
   hint: Schema.String
@@ -69,7 +69,7 @@ export class TimingUnsupported extends Schema.Error<TimingUnsupported>("effect-b
  * @category reasons
  * @since 0.1.0
  */
-export class Conflict extends Schema.Error<Conflict>("effect-browser/Declaration/Conflict")({
+export class Conflict extends Schema.Error<Conflict>("@usestrider/browser/Declaration/Conflict")({
   _tag: Schema.tag("Conflict"),
   with: Schema.String,
   hint: Schema.String
@@ -87,7 +87,7 @@ export class Conflict extends Schema.Error<Conflict>("effect-browser/Declaration
  * @since 0.1.0
  */
 export class DependencyReleased extends Schema.Error<DependencyReleased>(
-  "effect-browser/Declaration/DependencyReleased"
+  "@usestrider/browser/Declaration/DependencyReleased"
 )({
   _tag: Schema.tag("DependencyReleased"),
   hint: Schema.String
@@ -123,7 +123,7 @@ export const DeclarationErrorReason = Schema.Union([
  */
 export type DeclarationErrorReason = typeof DeclarationErrorReason.Type
 
-const DeclarationErrorTypeId = "~effect-browser/Declaration/DeclarationError"
+const DeclarationErrorTypeId = "~@usestrider/browser/Declaration/DeclarationError"
 
 /**
  * Error for a declaration that couldn't be put in force.

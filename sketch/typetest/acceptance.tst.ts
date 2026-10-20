@@ -3,7 +3,7 @@
  * Scope, reads require nothing, and errors stay small and named.
  */
 import type { Effect, Scope } from "effect"
-import type { Browser, Deadline, Locator, Page, Subscription, Target } from "effect-browser"
+import type { Browser, Deadline, Locator, Page, Subscription, Target } from "@usestrider/browser"
 import { describe, expect, it } from "tstyche"
 import type * as Acceptance from "../scenarios/acceptance.ts"
 

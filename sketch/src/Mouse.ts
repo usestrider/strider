@@ -156,7 +156,7 @@ export const MouseErrorReason = Schema.Union([
  */
 export type MouseErrorReason = typeof MouseErrorReason.Type
 
-const MouseErrorTypeId = "~effect-browser/Mouse/MouseError"
+const MouseErrorTypeId = "~@usestrider/browser/Mouse/MouseError"
 
 /**
  * Error for a mouse operation that failed.

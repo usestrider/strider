@@ -53,7 +53,7 @@ export const OriginState = Schema.Struct({
  * @category models
  * @since 0.1.0
  */
-export class StorageState extends Schema.Class<StorageState>("effect-browser/StorageState")({
+export class StorageState extends Schema.Class<StorageState>("@usestrider/browser/StorageState")({
   cookies: Schema.Array(CookieJar.Cookie),
   origins: Schema.Array(OriginState)
 }) {}
@@ -65,7 +65,7 @@ export class StorageState extends Schema.Class<StorageState>("effect-browser/Sto
  *
  * ```ts import.meta.vitest
  * import { Config, Effect, Schema } from "effect"
- * import { Browser, Expect, StorageState } from "effect-browser"
+ * import { Browser, Expect, StorageState } from "@usestrider/browser"
  *
  * const loginOnce = Effect.gen(function*() {
  *   const json = yield* Effect.scoped(Effect.gen(function*() {
@@ -101,7 +101,7 @@ export const Json = Schema.fromJsonString(StorageState)
  * @category reasons
  * @since 0.1.0
  */
-export class Incompatible extends Schema.Error<Incompatible>("effect-browser/StorageState/Incompatible")({
+export class Incompatible extends Schema.Error<Incompatible>("@usestrider/browser/StorageState/Incompatible")({
   _tag: Schema.tag("Incompatible"),
   partitions: Schema.Array(Schema.String),
   hint: Schema.String

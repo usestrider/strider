@@ -67,7 +67,7 @@ export type SourceLocation = typeof SourceLocation.Type
  * @category models
  * @since 0.1.0
  */
-export class ConsoleMessage extends Schema.Class<ConsoleMessage>("effect-browser/ConsoleMessage")({
+export class ConsoleMessage extends Schema.Class<ConsoleMessage>("@usestrider/browser/ConsoleMessage")({
   level: Level,
   text: Schema.String,
   location: Schema.Option(SourceLocation),

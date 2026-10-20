@@ -36,7 +36,7 @@ import type * as UserContext from "./UserContext.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const Id = Schema.String.pipe(Schema.brand("~effect-browser/NetworkConnection/Id"))
+export const Id = Schema.String.pipe(Schema.brand("~@usestrider/browser/NetworkConnection/Id"))
 
 /**
  * Id of a connection.
@@ -63,7 +63,7 @@ export type Kind = "webSocket" | "eventSource"
  * @category models
  * @since 0.1.0
  */
-export class Frame extends Schema.Class<Frame>("effect-browser/NetworkConnection/Frame")({
+export class Frame extends Schema.Class<Frame>("@usestrider/browser/NetworkConnection/Frame")({
   direction: Schema.Literals(["sent", "received"]),
   payload: Schema.Union([
     Schema.TaggedStruct("Text", { text: Schema.String }),
@@ -72,7 +72,7 @@ export class Frame extends Schema.Class<Frame>("effect-browser/NetworkConnection
   at: MonotonicInstant.MonotonicInstant
 }) {}
 
-const TypeId = "~effect-browser/NetworkConnection"
+const TypeId = "~@usestrider/browser/NetworkConnection"
 
 /**
  * A WebSocket or EventSource connection.
@@ -81,7 +81,7 @@ const TypeId = "~effect-browser/NetworkConnection"
  *
  * ```ts import.meta.vitest
  * import { Console, Effect, Stream } from "effect"
- * import { Deferred, NetworkConnection, Page } from "effect-browser"
+ * import { Deferred, NetworkConnection, Page } from "@usestrider/browser"
  *
  * const watchChat = Effect.fn("watchChat")(function*(page: Page.Page) {
  *   const opened = yield* NetworkConnection.next(page, { kind: "webSocket", url: "wss://chat.example.com/*" })

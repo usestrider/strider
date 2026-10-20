@@ -1,8 +1,8 @@
-# effect-browser API index
+# @usestrider/browser API index
 
 Generated from `src/` by `npm run index`; don't edit by hand. One line per declaration and member, by entry point, module and `@category`. Experimental APIs are marked. The browsable reference is generated from the same sources by `npm run api-reference`.
 
-## `effect-browser`
+## `@usestrider/browser`
 
 ### AriaPattern
 
@@ -321,8 +321,8 @@ A context's cookies.
 
 *schemas*
 
-- `const Name = Schema.String.pipe(Schema.brand("~effect-browser/CookieJar/Name"))`
-- `const Domain = Schema.String.pipe(Schema.brand("~effect-browser/CookieJar/Domain"))`
+- `const Name = Schema.String.pipe(Schema.brand("~@usestrider/browser/CookieJar/Name"))`
+- `const Domain = Schema.String.pipe(Schema.brand("~@usestrider/browser/CookieJar/Domain"))`
 - `const PartitionKey = Schema.Union([Schema.TaggedStruct("Unpartitioned", {}), Schema.TaggedStruct("Partitioned", { topLevelSite: Url.Site, crossSiteAncestor: Schema.Option(Schema.Boolean) })])`
 - `const CookieJarErrorReason = Schema.Union([Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
 
@@ -433,7 +433,7 @@ The evidence every failure carries, and the preset that decides how much of it i
 
 *schemas*
 
-- `const OperationId = Schema.String.pipe(Schema.brand("~effect-browser/Diagnostics/OperationId"))`
+- `const OperationId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Diagnostics/OperationId"))`
 - `const DispatchState = Schema.Union([Schema.TaggedStruct("NotSent", {}), Schema.TaggedStruct("MayHaveBeenSent", {}), Schema.TaggedStruct("Acknowledged", { result: Schema.Literals(["ok", "rejected"]) })])`
 - `const StepEvidence = Schema.Struct({ step: Schema.String, state: Schema.Literals(["unsent", "uncertain", "ok", "rejected"]), at: MonotonicInstant.MonotonicInstant })`
 - `const ObservedValue = Schema.Struct({ at: MonotonicInstant.MonotonicInstant, value: Schema.Unknown })`
@@ -466,7 +466,7 @@ Dialogs: `alert`, `confirm`, `prompt` and `beforeunload`.
 
 *schemas*
 
-- `const PromptId = Schema.String.pipe(Schema.brand("~effect-browser/Dialog/PromptId"))`
+- `const PromptId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Dialog/PromptId"))`
 
 *subscriptions*
 
@@ -511,7 +511,7 @@ Downloads a page starts.
 
 *schemas*
 
-- `const Id = Schema.String.pipe(Schema.brand("~effect-browser/Download/Id"))`
+- `const Id = Schema.String.pipe(Schema.brand("~@usestrider/browser/Download/Id"))`
 - `const Status = Schema.Union([Schema.TaggedStruct("InProgress", { received: Schema.Int, total: Schema.Option(Schema.Int) }), Schema.TaggedStruct("Completed", {}), Schema.TaggedStruct("Canceled", {}), Schema.TaggedSt…`
 - `const DownloadErrorReason = Schema.Union([DownloadCanceled, DownloadFailed, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
 
@@ -579,8 +579,8 @@ Emulated settings: viewport, locale, time zone, media features, network conditio
 
 *schemas*
 
-- `const Locale = Schema.String.pipe(Schema.brand("~effect-browser/Emulation/Locale"))`
-- `const TimeZoneId = Schema.String.pipe(Schema.brand("~effect-browser/Emulation/TimeZoneId"))`
+- `const Locale = Schema.String.pipe(Schema.brand("~@usestrider/browser/Emulation/Locale"))`
+- `const TimeZoneId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Emulation/TimeZoneId"))`
 
 ### Expect
 
@@ -683,8 +683,8 @@ Files to upload, saying where their bytes come from.
 
 *schemas*
 
-- `const FileName = Schema.String.pipe(Schema.brand("~effect-browser/FileInput/FileName"))`
-- `const MimeType = Schema.String.pipe(Schema.brand("~effect-browser/FileInput/MimeType"))`
+- `const FileName = Schema.String.pipe(Schema.brand("~@usestrider/browser/FileInput/FileName"))`
+- `const MimeType = Schema.String.pipe(Schema.brand("~@usestrider/browser/FileInput/MimeType"))`
 
 *constructors*
 
@@ -707,8 +707,8 @@ File paths, branded by whose machine they are on.
 
 *schemas*
 
-- `const Local = Schema.String.pipe(Schema.brand("~effect-browser/FilePath/Local"))`
-- `const Remote = Schema.String.pipe(Schema.brand("~effect-browser/FilePath/Remote"))`
+- `const Local = Schema.String.pipe(Schema.brand("~@usestrider/browser/FilePath/Local"))`
+- `const Remote = Schema.String.pipe(Schema.brand("~@usestrider/browser/FilePath/Remote"))`
 
 ### Har
 
@@ -767,7 +767,7 @@ Init scripts: code that runs in every new document of a page or context, before 
 
 *schemas*
 
-- `const Id = Schema.String.pipe(Schema.brand("~effect-browser/InitScript/Id"))`
+- `const Id = Schema.String.pipe(Schema.brand("~@usestrider/browser/InitScript/Id"))`
 
 ### JSHandle
 
@@ -826,7 +826,7 @@ Keys sent to whatever has focus, for what locators can't express.
 
 *schemas*
 
-- `const Key = Schema.String.pipe(Schema.brand("~effect-browser/Keyboard/Key"))`
+- `const Key = Schema.String.pipe(Schema.brand("~@usestrider/browser/Keyboard/Key"))`
 - `const KeyboardErrorReason = Schema.Union([Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
 
 *guards*
@@ -1006,7 +1006,7 @@ Points on the live monotonic clock, used for deadlines and event timestamps.
 
 *schemas*
 
-- `const MonotonicInstant = Schema.Number.pipe(Schema.brand("~effect-browser/MonotonicInstant"))`
+- `const MonotonicInstant = Schema.Number.pipe(Schema.brand("~@usestrider/browser/MonotonicInstant"))`
 
 ### Mouse
 
@@ -1069,7 +1069,7 @@ Long-lived connections a page opens: WebSockets and EventSource streams.
 
 *schemas*
 
-- `const Id = Schema.String.pipe(Schema.brand("~effect-browser/NetworkConnection/Id"))`
+- `const Id = Schema.String.pipe(Schema.brand("~@usestrider/browser/NetworkConnection/Id"))`
 
 *subscriptions*
 
@@ -1102,10 +1102,10 @@ Requests a page or context makes: the event, and the data every route and respon
 
 *schemas*
 
-- `const Id = Schema.String.pipe(Schema.brand("~effect-browser/NetworkRequest/Id"))`
-- `const HopId = Schema.String.pipe(Schema.brand("~effect-browser/NetworkRequest/HopId"))`
+- `const Id = Schema.String.pipe(Schema.brand("~@usestrider/browser/NetworkRequest/Id"))`
+- `const HopId = Schema.String.pipe(Schema.brand("~@usestrider/browser/NetworkRequest/HopId"))`
 - `const ResourceType = Schema.Literals(["document", "stylesheet", "image", "media", "font", "script", "fetch", "xhr", "webSocket", "eventSource", "manifest", "ping", "other"])`
-- `const Initiator = Schema.Union([Schema.TaggedStruct("Document", { navigable: Target.NavigableId, navigation: Schema.Option(Schema.String.pipe(Schema.brand("~effect-browser/PageNavigation/Id"))) }), Schema.TaggedStruct…`
+- `const Initiator = Schema.Union([Schema.TaggedStruct("Document", { navigable: Target.NavigableId, navigation: Schema.Option(Schema.String.pipe(Schema.brand("~@usestrider/browser/PageNavigation/Id"))) }), Schema.TaggedS…`
 - `const Method = Schema.Literals(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE", "QUERY"] as const satisfies ReadonlyArray<HttpMethod.HttpMethod>)`
 
 *subscriptions*
@@ -1140,7 +1140,7 @@ Responses a page or context receives: the event, and, when asked for, their bodi
 
 *schemas*
 
-- `const StatusCode = Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 100, maximum: 599 })), Schema.brand("~effect-browser/NetworkResponse/StatusCode"))`
+- `const StatusCode = Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 100, maximum: 599 })), Schema.brand("~@usestrider/browser/NetworkResponse/StatusCode"))`
 - `const ResponseErrorReason = Schema.Union([BodyUnavailable, Reason.BackendFailure])`
 
 *subscriptions*
@@ -1370,7 +1370,7 @@ Navigations of a page: the event, and the success value of `goto`, `reload`, `ba
 
 *schemas*
 
-- `const Id = Schema.String.pipe(Schema.brand("~effect-browser/PageNavigation/Id"))`
+- `const Id = Schema.String.pipe(Schema.brand("~@usestrider/browser/PageNavigation/Id"))`
 - `const PageNavigation = Schema.Union([Schema.TaggedStruct("Committed", { id: Id, document: Target.DocumentId, response: Schema.Option(NetworkResponse.NetworkResponse) }), Schema.TaggedStruct("SameDocument", { id: Id, docume…`
 
 *subscriptions*
@@ -1401,8 +1401,8 @@ CSS pixels and device pixels, which differ by the device pixel ratio.
 
 *schemas*
 
-- `const Css = Schema.Number.pipe(Schema.brand("~effect-browser/Pixels/Css"))`
-- `const Device = Schema.Number.pipe(Schema.brand("~effect-browser/Pixels/Device"))`
+- `const Css = Schema.Number.pipe(Schema.brand("~@usestrider/browser/Pixels/Css"))`
+- `const Device = Schema.Number.pipe(Schema.brand("~@usestrider/browser/Pixels/Device"))`
 
 ### Popup
 
@@ -1533,8 +1533,8 @@ Accessibility snapshots, for agents and for structural expectations.
 
 *schemas*
 
-- `const RefId = Schema.String.pipe(Schema.brand("~effect-browser/Snapshot/RefId"))`
-- `const Generation = Schema.Number.pipe(Schema.brand("~effect-browser/Snapshot/Generation"))`
+- `const RefId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Snapshot/RefId"))`
+- `const Generation = Schema.Number.pipe(Schema.brand("~@usestrider/browser/Snapshot/Generation"))`
 - `const InteractivityEvidence = Schema.Literals(["clickListener", "cursorPointer", "tabindex", "contentEditable", "onclickAttribute"])`
 - `const Node: Schema.Codec<Node, NodeEncoded>`
 
@@ -1611,9 +1611,9 @@ What operations act on: how targets are identified, and how they end.
 
 *schemas*
 
-- `const NavigableId = Schema.String.pipe(Schema.brand("~effect-browser/Target/NavigableId"))`
-- `const DocumentId = Schema.String.pipe(Schema.brand("~effect-browser/Target/DocumentId"))`
-- `const RealmId = Schema.String.pipe(Schema.brand("~effect-browser/Target/RealmId"))`
+- `const NavigableId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/NavigableId"))`
+- `const DocumentId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/DocumentId"))`
+- `const RealmId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/RealmId"))`
 - `const CloseReason = Schema.Union([Schema.TaggedStruct("BrowserClosed", {}), Schema.TaggedStruct("BrowserCrashed", {}), Schema.TaggedStruct("ConnectionLost", {}), Schema.TaggedStruct("ModelUnavailable", {}), Schema.Tagge…`
 - `const Description = Schema.Union([Schema.TaggedStruct("Page", { id: NavigableId }), Schema.TaggedStruct("Frame", { id: NavigableId }), Schema.TaggedStruct("Document", { id: DocumentId }), Schema.TaggedStruct("Realm", { …`
 - `const EventOrigin = Schema.Union([Schema.TaggedStruct("Page", { page: NavigableId }), Schema.TaggedStruct("Worker", { realm: RealmId })])`
@@ -1693,10 +1693,10 @@ URLs, URL patterns, origins and sites, as branded strings.
 
 *schemas*
 
-- `const Url = Schema.String.pipe(Schema.brand("~effect-browser/Url/Url"))`
-- `const Pattern = Schema.String.pipe(Schema.brand("~effect-browser/Url/Pattern"))`
-- `const Origin = Schema.String.pipe(Schema.brand("~effect-browser/Url/Origin"))`
-- `const Site = Schema.String.pipe(Schema.brand("~effect-browser/Url/Site"))`
+- `const Url = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url/Url"))`
+- `const Pattern = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url/Pattern"))`
+- `const Origin = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url/Origin"))`
+- `const Site = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url/Site"))`
 
 ### UserContext
 
@@ -1737,7 +1737,7 @@ User contexts (the spec's term; Playwright calls them browser contexts), at two 
 
 *schemas*
 
-- `const Id = Schema.String.pipe(Schema.brand("~effect-browser/UserContext/Id"))`
+- `const Id = Schema.String.pipe(Schema.brand("~@usestrider/browser/UserContext/Id"))`
 - `const UserContextErrorReason = Schema.Union([StorageState.Incompatible, Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
 
 *guards*
@@ -1766,11 +1766,11 @@ Read-only views of state that changes, folded from protocol events (principle 16
 
 - `const isWatchable: (u: unknown) => u is Watchable<unknown>`
 
-## `effect-browser/ai`
+## `@usestrider/browser/ai`
 
 ### BrowserToolkit
 
-The agent toolkit (`effect-browser/ai`): one definition that serves an in-process model, an MCP server and the CLI.
+The agent toolkit (`@usestrider/browser/ai`): one definition that serves an in-process model, an MCP server and the CLI.
 
 *models*
 
@@ -1784,7 +1784,7 @@ The agent toolkit (`effect-browser/ai`): one definition that serves an in-proces
 
 *schemas*
 
-- `const SecretName = Schema.String.pipe(Schema.brand("~effect-browser/ai/BrowserToolkit/SecretName"))` (experimental)
+- `const SecretName = Schema.String.pipe(Schema.brand("~@usestrider/browser/ai/BrowserToolkit/SecretName"))` (experimental)
 
 *constructors*
 
@@ -1807,21 +1807,21 @@ What page content may reach a model.
 - `const strict: CapturePolicy` (experimental)
 - `const local: CapturePolicy` (experimental)
 
-## `effect-browser/bidi`
+## `@usestrider/browser/bidi`
 
 ### Bidi
 
-The generic BiDi backend (`effect-browser/bidi`): any WebDriver BiDi endpoint, such as Safari Technology Preview or a remote grid.
+The generic BiDi backend (`@usestrider/browser/bidi`): any WebDriver BiDi endpoint, such as Safari Technology Preview or a remote grid.
 
 *layers*
 
 - `const layerConnect: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
 
-## `effect-browser/chromium`
+## `@usestrider/browser/chromium`
 
 ### Chromium
 
-The Chromium backend (`effect-browser/chromium`): Chromium, Chrome and Edge over the Chrome DevTools Protocol.
+The Chromium backend (`@usestrider/browser/chromium`): Chromium, Chrome and Edge over the Chrome DevTools Protocol.
 
 *layers*
 
@@ -1829,11 +1829,11 @@ The Chromium backend (`effect-browser/chromium`): Chromium, Chrome and Edge over
 - `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
 - `const layerConnect: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
 
-## `effect-browser/cli`
+## `@usestrider/browser/cli`
 
 ### CurrentSession
 
-What `eb run` provides to a segment (`effect-browser/cli`).
+What `strider run` provides to a segment (`@usestrider/browser/cli`).
 
 *services*
 
@@ -1851,7 +1851,7 @@ What `eb run` provides to a segment (`effect-browser/cli`).
 
 *schemas*
 
-- `const PageName = Schema.String.pipe(Schema.brand("~effect-browser/cli/CurrentSession/PageName"))` (experimental)
+- `const PageName = Schema.String.pipe(Schema.brand("~@usestrider/browser/cli/CurrentSession/PageName"))` (experimental)
 
 *guards*
 
@@ -1861,11 +1861,11 @@ What `eb run` provides to a segment (`effect-browser/cli`).
 
 - `class PageNotFound: Schema.TaggedError "PageNotFound" { name, hint }` (experimental)
 
-## `effect-browser/firefox`
+## `@usestrider/browser/firefox`
 
 ### Firefox
 
-The Firefox backend (`effect-browser/firefox`): Firefox over WebDriver BiDi.
+The Firefox backend (`@usestrider/browser/firefox`): Firefox over WebDriver BiDi.
 
 *layers*
 
@@ -1873,11 +1873,11 @@ The Firefox backend (`effect-browser/firefox`): Firefox over WebDriver BiDi.
 - `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
 - `const layerConnect: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
 
-## `effect-browser/test`
+## `@usestrider/browser/test`
 
 ### TestRun
 
-Runner-agnostic test support (`effect-browser/test`).
+Runner-agnostic test support (`@usestrider/browser/test`).
 
 *services*
 
@@ -1898,21 +1898,21 @@ Runner-agnostic test support (`effect-browser/test`).
 
 - `const TestArtifact = Schema.Union([Schema.TaggedStruct("Trace", { path: FilePath.Local }), Schema.TaggedStruct("Har", { path: FilePath.Local }), Schema.TaggedStruct("Screenshot", { path: FilePath.Local })])`
 
-## `effect-browser/test/vitest`
+## `@usestrider/browser/test/vitest`
 
 ### VitestBrowser
 
-The Vitest adapter (`effect-browser/test/vitest`; peer dependency: `@effect/vitest`).
+The Vitest adapter (`@usestrider/browser/test/vitest`; peer dependency: `@effect/vitest`).
 
 *layers*
 
 - `const layer: <E, R>(backend: Layer.Layer<Browser.Browser, E, R>) => Layer.Layer<Browser.Browser | TestRun.TestRun, E, R>`
 
-## `effect-browser/webkit`
+## `@usestrider/browser/webkit`
 
 ### WebKit
 
-The WebKit backend (`effect-browser/webkit`): Playwright-patched WebKit builds, launched, and stock WebKit targets, attached.
+The WebKit backend (`@usestrider/browser/webkit`): Playwright-patched WebKit builds, launched, and stock WebKit targets, attached.
 
 *layers*
 

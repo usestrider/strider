@@ -1,6 +1,8 @@
-# effect-browser (working name)
+# Strider
 
 *Design stage, revision 5 (2026-10-18). No implementation yet.*
+
+The package is `@usestrider/browser` (the `usestrider` org on npm and GitHub), and the command-line tool is `strider`.
 
 An Effect-native browser automation library that speaks browser protocols directly (CDP first, then WebDriver BiDi, then the WebKit inspector protocol). It is not a better Playwright. The aim is better browser automation, written in better TypeScript with Effect, and better for agents. Prior art, Playwright included, is evidence of what works and what breaks, never a reason on its own. Its priorities, in order:
 
@@ -125,6 +127,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Named Strider** (2026-10-19). `effect-browser` was a working name, and its npm name belongs to another project. The package is `@usestrider/browser`, TypeIds and brand keys start `~@usestrider/browser/`, and the CLI command `eb` became `strider` (`STRIDER_SESSION`). `reviews/` and `research/` keep the old name, as records of their time.
 - **Revision 5.25** adopted the Effect core team's own conventions ([review 7](reviews/07-effect-conventions.md)), so the library reads as if they wrote it, and generates its API reference as effect.website does:
   - modules are namespaces from a generated barrel (`Page.Page`, `Download.Download`), with short names inside (`UserContext.Options`, `CookieJar.Input`); brands are Schemas in the modules that own them;
   - settings are a trailing `options?`, so actions are calls (`button.click()`), and `*With` takes a function. This reverses 5.2's `xWith(options)`. Principle 22 then removed two duplicates the change exposed: `ariaSnapshot` is `snapshot({ sources: "aria" })`, and a snapshot's `root` option is `locator.snapshot()`;
@@ -161,11 +164,11 @@ Each user-visible operation has one monotonic deadline covering everything it do
   - HAR replay is deferred, the testing helpers change no defaults, and traces are spans with Playwright's zip as one export;
   - every default is stated where it is declared and recorded in its span.
 - **Revision 5.20** added the CLI (CLI.md), for agents and people driving a live session from a shell:
-  - sessions and pages are named, and every command names its session (`--session` or `EB_SESSION`) and page (`-p`), with no fallback and no current page;
+  - sessions and pages are named, and every command names its session (`--session` or `STRIDER_SESSION`) and page (`-p`), with no fallback and no current page;
   - one daemon and one browser per session, in a session directory at a predictable path that is deleted at `stop`; hard kills are reported and pruned explicitly;
   - forks copy storage state into a new session, from a running session or a file saved with `state save`;
   - commands are the toolkit's tools and drive the live session, while the library runs self-contained programs;
-  - segments bring code into a live session: a file's default export, an `Effect` requiring `CurrentSession` (CLI-only, provided by `eb run`), finds its pages by name, and the project's own `tsc` checks it;
+  - segments bring code into a live session: a file's default export, an `Effect` requiring `CurrentSession` (CLI-only, provided by `strider run`), finds its pages by name, and the project's own `tsc` checks it;
   - `snapshot.ref(id)` now returns a lazy `Locator`, which removed a double `yield*`;
   - launches use a temporary profile by default (`FileSystem.makeTempDirectoryScoped`), and `userDataDir` names a directory you own.
 - **Revision 5.19** replaced `page.events.*` with a module per event type:
@@ -208,8 +211,8 @@ Each user-visible operation has one monotonic deadline covering everything it do
   - ambiguity fails immediately, with a visibility hint, and has no retry window;
   - the dialog policy is an explicit context option that decides with no grace period.
 - **Revision 5.10** settled module layout:
-  - one package `effect-browser` with subpath exports and a single version;
-  - backends are imports (`effect-browser/chromium`, `/firefox`, `/webkit`, `/bidi`) that provide the `Browser` service;
+  - one package `@usestrider/browser` with subpath exports and a single version;
+  - backends are imports (`@usestrider/browser/chromium`, `/firefox`, `/webkit`, `/bidi`) that provide the `Browser` service;
   - plus `/test`, `/ai` and raw `/cdp`.
 - **Revision 5.9** settled the details of the access types:
   - popups of inspected or observed pages are `ObservedPage`s;

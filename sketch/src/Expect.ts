@@ -54,7 +54,7 @@ export interface DualMatcher<S, Args extends ReadonlyArray<unknown>> {
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Expect, Page } from "effect-browser"
+ * import { Expect, Page } from "@usestrider/browser"
  *
  * const welcomed = Effect.fn("welcomed")(function*(page: Page.ReadonlyPage) {
  *   yield* page.getByText("Welcome").pipe(Expect.toBeVisible)
@@ -178,7 +178,7 @@ export declare const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: n
  * **Example** (A navigation with an Orders link)
  *
  * ```ts import.meta.vitest
- * import { AriaPattern, Expect, Page } from "effect-browser"
+ * import { AriaPattern, Expect, Page } from "@usestrider/browser"
  *
  * const hasOrdersLink = (page: Page.ReadonlyPage) =>
  *   page.getByRole("navigation").pipe(Expect.toMatchAria(
@@ -224,7 +224,7 @@ export declare const toHaveTitle: DualMatcher<Page.ReadonlyPage, [expected: stri
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Condition, Download, Expect } from "effect-browser"
+ * import { Condition, Download, Expect } from "@usestrider/browser"
  *
  * const completed = (download: Download.Download) =>
  *   Expect.that(download.status, Condition.make("completed", (status) => status._tag === "Completed"))
@@ -262,7 +262,7 @@ export declare const withCheckInterval: {
   <A, E, R>(self: Effect.Effect<A, E, R>, interval: Duration.Input): Effect.Effect<A, E, R>
 }
 
-const ExpectationFailedTypeId = "~effect-browser/Expect/ExpectationFailed"
+const ExpectationFailedTypeId = "~@usestrider/browser/Expect/ExpectationFailed"
 
 /**
  * Error for an expectation that didn't pass before the deadline.

@@ -41,7 +41,7 @@ export interface Filter {
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Deferred, Dialog, Page, Popup } from "effect-browser"
+ * import { Deferred, Dialog, Page, Popup } from "@usestrider/browser"
  *
  * const connect = Effect.fn("connect")(function*(page: Page.Page) {
  *   const popups = yield* Popup.next(page)
