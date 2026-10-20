@@ -1,0 +1,83 @@
+{
+  "name": "@usestrider/browser",
+  "version": "0.0.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "Effect-native browser automation over CDP, WebDriver BiDi and the WebKit inspector protocol",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/usestrider/strider.git",
+    "directory": "packages/browser"
+  },
+  "bugs": {
+    "url": "https://github.com/usestrider/strider/issues"
+  },
+  "keywords": [
+    "effect",
+    "typescript",
+    "browser",
+    "automation",
+    "cdp",
+    "webdriver-bidi"
+  ],
+  "sideEffects": [],
+  "exports": {
+    "./package.json": "./package.json",
+    ".": "./src/index.ts",
+    "./ai": "./src/ai/index.ts",
+    "./bidi": "./src/bidi/index.ts",
+    "./chromium": "./src/chromium/index.ts",
+    "./cli": "./src/cli/index.ts",
+    "./firefox": "./src/firefox/index.ts",
+    "./test": "./src/test/index.ts",
+    "./test/vitest": "./src/test/vitest/index.ts",
+    "./webkit": "./src/webkit/index.ts",
+    "./*": "./src/*.ts",
+    "./internal/*": null,
+    "./index": null,
+    "./*/index": null
+  },
+  "files": [
+    "src/**/*.ts",
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "INDEX.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      ".": "./dist/index.js",
+      "./ai": "./dist/ai/index.js",
+      "./bidi": "./dist/bidi/index.js",
+      "./chromium": "./dist/chromium/index.js",
+      "./cli": "./dist/cli/index.js",
+      "./firefox": "./dist/firefox/index.js",
+      "./test": "./dist/test/index.js",
+      "./test/vitest": "./dist/test/vitest/index.js",
+      "./webkit": "./dist/webkit/index.js",
+      "./*": "./dist/*.js",
+      "./internal/*": null,
+      "./index": null,
+      "./*/index": null
+    }
+  },
+  "scripts": {
+    "codegen": "strider-utils barrel",
+    "build": "tsc -b tsconfig.json && pnpm babel",
+    "babel": "babel dist --plugins annotate-pure-calls --out-dir dist --source-maps",
+    "check": "tsc -b tsconfig.json"
+  },
+  "peerDependencies": {
+    "effect": "^4.0.5"
+  },
+  "devDependencies": {
+    "@usestrider/utils": "workspace:^",
+    "effect": "^4.0.5"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "include": [],
+  "compilerOptions": {
+    "outDir": "${configDir}/dist",
+    "rootDir": "${configDir}/src",
+    // Incremental builds with project references, as Effect builds.
+    "incremental": true,
+    "composite": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleDetection": "force",
+    "verbatimModuleSyntax": true,
+    "allowJs": false,
+    "rewriteRelativeImportExtensions": true,
+    "erasableSyntaxOnly": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "stripInternal": false,
+    "skipLibCheck": true,
+    "noErrorTruncation": true,
+    "types": [],
+    "lib": ["ES2023", "DOM"],
+    "plugins": [{
+      "name": "@effect/language-service",
+      "effectFn": ["untraced"],
+      "namespaceImportPackages": ["effect", "@usestrider/*"],
+      "diagnosticSeverity": {
+        "unstableApiUsage": "off",
+        "experimentalApiUsage": "off",
+        "effectFnOpportunity": "error"
+      },
+      "includeSuggestionsInTsc": false,
+      "ignoreEffectWarningsInTscExitCode": true,
+      "ignoreEffectErrorsInTscExitCode": false
+    }]
+  }
+}

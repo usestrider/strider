@@ -1,3 +1,9 @@
 node_modules/
+dist/
+*.tsbuildinfo
 .data/
 .examples/
+.repos/
+# symlinks to .agents/AGENTS.md, made by `pnpm install`
+/AGENTS.md
+/CLAUDE.md

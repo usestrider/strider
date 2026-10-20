@@ -1,6 +1,0 @@
-{
-  "tsconfig": "tsconfig.json",
-  "include": ["src/*.ts", "src/**/*.ts"],
-  "exclude": ["src/**/internal/**"],
-  "output": ".data/jsdocs.json"
-}

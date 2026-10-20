@@ -1,6 +1,6 @@
 # CLI: driving a live session from the command line
 
-*Revision 5.25, 2026-10-19. These are sketches, like API.md: names are provisional, and `@usestrider/browser/cli` is declared in [sketch/src/cli/](sketch/src/cli/). The command is `strider`, the project's name. Strider CD, a continuous-deployment server abandoned in 2022, also installed a `strider` command; few machines will have both.*
+*Revision 5.25, 2026-10-19. These are sketches, like API.md: names are provisional, and `@usestrider/browser/cli` is declared in [packages/browser/src/cli/](packages/browser/src/cli/). The command is `strider`, the project's name. Strider CD, a continuous-deployment server abandoned in 2022, also installed a `strider` command; few machines will have both.*
 
 ## Purpose
 

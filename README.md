@@ -20,7 +20,9 @@ Each layer document has the same shape: purpose, top data models, interface sket
 | — | [README.md](README.md) | goals, principles, cross-cutting decisions, guarantees |
 | L2 | [API.md](API.md) | the public API: entry points, pages, locators, actions, expectations, state and events, network, clock, agents, testing, errors, call sites |
 | L1 | [CONCEPTS.md](CONCEPTS.md) | the native browser model: identities, data models, lifetimes, contracts |
-| — | [sketch/](sketch/) | the whole public API in the package's real shape: 48 modules plus subpaths, Effect's JSDoc contract on every declaration, type tests, type-checked examples and acceptance scenarios; generates [INDEX.md](sketch/INDEX.md) and the API reference dataset (`npm run all`) |
+| — | [packages/browser/](packages/browser/) | the package: the whole public API as declarations (the sketch), 48 modules plus subpaths, Effect's JSDoc contract on every declaration, type tests, runtime tests, type-checked examples and acceptance scenarios; [INDEX.md](packages/browser/INDEX.md) lists every declaration (`pnpm all`) |
+| — | [packages/tools/](packages/tools/) | private tools: the vendored JSDoc checker, the example check, the API reference dataset, barrel codegen |
+| — | [.agents/AGENTS.md](.agents/AGENTS.md) | instructions for agents working in this repository: layout, checks, conventions |
 | — | [CLI.md](CLI.md) | the command line: named sessions, commands, files, storage and forks, export |
 | L0 | [PROTOCOL.md](PROTOCOL.md) | transports, protocol clients, code generation, ingestion, backend adapters, capabilities |
 | — | [PROBES.md](PROBES.md) | conformance probes, hazard coverage, deterministic model tests |
@@ -127,6 +129,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **A workspace** (2026-10-20). The sketch became the package, `packages/browser`, in a pnpm workspace set up as Effect's is: TypeScript 7 patched with Effect's language service, oxlint and dprint, Vitest with `@effect/vitest`, Tstyche, changesets, and private tools in `packages/tools` (Effect's JSDoc checker, vendored; the reference generators; barrel codegen). Agent instructions live in `.agents/AGENTS.md`, and the package ships its own `AGENTS.md` and `INDEX.md` for agents in users' projects. The first runtime test caught that Effect's default JSON encoding writes a `Redacted` as `"<redacted>"`, so `StorageState.Json` is now built with `Schema.toCodecJson`.
 - **Named Strider** (2026-10-19). `effect-browser` was a working name, and its npm name belongs to another project. The package is `@usestrider/browser`, TypeIds and brand keys start `~@usestrider/browser/`, and the CLI command `eb` became `strider` (`STRIDER_SESSION`). `reviews/` and `research/` keep the old name, as records of their time.
 - **Revision 5.25** adopted the Effect core team's own conventions ([review 7](reviews/07-effect-conventions.md)), so the library reads as if they wrote it, and generates its API reference as effect.website does:
   - modules are namespaces from a generated barrel (`Page.Page`, `Download.Download`), with short names inside (`UserContext.Options`, `CookieJar.Input`); brands are Schemas in the modules that own them;
@@ -137,7 +140,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
   - one span per operation with internals untraced, string TypeIds with kind guards, `Pipeable` and `Inspectable` handles, and `?: T | undefined`;
   - Effect's JSDoc contract on all 536 declarations, enforced by `effect-jsdocs --check` run from an Effect checkout; 48 examples type-checked, ready for `@effect/doctest`; Tstyche type tests replace `@ts-expect-error`; `Effect.fn` call sites, enforced by the language service as Effect enforces them;
   - `npm run api-reference` writes TypeDoc JSON per module with a manifest, the dataset effect.website renders Effect's reference from, for any site to render.
-- **Revision 5.24** folded in the type-checked sketch ([sketch/](sketch/)), which is now the source of truth for signatures; API.md keeps the contracts:
+- **Revision 5.24** folded in the type-checked sketch (now [packages/browser/](packages/browser/)), which is now the source of truth for signatures; API.md keeps the contracts:
   - type-checking changed two designs: an event predicate (`where`) is a trailing argument, so it is typed from the filter's body decoder, and body decoders take Effect's decoders as they are;
   - existing decisions corrected: viewport, locale and timezone moved into `Emulation` (one type for creation options and `emulate`); `ReadonlyFrame` became `FrameLocator`, because it is lazy; `selectOption` states `value`, `label` or `index`; event streams fail with `TargetGone` too; Effect's date input is `DateTime.DateTime.Input`;
   - newly designed: `Keyboard` and `Mouse` with scoped `hold`; frame locators; `JSHandle`; `Emulation`; `PdfOptions`; cookies (`CookieJar`, values `Redacted`) and origin storage (read with inspect, write with control); `readHtml`, `isEnabled`, `isChecked`, element `evaluate`, `tap`, `scrollIntoView`; `BrowserWorker` and `NetworkConnection` event modules; `Download.cancel`; `Route.provideCredentials`; `grant`; `Condition.make`;
@@ -251,4 +254,4 @@ Each user-visible operation has one monotonic deadline covering everything it do
   - finding 7, dual `Observe` combinators that return both values: API.md (superseded in 5.19: event modules);
   - finding 8, diagnostic presets: Diagnostics above;
   - the smaller items: CONCEPTS.md.
-- **Next:** start implementing, bottom-up. All three layers are designed (API.md, CONCEPTS.md, PROTOCOL.md), and none is built. Building starts at L0, the protocol layer, because the others sit on it: first the codegen pipeline and the transports, then the conformance probes (PROBES.md) against Chrome and Firefox, whose results settle questions the upper layers depend on. The implementation replaces the sketch's declarations module by module and keeps their JSDoc, so the sketch's checks (`npm run all`) keep holding the API to its design as it is built.
+- **Next:** start implementing, bottom-up. All three layers are designed (API.md, CONCEPTS.md, PROTOCOL.md), and none is built. Building starts at L0, the protocol layer, because the others sit on it: first the codegen pipeline and the transports, then the conformance probes (PROBES.md) against Chrome and Firefox, whose results settle questions the upper layers depend on. The implementation replaces the sketch's declarations module by module and keeps their JSDoc, so the checks (`pnpm all`) keep holding the API to its design as it is built.

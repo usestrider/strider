@@ -1,6 +1,6 @@
 # API: the ergonomic layer (L2)
 
-*Revision 5.25, 2026-10-19. Nothing is implemented. The full signatures live in [sketch/](sketch/), with each declaration's own contract in its JSDoc. The sketch type-checks against Effect 4.0.5 and passes Effect's own JSDoc checker, and the API reference is generated from it ([sketch/INDEX.md](sketch/INDEX.md) lists every declaration and member). This document keeps the design: the contracts that span declarations, and the excerpts that explain them. Where an excerpt and the sketch differ, the sketch is right. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
+*Revision 5.25, 2026-10-19. Nothing is implemented. The full signatures live in the package's source, [packages/browser/src/](packages/browser/src/), still declarations (the sketch), with each declaration's own contract in its JSDoc. It type-checks against Effect 4.0.5 and passes Effect's own JSDoc checker, and the API reference is generated from it ([packages/browser/INDEX.md](packages/browser/INDEX.md) lists every declaration and member). This document keeps the design: the contracts that span declarations, and the excerpts that explain them. Where an excerpt and the sketch differ, the sketch is right. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
 
 ## Purpose
 
@@ -78,8 +78,8 @@ The README's principles, as they apply to this layer, written the way Effect's o
   | `export*`, `Json` | crosses a persistence boundary; carries secrets | `exportStorageState`, `StorageState.Json`, `exportTrace` |
 
 **Behavior**
-- **Signatures are checked, not described.** `sketch/` declares the whole API in the package's real shape and checks it four ways: `tsc --strict` with `exactOptionalPropertyTypes`; Effect's language service, with `effectFnOpportunity` an error as in Effect's own repository; Tstyche type tests, which pin each access rule and requirement channel (an ordinary call site sees only `Browser` and `Scope`); and every JSDoc example, type-checked against the declarations.
-- **The reference is generated.** Every declaration carries Effect's JSDoc contract: a description, optional **When to use**, **Details** and **Gotchas**, titled examples, and `@see`, `@stability`, `@category` and `@since`. `effect-jsdocs --check`, run unchanged from an Effect checkout, enforces it. `npm run api-reference` writes the same dataset effect.website renders Effect's reference from: TypeDoc JSON per module, with a manifest. Until 1.0, everything is `@stability unstable` except what rests on an upstream proposal or an in-flight module, which is `experimental`.
+- **Signatures are checked, not described.** `packages/browser` declares the whole API in the package's real shape and checks it four ways: `tsc --strict` with `exactOptionalPropertyTypes`; Effect's language service, with `effectFnOpportunity` an error as in Effect's own repository; Tstyche type tests, which pin each access rule and requirement channel (an ordinary call site sees only `Browser` and `Scope`); and every JSDoc example, type-checked against the declarations.
+- **The reference is generated.** Every declaration carries Effect's JSDoc contract: a description, optional **When to use**, **Details** and **Gotchas**, titled examples, and `@see`, `@stability`, `@category` and `@since`. `effect-jsdocs --check`, run unchanged from an Effect checkout, enforces it. `pnpm api-reference` writes the same dataset effect.website renders Effect's reference from: TypeDoc JSON per module, with a manifest. Until 1.0, everything is `@stability unstable` except what rests on an upstream proposal or an in-flight module, which is `experimental`.
 - **Explicit over implicit** (rule 23). Nothing hidden changes behavior or adds waiting: no magic delays, grace periods or heuristic windows. Every default is stated where its option is declared (`@default` in the JSDoc) and recorded in the operation's span, and no helper changes a default on your behalf. Actionability waiting is each action's documented contract: named checks, adjustable per call, reported in errors.
 - **Every effect ends.** Waits run under a deadline, open-ended things are `Stream`s, and lifetime signals (`closed`) are the only exception.
 - **One way to do each thing** (principle 22). A convenience exists only at the dominant call site, documented as its expansion: `page.url` is `page.status.map(…)`, `download.finished` is `status.waitFor(…)`, and `Browser.newPage()` is `newContext()` followed by `newPage`. So the accessibility tree alone is `snapshot({ sources: "aria" })`, not a second member, and one element's subtree is `locator.snapshot()`, not a `root` option.
@@ -757,13 +757,13 @@ class StorageState extends Schema.Class<StorageState>("@usestrider/browser/Stora
   cookies: Schema.Array(CookieJar.Cookie),
   origins: Schema.Array(OriginState)                     // origin, partition, localStorage entries, IndexedDB databases; values Redacted
 }) {}
-declare const Json: Schema.Codec<StorageState, string>   // Schema.fromJsonString(StorageState): encode to save, decode to load
+declare const Json: Schema.Codec<StorageState, string>   // Schema.fromJsonString(Schema.toCodecJson(StorageState)): encode to save, decode to load
 ```
 
 - **Default dialog policy.** It is explicit and has no delay. A context's `dialogs` option (`"dismiss"`, the default for owned contexts; `"accept"`; or `"leaveOpen"`) decides immediately when no handler claims a dialog. `beforeunload` is accepted under `"dismiss"`, so closing never hangs. On attached pages there is no default unless the caller sets one. Every automatic decision is an `AutoResolution` event and is recorded on the operation that was running.
 - **Waiting on a dialog.** An operation blocked by a dialog that a handler or the policy is resolving waits within its deadline, normally just a round trip. Under `"leaveOpen"` it fails immediately with a hint naming the dialog.
 - **Cookies are a change, not a declaration.** `set` and `remove` act once, like a click; a scope closing doesn't undo them. Reading cookies needs a controlled context, as reading storage state does.
-- **Storage state is a Schema, and saving it is explicit.** `context.exportStorageState` returns the full restorable state with every secret `Redacted`, so logging it shows nothing. Writing it somewhere is a visible step through the codec: `Schema.encodeEffect(StorageState.Json)(state)` writes the secrets out in full, because that is the point of saving them, and `Schema.decodeEffect(StorageState.Json)` reads them back, validating either way. Diagnostic JSON of a context never contains secrets.
+- **Storage state is a Schema, and saving it is explicit.** `context.exportStorageState` returns the full restorable state with every secret `Redacted`, so logging it shows nothing. Writing it somewhere is a visible step through the codec: `Schema.encodeEffect(StorageState.Json)(state)` writes the secrets out in full, because that is the point of saving them, and `Schema.decodeEffect(StorageState.Json)` reads them back, validating either way. The codec is built with `Schema.toCodecJson` for that reason: Effect's default JSON encoding writes a `Redacted` as `"<redacted>"`, which is what the CLI's `--json`, MCP results and logs should show, and would empty a saved file of its secrets. A runtime test pins the difference. Diagnostic JSON of a context never contains secrets.
 
 ## Page time
 
@@ -980,7 +980,7 @@ locator.click().pipe(
 
 ## Call sites (acceptance scenarios)
 
-These are the checks for this layer. If a scenario needs protocol knowledge or repeated ceremony, the model underneath is wrong. They are type-checked in `sketch/scenarios/acceptance.ts`, and their requirement channels are pinned in `sketch/typetest/acceptance.tst.ts`.
+These are the checks for this layer. If a scenario needs protocol knowledge or repeated ceremony, the model underneath is wrong. They are type-checked in `packages/browser/scenarios/acceptance.ts`, and their requirement channels are pinned in `packages/browser/typetest/acceptance.tst.ts`.
 
 ```ts
 // 1. Log in once, reuse the session
@@ -1088,7 +1088,7 @@ yield* page.getByRole("navigation").pipe(Expect.toMatchAria(
     AriaPattern.node("link", "Orders", AriaPattern.unchecked)))))
 
 // 17+. Input held across steps, frames, cookies, origin storage, emulation, workers, WebSocket frames,
-//      reads and handles, tests and the fake browser are in sketch/scenarios/areas.ts, type-checked.
+//      reads and handles, tests and the fake browser are in packages/browser/scenarios/areas.ts, type-checked.
 ```
 
 ## Open questions

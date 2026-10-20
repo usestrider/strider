@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.base.json",
+  "references": [{ "path": "tsconfig.packages.json" }],
+  "include": [
+    "**/vitest.*.ts",
+    "./packages/*/test/**/*.ts",
+    "./packages/*/scenarios/**/*.ts"
+  ],
+  "exclude": ["**/node_modules/**", "**/dist/**"],
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "erasableSyntaxOnly": false,
+    "types": ["node"],
+    "paths": {
+      // Tests and scenarios read the package's source, as Effect's tests do.
+      "@usestrider/browser": ["./packages/browser/src/index.ts"],
+      "@usestrider/browser/ai": ["./packages/browser/src/ai/index.ts"],
+      "@usestrider/browser/bidi": ["./packages/browser/src/bidi/index.ts"],
+      "@usestrider/browser/chromium": ["./packages/browser/src/chromium/index.ts"],
+      "@usestrider/browser/cli": ["./packages/browser/src/cli/index.ts"],
+      "@usestrider/browser/firefox": ["./packages/browser/src/firefox/index.ts"],
+      "@usestrider/browser/test": ["./packages/browser/src/test/index.ts"],
+      "@usestrider/browser/test/vitest": ["./packages/browser/src/test/vitest/index.ts"],
+      "@usestrider/browser/webkit": ["./packages/browser/src/webkit/index.ts"],
+      "@usestrider/browser/*": ["./packages/browser/src/*.ts"]
+    }
+  }
+}
