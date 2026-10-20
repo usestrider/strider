@@ -12,26 +12,13 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as SubscriptionRef from "effect/SubscriptionRef"
-import { existsSync } from "node:fs"
-import * as path from "node:path"
 import * as CdpAdapter from "../../../src/internal/cdpAdapter.ts"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
 import * as Launch from "../../../src/internal/launch.ts"
+import { assertPinned, chromium } from "../browsers.ts"
 import { makeRecorder, site } from "./harness.ts"
 
-const findChromium = (): string | undefined => {
-  const configured = process.env["STRIDER_CHROMIUM"]
-  if (configured !== undefined && configured !== "") return configured
-  for (const directory of (process.env["PATH"] ?? "").split(path.delimiter)) {
-    for (const name of ["chromium", "chromium-browser", "google-chrome-stable", "google-chrome"]) {
-      const candidate = path.join(directory, name)
-      if (existsSync(candidate)) return candidate
-    }
-  }
-  return undefined
-}
-
-const executable = findChromium()
+const executable = chromium.executable
 const timeout = 60_000
 
 describe("Chromium launcher", () => {
@@ -97,6 +84,7 @@ describe.skipIf(executable === undefined)("Chromium adapter, CDP only", () => {
             const facts = makeRecorder()
             const { launched, transport } = yield* ChromiumLauncher.launchWithPort({ executablePath: executable! })
             const adapter = yield* CdpAdapter.connect(transport, { sink: facts.sink, ownership: "launched" })
+            assertPinned("Chromium", adapter.info.version, chromium.version)
             const page = yield* adapter.createPage(adapter.defaultContext)
             const url = `${served.origin}/crash-me`
             const navigation = yield* adapter.navigate(page, url, { referrer: Option.none() })
@@ -128,6 +116,7 @@ describe.skipIf(executable === undefined)("Chromium adapter, CDP only", () => {
             const facts = makeRecorder()
             const { transport } = yield* ChromiumLauncher.launchWithPort({ executablePath: executable! })
             const adapter = yield* CdpAdapter.connect(transport, { sink: facts.sink, ownership: "attached" })
+            assertPinned("Chromium", adapter.info.version, chromium.version)
             assert.strictEqual(adapter.pauseScope, "related")
             const adopted = yield* facts.when("PageAdded")
             assert.deepStrictEqual(adopted.origin, { _tag: "Adopted", opener: Option.none() })

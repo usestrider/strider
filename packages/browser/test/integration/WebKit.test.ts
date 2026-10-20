@@ -2,8 +2,9 @@
  * L0 against Playwright's WebKit build: the launcher, the raw connection, the error table, and what only the
  * WebKit adapter does.
  *
- * Set `STRIDER_WEBKIT` to the build's `pw_run.sh`, or install it where Playwright does. Without one, the
- * browser suites are skipped and Vitest reports them as skipped.
+ * They run against the pinned build (`browsers.ts`), whose `pw_run.sh` `nix develop` names in `STRIDER_WEBKIT`.
+ * Without it, the browser suites are skipped and Vitest reports them as skipped; the launcher refuses another
+ * build by its `protocol.json`.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, layer } from "@effect/vitest"
@@ -16,7 +17,6 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
-import { existsSync } from "node:fs"
 import type * as Adapter from "../../src/internal/adapter.ts"
 import * as ProtocolClient from "../../src/internal/protocolClient.ts"
 import * as WebKitAdapter from "../../src/internal/webkitAdapter.ts"
@@ -24,19 +24,19 @@ import * as WebKitLauncher from "../../src/internal/webkitLauncher.ts"
 import * as WebKitWire from "../../src/internal/webkitWire.ts"
 import type * as Transport from "../../src/protocol/Transport.ts"
 import { makeRecorder, site } from "./adapter/harness.ts"
+import { webkit } from "./browsers.ts"
 import { fixtures, record } from "./record.ts"
 
-const findWebKit = (): string | undefined => {
-  const configured = process.env["STRIDER_WEBKIT"]
-  if (configured !== undefined && configured !== "") return configured
-  return WebKitLauncher.cacheCandidates(process.platform, process.env).find((candidate) => existsSync(candidate))
-}
-
-const executable = findWebKit()
+const executable = webkit.executable
 const timeout = 60_000
 
 describe("WebKit launcher", () => {
   layer(NodeServices.layer, { excludeTestServices: true })((it) => {
+    it.effect("is pinned to the build the adapter is generated from", () =>
+      Effect.sync(() => {
+        assert.strictEqual(webkit.revision, WebKitLauncher.build.revision)
+      }))
+
     it.effect("fails with ExecutableNotFound for a path that doesn't exist", () =>
       Effect.gen(function*() {
         const error = yield* WebKitLauncher.launch({ executablePath: "/nowhere/pw_run.sh" }).pipe(Effect.flip)

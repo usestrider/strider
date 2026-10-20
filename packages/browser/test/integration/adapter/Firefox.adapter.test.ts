@@ -1,27 +1,16 @@
 /**
- * The adapter conformance suite against Firefox over WebDriver BiDi. Set `STRIDER_FIREFOX`, or put `firefox`
- * on `PATH`.
+ * The adapter conformance suite against Firefox over WebDriver BiDi: the pinned Firefox (`browsers.ts`), which
+ * `nix develop` names in `STRIDER_FIREFOX`. Another version fails it.
  */
 import * as Effect from "effect/Effect"
-import { existsSync } from "node:fs"
-import * as path from "node:path"
 import * as BidiAdapter from "../../../src/internal/bidiAdapter.ts"
 import * as BidiWire from "../../../src/internal/bidiWire.ts"
 import * as FirefoxLauncher from "../../../src/internal/firefoxLauncher.ts"
+import { assertPinned, firefox } from "../browsers.ts"
 import { fixtures, record } from "../record.ts"
 import { conformance } from "./conformance.ts"
 
-const findFirefox = (): string | undefined => {
-  const configured = process.env["STRIDER_FIREFOX"]
-  if (configured !== undefined && configured !== "") return configured
-  for (const directory of (process.env["PATH"] ?? "").split(path.delimiter)) {
-    const candidate = path.join(directory, "firefox")
-    if (existsSync(candidate)) return candidate
-  }
-  return undefined
-}
-
-const executable = findFirefox()
+const executable = firefox.executable
 
 conformance({
   name: "Firefox (BiDi)",
@@ -32,6 +21,7 @@ conformance({
       sink,
       ownership: "launched"
     })
+    assertPinned("Firefox", adapter.info.version, firefox.version)
     return { adapter, kill: launched.handle.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore) }
   })
 })

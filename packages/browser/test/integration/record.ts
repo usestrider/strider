@@ -17,12 +17,13 @@ import * as fs from "node:fs"
 import type { Classification, Wire, WireError } from "../../src/internal/protocolClient.ts"
 import * as ProtocolClient from "../../src/internal/protocolClient.ts"
 import type * as Transport from "../../src/protocol/Transport.ts"
+import { chromium, firefox, webkit } from "./browsers.ts"
 
-/** The fixture each backend's browser records into, named for the browser recorded. */
+/** The fixture each backend's browser records into, named for the pinned browser recorded (`browsers.json`). */
 export const fixtures = {
-  cdp: "cdp-chromium-155",
-  bidi: "bidi-firefox-158",
-  webkit: "webkit-playwright-2359"
+  cdp: chromium.fixture,
+  bidi: firefox.fixture,
+  webkit: webkit.fixture
 } as const
 
 /** One recorded message. */

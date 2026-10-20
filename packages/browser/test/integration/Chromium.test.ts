@@ -1,8 +1,8 @@
 /**
  * L0 against a real Chromium: both transports, the session lifecycle, and CDP's error table.
  *
- * Set `STRIDER_CHROMIUM` to the executable, or put `chromium`, `chromium-browser`, `google-chrome-stable` or
- * `google-chrome` on `PATH`. Without one, the suite is skipped and Vitest reports it as skipped.
+ * It runs against the pinned Chromium (`browsers.ts`), which `nix develop` names in `STRIDER_CHROMIUM`. Without
+ * it, the suite is skipped and Vitest reports it as skipped; another version fails it.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
@@ -21,25 +21,13 @@ import * as Layer from "effect/Layer"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as Schedule from "effect/Schedule"
 import * as Stream from "effect/Stream"
-import { existsSync } from "node:fs"
 import * as path from "node:path"
 import * as CdpWire from "../../src/internal/cdpWire.ts"
 import * as ProtocolClient from "../../src/internal/protocolClient.ts"
+import { assertPinned, chromium } from "./browsers.ts"
 import { fixtures, record } from "./record.ts"
 
-const findChromium = (): string | undefined => {
-  const configured = process.env["STRIDER_CHROMIUM"]
-  if (configured !== undefined && configured !== "") return configured
-  for (const directory of (process.env["PATH"] ?? "").split(path.delimiter)) {
-    for (const name of ["chromium", "chromium-browser", "google-chrome-stable", "google-chrome"]) {
-      const candidate = path.join(directory, name)
-      if (existsSync(candidate)) return candidate
-    }
-  }
-  return undefined
-}
-
-const executable = findChromium()
+const executable = chromium.executable
 
 // Launching a browser takes a second or two; a test gets thirty.
 const timeout = 30_000
@@ -92,6 +80,7 @@ describe.skipIf(executable === undefined)("Chromium over CDP", () => {
           const { cdp } = yield* connect()
           const version = yield* Browser.getVersion().pipe(Protocol.on(cdp.browser))
           assert.match(version.product, /Chrome\//)
+          assertPinned("Chromium", version.product.split("/")[1] ?? version.product, chromium.version)
           const { page } = yield* openPage(cdp)
           const url = "data:text/html,<title>Strider</title><p>hello</p>"
           const navigated = yield* page.subscribe(Page.frameNavigated)
@@ -122,6 +111,7 @@ describe.skipIf(executable === undefined)("Chromium over CDP", () => {
             const cdp = yield* CdpConnection.make(transport)
             const version = yield* Browser.getVersion().pipe(Protocol.on(cdp.browser))
             assert.match(version.product, /Chrome\//)
+            assertPinned("Chromium", version.product.split("/")[1] ?? version.product, chromium.version)
             yield* transport.closed.pipe(Effect.flatMap((lost) => Deferred.succeed(closed, lost)), Effect.forkDetach)
           }))
           assert.strictEqual((yield* Deferred.await(closed)).initiator, "local")

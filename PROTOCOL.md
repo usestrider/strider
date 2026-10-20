@@ -111,7 +111,7 @@ interface ErrorMatcher {
   | `-32001` "Session with given id not found." | `SessionEnded{detached}` |
 
   An integration test sends each case to a real browser and checks that the reply still matches its row, which is the first half of the drift test. `-32000` "Cannot find context with specified id", for an unknown execution context or remote object, stays `Unrecognized`, because no `RejectReason` fits it yet.
-- **Tests:** 14 against a scripted browser, and 7 against Chromium 155: both transports, a failed connection, a closed target, a killed browser, a clean exit, and the error table. The Chromium suite uses `STRIDER_CHROMIUM`, or the first Chromium or Chrome on `PATH`, and is reported as skipped without one.
+- **Tests:** 14 against a scripted browser, and 7 against Chromium 155: both transports, a failed connection, a closed target, a killed browser, a clean exit, and the error table. The Chromium suite uses `STRIDER_CHROMIUM`, or the first Chromium or Chrome on `PATH`, and is reported as skipped without one. (Since 2026-10-20 every browser suite takes only its variable, which `nix develop` sets to the pinned build: Tests and pinned browsers, below.)
 - **Where the build differs from the sketch above:**
   - `ProtocolSession.key` is `undefined` for the browser's own session, which CDP doesn't key;
   - a command carries its `definition`, which is where the session finds its codecs;
@@ -412,6 +412,12 @@ Adapter responsibilities:
 - **Enrichment and the domain `RcMap`** wait for what consumes them in L1, and the on-demand realm strategy for a measured need.
 - **A test of prerender activation**, which headless Chromium doesn't produce, and **downloading Chrome for Testing**, which the Chromium launcher's `ExecutableNotFound` says isn't built.
 - **The attach-only stock WebKit profile** (Built for WebKit, above). Its endpoint is available after all: nixpkgs has WebKitGTK 2.54 and WPE (cog), whose remote inspector an environment variable turns on. What it needs is stock WebKit's own protocol, vendored as a backend of its own, a wire for it, and a smaller adapter.
+
+**Tests and pinned browsers** (2026-10-20). The integration tests run against the builds their fixtures and the error tables' evidence were recorded from, pinned in `packages/browser/test/integration/browsers.json`: Chromium 155.0.8059.79, Firefox 158.0 and Playwright's WebKit build 2359.
+
+- **`flake.nix`** locks nixpkgs at `319e4ce` (2026-10-14), whose packages are exactly these, and asserts so: a `nix flake update` that moves a browser fails evaluation with the version it found, as does a pnpm that isn't `packageManager`'s. Its dev shell provides Node 24.21.0 and pnpm 12.9.0 and names each browser in `STRIDER_CHROMIUM`, `STRIDER_FIREFOX` and `STRIDER_WEBKIT`. Chromium and Playwright's WebKit are built for Linux only in nixpkgs, so the flake is for `x86_64-linux` and `aarch64-linux`.
+- **The tests take only those variables.** They no longer search `PATH` or Playwright's cache, which found whatever was installed. A browser that isn't named has its tests skipped, which Vitest reports; one that is named but isn't the pinned version fails them, saying what it found: Chromium and Firefox by the version they report, WebKit by its launcher's `protocol.json` check and by the pin matching the build the adapter is generated from.
+- **The fixtures are named from the pins**, so recording again after moving one writes new fixtures beside the old.
 
 **Built** (2026-10-20, after [review 09](reviews/09-served-by.md)): who served a response.
 

@@ -7,3 +7,6 @@ dist/
 # symlinks to .agents/AGENTS.md, made by `pnpm install`
 /AGENTS.md
 /CLAUDE.md
+
+# nix build
+/result

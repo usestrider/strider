@@ -2,8 +2,8 @@
  * L0 against a real Firefox over WebDriver BiDi: the launcher, the raw connection, the error table, and the
  * corrections the BiDi model carries.
  *
- * Set `STRIDER_FIREFOX` to the executable, or put `firefox` on `PATH`. Without one, the suite is skipped and
- * Vitest reports it as skipped.
+ * It runs against the pinned Firefox (`browsers.ts`), which `nix develop` names in `STRIDER_FIREFOX`. Without it,
+ * the suite is skipped and Vitest reports it as skipped; another version fails it.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
@@ -17,24 +17,13 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
-import { existsSync } from "node:fs"
-import * as path from "node:path"
 import * as BidiWire from "../../src/internal/bidiWire.ts"
 import * as FirefoxLauncher from "../../src/internal/firefoxLauncher.ts"
 import * as ProtocolClient from "../../src/internal/protocolClient.ts"
+import { assertPinned, firefox } from "./browsers.ts"
 import { fixtures, record } from "./record.ts"
 
-const findFirefox = (): string | undefined => {
-  const configured = process.env["STRIDER_FIREFOX"]
-  if (configured !== undefined && configured !== "") return configured
-  for (const directory of (process.env["PATH"] ?? "").split(path.delimiter)) {
-    const candidate = path.join(directory, "firefox")
-    if (existsSync(candidate)) return candidate
-  }
-  return undefined
-}
-
-const executable = findFirefox()
+const executable = firefox.executable
 const timeout = 60_000
 
 describe("Firefox launcher", () => {
@@ -74,6 +63,7 @@ describe.skipIf(executable === undefined)("Firefox over WebDriver BiDi", () => {
           const on = Protocol.on(bidi.session)
           const session = yield* Session.new_({ capabilities: {} }).pipe(on)
           assert.strictEqual(session.capabilities.browserName, "firefox")
+          assertPinned("Firefox", String(session.capabilities.browserVersion), firefox.version)
           yield* Session.subscribe({ events: ["browsingContext"] }).pipe(on)
           // The first correction: Firefox's contextCreated has no hasPlannedNavigation
           const created = yield* bidi.session.subscribe(BrowsingContext.contextCreated)

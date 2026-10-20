@@ -1,22 +1,16 @@
 /**
- * The adapter conformance suite against Playwright's WebKit build. Set `STRIDER_WEBKIT` to its `pw_run.sh`, or
- * install it where Playwright does (`PLAYWRIGHT_BROWSERS_PATH`, or Playwright's cache).
+ * The adapter conformance suite against Playwright's WebKit: the pinned build (`browsers.ts`), whose `pw_run.sh`
+ * `nix develop` names in `STRIDER_WEBKIT`. The launcher refuses another build by its `protocol.json`.
  */
 import * as Effect from "effect/Effect"
-import { existsSync } from "node:fs"
 import * as WebKitAdapter from "../../../src/internal/webkitAdapter.ts"
 import * as WebKitLauncher from "../../../src/internal/webkitLauncher.ts"
 import * as WebKitWire from "../../../src/internal/webkitWire.ts"
+import { webkit } from "../browsers.ts"
 import { fixtures, record } from "../record.ts"
 import { conformance } from "./conformance.ts"
 
-const findWebKit = (): string | undefined => {
-  const configured = process.env["STRIDER_WEBKIT"]
-  if (configured !== undefined && configured !== "") return configured
-  return WebKitLauncher.cacheCandidates(process.platform, process.env).find((candidate) => existsSync(candidate))
-}
-
-const executable = findWebKit()
+const executable = webkit.executable
 
 conformance({
   name: "WebKit (Playwright)",
