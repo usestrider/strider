@@ -126,6 +126,12 @@ export interface FoldControl {
    */
   readonly sync: (session: Session, sync: Effect.Effect<Synced, unknown>) => void
   readonly session: (key: Protocol.SessionKey) => Session | undefined
+  /**
+   * Runs an effect in the worker, after every event received so far, and waits for it: for what an operation
+   * learns from a reply rather than an event, so that it reaches the model in order. If the connection ends
+   * first, the effect doesn't run.
+   */
+  readonly run: (effect: Effect.Effect<void>) => Effect.Effect<void>
 }
 
 /**
@@ -450,6 +456,12 @@ type Work =
   | { readonly _tag: "Overloaded"; readonly state: SessionState; readonly failure: IntegrityFailure }
   | { readonly _tag: "Synced"; readonly state: SessionState; readonly synced: Synced }
   | { readonly _tag: "End"; readonly state: SessionState; readonly reason: Protocol.SessionEnded }
+  | {
+    readonly _tag: "Run"
+    readonly state: SessionState
+    readonly effect: Effect.Effect<void>
+    readonly done: Deferred.Deferred<void>
+  }
 
 interface SessionState {
   readonly key: Protocol.SessionKey | undefined
@@ -506,8 +518,17 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
         )
       )
     },
-    session: (key) => sessions.get(key)?.handle
+    session: (key) => sessions.get(key)?.handle,
+    run: (effect) =>
+      Effect.suspend(() => {
+        if (lost !== undefined) return Effect.void
+        const done = Deferred.makeUnsafe<void>()
+        runs.add(done)
+        Queue.offerUnsafe(inbox, { _tag: "Run", state: root, effect, done })
+        return Deferred.await(done)
+      })
   }
+  const runs = new Set<Deferred.Deferred<void>>()
   const fold = options?.fold?.(control)
   const foldDecoders = new Map(
     [...(fold?.events.values() ?? [])].map((event) =>
@@ -570,6 +591,11 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
       [...live],
       (state) => finish(state, state.endedWith ?? new Protocol.SessionEnded({ why: "connectionLost" })),
       { discard: true }
+    ).pipe(
+      Effect.andThen(Effect.sync(() => {
+        for (const done of runs) Deferred.doneUnsafe(done, Effect.void)
+        runs.clear()
+      }))
     )
   )
 
@@ -910,6 +936,13 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
 
   const process = Effect.fnUntraced(function*(work: Work) {
     const state = work.state
+    if (work._tag === "Run") {
+      if (runs.delete(work.done)) {
+        yield* work.effect
+        Deferred.doneUnsafe(work.done, Effect.void)
+      }
+      return
+    }
     if (state.finished) return
     switch (work._tag) {
       case "Event": {
