@@ -19,7 +19,7 @@ import { splitId } from "./Model.ts"
 export interface Source {
   /** Where the spec came from, for the generated header. */
   readonly description: string
-  /** The output directory under `packages/browser/src`, which also keys brands: `cdp`, `bidi-protocol`. */
+  /** The output directory under `packages/browser/src`, which also keys brands: `cdp`, `bidi-protocol`, `webkit-protocol`. */
   readonly output: string
 }
 
@@ -93,6 +93,12 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 const localName = (id: string) => splitId(id)[1].split(".").map(cap).join("")
 
 const isDeprecated = (traits: Traits) => traits.status === "deprecated"
+
+// WebKit: the build flags an item is compiled under, in its JSDoc's first paragraph
+const onlyWhere = (traits: Traits, description: string) =>
+  traits.condition === undefined
+    ? description
+    : `${description.trimEnd()} Only in builds compiled with \`${traits.condition}\`.`
 
 const refsOf = (type: TypeExpr): ReadonlyArray<string> => {
   switch (type._tag) {
@@ -300,7 +306,7 @@ export const emit = (model: ProtocolModel, source: Source): Emitted => {
       `@category ${category}`,
       "@since 0.1.0"
     ]
-    const describe = (traits: Traits, fallback: string) => traits.description ?? fallback
+    const describe = (traits: Traits, fallback: string) => onlyWhere(traits, traits.description ?? fallback)
 
     const types: Array<string> = []
     const commands: Array<string> = []
@@ -421,7 +427,10 @@ export const emit = (model: ProtocolModel, source: Source): Emitted => {
       )
     ]
     const header = jsdoc("", [
-      domainTraits.description ?? `The ${domain} ${model.backend === "bidi" ? "module" : "domain"}.`,
+      onlyWhere(
+        domainTraits,
+        domainTraits.description ?? `The ${domain} ${model.backend === "bidi" ? "module" : "domain"}.`
+      ),
       "",
       `Generated from ${source.description}. Don't edit: correct the model (\`packages/tools/codegen/protocols/${model.backend}\`) and run \`pnpm codegen:protocol\`.`,
       "",

@@ -31,6 +31,7 @@
       "@usestrider/browser/test": ["./packages/browser/src/test/index.ts"],
       "@usestrider/browser/test/vitest": ["./packages/browser/src/test/vitest/index.ts"],
       "@usestrider/browser/webkit": ["./packages/browser/src/webkit/index.ts"],
+      "@usestrider/browser/webkit-protocol": ["./packages/browser/src/webkit-protocol/index.ts"],
       "@usestrider/browser/*": ["./packages/browser/src/*.ts"]
     }
   }

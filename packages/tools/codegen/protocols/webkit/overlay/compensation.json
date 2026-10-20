@@ -1,0 +1,29 @@
+{
+  "reason": "Input that can leave a key or button held when the caller is interrupted after dispatch. L1 releases it in reverse order (CONCEPTS.md \u00a75).",
+  "annotate": [
+    {
+      "target": "Input#dispatchKeyEvent",
+      "traits": {
+        "compensation": "releaseInput"
+      }
+    },
+    {
+      "target": "Input#dispatchMouseEvent",
+      "traits": {
+        "compensation": "releaseInput"
+      }
+    },
+    {
+      "target": "Input#dispatchTouchEvent",
+      "traits": {
+        "compensation": "releaseInput"
+      }
+    },
+    {
+      "target": "Input#dispatchTapEvent",
+      "traits": {
+        "compensation": "releaseInput"
+      }
+    }
+  ]
+}

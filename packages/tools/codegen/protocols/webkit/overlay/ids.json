@@ -1,0 +1,131 @@
+{
+  "reason": "Ids and handles the browser mints. Each is branded by protocol, domain and kind, so an id never crosses protocols or kinds (PROTOCOL.md, Shape of the output). WebKit gives targets, workers and downloads bare strings, with no type of their own, so they aren't branded.",
+  "annotate": [
+    {
+      "target": "Animation#AnimationId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Browser#ExtensionId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "CSS#StyleSheetId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Canvas#CanvasId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Canvas#ProgramId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "DOM#EventListenerId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "DOM#NodeId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Debugger#BreakpointActionIdentifier",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Debugger#BreakpointId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Debugger#CallFrameId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Debugger#ScriptId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "LayerTree#LayerId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "LayerTree#PseudoElementId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Network#FrameId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Network#LoaderId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Network#RequestId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Playwright#ContextID",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Playwright#PageProxyID",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Runtime#ExecutionContextId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Runtime#RemoteObjectId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Screencast#ScreencastId",
+      "traits": {
+        "id": true
+      }
+    }
+  ]
+}

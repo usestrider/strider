@@ -1,0 +1,122 @@
+{
+  "reason": "Commands whose replies hand out something with a remote lifetime: contexts, pages, worlds and remote objects. A reply that arrives after its caller was interrupted, or timed out, is routed to an owner, which adopts or releases it (PROTOCOL.md, Protocol client). `release` names the commands that release it, from the spec's own pairs: Playwright.deleteContext, Playwright.closePage and Runtime.releaseObject. A user world has no release command; it lasts as long as the page.",
+  "annotate": [
+    {
+      "target": "Playwright#createContext",
+      "traits": {
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Playwright.deleteContext",
+            "param": "browserContextId",
+            "from": "/browserContextId"
+          }
+        ]
+      }
+    },
+    {
+      "target": "Playwright#createPage",
+      "traits": {
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Playwright.closePage",
+            "param": "pageProxyId",
+            "from": "/pageProxyId"
+          }
+        ]
+      }
+    },
+    {
+      "target": "Page#createUserWorld",
+      "traits": {
+        "createsResource": true
+      }
+    },
+    {
+      "target": "Runtime#evaluate",
+      "traits": {
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/result/objectId"
+          }
+        ]
+      }
+    },
+    {
+      "target": "Runtime#callFunctionOn",
+      "traits": {
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/result/objectId"
+          }
+        ]
+      }
+    },
+    {
+      "target": "Runtime#awaitPromise",
+      "traits": {
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/result/objectId"
+          }
+        ]
+      }
+    },
+    {
+      "target": "Runtime#getProperties",
+      "traits": {
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/properties/*/value/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/properties/*/get/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/properties/*/set/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/properties/*/symbol/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/internalProperties/*/value/objectId"
+          }
+        ]
+      }
+    },
+    {
+      "target": "DOM#resolveNode",
+      "traits": {
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/object/objectId"
+          }
+        ]
+      }
+    }
+  ]
+}

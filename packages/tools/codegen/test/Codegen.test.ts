@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import type { CdpProtocol } from "../src/Cdp.ts"
-import { parse } from "../src/Cdp.ts"
+import { parse, possible } from "../src/Cdp.ts"
 import { applyCorrections, applyOverlays } from "../src/Corrections.ts"
 import { emit } from "../src/Emit.ts"
 
@@ -85,6 +85,28 @@ describe("parse", () => {
         }]),
       /A#Nope doesn't resolve/
     )
+  })
+
+  it("WebKit: keeps what some Playwright build compiles in, once, with its condition", () => {
+    const ios = "defined(WTF_PLATFORM_IOS_FAMILY) && WTF_PLATFORM_IOS_FAMILY"
+    assert.isFalse(possible(ios))
+    assert.isTrue(possible(`!(${ios})`))
+    assert.isTrue(possible("(defined(ENABLE_WEB_ARCHIVE) && ENABLE_WEB_ARCHIVE) && (defined(USE_CF) && USE_CF)"))
+    assert.throws(() => possible("defined(A"), /expected \)/)
+    const webkit = parse("test", [{
+      domains: [{
+        domain: "DOM",
+        commands: [
+          { name: "highlight", condition: ios, parameters: [{ name: "a", type: "string" }] },
+          { name: "highlight", condition: `!(${ios})`, parameters: [{ name: "b", $ref: "boolean" }] }
+        ]
+      }]
+    }], "webkit")
+    const params = webkit.shapes["DOM#highlight.Params"]
+    assert(params?._tag === "Struct")
+    assert.deepStrictEqual(Object.keys(params.members), ["b"])
+    assert.deepStrictEqual(params.members["b"]?.type, { _tag: "Scalar", scalar: "boolean" })
+    assert.strictEqual(webkit.shapes["DOM#highlight"]?.traits.condition, `!(${ios})`)
   })
 })
 

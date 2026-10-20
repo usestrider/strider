@@ -10,7 +10,7 @@ export default defineConfig({
       { find: /^@usestrider\/browser$/, replacement: src("index.ts") },
       {
         find:
-          /^@usestrider\/browser\/(ai|bidi|bidi-protocol|cdp|chromium|cli|firefox|protocol|test|test\/vitest|webkit)$/,
+          /^@usestrider\/browser\/(ai|bidi|bidi-protocol|cdp|chromium|cli|firefox|protocol|test|test\/vitest|webkit|webkit-protocol)$/,
         replacement: src("$1/index.ts")
       },
       { find: /^@usestrider\/browser\/(.+)$/, replacement: src("$1.ts") }

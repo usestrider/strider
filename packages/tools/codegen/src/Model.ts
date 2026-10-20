@@ -26,6 +26,8 @@ export const Traits = Schema.Struct({
   session: Schema.optionalKey(Schema.Literals(["browser", "target"])),
   /** Overlay: what L1 must undo if the caller is interrupted after dispatch. */
   compensation: Schema.optionalKey(Schema.String),
+  /** WebKit: the build flags the item is compiled under, as the spec writes them. */
+  condition: Schema.optionalKey(Schema.String),
   /** BiDi: a map that admits keys beyond its members (`Extensible`). */
   extensible: Schema.optionalKey(Schema.Literal(true)),
   /** Overlay: late replies route to an owner for adoption or cleanup. */

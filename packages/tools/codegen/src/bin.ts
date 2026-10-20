@@ -23,7 +23,8 @@ import { Backend, build, outputs, protocolDirectory, serialize } from "./Pipelin
 
 const sources: Record<Backend, string> = {
   cdp: "the Chrome DevTools Protocol, devtools-protocol 0.0.1696802 (Chrome 155)",
-  bidi: "WebDriver BiDi's CDDL, w3c/webdriver-bidi f922e6a (2026-10-08)"
+  bidi: "WebDriver BiDi's CDDL, w3c/webdriver-bidi f922e6a (2026-10-08), and the Permissions spec's module",
+  webkit: "the WebKit inspector protocol as Playwright patches it, WebKit build 2359 (WebKit 26.6)"
 }
 
 const writeOrCheck = Effect.fnUntraced(function*(file: string, content: string, check: boolean) {

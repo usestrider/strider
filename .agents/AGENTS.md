@@ -27,7 +27,8 @@ layer. Use `pnpm` from the repository root.
 - `packages/tools/utils`: barrel codegen.
 - `packages/tools/codegen`: protocol code generation. `protocols/<backend>/` holds the vendored spec (`source/`),
   corrections (`patches/`), our annotations (`overlay/`), and the generated `model.json` and `coverage.json`. Its
-  output is `packages/browser/src/cdp/` and `packages/browser/src/bidi-protocol/`. Never edit generated files:
+  output is `packages/browser/src/cdp/`, `packages/browser/src/bidi-protocol/` and
+  `packages/browser/src/webkit-protocol/`. Never edit generated files:
   change a correction or an annotation and run `pnpm codegen:protocol`. A correction says what the spec states,
   what the wire does, and the evidence.
 - `.repos/`: read-only references cloned by `scripts/worktree-setup.sh`, such as Effect's sources and its

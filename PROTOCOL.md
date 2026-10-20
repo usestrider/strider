@@ -202,7 +202,7 @@ interface Traits {                               // spec facts plus overlay anno
   - shapes are tagged with `_tag`, as Effect's are, rather than `kind`;
   - one module per domain holds both the interfaces and the codecs, rendered by separate functions, with a separate types-only output deferred until something needs it;
   - an import that would collide with a module's own names is renamed (CDP's `SmartCardEmulation` has a type named `Protocol`).
-- **Next:** the transports and the CDP client are built (Transports and Protocol client above). The error table's next rows, and the rest of the drift test, come from probes recording real traffic. BiDi's CDDL and WebKit's JSON get their parsers when those backends start; the correction audit is built with the first correction.
+- **Next:** the transports and the CDP client are built (Transports and Protocol client above). The error table's next rows, and the rest of the drift test, come from probes recording real traffic. BiDi's CDDL and WebKit's JSON get their parsers when those backends start (both now have them: Built for BiDi and Built for WebKit, below); the correction audit is built with the first correction.
 
 **Built for BiDi** (2026-10-20), after review 08 (candidate 12):
 
@@ -220,6 +220,16 @@ interface Traits {                               // spec facts plus overlay anno
 - **Overlay:** 17 id brands, 7 sensitive members (cookie values, credentials, typed keys), 8 resource-creating commands with their releases (one releases into a list: `session.unsubscribe`), and input compensation.
 - **Corrections**, the first two, both recorded from Firefox 158: `browsingContext.contextCreated` comes without the `hasPlannedNavigation` the draft requires, and the `navigationStarted` that closing a page with `promptUnload` starts comes without a `url`.
 - **Output:** 12 modules at `@usestrider/browser/bidi-protocol`, with 342 types, 69 commands and 24 events.
+
+**Built for WebKit** (2026-10-20), for Playwright's WebKit build:
+
+- **Source.** The `protocol.json` that Playwright's WebKit build 2359 (WebKit 26.6) ships, as nixpkgs packages it for Playwright 1.63.0; `SOURCE.md` records where it came from, its licenses and its hash. It is CDP's format with a few more keys, so CDP's parser reads it, in WebKit's dialect (`Cdp.parse(revision, protocols, "webkit")`).
+- **The dialect's two differences:**
+  - Items can be compiled in only under build flags (`condition`). An item only an iOS build compiles is dropped, since Playwright never builds WebKit for iOS; that removes the second definition of four `DOM` commands, which the spec gives once per platform family. Any other condition may hold in some build, so its item is kept and the condition recorded: the JSDoc says "Only in builds compiled with …", and a build without it answers `Unsupported`.
+  - A `$ref` can name a primitive type, which WebKit's generator resolves (`Runtime.PropertyDescriptor.isPrivate` is a `$ref` to `boolean`).
+- **Overlay:** 21 id brands (targets, workers and downloads have bare string ids, with no type to brand); 9 sensitive members (cookie values, credentials, typed text); 8 resource-creating commands, with `Playwright.deleteContext`, `Playwright.closePage` and `Runtime.releaseObject` as their releases (`Page.createUserWorld` has none: a world lasts as long as its page); input compensation; and the `Playwright` domain marked as sent on the browser session.
+- **Corrections:** none so far; the adapter's probes record what the wire does (Backend adapters, Built for WebKit).
+- **Output:** 33 modules at `@usestrider/browser/webkit-protocol`, with 206 types, 308 commands and 128 events.
 
 ## Ingestion pipeline
 
@@ -359,7 +369,7 @@ The capability is `pauseScope: "context" | "related" | "opener" | "browser"`. A 
 
 ## Backends and order
 
-Each backend ships as its own subpath export (`@usestrider/browser/chromium`, `/firefox`, `/webkit`, `/bidi`) that provides the `Browser` service, so unused protocol code is never loaded. Generated L0 commands are available raw at `@usestrider/browser/cdp` (and later `/bidi-protocol`) for power users.
+Each backend ships as its own subpath export (`@usestrider/browser/chromium`, `/firefox`, `/webkit`, `/bidi`) that provides the `Browser` service, so unused protocol code is never loaded. Generated L0 commands are available raw at `@usestrider/browser/cdp`, `/bidi-protocol` and `/webkit-protocol` for power users.
 
 
 1. **CDP:** launched Chromium; remote endpoints.
