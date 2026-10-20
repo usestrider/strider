@@ -125,6 +125,11 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.24** folded in the type-checked sketch ([sketch/](sketch/)), which is now the source of truth for signatures; API.md keeps the contracts:
+  - type-checking changed two designs: an event predicate (`where`) is a trailing argument, so it is typed from the filter's body decoder, and body decoders take Effect's decoders as they are;
+  - existing decisions corrected: viewport, locale and timezone moved into `Emulation` (one type for creation options and `emulate`); `ReadonlyFrame` became `FrameLocator`, because it is lazy; `selectOption` states `value`, `label` or `index`; event streams fail with `TargetGone` too; Effect's date input is `DateTime.DateTime.Input`;
+  - newly designed: `Keyboard` and `Mouse` with scoped `hold`; frame locators; `JSHandle`; `Emulation`; `PdfOptions`; cookies (`CookieJar`, values `Redacted`) and origin storage (read with inspect, write with control); `readHtml`, `isEnabled`, `isChecked`, element `evaluate`, `tap`, `scrollIntoView`; `BrowserWorker` and `NetworkConnection` event modules; `Download.cancel`; `Route.provideCredentials`; `grant`; `Condition.make`;
+  - the sketch's scenarios assert requirement channels and pin nine access rules with `@ts-expect-error`.
 - **Revision 5.23** moved the cross-cutting settings off `Browser` and onto Effect's own shapes:
   - `next` hands out a `ReadonlyDeferred`, the read side of Effect's `Deferred`, proposed upstream ([upstream/effect-readonly-deferred.md](upstream/effect-readonly-deferred.md)); its deadline is set at `next`, and `Pending` is gone;
   - a `Deadline` module (`within`, `withDefaultBudget`, `remaining`, and the `Current` and `DefaultBudget` references) replaces `Browser.withTimeout` and `withDefaultTimeout`; an explicit deadline wins over the default budget;

@@ -1,6 +1,6 @@
 # API: the ergonomic layer (L2)
 
-*Revision 5.23, 2026-10-19. These are sketches: names and signatures are provisional, nothing is implemented, and the types show shape rather than compile-verified code. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
+*Revision 5.24, 2026-10-19. Nothing is implemented. The full signatures live in [sketch/](sketch/), which type-checks against Effect 4.0.5 ([sketch/INDEX.md](sketch/INDEX.md) lists every member); this document keeps the contracts and the excerpts that explain them, and where an excerpt and the sketch differ, the sketch is right. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
 
 ## Purpose
 
@@ -39,7 +39,7 @@ The README's principles, as they apply to this layer. The reasons live there; th
 - **Locators are values,** resolved again on every attempt. The one exception is a ref (`snapshot.ref(id)`), which is pinned to one node and fails with `StaleRef` rather than rebinding.
 
 **Names**
-- **Spec names first, then Effect's types.** `UserContext` is the spec's and BiDi's term, and it avoids Effect's `Context`. Where Effect has the type, we use it: `Headers`, `HttpMethod`, `HttpServerResponse`, `HttpClientRequest` and `HttpIncomingMessage` from `effect/http`, `DateTime.Input`, and `Config`. Our own names get a prefix only where a bare one would clash with the DOM (`FileInput`) or with Effect (`PageClock`, `EventHistory`, `HttpStatusCode`). Long, explicit names are fine.
+- **Spec names first, then Effect's types.** `UserContext` is the spec's and BiDi's term, and it avoids Effect's `Context`. Where Effect has the type, we use it: `Headers`, `HttpMethod`, `HttpServerResponse`, `HttpClientRequest` and `HttpIncomingMessage` from `effect/http`, `DateTime.DateTime.Input`, and `Config`. Our own names get a prefix only where a bare one would clash with the DOM (`FileInput`) or with Effect (`PageClock`, `EventHistory`, `HttpStatusCode`). Long, explicit names are fine.
 - **Names encode behavior** (principle 18):
 
   | Form | Meaning | Examples |
@@ -56,6 +56,7 @@ The README's principles, as they apply to this layer. The reasons live there; th
   | `export*` / `import` | crosses a persistence boundary; carries secrets | `exportStorageState`, `StorageState.import` |
 
 **Behavior**
+- **Signatures are checked, not described.** `sketch/` declares the whole API and checks it with `tsc --strict`. Its scenarios assert requirement channels (an ordinary call site sees only `Browser` and `Scope`) and pin each access rule with `@ts-expect-error`, so loosening a rule fails the check.
 - **Explicit over implicit** (rule 23). Nothing hidden changes behavior or adds waiting: no magic delays, grace periods or heuristic windows. Every default is stated where its option is declared and recorded in the operation's span, and no helper changes a default on your behalf. Actionability waiting is each action's documented contract: named checks, adjustable per call, reported in errors.
 - **Every effect ends.** Waits run under a deadline, open-ended things are `Stream`s, and lifetime signals (`closed`) are the only exception.
 - **Every error reason carries a hint,** shown in the rendered message:
@@ -74,6 +75,7 @@ interface ObservedPage {                                // state and events only
   readonly status: Watchable<PageStatus>                 // one consistent snapshot; ends with Closed{reason}
   readonly url: Watchable<Url>                           // status.map(…): derived from the same source
   readonly frames: Watchable<FrameTree>
+  readonly workers: Watchable<ReadonlyArray<ObservedBrowserWorker>>   // dedicated workers of this page; a Page narrows to BrowserWorker
   readonly closed: Effect<CloseReason>                  // lifetime signal: waits as long as the page lives
   readonly inspect: Effect<ReadonlyPage, PageError, Scope>   // installs the utility world; page stays open
   readonly control: Effect<Page, PageError, Scope>           // access lasts for the scope; page stays open
@@ -219,30 +221,51 @@ interface BrowserHandle {
 interface ObservedUserContext {                              // a context we don't control, e.g. the default context when attached
   readonly id: UserContextId
   readonly pages: Watchable<ReadonlyArray<ObservedPage>>
+  readonly workers: Watchable<ReadonlyArray<ObservedBrowserWorker>>   // shared and service workers
   readonly closed: Effect<CloseReason>
   readonly control: Effect<UserContext, UserContextError, Scope>   // explicit; reading storage needs it too
 }
 interface UserContext extends ObservedUserContext {        // two levels only: reads happen on pages
   readonly newPage: Effect<Page, PageError, Scope>       // closed with its unsolicited popups when the scope closes
   readonly pages: Watchable<ReadonlyArray<Page>>
+  readonly workers: Watchable<ReadonlyArray<BrowserWorker>>
+  readonly cookies: CookieJar                            // a sub-handle bound to the context (Storage, below)
   readonly exportStorageState: Effect<Redacted<StorageStateBytes>, StorageStateError>   // branded bytes; a Uint8Array subtype
   readonly clock: PageClock                              // context-wide timeline (opt-in)
   route<E, R>(pattern: UrlPattern, handler: RouteHandler<E, R>): Effect<RouteRegistration, RouteError, Scope | R>
   addInitScript(script: InitScriptSource, options?: InitScriptOptions): Effect<InitScript, DeclarationError, Scope>
   emulate(settings: Emulation): Effect<Registration, DeclarationError, Scope>
+  grant(permissions: ReadonlyArray<Permission>, options?: { origin?: Origin | string }): Effect<Registration, DeclarationError, Scope>   // default every origin; ANDed with Permissions Policy
 }
 
 interface UserContextOptions {                          // an unset option keeps the browser's own value unless a default is stated
   readonly storageState?: StorageState                  // from StorageState.import(bytes)
   readonly dialogs?: "dismiss" | "accept" | "leaveOpen"  // decision when no handler claims a dialog; default "dismiss"
-  readonly viewport?: { width: CssPixels | number; height: CssPixels | number }   // CSS pixels by definition
-  readonly locale?: Locale | string
-  readonly timezone?: TimeZoneId | string
-  readonly permissions?: ReadonlyArray<Permission>
   readonly focus?: "system" | "emulated"                 // default "system"; "emulated" makes every page report focus (owned contexts only)
   readonly eventLog?: number                             // retained events per module and page, for history; default 100, 0 keeps none
+  readonly emulation?: Emulation                         // held for the context's life: emulate(...) without a scope
+  readonly permissions?: ReadonlyArray<Permission>       // granted for the context's life, every origin: grant(...) without a scope
+}
+
+interface Emulation {                                    // what a declaration overrides while it lives; unset fields are untouched
+  readonly viewport?: { width: number; height: number; deviceScaleFactor?: number; mobile?: boolean }   // CSS pixels; defaults 1 and false
+  readonly userAgent?: string
+  readonly locale?: Locale | string
+  readonly timezone?: TimeZoneId | string
+  readonly geolocation?: { latitude: number; longitude: number; accuracy?: number } | "unavailable"
+  readonly media?: {
+    type?: "screen" | "print"; colorScheme?: "light" | "dark" | "noPreference"; reducedMotion?: "reduce" | "noPreference"
+    forcedColors?: "active" | "none"; contrast?: "more" | "less" | "custom" | "noPreference"
+  }
+  readonly network?: "offline" | { download: number; upload: number; latency: Duration.Input }   // bytes per second
+  readonly cpuSlowdown?: number                          // a factor; CDP only
+  readonly javaScript?: "enabled" | "disabled"
+  readonly touch?: boolean
 }
 ```
+
+- **One concept, two lifetimes.** Creation options are declarations held for the context's whole life; `emulate` and `grant` are the same declarations, scoped. So viewport, locale and timezone live in `Emulation`, not as separate options.
+- **Overrides restore only what they know.** Removing one restores the previous value when it is known and access permits; precedence is page over context (CONCEPTS.md §7). A field the backend can't apply fails with `Unsupported` naming it.
 
 ## Pages
 
@@ -250,14 +273,18 @@ interface UserContextOptions {                          // an unset option keeps
 interface ReadonlyPage extends ObservedPage {
   // locators
   // a string matches as a case-insensitive substring unless exact: true; a RegExp is used as given
-  getByRole(role: AriaRole, options?: { name?: string | RegExp; exact?: boolean }): ReadonlyLocator
+  getByRole(role: AriaRole, options?: { name?: string | RegExp; exact?: boolean; includeHidden?: boolean }): ReadonlyLocator
   getByText(text: string | RegExp, options?: { exact?: boolean }): ReadonlyLocator
   getByLabel(text: string | RegExp, options?: { exact?: boolean }): ReadonlyLocator
-  getByTestId(id: string): ReadonlyLocator
+  getByPlaceholder(text: string | RegExp, options?: { exact?: boolean }): ReadonlyLocator
+  getByAltText(text: string | RegExp, options?: { exact?: boolean }): ReadonlyLocator
+  getByTitle(text: string | RegExp, options?: { exact?: boolean }): ReadonlyLocator
+  getByTestId(id: string): ReadonlyLocator               // the data-testid attribute
   locator(css: string): ReadonlyLocator
-  frame(locator: ReadonlyLocator): ReadonlyFrame         // enters an iframe by its element
+  frame(iframe: ReadonlyLocator): ReadonlyFrameLocator   // enters an iframe by its element; lazy, like any locator
   // one-shot reads
   readonly title: Effect<string, ReadError>
+  readonly readHtml: Effect<string, ReadError>           // the document's serialized HTML
   readonly ariaSnapshot: Effect<Snapshot, ReadError>     // the accessibility tree only: what assistive technology sees
   readonly snapshot: Effect<Snapshot, ReadError>         // accessibility tree + inferred interactivity, every inferred node tagged with its evidence
   snapshotWith(options: { sources?: "aria" | "aria+interactivity"; root?: ReadonlyLocator; depth?: number; interactiveOnly?: boolean }):   // defaults: aria+interactivity, the whole page, every level, every node
@@ -266,21 +293,27 @@ interface ReadonlyPage extends ObservedPage {
   screenshotWith(options: {
     area?: { _tag: "Viewport" } | { _tag: "FullPage" } | { _tag: "Clip"; rect: Rect<CssPixels> } | { _tag: "Element"; locator: ReadonlyLocator }
     format?: { _tag: "Png" } | { _tag: "Jpeg"; quality: number }   // quality exists only for JPEG
+    scale?: "css" | "device"                              // default "device"
+    omitBackground?: boolean                              // default false
   }): Effect<Uint8Array, CaptureError>
   readonly pdf: Effect<Uint8Array, CaptureError>
   pdfWith(options: PdfOptions): Effect<Uint8Array, CaptureError>
+  readonly localStorage: ReadonlyOriginStorage           // the current document's origin; a Page makes them writable
+  readonly sessionStorage: ReadonlyOriginStorage
+  capability<H>(capability: Capability<H>): Effect<H, CapabilityError, Scope>
   evaluate<Args extends ReadonlyArray<unknown>, A>(    // the isolated world, on every page: page globals are invisible
     fn: (...args: Args) => A | Promise<A>, ...args: Args
   ): Effect<Serialized<A>, EvaluationError | TargetGone | Timeout>
 }
 
 interface Page extends ReadonlyPage {
-  // the locator and snapshot members above return Locator and Snapshot<Locator> instead of the read-only forms
+  // the locator, frame and snapshot members above return Locator, FrameLocator and Snapshot<Locator>;
+  // workers are BrowserWorkers, and localStorage and sessionStorage are writable OriginStorage
   readonly context: UserContext                      // fixed: a page never changes context
   goto(url: Url | string, options?: { waitUntil?: LoadState; accept?: ReadonlyArray<"download" | "noContent"> }):   // defaults: commit; a download or 204 is a NavigationError
     Effect<PageNavigation, NavigationError | TargetGone | Timeout>
   readonly reload: Effect<PageNavigation, NavigationError | TargetGone | Timeout>
-  reloadWith(options: { waitUntil?: LoadState }): Effect<PageNavigation, NavigationError | TargetGone | Timeout>
+  reloadWith(options: { waitUntil?: LoadState; bypassCache?: boolean }): Effect<PageNavigation, NavigationError | TargetGone | Timeout>
   readonly back: Effect<Option<PageNavigation>, NavigationError | TargetGone | Timeout>    // None: no history entry
   backWith(options: { waitUntil?: LoadState }): Effect<Option<PageNavigation>, NavigationError | TargetGone | Timeout>
   readonly forward: Effect<Option<PageNavigation>, NavigationError | TargetGone | Timeout>
@@ -289,9 +322,9 @@ interface Page extends ReadonlyPage {
     options: { readonly world: "isolated" | "main"; readonly userGesture?: boolean },
     fn: (...args: Args) => A | Promise<A>, ...args: Args
   ): Effect<Serialized<A>, EvaluationError | TargetGone | Timeout>
-  evaluateHandle<Args extends ReadonlyArray<unknown>>(    // the isolated world, like evaluate
-    fn: (...args: Args) => unknown, ...args: Args
-  ): Effect<JSHandle, EvaluationError | TargetGone | Timeout, Scope>
+  evaluateHandle<Args extends ReadonlyArray<unknown>, A>(   // the isolated world, like evaluate
+    fn: (...args: Args) => A | Promise<A>, ...args: Args
+  ): Effect<JSHandle<Awaited<A>>, EvaluationError | TargetGone | Timeout, Scope>
   readonly keyboard: Keyboard
   readonly mouse: Mouse
   readonly clock: PageClock
@@ -313,6 +346,26 @@ type Serialized<A> =                                   // what actually arrives:
   : A extends Node ? NotSerializable<"DOM nodes don't cross by value; use evaluateHandle">
   : A extends Function | symbol ? never
   : { [K in keyof A as A[K] extends Function | symbol ? never : K]: Serialized<A[K]> }   // class instances arrive as their data
+
+interface PdfOptions {                                   // Length is a value and a unit: in, cm, mm or px
+  readonly paper?: "letter" | "legal" | "tabloid" | "a3" | "a4" | "a5" | { width: Length; height: Length }   // default "letter", as Chrome and BiDi
+  readonly landscape?: boolean                           // default false
+  readonly margins?: { top?: Length; right?: Length; bottom?: Length; left?: Length }   // default none
+  readonly scale?: number                                // default 1
+  readonly background?: boolean                          // default false
+  readonly pageRanges?: string                           // e.g. "1-3, 5"; default every page
+  readonly preferCssPageSize?: boolean                   // default false
+  readonly header?: string; readonly footer?: string     // HTML templates; Unsupported on BiDi
+}
+interface ReadonlyOriginStorage {
+  readonly entries: Effect<ReadonlyArray<readonly [key: string, value: string]>, StorageError | TargetGone>
+  get(key: string): Effect<Option<string>, StorageError | TargetGone>
+}
+interface OriginStorage extends ReadonlyOriginStorage {
+  set(key: string, value: string | Redacted<string>): Effect<void, StorageError | TargetGone>
+  remove(key: string): Effect<void, StorageError | TargetGone>
+  readonly clear: Effect<void, StorageError | TargetGone>
+}
 ```
 
 Notes:
@@ -320,6 +373,7 @@ Notes:
 - **Evaluated functions cross into the page.** They must be self-contained, and values travel as arguments. A `ReferenceError` from an evaluated function carries a hint saying so.
 - **One name per world.** `evaluate` always runs in the isolated world, so a helper that takes a `ReadonlyPage` behaves the same when it is given a `Page`. The main world is `evaluateWith({ world: "main" }, …)`, only on `Page`, so it is visible at every call site that uses it. So is running as a user gesture, where the backend supports it.
 - **The type says what arrives.** Results cross by value, typed `Serialized<A>`. To validate a result instead of trusting the function's type, decode it: `.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Cart)))`. Handles are opt-in and scoped.
+- **Reads of page storage follow access.** `localStorage` and `sessionStorage` belong to the current document's origin. Reading needs inspect; writing needs control.
 - **Navigation resolves at commit.** That is when a navigation has succeeded. Waiting for `domContentLoaded` or `load` is an extra wait you ask for with `waitUntil`, and the span records which state was waited for.
 - **Declarations are scoped registrations.** `route`, `addInitScript`, `emulate`, `Dialog.handle` and `FileChooser.handle` are removed when the caller's scope closes. In `@effect/vitest`'s `it.effect` that scope is already present; elsewhere, use `Effect.scoped`.
 
@@ -345,10 +399,16 @@ interface ReadonlyLocator extends Pipeable, Equal.Equal, Inspectable {
   readonly count: Effect<number, ReadError>
   readonly readText: Effect<string, ReadError>
   readonly readValue: Effect<string, ReadError>
+  readonly readHtml: Effect<string, ReadError>           // outerHTML
   readonly isVisible: Effect<boolean, ReadError>
+  readonly isEnabled: Effect<boolean, ReadError>
+  readonly isChecked: Effect<boolean, ReadError>
   readonly all: Effect<ReadonlyArray<ReadonlyLocator>, ReadError>   // pinned to the current nth matches
   readonly snapshot: Effect<Snapshot, ReadError>
   readAttribute(name: string): Effect<Option<string>, ReadError>
+  evaluate<Args extends ReadonlyArray<unknown>, B>(      // the isolated world, with the element first; strict: exactly one match
+    fn: (element: Element, ...args: Args) => B | Promise<B>, ...args: Args
+  ): Effect<Serialized<B>, EvaluationError | ReadError | TargetGone | Timeout>
 }
 
 interface Locator extends ReadonlyLocator {             // chainers and first/last return Locator
@@ -362,10 +422,12 @@ interface Locator extends ReadonlyLocator {             // chainers and first/la
   readonly uncheck: Effect<void, ActionError | TargetGone | Timeout>
   readonly focus: Effect<void, ActionError | TargetGone | Timeout>
   readonly clear: Effect<void, ActionError | TargetGone | Timeout>
+  readonly tap: Effect<void, ActionError | TargetGone | Timeout>              // touch
+  readonly scrollIntoView: Effect<void, ActionError | TargetGone | Timeout>   // the toolkit's scroll
   fill(value: string | Redacted<string>): Effect<void, ActionError | TargetGone | Timeout>
-  press(key: KeyName): Effect<void, ActionError | TargetGone | Timeout>
+  press(key: KeyName | string, options?: { modifiers?: ReadonlyArray<"Alt" | "Control" | "Meta" | "Shift"> }): Effect<void, ActionError | TargetGone | Timeout>
   pressSequentially(text: string | Redacted<string>, options?: { delay?: Duration.Input }): Effect<void, ActionError | TargetGone | Timeout>   // delay default 0
-  selectOption(values: string | ReadonlyArray<string>): Effect<void, ActionError | TargetGone | Timeout>
+  selectOption(options: SelectOption | ReadonlyArray<SelectOption>): Effect<void, ActionError | TargetGone | Timeout>   // { value } | { label } | { index }: which one is always stated
   setInputFiles(files: FileInput | ReadonlyArray<FileInput>): Effect<void, ActionError | TargetGone | Timeout>
   dragTo(target: Locator, options?: DragOptions): Effect<void, ActionError | TargetGone | Timeout>
 }
@@ -401,6 +463,44 @@ const RelativeLocator: {                                 // only valid inside fi
 - **`has:` takes only `RelativeLocator`.** That makes Playwright's silent "page-rooted locator inside `has`" mismatch a type error.
 - **Once only.** An action dispatches at most once per call. If a later step fails after input may have reached the page, the error carries that evidence and the action is never replayed.
 
+## Keyboard, mouse, frames and handles
+
+```ts
+interface Keyboard {                                     // keys to whatever has focus; input to one page is serialized
+  press(key: KeyName | string, options?: { modifiers?: ReadonlyArray<Modifier> }): Effect<void, ActionError | TargetGone | Timeout>
+  pressSequentially(text: string | Redacted<string>, options?: { delay?: Duration.Input }): Effect<void, ActionError | TargetGone | Timeout>   // delay default 0
+  insertText(text: string | Redacted<string>): Effect<void, ActionError | TargetGone | Timeout>   // no key events, as an input method
+  hold(key: KeyName | string): Effect<HeldInput, ActionError | TargetGone | Timeout, Scope>
+}
+interface Mouse {                                        // coordinates, for canvas-like UIs; CSS pixels from the viewport's top left
+  readonly position: Effect<Point>                       // mutable state, so read through an Effect
+  move(to: Point, options?: { steps?: number }): Effect<void, ActionError | TargetGone | Timeout>   // steps default 1
+  click(at: Point, options?: { button?: "left" | "right" | "middle"; clickCount?: number; modifiers?: ReadonlyArray<Modifier> }): Effect<void, ActionError | TargetGone | Timeout>
+  hold(button: "left" | "right" | "middle"): Effect<HeldInput, ActionError | TargetGone | Timeout, Scope>
+  wheel(delta: { x: CssPixels | number; y: CssPixels | number }): Effect<void, ActionError | TargetGone | Timeout>
+}
+interface HeldInput { readonly release: Effect<void> }   // idempotent; the scope's finalizer becomes a no-op
+
+interface ReadonlyFrameLocator {                         // an iframe's document, entered by its element; lazy like any locator
+  readonly owner: ReadonlyLocator                        // the iframe element
+  // getByRole, getByText, getByLabel, getByPlaceholder, getByAltText, getByTitle, getByTestId, locator, frame
+}                                                        // FrameLocator: the same queries returning Locator
+
+interface JSHandle<A = unknown> {                        // a value in one realm, owned by the scope that acquired it
+  readonly realm: RealmId                                // fixed: a handle never moves between realms
+  evaluate<Args extends ReadonlyArray<unknown>, B>(fn: (value: A, ...args: Args) => B | Promise<B>, ...args: Args):
+    Effect<Serialized<B>, EvaluationError | TargetGone | Timeout>
+  evaluateHandle<Args extends ReadonlyArray<unknown>, B>(fn: (value: A, ...args: Args) => B | Promise<B>, ...args: Args):
+    Effect<JSHandle<Awaited<B>>, EvaluationError | TargetGone | Timeout, Scope>
+  readonly read: Effect<Serialized<A>, EvaluationError | TargetGone | Timeout>   // the value itself, by value
+  readonly release: Effect<void>                         // early release; idempotent
+}
+```
+
+- **Held input is scoped.** `hold` acquires a key or button and releases it when `release` runs or its scope closes, and on interruption, in reverse order (CONCEPTS.md §5). A failed step never leaves Shift held down.
+- **Frames are entered, not held.** A frame locator re-resolves its iframe element on every attempt, like any locator; the frame tree as state is `page.frames`.
+- **Handles end with their realm.** Using a handle after its realm ends fails with `TargetGone{RealmDestroyed}`. Handles are released in batches unless the realm already ended.
+
 ## Expectations
 
 ```ts
@@ -410,11 +510,14 @@ declare const Expect: {
   toBeVisible: (subject: ReadonlyLocator) => Effect<void, ExpectationFailed | TargetGone>
   toBeHidden: (subject: ReadonlyLocator) => Effect<void, ExpectationFailed | TargetGone>
   toBeEnabled: (subject: ReadonlyLocator) => Effect<void, ExpectationFailed | TargetGone>
+  toBeDisabled: (subject: ReadonlyLocator) => Effect<void, ExpectationFailed | TargetGone>
   toBeChecked: (subject: ReadonlyLocator) => Effect<void, ExpectationFailed | TargetGone>
   toBeFocused: (subject: ReadonlyLocator) => Effect<void, ExpectationFailed | TargetGone>
+  toBeEditable: (subject: ReadonlyLocator) => Effect<void, ExpectationFailed | TargetGone>
   // with arguments: dual
   //   locator.pipe(Expect.toHaveText("1 item"))   or   Expect.toHaveText(locator, "1 item")
   toHaveText: DualMatcher<ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>]>
+  toContainText: DualMatcher<ReadonlyLocator, [expected: string | RegExp]>
   toHaveValue: DualMatcher<ReadonlyLocator, [expected: string | RegExp]>
   toHaveAttribute: DualMatcher<ReadonlyLocator, [name: string, expected?: string | RegExp]>
   toHaveCount: DualMatcher<ReadonlyLocator, [count: number]>
@@ -427,6 +530,7 @@ declare const Expect: {
   withInterval: Dual<Duration.Input>                     // re-check interval for subjects with no change signal; default 100 ms
 }
 declare const Condition: {
+  make<A>(description: string, predicate: Predicate<A>): Condition<A>   // the description appears in ExpectationFailed
   not<A>(c: Condition<A>): Condition<A>                  // the wait is for the negation, and it passes when the element is missing
   and<A>(...cs: ReadonlyArray<Condition<A>>): Condition<A>   // evaluated against one observation
   because<A>(why: string): (c: Condition<A>) => Condition<A>
@@ -464,10 +568,13 @@ interface Watchable<A> extends Effect<A> {               // yield* reads the cur
 }
 
 interface EventModule<T, A, F, E = never> {               // every event module has these three verbs; T: targets, F: filter
-  next(target: T, filter?: F): Effect<ReadonlyDeferred<A, E | TargetGone | Timeout>, ObserveError, Scope>   // subscribed when this returns; await with Deferred.await
-  stream(target: T, filter?: F): Effect<Stream<A, E | EventOverflow>, ObserveError, Scope>   // every match from now on
-  history(target: T, filter?: F): Effect<EventHistory<A>>                                     // every retained match; never waits
+  next<PE = never, PR = never>(target: T, filter?: F, where?: Where<A, PE, PR>):   // subscribed when this returns; await with Deferred.await
+    Effect<ReadonlyDeferred<A, E | PE | TargetGone | Timeout>, ObserveError, Scope | PR>
+  stream<PE = never, PR = never>(target: T, filter?: F, where?: Where<A, PE, PR>):   // every match from now on
+    Effect<Stream<A, E | PE | EventOverflow | TargetGone>, ObserveError, Scope | PR>
+  history(target: T, filter?: F): Effect<EventHistory<A>>                            // every retained match; a read, so no where
 }
+type Where<A, PE, PR> = (event: A) => Effect<boolean, PE, PR>   // a caller predicate, after the declarative filter
 interface EventHistory<A> {
   readonly entries: ReadonlyArray<A>                     // oldest first
   readonly dropped: number                               // matches the cap discarded, so a truncated log doesn't look complete
@@ -481,17 +588,20 @@ interface EventHistory<A> {
 | `PageNavigation` | `PageNavigation` | `url`; `next` also takes `waitUntil` | any page |
 | `Popup` | `Page` from a `Page`, otherwise `ObservedPage` | `url` | any page |
 | `NetworkRequest` | `NetworkRequest` | `RequestFilter`; `next` requires `url` | any page or context |
-| `NetworkResponse` | `NetworkResponse`, or `CapturedResponse<B>` given `body` | `url`, `method`, `status`; `next` requires `url`. `body` (any decoder of an `HttpIncomingMessage`, such as `HttpIncomingMessage.schemaBodyJson(Cart)`) and `where` need inspect and apply to `next` and `stream` | any page or context |
+| `NetworkResponse` | `NetworkResponse`, or `CapturedResponse<B>` given `body` | `url`, `method`, `status`; `next` requires `url`. `body` (any decoder of an `HttpIncomingMessage`, such as `HttpIncomingMessage.schemaBodyJson(Cart)`) needs inspect, applies to `next` and `stream`, and types their `where` | any page or context |
 | `ConsoleMessage` | `ConsoleMessage` | `level`, `text` | any page or context |
 | `UncaughtException` | `UncaughtException`: thrown errors and unhandled rejections | `message` | any page or context |
 | `Dialog` | `Dialog` | `_tag` | any page; `Dialog.handle` needs `Page` |
 | `FileChooser` | `FileChooser` | — | `Page` |
 | `Download` | `Download` | `url` | `Page` or `UserContext` |
 | `AutoResolution` | `AutoResolution`: an obligation decided by a default policy | — | `Page` or `UserContext` |
+| `BrowserWorker` | `BrowserWorker` from a `Page` or `UserContext` (it can `evaluate`, which needs control: workers have no isolated world), otherwise `ObservedBrowserWorker` | `url`, `kind` | any page or context |
+| `NetworkConnection` | `NetworkConnection`: a WebSocket or EventSource, whose `frames` subscribe from now on (CDP and patched WebKit; Unsupported on BiDi) | `url`, `kind` | any page or context |
 
 Each module has the most specific accurate name, with a prefix only where a bare name would clash with the fetch `Request`/`Response` or DOM `Navigation` globals. `ConsoleMessage` avoids Effect's `Console`, and `UncaughtException` avoids our `PageError` and the `*Error` suffix our failures use.
 
 **Events:**
+- **Filters are data; `where` is a function.** The filter is applied before buffering, so unrelated traffic can't overflow a subscription. `where` runs after it, in the subscriber, never on the ingestion path. It is a separate trailing argument because TypeScript can't type a callback from a sibling property of the same object: as its own argument, `where` gets the decoded body type from `body`. The sketch found this.
 - **Subscribe, act, collect.** `next` and `stream` are subscribed by the time their effect returns, so code order is subscription order, and one action can have several outcomes. Filters apply before buffering, so unrelated traffic can't overflow a subscription. A subscription made too late is diagnosed: its `Timeout` names the match that arrived just before it subscribed.
 - **`history` looks back.** It answers questions you couldn't ask in advance (debugging, failure reports, agents, the CLI, a popup's first requests) and never subscribes or waits, so it can't catch what an action causes; that is why there is no `last`.
   - The log is capped by `UserContextOptions.eventLog`, so a missing entry proves nothing unless `dropped` is 0. Complete records come from a `stream` opened at the start, or from `Har.record`.
@@ -501,7 +611,7 @@ Each module has the most specific accurate name, with a prefix only where a bare
 - **Events reveal resources; they don't acquire them.** `Popup.next` and `Popup.history` return the same handle, owned by the scope that acquired its opener; the `Scope` on `next` and `stream` holds only the subscription. Popups of owned pages are owned, and popups of attached pages stay open.
 - **A wait's deadline is set where the wait starts.** `next` hands out the read side of the `Deferred` that latches the first match (a `ReadonlyDeferred`, proposed upstream: upstream/effect-readonly-deferred.md). Its timer comes from the deadline in force at `next`, so the budget is stated where the wait begins: `Download.next(page).pipe(Deadline.within("2 minutes"))`. Time spent in your own steps before you await counts against it. Awaiting always ends: in the match, in `TargetGone` as soon as the owner ends, or in `Timeout`, which fails the deferred rather than interrupting it, because interruption means the caller cancelled. If upstream declines the type, `next` returns the awaiting `Effect` instead, with the same timing.
 - **Results outlive the subscription.** A captured response body is owned bytes, so it survives the subscription and even the page closing.
-- **Event streams end** normally when their owner ends normally or the acquiring scope closes. They fail with `TargetGone` on an abnormal end, and with `EventOverflow` past their bound.
+- **Event streams end** normally when their owner ends normally or the acquiring scope closes. They fail with `TargetGone` on an abnormal end, and with `EventOverflow` past their bound, so both are in every event stream's error type.
 
 **State:**
 - **Watching gives you the present, not the past.** `changes` starts with the current value and conflates, so intermediate stages can be skipped. To see transitions from the beginning, subscribe before the cause, or fork the consumer right after you get the handle.
@@ -525,6 +635,7 @@ declare const Route: {
   readonly abort: RouteDecision
   abortWith(reason: AbortReason): RouteDecision
   readonly fallthrough: RouteDecision                    // next matching handler
+  provideCredentials(credentials: { username: string; password: Redacted<string> }): RouteDecision   // the auth phase only
 }
 // HAR recording: Recordings, below
 
@@ -579,7 +690,33 @@ interface Download {
   readonly finished: Effect<void, DownloadError>          // status.waitFor(finished), under the deadline
   readonly stream: Stream<Uint8Array, DownloadError>
   saveAs(path: LocalPath | string): Effect<void, DownloadError>   // always a local path; transfers from a remote browser where supported
+  readonly cancel: Effect<void, DownloadError>
   // the browser-side file is deleted when its context closes, unless the backend's download policy keeps it; saveAs copies it out first
+}
+
+interface CookieJar {                                    // context.cookies
+  readonly list: Effect<ReadonlyArray<BrowserCookie>, StorageError>          // every cookie in the context
+  listFor(url: Url | string): Effect<ReadonlyArray<BrowserCookie>, StorageError>   // what a request to url would send
+  set(cookie: CookieInput): Effect<void, StorageError>                       // a change, not a declaration: a scope doesn't undo it
+  remove(match: { name: CookieName | string; domain?: CookieDomain | string; path?: string }): Effect<void, StorageError>
+  readonly clear: Effect<void, StorageError>
+  toCookie(cookie: BrowserCookie): Cookies.Cookie                            // to effect/http's Cookie, unredacting the value explicitly
+}
+interface BrowserCookie {                                // Effect's cookie attributes plus what only browsers store
+  readonly name: CookieName; readonly value: Redacted<string>                // values are classified
+  readonly domain: CookieDomain; readonly path: string
+  readonly expires: Option<DateTime.Utc>                 // None: a session cookie
+  readonly httpOnly: boolean; readonly secure: boolean; readonly sameSite: "strict" | "lax" | "none"
+  readonly partitionKey: PartitionKey; readonly priority: "low" | "medium" | "high"
+}
+interface CookieInput {
+  readonly name: CookieName | string
+  readonly value: string | Redacted<string>
+  readonly scope: { _tag: "Url"; url: Url | string } | { _tag: "Domain"; domain: CookieDomain | string; path: string }   // which one is always stated
+  readonly expires?: DateTime.DateTime.Input             // default: a session cookie
+  readonly httpOnly?: boolean; readonly secure?: boolean // defaults false
+  readonly sameSite?: "strict" | "lax" | "none"          // default "lax"
+  readonly partitionKey?: PartitionKey                   // default Unpartitioned
 }
 
 declare const StorageState: {
@@ -589,6 +726,7 @@ declare const StorageState: {
 
 - **Default dialog policy.** It is explicit and has no delay. A context's `dialogs` option (`"dismiss"`, the default for owned contexts; `"accept"`; or `"leaveOpen"`) decides immediately when no handler claims a dialog. `beforeunload` is accepted under `"dismiss"`, so closing never hangs. On attached pages there is no default unless the caller sets one. Every automatic decision is an `AutoResolution` event and is recorded on the operation that was running.
 - **Waiting on a dialog.** An operation blocked by a dialog that a handler or the policy is resolving waits within its deadline, normally just a round trip. Under `"leaveOpen"` it fails immediately with a hint naming the dialog.
+- **Cookies are a change, not a declaration.** `set` and `remove` act once, like a click; a scope closing doesn't undo them. Reading cookies needs a controlled context, as reading storage state does.
 - **Storage state.** `context.exportStorageState` returns the full restorable state as `Redacted<Uint8Array>`. Writing it somewhere is an explicit, visible step. Diagnostic JSON of a context never contains secrets.
 
 ## Page time
@@ -596,12 +734,12 @@ declare const StorageState: {
 ```ts
 interface PageClock {
   install(mode:
-    | { readonly mode: "fixed"; readonly at: DateTime.Input }     // wall time frozen at `at`; timers run
+    | { readonly mode: "fixed"; readonly at: DateTime.DateTime.Input }   // wall time frozen at `at`; timers run
     | { readonly mode: "offset"; readonly by: Duration.Input }    // wall time shifted; everything else real
-    | { readonly mode: "controlled"; readonly at: DateTime.Input }   // wall time, monotonic time, timers and frames move only when told
+    | { readonly mode: "controlled"; readonly at: DateTime.DateTime.Input }   // wall time, monotonic time, timers and frames move only when told
   ): Effect<Registration, DeclarationError, Scope>                 // needs before-author-script timing
   adjust(duration: Duration.Input): Effect<void, ClockError>      // controlled: advances, firing every due timer in order
-  setTime(at: DateTime.Input): Effect<void, ClockError>           // fixed or controlled: jumps; due timers fire at most once, like waking from sleep
+  setTime(at: DateTime.DateTime.Input): Effect<void, ClockError>   // fixed or controlled: jumps; due timers fire at most once, like waking from sleep
   readonly resume: Effect<void, ClockError>                       // real time again, from now
 }
 ```
@@ -805,8 +943,9 @@ yield* Dialog.handle(popup, Dialog.acceptAll)            // a dialog blocks its 
 yield* popup.getByRole("button", { name: "Allow" }).click
 
 // 4 + 9. Response body, decoded and filtered
-const added = yield* NetworkResponse.next(page, { url: "**/api/cart", method: "POST", body: HttpIncomingMessage.schemaBodyJson(Cart),
-  where: (r) => Effect.succeed(r.body.items.length > 0) })
+const added = yield* NetworkResponse.next(page,
+  { url: "**/api/cart", method: "POST", body: HttpIncomingMessage.schemaBodyJson(Cart) },
+  (r) => Effect.succeed(r.body.items.length > 0))         // where: typed from the decoded body
 yield* page.getByRole("button", { name: "Add to cart" }).click
 const res = yield* Deferred.await(added)                 // CapturedResponse<Cart>
 
@@ -880,6 +1019,9 @@ const carts = yield* NetworkResponse.history(page, { url: "**/api/cart" })   // 
 yield* page.getByRole("navigation").pipe(Expect.toMatchAria(
   AriaPattern.node("navigation", "Main", AriaPattern.including(
     AriaPattern.node("link", "Orders", AriaPattern.unchecked)))))
+
+// 17+. The newly sketched areas (input held across steps, frames, cookies, origin storage, emulation,
+//      workers, WebSocket frames, reads and handles) are in sketch/scenarios/gaps.ts, type-checked.
 ```
 
 ## Open questions
