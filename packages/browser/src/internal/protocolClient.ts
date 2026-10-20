@@ -51,6 +51,8 @@ export type Incoming =
     readonly method: string
     readonly params: unknown
   }
+  /** An envelope that carries nothing for the client, such as the reply to a wrapper around a command. */
+  | { readonly _tag: "Ignore" }
 
 /** What an error reply becomes. Tables map onto these tags and never add one. */
 export type Classification =
@@ -167,6 +169,8 @@ export interface Options {
 export interface Client {
   readonly root: Session
   readonly session: (key: Protocol.SessionKey) => Session | undefined
+  /** The sessions attached under a session and not yet ended, oldest first. */
+  readonly children: (session: Session) => ReadonlyArray<Session>
   readonly closed: Effect.Effect<ConnectionLost>
 }
 
@@ -870,6 +874,8 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
         else Deferred.doneUnsafe(entry.reply, Effect.succeed(incoming.result))
         return
       }
+      case "Ignore":
+        return
       case "Event": {
         wire.lifecycle(incoming, lifecycle)
         const state = incoming.key === undefined ? root : sessions.get(incoming.key)
@@ -1049,6 +1055,7 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
   return {
     root: root.handle,
     session: (key) => sessions.get(key)?.handle,
+    children: (session) => Array.from(states.get(session)?.children ?? [], (child) => child.handle),
     closed: Deferred.await(closed)
   } satisfies Client
 }) as (transport: Transport.Transport, wire: Wire, options?: Options) => Effect.Effect<Client, never, Scope.Scope>

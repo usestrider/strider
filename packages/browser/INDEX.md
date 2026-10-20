@@ -2067,6 +2067,24 @@ Transports carry a browser connection's messages (L0): framed text in both direc
 - `class ConnectFailed: Schema.Error { description }` (experimental)
 - `class ConnectionLost: Schema.Error { initiator, description }` (experimental)
 
+### WebKitConnection
+
+A raw connection to Playwright's WebKit build (L0): the browser's own session, a session per page proxy, and one per inspector target and worker inside it, over one `Transport`.
+
+*models*
+
+- `interface WebKitConnection` (experimental)
+  - `readonly browser: Protocol.ProtocolSession`
+  - `readonly pageProxy: (pageProxyId: Playwright.PageProxyID) => Effect.Effect<Protocol.ProtocolSession, Protocol.ProtocolError>`
+  - `readonly targets: (pageProxyId: Playwright.PageProxyID) => Effect.Effect<ReadonlyArray<string>>`
+  - `readonly target: (pageProxyId: Playwright.PageProxyID, targetId: string) => Effect.Effect<Protocol.ProtocolSession, Protocol.ProtocolError>`
+  - `readonly worker: (pageProxyId: Playwright.PageProxyID, targetId: string, workerId: string) => Effect.Effect<Protocol.ProtocolSession, Protocol.ProtocolError>`
+  - `readonly closed: Effect.Effect<Transport.ConnectionLost>`
+
+*constructors*
+
+- `const make: (transport: Transport.Transport) => Effect.Effect<WebKitConnection, never, Scope.Scope>` (experimental)
+
 ## `@usestrider/browser/test`
 
 ### TestRun

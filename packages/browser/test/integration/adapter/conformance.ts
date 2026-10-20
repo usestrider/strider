@@ -455,6 +455,7 @@ export const conformance = (backend: Backend) =>
               if (declared) assert.deepStrictEqual(yield* evaluate(world, page, read), expected, override._tag)
               return declared
             })
+            const width = yield* evaluate(world, page, "() => innerWidth")
             yield* Effect.scoped(Effect.gen(function*() {
               const viewport = yield* check(
                 { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false },
@@ -490,7 +491,7 @@ export const conformance = (backend: Backend) =>
               )
               if (offline) yield* Effect.void
             }))
-            assert.notStrictEqual(yield* evaluate(world, page, "() => innerWidth"), 640)
+            assert.strictEqual(yield* evaluate(world, page, "() => innerWidth"), width, "the viewport it had before")
             assert.isTrue(yield* evaluate(world, page, "() => navigator.onLine"))
           }), timeout)
 

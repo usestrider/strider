@@ -28,3 +28,9 @@ export * as Protocol from "./Protocol.ts"
  * @since 0.1.0
  */
 export * as Transport from "./Transport.ts"
+
+/**
+ * @stability experimental
+ * @since 0.1.0
+ */
+export * as WebKitConnection from "./WebKitConnection.ts"
