@@ -406,6 +406,13 @@ Adapter responsibilities:
 - **Firefox's `unsupported operation`.** `browsingContext.reload` with `ignoreCache`, `true` or `false`, is "not supported yet", which gave BiDi's table its fifth row, `Unsupported`. A reload now sends `ignoreCache` only to bypass the cache, and a navigation command the browser doesn't support fails as `Unsupported` instead of ending its navigation `Failed`.
 - **WebKit.** This build keeps no back/forward cache: going back loads the page again. A reload or traversal the adapter starts is now reported as one, as it is on BiDi; CDP's come from the browser's own navigation type.
 
+**Not built, across backends** (2026-10-20). With these, the protocol layer is otherwise built for CDP, BiDi and patched WebKit:
+
+- **`servedBy` is always `network`.** A request's snapshot is reported when it is sent, before anything says what serves it, and what the response says (CDP's `fromDiskCache` and `fromServiceWorker`, BiDi's `fromCache`, WebKit's `source`) would need a fact that updates the request. That changes the fact contract, so it waits for a review; CDP's `ExtraInfo` headers, the ones the network stack adds, wait for the same fact.
+- **Enrichment and the domain `RcMap`** wait for what consumes them in L1, and the on-demand realm strategy for a measured need.
+- **A test of prerender activation**, which headless Chromium doesn't produce, and **downloading Chrome for Testing**, which the Chromium launcher's `ExecutableNotFound` says isn't built.
+- **The attach-only stock WebKit profile** (Built for WebKit, above).
+
 ### Pause-on-start granularity
 
 Before-author-script setup for *new* targets needs them paused at creation. Granularity differs by backend, and the access model depends on it.
