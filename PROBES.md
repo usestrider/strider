@@ -1,6 +1,6 @@
 # PROBES: conformance probes, hazard coverage and model tests
 
-*Revision 5.25, 2026-10-19; first results 2026-10-20. The specs leave key orderings and identities undefined, and the research disagrees in places. These questions are to be measured, not argued. The probe suite is also the adapters' regression suite: recorded traffic must decode against the generated schemas, and recorded behavior is re-run on each browser roll. Probe results and recorded traces are also the evidence that spec corrections cite (PROTOCOL.md, Code generation). Probe numbers are stable across revisions.*
+*Revision 5.25, 2026-10-19; first results 2026-10-20, for CDP, BiDi and patched WebKit. The specs leave key orderings and identities undefined, and the research disagrees in places. These questions are to be measured, not argued. The probe suite is also the adapters' regression suite: recorded traffic must decode against the generated schemas, and recorded behavior is re-run on each browser roll. Probe results and recorded traces are also the evidence that spec corrections cite (PROTOCOL.md, Code generation). Probe numbers are stable across revisions.*
 
 ## Conformance probes (run against each backend)
 
@@ -69,7 +69,33 @@ Recorded with Chromium 155.0.8059.79 over the pipe, every message logged both wa
 
 Other BiDi findings: a dedicated worker's console messages arrive with its owner window's realm as their source; an error page commits as `about:neterror?e=…` under a navigation id never announced by `navigationStarted`; frame context ids are numeric strings, top-level ones UUIDs; `permissions.setPermission` is implemented.
 
-Other findings: execution context ids restart after a process swap within one session, while `uniqueId` doesn't; `frameStartedNavigating` carries the loader id from the start, also for same-document navigations started by a command (`navigationType: sameDocument`); a refused connection commits `chrome-error://chromewebdata/` under the navigation's own loader id; browser-wide auto-attach without a filter attaches `browser_ui` targets and component extensions' pages; `Fetch.requestPaused` follows `Network.requestWillBeSent` and names it with `networkId`; deep serialization gives BiDi's `RemoteValue`, and a node carries its `backendNodeId` and its document's loader id.
+Other CDP findings: execution context ids restart after a process swap within one session, while `uniqueId` doesn't; `frameStartedNavigating` carries the loader id from the start, also for same-document navigations started by a command (`navigationType: sameDocument`); a refused connection commits `chrome-error://chromewebdata/` under the navigation's own loader id; browser-wide auto-attach without a filter attaches `browser_ui` targets and component extensions' pages; `Fetch.requestPaused` follows `Network.requestWillBeSent` and names it with `networkId`; deep serialization gives BiDi's `RemoteValue`, and a node carries its `backendNodeId` and its document's loader id.
+
+Recorded with Playwright's WebKit build 2359 over the pipe, every message logged both ways by scratch scripts that aren't committed; the conformance suite and `test/integration/WebKit.test.ts` re-check what the WebKit adapter depends on.
+
+| Probe | Patched WebKit (Playwright's build 2359, WebKit 26.6, WPE headless, 2026-10-20) |
+|---|---|
+| 1. Commit ordering | The realm comes after the commit, as in Chromium: `frameNavigated`, then `executionContextCreated`. No event ever says a context was destroyed |
+| 2. Initial `about:blank` reuse | Not kept: a popup opened with `window.open('/hello')` by a same-origin opener commits `/hello` with a new context (id 2 after 1), and so does a new page's first navigation |
+| 8. Orphaned children | Reported: `frameDetached` for each child of a document a navigation replaces, before the parent's `frameNavigated`, like Firefox |
+| 15. Navigations that keep the old document | A 204: `responseReceived` 204, `loadingFailed` "Frame load interrupted" (canceled) and `Playwright.provisionalLoadFailed` with the loader id, and no commit. A download: `Playwright.downloadCreated` (whose `frameId` isn't the page's frame id in the web process), `responseReceived` twice, the same two failures, then `downloadFilenameSuggested` and `downloadFinished`. A request the browser refuses to send (port 9) has no request event at all, only `provisionalLoadFailed` and a `security` console message |
+| 17. `document.open()` | Only `loadEventFired` and `domContentEventFired` again, for the same frame and loader; no other event |
+| 20. Evaluation with user activation | `emulateUserGesture` grants activation that outlasts the call: `isActive` and `hasBeenActive` are still true after it, as with Chromium's `userGesture` |
+| 22. Pause-on-start granularity | Every target created after `Playwright.enable` starts paused (`isPaused`): a new page's, a popup's (its page proxy names its opener) and the provisional target of a cross-site navigation, each resumed on its own with `Target.resume`. The startup page, created before, isn't. Frames run in their page's process (no site isolation in this build), so a cross-site iframe is no target of its own |
+| 24. Error vocabulary | Eight rows (PROTOCOL.md, Built for WebKit): an unknown domain or method (`-32601`, at the browser, a page proxy and a target alike), arguments that can't be processed, a page proxy that is gone (two codes), a target that is gone, an unknown frame, an unknown node by id or object. An unknown execution context ("Missing injected script for given executionContextId"), object or browser context is `Unrecognized` |
+
+Other WebKit findings:
+
+- Two commands abort the browser instead of failing: `Playwright.navigate` with a `frameId` the page doesn't have (exit 134), and `Dialog.handleJavaScriptDialog` with no dialog open (exit 139).
+- A cross-site navigation loads in a provisional target whose main frame has a new id (`8589934595` for `8589934594`); the loader id is the same in both, `Page.didCheckNavigationPolicy` on the old target says `cancel: true` though the navigation goes on, and `didCommitProvisionalTarget` comes before the old target's `targetDestroyed`. The provisional target's tree shows a main frame with an empty URL and loader id.
+- `loadEventFired` usually comes before `domContentEventFired` for the same frame; a parent's `domContentEventFired` can come before its children's load.
+- `Page.getResourceTree` must come before `Runtime.enable` for its snapshot to precede the contexts `Runtime.enable` replays.
+- `Playwright.navigate` replies with the loader id before the load's events, and with none for a same-document navigation; `Playwright.createPage` replies after `pageProxyCreated` and `targetCreated`.
+- `Playwright.setLanguages` reaches only web processes started after it: a same-process navigation keeps the old locale, a cross-site one takes the new one.
+- `Emulation.setDeviceMetricsOverride` resizes the view and has nothing to clear (0 by 0 makes the view empty); WPE headless starts views at 1024 by 768.
+- A document caches `navigator.userAgent` once it has been read, so `Page.overrideUserAgent` shows in it only if nothing read it before.
+- Workers have no `Network` domain; a worker's script request comes on its page's target with `targetId` naming the worker, before `workerCreated`.
+- A dialog's `Dialog.javascriptDialogOpening` comes on the page proxy, and an answer the adapter sends completes it; in a raw-protocol scratch probe, the same answer left the dialog open and its page blocked, and that difference wasn't traced.
 
 ## Hazard coverage
 

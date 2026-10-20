@@ -248,6 +248,16 @@ describe.skipIf(executable === undefined)("WebKit over its inspector protocol", 
             _tag: "Value",
             value: { type: "string", value: new URL(served.crossSite).host }
           })
+          // document.open() shows only as a second load, which starts a new generation (probe 17)
+          yield* adapter.evaluate(realm.realm, {
+            functionDeclaration: "() => { document.open(); document.write('<title>w</title>'); document.close() }",
+            arguments: [],
+            awaitPromise: false,
+            result: "value",
+            userActivation: false
+          })
+          const opened = yield* facts.when("DocumentOpened", (fact) => fact.document === second.document)
+          assert.strictEqual(opened.generation, 1)
           // Page.crash, sent behind the adapter's back with an id it never uses
           const current = targets.at(-1)!
           yield* transport.send(

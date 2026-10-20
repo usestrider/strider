@@ -1,6 +1,6 @@
 # PROTOCOL: transports, protocol clients and backend adapters (L0)
 
-*Revision 5.25, 2026-10-19; CDP code generation, the transports and the CDP client built 2026-10-19; the client's timeouts, late replies and validation modes, the ingestion pipeline, and the CDP and BiDi adapters built 2026-10-20. A condensed sketch drawn from draft 4 of the native model (commit `6cc0bc1`) and the research notes, especially `research/effect-building-blocks.md`, `research/non-js-cdp-clients.md`, `research/puppeteer-and-chromium-bidi.md`, `research/webdriver-bidi.md` and `research/webkit.md`.*
+*Revision 5.25, 2026-10-19; CDP code generation, the transports and the CDP client built 2026-10-19; the client's timeouts, late replies and validation modes, the ingestion pipeline, and the CDP and BiDi adapters built 2026-10-20; WebKit code generation and the WebKit backend built 2026-10-20. A condensed sketch drawn from draft 4 of the native model (commit `6cc0bc1`) and the research notes, especially `research/effect-building-blocks.md`, `research/non-js-cdp-clients.md`, `research/puppeteer-and-chromium-bidi.md`, `research/webdriver-bidi.md` and `research/webkit.md`.*
 
 ## Purpose
 
@@ -128,7 +128,7 @@ interface ErrorMatcher {
   - The default handler releases. L1 will set one that adopts the resource into its owner, or releases it. `createIsolatedWorld` has no release command; its world lasts as long as its document.
 - **Validation.** `Protocol.CurrentValidation` is `"decode"` unless set; `"trust"` skips codecs that only check, and still runs those that transform, such as a sensitive member becoming `Redacted`, so trust never leaks a secret as a plain string. Whether a codec only checks is read from its schema AST once and cached. Encoding always runs.
 - **Tests:** 23 against a scripted browser now, 10 more for the pipeline with a fold, and the 7 against Chromium.
-- **Not built yet:** the backend adapter.
+- **Not built yet:** the backend adapter, which came next (Backend adapters, below).
 
 ## Code generation
 
@@ -355,6 +355,39 @@ Adapter responsibilities:
 - **Findings** (PROBES.md, Results): Firefox sends `contextDestroyed` for frames orphaned by a navigation (probe 8); `userActivation` grants activation only during the call (probe 20); a dedicated worker's console messages come attributed to its owner's realm; `document.open()` shows as `historyUpdated` and a repeated `domContentLoaded`, which the adapter reports as a new generation (probe 17).
 - **Tests:** the conformance suite's 23 tests pass against Firefox 158 as they do against Chromium; 5 Firefox tests check the launcher, the raw connection, every error-table row against the browser, and both corrections.
 
+**Built for WebKit** (2026-10-20), for Playwright's WebKit build (`src/internal/webkitAdapter.ts`, `src/internal/webkitWire.ts`, `src/internal/webkitUtility.ts`, `src/internal/webkitLauncher.ts`, and the public `WebKitConnection`):
+
+- **Wire.** Three levels of session on one pipe.
+  - The browser's own session takes the `Playwright` domain.
+  - A page proxy (one page, in the UI process) adds `pageProxyId` to the envelope and takes `Dialog`, `Emulation`, `Input`, `Screencast` and `Target`.
+  - An inspector target (the page in a web process) is reached by wrapping each command in `Target.sendMessageToTarget`, and its messages come back wrapped in `Target.dispatchMessageFromTarget`. A worker is one more level, through `Worker.sendMessageToWorker`.
+
+  A session's key is the ids on its path as a JSON array (`["5","page-6"]`), so no id is mistaken for a separator. A wrapper is a command of its own: it takes the negated id of the command it carries (the browser accepts negative ids), its success is ignored (a new `Ignore` envelope in the client), and its failure becomes the carried command's error, since that command never arrived. `pageProxyCreated`, `targetCreated` and `workerCreated` attach sessions; `pageProxyDestroyed`, `targetDestroyed` and `workerTerminated` end them, and `didCommitProvisionalTarget` ends the target it swaps out as `swapped`. The client gained `children`, the sessions attached under a session, which `WebKitConnection.targets` reads: a page's first target is announced before `Playwright.createPage` replies.
+- **The error table** has eight rows, recorded against build 2359: an unknown domain or method at any level (`-32601`); arguments that can't be processed (`-32602`); a page proxy that is gone, which is `SessionEnded{detached}` when the envelope names it (`-32602`) and `Rejected{NoSuchTarget}` when a parameter does (`-32000`); a target that is gone (`SessionEnded{detached}`); an unknown frame; and an unknown node, by node id or by object. An unknown execution context or remote object stays `Unrecognized`, as on CDP.
+- **Launcher.** The executable is `executablePath`, or the pinned build where Playwright installs it (`PLAYWRIGHT_BROWSERS_PATH`, or Playwright's cache directory, under `webkit-2359`), and nothing else. The profile is always persistent (`--user-data-dir`), so the browser has a default context, as a stock browser does, and opens one page in it. The launch compares the build's `protocol.json` with the vendored one by SHA-256 and fails with `IncompatibleRevision` if they differ or it has none, unless `checkRevision` is off: this is the drift test's launch-time half.
+- **Connecting.** `Playwright.enable` announces the pages that already exist before it replies; they are adopted. Every target created after it starts paused (`isPaused`), the startup page's doesn't.
+- **The gate.** Each session is synced before its events are folded.
+  - A page proxy enables `Dialog` and applies what the page proxy carries: JavaScript, focus and the permissions granted to its context.
+  - A target enables `Page`, `Network` and `Console`, takes `Page.getResourceTree` (the snapshot), then enables `Runtime`, whose contexts arrive after it, and `Worker`. It applies the declarations in force (the target's overrides, the bootstrap script, interception, the file chooser, the isolated worlds the page has asked for) and the viewport for a page's first target, and resumes it with `Target.resume`, in a finalizer.
+  - A worker enables `Runtime` and `Console`, then `Worker.initialized` lets it run.
+- **Correlation.**
+  - A page proxy is the page. A cross-site navigation loads in a provisional target, whose main frame has a new frame id: the snapshot maps that id onto the page's main frame, and `didCommitProvisionalTarget` makes it the page's. Loader ids survive the swap, so the navigation is followed across it, and the provisional process's own empty document is never reported.
+  - Realms are execution contexts, keyed by session and context id. WebKit never reports one destroyed: a document's realms end when another document commits in its frame, when the frame goes, or with their target.
+  - Navigations are keyed by loader id. A command's navigation takes the loader id from `Playwright.navigate`'s reply, or is matched by URL to the first document request, whichever comes first; a load that failed before the reply is ended when it arrives.
+  - A console message is attributed to the realm of its first object argument (WebKit's object ids name their context); one with only primitive arguments is attributed to the main frame's main realm, a limitation the capability profile states.
+- **Outcomes.** Commit; same document (`navigatedWithinDocument`, a fragment when only the fragment differs); download (`Playwright.downloadCreated` names the page, and a navigation there to that URL becomes it); no content (a 204's load fails); failure (`Playwright.provisionalLoadFailed`, which also covers a request the browser refused to send); supersession by a new navigation.
+- **Evaluation.** WebKit calls functions only on an object and serializes only JSON, so each realm gets a helper, installed on first use from an expression whose value it is, kept in a closure where the page can't reach it. Every call runs through it: it deserializes arguments from `RemoteValue` (handles pass as remote objects), awaits if asked, and returns BiDi's `RemoteValue` as JSON text, or the value itself for a handle. The nodes a value holds come back in a batch, as remote objects, which are their bindings: `DOM.setInputFiles` takes one. `emulateUserGesture` grants activation for the call.
+- **Operations** use `Playwright.createContext` (with `setIgnoreCertificateErrors` for `acceptInsecureCerts`, which CDP can't scope), `createPage` and `closePage` (with `runBeforeUnload`), `Playwright.navigate`, `Page.reload`, `goBack` and `goForward` (one entry at a time; other deltas are `Unsupported`), `Page.createUserWorld`, the `Input` domain on the page proxy (Windows key codes, as on CDP; `Page.insertText` on the target), `Network.addInterception` with each glob compiled to an anchored regular expression, `Dialog.handleJavaScriptDialog`, `DOM.setInputFiles` after `Playwright.grantFileReadAccess`, `Page.snapshotRect` for screenshots, `Playwright` cookies, `Emulation.grantPermissions` per page proxy, `Network.getResponseBody`, and `Playwright.setDownloadBehavior`.
+- **Declarations, where WebKit differs.**
+  - Init scripts are one bootstrap script per target (`Page.setBootstrapScript`), main world only: an init script for an isolated world is `Unsupported`.
+  - The viewport is a resize of the view, with nothing to clear, so the adapter measures the size the view had before its first resize, and restores that.
+  - The locale (`Playwright.setLanguages`) and geolocation are per context. A web process takes its languages when it starts, so a locale declared for pages that already exist is `Unsupported`; declared first, it applies to every page created after.
+  - A document caches `navigator.userAgent` the first time it is read, so a user-agent override reaches a document that has read it only at its next navigation; requests carry it at once.
+- **Not supported, and said so:** PDFs, interception of authentication (WebKit answers challenges from credentials set in advance), a response-phase `Fail`, and the per-page locale and geolocation above.
+- **Hazards** (PROBES.md, Results): `Playwright.navigate` with a frame id the page doesn't have, and `Dialog.handleJavaScriptDialog` with no dialog open, abort the browser. The adapter navigates only frames it has seen and not seen go, and answers only a dialog it has seen open and not seen close; a frame that goes between that check and the command is a race it can't close.
+- **Tests:** the conformance suite's 23 tests pass against build 2359 as they do against Chromium and Firefox; 6 WebKit tests check the launcher and its revision check, the raw connection, every error-table row (with unknown methods at every level), a cross-site navigation followed across targets, `document.open()`, and a crash.
+- **Not built:** the attach-only stock profile (iOS, WKWebView, the WebKitGTK inspector). It needs stock WebKit's protocol, vendored and modeled as a backend of its own (its domains differ from Playwright's: no `Playwright`, no page proxies), and an endpoint to record against, which this environment doesn't have.
+
 ### Pause-on-start granularity
 
 Before-author-script setup for *new* targets needs them paused at creation. Granularity differs by backend, and the access model depends on it.
@@ -363,7 +396,7 @@ Before-author-script setup for *new* targets needs them paused at creation. Gran
 |---|---|
 | CDP | frames and workers: per page, by auto-attach on the page's session. Popups: **browser-wide only**: neither `autoAttachRelated` nor the opener's auto-attach attaches them (confirmed 2026-10-20, Chromium 155) |
 | BiDi | not needed: declarations are scoped natively by context or user context (built 2026-10-20) |
-| Patched WebKit | per page proxy; popup behavior unconfirmed |
+| Patched WebKit | every target created after `Playwright.enable` starts paused: new pages, popups and the provisional targets of cross-site navigations, each resumed on its own (`Target.resume`); workers wait for `Worker.initialized` (built 2026-10-20) |
 
 The capability is `pauseScope: "context" | "related" | "opener" | "browser"`. A declaration that needs `beforeAuthorScript` on targets the available granularity can't isolate fails with `Unsupported`. Observe-only targets are never paused.
 
@@ -375,8 +408,8 @@ Each backend ships as its own subpath export (`@usestrider/browser/chromium`, `/
 1. **CDP:** launched Chromium; remote endpoints.
 2. **BiDi:** Firefox, plus Chrome over chromium-bidi as a cross-check.
 3. **WebKit inspector:**
-   - a *patched* profile for Playwright's builds, revision-pinned because about 27% of rolls change the protocol;
-   - an attach-only *stock* profile for iOS, WKWebView and the WebKitGTK inspector.
+   - a *patched* profile for Playwright's builds, revision-pinned because about 27% of rolls change the protocol (built 2026-10-20 for build 2359);
+   - an attach-only *stock* profile for iOS, WKWebView and the WebKitGTK inspector (not built: Built for WebKit, above).
 4. **Experimental BiDi profiles:** Safari Technology Preview (needs `safari:experimentalWebSocketUrl`) and WebKitGTK/WPE (about 23% of WPT).
 
 ### Capability snapshot

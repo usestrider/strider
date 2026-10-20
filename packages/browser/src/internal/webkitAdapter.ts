@@ -17,7 +17,8 @@
  * - **Evaluation** runs through a helper installed in each realm (`webkitUtility.ts`), because WebKit calls
  *   functions only on objects and serializes only JSON. The helper returns WebDriver BiDi's `RemoteValue`.
  * - **Readiness.** WebKit can report a document's `load` before its `DOMContentLoaded`; a document is reported
- *   interactive, then complete, whichever arrives first.
+ *   interactive, then complete, whichever arrives first. A complete document that loads again was reopened
+ *   (`document.open()`), which WebKit reports no other way, so it starts a new generation.
  * - **Hazards** (PROBES.md, WebKit): `Playwright.navigate` with a frame id the page doesn't have, and
  *   `Dialog.handleJavaScriptDialog` with no dialog open, abort the browser. The adapter navigates only frames it
  *   has seen and not seen go, and answers only dialogs it has seen open and not seen close.
@@ -137,6 +138,7 @@ interface DocumentEntry {
   readonly realms: Set<RealmEntry>
   interactive: boolean
   complete: boolean
+  generation: number
 }
 
 interface RealmEntry {
@@ -669,7 +671,8 @@ export const connect: (
         url: snapshot.url,
         realms: new Set(),
         interactive: false,
-        complete: false
+        complete: false,
+        generation: 0
       }
       documents.set(document.id, document)
       frame.document = document
@@ -1209,7 +1212,13 @@ export const connect: (
       },
       [Page.loadEventFired.method]: (_where, params: Page.LoadEventFiredParams) => {
         const document = frames.get(params.frameId)?.document
-        if (document === undefined || document.complete) return
+        if (document === undefined) return
+        if (document.complete) {
+          // A document that loads again was opened again: `document.open()` shows only this (probe 17)
+          document.generation++
+          document.interactive = false
+          emit({ _tag: "DocumentOpened", document: document.id, generation: document.generation })
+        }
         // WebKit can report load first: the document was interactive before it was complete
         if (!document.interactive) {
           document.interactive = true

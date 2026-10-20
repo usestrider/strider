@@ -14,12 +14,14 @@ layer. Use `pnpm` from the repository root.
   rewrite them.
 - `packages/browser` is the published package:
   - `src/`: one module per file, exported as namespaces. `src/index.ts` and each subpath's `index.ts` are generated.
-    `src/internal/` is implementation that no subpath exports, such as the protocol client and CDP's wire.
+    `src/internal/` is implementation that no subpath exports, such as the protocol client, each backend's wire,
+    launcher and adapter.
   - `scenarios/`: the acceptance scenarios from API.md, type-checked as ordinary code.
   - `typetest/`: Tstyche tests of access rules, requirement channels and what crosses by value.
   - `test/`: runtime tests with `@effect/vitest`. `test/integration/` drives real browsers: Chromium (set
-    `STRIDER_CHROMIUM`, or put Chromium or Chrome on `PATH`) and Firefox (`STRIDER_FIREFOX`, or `firefox` on `PATH`);
-    a browser that isn't there has its tests reported as skipped. `test/integration/adapter/` is the adapter
+    `STRIDER_CHROMIUM`, or put Chromium or Chrome on `PATH`), Firefox (`STRIDER_FIREFOX`, or `firefox` on `PATH`) and
+    Playwright's WebKit build 2359 (`STRIDER_WEBKIT` naming its `pw_run.sh`, or installed where Playwright installs
+    it); a browser that isn't there has its tests reported as skipped. `test/integration/adapter/` is the adapter
     conformance suite, written once and run against each backend.
   - `INDEX.md`: every declaration and member, generated.
 - `packages/tools/docs`: the JSDoc checker (vendored from Effect; don't edit it), the example check, `INDEX.md` and
