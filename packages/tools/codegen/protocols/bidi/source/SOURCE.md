@@ -18,3 +18,15 @@ Each command's result is the rule named after it with `Result` appended (`browsi
 `browsingContext.ActivateResult`), which is how every command section of the spec pairs its Command Type with its
 Return Type. A roll replaces both files and this note, then regenerates the model; the model's diff names what
 changed.
+
+## Extension: Permissions
+
+`permissions.cddl` is the WebDriver BiDi CDDL of the Permissions spec (the `permissions` module), extracted the same
+way from its `index.html`, under the W3C Software and Document License.
+
+- **Revision:** `w3c/permissions` at `0051a836a92c4f8e37d016f261bbbed5b6312b96` (2025-10-06).
+- **Fetched:** 2026-10-20.
+- **SHA-256:** `permissions.cddl`: `2e1565bf810deafb0e3a21f44d33a8c019862ead1b2079734ddd36069701d8ff`
+
+The spec gives `permissions.setPermission` no return type; like every BiDi command that returns nothing, it is read
+as `EmptyResult`. Firefox 158 implements it (recorded 2026-10-20).

@@ -44,6 +44,12 @@
         "status": "stable"
       }
     },
+    "permissions": {
+      "dependencies": [],
+      "traits": {
+        "status": "stable"
+      }
+    },
     "script": {
       "dependencies": [],
       "traits": {
@@ -2221,7 +2227,7 @@
             "_tag": "Scalar",
             "scalar": "string"
           },
-          "optional": false,
+          "optional": true,
           "traits": {
             "status": "stable"
           }
@@ -9335,6 +9341,102 @@
       "_tag": "Command",
       "method": "network.setExtraHeaders",
       "params": "network#SetExtraHeadersParameters",
+      "result": null,
+      "traits": {
+        "status": "stable"
+      }
+    },
+    "permissions#PermissionDescriptor": {
+      "_tag": "Struct",
+      "members": {
+        "name": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable"
+          }
+        }
+      },
+      "traits": {
+        "status": "stable"
+      }
+    },
+    "permissions#PermissionState": {
+      "_tag": "Enum",
+      "values": [
+        "granted",
+        "denied",
+        "prompt"
+      ],
+      "traits": {
+        "status": "stable"
+      }
+    },
+    "permissions#SetPermissionParameters": {
+      "_tag": "Struct",
+      "members": {
+        "descriptor": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "permissions#PermissionDescriptor"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable"
+          }
+        },
+        "state": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "permissions#PermissionState"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable"
+          }
+        },
+        "origin": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable"
+          }
+        },
+        "embeddedOrigin": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable"
+          }
+        },
+        "userContext": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable"
+          }
+        }
+      },
+      "traits": {
+        "status": "stable"
+      }
+    },
+    "permissions#setPermission": {
+      "_tag": "Command",
+      "method": "permissions.setPermission",
+      "params": "permissions#SetPermissionParameters",
       "result": null,
       "traits": {
         "status": "stable"

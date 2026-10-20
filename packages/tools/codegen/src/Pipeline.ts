@@ -58,10 +58,15 @@ export const build = Effect.fnUntraced(function*(root: string, backend: Backend)
       (name) => readJson(path.join(directory, "source", name), Schema.Unknown)
     ).pipe(Effect.map((sources) => () => Cdp.parse(revisions.cdp, sources as ReadonlyArray<CdpProtocol>)))
     : yield* Effect.forEach(
-      ["remote", "local"] as const,
-      (side) =>
-        fs.readFileString(path.join(directory, "source", `${side}.cddl`)).pipe(
-          Effect.map((text): Cddl.CddlSource => ({ file: `${side}.cddl`, side, text }))
+      [
+        { file: "remote.cddl", side: "remote" },
+        { file: "local.cddl", side: "local" },
+        // The Permissions spec's module, whose commands have no return type
+        { file: "permissions.cddl", side: "remote", emptyResults: true }
+      ] as const,
+      (source) =>
+        fs.readFileString(path.join(directory, "source", source.file)).pipe(
+          Effect.map((text): Cddl.CddlSource => ({ ...source, text }))
         )
     ).pipe(Effect.map((sources) => () => Cddl.parse(revisions.bidi, sources)))
   const corrections = yield* readDirectory(path.join(directory, "patches"), Correction)

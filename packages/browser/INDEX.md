@@ -1819,7 +1819,7 @@ The generic BiDi backend (`@usestrider/browser/bidi`): any WebDriver BiDi endpoi
 
 ## `@usestrider/browser/bidi-protocol`
 
-11 generated modules: Browser, BrowsingContext, Common, Emulation, Input, Log, Network, Script, Session, Storage, WebExtension. Their declarations are in the API reference.
+12 generated modules: Browser, BrowsingContext, Common, Emulation, Input, Log, Network, Permissions, Script, Session, Storage, WebExtension. Their declarations are in the API reference.
 
 ## `@usestrider/browser/cdp`
 

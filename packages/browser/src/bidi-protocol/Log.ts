@@ -65,7 +65,7 @@ export type Entry = GenericLogEntry | ConsoleLogEntry | JavascriptLogEntry
  * @since 0.1.0
  */
 export const Entry = /*#__PURE__*/ Schema.suspend(() =>
-  Schema.Union([GenericLogEntry, ConsoleLogEntry, JavascriptLogEntry])
+  Schema.Union([ConsoleLogEntry, JavascriptLogEntry, GenericLogEntry])
 ) as any as Schema.Codec<Entry>
 
 /**

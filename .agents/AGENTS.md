@@ -17,16 +17,19 @@ layer. Use `pnpm` from the repository root.
     `src/internal/` is implementation that no subpath exports, such as the protocol client and CDP's wire.
   - `scenarios/`: the acceptance scenarios from API.md, type-checked as ordinary code.
   - `typetest/`: Tstyche tests of access rules, requirement channels and what crosses by value.
-  - `test/`: runtime tests with `@effect/vitest`. `test/integration/` drives a real Chromium: set `STRIDER_CHROMIUM`, or
-    put Chromium or Chrome on `PATH`; without one, those tests are reported as skipped.
+  - `test/`: runtime tests with `@effect/vitest`. `test/integration/` drives real browsers: Chromium (set
+    `STRIDER_CHROMIUM`, or put Chromium or Chrome on `PATH`) and Firefox (`STRIDER_FIREFOX`, or `firefox` on `PATH`);
+    a browser that isn't there has its tests reported as skipped. `test/integration/adapter/` is the adapter
+    conformance suite, written once and run against each backend.
   - `INDEX.md`: every declaration and member, generated.
 - `packages/tools/docs`: the JSDoc checker (vendored from Effect; don't edit it), the example check, `INDEX.md` and
   the API reference dataset.
 - `packages/tools/utils`: barrel codegen.
 - `packages/tools/codegen`: protocol code generation. `protocols/<backend>/` holds the vendored spec (`source/`),
   corrections (`patches/`), our annotations (`overlay/`), and the generated `model.json` and `coverage.json`. Its
-  output is `packages/browser/src/cdp/`. Never edit generated files: change a correction or an annotation and run
-  `pnpm codegen:protocol`. A correction says what the spec states, what the wire does, and the evidence.
+  output is `packages/browser/src/cdp/` and `packages/browser/src/bidi-protocol/`. Never edit generated files:
+  change a correction or an annotation and run `pnpm codegen:protocol`. A correction says what the spec states,
+  what the wire does, and the evidence.
 - `.repos/`: read-only references cloned by `scripts/worktree-setup.sh`, such as Effect's sources and its
   `.agents/skills`. Never import from them.
 
@@ -41,6 +44,7 @@ Use the narrowest check that covers the change:
 | Protocol corrections or annotations | `pnpm codegen:protocol`, then `pnpm check`                                                                                                   |
 | Runtime behavior                    | `pnpm test --run <file>`                                                                                                                     |
 | The protocol client or transports   | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts packages/browser/test/integration` |
+| A backend adapter                   | `pnpm test --run packages/browser/test/integration/adapter`                                                                                  |
 | Access rules or other type behavior | `pnpm test-types`                                                                                                                            |
 | JSDoc text, categories or links     | `pnpm jsdocs`                                                                                                                                |
 | JSDoc examples                      | `pnpm jsdocs`, then `pnpm examples`                                                                                                          |

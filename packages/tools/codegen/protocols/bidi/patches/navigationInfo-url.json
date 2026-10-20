@@ -1,0 +1,12 @@
+{
+  "spec": "browsingContext.NavigationInfo requires url: text, in every navigation event (editor's draft at f922e6a).",
+  "wire": "Firefox 158.0 sends browsingContext.navigationStarted without url for the navigation that closing a page with promptUnload starts, so the member is optional on the wire.",
+  "evidence": "Recorded 2026-10-20 from Firefox 158.0, after browsingContext.close({ promptUnload: true }) opened a beforeunload prompt: {\"context\":…,\"navigation\":…,\"timestamp\":…,\"userContext\":…}.",
+  "operations": [
+    {
+      "op": "replace",
+      "path": "/shapes/browsingContext#NavigationInfo/members/url/optional",
+      "value": true
+    }
+  ]
+}

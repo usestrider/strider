@@ -57,6 +57,18 @@ Recorded with Chromium 155.0.8059.79 over the pipe, every message logged both wa
 | 24. Error vocabulary | Six rows (PROTOCOL.md, Protocol client): unknown method, invalid parameters, unknown target, unknown frame, unknown node, ended session. An unknown execution context is `Unrecognized` |
 | 25. Several clients on one browser | Yes: a second client connected over the debugging port attached to a page the first one had created and crashed it, and the first one saw the crash |
 
+| Probe | BiDi (Firefox 158.0, 2026-10-20) |
+|---|---|
+| 1. Commit ordering | The realm comes **before** the commit: `realmDestroyed` (old), sometimes a transient `realmCreated` and `realmDestroyed` with origin `null`, `realmCreated` (new), then `navigationCommitted` |
+| 2. Initial `about:blank` reuse | Kept, as in Chromium: a same-origin frame or popup commits its first document with no new realm |
+| 8. Orphaned children | Reported: `contextDestroyed` for the remaining frame when the top document navigated away, unlike Chromium |
+| 15. Navigations that keep the old document | A 204: `responseStarted` 204, `fetchError` `NS_BINDING_ABORTED`, an error reply to `browsingContext.navigate`, and `navigationFailed` only when the next navigation starts. A download: `downloadWillBegin` naming the navigation, then `downloadEnd` |
+| 17. `document.open()` | `historyUpdated`, then `domContentLoaded` and `load` again under the document's own navigation id |
+| 20. Evaluation with user activation | `userActivation: true` grants transient activation for the call only: `isActive` and `hasBeenActive` are true inside it and false after. A popup opened inside it isn't blocked. Chromium's `userGesture` leaves `hasBeenActive` true |
+| 24. Error vocabulary | `unknown command` for a missing method (also for `emulation.setMediaFeaturesOverride`, which Firefox doesn't implement), `invalid argument`, `no such frame`, `no such node`, `no such history entry`, `no such network data`; a failed navigation is an `unknown error` reply to `navigate` |
+
+Other BiDi findings: a dedicated worker's console messages arrive with its owner window's realm as their source; an error page commits as `about:neterror?e=…` under a navigation id never announced by `navigationStarted`; frame context ids are numeric strings, top-level ones UUIDs; `permissions.setPermission` is implemented.
+
 Other findings: execution context ids restart after a process swap within one session, while `uniqueId` doesn't; `frameStartedNavigating` carries the loader id from the start, also for same-document navigations started by a command (`navigationType: sameDocument`); a refused connection commits `chrome-error://chromewebdata/` under the navigation's own loader id; browser-wide auto-attach without a filter attaches `browser_ui` targets and component extensions' pages; `Fetch.requestPaused` follows `Network.requestWillBeSent` and names it with `networkId`; deep serialization gives BiDi's `RemoteValue`, and a node carries its `backendNodeId` and its document's loader id.
 
 ## Hazard coverage

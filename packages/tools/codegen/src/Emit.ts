@@ -193,6 +193,27 @@ export const emit = (model: ProtocolModel, source: Source): Emitted => {
     byDomain.set(domain, [...taken, id])
   }
 
+  /**
+   * The order a union's members are tried in when decoding: the spec's, except that a member typing a field
+   * loosely (BiDi's `log.GenericLogEntry`, `type: text`) goes after the members that fix that field to a
+   * literal, so it doesn't decode their values and drop their fields.
+   */
+  const decodeOrder = (members: ReadonlyArray<TypeExpr>): ReadonlyArray<TypeExpr> => {
+    const structOf = (member: TypeExpr) => member._tag === "Ref" ? shapes[member.shape] : undefined
+    const literalKeys = new Set<string>()
+    for (const member of members) {
+      const shape = structOf(member)
+      if (shape?._tag !== "Struct") continue
+      for (const [key, field] of Object.entries(shape.members)) if (field.type._tag === "Literal") literalKeys.add(key)
+    }
+    const loose = (member: TypeExpr) => {
+      const shape = structOf(member)
+      return shape?._tag === "Struct" &&
+        Object.entries(shape.members).some(([key, field]) => literalKeys.has(key) && field.type._tag !== "Literal")
+    }
+    return [...members.filter((member) => !loose(member)), ...members.filter(loose)]
+  }
+
   const modules = new Map<string, string>()
   for (const [domain, ids] of [...byDomain].sort(([a], [b]) => a < b ? -1 : 1)) {
     // Import names never collide with the module's own (CDP's SmartCardEmulation has a type named `Protocol`)
@@ -260,7 +281,7 @@ export const emit = (model: ProtocolModel, source: Source): Emitted => {
         case "Literal":
           return type.value === null ? `${$Schema}.Null` : `${$Schema}.Literal(${JSON.stringify(type.value)})`
         case "Union":
-          return `${$Schema}.Union([${type.members.map(codecOf).join(", ")}])`
+          return `${$Schema}.Union([${decodeOrder(type.members).map(codecOf).join(", ")}])`
         case "Tuple":
           return `${$Schema}.Tuple([${type.items.map(codecOf).join(", ")}])`
         case "Map":

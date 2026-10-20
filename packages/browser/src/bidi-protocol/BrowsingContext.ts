@@ -1146,7 +1146,7 @@ export interface NavigationInfo {
   readonly context: BrowsingContext
   readonly navigation: Navigation | null
   readonly timestamp: number
-  readonly url: string
+  readonly url?: string | undefined
   readonly userContext?: Browser.UserContext | undefined
 }
 
@@ -1162,7 +1162,7 @@ export const NavigationInfo = /*#__PURE__*/ Schema.suspend(() =>
     context: BrowsingContext,
     navigation: Schema.Union([Navigation, Schema.Null]),
     timestamp: Schema.Int,
-    url: Schema.String,
+    url: Schema.optional(Schema.String),
     userContext: Schema.optional(Browser.UserContext)
   }).annotate({ identifier: "browsingContext.NavigationInfo" })
 ) as any as Schema.Codec<NavigationInfo>

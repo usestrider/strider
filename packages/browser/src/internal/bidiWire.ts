@@ -13,18 +13,16 @@ const recorded = "Firefox 158.0, recorded 2026-10-20; checked by test/integratio
 
 /**
  * BiDi's error table. The spec names every error code, so rows match the code alone; a code the table doesn't
- * know is `Unrecognized`.
+ * know is `Unrecognized`, as are those no `RejectReason` fits (`no such history entry`, `no such network data`).
+ * Firefox reports a command it doesn't implement as `unknown command`, never `unsupported operation`, so that
+ * code has no row until a browser is recorded sending it.
  */
 export const errors: ReadonlyArray<ErrorMatcher> = [
   {
     match: { code: "unknown command" },
     becomes: { _tag: "Unsupported" },
-    evidence: `${spec}: "unknown command"; a method Firefox doesn't know, ${recorded}`
-  },
-  {
-    match: { code: "unsupported operation" },
-    becomes: { _tag: "Unsupported" },
-    evidence: `${spec}: "unsupported operation"`
+    evidence:
+      `${spec}: "unknown command"; "Nope.nothing", and emulation.setMediaFeaturesOverride, which Firefox doesn't implement, ${recorded}`
   },
   {
     match: { code: "invalid argument" },

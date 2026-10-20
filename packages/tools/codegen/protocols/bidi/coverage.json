@@ -1,9 +1,9 @@
 {
   "revision": "f922e6af669ead51496db85f37813f39438ef171",
   "counts": {
-    "domains": 11,
-    "types": 339,
-    "commands": 68,
+    "domains": 12,
+    "types": 342,
+    "commands": 69,
     "events": 24,
     "excluded": 0,
     "approximated": 41

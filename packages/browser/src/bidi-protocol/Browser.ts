@@ -338,8 +338,8 @@ export type SetClientWindowStateParameters =
  */
 export const SetClientWindowStateParameters = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Union([
-    SetClientWindowStateParametersClientWindowNamedState,
-    SetClientWindowStateParametersClientWindowRectState
+    SetClientWindowStateParametersClientWindowRectState,
+    SetClientWindowStateParametersClientWindowNamedState
   ])
 ) as any as Schema.Codec<SetClientWindowStateParameters>
 

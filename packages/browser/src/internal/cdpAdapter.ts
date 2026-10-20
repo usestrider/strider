@@ -520,8 +520,7 @@ const gone = (target: L1Target.Description, reason: L1Target.CloseReason) =>
 
 const foreign = (id: string) => new Adapter.AdapterError({ reason: { _tag: "Foreign", id } })
 
-const protocolError = (error: Protocol.ProtocolError) =>
-  new Adapter.AdapterError({ reason: { _tag: "Protocol", error } })
+const protocolError = Adapter.protocolError
 
 const unsupported = (capability: string, hint: string) =>
   new Adapter.AdapterError({ reason: { _tag: "Unsupported", capability, hint } })
@@ -1886,6 +1885,8 @@ export const connect: (
               )
               : Effect.void
           case "Downloads":
+          case "BodyCollection":
+            // Chromium keeps response bodies on its own, so there is nothing to collect
             return Effect.void
         }
       }, { concurrency: "unbounded", discard: true })

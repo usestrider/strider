@@ -51,6 +51,12 @@ export * as Network from "./Network.ts"
  * @stability unstable
  * @since 0.1.0
  */
+export * as Permissions from "./Permissions.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
 export * as Script from "./Script.ts"
 
 /**

@@ -201,14 +201,11 @@ export const conformance = (backend: Backend) =>
               )
             ])
             for (const frame of frames) {
-              const committed = yield* world.facts.when(
+              yield* world.facts.when(
                 "DocumentCommitted",
                 (fact) => fact.navigable === frame.frame && fact.url.endsWith("/child")
               )
-              yield* world.facts.when(
-                "RealmAdded",
-                (fact) => fact.kind._tag === "Window" && fact.kind.document === committed.document
-              )
+              yield* mainRealm(world, frame.frame)
             }
             const urls = frames.map((frame) =>
               world.facts.all("DocumentCommitted").filter((fact) => fact.navigable === frame.frame).at(-1)!.url
@@ -319,9 +316,9 @@ export const conformance = (backend: Backend) =>
             })
             assert.deepStrictEqual(incremented, { _tag: "Value", value: { type: "number", value: 42 } })
             yield* world.adapter.releaseHandles([handle.value.handle])
-            assert.isFalse(yield* evaluate(world, page, "() => navigator.userActivation.hasBeenActive"))
-            yield* evaluate(world, page, "() => 1", true)
-            assert.isTrue(yield* evaluate(world, page, "() => navigator.userActivation.hasBeenActive"))
+            // Probe 20: activation during the call is what every backend grants; Chromium also keeps it sticky
+            assert.isFalse(yield* evaluate(world, page, "() => navigator.userActivation.isActive"))
+            assert.isTrue(yield* evaluate(world, page, "() => navigator.userActivation.isActive", true))
           }), timeout)
 
         it.effect("dispatches input: a click and typing", () =>
@@ -425,9 +422,11 @@ export const conformance = (backend: Backend) =>
             )
             const third = yield* world.facts.when("ObligationOpened", (fact) =>
               fact.subject._tag === "PausedRequest" && fact.subject.request.url.endsWith("/headers"))
+            // Headers replace the request's own, on every backend: keep them, and add one
+            assert(third.subject._tag === "PausedRequest")
             yield* world.adapter.resolve(third.obligation, {
               _tag: "Continue",
-              overrides: Option.some({ headers: { "x-strider": "continued" } })
+              overrides: Option.some({ headers: { ...third.subject.request.headers, "x-strider": "continued" } })
             })
             const headers = yield* Fiber.join(continued)
             assert.deepInclude(headers as object, { "x-strider": "continued" })
@@ -439,46 +438,57 @@ export const conformance = (backend: Backend) =>
             const { context, page } = yield* newPage(world)
             yield* goto(world, page, `${world.site.origin}/hello`)
             const scope = { _tag: "UserContext", context } as const
+            // Each override takes effect, or fails with Unsupported naming what's missing; never silently
+            const check = Effect.fnUntraced(function*(
+              override: Adapter.Override,
+              read: string,
+              expected: unknown,
+              where: Adapter.DeclarationScope = scope
+            ) {
+              const declared = yield* world.adapter.declare(where, { _tag: "Override", override }).pipe(
+                Effect.as(true),
+                Effect.catchIf(
+                  (error) => error.reason._tag === "Unsupported",
+                  () => Effect.succeed(false)
+                )
+              )
+              if (declared) assert.deepStrictEqual(yield* evaluate(world, page, read), expected, override._tag)
+              return declared
+            })
             yield* Effect.scoped(Effect.gen(function*() {
-              yield* world.adapter.declare(scope, {
-                _tag: "Override",
-                override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
-              })
-              yield* world.adapter.declare(scope, {
-                _tag: "Override",
-                override: { _tag: "TimeZone", timeZone: "Asia/Tokyo" }
-              })
-              yield* world.adapter.declare(scope, { _tag: "Override", override: { _tag: "Locale", locale: "de-DE" } })
-              yield* world.adapter.declare(scope, {
-                _tag: "Override",
-                override: { _tag: "Media", media: Option.none(), features: { "prefers-color-scheme": "dark" } }
-              })
-              yield* world.adapter.declare(scope, {
-                _tag: "Override",
-                override: { _tag: "ExtraHeaders", headers: { "x-extra": "1" } }
-              })
-              assert.deepStrictEqual(
-                yield* evaluate(
-                  world,
-                  page,
-                  "() => [innerWidth, Intl.DateTimeFormat().resolvedOptions().timeZone, new Intl.NumberFormat().resolvedOptions().locale, matchMedia('(prefers-color-scheme: dark)').matches]"
-                ),
-                [640, "Asia/Tokyo", "de-DE", true]
+              const viewport = yield* check(
+                { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false },
+                "() => innerWidth",
+                640
               )
-              const headers = yield* evaluate(world, page, "() => fetch('/headers').then((r) => r.json())")
-              assert.deepInclude(headers as object, { "x-extra": "1" })
-              yield* world.adapter.declare({ _tag: "Page", page }, {
-                _tag: "Override",
-                override: { _tag: "Offline", offline: true }
-              })
-              assert.deepStrictEqual(
-                yield* evaluate(
-                  world,
-                  page,
-                  "() => fetch('/json').then(() => [navigator.onLine, 'ok'], () => [navigator.onLine, 'failed'])"
-                ),
-                [false, "failed"]
+              assert.isTrue(viewport, "every backend sets the viewport")
+              yield* check(
+                { _tag: "TimeZone", timeZone: "Asia/Tokyo" },
+                "() => Intl.DateTimeFormat().resolvedOptions().timeZone",
+                "Asia/Tokyo"
               )
+              yield* check(
+                { _tag: "Locale", locale: "de-DE" },
+                "() => new Intl.NumberFormat().resolvedOptions().locale",
+                "de-DE"
+              )
+              yield* check(
+                { _tag: "Media", media: Option.none(), features: { "prefers-color-scheme": "dark" } },
+                "() => matchMedia('(prefers-color-scheme: dark)').matches",
+                true
+              )
+              yield* check(
+                { _tag: "ExtraHeaders", headers: { "x-extra": "1" } },
+                "() => fetch('/headers').then((r) => r.json()).then((headers) => headers['x-extra'])",
+                "1"
+              )
+              const offline = yield* check(
+                { _tag: "Offline", offline: true },
+                "() => fetch('/json').then(() => [navigator.onLine, 'ok'], () => [navigator.onLine, 'failed'])",
+                [false, "failed"],
+                { _tag: "Page", page }
+              )
+              if (offline) yield* Effect.void
             }))
             assert.notStrictEqual(yield* evaluate(world, page, "() => innerWidth"), 640)
             assert.isTrue(yield* evaluate(world, page, "() => navigator.onLine"))
@@ -503,6 +513,7 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
+            yield* world.adapter.declare({ _tag: "Page", page }, { _tag: "BodyCollection", maxBytes: 1024 * 1024 })
             const { outcome } = yield* goto(world, page, `${world.site.origin}/json`)
             assert(outcome._tag === "Committed")
             const body = yield* world.adapter.responseBody(Option.getOrThrow(outcome.response))
@@ -547,7 +558,14 @@ export const conformance = (backend: Backend) =>
             assert.isEmpty(yield* world.adapter.cookies(other))
             yield* world.adapter.clearCookies(context)
             assert.isEmpty(yield* world.adapter.cookies(context))
-            yield* world.adapter.grantPermissions(context, Option.some(world.site.origin), ["geolocation"])
+            const capabilities = yield* SubscriptionRef.get(world.adapter.capabilities)
+            const granted = world.adapter.grantPermissions(context, Option.some(world.site.origin), ["geolocation"])
+            if (!capabilities.has("permissions")) {
+              const error = yield* Effect.flip(granted)
+              assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "permissions" })
+              return
+            }
+            yield* granted
             assert.strictEqual(
               yield* evaluate(
                 world,
@@ -604,14 +622,24 @@ export const conformance = (backend: Backend) =>
             yield* goto(world, page, `${world.site.origin}/worker`)
             const realm = yield* world.facts.when("RealmAdded", (fact) => fact.kind._tag === "Worker")
             assert(realm.kind._tag === "Worker")
-            assert.deepStrictEqual(realm.kind.worker, { _tag: "Dedicated", owner: Option.none() })
+            assert.strictEqual(realm.kind.worker._tag, "Dedicated")
             const message = yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text === "from the worker")
-            assert.strictEqual(message.realm, realm.realm)
+            // Firefox 158 attributes a dedicated worker's console to its owner, the window realm (recorded 2026-10-20)
+            const owner = realm.kind.worker._tag === "Dedicated"
+              ? Option.getOrUndefined(realm.kind.worker.owner)
+              : undefined
+            assert.include([realm.realm, owner], message.realm)
           }), timeout)
 
         it.effect("reports a WebSocket's frames", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
+            const capabilities = yield* SubscriptionRef.get(world.adapter.capabilities)
+            if (!capabilities.has("webSocketFrames")) {
+              const entry = capabilities.entries.find((entry) => entry.name === "webSocketFrames")
+              assert.strictEqual(entry?.status, "unsupported", "a missing capability is said to be unsupported")
+              return
+            }
             const { page } = yield* newPage(world)
             yield* goto(world, page, `${world.site.origin}/socket`)
             const opened = yield* world.facts.when("ConnectionOpened")
@@ -642,7 +670,12 @@ export const conformance = (backend: Backend) =>
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
             yield* goto(world, page, `${world.site.origin}/beforeunload`)
-            yield* evaluate(world, page, "() => 1", true)
+            // A beforeunload prompt needs the page to have been interacted with: a real click
+            const none = { alt: false, control: false, meta: false, shift: false }
+            yield* world.adapter.dispatchInput(page, [
+              { _tag: "Mouse", type: "down", x: 5, y: 5, button: "left", clickCount: 1, modifiers: none },
+              { _tag: "Mouse", type: "up", x: 5, y: 5, button: "left", clickCount: 1, modifiers: none }
+            ])
             yield* world.adapter.closePage(page, { runBeforeUnload: true })
             const opened = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "Prompt")
             assert.deepInclude(opened.subject, { kind: "beforeunload" })

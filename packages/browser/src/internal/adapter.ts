@@ -480,6 +480,11 @@ export type Declaration =
     readonly behavior: { readonly _tag: "Allow"; readonly directory: string } | { readonly _tag: "Deny" }
   }
   | { readonly _tag: "FileChooser" }
+  | {
+    readonly _tag: "BodyCollection"
+    /** Response bodies kept per request, at most; larger ones aren't kept. */
+    readonly maxBytes: number
+  }
 
 /** A decision for an obligation. */
 export type Decision =
@@ -631,6 +636,21 @@ export class AdapterError extends Data.TaggedError("AdapterError")<{ readonly re
     }
   }
 }
+
+/**
+ * An adapter error for a protocol failure. A command the browser doesn't implement is `Unsupported`, named by
+ * its method, as every missing capability is; anything else is `Protocol`.
+ */
+export const protocolError = (error: Protocol.ProtocolError): AdapterError =>
+  new AdapterError({
+    reason: error.reason._tag === "Unsupported"
+      ? {
+        _tag: "Unsupported",
+        capability: error.reason.method,
+        hint: "This browser doesn't implement it"
+      }
+      : { _tag: "Protocol", error }
+  })
 
 // ── The contract ──────────────────────────────────────────────────────────────────────────────────────────
 

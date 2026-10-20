@@ -1,6 +1,6 @@
 # PROTOCOL: transports, protocol clients and backend adapters (L0)
 
-*Revision 5.25, 2026-10-19; CDP code generation, the transports and the CDP client built 2026-10-19; the client's timeouts, late replies and validation modes, the ingestion pipeline, and the CDP adapter built 2026-10-20. A condensed sketch drawn from draft 4 of the native model (commit `6cc0bc1`) and the research notes, especially `research/effect-building-blocks.md`, `research/non-js-cdp-clients.md`, `research/puppeteer-and-chromium-bidi.md`, `research/webdriver-bidi.md` and `research/webkit.md`.*
+*Revision 5.25, 2026-10-19; CDP code generation, the transports and the CDP client built 2026-10-19; the client's timeouts, late replies and validation modes, the ingestion pipeline, and the CDP and BiDi adapters built 2026-10-20. A condensed sketch drawn from draft 4 of the native model (commit `6cc0bc1`) and the research notes, especially `research/effect-building-blocks.md`, `research/non-js-cdp-clients.md`, `research/puppeteer-and-chromium-bidi.md`, `research/webdriver-bidi.md` and `research/webkit.md`.*
 
 ## Purpose
 
@@ -204,6 +204,23 @@ interface Traits {                               // spec facts plus overlay anno
   - an import that would collide with a module's own names is renamed (CDP's `SmartCardEmulation` has a type named `Protocol`).
 - **Next:** the transports and the CDP client are built (Transports and Protocol client above). The error table's next rows, and the rest of the drift test, come from probes recording real traffic. BiDi's CDDL and WebKit's JSON get their parsers when those backends start; the correction audit is built with the first correction.
 
+**Built for BiDi** (2026-10-20), after review 08 (candidate 12):
+
+- **Source.** WebDriver BiDi's CDDL is extracted from the editor's draft at `w3c/webdriver-bidi` `f922e6a` into `remote.cddl` and `local.cddl`, as the spec's own script does, minus HTML comments. The Permissions spec's module (`w3c/permissions` `0051a83`) is a third source, `permissions.cddl`; `SOURCE.md` records how each was extracted and its hash.
+- **Parser** (`packages/tools/codegen/src/Cddl.ts`). It accepts the subset of RFC 8610 the specs use and fails on anything else:
+  - a group with `method` and `params` is a command (sent by clients) or an event (sent by browsers);
+  - a command's result is the rule named after it plus `Result`, which is how every command section of the spec pairs its types; the Permissions spec gives its command no return type, so that source's commands return `EmptyResult`;
+  - a map is a struct, or a union of structs when its group has choices, including inline choices beside fixed members, which are multiplied out; an included group is flattened, optional if included with `?`;
+  - a choice of strings is an open enum, a single literal stays exact, and decimal and integer ranges are told apart by how they are written.
+- **Model and emitter.** The model gains literals, unions, tuples and string-keyed maps.
+  - The emitter quotes member names that aren't identifiers (`"any-hover"`) and renames reserved words (`Session.new_`).
+  - It redacts sensitive members of any type: a BiDi cookie's value is a `network.BytesValue`, which header values share, so the member is redacted whole.
+  - It capitalizes module names (`BrowsingContext`).
+  - It decodes a union's loose members last: the spec lists `log.GenericLogEntry`, whose `type` is any text, before the console and JavaScript entries, and decoding in that order kept only the generic entry's fields.
+- **Overlay:** 17 id brands, 7 sensitive members (cookie values, credentials, typed keys), 8 resource-creating commands with their releases (one releases into a list: `session.unsubscribe`), and input compensation.
+- **Corrections**, the first two, both recorded from Firefox 158: `browsingContext.contextCreated` comes without the `hasPlannedNavigation` the draft requires, and the `navigationStarted` that closing a page with `promptUnload` starts comes without a `url`.
+- **Output:** 12 modules at `@usestrider/browser/bidi-protocol`, with 342 types, 69 commands and 24 events.
+
 ## Ingestion pipeline
 
 ```
@@ -313,6 +330,21 @@ Adapter responsibilities:
   - enrichment;
   - tests of back/forward-cache restores and prerender activation, which headless Chromium 155 didn't produce (`Page.backForwardCacheNotUsed`).
 
+**Built for BiDi** (2026-10-20), for Firefox and any BiDi endpoint (`src/internal/bidiAdapter.ts`, `src/internal/bidiWire.ts`, `src/internal/firefoxLauncher.ts`, and the public `BidiConnection`):
+
+- **Wire.** One session per connection: every event belongs to it, and the adapter routes events by the context in their parameters. `params` is always sent, even empty. An error reply with no id answers a message the browser couldn't read, which is a bug here, so it ends the connection. The error table matches the spec's codes; Firefox reports a command it doesn't implement as `unknown command`, so `unsupported operation` has no row until a browser sends it.
+- **Connecting.** The adapter starts a session with `unhandledPromptBehavior: ignore`, so prompts and file dialogs wait for a decision, and subscribes to `browsingContext`, `script`, `network`, `log` and `input`. It adopts the contexts `browsingContext.getTree` shows. That tree is also its resync after an integrity failure, which a recorded Firefox event that didn't decode exercised before the correction for it.
+- **No pause.** Declarations are native: preload scripts and overrides registered for a context, a user context or every context apply before a new context's scripts. `pauseScope` is `"context"`, a new page is ready as it appears, and popups get their user context's declarations.
+- **Correlation.** Contexts are navigables, BiDi's navigation ids map to ours (a command's navigation is matched by URL), requests are hops by request id and redirect count, and realms are keyed by BiDi's id. Firefox creates a new document's realm before `navigationCommitted`, sometimes after a transient one: a main-world realm created for a context whose document already had one is held for the next commit, and one destroyed before it is never reported. The initial `about:blank` realm survives into the first same-origin document, as in Chromium (probe 2).
+- **Outcomes.** As on CDP: commit (an `about:neterror` page is `Failed` with its error document), same document (`fragmentNavigated`, `historyUpdated`), download (`downloadWillBegin` names the navigation), no content (a 204 and a fetch error), failure, and supersession by a new navigation. A navigation command whose reply is an error may still have started one, whose events report its outcome.
+- **Operations** map onto `browsingContext`, `script` (sandboxes for isolated worlds, created by evaluating in them; handles owned with `resultOwnership: root` and released with `disown`), `input.performActions` (pointer, key and wheel sources, WebDriver's key codes, typed keys redacted), `network` (intercepts, data collectors), `emulation`, `storage`, `browser.setDownloadBehavior` and `permissions.setPermission`.
+  - **Intercepts** are compiled to URL patterns that cover each glob (scheme, host and port), and the glob is checked by the adapter; a paused request nothing matches continues at once. BiDi can't scope an intercept to a user context, so one scoped that way intercepts browser-wide and filters here (CONCEPTS.md §6).
+  - **Bodies** need a `BodyCollection` declaration before the request starts, a new declaration kind, which compiles to `network.addDataCollector` (CDP needs none).
+  - **Permissions** are granted per origin; BiDi has no reset, so the adapter sets the ones it granted back to `prompt`.
+- **Not supported, and said so:** a navigation referrer, media-feature overrides and focus emulation on Firefox 158, which answers `unknown command` (now `AdapterError{Unsupported}` named by the method), and WebSocket frames, which BiDi has no events for.
+- **Findings** (PROBES.md, Results): Firefox sends `contextDestroyed` for frames orphaned by a navigation (probe 8); `userActivation` grants activation only during the call (probe 20); a dedicated worker's console messages come attributed to its owner's realm; `document.open()` shows as `historyUpdated` and a repeated `domContentLoaded`, which the adapter reports as a new generation (probe 17).
+- **Tests:** the conformance suite's 23 tests pass against Firefox 158 as they do against Chromium; 5 Firefox tests check the launcher, the raw connection, every error-table row against the browser, and both corrections.
+
 ### Pause-on-start granularity
 
 Before-author-script setup for *new* targets needs them paused at creation. Granularity differs by backend, and the access model depends on it.
@@ -320,7 +352,7 @@ Before-author-script setup for *new* targets needs them paused at creation. Gran
 | Backend | Granularity (probe 22) |
 |---|---|
 | CDP | frames and workers: per page, by auto-attach on the page's session. Popups: **browser-wide only**: neither `autoAttachRelated` nor the opener's auto-attach attaches them (confirmed 2026-10-20, Chromium 155) |
-| BiDi | not needed: declarations are scoped natively by context or user context |
+| BiDi | not needed: declarations are scoped natively by context or user context (built 2026-10-20) |
 | Patched WebKit | per page proxy; popup behavior unconfirmed |
 
 The capability is `pauseScope: "context" | "related" | "opener" | "browser"`. A declaration that needs `beforeAuthorScript` on targets the available granularity can't isolate fails with `Unsupported`. Observe-only targets are never paused.

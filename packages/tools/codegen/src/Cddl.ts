@@ -291,6 +291,11 @@ export interface CddlSource {
   readonly file: string
   readonly side: "remote" | "local"
   readonly text: string
+  /**
+   * An extension spec that gives commands no return type: its commands return `EmptyResult` unless a `Result`
+   * rule says otherwise.
+   */
+  readonly emptyResults?: true | undefined
 }
 
 /**
@@ -299,8 +304,10 @@ export interface CddlSource {
 export const parse = (revision: string, sources: ReadonlyArray<CddlSource>): ProtocolModel => {
   const rules = new Map<string, CType>()
   const sides = new Map<string, Set<CddlSource["side"]>>()
+  const emptyResults = new Set<string>()
   for (const source of sources) {
     for (const [name, type] of parseRules(source.text, source.file)) {
+      if (source.emptyResults === true) emptyResults.add(name)
       const known = rules.get(name)
       if (known !== undefined && JSON.stringify(known) !== JSON.stringify(type)) {
         throw new Error(`${source.file}: ${name} is defined differently in another source`)
@@ -513,7 +520,9 @@ export const parse = (revision: string, sources: ReadonlyArray<CddlSource>): Pro
   }
 
   const domains = new Set<string>()
-  const commands: Array<{ readonly name: string; readonly method: string; readonly params: CType }> = []
+  const commands: Array<
+    { readonly name: string; readonly method: string; readonly params: CType; readonly emptyResults: boolean }
+  > = []
   const events: Array<{ readonly method: string; readonly params: CType }> = []
 
   for (const [name, type] of rules) {
@@ -521,7 +530,7 @@ export const parse = (revision: string, sources: ReadonlyArray<CddlSource>): Pro
     const message = messageOf(type)
     if (message !== undefined) {
       const side = sides.get(name)!
-      if (side.has("remote")) commands.push({ name, ...message })
+      if (side.has("remote")) commands.push({ name, ...message, emptyResults: emptyResults.has(name) })
       else events.push(message)
       continue
     }
@@ -568,7 +577,8 @@ export const parse = (revision: string, sources: ReadonlyArray<CddlSource>): Pro
     const id = `${domain}#${name}`
     domains.add(domain)
     const resultName = `${command.name}Result`
-    const result = rules.get(resultName)
+    const result = rules.get(resultName) ??
+      (command.emptyResults ? { kind: "name", name: "EmptyResult" } as CType : undefined)
     if (result === undefined) throw new Error(`${command.method}: no ${resultName}`)
     add(id, {
       _tag: "Command",
