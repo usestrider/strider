@@ -12,6 +12,7 @@ import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Stream from "effect/Stream"
 import * as Browser from "../Browser.ts"
 import * as Diagnostics from "../Diagnostics.ts"
+import * as Reason from "../Reason.ts"
 import { now } from "./adapter.ts"
 
 /** A browser process, started. */
@@ -25,6 +26,14 @@ export interface Launched {
   /** Waits for a line of stderr that matches, and returns its match; `None` if stderr ends first. */
   readonly stderrLine: (pattern: RegExp) => Effect.Effect<Option.Option<RegExpMatchArray>>
 }
+
+/**
+ * Which browser a launch runs: its executable, or a channel the launcher knows, exactly one. Nothing else is
+ * looked up, and nothing is downloaded (review 10).
+ */
+export type Named<Channel extends string> =
+  | { readonly executablePath: string; readonly channel?: undefined }
+  | { readonly channel: Channel; readonly executablePath?: undefined }
 
 /** The `Diagnostics` of a launch: one step, never dispatched to a page. */
 export const diagnostics = (step: string): Diagnostics.Diagnostics =>
@@ -51,6 +60,32 @@ export const findExecutable = Effect.fnUntraced(function*(candidates: ReadonlyAr
   }
   return yield* fail(new Browser.ExecutableNotFound({ searched: [...candidates], hint }), "find the executable")
 })
+
+/**
+ * The executable a launch names: its path, or the first of its channel's candidates that exists. The types
+ * require exactly one; a caller they don't reach, such as plain JavaScript, that names neither or both fails
+ * with `InvalidInput` rather than being given a browser.
+ */
+export const namedExecutable = <Channel extends string>(
+  options: Named<Channel>,
+  channel: (channel: Channel) => { readonly candidates: ReadonlyArray<string>; readonly hint: string }
+) => {
+  if (options.executablePath !== undefined && options.channel === undefined) {
+    return findExecutable([options.executablePath], "The executablePath given doesn't exist")
+  }
+  if (options.channel !== undefined && options.executablePath === undefined) {
+    const { candidates, hint } = channel(options.channel)
+    return findExecutable(candidates, hint)
+  }
+  return fail(
+    new Reason.InvalidInput({
+      input: "launch options",
+      expected: "exactly one of executablePath and channel",
+      hint: "A launch names its browser; nothing is looked up or downloaded in its place"
+    }),
+    "find the executable"
+  )
+}
 
 /** A profile directory: the caller's, or a temporary one deleted after the browser exits. */
 export const profileDirectory = Effect.fnUntraced(function*(userDataDir: string | undefined, prefix: string) {

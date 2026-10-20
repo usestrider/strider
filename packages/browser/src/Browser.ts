@@ -1,8 +1,8 @@
 /**
  * The `Browser` service, its accessors, and the settings every backend shares.
  *
- * A backend layer provides `Browser`: `Chromium.layer()` launches one, `Chromium.layerConnect(endpoint)`
- * attaches to one. Backends are imports, not option values (`@usestrider/browser/chromium`, `/firefox`, `/webkit`,
+ * A backend layer provides `Browser`: `Chromium.layer({ channel: "stable" })` launches the browser it names,
+ * `Chromium.layerConnect(endpoint)` attaches to one. Backends are imports, not option values (`@usestrider/browser/chromium`, `/firefox`, `/webkit`,
  * `/bidi`), so only the protocol code you import is loaded. A launch uses a temporary profile, acquired with
  * `FileSystem.makeTempDirectoryScoped` before the browser starts and deleted after it exits.
  *
@@ -191,29 +191,19 @@ export declare const newContext: (
 ) => Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Browser | Scope.Scope>
 
 /**
- * Settings for launching a browser.
+ * Settings every launch takes, whichever browser it runs.
  *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
-export interface LaunchOptions {
+export interface LaunchSettings {
   /**
    * Run without a visible window.
    *
    * @default true
    */
   readonly headless?: boolean | undefined
-  /**
-   * An installed release channel.
-   *
-   * @default Chrome for Testing, not an installed channel
-   */
-  readonly channel?: "stable" | "beta" | "canary" | undefined
-  /**
-   * The browser executable to run instead of looking one up.
-   */
-  readonly executablePath?: FilePath.Local | string | undefined
   /**
    * Extra command-line arguments, added after the profile's.
    *
@@ -233,6 +223,45 @@ export interface LaunchOptions {
    */
   readonly userDataDir?: FilePath.Local | string | undefined
 }
+
+/**
+ * Settings for launching a browser: the browser, named by its executable or by a channel, and the settings every
+ * launch takes.
+ *
+ * **Details**
+ *
+ * Exactly one of `executablePath` and `channel` names the browser, and nothing else is looked up. A channel is an
+ * install location the backend knows: Chrome's and Firefox's release channels, or Playwright's browser cache
+ * for WebKit. Each backend's `layer` states its channels.
+ *
+ * **Gotchas**
+ *
+ * The library never downloads or installs a browser. Install it as you would any program (an operating
+ * system's package, Chrome's installer for a channel, a Nix package, Playwright's installer for its WebKit),
+ * and name it here.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type LaunchOptions<Channel extends string> =
+  & LaunchSettings
+  & (
+    | {
+      /**
+       * The browser's executable.
+       */
+      readonly executablePath: FilePath.Local | string
+      readonly channel?: undefined
+    }
+    | {
+      /**
+       * An install location the backend knows, such as an installed release channel.
+       */
+      readonly channel: Channel
+      readonly executablePath?: undefined
+    }
+  )
 
 /**
  * Settings for connecting to a running browser.

@@ -98,7 +98,7 @@ export const toolkit = Effect.fn("toolkit")(function*(page: Page.Page) {
 export const testProgram = Effect.scoped(Effect.gen(function*() {
   const page = yield* Browser.newPage({ focus: "emulated" })
   yield* page.goto("https://shop.example.com")
-})).pipe(Effect.provide(VitestBrowser.layer(Chromium.layer({ headless: true }))))
+})).pipe(Effect.provide(VitestBrowser.layer(Chromium.layer({ channel: "stable" }))))
 
 // Event and lifecycle tests run against the fake browser's timeline
 export const fakeTimeline = Effect.scoped(Effect.gen(function*() {

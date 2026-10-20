@@ -60,7 +60,7 @@ export const profileArgs: Readonly<Record<Profile, ReadonlyArray<string>>> = {
 /** Where each channel installs itself, per platform. */
 export const channelCandidates = (
   platform: string,
-  channel: "stable" | "beta" | "canary",
+  channel: Channel,
   env: Readonly<Record<string, string | undefined>>
 ): ReadonlyArray<string> => {
   switch (platform) {
@@ -87,11 +87,11 @@ export const channelCandidates = (
   }
 }
 
-/** Settings for a launch. */
-export interface Options {
-  /** The executable; otherwise `channel`'s. */
-  readonly executablePath?: string | undefined
-  readonly channel?: "stable" | "beta" | "canary" | undefined
+/** Chrome's release channels, each where its installer puts it. */
+export type Channel = "stable" | "beta" | "canary"
+
+/** Settings for a launch, beside the browser it names. */
+export interface Settings {
   /** @default true */
   readonly headless?: boolean | undefined
   /** @default "automation" */
@@ -102,8 +102,11 @@ export interface Options {
   readonly userDataDir?: string | undefined
 }
 
+/** A launch: the browser it names, and its settings. */
+export type Options = Settings & Launch.Named<Channel>
+
 /** The arguments a launch passes, in order: the profile's, the caller's, then ours. */
-export const argsFor = (options: Options, userDataDir: string, debugging: "pipe" | "port"): ReadonlyArray<string> => [
+export const argsFor = (options: Settings, userDataDir: string, debugging: "pipe" | "port"): ReadonlyArray<string> => [
   ...profileArgs[options.profile ?? "automation"],
   ...(options.headless ?? true ? ["--headless"] : []),
   ...(options.args ?? []),
@@ -117,21 +120,11 @@ const host = (globalThis as {
   readonly process?: { readonly platform: string; readonly env: Readonly<Record<string, string | undefined>> }
 }).process
 
-const executable = (options: Options) => {
-  if (options.executablePath !== undefined) {
-    return Launch.findExecutable([options.executablePath], "The executablePath given doesn't exist")
-  }
-  if (options.channel !== undefined) {
-    return Launch.findExecutable(
-      channelCandidates(host?.platform ?? "linux", options.channel, host?.env ?? {}),
-      `Chrome's ${options.channel} channel isn't installed where it installs itself`
-    )
-  }
-  return Launch.findExecutable(
-    [],
-    "Pass executablePath or a channel. Downloading Chrome for Testing, the default, isn't built yet"
-  )
-}
+const executable = (options: Options) =>
+  Launch.namedExecutable(options, (channel: Channel) => ({
+    candidates: channelCandidates(host?.platform ?? "linux", channel, host?.env ?? {}),
+    hint: `Chrome's ${channel} channel isn't installed where its installer puts it`
+  }))
 
 /** Launches over the pipe. */
 export const launch: (

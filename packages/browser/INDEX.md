@@ -104,13 +104,12 @@ The `Browser` service, its accessors, and the settings every backend shares.
 - `type CapabilityEntry = typeof CapabilityEntry.Type`
 - `class CapabilitySet: Schema.Class { entries }`
   - `has(name: string): boolean`
-- `interface LaunchOptions`
+- `interface LaunchSettings`
   - `readonly headless?: boolean | undefined`
-  - `readonly channel?: "stable" | "beta" | "canary" | undefined`
-  - `readonly executablePath?: FilePath.Local | string | undefined`
   - `readonly args?: ReadonlyArray<string> | undefined`
   - `readonly profile?: LaunchProfile.LaunchProfile | undefined`
   - `readonly userDataDir?: FilePath.Local | string | undefined`
+- `type LaunchOptions<Channel extends string> = & LaunchSettings & (| { readonly executablePath: FilePath.Local | string readonly channel?: undefined } | { readonly channel: Channel readonly executablePath?: undefined })`
 - `interface ConnectOptions`
   - `readonly headers?: Readonly<Record<string, string | Redacted.Redacted<string>>> | undefined`
 - `interface Operation`
@@ -1835,9 +1834,13 @@ The Chromium backend (`@usestrider/browser/chromium`): Chromium, Chrome and Edge
 
 *layers*
 
-- `const layer: (options?: Browser.LaunchOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>`
-- `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
+- `const layer: (options: Browser.LaunchOptions<Channel>) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>`
+- `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions<Channel>>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
 - `const layerConnect: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
+
+*models*
+
+- `type Channel = "stable" | "beta" | "canary"`
 
 ## `@usestrider/browser/cli`
 
@@ -1879,9 +1882,13 @@ The Firefox backend (`@usestrider/browser/firefox`): Firefox over WebDriver BiDi
 
 *layers*
 
-- `const layer: (options?: Browser.LaunchOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>`
-- `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
+- `const layer: (options: Browser.LaunchOptions<Channel>) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>`
+- `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions<Channel>>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
 - `const layerConnect: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
+
+*models*
+
+- `type Channel = "stable" | "beta" | "canary"`
 
 ## `@usestrider/browser/protocol`
 
@@ -2130,9 +2137,13 @@ The WebKit backend (`@usestrider/browser/webkit`): Playwright-patched WebKit bui
 
 *layers*
 
-- `const layer: (options?: Browser.LaunchOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>`
-- `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
+- `const layer: (options: Browser.LaunchOptions<Channel>) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>`
+- `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions<Channel>>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
 - `const layerAttach: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
+
+*models*
+
+- `type Channel = "playwright"`
 
 ## `@usestrider/browser/webkit-protocol`
 

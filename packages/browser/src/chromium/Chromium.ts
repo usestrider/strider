@@ -2,8 +2,8 @@
  * The Chromium backend (`@usestrider/browser/chromium`): Chromium, Chrome and Edge over the Chrome DevTools
  * Protocol.
  *
- * Launching uses Chrome for Testing unless a channel or executable is given. Protocol failures carry the CDP
- * error under `metadata.cdp`.
+ * A launch runs the browser it names: an executable, or an installed channel of Chrome. Nothing is downloaded.
+ * Protocol failures carry the CDP error under `metadata.cdp`.
  *
  * @stability unstable
  * @since 0.1.0
@@ -24,7 +24,16 @@ declare module "../Reason.ts" {
 }
 
 /**
- * Launches Chromium (Chrome for Testing, unless a channel or executable is given) and provides it as `Browser`.
+ * The Chrome release channels a launch can name, each at the location its installer uses.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type Channel = "stable" | "beta" | "canary"
+
+/**
+ * Launches the Chromium or Chrome it names and provides it as `Browser`.
  *
  * **Details**
  *
@@ -41,7 +50,7 @@ declare module "../Reason.ts" {
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
  *   yield* page.goto("https://example.com")
- * })).pipe(Effect.provide(Chromium.layer({ headless: true })))
+ * })).pipe(Effect.provide(Chromium.layer({ channel: "stable" })))
  * ```
  *
  * @stability unstable
@@ -49,12 +58,12 @@ declare module "../Reason.ts" {
  * @since 0.1.0
  */
 export declare const layer: (
-  options?: Browser.LaunchOptions | undefined
+  options: Browser.LaunchOptions<Channel>
 ) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>
 
 /**
- * Launches Chromium (Chrome for Testing, unless a channel or executable is given) with options read from configuration, such as the executable path from CI's
- * environment.
+ * Launches the Chromium or Chrome it names with options read from configuration, such as the executable path
+ * from CI's environment.
  *
  * @see {@link layer}
  *
@@ -63,7 +72,7 @@ export declare const layer: (
  * @since 0.1.0
  */
 export declare const layerConfig: (
-  options: Config.Wrap<Browser.LaunchOptions>
+  options: Config.Wrap<Browser.LaunchOptions<Channel>>
 ) => Layer.Layer<
   Browser.Browser,
   Browser.BrowserError | Config.ConfigError,

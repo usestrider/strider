@@ -1,6 +1,7 @@
 /**
  * The Firefox backend (`@usestrider/browser/firefox`): Firefox over WebDriver BiDi.
  *
+ * A launch runs the browser it names: an executable, or an installed channel of Firefox. Nothing is downloaded.
  * Protocol failures carry the BiDi error under `metadata.bidi`.
  *
  * @stability unstable
@@ -22,7 +23,16 @@ declare module "../Reason.ts" {
 }
 
 /**
- * Launches Firefox and provides it as `Browser`.
+ * The Firefox release channels a launch can name, each at the location its installer uses; `canary` is Nightly.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type Channel = "stable" | "beta" | "canary"
+
+/**
+ * Launches the Firefox it names and provides it as `Browser`.
  *
  * **Details**
  *
@@ -39,7 +49,7 @@ declare module "../Reason.ts" {
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
  *   yield* page.goto("https://example.com")
- * })).pipe(Effect.provide(Firefox.layer({ headless: true })))
+ * })).pipe(Effect.provide(Firefox.layer({ channel: "stable" })))
  * ```
  *
  * @stability unstable
@@ -47,11 +57,11 @@ declare module "../Reason.ts" {
  * @since 0.1.0
  */
 export declare const layer: (
-  options?: Browser.LaunchOptions | undefined
+  options: Browser.LaunchOptions<Channel>
 ) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>
 
 /**
- * Launches Firefox with options read from configuration, such as the executable path from CI's
+ * Launches the Firefox it names with options read from configuration, such as the executable path from CI's
  * environment.
  *
  * @see {@link layer}
@@ -61,7 +71,7 @@ export declare const layer: (
  * @since 0.1.0
  */
 export declare const layerConfig: (
-  options: Config.Wrap<Browser.LaunchOptions>
+  options: Config.Wrap<Browser.LaunchOptions<Channel>>
 ) => Layer.Layer<
   Browser.Browser,
   Browser.BrowserError | Config.ConfigError,

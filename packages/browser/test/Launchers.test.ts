@@ -17,15 +17,23 @@ import { pins } from "./integration/pins.ts"
 
 describe("Chromium launcher", () => {
   layer(NodeServices.layer, { excludeTestServices: true })((it) => {
-    it.effect("fails with ExecutableNotFound, naming what it searched, without looking anywhere else", () =>
+    it.effect("fails with ExecutableNotFound for a browser that isn't there, naming what it searched", () =>
       Effect.gen(function*() {
         const error = yield* ChromiumLauncher.launch({ executablePath: "/nowhere/chrome" }).pipe(Effect.flip)
         assert(error.reason._tag === "ExecutableNotFound")
         assert.deepStrictEqual(error.reason.searched, ["/nowhere/chrome"])
-        const none = yield* ChromiumLauncher.launch({}).pipe(Effect.flip)
-        assert(none.reason._tag === "ExecutableNotFound")
-        assert.deepStrictEqual(none.reason.searched, [])
-        assert.include(none.reason.hint, "executablePath")
+      }))
+
+    it.effect("fails with InvalidInput, looking nowhere, for a caller the types don't reach that names no browser or two", () =>
+      Effect.gen(function*() {
+        const untyped = [{}, { executablePath: "/usr/bin/chromium", channel: "stable" }] as unknown as ReadonlyArray<
+          ChromiumLauncher.Options
+        >
+        for (const options of untyped) {
+          const error = yield* ChromiumLauncher.launch(options).pipe(Effect.flip)
+          assert(error.reason._tag === "InvalidInput")
+          assert.strictEqual(error.reason.expected, "exactly one of executablePath and channel")
+        }
       }))
 
     it.effect("knows where each channel installs itself", () =>
@@ -70,11 +78,11 @@ describe("Chromium launcher", () => {
 describe("Firefox launcher", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
-      it.effect("fails with ExecutableNotFound without looking anywhere it wasn't told", () =>
+      it.effect("fails with ExecutableNotFound for a browser that isn't there, naming what it searched", () =>
         Effect.gen(function*() {
-          const error = yield* FirefoxLauncher.launch({}).pipe(Effect.flip)
+          const error = yield* FirefoxLauncher.launch({ executablePath: "/nowhere/firefox" }).pipe(Effect.flip)
           assert(error.reason._tag === "ExecutableNotFound")
-          assert.deepStrictEqual(error.reason.searched, [])
+          assert.deepStrictEqual(error.reason.searched, ["/nowhere/firefox"])
         }))
 
       it.effect("writes the profile's preferences, and knows where each channel installs itself", () =>

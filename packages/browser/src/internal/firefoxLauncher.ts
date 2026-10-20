@@ -42,7 +42,7 @@ export const profilePrefs: Readonly<Record<Profile, Prefs>> = {
 /** Where each channel installs itself, per platform. */
 export const channelCandidates = (
   platform: string,
-  channel: "stable" | "beta" | "canary",
+  channel: Channel,
   env: Readonly<Record<string, string | undefined>>
 ): ReadonlyArray<string> => {
   switch (platform) {
@@ -63,11 +63,11 @@ export const channelCandidates = (
   }
 }
 
-/** Settings for a launch. */
-export interface Options {
-  /** The executable; otherwise `channel`'s. */
-  readonly executablePath?: string | undefined
-  readonly channel?: "stable" | "beta" | "canary" | undefined
+/** Firefox's release channels, each where its installer puts it; `canary` is Nightly. */
+export type Channel = "stable" | "beta" | "canary"
+
+/** Settings for a launch, beside the browser it names. */
+export interface Settings {
   /** @default true */
   readonly headless?: boolean | undefined
   /** @default "automation" */
@@ -84,8 +84,11 @@ export interface Options {
   readonly timeout?: Duration.Input | undefined
 }
 
+/** A launch: the browser it names, and its settings. */
+export type Options = Settings & Launch.Named<Channel>
+
 /** The arguments a launch passes. */
-export const argsFor = (options: Options, profile: string): ReadonlyArray<string> => [
+export const argsFor = (options: Settings, profile: string): ReadonlyArray<string> => [
   ...(options.headless ?? true ? ["--headless"] : []),
   "--remote-debugging-port=0",
   "--no-remote",
@@ -105,18 +108,11 @@ const host = (globalThis as {
   readonly process?: { readonly platform: string; readonly env: Readonly<Record<string, string | undefined>> }
 }).process
 
-const executable = (options: Options) => {
-  if (options.executablePath !== undefined) {
-    return Launch.findExecutable([options.executablePath], "The executablePath given doesn't exist")
-  }
-  if (options.channel !== undefined) {
-    return Launch.findExecutable(
-      channelCandidates(host?.platform ?? "linux", options.channel, host?.env ?? {}),
-      `Firefox's ${options.channel} channel isn't installed where it installs itself`
-    )
-  }
-  return Launch.findExecutable([], "Pass executablePath or a channel")
-}
+const executable = (options: Options) =>
+  Launch.namedExecutable(options, (channel: Channel) => ({
+    candidates: channelCandidates(host?.platform ?? "linux", channel, host?.env ?? {}),
+    hint: `Firefox's ${channel} channel isn't installed where its installer puts it`
+  }))
 
 /** Launches Firefox and connects to its WebDriver BiDi endpoint. */
 export const launch = Effect.fnUntraced(function*(options: Options) {

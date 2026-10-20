@@ -24,7 +24,7 @@ import type * as TestRun from "../TestRun.ts"
  * const test = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage({ focus: "emulated" })
  *   yield* page.goto("https://shop.example.com")
- * })).pipe(Effect.provide(VitestBrowser.layer(Chromium.layer({ headless: true }))))
+ * })).pipe(Effect.provide(VitestBrowser.layer(Chromium.layer({ channel: "stable" }))))
  * ```
  *
  * @stability unstable

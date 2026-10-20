@@ -2,7 +2,9 @@
  * The WebKit backend (`@usestrider/browser/webkit`): Playwright-patched WebKit builds, launched, and stock WebKit
  * targets, attached.
  *
- * Protocol failures carry the inspector error under `metadata.webkit`.
+ * A launch runs the build it names: an executable, or the `playwright` channel, Playwright's browser cache. The
+ * build must be the one the adapter is generated from, which the launch checks by its `protocol.json`. Nothing is
+ * downloaded. Protocol failures carry the inspector error under `metadata.webkit`.
  *
  * @stability unstable
  * @since 0.1.0
@@ -23,7 +25,17 @@ declare module "../Reason.ts" {
 }
 
 /**
- * Launches a Playwright-patched WebKit build and provides it as `Browser`.
+ * The channel a launch can name: `playwright`, Playwright's browser cache (`PLAYWRIGHT_BROWSERS_PATH`, or the
+ * cache directory Playwright's installer uses), at the build the adapter is generated from.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type Channel = "playwright"
+
+/**
+ * Launches the Playwright-patched WebKit build it names and provides it as `Browser`.
  *
  * **Details**
  *
@@ -40,7 +52,7 @@ declare module "../Reason.ts" {
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
  *   yield* page.goto("https://example.com")
- * })).pipe(Effect.provide(WebKit.layer({ headless: true })))
+ * })).pipe(Effect.provide(WebKit.layer({ channel: "playwright" })))
  * ```
  *
  * @stability unstable
@@ -48,12 +60,12 @@ declare module "../Reason.ts" {
  * @since 0.1.0
  */
 export declare const layer: (
-  options?: Browser.LaunchOptions | undefined
+  options: Browser.LaunchOptions<Channel>
 ) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>
 
 /**
- * Launches a Playwright-patched WebKit build with options read from configuration, such as the executable path from CI's
- * environment.
+ * Launches the Playwright-patched WebKit build it names with options read from configuration, such as the
+ * executable path from CI's environment.
  *
  * @see {@link layer}
  *
@@ -62,7 +74,7 @@ export declare const layer: (
  * @since 0.1.0
  */
 export declare const layerConfig: (
-  options: Config.Wrap<Browser.LaunchOptions>
+  options: Config.Wrap<Browser.LaunchOptions<Channel>>
 ) => Layer.Layer<
   Browser.Browser,
   Browser.BrowserError | Config.ConfigError,

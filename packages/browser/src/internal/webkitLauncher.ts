@@ -1,6 +1,7 @@
 /**
- * Launches Playwright's WebKit build for the WebKit adapter: the build's executable, named by path or found in
- * Playwright's browser cache, a profile that lives as long as the browser, and the pipe.
+ * Launches Playwright's WebKit build for the WebKit adapter: the build's executable, named by path or by the
+ * `playwright` channel (Playwright's browser cache, looked in only when named), a profile that lives as long as the
+ * browser, and the pipe. Nothing is downloaded.
  *
  * The profile is always a persistent one (`--user-data-dir`), so the browser has a default context, as a
  * stock browser does, and opens one page in it. That page exists before the adapter attaches, so it isn't
@@ -50,10 +51,11 @@ export const cacheCandidates = (
   )
 }
 
-/** Settings for a launch. */
-export interface Options {
-  /** The build's executable (`pw_run.sh`, or `Playwright.exe` on Windows); otherwise Playwright's cache's. */
-  readonly executablePath?: string | undefined
+/** The one channel: Playwright's browser cache, at the pinned build. */
+export type Channel = "playwright"
+
+/** Settings for a launch, beside the build it names. */
+export interface Settings {
   /**
    * Headed runs need the GTK build on Linux, which `pw_run.sh` picks when `--headless` is absent.
    *
@@ -72,8 +74,14 @@ export interface Options {
   readonly checkRevision?: boolean | undefined
 }
 
+/**
+ * A launch: the build it names, by its executable (`pw_run.sh`, or `Playwright.exe` on Windows) or the
+ * `playwright` channel, and its settings.
+ */
+export type Options = Settings & Launch.Named<Channel>
+
 /** The arguments a launch passes. */
-export const argsFor = (options: Options, userDataDir: string): ReadonlyArray<string> => [
+export const argsFor = (options: Settings, userDataDir: string): ReadonlyArray<string> => [
   "--inspector-pipe",
   ...(options.headless ?? true ? ["--headless"] : []),
   `--user-data-dir=${userDataDir}`,
@@ -86,12 +94,11 @@ const host = (globalThis as {
 }).process
 
 const executable = (options: Options) =>
-  options.executablePath !== undefined
-    ? Launch.findExecutable([options.executablePath], "The executablePath given doesn't exist")
-    : Launch.findExecutable(
-      cacheCandidates(host?.platform ?? "linux", host?.env ?? {}),
-      `Playwright's WebKit ${build.revision} isn't in Playwright's browser cache; install it with \`npx playwright install webkit\` from Playwright 1.63, or pass executablePath`
-    )
+  Launch.namedExecutable(options, () => ({
+    candidates: cacheCandidates(host?.platform ?? "linux", host?.env ?? {}),
+    hint:
+      `Playwright's WebKit ${build.revision} isn't in Playwright's browser cache, which its installer fills (\`npx playwright install webkit\`, Playwright 1.63)`
+  }))
 
 const sha256 = (bytes: Uint8Array) =>
   Effect.promise(() => globalThis.crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>)).pipe(
