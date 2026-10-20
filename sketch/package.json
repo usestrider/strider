@@ -4,7 +4,8 @@
   "type": "module",
   "description": "Type-checked sketch of the effect-browser public API. Declarations only; nothing here runs.",
   "scripts": {
-    "check": "tsc --noEmit -p ."
+    "check": "tsc --noEmit -p .",
+    "index": "node scripts/index.cjs"
   },
   "devDependencies": {
     "effect": "4.0.5",
