@@ -118,6 +118,7 @@ describe.skipIf(executable === undefined)("Firefox over WebDriver BiDi", () => {
           const context = tree["result"].contexts[0].context
           const cases: ReadonlyArray<readonly [string, object]> = [
             ["Nope.nothing", {}],
+            ["browsingContext.reload", { context, ignoreCache: true }],
             ["browsingContext.navigate", { context }],
             ["browsingContext.navigate", { context: "nope", url: "about:blank" }],
             ["script.callFunction", {

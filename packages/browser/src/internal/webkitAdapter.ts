@@ -125,7 +125,9 @@ interface FrameEntry {
   readonly children: Set<FrameEntry>
   document: DocumentEntry | undefined
   /** Navigations started by a command that the browser hasn't announced yet, oldest first. */
-  readonly expected: Array<{ readonly id: PageNavigation.Id; readonly url: string }>
+  readonly expected: Array<
+    { readonly id: PageNavigation.Id; readonly url: string; readonly initiatedAs: Adapter.InitiatedAs }
+  >
   readonly navigations: Map<string, NavigationEntry>
   removed: boolean
 }
@@ -701,7 +703,14 @@ export const connect: (
       const normalized = normalize(url)
       const index = frame.expected.findIndex((expected) => normalize(expected.url) === normalized)
       const expected = index >= 0 ? frame.expected.splice(index, 1)[0] : frame.expected.shift()
-      return startNavigationAs(frame, expected?.id ?? ids.navigation(), loaderId, url, type, sameDocument)
+      return startNavigationAs(
+        frame,
+        expected?.id ?? ids.navigation(),
+        loaderId,
+        url,
+        expected?.initiatedAs ?? type,
+        sameDocument
+      )
     }
 
     const startNavigationAs = (
@@ -2219,9 +2228,9 @@ export const connect: (
       }
     )
 
-    const expect = (frame: FrameEntry, url: string) => {
+    const expect = (frame: FrameEntry, url: string, initiatedAs: Adapter.InitiatedAs = "crossDocument") => {
       const id = ids.navigation()
-      frame.expected.push({ id, url })
+      frame.expected.push({ id, url, initiatedAs })
       return id
     }
 
@@ -2268,7 +2277,7 @@ export const connect: (
     const reload = Effect.fnUntraced(function*(id: L1Target.NavigableId, options: { readonly ignoreCache: boolean }) {
       const page = yield* pageOf(id)
       const target = yield* targetOf(page)
-      const navigation = expect(page.main, page.main.document?.url ?? "")
+      const navigation = expect(page.main, page.main.document?.url ?? "", "reload")
       yield* protocol(Page.reload({ ignoreCache: options.ignoreCache }).pipe(Protocol.on(target.session))).pipe(
         Effect.tapError(() => Effect.sync(() => unexpect(page.main, navigation)))
       )
@@ -2281,7 +2290,7 @@ export const connect: (
       if (delta !== 1 && delta !== -1) {
         return yield* Effect.fail(unsupported("traverse.delta", "WebKit moves through history one entry at a time"))
       }
-      const navigation = expect(page.main, "")
+      const navigation = expect(page.main, "", "traversal")
       const moved = yield* (delta === -1 ? Page.goBack() : Page.goForward()).pipe(
         Protocol.on(target.session),
         Effect.as(true),

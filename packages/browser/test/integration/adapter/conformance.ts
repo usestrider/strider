@@ -13,6 +13,7 @@ import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Adapter from "../../../src/internal/adapter.ts"
+import type * as PageNavigation from "../../../src/PageNavigation.ts"
 import type * as Target from "../../../src/Target.ts"
 import { type Backend, json, makeRecorder, type Recorder, type Site, site } from "./harness.ts"
 
@@ -170,19 +171,55 @@ export const conformance = (backend: Backend) =>
             assert.strictEqual(refused.outcome._tag, "Failed")
           }), timeout)
 
+        it.effect("reloads, and moves through history: back, forward, and nowhere past the end", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            const first = yield* goto(world, page, `${world.site.origin}/hello`)
+            assert(first.outcome._tag === "Committed")
+            yield* goto(world, page, `${world.site.origin}/json`)
+            const ended = Effect.fnUntraced(function*(navigation: PageNavigation.Id, initiatedAs: Adapter.InitiatedAs) {
+              const started = yield* world.facts.when("NavigationStarted", (fact) =>
+                fact.navigation === navigation)
+              assert.strictEqual(started.initiatedAs, initiatedAs)
+              return yield* world.facts.when("NavigationEnded", (fact) => fact.navigation === navigation)
+            })
+            const urlOf = (outcome: Adapter.NavigationOutcome) => {
+              assert(
+                outcome._tag === "Committed" || outcome._tag === "Restored",
+                `a history navigation commits or restores, not ${outcome._tag}`
+              )
+              return world.facts.all("DocumentCommitted").find((fact) => fact.document === outcome.document)?.url
+            }
+            const back = yield* world.adapter.traverse(page, -1)
+            assert(Option.isSome(back), "there is an entry before")
+            const backOutcome = (yield* ended(back.value, "traversal")).outcome
+            assert.strictEqual(urlOf(backOutcome), `${world.site.origin}/hello`)
+            const forward = yield* world.adapter.traverse(page, 1)
+            assert(Option.isSome(forward), "there is an entry after")
+            assert.strictEqual(urlOf((yield* ended(forward.value, "traversal")).outcome), `${world.site.origin}/json`)
+            assert.isTrue(Option.isNone(yield* world.adapter.traverse(page, 1)), "nothing after the last entry")
+            const reload = yield* world.adapter.reload(page, { ignoreCache: false })
+            const reloaded = (yield* ended(reload, "reload")).outcome
+            assert(reloaded._tag === "Committed", `a reload commits, not ${reloaded._tag}`)
+            assert.strictEqual(urlOf(reloaded), `${world.site.origin}/json`)
+          }), timeout)
+
         it.effect("follows a redirect as hops of one request", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
             const { outcome } = yield* goto(world, page, `${world.site.origin}/redirect`)
             assert(outcome._tag === "Committed")
-            const committed = yield* world.facts.when("DocumentCommitted", (fact) => fact.document === outcome.document)
+            const committed = yield* world.facts.when("DocumentCommitted", (fact) =>
+              fact.document === outcome.document)
             assert.strictEqual(committed.url, `${world.site.origin}/landed`)
             const hop = Option.getOrThrow(outcome.response)
             assert.match(hop, /\.1$/, "the second hop")
             const first = yield* world.facts.when(
               "ResponseReceived",
-              (fact) => fact.response.hop === hop.replace(/\.1$/, ".0")
+              (fact) =>
+                fact.response.hop === hop.replace(/\.1$/, ".0")
             )
             assert.strictEqual(first.response.status, 302)
           }), timeout)
@@ -197,7 +234,9 @@ export const conformance = (backend: Backend) =>
                 fact.parent === page),
               world.facts.next((fact): fact is Extract<Adapter.Fact, { _tag: "FrameAdded" }> =>
                 fact._tag === "FrameAdded" && fact.parent === page &&
-                world.facts.all("FrameAdded").filter((other) => other.parent === page).indexOf(fact) === 1
+                world.facts.all("FrameAdded").filter((other) =>
+                    other.parent === page
+                  ).indexOf(fact) === 1
               )
             ])
             for (const frame of frames) {
@@ -251,8 +290,7 @@ export const conformance = (backend: Backend) =>
               fact.origin._tag === "Opened")
             assert.deepStrictEqual(popup.origin, { _tag: "Opened", opener: Option.some(page) })
             assert.strictEqual(popup.kind, "popup")
-            yield* world.facts.when("PageReady", (fact) =>
-              fact.page === popup.page)
+            yield* world.facts.when("PageReady", (fact) => fact.page === popup.page)
             yield* world.facts.when("DocumentCommitted", (fact) =>
               fact.navigable === popup.page && fact.url.endsWith("/init"))
             yield* world.facts.when("DocumentReadiness", (fact) =>

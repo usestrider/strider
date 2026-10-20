@@ -72,8 +72,13 @@ interface NavigableEntry {
   document: DocumentEntry | undefined
   /** Main-world realms created for the next document, before it commits. */
   readonly pendingRealms: Array<RealmEntry>
-  readonly expected: Array<{ readonly id: PageNavigation.Id; readonly url: string }>
+  /** Navigations started by a command that the browser hasn't announced yet, oldest first. */
+  readonly expected: Array<
+    { readonly id: PageNavigation.Id; readonly url: string; readonly initiatedAs: Adapter.InitiatedAs }
+  >
   readonly navigations: Map<string, NavigationEntry>
+  /** The documents it had, by URL: what a restore from the back/forward cache restores. */
+  readonly past: Map<string, L1Target.DocumentId>
   removed: boolean
 }
 
@@ -96,6 +101,8 @@ interface RealmEntry {
   readonly world: Adapter.World
   readonly origin: string
   ended: boolean
+  /** What it logged while it waited for its document's commit, reported after it. */
+  readonly held: Array<Adapter.Fact>
 }
 
 interface NavigationEntry {
@@ -104,6 +111,8 @@ interface NavigationEntry {
   readonly navigable: NavigableEntry
   readonly url: string
   readonly sameDocument: boolean
+  /** A move through history, which may restore a document from the back/forward cache. */
+  readonly traversal: boolean
   documentHop: NetworkRequest.HopId | undefined
   status: number | undefined
   ended: boolean
@@ -461,6 +470,7 @@ export const connect: (
       if (navigation.ended) return
       navigation.ended = true
       navigation.navigable.navigations.delete(navigation.bidi)
+      if (navigations.get(navigation.bidi) === navigation) navigations.delete(navigation.bidi)
       emit({ _tag: "NavigationEnded", navigation: navigation.id, outcome, evidence })
     }
 
@@ -525,6 +535,7 @@ export const connect: (
       })
       if (old !== undefined) {
         documents.delete(old.id)
+        navigable.past.set(old.url, old.id)
         // A realm that survived the commit hosts the new document: the initial about:blank's (probe 2)
         for (const realm of old.realms) {
           if (realm.ended) continue
@@ -550,6 +561,13 @@ export const connect: (
         origin: realm.origin,
         kind: { _tag: "Window", navigable: document.navigable.id, document: document.id, world: realm.world }
       })
+      for (const fact of realm.held.splice(0)) emit(fact)
+    }
+
+    // What a realm logs is reported after the realm itself, which may be waiting for its document's commit.
+    const emitFrom = (realm: RealmEntry, fact: Adapter.Fact) => {
+      if (realm.navigable?.pendingRealms.includes(realm) === true) realm.held.push(fact)
+      else emit(fact)
     }
 
     const startNavigation = (
@@ -557,17 +575,24 @@ export const connect: (
       bidi: string,
       url: string,
       type: Adapter.InitiatedAs,
-      sameDocument: boolean
+      sameDocument: boolean,
+      /** A command's expectation, already taken; otherwise the first that matches is. */
+      taken?: { readonly id: PageNavigation.Id; readonly initiatedAs: Adapter.InitiatedAs }
     ): NavigationEntry => {
       const normalized = normalize(url)
-      const index = navigable.expected.findIndex((expected) => normalize(expected.url) === normalized)
-      const expected = index >= 0 ? navigable.expected.splice(index, 1)[0] : navigable.expected.shift()
+      const index = taken !== undefined
+        ? -1
+        : navigable.expected.findIndex((expected) => normalize(expected.url) === normalized)
+      const expected = taken ?? (index >= 0 ? navigable.expected.splice(index, 1)[0] : navigable.expected.shift())
+      const initiatedAs = expected?.initiatedAs ?? type
+      const traversal = initiatedAs === "traversal"
       const navigation: NavigationEntry = {
         id: expected?.id ?? ids.navigation(),
         bidi,
         navigable,
         url,
         sameDocument,
+        traversal,
         documentHop: undefined,
         status: undefined,
         ended: false
@@ -582,7 +607,13 @@ export const connect: (
       }
       navigable.navigations.set(bidi, navigation)
       navigations.set(bidi, navigation)
-      emit({ _tag: "NavigationStarted", navigation: navigation.id, navigable: navigable.id, url, initiatedAs: type })
+      emit({
+        _tag: "NavigationStarted",
+        navigation: navigation.id,
+        navigable: navigable.id,
+        url,
+        initiatedAs
+      })
       return navigation
     }
 
@@ -622,6 +653,7 @@ export const connect: (
         document: undefined,
         pendingRealms: [],
         expected: [],
+        past: new Map(),
         navigations: new Map(),
         removed: false
       }
@@ -842,7 +874,8 @@ export const connect: (
             navigable,
             world: params.sandbox === undefined ? { _tag: "Main" } : { _tag: "Isolated", name: params.sandbox },
             origin: params.origin,
-            ended: false
+            ended: false,
+            held: []
           }
           realms.set(realm.bidi, realm)
           realmsById.set(realm.id, realm)
@@ -861,7 +894,8 @@ export const connect: (
           navigable: undefined,
           world: { _tag: "Main" },
           origin: params.origin,
-          ended: false
+          ended: false,
+          held: []
         }
         realms.set(realm.bidi, realm)
         realmsById.set(realm.id, realm)
@@ -910,7 +944,7 @@ export const connect: (
           : { _tag: "Page", page: "" as L1Target.NavigableId }
         if (params.type === "console") {
           if (realm === undefined) return
-          emit({
+          emitFrom(realm, {
             _tag: "ConsoleMessage",
             realm: realm.id,
             message: new ConsoleMessage.ConsoleMessage({
@@ -926,7 +960,7 @@ export const connect: (
         if (params.type === "javascript") {
           const text = params.text ?? ""
           const colon = text.indexOf(": ")
-          emit({
+          const fact: Adapter.Fact = {
             _tag: "UncaughtException",
             realm: Option.fromUndefinedOr(realm?.id),
             exception: new UncaughtException.UncaughtException({
@@ -937,7 +971,9 @@ export const connect: (
               origin,
               at: Adapter.now()
             })
-          })
+          }
+          if (realm === undefined) emit(fact)
+          else emitFrom(realm, fact)
         }
       },
       [Network.beforeRequestSent.method]: (params: Network.BeforeRequestSentParameters) => {
@@ -1395,9 +1431,9 @@ export const connect: (
       }
     )
 
-    const expect = (navigable: NavigableEntry, url: string) => {
+    const expect = (navigable: NavigableEntry, url: string, initiatedAs: Adapter.InitiatedAs = "crossDocument") => {
       const id = ids.navigation()
-      navigable.expected.push({ id, url })
+      navigable.expected.push({ id, url, initiatedAs })
       return id
     }
 
@@ -1433,10 +1469,21 @@ export const connect: (
       url: string,
       command: Effect.Effect<unknown, Protocol.ProtocolError>
     ) {
-      const exit = yield* Effect.exit(command)
-      if (exit._tag === "Success") return id
-      yield* neverStarted(navigable, id, url, String(exit.cause))
-      return id
+      return yield* command.pipe(
+        Effect.as(id),
+        Effect.catch((error) =>
+          // What the browser doesn't implement fails the operation; anything else, the navigation
+          error.reason._tag === "Unsupported"
+            ? Effect.andThen(
+              Effect.sync(() => {
+                const index = navigable.expected.findIndex((expected) => expected.id === id)
+                if (index >= 0) navigable.expected.splice(index, 1)
+              }),
+              Effect.fail(protocolError(error))
+            )
+            : Effect.as(neverStarted(navigable, id, url, error.message), id)
+        )
+      )
     })
 
     const navigate = Effect.fnUntraced(function*(
@@ -1461,14 +1508,15 @@ export const connect: (
     const reload = Effect.fnUntraced(function*(id: L1Target.NavigableId, options: { readonly ignoreCache: boolean }) {
       const navigable = yield* navigableById(id)
       const url = navigable.document?.url ?? ""
-      const navigation = expect(navigable, url)
+      const navigation = expect(navigable, url, "reload")
       return yield* sendNavigation(
         navigable,
         navigation,
         url,
         BrowsingContext.reload({
           context: navigable.bidi as BrowsingContext.BrowsingContext,
-          ignoreCache: options.ignoreCache,
+          // Firefox 158 refuses the argument whatever its value, so it is sent only to bypass the cache
+          ...(options.ignoreCache ? { ignoreCache: true } : {}),
           wait: "none"
         }).pipe(on)
       )
@@ -1476,7 +1524,7 @@ export const connect: (
 
     const traverse = Effect.fnUntraced(function*(id: L1Target.NavigableId, delta: number) {
       const navigable = yield* navigableById(id)
-      const navigation = expect(navigable, "")
+      const navigation = expect(navigable, "", "traversal")
       const exit = yield* Effect.exit(
         BrowsingContext.traverseHistory({ context: navigable.bidi as BrowsingContext.BrowsingContext, delta }).pipe(on)
       )
@@ -1484,6 +1532,60 @@ export const connect: (
         const index = navigable.expected.findIndex((expected) => expected.id === navigation)
         if (index >= 0) navigable.expected.splice(index, 1)
         return Option.none<PageNavigation.Id>()
+      }
+      // The reply comes once the traversal is done. One still in flight then, with a new main-world realm and
+      // no commit, restored its document from the back/forward cache, which Firefox reports no other way. It may
+      // not even have started one (Firefox 158, leaving its JSON viewer): then the realm says where it is.
+      const evidence = "bidi:browsingContext.traverseHistory replied with a new realm and no commit"
+      const restore = (entry: NavigationEntry, realm: RealmEntry) => {
+        const from = navigable.past.get(entry.url)
+        const document = commit(
+          navigable,
+          entry.url,
+          realm.origin,
+          from === undefined
+            ? { _tag: "Navigation", navigation: entry.id }
+            : { _tag: "Restored", navigation: entry.id, from },
+          entry.bidi,
+          evidence
+        )
+        endNavigation(
+          entry,
+          from === undefined
+            ? { _tag: "Committed", document: document.id, response: Option.none() }
+            : { _tag: "Restored", document: document.id },
+          evidence
+        )
+      }
+      const pendingRealm = () =>
+        navigable.pendingRealms.find((pending) => !pending.ended && pending.world._tag === "Main")
+      let unannounced: RealmEntry | undefined
+      yield* run(() => {
+        const entry = [...navigable.navigations.values()].find((pending) => pending.id === navigation)
+        const realm = pendingRealm()
+        if (realm === undefined) return
+        if (entry !== undefined && !entry.ended) restore(entry, realm)
+        else if (navigable.expected.some((expected) => expected.id === navigation)) unannounced = realm
+      })
+      if (unannounced !== undefined) {
+        const realm = unannounced
+        const href = yield* Script.evaluate({
+          expression: "location.href",
+          target: { realm: realm.bidi as Script.Realm },
+          awaitPromise: false
+        }).pipe(
+          on,
+          Effect.map((result) =>
+            result.type === "success" && result.result.type === "string" ? String(result.result.value) : undefined
+          ),
+          Effect.orElseSucceed(() => undefined)
+        )
+        yield* run(() => {
+          const index = navigable.expected.findIndex((expected) => expected.id === navigation)
+          if (href === undefined || index < 0 || pendingRealm() !== realm) return
+          const [taken] = navigable.expected.splice(index, 1)
+          restore(startNavigation(navigable, `restored:${navigation}`, href, "traversal", false, taken), realm)
+        })
       }
       return Option.some(navigation)
     })

@@ -329,7 +329,7 @@ Adapter responsibilities:
   - The executable comes from `executablePath` or a channel's install location, and nothing else; downloading Chrome for Testing, the default, isn't built yet, and `ExecutableNotFound` says so.
   - The profile is a temporary directory unless the caller owns one. The `automation` profile's arguments turn off what a page can't observe (first run, sync, updates, component extensions); `concurrent` adds the throttling switches.
   - The pipe is the transport, or a port read from `DevToolsActivePort`. stderr is kept for `ProcessExited`.
-- **Tests:** a conformance suite of 23 tests written against the contract, with a local site (`test/integration/adapter/`), and 6 more for Chromium alone. They cover:
+- **Tests:** a conformance suite of 23 tests (24 since history was added) written against the contract, with a local site (`test/integration/adapter/`), and 6 more for Chromium alone. They cover:
   - pages, frames and out-of-process frames, orphans, and popups with init scripts before author script;
   - outcomes: commit, same-document, no content, failure, redirect hops;
   - evaluation, input, prompts, interception, overrides and their release;
@@ -345,11 +345,11 @@ Adapter responsibilities:
   - the on-demand realm strategy (no `Runtime.enable`);
   - merging `ExtraInfo` headers and `servedBy` into request snapshots;
   - enrichment;
-  - tests of back/forward-cache restores and prerender activation, which headless Chromium 155 didn't produce (`Page.backForwardCacheNotUsed`).
+  - a test of prerender activation, which headless Chromium 155 doesn't produce; back/forward-cache restores, which it didn't in the first probe, it does between plain pages, and are built and tested since (History and restores, below).
 
 **Built for BiDi** (2026-10-20), for Firefox and any BiDi endpoint (`src/internal/bidiAdapter.ts`, `src/internal/bidiWire.ts`, `src/internal/firefoxLauncher.ts`, and the public `BidiConnection`):
 
-- **Wire.** One session per connection: every event belongs to it, and the adapter routes events by the context in their parameters. `params` is always sent, even empty. An error reply with no id answers a message the browser couldn't read, which is a bug here, so it ends the connection. The error table matches the spec's codes; Firefox reports a command it doesn't implement as `unknown command`, so `unsupported operation` has no row until a browser sends it.
+- **Wire.** One session per connection: every event belongs to it, and the adapter routes events by the context in their parameters. `params` is always sent, even empty. An error reply with no id answers a message the browser couldn't read, which is a bug here, so it ends the connection. The error table matches the spec's codes; Firefox reports a command it doesn't implement as `unknown command`, so `unsupported operation` had no row until a browser sent it (it has one since: History and restores, below).
 - **Connecting.** The adapter starts a session with `unhandledPromptBehavior: ignore`, so prompts and file dialogs wait for a decision, and subscribes to `browsingContext`, `script`, `network`, `log` and `input`. It adopts the contexts `browsingContext.getTree` shows. That tree is also its resync after an integrity failure, which a recorded Firefox event that didn't decode exercised before the correction for it.
 - **No pause.** Declarations are native: preload scripts and overrides registered for a context, a user context or every context apply before a new context's scripts. `pauseScope` is `"context"`, a new page is ready as it appears, and popups get their user context's declarations.
 - **Correlation.** Contexts are navigables, BiDi's navigation ids map to ours (a command's navigation is matched by URL), requests are hops by request id and redirect count, and realms are keyed by BiDi's id. Firefox creates a new document's realm before `navigationCommitted`, sometimes after a transient one: a main-world realm created for a context whose document already had one is held for the next commit, and one destroyed before it is never reported. The initial `about:blank` realm survives into the first same-origin document, as in Chromium (probe 2).
@@ -360,7 +360,7 @@ Adapter responsibilities:
   - **Permissions** are granted per origin; BiDi has no reset, so the adapter sets the ones it granted back to `prompt`.
 - **Not supported, and said so:** a navigation referrer, media-feature overrides and focus emulation on Firefox 158, which answers `unknown command` (now `AdapterError{Unsupported}` named by the method), and WebSocket frames, which BiDi has no events for.
 - **Findings** (PROBES.md, Results): Firefox sends `contextDestroyed` for frames orphaned by a navigation (probe 8); `userActivation` grants activation only during the call (probe 20); a dedicated worker's console messages come attributed to its owner's realm; `document.open()` shows as `historyUpdated` and a repeated `domContentLoaded`, which the adapter reports as a new generation (probe 17).
-- **Tests:** the conformance suite's 23 tests pass against Firefox 158 as they do against Chromium; 5 Firefox tests check the launcher, the raw connection, every error-table row against the browser, and both corrections.
+- **Tests:** the conformance suite's 23 tests (24 since) pass against Firefox 158 as they do against Chromium; 5 Firefox tests check the launcher, the raw connection, every error-table row against the browser, and both corrections.
 
 **Built for WebKit** (2026-10-20), for Playwright's WebKit build (`src/internal/webkitAdapter.ts`, `src/internal/webkitWire.ts`, `src/internal/webkitUtility.ts`, `src/internal/webkitLauncher.ts`, and the public `WebKitConnection`):
 
@@ -392,8 +392,19 @@ Adapter responsibilities:
   - A document caches `navigator.userAgent` the first time it is read, so a user-agent override reaches a document that has read it only at its next navigation; requests carry it at once.
 - **Not supported, and said so:** PDFs, interception of authentication (WebKit answers challenges from credentials set in advance), a response-phase `Fail`, and the per-page locale and geolocation above.
 - **Hazards** (PROBES.md, Results): `Playwright.navigate` with a frame id the page doesn't have, and `Dialog.handleJavaScriptDialog` with no dialog open, abort the browser. The adapter navigates only frames it has seen and not seen go, and answers only a dialog it has seen open and not seen close; a frame that goes between that check and the command is a race it can't close.
-- **Tests:** the conformance suite's 23 tests pass against build 2359 as they do against Chromium and Firefox; 6 WebKit tests check the launcher and its revision check, the raw connection, every error-table row (with unknown methods at every level), a cross-site navigation followed across targets, `document.open()`, and a crash.
+- **Tests:** the conformance suite's 24 tests pass against build 2359 as they do against Chromium and Firefox; 6 WebKit tests check the launcher and its revision check, the raw connection, every error-table row (with unknown methods at every level), a cross-site navigation followed across targets, `document.open()`, and a crash.
 - **Not built:** the attach-only stock profile (iOS, WKWebView, the WebKitGTK inspector). It needs stock WebKit's protocol, vendored and modeled as a backend of its own (its domains differ from Playwright's: no `Playwright`, no page proxies), and an endpoint to record against, which this environment doesn't have.
+
+**Built** (2026-10-20): history and back/forward-cache restores, on every backend, which no test had covered.
+
+- **The test.** A conformance test reloads and moves through history: back, forward and past the end, each navigation started as a `traversal` or a `reload` and ending `Committed` or `Restored` in the document it names. It failed on two backends at first.
+- **CDP.** Chromium 155 restores a plain page from the back/forward cache. It creates the restored document's context before `frameNavigated{type: BackForwardCacheRestore}`, which commits under that document's original loader id.
+  - An ended navigation now leaves the table of navigations by loader id, which it never did, so the restore's commit no longer found the long-ended navigation that first loaded the document; it takes the traversal in flight.
+  - A main-world context created while a traversal is in flight waits for the commit, and what it logs meanwhile waits with it, so the restored document's realm is reported as that document's, after it.
+  - Chromium answers a page's commands with "Not attached to an active page" for a moment while it swaps documents, as just after a commit. A history command refused for that never ran, so it is sent again, every 50 ms for up to a second.
+- **BiDi.** Firefox 158 restores without `navigationCommitted`, `domContentLoaded` or `load`: the old realm goes and a new one comes. `traverseHistory` replies once the traversal is done, and a normal traversal commits before that, so a traversal still in flight at the reply, with a new main-world realm waiting, restored its document. Leaving its JSON viewer before it has loaded, Firefox doesn't even start one: then the waiting realm's `location.href` says where the page went. Either way the adapter commits the restored document, from the document the navigable last had at that URL, and ends the traversal `Restored`, reporting the realm's console messages after it.
+- **Firefox's `unsupported operation`.** `browsingContext.reload` with `ignoreCache`, `true` or `false`, is "not supported yet", which gave BiDi's table its fifth row, `Unsupported`. A reload now sends `ignoreCache` only to bypass the cache, and a navigation command the browser doesn't support fails as `Unsupported` instead of ending its navigation `Failed`.
+- **WebKit.** This build keeps no back/forward cache: going back loads the page again. A reload or traversal the adapter starts is now reported as one, as it is on BiDi; CDP's come from the browser's own navigation type.
 
 ### Pause-on-start granularity
 

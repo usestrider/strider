@@ -23,6 +23,7 @@ import * as Encoding from "effect/encoding/Base64"
 import * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as Schedule from "effect/Schedule"
 import type * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Browser from "../Browser.ts"
@@ -106,6 +107,8 @@ interface FrameEntry {
   /** Navigations started by a command that the browser hasn't announced yet, oldest first. */
   readonly expected: Array<{ readonly id: PageNavigation.Id; readonly url: string }>
   readonly navigations: Map<string, NavigationEntry>
+  /** Main-world realms created during a traversal, for the document it restores. */
+  readonly pendingRealms: Array<RealmEntry>
   removed: boolean
 }
 
@@ -125,7 +128,11 @@ interface RealmEntry {
   readonly target: TargetEntry
   readonly frame: FrameEntry | undefined
   readonly world: Adapter.World
+  readonly origin: string
   ended: boolean
+  /** Created ahead of its document's commit, so not reported yet; what it logs meanwhile waits with it. */
+  pending: boolean
+  readonly held: Array<Adapter.Fact>
 }
 
 interface NavigationEntry {
@@ -134,6 +141,8 @@ interface NavigationEntry {
   readonly loaderId: string
   readonly url: string
   readonly sameDocument: boolean
+  /** A move through history, which may restore a document from the back/forward cache. */
+  readonly traversal: boolean
   documentHop: NetworkRequest.HopId | undefined
   status: number | undefined
   failed: string | undefined
@@ -590,7 +599,34 @@ export const connect: (
       if (navigation.ended) return
       navigation.ended = true
       navigation.frame.navigations.delete(navigation.loaderId)
+      // A later commit under the same loader id, such as a restore, mustn't find this one
+      if (navigations.get(navigation.loaderId) === navigation) navigations.delete(navigation.loaderId)
       emit({ _tag: "NavigationEnded", navigation: navigation.id, outcome, evidence })
+      // Realms held for a document the traversal didn't produce belong to the one that stayed
+      const frame = navigation.frame
+      if (frame.document !== undefined) adoptPending(frame, frame.document)
+    }
+
+    // Reports the realms held for a frame's next document as the given document's, then what they logged.
+    const adoptPending = (frame: FrameEntry, document: DocumentEntry) => {
+      for (const realm of frame.pendingRealms.splice(0)) {
+        if (realm.ended) continue
+        realm.pending = false
+        document.realms.add(realm)
+        emit({
+          _tag: "RealmAdded",
+          realm: realm.id,
+          origin: realm.origin,
+          kind: { _tag: "Window", navigable: frame.id, document: document.id, world: realm.world }
+        })
+        for (const fact of realm.held.splice(0)) emit(fact)
+      }
+    }
+
+    // What a realm logs is reported after the realm itself.
+    const emitFrom = (realm: RealmEntry, fact: Adapter.Fact) => {
+      if (realm.pending) realm.held.push(fact)
+      else emit(fact)
     }
 
     // Ends a frame and everything below it, deepest first.
@@ -669,6 +705,8 @@ export const connect: (
           emit({ _tag: "RealmDocumentAdded", realm: realm.id, document: document.id })
         }
       }
+      // Realms created ahead of the commit: a restored document's, which Chromium creates first
+      adoptPending(frame, document)
       return document
     }
 
@@ -688,6 +726,7 @@ export const connect: (
         loaderId,
         url,
         sameDocument,
+        traversal: type === "traversal",
         documentHop: undefined,
         status: undefined,
         failed: undefined,
@@ -722,6 +761,7 @@ export const connect: (
         document: undefined,
         expected: [],
         navigations: new Map(),
+        pendingRealms: [],
         removed: false
       }
       parent.children.add(frame)
@@ -797,6 +837,7 @@ export const connect: (
             document: undefined,
             expected: [],
             navigations: new Map(),
+            pendingRealms: [],
             removed: false
           }
           frames.set(info.targetId, main)
@@ -1031,10 +1072,12 @@ export const connect: (
           if (parent === undefined) return
           frame = addFrame(f.id, parent, target)
         }
+        const restored = params.type === "BackForwardCacheRestore"
+        // A restore commits under the restored document's loader id, not the traversal's
         const navigation = navigations.get(f.loaderId) ??
+          (restored ? [...frame.navigations.values()].find((pending) => pending.traversal) : undefined) ??
           startNavigation(frame, f.loaderId, f.url, "crossDocument", false)
         const errorPage = f.url.startsWith("chrome-error://")
-        const restored = params.type === "BackForwardCacheRestore"
         const previous = documentsByLoader.get(f.loaderId)
         const document = commit(
           frame,
@@ -1179,7 +1222,10 @@ export const connect: (
             target,
             frame: undefined,
             world: { _tag: "Main" },
-            ended: false
+            origin: context.origin,
+            ended: false,
+            pending: false,
+            held: []
           }
           target.realm = realm
           realms.set(realm.id, realm)
@@ -1212,11 +1258,20 @@ export const connect: (
           target,
           frame,
           world: auxData.isDefault === true ? { _tag: "Main" } : { _tag: "Isolated", name: context.name },
-          ended: false
+          origin: context.origin,
+          ended: false,
+          pending: false,
+          held: []
         }
         realms.set(realm.id, realm)
         realmsByContext.set(contextKey(target, realm.contextId), realm)
         realmsByUnique.set(realm.uniqueId, realm)
+        // During a traversal, Chromium creates a restored document's realm before its commit
+        if (realm.world._tag === "Main" && [...frame.navigations.values()].some((pending) => pending.traversal)) {
+          realm.pending = true
+          frame.pendingRealms.push(realm)
+          return
+        }
         document.realms.add(realm)
         emit({
           _tag: "RealmAdded",
@@ -1240,7 +1295,7 @@ export const connect: (
         const realm = realmsByContext.get(contextKey(target, params.executionContextId as number))
         if (realm === undefined) return
         const top = params.stackTrace?.callFrames[0]
-        emit({
+        emitFrom(realm, {
           _tag: "ConsoleMessage",
           realm: realm.id,
           message: new ConsoleMessage.ConsoleMessage({
@@ -1266,7 +1321,7 @@ export const connect: (
         const description = exception?.description ?? details.text
         const [first = details.text, ...rest] = description.split("\n")
         const colon = first.indexOf(": ")
-        emit({
+        const fact: Adapter.Fact = {
           _tag: "UncaughtException",
           realm: Option.fromUndefinedOr(realm?.id),
           exception: new UncaughtException.UncaughtException({
@@ -1281,7 +1336,9 @@ export const connect: (
               : { _tag: "Page", page: target.page?.id ?? ("" as L1Target.NavigableId) },
             at: Adapter.now()
           })
-        })
+        }
+        if (realm === undefined) emit(fact)
+        else emitFrom(realm, fact)
       },
       [Network.requestWillBeSent.method]: (target, params: Network.RequestWillBeSentParams) => {
         if (target === undefined) return
@@ -2111,22 +2168,39 @@ export const connect: (
       return id
     })
 
+    // Chromium says a page isn't attached for a moment while it swaps documents, as just after a navigation
+    // commits (recorded 2026-10-20); a command refused for that never ran, so it is sent again
+    const whileSwapping = <A>(effect: Effect.Effect<A, Protocol.ProtocolError>) =>
+      effect.pipe(Effect.retry({
+        while: (error) =>
+          error.reason._tag === "Rejected" && error.reason.reason === "Unrecognized" &&
+          error.reason.description === "Not attached to an active page",
+        schedule: Schedule.spaced("50 millis"),
+        times: 20
+      }))
+
     const reload = Effect.fnUntraced(function*(id: L1Target.NavigableId, options: { readonly ignoreCache: boolean }) {
       const page = yield* pageOf(id)
       const frame = navigables.get(page.id)!
       const navigation = expect(frame, frame.document?.url ?? "")
-      yield* protocol(Page.reload({ ignoreCache: options.ignoreCache }).pipe(Protocol.on(page.target.session)))
+      yield* protocol(
+        whileSwapping(Page.reload({ ignoreCache: options.ignoreCache }).pipe(Protocol.on(page.target.session)))
+      )
       return navigation
     })
 
     const traverse = Effect.fnUntraced(function*(id: L1Target.NavigableId, delta: number) {
       const page = yield* pageOf(id)
       const frame = navigables.get(page.id)!
-      const history = yield* protocol(Page.getNavigationHistory().pipe(Protocol.on(page.target.session)))
+      const history = yield* protocol(
+        whileSwapping(Page.getNavigationHistory().pipe(Protocol.on(page.target.session)))
+      )
       const entry = history.entries[history.currentIndex + delta]
       if (entry === undefined) return Option.none<PageNavigation.Id>()
       const navigation = expect(frame, entry.url)
-      yield* protocol(Page.navigateToHistoryEntry({ entryId: entry.id }).pipe(Protocol.on(page.target.session)))
+      yield* protocol(
+        whileSwapping(Page.navigateToHistoryEntry({ entryId: entry.id }).pipe(Protocol.on(page.target.session)))
+      )
       return Option.some(navigation)
     })
 
