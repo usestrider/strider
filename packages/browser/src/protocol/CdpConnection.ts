@@ -54,9 +54,11 @@ export interface CdpConnection {
  *
  * **Details**
  *
- * One reader, running in the scope, routes replies to their commands and events to their sessions. Closing
- * the scope, or losing the transport, ends every session: pending commands fail and subscriptions end, with
- * `SessionEnded`.
+ * One reader, running in the scope, routes replies to their commands and queues events, which one worker
+ * publishes to each session's subscriptions in the order they arrived. A session may have 10,000 events or
+ * 256 MiB queued for the worker; past that, its queued events are dropped, and its subscriptions fail with
+ * `EventOverflow` or, if sliding, get a `Gap`. Closing the scope, or losing the transport, ends every session:
+ * pending commands fail at once, and subscriptions end with `SessionEnded` after the events received before.
  *
  * **Example** (Navigating a new tab)
  *

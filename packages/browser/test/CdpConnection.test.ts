@@ -2,7 +2,9 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Browser from "@usestrider/browser/cdp/Browser"
 import * as Emulation from "@usestrider/browser/cdp/Emulation"
 import * as Input from "@usestrider/browser/cdp/Input"
+import * as Network from "@usestrider/browser/cdp/Network"
 import * as Page from "@usestrider/browser/cdp/Page"
+import * as Runtime from "@usestrider/browser/cdp/Runtime"
 import * as Target from "@usestrider/browser/cdp/Target"
 import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol"
 import * as Cause from "effect/Cause"
@@ -10,47 +12,10 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
-import * as Queue from "effect/Queue"
 import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
-
-interface Sent {
-  readonly id: number
-  readonly method: string
-  readonly params?: Record<string, unknown>
-  readonly sessionId?: string
-}
-
-/** A transport the test plays the browser on: it reads what was sent and writes what arrives. */
-const makeBrowser = Effect.gen(function*() {
-  const inbox = yield* Queue.unbounded<string, Transport.TransportError | Cause.Done>()
-  const sent = yield* Queue.unbounded<Sent>()
-  const lost = yield* Deferred.make<Transport.ConnectionLost>()
-  let reason: Transport.ConnectionLost | undefined
-  const transport: Transport.Transport = {
-    send: (message) =>
-      Effect.suspend(() =>
-        reason === undefined
-          ? Queue.offer(sent, JSON.parse(message)).pipe(Effect.asVoid)
-          : Effect.fail(new Transport.TransportError({ reason }))
-      ),
-    messages: Stream.fromQueue(inbox),
-    closed: Deferred.await(lost)
-  }
-  return {
-    transport,
-    next: Queue.take(sent),
-    pending: Queue.size(sent),
-    receive: (message: object) => Queue.offer(inbox, JSON.stringify(message)).pipe(Effect.asVoid),
-    receiveRaw: (message: string) => Queue.offer(inbox, message).pipe(Effect.asVoid),
-    lose: (description: string) =>
-      Effect.sync(() => {
-        reason = new Transport.ConnectionLost({ initiator: "remote", description })
-        Queue.failCauseUnsafe(inbox, Cause.fail(new Transport.TransportError({ reason })))
-        Deferred.doneUnsafe(lost, Effect.succeed(reason))
-      })
-  }
-})
+import { TestClock } from "effect/testing"
+import { type FakeBrowser, makeBrowser } from "./utils/FakeBrowser.ts"
 
 const version = {
   protocolVersion: "1.3",
@@ -61,7 +26,7 @@ const version = {
 }
 
 const attach = Effect.fnUntraced(function*(
-  browser: Effect.Success<typeof makeBrowser>,
+  browser: FakeBrowser,
   cdp: CdpConnection.CdpConnection,
   sessionId: string,
   parent?: string
@@ -237,7 +202,7 @@ describe("CdpConnection", () => {
       assert.strictEqual(event.value.timestamp, 2)
     }))
 
-  it.effect("keeps only the newest events in a sliding subscription", () =>
+  it.effect("keeps only the newest events in a sliding subscription, and marks where it dropped some", () =>
     Effect.gen(function*() {
       const browser = yield* makeBrowser
       const cdp = yield* CdpConnection.make(browser.transport)
@@ -246,9 +211,194 @@ describe("CdpConnection", () => {
       for (const timestamp of [1, 2, 3, 4]) {
         yield* browser.receive({ method: "Page.loadEventFired", params: { timestamp }, sessionId: "S1" })
       }
-      yield* Effect.yieldNow
-      const seen = yield* loaded.pipe(Stream.take(2), Stream.map((event) => event.timestamp), Stream.runCollect)
-      assert.deepStrictEqual(seen, [3, 4])
+      yield* browser.delivered
+      yield* page.drainObserved
+      const seen = yield* loaded.pipe(
+        Stream.take(3),
+        Stream.map((event) => Protocol.isGap(event) ? `${event.dropped} dropped` : event.timestamp),
+        Stream.runCollect
+      )
+      assert.deepStrictEqual(seen, ["2 dropped", 3, 4])
+    }))
+
+  it.effect("fails a lossless subscription that falls behind with EventOverflow, after what it kept", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const cdp = yield* CdpConnection.make(browser.transport)
+      const page = yield* attach(browser, cdp, "S1")
+      const loaded = yield* page.subscribe(Page.loadEventFired, { buffer: { lossless: 2 } })
+      for (const timestamp of [1, 2, 3]) {
+        yield* browser.receive({ method: "Page.loadEventFired", params: { timestamp }, sessionId: "S1" })
+      }
+      yield* browser.delivered
+      yield* page.drainObserved
+      const kept = yield* loaded.pipe(Stream.take(2), Stream.map((event) => event.timestamp), Stream.runCollect)
+      assert.deepStrictEqual(kept, [1, 2])
+      assert.deepInclude(reasonOf(yield* loaded.pipe(Stream.runDrain, Effect.exit)), {
+        _tag: "EventOverflow",
+        method: "Page.loadEventFired",
+        capacity: 2
+      })
+    }))
+
+  it.effect("filters with a prefilter before buffering, so excluded events take no space", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const cdp = yield* CdpConnection.make(browser.transport)
+      const page = yield* attach(browser, cdp, "S1")
+      const lifecycle = yield* page.subscribe(Page.lifecycleEvent, {
+        buffer: { lossless: 1 },
+        prefilter: { frameId: "F2" as Page.FrameId }
+      })
+      for (const frameId of ["F1", "F1", "F2"]) {
+        yield* browser.receive({
+          method: "Page.lifecycleEvent",
+          params: { frameId, loaderId: "L", name: "load", timestamp: 1 },
+          sessionId: "S1"
+        })
+      }
+      const event = yield* Stream.runHead(lifecycle)
+      assert(event._tag === "Some")
+      assert.strictEqual(event.value.frameId, "F2")
+    }))
+
+  it.effect("sees only events received after subscribe returns", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const cdp = yield* CdpConnection.make(browser.transport)
+      const page = yield* attach(browser, cdp, "S1")
+      yield* browser.receive({ method: "Page.loadEventFired", params: { timestamp: 1 }, sessionId: "S1" })
+      yield* browser.delivered
+      const loaded = yield* page.subscribe(Page.loadEventFired)
+      yield* browser.receive({ method: "Page.loadEventFired", params: { timestamp: 2 }, sessionId: "S1" })
+      const event = yield* Stream.runHead(loaded)
+      assert(event._tag === "Some")
+      assert.strictEqual(event.value.timestamp, 2)
+    }))
+
+  it.effect("delivers the events received before a session ended, then ends the subscription", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const cdp = yield* CdpConnection.make(browser.transport)
+      const page = yield* attach(browser, cdp, "S1")
+      const loaded = yield* page.subscribe(Page.loadEventFired)
+      yield* browser.receive({ method: "Page.loadEventFired", params: { timestamp: 1 }, sessionId: "S1" })
+      yield* browser.receive({ method: "Target.detachedFromTarget", params: { sessionId: "S1" } })
+      const first = yield* Stream.runHead(loaded)
+      assert(first._tag === "Some")
+      assert.strictEqual(first.value.timestamp, 1)
+      assert.deepInclude(reasonOf(yield* loaded.pipe(Stream.runDrain, Effect.exit)), {
+        _tag: "SessionEnded",
+        why: "detached"
+      })
+    }))
+
+  it.effect("under trust, skips codecs that only check, and still runs those that transform", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const cdp = yield* CdpConnection.make(browser.transport)
+      const page = yield* attach(browser, cdp, "S1")
+      const loaded = yield* page.subscribe(Page.loadEventFired).pipe(Protocol.withValidation("trust"))
+      yield* browser.receive({ method: "Page.loadEventFired", params: { timestamp: "soon" }, sessionId: "S1" })
+      const event = yield* Stream.runHead(loaded)
+      assert(event._tag === "Some")
+      assert.strictEqual(event.value.timestamp as unknown, "soon")
+
+      const cookies = yield* Network.getCookies().pipe(
+        Protocol.on(page),
+        Protocol.withValidation("trust"),
+        Effect.forkChild
+      )
+      const sent = yield* browser.next
+      const cookie = {
+        name: "session",
+        value: "hunter2",
+        domain: "example.com",
+        path: "/",
+        expires: -1,
+        size: 14,
+        httpOnly: true,
+        secure: true,
+        session: true,
+        priority: "Medium",
+        sourceScheme: "Secure",
+        sourcePort: 443
+      }
+      yield* browser.receive({ id: sent.id, result: { cookies: [cookie] }, sessionId: "S1" })
+      const [received] = (yield* Fiber.join(cookies)).cookies
+      assert(received !== undefined && Redacted.isRedacted(received.value))
+      assert.strictEqual(Redacted.value(received.value), "hunter2")
+    }))
+
+  it.effect("fails a command with NoReply after CommandTimeout, and drops its late reply", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const cdp = yield* CdpConnection.make(browser.transport)
+      const fiber = yield* Browser.getVersion().pipe(
+        Protocol.on(cdp.browser),
+        Protocol.withCommandTimeout("1 second"),
+        Effect.forkChild
+      )
+      const sent = yield* browser.next
+      yield* TestClock.adjust("1 second")
+      assert.deepInclude(reasonOf(yield* Fiber.await(fiber)), { _tag: "NoReply", method: "Browser.getVersion" })
+      yield* browser.receive({ id: sent.id, result: version })
+      yield* browser.delivered
+      assert.strictEqual(yield* browser.pending, 0)
+    }))
+
+  it.effect("waits 30 seconds by default", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const cdp = yield* CdpConnection.make(browser.transport)
+      const fiber = yield* Browser.getVersion().pipe(Protocol.on(cdp.browser), Effect.forkChild)
+      yield* browser.next
+      yield* TestClock.adjust("29 seconds")
+      assert.isUndefined(fiber.pollUnsafe())
+      yield* TestClock.adjust("1 second")
+      assert.strictEqual(reasonOf(yield* Fiber.await(fiber))._tag, "NoReply")
+    }))
+
+  it.effect("releases a resource whose reply arrives after its caller stopped waiting", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const cdp = yield* CdpConnection.make(browser.transport)
+      const fiber = yield* Target.createTarget({ url: "about:blank" }).pipe(Protocol.on(cdp.browser), Effect.forkChild)
+      const sent = yield* browser.next
+      yield* Fiber.interrupt(fiber)
+      yield* browser.receive({ id: sent.id, result: { targetId: "T9" } })
+      const release = yield* browser.next
+      assert.deepInclude(release, { method: "Target.closeTarget", params: { targetId: "T9" } })
+      assert.isUndefined(release.sessionId)
+    }))
+
+  it.effect("hands a late reply to the handler in the caller's context", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const cdp = yield* CdpConnection.make(browser.transport)
+      const page = yield* attach(browser, cdp, "S1")
+      const late = yield* Deferred.make<Protocol.LateReply>()
+      const fiber = yield* Runtime.evaluate({ expression: "document.body" }).pipe(
+        Protocol.on(page),
+        Protocol.withLateReplyHandler((reply) => Deferred.succeed(late, reply).pipe(Effect.asVoid)),
+        Protocol.withCommandTimeout("1 second"),
+        Effect.forkChild
+      )
+      const sent = yield* browser.next
+      yield* TestClock.adjust("1 second")
+      assert.strictEqual(reasonOf(yield* Fiber.await(fiber))._tag, "NoReply")
+      const result = { result: { type: "object", subtype: "node", objectId: "O1" } }
+      yield* browser.receive({ id: sent.id, result, sessionId: "S1" })
+      const reply = yield* Deferred.await(late)
+      assert.strictEqual(reply.method, "Runtime.evaluate")
+      assert.deepStrictEqual(reply.result, result)
+      assert.strictEqual(reply.session, page)
+      assert.strictEqual(yield* browser.pending, 0)
+      const released = yield* reply.release.pipe(Effect.forkChild)
+      const release = yield* browser.next
+      assert.deepInclude(release, { method: "Runtime.releaseObject", params: { objectId: "O1" }, sessionId: "S1" })
+      yield* browser.receive({ id: release.id, result: {}, sessionId: "S1" })
+      yield* Fiber.join(released)
     }))
 
   it.effect("ends a detached session and its children: pending commands and subscriptions fail", () =>

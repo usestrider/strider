@@ -950,7 +950,7 @@ export const takeResponseBodyAsStream: Protocol.CommandDef<
   "Fetch.takeResponseBodyAsStream",
   TakeResponseBodyAsStreamParams,
   TakeResponseBodyAsStreamResult,
-  { status: "stable", createsResource: true }
+  { status: "stable", createsResource: true, release: [{ method: "IO.close", param: "handle", from: "/stream" }] }
 )
 
 /**

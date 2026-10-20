@@ -127,6 +127,38 @@ describe("overlays", () => {
     assert.isTrue(cookie.members["value"]?.traits.sensitive)
   })
 
+  it("check that a release names a command, its parameter, and a path through the result", () => {
+    const release = (target: string, traits: object) =>
+      applyOverlays(model, [["resources.json", {
+        reason: "fixture",
+        annotate: [{ target, traits: { createsResource: true, ...traits } }]
+      }]])
+    const valid = { method: "Card.connect", param: "id", from: "/cookies/*/name" }
+    const annotated = release("Net#getCookies", { release: [valid] })
+    assert.deepStrictEqual(annotated.shapes["Net#getCookies"]?.traits.release, [valid])
+    assert.throws(
+      () => release("Net#getCookies", { release: [{ ...valid, method: "Card.gone" }] }),
+      /no command Card\.gone/
+    )
+    assert.throws(() => release("Net#getCookies", { release: [{ ...valid, param: "nope" }] }), /has no parameter nope/)
+    assert.throws(
+      () => release("Net#getCookies", { release: [{ ...valid, from: "/cookies/0/name" }] }),
+      /doesn't resolve/
+    )
+    assert.throws(
+      () => release("Net#getCookies", { release: [{ ...valid, from: "/cookies/*/*" }] }),
+      /steps into a list/
+    )
+    assert.throws(
+      () =>
+        applyOverlays(model, [["resources.json", {
+          reason: "fixture",
+          annotate: [{ target: "Net#getCookies", traits: { release: [valid] } }]
+        }]]),
+      /only a command that creates a resource/
+    )
+  })
+
   it("fail on a target that doesn't exist", () => {
     assert.throws(
       () =>

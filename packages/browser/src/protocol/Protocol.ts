@@ -16,6 +16,7 @@
  * @since 0.1.0
  */
 import * as Context from "effect/Context"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import { dual } from "effect/Function"
 import * as Predicate from "effect/Predicate"
@@ -34,6 +35,8 @@ import type * as Stream from "effect/Stream"
  *   releasing held input.
  * - `createsResource`: the reply hands out something with a remote lifetime, so a late reply is routed to an
  *   owner that adopts or releases it.
+ * - `release`: the commands that release what the reply hands out, each taking one parameter from the
+ *   result. `from` is a JSON pointer into the result as sent, where `*` stands for every element of a list.
  *
  * @stability experimental
  * @category models
@@ -44,7 +47,22 @@ export interface Traits {
   readonly session?: "browser" | "target" | undefined
   readonly compensation?: string | undefined
   readonly createsResource?: true | undefined
+  readonly release?: ReadonlyArray<Release> | undefined
   readonly redirect?: string | undefined
+}
+
+/**
+ * One command that releases a resource a reply handed out: `method`, with `param` taken from the result at
+ * the JSON pointer `from`.
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export interface Release {
+  readonly method: string
+  readonly param: string
+  readonly from: string
 }
 
 /**
@@ -166,20 +184,115 @@ export const SessionKey = Schema.String.pipe(Schema.brand("~@usestrider/browser/
 export type SessionKey = typeof SessionKey.Type
 
 /**
- * Settings for a subscription.
+ * A declarative filter on an event's parameters: the values some of its fields must equal, nested as the
+ * parameters are. It runs before an event is buffered, so excluded events never take up a subscription's
+ * space, and it never runs your code on the connection's behalf.
+ *
+ * **Example** (One frame's navigations)
+ *
+ * ```ts import.meta.vitest
+ * import { Effect, Stream } from "effect"
+ * import { Page } from "@usestrider/browser/cdp"
+ * import type { Protocol } from "@usestrider/browser/protocol"
+ *
+ * const navigations = Effect.fn("navigations")(function*(page: Protocol.ProtocolSession, frameId: Page.FrameId) {
+ *   const navigated = yield* page.subscribe(Page.frameNavigated, { prefilter: { frame: { id: frameId } } })
+ *   return yield* navigated.pipe(Stream.take(1), Stream.runCollect)
+ * })
+ * ```
  *
  * @stability experimental
  * @category models
  * @since 0.1.0
  */
-export interface SubscribeOptions {
+export type Prefilter<A> = A extends ReadonlyArray<unknown> ? never : {
+  readonly [K in keyof A]?: NonNullable<A[K]> extends string | number | boolean ? A[K]
+    : Prefilter<NonNullable<A[K]>>
+}
+
+/**
+ * Settings for a subscription that keeps every event.
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export interface SubscribeOptions<A> {
   /**
-   * `"lossless"` keeps every event until it is read; `{ sliding }` keeps only the newest `sliding` events and
-   * drops older unread ones.
+   * Keeps up to `lossless` unread events. One more fails the subscription with `EventOverflow`; nothing is
+   * dropped silently.
    *
-   * @default "lossless"
+   * @default { lossless: 10_000 }
    */
-  readonly buffer?: "lossless" | { readonly sliding: number } | undefined
+  readonly buffer?: { readonly lossless: number } | undefined
+  /**
+   * Only events whose parameters match.
+   *
+   * @default every event
+   */
+  readonly prefilter?: Prefilter<A> | undefined
+}
+
+/**
+ * Settings for a subscription that keeps only the newest events, and marks where it dropped older ones with a
+ * `Gap`.
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export interface SlidingOptions<A> {
+  /**
+   * Keeps the newest `sliding` unread events; older ones are dropped, and a `Gap` takes their place.
+   */
+  readonly buffer: { readonly sliding: number }
+  /**
+   * Only events whose parameters match.
+   *
+   * @default every event
+   */
+  readonly prefilter?: Prefilter<A> | undefined
+}
+
+/**
+ * Where a sliding subscription dropped events, and how many.
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export class Gap extends Schema.TaggedClass<Gap>("@usestrider/browser/protocol/Protocol/Gap")("Gap", {
+  dropped: Schema.Int
+}) {}
+
+/**
+ * Checks whether an element of a sliding subscription is a `Gap`.
+ *
+ * @stability experimental
+ * @category guards
+ * @since 0.1.0
+ */
+export const isGap = (u: unknown): u is Gap => u instanceof Gap
+
+/**
+ * A reply that arrived after its caller stopped waiting, to a command that hands out something with a remote
+ * lifetime.
+ *
+ * **Details**
+ *
+ * `result` is the reply as sent, not decoded. `release` sends the command's release commands (its `release`
+ * trait) on the same session and ignores their failures; for a command with none, it does nothing.
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export interface LateReply {
+  readonly session: ProtocolSession
+  readonly method: string
+  readonly params: unknown
+  readonly result: unknown
+  readonly release: Effect.Effect<void>
 }
 
 /**
@@ -188,10 +301,12 @@ export interface SubscribeOptions {
  * **Details**
  *
  * Commands sent on a session reply in any order; events arrive in order, per session only. A subscription is
- * live by the time `subscribe` returns, so code order is subscription order.
+ * live by the time `subscribe` returns, so code order is subscription order, and it sees only events received
+ * after that.
  *
  * A session ends when the browser detaches it, when its parent session ends, or when the connection is lost.
- * Then pending commands fail and subscriptions end, both with `SessionEnded`.
+ * Then pending commands fail at once, and subscriptions end with `SessionEnded` after the events received
+ * before the end.
  *
  * @stability experimental
  * @category services
@@ -203,18 +318,37 @@ export interface ProtocolSession {
    */
   readonly key: SessionKey | undefined
   /**
-   * Sends a command and waits for its reply. Interrupting the caller abandons the reply; it never cancels the
-   * command, which no protocol can do.
+   * Sends a command and waits for its reply, for at most `CommandTimeout`. Interrupting the caller, or running
+   * out of time, abandons the reply; it never cancels the command, which no protocol can do. A late reply to
+   * a command that creates a resource goes to `CurrentLateReplyHandler`.
    */
   send<M extends string, P, A>(command: Command<M, P, A>): Effect.Effect<A, ProtocolError>
+  /**
+   * Subscribes to an event, keeping only the newest events; live by the time this returns. A `Gap` marks
+   * where older events were dropped.
+   */
+  subscribe<M extends string, A>(
+    event: EventDef<M, A>,
+    options: SlidingOptions<A>
+  ): Effect.Effect<Stream.Stream<A | Gap, ProtocolError>, never, Scope.Scope>
   /**
    * Subscribes to an event; live by the time this returns. Each event's parameters are decoded as the stream
    * is read, so one that doesn't match its codec fails this stream with `Decode` and no other.
    */
   subscribe<M extends string, A>(
     event: EventDef<M, A>,
-    options?: SubscribeOptions | undefined
+    options?: SubscribeOptions<A> | undefined
   ): Effect.Effect<Stream.Stream<A, ProtocolError>, never, Scope.Scope>
+  /**
+   * Waits until every event this session received before the call has been processed: folded into the model,
+   * where there is one, and published to subscriptions.
+   *
+   * **Gotchas**
+   *
+   * It is a local barrier, not proof that everything a command caused has arrived: an event the browser
+   * hasn't sent yet isn't waited for.
+   */
+  readonly drainObserved: Effect.Effect<void>
   /**
    * Waits as long as the session lives, then gives the reason it ended.
    */
@@ -246,6 +380,146 @@ export const on: {
   2,
   <M extends string, P, A>(command: Command<M, P, A>, session: ProtocolSession): Effect.Effect<A, ProtocolError> =>
     Effect.provideService(command, ProtocolSession, session)
+)
+
+/**
+ * Reference to how long a command waits for its reply before failing with `NoReply`; 30 seconds unless set.
+ *
+ * **Details**
+ *
+ * This is the fallback for raw protocol use. The API in `@usestrider/browser` runs commands under the
+ * operation's deadline instead. `Duration.infinity` waits until the reply arrives or the session ends.
+ *
+ * @stability experimental
+ * @category references
+ * @since 0.1.0
+ */
+export const CommandTimeout: Context.Reference<Duration.Duration> = Context.Reference(
+  "@usestrider/browser/protocol/Protocol/CommandTimeout",
+  { defaultValue: () => Duration.seconds(30) }
+)
+
+/**
+ * Sets how long the commands an effect sends wait for their replies.
+ *
+ * **Example** (A slow evaluation)
+ *
+ * ```ts import.meta.vitest
+ * import { Runtime } from "@usestrider/browser/cdp"
+ * import { Protocol } from "@usestrider/browser/protocol"
+ *
+ * const settle = Runtime.evaluate({ expression: "new Promise((r) => setTimeout(r, 60_000))", awaitPromise: true })
+ *   .pipe(Protocol.withCommandTimeout("2 minutes"))
+ * ```
+ *
+ * @stability experimental
+ * @category combinators
+ * @since 0.1.0
+ */
+export const withCommandTimeout: {
+  (timeout: Duration.Input): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
+  <A, E, R>(self: Effect.Effect<A, E, R>, timeout: Duration.Input): Effect.Effect<A, E, R>
+} = dual(
+  2,
+  <A, E, R>(self: Effect.Effect<A, E, R>, timeout: Duration.Input): Effect.Effect<A, E, R> =>
+    Effect.provideService(self, CommandTimeout, Duration.fromInputUnsafe(timeout))
+)
+
+/**
+ * How results and event parameters are checked: `"decode"` runs each through its codec; `"trust"` skips the
+ * codecs that would only check, and still runs those that transform, such as a sensitive value becoming
+ * `Redacted`.
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export type Validation = "decode" | "trust"
+
+/**
+ * Reference to how results and event parameters are checked; `"decode"` unless set.
+ *
+ * **Details**
+ *
+ * `"trust"` is for hot paths you have measured. A payload that drifted from the spec then arrives typed as if
+ * it hadn't, so a failure shows up later and further from its cause. Provide it for a whole program with
+ * `Layer.succeed(Protocol.CurrentValidation, "trust")`, or for one effect with `withValidation`.
+ *
+ * @stability experimental
+ * @category references
+ * @since 0.1.0
+ */
+export const CurrentValidation: Context.Reference<Validation> = Context.Reference(
+  "@usestrider/browser/protocol/Protocol/CurrentValidation",
+  { defaultValue: (): Validation => "decode" }
+)
+
+/**
+ * Sets how the results and event parameters an effect reads are checked.
+ *
+ * @stability experimental
+ * @category combinators
+ * @since 0.1.0
+ */
+export const withValidation: {
+  (validation: Validation): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
+  <A, E, R>(self: Effect.Effect<A, E, R>, validation: Validation): Effect.Effect<A, E, R>
+} = dual(
+  2,
+  <A, E, R>(self: Effect.Effect<A, E, R>, validation: Validation): Effect.Effect<A, E, R> =>
+    Effect.provideService(self, CurrentValidation, validation)
+)
+
+/**
+ * Reference to what happens to a late reply that hands out a resource; unless set, the resource is released.
+ *
+ * **Details**
+ *
+ * A command whose `createsResource` trait is set keeps listening after its caller is interrupted or times
+ * out. When the reply arrives, the handler in the caller's context at send time receives it, in a fiber of
+ * its own; the default runs `release`. The API in `@usestrider/browser` sets a handler that adopts the
+ * resource into its owner, or releases it.
+ *
+ * @stability experimental
+ * @category references
+ * @since 0.1.0
+ */
+export const CurrentLateReplyHandler: Context.Reference<(reply: LateReply) => Effect.Effect<void>> = Context
+  .Reference("@usestrider/browser/protocol/Protocol/CurrentLateReplyHandler", {
+    defaultValue: () => (reply: LateReply) => reply.release
+  })
+
+/**
+ * Sets what happens to late replies that hand out resources, for the commands an effect sends.
+ *
+ * **Example** (Recording a page created too late)
+ *
+ * ```ts import.meta.vitest
+ * import { Effect } from "effect"
+ * import { Target } from "@usestrider/browser/cdp"
+ * import { Protocol } from "@usestrider/browser/protocol"
+ *
+ * const open = Target.createTarget({ url: "about:blank" }).pipe(
+ *   Effect.timeout("5 seconds"),
+ *   Protocol.withLateReplyHandler((late) =>
+ *     Effect.logWarning(`${late.method} replied after its caller gave up`).pipe(Effect.andThen(late.release))
+ *   )
+ * )
+ * ```
+ *
+ * @stability experimental
+ * @category combinators
+ * @since 0.1.0
+ */
+export const withLateReplyHandler: {
+  (
+    handler: (reply: LateReply) => Effect.Effect<void>
+  ): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
+  <A, E, R>(self: Effect.Effect<A, E, R>, handler: (reply: LateReply) => Effect.Effect<void>): Effect.Effect<A, E, R>
+} = dual(
+  2,
+  <A, E, R>(self: Effect.Effect<A, E, R>, handler: (reply: LateReply) => Effect.Effect<void>): Effect.Effect<A, E, R> =>
+    Effect.provideService(self, CurrentLateReplyHandler, handler)
 )
 
 /**
@@ -318,16 +592,66 @@ export class Encode extends Schema.Error<Encode>("@usestrider/browser/protocol/P
 /**
  * Reason for a session that ended before the reply arrived.
  *
+ * **Details**
+ *
+ * `why` is `detached` when the browser detached the session or its target went away, `connectionLost` when
+ * the connection ended, `swapped` when the target moved to a new session, and `modelUnavailable` when the
+ * session's events could no longer be followed and a fresh snapshot of its state couldn't be taken.
+ *
  * @stability experimental
  * @category reasons
  * @since 0.1.0
  */
 export class SessionEnded extends Schema.Error<SessionEnded>("@usestrider/browser/protocol/Protocol/SessionEnded")({
   _tag: Schema.tag("SessionEnded"),
-  why: Schema.Literals(["detached", "targetDestroyed", "connectionLost", "swapped"])
+  why: Schema.Literals(["detached", "targetDestroyed", "connectionLost", "swapped", "modelUnavailable"])
 }) {
   override get message(): string {
     return `The session ended: ${this.why}`
+  }
+}
+
+/**
+ * Reason for a command that got no reply within `CommandTimeout`.
+ *
+ * **Details**
+ *
+ * The command may still run: no protocol can cancel one. A late reply is dropped, or, for a command that
+ * creates a resource, handed to `CurrentLateReplyHandler`.
+ *
+ * @stability experimental
+ * @category reasons
+ * @since 0.1.0
+ */
+export class NoReply extends Schema.Error<NoReply>("@usestrider/browser/protocol/Protocol/NoReply")({
+  _tag: Schema.tag("NoReply"),
+  method: Schema.String,
+  timeout: Schema.Duration
+}) {
+  override get message(): string {
+    return `${this.method} got no reply within ${Duration.format(this.timeout)}`
+  }
+}
+
+/**
+ * Reason for a subscription that fell further behind than its buffer allows.
+ *
+ * **Details**
+ *
+ * A subscription that keeps every event fails rather than drop one. `capacity` is its buffer's size; read
+ * faster, filter with a `prefilter`, or subscribe with a larger buffer.
+ *
+ * @stability experimental
+ * @category reasons
+ * @since 0.1.0
+ */
+export class EventOverflow extends Schema.Error<EventOverflow>("@usestrider/browser/protocol/Protocol/EventOverflow")({
+  _tag: Schema.tag("EventOverflow"),
+  method: Schema.String,
+  capacity: Schema.Int
+}) {
+  override get message(): string {
+    return `The subscription to ${this.method} fell more than ${this.capacity} events behind`
   }
 }
 
@@ -357,7 +681,7 @@ const ProtocolErrorTypeId = "~@usestrider/browser/protocol/Protocol/ProtocolErro
  * @since 0.1.0
  */
 export class ProtocolError extends Schema.TaggedError<ProtocolError>(ProtocolErrorTypeId)("ProtocolError", {
-  reason: Schema.Union([Rejected, Encode, Decode, SessionEnded, Unsupported])
+  reason: Schema.Union([Rejected, Encode, Decode, SessionEnded, Unsupported, NoReply, EventOverflow])
 }) {
   readonly [ProtocolErrorTypeId] = ProtocolErrorTypeId
   override get message(): string {

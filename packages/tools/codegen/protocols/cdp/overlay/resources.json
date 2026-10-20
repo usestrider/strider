@@ -1,22 +1,43 @@
 {
-  "reason": "Commands whose replies hand out something with a remote lifetime: targets, contexts, sessions, worlds, scripts, remote objects and IO streams. A reply that arrives after its caller was interrupted is routed to an owner, which adopts or releases it (PROTOCOL.md, Protocol client).",
+  "reason": "Commands whose replies hand out something with a remote lifetime: targets, contexts, sessions, worlds, scripts, remote objects and IO streams. A reply that arrives after its caller was interrupted, or timed out, is routed to an owner, which adopts or releases it (PROTOCOL.md, Protocol client). `release` names the commands that release it, from the CDP spec's own pairs: closeTarget, disposeBrowserContext, detachFromTarget, removeScriptToEvaluateOnNewDocument, releaseObject and IO.close. An isolated world and a compiled script have no release command; they last as long as their document.",
   "annotate": [
     {
       "target": "Target#createTarget",
       "traits": {
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Target.closeTarget",
+            "param": "targetId",
+            "from": "/targetId"
+          }
+        ]
       }
     },
     {
       "target": "Target#createBrowserContext",
       "traits": {
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Target.disposeBrowserContext",
+            "param": "browserContextId",
+            "from": "/browserContextId"
+          }
+        ]
       }
     },
     {
       "target": "Target#attachToTarget",
       "traits": {
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Target.detachFromTarget",
+            "param": "sessionId",
+            "from": "/sessionId"
+          }
+        ]
       }
     },
     {
@@ -28,49 +49,155 @@
     {
       "target": "Page#addScriptToEvaluateOnNewDocument",
       "traits": {
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Page.removeScriptToEvaluateOnNewDocument",
+            "param": "identifier",
+            "from": "/identifier"
+          }
+        ]
       }
     },
     {
       "target": "Runtime#evaluate",
       "traits": {
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/result/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/exceptionDetails/exception/objectId"
+          }
+        ]
       }
     },
     {
       "target": "Runtime#callFunctionOn",
       "traits": {
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/result/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/exceptionDetails/exception/objectId"
+          }
+        ]
       }
     },
     {
       "target": "Runtime#getProperties",
       "traits": {
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/result/*/value/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/result/*/get/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/result/*/set/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/result/*/symbol/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/internalProperties/*/value/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/privateProperties/*/value/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/privateProperties/*/get/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/privateProperties/*/set/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/exceptionDetails/exception/objectId"
+          }
+        ]
       }
     },
     {
       "target": "Runtime#compileScript",
       "traits": {
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/exceptionDetails/exception/objectId"
+          }
+        ]
       }
     },
     {
       "target": "DOM#resolveNode",
       "traits": {
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/object/objectId"
+          }
+        ]
       }
     },
     {
       "target": "Fetch#takeResponseBodyAsStream",
       "traits": {
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "IO.close",
+            "param": "handle",
+            "from": "/stream"
+          }
+        ]
       }
     },
     {
       "target": "Page#printToPDF",
       "traits": {
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "IO.close",
+            "param": "handle",
+            "from": "/stream"
+          }
+        ]
       }
     }
   ]

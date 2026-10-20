@@ -27,7 +27,16 @@ export const Traits = Schema.Struct({
   /** Overlay: what L1 must undo if the caller is interrupted after dispatch. */
   compensation: Schema.optionalKey(Schema.String),
   /** Overlay: late replies route to an owner for adoption or cleanup. */
-  createsResource: Schema.optionalKey(Schema.Literal(true))
+  createsResource: Schema.optionalKey(Schema.Literal(true)),
+  /**
+   * Overlay: the commands that release what a reply hands out, each taking `param` from the result at the
+   * JSON pointer `from`, where `*` stands for every element of a list.
+   */
+  release: Schema.optionalKey(Schema.Array(Schema.Struct({
+    method: Schema.String,
+    param: Schema.String,
+    from: Schema.String
+  })))
 })
 export type Traits = typeof Traits.Type
 

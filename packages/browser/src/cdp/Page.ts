@@ -5080,7 +5080,11 @@ export const addScriptToEvaluateOnNewDocument: Protocol.CommandDef<
   "Page.addScriptToEvaluateOnNewDocument",
   AddScriptToEvaluateOnNewDocumentParams,
   AddScriptToEvaluateOnNewDocumentResult,
-  { status: "stable", createsResource: true }
+  {
+    status: "stable",
+    createsResource: true,
+    release: [{ method: "Page.removeScriptToEvaluateOnNewDocument", param: "identifier", from: "/identifier" }]
+  }
 )
 
 /**
@@ -5504,7 +5508,7 @@ export const printToPDF: Protocol.CommandDef<"Page.printToPDF", PrintToPDFParams
     "Page.printToPDF",
     PrintToPDFParams,
     PrintToPDFResult,
-    { status: "stable", createsResource: true }
+    { status: "stable", createsResource: true, release: [{ method: "IO.close", param: "handle", from: "/stream" }] }
   )
 
 /**

@@ -2530,7 +2530,15 @@ export const callFunctionOn: Protocol.CommandDef<"Runtime.callFunctionOn", CallF
     "Runtime.callFunctionOn",
     CallFunctionOnParams,
     CallFunctionOnResult,
-    { status: "stable", createsResource: true }
+    {
+      status: "stable",
+      createsResource: true,
+      release: [{ method: "Runtime.releaseObject", param: "objectId", from: "/result/objectId" }, {
+        method: "Runtime.releaseObject",
+        param: "objectId",
+        from: "/exceptionDetails/exception/objectId"
+      }]
+    }
   )
 
 /**
@@ -2545,7 +2553,11 @@ export const compileScript: Protocol.CommandDef<"Runtime.compileScript", Compile
     "Runtime.compileScript",
     CompileScriptParams,
     CompileScriptResult,
-    { status: "stable", createsResource: true }
+    {
+      status: "stable",
+      createsResource: true,
+      release: [{ method: "Runtime.releaseObject", param: "objectId", from: "/exceptionDetails/exception/objectId" }]
+    }
   )
 
 /**
@@ -2605,7 +2617,15 @@ export const evaluate: Protocol.CommandDef<"Runtime.evaluate", EvaluateParams, E
     "Runtime.evaluate",
     EvaluateParams,
     EvaluateResult,
-    { status: "stable", createsResource: true }
+    {
+      status: "stable",
+      createsResource: true,
+      release: [{ method: "Runtime.releaseObject", param: "objectId", from: "/result/objectId" }, {
+        method: "Runtime.releaseObject",
+        param: "objectId",
+        from: "/exceptionDetails/exception/objectId"
+      }]
+    }
   )
 
 /**
@@ -2674,7 +2694,21 @@ export const getProperties: Protocol.CommandDef<"Runtime.getProperties", GetProp
     "Runtime.getProperties",
     GetPropertiesParams,
     GetPropertiesResult,
-    { status: "stable", createsResource: true }
+    {
+      status: "stable",
+      createsResource: true,
+      release: [
+        { method: "Runtime.releaseObject", param: "objectId", from: "/result/*/value/objectId" },
+        { method: "Runtime.releaseObject", param: "objectId", from: "/result/*/get/objectId" },
+        { method: "Runtime.releaseObject", param: "objectId", from: "/result/*/set/objectId" },
+        { method: "Runtime.releaseObject", param: "objectId", from: "/result/*/symbol/objectId" },
+        { method: "Runtime.releaseObject", param: "objectId", from: "/internalProperties/*/value/objectId" },
+        { method: "Runtime.releaseObject", param: "objectId", from: "/privateProperties/*/value/objectId" },
+        { method: "Runtime.releaseObject", param: "objectId", from: "/privateProperties/*/get/objectId" },
+        { method: "Runtime.releaseObject", param: "objectId", from: "/privateProperties/*/set/objectId" },
+        { method: "Runtime.releaseObject", param: "objectId", from: "/exceptionDetails/exception/objectId" }
+      ]
+    }
   )
 
 /**

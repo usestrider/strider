@@ -1,6 +1,6 @@
 # PROTOCOL: transports, protocol clients and backend adapters (L0)
 
-*Revision 5.25, 2026-10-19; CDP code generation, the transports and the CDP client built 2026-10-19. A condensed sketch drawn from draft 4 of the native model (commit `6cc0bc1`) and the research notes, especially `research/effect-building-blocks.md`, `research/non-js-cdp-clients.md`, `research/puppeteer-and-chromium-bidi.md`, `research/webdriver-bidi.md` and `research/webkit.md`.*
+*Revision 5.25, 2026-10-19; CDP code generation, the transports and the CDP client built 2026-10-19; the client's timeouts, late replies and validation modes, and the ingestion pipeline, built 2026-10-20. A condensed sketch drawn from draft 4 of the native model (commit `6cc0bc1`) and the research notes, especially `research/effect-building-blocks.md`, `research/non-js-cdp-clients.md`, `research/puppeteer-and-chromium-bidi.md`, `research/webdriver-bidi.md` and `research/webkit.md`.*
 
 ## Purpose
 
@@ -118,13 +118,17 @@ interface ErrorMatcher {
   - parameters that don't match their codec fail with a new reason, `Encode`, and nothing is sent. A command whose parameters are all optional, called with none, sends none;
   - transports fail with `TransportError` (`ConnectFailed` or `ConnectionLost`), where the sketch had a bare `ConnectionLost`;
   - the error table is data next to the client's code (`src/internal/cdpWire.ts`), not in `overlay/`: the client reads it at run time, nothing is emitted from it, and the integration test holds each row to its evidence;
-  - lossless subscriptions are unbounded, and sliding ones drop their oldest events without a gap marker. Bounded queues, `EventOverflow` and gap markers belong to the ingestion pipeline.
-- **Not built yet:**
-  - the protocol-level fallback timeout: until it exists, a raw command waits until it is answered, its session ends, or the caller times it out;
-  - routing late replies of `createsResource` commands to an owner: they are dropped like any late reply;
-  - the validation policy's `trust` mode;
-  - the ingestion pipeline (fold, integrity, prefilters, `drainObserved`);
-  - the backend adapter.
+  - subscriptions were unbounded, or sliding without a gap marker, until the ingestion pipeline was built (2026-10-20, below).
+
+**Built** (2026-10-20): the rest of the client, for every backend.
+
+- **Timeouts.** A command waits for its reply for at most `Protocol.CommandTimeout`, a `Context.Reference` that is 30 seconds unless set (the same as L2's default budget), and then fails with a new reason, `NoReply`. `Protocol.withCommandTimeout` sets it for an effect, and `Duration.infinity` turns it off. L1 will set it from the operation's deadline. It runs on Effect's `Clock`, so scripted tests drive it with `TestClock`.
+- **Late replies.** A command whose `createsResource` trait is set keeps its pending entry when its caller is interrupted or times out, and a reply that arrives but wasn't consumed counts as late too. The reply goes to the handler in `Protocol.CurrentLateReplyHandler`, read from the caller's context when it sent the command, and runs in a fiber of the connection's. A `LateReply` carries the session, the method, the parameters, the raw result and `release`.
+  - `release` sends the command's release commands, which a new overlay trait names. Each takes one parameter from the result by JSON pointer, where `*` stands for every element of a list: `createTarget` → `closeTarget`, `createBrowserContext` → `disposeBrowserContext`, `attachToTarget` → `detachFromTarget`, `addScriptToEvaluateOnNewDocument` → `removeScriptToEvaluateOnNewDocument`, the remote objects in `evaluate`, `callFunctionOn`, `getProperties`, `compileScript` and `resolveNode` → `releaseObject`, and the streams of `takeResponseBodyAsStream` and `printToPDF` → `IO.close`. Code generation checks that each release names a command, one of its parameters, and a path through the result, so a roll that moves one fails the build.
+  - The default handler releases. L1 will set one that adopts the resource into its owner, or releases it. `createIsolatedWorld` has no release command; its world lasts as long as its document.
+- **Validation.** `Protocol.CurrentValidation` is `"decode"` unless set; `"trust"` skips codecs that only check, and still runs those that transform, such as a sensitive member becoming `Redacted`, so trust never leaks a secret as a plain string. Whether a codec only checks is read from its schema AST once and cached. Encoding always runs.
+- **Tests:** 23 against a scripted browser now, 10 more for the pipeline with a fold, and the 7 against Chromium.
+- **Not built yet:** the backend adapter.
 
 ## Code generation
 
@@ -215,6 +219,19 @@ transport ─► dispatcher ─► per-session ordered fold ─► publisher ─
 5. **Enrichment** (cookies for a paused request, node descriptions) is lazy or published separately with correlation ids. It never delays obligations or the fold.
 6. **`drainObserved`** waits until the fold has processed every event received *up to now* on selected sessions. It is a local processing barrier, not proof that everything a command caused has arrived.
 7. **Ordering.** Order is guaranteed per session only. Handlers never run on the reader or the fold.
+
+**Built** (2026-10-20), in the client every backend shares (`src/internal/protocolClient.ts`):
+
+- **Dispatcher and worker.** The reader numbers every message it receives, replies included, resolves replies, applies the session lifecycle, and queues events. One worker per connection takes them in that order: it decodes and folds the events the fold names, then publishes to subscribers. One worker rather than one per session, because decoding is synchronous work on one thread either way, and per-session order follows from the global order.
+- **The fold** is a backend adapter's, given when the client is made: the events it needs, `apply`, `lost`, `resync` and `ended`. Every hook runs in the worker and must not wait. `CdpConnection` has none, so its worker only publishes. A fold that fails is a bug, and ends the connection with that description rather than leaving everything waiting on a worker that's gone.
+- **Integrity.** A session may have 10,000 events or 256 MiB (UTF-8 bytes of message text) queued for the worker. Going past either discards everything it has queued; a folded event that won't decode is skipped. Either way the fold's `lost` wakes the model's waiters, and its `resync` rebuilds the model in a fiber of its own and returns the receive sequence its snapshot accounts for. Events that arrive meanwhile are published, and held, within the same limits; once the snapshot is in, those after its sequence number are folded on top. A resync that fails, or that is overrun, ends the session with a new `SessionEnded` reason, `modelUnavailable`. Without a fold, an overrun only discards.
+- **Subscriber buffers** are bounded. `{ lossless: n }` (default 10,000) fails with a new reason, `EventOverflow`, after delivering what it kept; `{ sliding: n }` drops its oldest event and leaves a `Protocol.Gap` with the count where it was, so a sliding stream is typed `Stream<A | Gap>`. Events discarded upstream count against both. Gaps and terminal signals take no space.
+- **Prefilters** are a typed deep-partial of the event's parameters (`{ frame: { id } }`), matched against the raw parameters before buffering, so excluded events take no space and no user code runs on the worker.
+- **Live means from now.** A subscription sees only events received after `subscribe` returns, even ones the worker hasn't published yet.
+- **Ends in order.** A session that ends fails its pending commands at once, but its subscriptions end with `SessionEnded` only after the events received before the end; the fold hears of the end first, then subscribers, then `ended`.
+- **`drainObserved`** is on every `ProtocolSession`: it waits until every event the session received before the call has been folded and published. Combine sessions with `Effect.all`.
+- **`sendSequenced`**, on the internal session, returns a reply's receive sequence alongside its result, so a resync can say which events its snapshot covers.
+- **Not built yet:** enrichment (step 5), which belongs to the adapter.
 
 ## Backend adapters
 

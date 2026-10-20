@@ -1325,7 +1325,12 @@ export const attachToTarget: Protocol.CommandDef<"Target.attachToTarget", Attach
     "Target.attachToTarget",
     AttachToTargetParams,
     AttachToTargetResult,
-    { status: "stable", session: "browser", createsResource: true }
+    {
+      status: "stable",
+      session: "browser",
+      createsResource: true,
+      release: [{ method: "Target.detachFromTarget", param: "sessionId", from: "/sessionId" }]
+    }
   )
 
 /**
@@ -1378,7 +1383,12 @@ export const createBrowserContext: Protocol.CommandDef<
   "Target.createBrowserContext",
   CreateBrowserContextParams,
   CreateBrowserContextResult,
-  { status: "stable", session: "browser", createsResource: true }
+  {
+    status: "stable",
+    session: "browser",
+    createsResource: true,
+    release: [{ method: "Target.disposeBrowserContext", param: "browserContextId", from: "/browserContextId" }]
+  }
 )
 
 /**
@@ -1393,7 +1403,12 @@ export const createTarget: Protocol.CommandDef<"Target.createTarget", CreateTarg
     "Target.createTarget",
     CreateTargetParams,
     CreateTargetResult,
-    { status: "stable", session: "browser", createsResource: true }
+    {
+      status: "stable",
+      session: "browser",
+      createsResource: true,
+      release: [{ method: "Target.closeTarget", param: "targetId", from: "/targetId" }]
+    }
   )
 
 /**

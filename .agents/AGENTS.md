@@ -34,17 +34,17 @@ layer. Use `pnpm` from the repository root.
 
 Use the narrowest check that covers the change:
 
-| Change                              | Run                                                                                             |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Source, scenarios or configuration  | `pnpm check`, `pnpm lint-fix`                                                                   |
-| A new, renamed or removed module    | `pnpm codegen`, then `pnpm check`                                                               |
-| Protocol corrections or annotations | `pnpm codegen:protocol`, then `pnpm check`                                                      |
-| Runtime behavior                    | `pnpm test --run <file>`                                                                        |
-| The protocol client or transports   | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/integration` |
-| Access rules or other type behavior | `pnpm test-types`                                                                               |
-| JSDoc text, categories or links     | `pnpm jsdocs`                                                                                   |
-| JSDoc examples                      | `pnpm jsdocs`, then `pnpm examples`                                                             |
-| Before a commit that touches `src/` | `pnpm all`                                                                                      |
+| Change                              | Run                                                                                                                                          |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source, scenarios or configuration  | `pnpm check`, `pnpm lint-fix`                                                                                                                |
+| A new, renamed or removed module    | `pnpm codegen`, then `pnpm check`                                                                                                            |
+| Protocol corrections or annotations | `pnpm codegen:protocol`, then `pnpm check`                                                                                                   |
+| Runtime behavior                    | `pnpm test --run <file>`                                                                                                                     |
+| The protocol client or transports   | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts packages/browser/test/integration` |
+| Access rules or other type behavior | `pnpm test-types`                                                                                                                            |
+| JSDoc text, categories or links     | `pnpm jsdocs`                                                                                                                                |
+| JSDoc examples                      | `pnpm jsdocs`, then `pnpm examples`                                                                                                          |
+| Before a commit that touches `src/` | `pnpm all`                                                                                                                                   |
 
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
 

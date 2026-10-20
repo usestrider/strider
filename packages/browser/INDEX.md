@@ -1903,7 +1903,9 @@ The protocol layer's client contract (L0): commands and events as data, the sess
 - `interface ProtocolSession` (experimental)
   - `readonly key: SessionKey | undefined`
   - `send<M extends string, P, A>(command: Command<M, P, A>): Effect.Effect<A, ProtocolError>`
-  - `subscribe<M extends string, A>(event: EventDef<M, A>, options?: SubscribeOptions | undefined): Effect.Effect<Stream.Stream<A, ProtocolError>, never, Scope.Scop…`
+  - `subscribe<M extends string, A>(event: EventDef<M, A>, options: SlidingOptions<A>): Effect.Effect<Stream.Stream<A | Gap, ProtocolError>, never, Scope.Scope>`
+  - `subscribe<M extends string, A>(event: EventDef<M, A>, options?: SubscribeOptions<A> | undefined): Effect.Effect<Stream.Stream<A, ProtocolError>, never, Scope.S…`
+  - `readonly drainObserved: Effect.Effect<void>`
   - `readonly ended: Effect.Effect<SessionEnded>`
 
 *tags*
@@ -1917,7 +1919,12 @@ The protocol layer's client contract (L0): commands and events as data, the sess
   - `readonly session?: "browser" | "target" | undefined`
   - `readonly compensation?: string | undefined`
   - `readonly createsResource?: true | undefined`
+  - `readonly release?: ReadonlyArray<Release> | undefined`
   - `readonly redirect?: string | undefined`
+- `interface Release` (experimental)
+  - `readonly method: string`
+  - `readonly param: string`
+  - `readonly from: string`
 - `interface Command<M extends string, P, A> extends Effect.Effect<A, ProtocolError, ProtocolSession>` (experimental)
   - `readonly method: M`
   - `readonly params: P`
@@ -1933,8 +1940,21 @@ The protocol layer's client contract (L0): commands and events as data, the sess
   - `readonly Params: Schema.Codec<A, unknown> | undefined`
   - `readonly traits: Traits`
 - `type SessionKey = typeof SessionKey.Type` (experimental)
-- `interface SubscribeOptions` (experimental)
-  - `readonly buffer?: "lossless" | { readonly sliding: number } | undefined`
+- `type Prefilter<A> = A extends ReadonlyArray<unknown> ? never : { readonly [K in keyof A]?: NonNullable<A[K]> extends string | number | boolean ? A[K] : Prefilter<NonNullable<A[K]>> }` (experimental)
+- `interface SubscribeOptions<A>` (experimental)
+  - `readonly buffer?: { readonly lossless: number } | undefined`
+  - `readonly prefilter?: Prefilter<A> | undefined`
+- `interface SlidingOptions<A>` (experimental)
+  - `readonly buffer: { readonly sliding: number }`
+  - `readonly prefilter?: Prefilter<A> | undefined`
+- `class Gap: Schema.TaggedClass "Gap" { dropped }` (experimental)
+- `interface LateReply` (experimental)
+  - `readonly session: ProtocolSession`
+  - `readonly method: string`
+  - `readonly params: unknown`
+  - `readonly result: unknown`
+  - `readonly release: Effect.Effect<void>`
+- `type Validation = "decode" | "trust"` (experimental)
 - `type RejectReason = "NoSuchTarget" | "NoSuchFrame" | "NoSuchNode" | "InvalidArgument" | "Unrecognized"` (experimental)
 
 *schemas*
@@ -1951,9 +1971,25 @@ The protocol layer's client contract (L0): commands and events as data, the sess
 - `const on` (experimental)
   - `(session: ProtocolSession): <M extends string, P, A>(command: Command<M, P, A>) => Effect.Effect<A, ProtocolError>`
   - `<M extends string, P, A>(command: Command<M, P, A>, session: ProtocolSession): Effect.Effect<A, ProtocolError>`
+- `const withCommandTimeout` (experimental)
+  - `(timeout: Duration.Input): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>`
+  - `<A, E, R>(self: Effect.Effect<A, E, R>, timeout: Duration.Input): Effect.Effect<A, E, R>`
+- `const withValidation` (experimental)
+  - `(validation: Validation): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>`
+  - `<A, E, R>(self: Effect.Effect<A, E, R>, validation: Validation): Effect.Effect<A, E, R>`
+- `const withLateReplyHandler` (experimental)
+  - `(handler: (reply: LateReply) => Effect.Effect<void>): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>`
+  - `<A, E, R>(self: Effect.Effect<A, E, R>, handler: (reply: LateReply) => Effect.Effect<void>): Effect.Effect<A, E, R>`
+
+*references*
+
+- `const CommandTimeout: Context.Reference<Duration.Duration>` (experimental)
+- `const CurrentValidation: Context.Reference<Validation>` (experimental)
+- `const CurrentLateReplyHandler: Context.Reference<(reply: LateReply) => Effect.Effect<void>>` (experimental)
 
 *guards*
 
+- `const isGap: (u: unknown) => u is Gap` (experimental)
 - `const isProtocolError: (u: unknown) => u is ProtocolError` (experimental)
 
 *errors*
@@ -1966,6 +2002,8 @@ The protocol layer's client contract (L0): commands and events as data, the sess
 - `class Decode: Schema.Error { method, issue }` (experimental)
 - `class Encode: Schema.Error { method, issue }` (experimental)
 - `class SessionEnded: Schema.Error { why }` (experimental)
+- `class NoReply: Schema.Error { method, timeout }` (experimental)
+- `class EventOverflow: Schema.Error { method, capacity }` (experimental)
 - `class Unsupported: Schema.Error { method }` (experimental)
 
 *utility types*

@@ -4451,7 +4451,11 @@ export const resolveNode: Protocol.CommandDef<"DOM.resolveNode", ResolveNodePara
     "DOM.resolveNode",
     ResolveNodeParams,
     ResolveNodeResult,
-    { status: "stable", createsResource: true }
+    {
+      status: "stable",
+      createsResource: true,
+      release: [{ method: "Runtime.releaseObject", param: "objectId", from: "/object/objectId" }]
+    }
   )
 
 /**

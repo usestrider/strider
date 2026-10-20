@@ -363,6 +363,17 @@ const traitsLiteral = (traits: Traits) => {
   if (traits.session !== undefined) fields.push(`session: ${JSON.stringify(traits.session)}`)
   if (traits.compensation !== undefined) fields.push(`compensation: ${JSON.stringify(traits.compensation)}`)
   if (traits.createsResource === true) fields.push("createsResource: true")
+  if (traits.release !== undefined) {
+    fields.push(
+      `release: [${
+        traits.release.map((release) =>
+          `{ method: ${JSON.stringify(release.method)}, param: ${JSON.stringify(release.param)}, from: ${
+            JSON.stringify(release.from)
+          } }`
+        ).join(", ")
+      }]`
+    )
+  }
   if (traits.redirect !== undefined) fields.push(`redirect: ${JSON.stringify(traits.redirect)}`)
   return `{ ${fields.join(", ")} }`
 }

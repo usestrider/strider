@@ -8,7 +8,7 @@
  */
 import * as JsonPatch from "effect/JsonPatch"
 import * as Schema from "effect/Schema"
-import type { ProtocolModel, Traits } from "./Model.ts"
+import type { ProtocolModel, Shape, Traits, TypeExpr } from "./Model.ts"
 import { ProtocolModel as ProtocolModelSchema, sorted, Traits as TraitsSchema } from "./Model.ts"
 
 export const Correction = Schema.Struct({
@@ -75,5 +75,61 @@ export const applyOverlays = (
       owner.traits = { ...owner.traits, ...traits } satisfies Traits
     }
   }
-  return { ...model, shapes }
+  const annotated = { ...model, shapes }
+  checkReleases(annotated)
+  return annotated
+}
+
+/**
+ * Checks every `release` annotation against the model: it belongs to a command that creates a resource, names
+ * a command that takes `param`, and its pointer resolves through the command's result. A roll that moves any
+ * of them fails here, rather than at run time.
+ */
+const checkReleases = (model: ProtocolModel): void => {
+  const commands = new Map<string, string>()
+  for (const [id, shape] of Object.entries(model.shapes)) {
+    if (shape._tag === "Command") commands.set(shape.method, id)
+  }
+  for (const [id, shape] of Object.entries(model.shapes)) {
+    const releases = shape.traits.release
+    if (releases === undefined) continue
+    if (shape._tag !== "Command" || shape.traits.createsResource !== true) {
+      throw new Error(`${id}: only a command that creates a resource can name its release`)
+    }
+    for (const release of releases) {
+      const releaseId = commands.get(release.method)
+      if (releaseId === undefined) throw new Error(`${id}: no command ${release.method} releases it`)
+      const releaseShape = model.shapes[releaseId]
+      const params = releaseShape?._tag === "Command" && releaseShape.params !== null
+        ? model.shapes[releaseShape.params]
+        : undefined
+      if (params?._tag !== "Struct" || !(release.param in params.members)) {
+        throw new Error(`${id}: ${release.method} has no parameter ${release.param}`)
+      }
+      if (shape.result === null) throw new Error(`${id}: has no result to release from`)
+      resolvePointer(model, shape.result, release.from, id)
+    }
+  }
+}
+
+/** Follows a JSON pointer through the model's shapes; `*` steps into a list's items. */
+const resolvePointer = (model: ProtocolModel, from: string, pointer: string, owner: string): void => {
+  if (!pointer.startsWith("/")) throw new Error(`${owner}: ${pointer} isn't a JSON pointer`)
+  let type: TypeExpr = { _tag: "Ref", shape: from }
+  for (const segment of pointer.slice(1).split("/")) {
+    while (type._tag === "Ref") {
+      const shape: Shape | undefined = model.shapes[type.shape]
+      if (shape?._tag === "Alias") type = shape.type
+      else break
+    }
+    if (segment === "*") {
+      if (type._tag !== "List") throw new Error(`${owner}: ${pointer} steps into a list where there is none`)
+      type = type.items
+      continue
+    }
+    const shape = type._tag === "Ref" ? model.shapes[type.shape] : undefined
+    const member = shape?._tag === "Struct" ? shape.members[segment] : undefined
+    if (member === undefined) throw new Error(`${owner}: ${pointer} doesn't resolve at ${segment}`)
+    type = member.type
+  }
 }

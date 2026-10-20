@@ -18576,7 +18576,14 @@
       "traits": {
         "status": "stable",
         "description": "Resolves the JavaScript node object for a given NodeId or BackendNodeId.",
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/object/objectId"
+          }
+        ]
       }
     },
     "DOM#resolveNode.Params": {
@@ -29986,7 +29993,14 @@
       "traits": {
         "status": "stable",
         "description": "Returns a handle to the stream representing the response body.\nThe request must be paused in the HeadersReceived stage.\nNote that after this command the request can't be continued\nas is -- client either needs to cancel it or to provide the\nresponse body.\nThe stream only supports sequential read, IO.read will fail if the position\nis specified.\nThis method is mutually exclusive with getResponseBody.\nCalling other methods that affect the request or disabling fetch\ndomain before body is received results in an undefined behavior.",
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "IO.close",
+            "param": "handle",
+            "from": "/stream"
+          }
+        ]
       }
     },
     "Fetch#takeResponseBodyAsStream.Params": {
@@ -50398,7 +50412,14 @@
       "traits": {
         "status": "stable",
         "description": "Evaluates given script in every frame upon creation (before loading frame's scripts).",
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Page.removeScriptToEvaluateOnNewDocument",
+            "param": "identifier",
+            "from": "/identifier"
+          }
+        ]
       }
     },
     "Page#addScriptToEvaluateOnNewDocument.Params": {
@@ -52912,7 +52933,14 @@
       "traits": {
         "status": "stable",
         "description": "Print page as PDF.",
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "IO.close",
+            "param": "handle",
+            "from": "/stream"
+          }
+        ]
       }
     },
     "Page#printToPDF.Params": {
@@ -58064,7 +58092,19 @@
       "traits": {
         "status": "stable",
         "description": "Calls function with given declaration on the given object. Object group of the result is\ninherited from the target object.",
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/result/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/exceptionDetails/exception/objectId"
+          }
+        ]
       }
     },
     "Runtime#callFunctionOn.Params": {
@@ -58261,7 +58301,14 @@
       "traits": {
         "status": "stable",
         "description": "Compiles expression.",
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/exceptionDetails/exception/objectId"
+          }
+        ]
       }
     },
     "Runtime#compileScript.Params": {
@@ -58500,7 +58547,19 @@
       "traits": {
         "status": "stable",
         "description": "Evaluates expression on global object.",
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/result/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/exceptionDetails/exception/objectId"
+          }
+        ]
       }
     },
     "Runtime#evaluate.Params": {
@@ -59026,7 +59085,54 @@
       "traits": {
         "status": "stable",
         "description": "Returns properties of a given object. Object group of the result is inherited from the target\nobject.",
-        "createsResource": true
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/result/*/value/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/result/*/get/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/result/*/set/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/result/*/symbol/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/internalProperties/*/value/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/privateProperties/*/value/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/privateProperties/*/get/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/privateProperties/*/set/objectId"
+          },
+          {
+            "method": "Runtime.releaseObject",
+            "param": "objectId",
+            "from": "/exceptionDetails/exception/objectId"
+          }
+        ]
       }
     },
     "Runtime#getProperties.Params": {
@@ -65112,6 +65218,13 @@
         "status": "stable",
         "description": "Attaches to the target with given id.",
         "createsResource": true,
+        "release": [
+          {
+            "method": "Target.detachFromTarget",
+            "param": "sessionId",
+            "from": "/sessionId"
+          }
+        ],
         "session": "browser"
       }
     },
@@ -65324,6 +65437,13 @@
         "status": "stable",
         "description": "Creates a new empty BrowserContext. Similar to an incognito profile but you can have more than\none.",
         "createsResource": true,
+        "release": [
+          {
+            "method": "Target.disposeBrowserContext",
+            "param": "browserContextId",
+            "from": "/browserContextId"
+          }
+        ],
         "session": "browser"
       }
     },
@@ -65412,6 +65532,13 @@
         "status": "stable",
         "description": "Creates a new page.",
         "createsResource": true,
+        "release": [
+          {
+            "method": "Target.closeTarget",
+            "param": "targetId",
+            "from": "/targetId"
+          }
+        ],
         "session": "browser"
       }
     },
