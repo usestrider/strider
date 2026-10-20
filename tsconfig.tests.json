@@ -5,12 +5,16 @@
   "include": [
     "**/vitest.*.ts",
     "./packages/*/test/**/*.ts",
-    "./packages/*/scenarios/**/*.ts"
+    "./packages/*/scenarios/**/*.ts",
+    "./packages/tools/*/test/**/*.ts"
   ],
   "exclude": ["**/node_modules/**", "**/dist/**"],
   "compilerOptions": {
     "rootDir": ".",
     "noEmit": true,
+    // tests import sources across projects directly, and nothing here is emitted
+    "rewriteRelativeImportExtensions": false,
+    "allowImportingTsExtensions": true,
     "erasableSyntaxOnly": false,
     "types": ["node"],
     "paths": {
@@ -18,9 +22,11 @@
       "@usestrider/browser": ["./packages/browser/src/index.ts"],
       "@usestrider/browser/ai": ["./packages/browser/src/ai/index.ts"],
       "@usestrider/browser/bidi": ["./packages/browser/src/bidi/index.ts"],
+      "@usestrider/browser/cdp": ["./packages/browser/src/cdp/index.ts"],
       "@usestrider/browser/chromium": ["./packages/browser/src/chromium/index.ts"],
       "@usestrider/browser/cli": ["./packages/browser/src/cli/index.ts"],
       "@usestrider/browser/firefox": ["./packages/browser/src/firefox/index.ts"],
+      "@usestrider/browser/protocol": ["./packages/browser/src/protocol/index.ts"],
       "@usestrider/browser/test": ["./packages/browser/src/test/index.ts"],
       "@usestrider/browser/test/vitest": ["./packages/browser/src/test/vitest/index.ts"],
       "@usestrider/browser/webkit": ["./packages/browser/src/webkit/index.ts"],

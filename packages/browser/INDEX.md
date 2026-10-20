@@ -1817,6 +1817,10 @@ The generic BiDi backend (`@usestrider/browser/bidi`): any WebDriver BiDi endpoi
 
 - `const layerConnect: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
 
+## `@usestrider/browser/cdp`
+
+56 generated modules: Accessibility, Ads, Animation, Audits, Autofill, BackgroundService, BluetoothEmulation, Browser, CacheStorage, Cast, CrashReportContext, CSS, Debugger, DeviceAccess, DeviceOrientation, DigitalCredentials, DOM, DOMDebugger, DOMSnapshot, DOMStorage, Emulation, EventBreakpoints, Extensions, FedCm, Fetch, FileSystem, HeadlessExperimental, HeapProfiler, IndexedDB, Input, Inspector, IO, LayerTree, Log, Media, Memory, Network, Overlay, Page, Performance, PerformanceTimeline, Preload, Profiler, PWA, Runtime, Security, ServiceWorker, SmartCardEmulation, Storage, SystemInfo, Target, Tethering, Tracing, WebAudio, WebAuthn, WebMCP. Their declarations are in the API reference.
+
 ## `@usestrider/browser/chromium`
 
 ### Chromium
@@ -1872,6 +1876,84 @@ The Firefox backend (`@usestrider/browser/firefox`): Firefox over WebDriver BiDi
 - `const layer: (options?: Browser.LaunchOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>`
 - `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
 - `const layerConnect: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
+
+## `@usestrider/browser/protocol`
+
+### Protocol
+
+The protocol layer's client contract (L0): commands and events as data, the session they run on, and the errors a session reports.
+
+*services*
+
+- `interface ProtocolSession` (experimental)
+  - `readonly key: SessionKey`
+  - `send<M extends string, P, A>(command: Command<M, P, A>): Effect.Effect<A, ProtocolError>`
+  - `subscribe<M extends string, A>(event: EventDef<M, A>, options?: SubscribeOptions | undefined): Effect.Effect<Stream.Stream<A, ProtocolError>, never, Scope.Scop…`
+  - `readonly ended: Effect.Effect<SessionEnded>`
+
+*tags*
+
+- `const ProtocolSession: Context.Service<ProtocolSession, ProtocolSession>` (experimental)
+
+*models*
+
+- `interface Traits` (experimental)
+  - `readonly status: "stable" | "experimental" | "deprecated"`
+  - `readonly session?: "browser" | "target" | undefined`
+  - `readonly compensation?: string | undefined`
+  - `readonly createsResource?: true | undefined`
+  - `readonly redirect?: string | undefined`
+- `interface Command<M extends string, P, A> extends Effect.Effect<A, ProtocolError, ProtocolSession>` (experimental)
+  - `readonly method: M`
+  - `readonly params: P`
+- `interface CommandDef<M extends string, P, A>` (experimental)
+  - `(...args: CommandArgs<P>): Command<M, P, A>`
+  - `readonly method: M`
+  - `readonly Params: Schema.Codec<P, unknown> | undefined`
+  - `readonly Result: Schema.Codec<A, unknown> | undefined`
+  - `readonly traits: Traits`
+- `interface EventDef<M extends string, A>` (experimental)
+  - `readonly method: M`
+  - `readonly Params: Schema.Codec<A, unknown> | undefined`
+  - `readonly traits: Traits`
+- `type SessionKey = typeof SessionKey.Type` (experimental)
+- `interface SubscribeOptions` (experimental)
+  - `readonly buffer?: "lossless" | { readonly sliding: number } | undefined`
+- `type RejectReason = "NoSuchTarget" | "NoSuchFrame" | "NoSuchNode" | "InvalidArgument" | "Unrecognized"` (experimental)
+
+*schemas*
+
+- `const SessionKey = Schema.String.pipe(Schema.brand("~@usestrider/browser/protocol/Protocol/SessionKey"))` (experimental)
+
+*constructors*
+
+- `const command: <M extends string, P, A>(method: M, Params: Schema.Codec<P, unknown> | undefined, Result: Schema.Codec<A, unknown> | undefined, traits: Traits) => CommandDef<M, P, A>` (experimental)
+- `const event: <M extends string, A>(method: M, Params: Schema.Codec<A, unknown> | undefined, traits: Traits) => EventDef<M, A>` (experimental)
+
+*combinators*
+
+- `const on` (experimental)
+  - `(session: ProtocolSession): <M extends string, P, A>(command: Command<M, P, A>) => Effect.Effect<A, ProtocolError>`
+  - `<M extends string, P, A>(command: Command<M, P, A>, session: ProtocolSession): Effect.Effect<A, ProtocolError>`
+
+*guards*
+
+- `const isProtocolError: (u: unknown) => u is ProtocolError` (experimental)
+
+*errors*
+
+- `class ProtocolError: Schema.TaggedError "ProtocolError" { reason }` (experimental)
+
+*reasons*
+
+- `class Rejected: Schema.Error { method, reason, code, description }` (experimental)
+- `class Decode: Schema.Error { method, issue }` (experimental)
+- `class SessionEnded: Schema.Error { why }` (experimental)
+- `class Unsupported: Schema.Error { method }` (experimental)
+
+*utility types*
+
+- `type CommandArgs<P> = [P] extends [void] ? [] : {} extends P ? [params?: P] : [params: P]` (experimental)
 
 ## `@usestrider/browser/test`
 

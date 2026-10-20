@@ -1,0 +1,59 @@
+{
+  "reason": "Classified values (README, Diagnostics and secrets): cookie values, authentication passwords and typed text. They decode as Redacted, so L0 traffic captured in diagnostics can't leak them. Headers are a record and are redacted by name through Effect's Headers, not here.",
+  "annotate": [
+    {
+      "target": "Network#Cookie:value",
+      "traits": {
+        "sensitive": true
+      }
+    },
+    {
+      "target": "Network#CookieParam:value",
+      "traits": {
+        "sensitive": true
+      }
+    },
+    {
+      "target": "Network#setCookie.Params:value",
+      "traits": {
+        "sensitive": true
+      }
+    },
+    {
+      "target": "Network#AuthChallengeResponse:password",
+      "traits": {
+        "sensitive": true
+      }
+    },
+    {
+      "target": "Fetch#AuthChallengeResponse:password",
+      "traits": {
+        "sensitive": true
+      }
+    },
+    {
+      "target": "Input#insertText.Params:text",
+      "traits": {
+        "sensitive": true
+      }
+    },
+    {
+      "target": "Input#imeSetComposition.Params:text",
+      "traits": {
+        "sensitive": true
+      }
+    },
+    {
+      "target": "Input#dispatchKeyEvent.Params:text",
+      "traits": {
+        "sensitive": true
+      }
+    },
+    {
+      "target": "Input#dispatchKeyEvent.Params:unmodifiedText",
+      "traits": {
+        "sensitive": true
+      }
+    }
+  ]
+}

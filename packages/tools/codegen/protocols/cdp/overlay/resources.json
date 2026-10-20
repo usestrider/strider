@@ -1,0 +1,77 @@
+{
+  "reason": "Commands whose replies hand out something with a remote lifetime: targets, contexts, sessions, worlds, scripts, remote objects and IO streams. A reply that arrives after its caller was interrupted is routed to an owner, which adopts or releases it (PROTOCOL.md, Protocol client).",
+  "annotate": [
+    {
+      "target": "Target#createTarget",
+      "traits": {
+        "createsResource": true
+      }
+    },
+    {
+      "target": "Target#createBrowserContext",
+      "traits": {
+        "createsResource": true
+      }
+    },
+    {
+      "target": "Target#attachToTarget",
+      "traits": {
+        "createsResource": true
+      }
+    },
+    {
+      "target": "Page#createIsolatedWorld",
+      "traits": {
+        "createsResource": true
+      }
+    },
+    {
+      "target": "Page#addScriptToEvaluateOnNewDocument",
+      "traits": {
+        "createsResource": true
+      }
+    },
+    {
+      "target": "Runtime#evaluate",
+      "traits": {
+        "createsResource": true
+      }
+    },
+    {
+      "target": "Runtime#callFunctionOn",
+      "traits": {
+        "createsResource": true
+      }
+    },
+    {
+      "target": "Runtime#getProperties",
+      "traits": {
+        "createsResource": true
+      }
+    },
+    {
+      "target": "Runtime#compileScript",
+      "traits": {
+        "createsResource": true
+      }
+    },
+    {
+      "target": "DOM#resolveNode",
+      "traits": {
+        "createsResource": true
+      }
+    },
+    {
+      "target": "Fetch#takeResponseBodyAsStream",
+      "traits": {
+        "createsResource": true
+      }
+    },
+    {
+      "target": "Page#printToPDF",
+      "traits": {
+        "createsResource": true
+      }
+    }
+  ]
+}

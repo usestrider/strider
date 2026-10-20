@@ -1,0 +1,275 @@
+{
+  "reason": "Commands sent on the browser session, with no target session id: the Browser, SystemInfo and Target domains, and Storage's cookie commands, which take a browser context id. Target.setAutoAttach and Target.autoAttachRelated are also sent on target sessions, to attach recursively, so they carry no annotation. Source: Puppeteer's and chromium-bidi's use of the browser connection (research/puppeteer-and-chromium-bidi.md); probe 22 confirms auto-attach scope.",
+  "annotate": [
+    {
+      "target": "Browser#addMockCamera",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#addPrivacySandboxEnrollmentOverride",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#cancelDownload",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#close",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#crash",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#crashGpuProcess",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#executeBrowserCommand",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#getBrowserCommandLine",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#getGlobalPrivacyControl",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#getHistogram",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#getHistograms",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#getVersion",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#getWindowBounds",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#getWindowForTarget",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#grantPermissions",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#resetPermissions",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#setContentsSize",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#setDockTile",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#setDownloadBehavior",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#setGlobalPrivacyControl",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#setPermission",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Browser#setWindowBounds",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Storage#clearCookies",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Storage#getCookies",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Storage#setCookies",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "SystemInfo#getFeatureState",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "SystemInfo#getInfo",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "SystemInfo#getProcessInfo",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Target#activateTarget",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Target#attachToBrowserTarget",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Target#attachToTarget",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Target#closeTarget",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Target#createBrowserContext",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Target#createTarget",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Target#detachFromTarget",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Target#disposeBrowserContext",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Target#exposeDevToolsProtocol",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Target#getBrowserContexts",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Target#getDevToolsTarget",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Target#getTargetInfo",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Target#getTargets",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Target#openDevTools",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Target#sendMessageToTarget",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Target#setDiscoverTargets",
+      "traits": {
+        "session": "browser"
+      }
+    },
+    {
+      "target": "Target#setRemoteLocations",
+      "traits": {
+        "session": "browser"
+      }
+    }
+  ]
+}

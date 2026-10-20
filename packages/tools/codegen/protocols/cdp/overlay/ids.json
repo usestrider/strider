@@ -1,0 +1,227 @@
+{
+  "reason": "Ids and handles the browser mints. Each is branded by protocol, domain and kind, so an id never crosses protocols or kinds (PROTOCOL.md, Shape of the output). DOMSnapshot#StringIndex is an index, not an id, so it isn't branded.",
+  "annotate": [
+    {
+      "target": "Accessibility#AXNodeId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Audits#IssueId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Browser#BrowserContextID",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Browser#WindowID",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "CacheStorage#CacheId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "DOM#BackendNodeId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "DOM#NodeId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "DOM#StyleSheetId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Debugger#BreakpointId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Debugger#CallFrameId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "DeviceAccess#DeviceId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "DeviceAccess#RequestId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Emulation#ScreenId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Fetch#RequestId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "HeapProfiler#HeapSnapshotObjectId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "IO#StreamHandle",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "LayerTree#LayerId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "LayerTree#SnapshotId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Media#PlayerId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Network#DeviceBoundSessionEventId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Network#LoaderId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Network#ReportId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Network#RequestId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Page#FrameId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Page#ScriptIdentifier",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Preload#PreloadPipelineId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Preload#RuleSetId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Runtime#ExecutionContextId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Runtime#RemoteObjectId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Runtime#ScriptId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Runtime#UniqueDebuggerId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Security#CertificateId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "ServiceWorker#RegistrationID",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Target#SessionID",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "Target#TargetID",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "WebAudio#GraphObjectId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "WebAuthn#AuthenticatorId",
+      "traits": {
+        "id": true
+      }
+    }
+  ]
+}

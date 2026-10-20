@@ -5,7 +5,7 @@
   "scripts": {
     "prepare": "node scripts/setup-agents.mjs && effect-tsgo patch",
     "codegen": "pnpm --recursive --filter \"./packages/*\" run codegen",
-    "check": "tsc -b tsconfig.json && pnpm --recursive --filter \"./packages/*\" run codegen --check",
+    "check": "tsc -b tsconfig.json && pnpm --recursive --filter \"./packages/*\" run codegen --check && strider-codegen generate cdp --check",
     "build": "tsc -b tsconfig.packages.json && pnpm --recursive --filter \"./packages/*\" run build",
     "lint": "oxlint && dprint check",
     "lint-fix": "oxlint --fix && dprint fmt",
@@ -16,7 +16,8 @@
     "index": "strider-docs index",
     "api-reference": "strider-docs api-reference",
     "all": "pnpm check && pnpm lint && pnpm test --run && pnpm test-types && pnpm reference",
-    "reference": "pnpm jsdocs && pnpm examples && pnpm index && pnpm api-reference"
+    "reference": "pnpm jsdocs && pnpm examples && pnpm index && pnpm api-reference",
+    "codegen:protocol": "strider-codegen generate cdp"
   },
   "devDependencies": {
     "@babel/cli": "^8.0.6",
@@ -26,6 +27,7 @@
     "@effect/tsgo": "^0.54.0",
     "@effect/vitest": "^4.0.5",
     "@types/node": "^26.6.5",
+    "@usestrider/codegen": "workspace:^",
     "@usestrider/docs-tools": "workspace:^",
     "babel-plugin-annotate-pure-calls": "^0.5.0",
     "dprint": "^0.64.0",

@@ -9,7 +9,7 @@ export default defineConfig({
     alias: [
       { find: /^@usestrider\/browser$/, replacement: src("index.ts") },
       {
-        find: /^@usestrider\/browser\/(ai|bidi|chromium|cli|firefox|test|test\/vitest|webkit)$/,
+        find: /^@usestrider\/browser\/(ai|bidi|cdp|chromium|cli|firefox|protocol|test|test\/vitest|webkit)$/,
         replacement: src("$1/index.ts")
       },
       { find: /^@usestrider\/browser\/(.+)$/, replacement: src("$1.ts") }
@@ -21,6 +21,14 @@ export default defineConfig({
       test: {
         name: "browser",
         root: "packages/browser",
+        include: ["test/**/*.test.ts"],
+        setupFiles: [path.join(import.meta.dirname, "vitest.setup.ts")]
+      }
+    }, {
+      extends: true,
+      test: {
+        name: "codegen",
+        root: "packages/tools/codegen",
         include: ["test/**/*.test.ts"],
         setupFiles: [path.join(import.meta.dirname, "vitest.setup.ts")]
       }

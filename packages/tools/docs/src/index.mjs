@@ -156,6 +156,13 @@ export const index = (root) => {
       m[1]
     )
     out += `\n## \`${entry}\`\n`
+    if (fs.readFileSync(path.join(path.dirname(barrel), `${modules[0]}.ts`), "utf8").includes(" * Generated from ")) {
+      // generated protocol modules are listed in the API reference, not here
+      out += `\n${modules.length} generated modules: ${
+        modules.join(", ")
+      }. Their declarations are in the API reference.\n`
+      continue
+    }
     for (const name of modules) {
       const { summary, declarations: decls } = declarations(path.join(path.dirname(barrel), `${name}.ts`))
       out += `\n### ${name}\n\n${summary}\n`

@@ -21,6 +21,10 @@ layer. Use `pnpm` from the repository root.
 - `packages/tools/docs`: the JSDoc checker (vendored from Effect; don't edit it), the example check, `INDEX.md` and
   the API reference dataset.
 - `packages/tools/utils`: barrel codegen.
+- `packages/tools/codegen`: protocol code generation. `protocols/<backend>/` holds the vendored spec (`source/`),
+  corrections (`patches/`), our annotations (`overlay/`), and the generated `model.json` and `coverage.json`. Its
+  output is `packages/browser/src/cdp/`. Never edit generated files: change a correction or an annotation and run
+  `pnpm codegen:protocol`. A correction says what the spec states, what the wire does, and the evidence.
 - `.repos/`: read-only references cloned by `scripts/worktree-setup.sh`, such as Effect's sources and its
   `.agents/skills`. Never import from them.
 
@@ -28,15 +32,16 @@ layer. Use `pnpm` from the repository root.
 
 Use the narrowest check that covers the change:
 
-| Change                              | Run                                 |
-| ----------------------------------- | ----------------------------------- |
-| Source, scenarios or configuration  | `pnpm check`, `pnpm lint-fix`       |
-| A new, renamed or removed module    | `pnpm codegen`, then `pnpm check`   |
-| Runtime behavior                    | `pnpm test --run <file>`            |
-| Access rules or other type behavior | `pnpm test-types`                   |
-| JSDoc text, categories or links     | `pnpm jsdocs`                       |
-| JSDoc examples                      | `pnpm jsdocs`, then `pnpm examples` |
-| Before a commit that touches `src/` | `pnpm all`                          |
+| Change                              | Run                                        |
+| ----------------------------------- | ------------------------------------------ |
+| Source, scenarios or configuration  | `pnpm check`, `pnpm lint-fix`              |
+| A new, renamed or removed module    | `pnpm codegen`, then `pnpm check`          |
+| Protocol corrections or annotations | `pnpm codegen:protocol`, then `pnpm check` |
+| Runtime behavior                    | `pnpm test --run <file>`                   |
+| Access rules or other type behavior | `pnpm test-types`                          |
+| JSDoc text, categories or links     | `pnpm jsdocs`                              |
+| JSDoc examples                      | `pnpm jsdocs`, then `pnpm examples`        |
+| Before a commit that touches `src/` | `pnpm all`                                 |
 
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
 
@@ -54,7 +59,7 @@ Conventions section applies them. Effect's skills in `.repos/effect/.agents/skil
 - Library code uses `Effect.fnUntraced`; examples use `Effect.fn("name")`. A function that returns `Effect.gen` is a
   compile error.
 - Nothing implicit (principle 23): every default is stated with `@default`, and nothing hidden waits or retries.
-- Generated files (sections marked `// @barrel:`, `INDEX.md`) are regenerated, never edited.
+- Generated files (sections marked `// @barrel:`, `INDEX.md`, `src/cdp/`, the protocol models) are regenerated, never edited.
 
 Every public declaration carries Effect's JSDoc contract: one paragraph that starts with what it does; then
 optional **When to use** (starting "Use to", "Use when", "Use as" or "Use with"), **Details** and **Gotchas**;

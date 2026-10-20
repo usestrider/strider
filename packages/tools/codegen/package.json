@@ -1,0 +1,14 @@
+{
+  "name": "@usestrider/codegen",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Protocol code generation: parse, correct, annotate, emit",
+  "bin": {
+    "strider-codegen": "./src/bin.ts"
+  },
+  "dependencies": {
+    "@effect/platform-node": "^4.0.5",
+    "effect": "^4.0.5"
+  }
+}

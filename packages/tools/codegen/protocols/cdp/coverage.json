@@ -1,0 +1,923 @@
+{
+  "revision": "0.0.1696802",
+  "counts": {
+    "domains": 56,
+    "types": 603,
+    "commands": 619,
+    "events": 223,
+    "excluded": 150,
+    "approximated": 32
+  },
+  "entries": [
+    {
+      "item": "Accessibility#AXValue:value",
+      "verdict": "approximated",
+      "reason": "any"
+    },
+    {
+      "item": "Audits#InspectorIssueDetails:navigatorUserAgentIssueDetails",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Audits#NavigatorUserAgentIssueDetails",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Browser#grantPermissions",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Browser#grantPermissions.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "CSS#CSSContainerQuery:text",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "CSS#getEnvironmentVariables.Result:environmentVariables",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "CSS#setContainerQueryText",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "CSS#setContainerQueryText.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "CSS#setContainerQueryText.Result",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Console#ConsoleMessage",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Console#ConsoleMessage.level",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Console#ConsoleMessage.source",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Console#clearMessages",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Console#disable",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Console#enable",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Console#messageAdded",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Console#messageAdded.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "DOM#Node:importedDocument",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "DOM#ShapeOutsideInfo:marginShape",
+      "verdict": "approximated",
+      "reason": "any"
+    },
+    {
+      "item": "DOM#ShapeOutsideInfo:shape",
+      "verdict": "approximated",
+      "reason": "any"
+    },
+    {
+      "item": "DOM#getFlattenedDocument",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "DOM#getFlattenedDocument.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "DOM#getFlattenedDocument.Result",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "DOMDebugger#removeInstrumentationBreakpoint",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "DOMDebugger#removeInstrumentationBreakpoint.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "DOMDebugger#setInstrumentationBreakpoint",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "DOMDebugger#setInstrumentationBreakpoint.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "DOMSnapshot#getSnapshot",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "DOMSnapshot#getSnapshot.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "DOMSnapshot#getSnapshot.Result",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#CallFrame:url",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#breakpointResolved",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#breakpointResolved.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#getWasmBytecode",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#getWasmBytecode.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#getWasmBytecode.Result",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#pauseOnAsyncCall",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#pauseOnAsyncCall.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#paused.Params:asyncCallStackTraceId",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#paused.Params:data",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Debugger#restartFrame.Result:asyncStackTrace",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#restartFrame.Result:asyncStackTraceId",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#restartFrame.Result:callFrames",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#scriptFailedToParse.Params:executionContextAuxData",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Debugger#scriptParsed.Params:executionContextAuxData",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Debugger#setScriptSource",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#setScriptSource.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#setScriptSource.Result",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#setScriptSource.Result:asyncStackTrace",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#setScriptSource.Result:asyncStackTraceId",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#setScriptSource.Result:callFrames",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Debugger#setScriptSource.Result:stackChanged",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "DigitalCredentials#setVirtualWalletBehavior.Params:response",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Emulation#UserAgentMetadata:fullVersion",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Emulation#canEmulate",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Emulation#canEmulate.Result",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Emulation#setDeviceMetricsOverride.Params:devicePosture",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Emulation#setDeviceMetricsOverride.Params:displayFeature",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Emulation#setNavigatorOverrides",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Emulation#setNavigatorOverrides.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Emulation#setVisibleSize",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Emulation#setVisibleSize.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Extensions#getStorageItems.Result:data",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Extensions#setStorageItems.Params:values",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "HeadlessExperimental#disable",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "HeadlessExperimental#enable",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "HeapProfiler#stopTrackingHeapObjects.Params:treatGlobalObjectsAsRoots",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "HeapProfiler#takeHeapSnapshot.Params:treatGlobalObjectsAsRoots",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "LayerTree#snapshotCommandLog.Result:commandLog",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Media#PlayerError:data",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Network#Headers",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Network#ReportingApiReport:body",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Network#Request:postData",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Network#Response:headersText",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Network#Response:requestHeadersText",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Network#canClearBrowserCache",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Network#canClearBrowserCache.Result",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Network#canClearBrowserCookies",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Network#canClearBrowserCookies.Result",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Network#canEmulateNetworkConditions",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Network#canEmulateNetworkConditions.Result",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Network#emulateNetworkConditions",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Network#emulateNetworkConditions.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Network#emulateNetworkConditionsByRule.Params:offline",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Network#getAllCookies",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Network#getAllCookies.Result",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Network#setBlockedURLs.Params:urls",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Network#setCookie.Result:success",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Overlay#GridHighlightConfig:cellBorderColor",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Overlay#GridHighlightConfig:cellBorderDash",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Overlay#getGridHighlightObjectsForTest.Result:highlights",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Overlay#getHighlightObjectForTest.Result:highlight",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Overlay#getSourceOrderHighlightObjectForTest.Result:highlight",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Overlay#highlightFrame",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Overlay#highlightFrame.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Overlay#setShowHitTestBorders",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Overlay#setShowHitTestBorders.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Overlay#setShowWebVitals",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Overlay#setShowWebVitals.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#addScriptToEvaluateOnLoad",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#addScriptToEvaluateOnLoad.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#addScriptToEvaluateOnLoad.Result",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#clearDeviceMetricsOverride",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#clearDeviceOrientationOverride",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#clearGeolocationOverride",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#deleteCookie",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#deleteCookie.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#downloadProgress",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#downloadProgress.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#downloadWillBegin",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#downloadWillBegin.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#frameClearedScheduledNavigation",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#frameClearedScheduledNavigation.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#frameScheduledNavigation",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#frameScheduledNavigation.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#getAppManifest.Result:parsed",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#getLayoutMetrics.Result:contentSize",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#getLayoutMetrics.Result:layoutViewport",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#getLayoutMetrics.Result:visualViewport",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#getManifestIcons",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#getManifestIcons.Result",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#removeScriptToEvaluateOnLoad",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#removeScriptToEvaluateOnLoad.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#setDeviceMetricsOverride",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#setDeviceMetricsOverride.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#setDeviceOrientationOverride",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#setDeviceOrientationOverride.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#setDownloadBehavior",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#setDownloadBehavior.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#setGeolocationOverride",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#setGeolocationOverride.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#setTouchEmulationEnabled",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Page#setTouchEmulationEnabled.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Performance#setTimeDomain",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Performance#setTimeDomain.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Preload#RuleSet:errorMessage",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Runtime#CallArgument:value",
+      "verdict": "approximated",
+      "reason": "any"
+    },
+    {
+      "item": "Runtime#DeepSerializedValue:value",
+      "verdict": "approximated",
+      "reason": "any"
+    },
+    {
+      "item": "Runtime#ExceptionDetails:exceptionMetaData",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Runtime#ExecutionContextDescription:auxData",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Runtime#RemoteObject:value",
+      "verdict": "approximated",
+      "reason": "any"
+    },
+    {
+      "item": "Runtime#SerializationOptions:additionalParameters",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Runtime#addBinding.Params:executionContextId",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Runtime#executionContextDestroyed.Params:executionContextId",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Runtime#inspectRequested.Params:hints",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Schema#Domain",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Schema#getDomains",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Schema#getDomains.Result",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Security#InsecureContentStatus",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Security#certificateError",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Security#certificateError.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Security#handleCertificateError",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Security#handleCertificateError.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Security#securityStateChanged",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Security#securityStateChanged.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Security#securityStateChanged.Params:explanations",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Security#securityStateChanged.Params:insecureContentStatus",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Security#securityStateChanged.Params:schemeIsCryptographic",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Security#securityStateChanged.Params:summary",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Security#setOverrideCertificateErrors",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Security#setOverrideCertificateErrors.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Storage#getStorageKeyForFrame",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Storage#getStorageKeyForFrame.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Storage#getStorageKeyForFrame.Result",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "SystemInfo#GPUInfo:auxAttributes",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "SystemInfo#GPUInfo:featureStatus",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Target#TargetInfo:embedderData",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Target#closeTarget.Result:success",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Target#detachFromTarget.Params:targetId",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Target#detachedFromTarget.Params:targetId",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Target#receivedMessageFromTarget.Params:targetId",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Target#sendMessageToTarget",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Target#sendMessageToTarget.Params",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Target#sendMessageToTarget.Params:targetId",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Tracing#MemoryDumpConfig",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Tracing#dataCollected.Params:value",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "Tracing#start.Params:categories",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "Tracing#start.Params:options",
+      "verdict": "excluded",
+      "reason": "deprecated"
+    },
+    {
+      "item": "WebMCP#Tool:inputSchema",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "WebMCP#invokeTool.Params:input",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "WebMCP#toolResponded.Params:output",
+      "verdict": "approximated",
+      "reason": "any"
+    }
+  ]
+}

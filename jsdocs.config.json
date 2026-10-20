@@ -1,6 +1,14 @@
 {
   "tsconfig": "packages/browser/tsconfig.json",
-  "include": ["packages/browser/src/*.ts", "packages/browser/src/**/*.ts"],
-  "exclude": ["**/node_modules/**", "packages/**/src/internal/**", "packages/**/src/**/internal/**"],
+  "include": [
+    "packages/browser/src/*.ts",
+    "packages/browser/src/**/*.ts"
+  ],
+  "exclude": [
+    "**/node_modules/**",
+    "packages/**/src/internal/**",
+    "packages/**/src/**/internal/**",
+    "packages/browser/src/cdp/**"
+  ],
   "output": ".data/jsdocs.json"
 }

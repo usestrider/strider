@@ -3,6 +3,11 @@
   "extends": "./tsconfig.base.json",
   "include": [],
   "references": [
-    { "path": "packages/browser" }
+    {
+      "path": "packages/browser"
+    },
+    {
+      "path": "packages/tools/codegen"
+    }
   ]
 }
