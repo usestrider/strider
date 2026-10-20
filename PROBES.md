@@ -1,6 +1,6 @@
 # PROBES: conformance probes, hazard coverage and model tests
 
-*Revision 5.25, 2026-10-19. The specs leave key orderings and identities undefined, and the research disagrees in places. These questions are to be measured, not argued. The probe suite is also the adapters' regression suite: recorded traffic must decode against the generated schemas, and recorded behavior is re-run on each browser roll. Probe results and recorded traces are also the evidence that spec corrections cite (PROTOCOL.md, Code generation). Probe numbers are stable across revisions.*
+*Revision 5.25, 2026-10-19; first results 2026-10-20. The specs leave key orderings and identities undefined, and the research disagrees in places. These questions are to be measured, not argued. The probe suite is also the adapters' regression suite: recorded traffic must decode against the generated schemas, and recorded behavior is re-run on each browser roll. Probe results and recorded traces are also the evidence that spec corrections cite (PROTOCOL.md, Code generation). Probe numbers are stable across revisions.*
 
 ## Conformance probes (run against each backend)
 
@@ -40,6 +40,24 @@
     - Do pages stay visible and keep rendering? Do timers keep their cadence?
     - Does each new context's first page get its own window?
     - What does `document.hasFocus()` report with `focus` set to `"emulated"` and to `"system"`?
+
+## Results
+
+Recorded with Chromium 155.0.8059.79 over the pipe, every message logged both ways; the adapter conformance suite (`test/integration/adapter/`) re-checks the ones the CDP adapter depends on.
+
+| Probe | CDP (Chromium 155, 2026-10-20) |
+|---|---|
+| 1. Commit ordering | The realm comes after the commit: `executionContextsCleared` (main frame) or `executionContextDestroyed` (subframe), lifecycle `init`, `frameNavigated`, then `executionContextCreated` |
+| 2. Initial `about:blank` reuse | Kept. A popup opened with `window.open('/two')` commits its initial `about:blank`, then `/two`, with no new context: same id, same `uniqueId`. A frame's initial document has no realm until script touches it, so its first navigation creates one |
+| 4. Missing terminal events (superseded) | A navigation replaced while in flight gets `loadingFailed{ERR_ABORTED, canceled}` just before the new one's `frameStartedNavigating`, and its `Page.navigate` replies `ERR_ABORTED`; no event names the replacement |
+| 8. Orphaned children | No `frameDetached` for the children of a document that a cross-document navigation replaced. A frame removed by script gets `frameDetached{reason: remove}`; one moving to another process, `swap` |
+| 15. Navigations that keep the old document | A 204: `Page.navigate` replies `ERR_ABORTED`, then `responseReceived` 204 and `loadingFailed` (canceled), and no commit. A download: `isDownload: true`, `loadingFailed`, then `Browser.downloadWillBegin` for the frame. The old realm stays usable in both |
+| 17. Node and reference continuity (`document.open()`) | Visible: `Page.documentOpened`, then lifecycle `init`, `DOMContentLoaded` and `load` again under the same loader id |
+| 22. Pause-on-start granularity | Frames and workers: per page (`setAutoAttach` on its session; an out-of-process frame attached with `waitingForDebugger: true`). Popups: browser-wide only. A popup opened with a user gesture is created with `openerId`, but neither `autoAttachRelated` on its opener nor auto-attach on the opener's session attaches it, and `TargetFilter` has no context. A paused popup also blocks its same-process opener: `window.open` doesn't return until the popup resumes |
+| 24. Error vocabulary | Six rows (PROTOCOL.md, Protocol client): unknown method, invalid parameters, unknown target, unknown frame, unknown node, ended session. An unknown execution context is `Unrecognized` |
+| 25. Several clients on one browser | Yes: a second client connected over the debugging port attached to a page the first one had created and crashed it, and the first one saw the crash |
+
+Other findings: execution context ids restart after a process swap within one session, while `uniqueId` doesn't; `frameStartedNavigating` carries the loader id from the start, also for same-document navigations started by a command (`navigationType: sameDocument`); a refused connection commits `chrome-error://chromewebdata/` under the navigation's own loader id; browser-wide auto-attach without a filter attaches `browser_ui` targets and component extensions' pages; `Fetch.requestPaused` follows `Network.requestWillBeSent` and names it with `networkId`; deep serialization gives BiDi's `RemoteValue`, and a node carries its `backendNodeId` and its document's loader id.
 
 ## Hazard coverage
 

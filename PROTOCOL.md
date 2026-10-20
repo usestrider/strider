@@ -1,6 +1,6 @@
 # PROTOCOL: transports, protocol clients and backend adapters (L0)
 
-*Revision 5.25, 2026-10-19; CDP code generation, the transports and the CDP client built 2026-10-19; the client's timeouts, late replies and validation modes, and the ingestion pipeline, built 2026-10-20. A condensed sketch drawn from draft 4 of the native model (commit `6cc0bc1`) and the research notes, especially `research/effect-building-blocks.md`, `research/non-js-cdp-clients.md`, `research/puppeteer-and-chromium-bidi.md`, `research/webdriver-bidi.md` and `research/webkit.md`.*
+*Revision 5.25, 2026-10-19; CDP code generation, the transports and the CDP client built 2026-10-19; the client's timeouts, late replies and validation modes, the ingestion pipeline, and the CDP adapter built 2026-10-20. A condensed sketch drawn from draft 4 of the native model (commit `6cc0bc1`) and the research notes, especially `research/effect-building-blocks.md`, `research/non-js-cdp-clients.md`, `research/puppeteer-and-chromium-bidi.md`, `research/webdriver-bidi.md` and `research/webkit.md`.*
 
 ## Purpose
 
@@ -273,13 +273,53 @@ Adapter responsibilities:
 - **Capability evidence.** Probe only in owned, disposable targets or with read-only checks, never by mutating adopted pages. Cache results per backend revision and configuration, in a `Cache`.
 - **Domain enablement** goes through an `RcMap` keyed by session and domain: the first subscriber enables a domain, and the last scope to close disables it (principle 8).
 
+**Built for CDP** (2026-10-20), after [review 08](reviews/08-l0-adapters.md):
+
+- **The contract** (`src/internal/adapter.ts`) is the whole of what a backend gives L1.
+  - **Facts:** contexts, pages and frames, documents, realms, navigations and their outcomes, request hops, WebSocket and EventSource connections, obligations, prompts, downloads, console messages and uncaught exceptions. They are in L1's ids, carry the public data classes where those exist (`NetworkRequest`, `NetworkResponse`, `ConsoleMessage`, `UncaughtException`, `NetworkConnection.Frame`), and the ones that interpret traffic carry their evidence. The adapter calls the sink from its fold, in receive order, before the events are published.
+  - **Ids** are minted per connection behind a prefix per kind (`N3`, `D7`, `R5`, `Q12.1`). An id this connection never minted fails with `Foreign`.
+  - **Operations:** contexts and pages, navigation (whose id is minted before the command is sent), realms and evaluation, input, obligations, declarations, screenshots, PDFs, cookies, permissions, response bodies, input files and download paths. Each fails with `AdapterError`, whose reasons are `Gone`, `Unsupported`, `Foreign` and `Protocol`.
+  - **Remote values** are WebDriver BiDi's `RemoteValue`. CDP produces them with `serializationOptions: { serialization: "deep" }`, and nodes carry a binding (`backendNodeId` and the document) that `setInputFiles` and file choosers use.
+- **Declarations** (`src/internal/declarations.ts`) are a registry every backend's gate reads.
+  - Overrides take the most specific scope (page, then context, then browser), then the most recent, and releasing one in any order recomputes the effective value and applies it, or resets it.
+  - Init scripts form one bundle per world, environment phase first, broader scopes first, each script in its own `try`.
+  - Intercepts are the union of patterns per phase; `Fetch` is never disabled while a request is paused.
+- **CDP specifics** (`src/internal/cdpAdapter.ts`):
+  - **Auto-attach.** The browser session auto-attaches pages, service workers and shared workers, filtering out `browser_ui` targets and extension pages. A launched browser pauses every new page; an attached one pauses nothing browser-wide. Every page and out-of-process frame auto-attaches its own frames and workers, paused.
+  - **The gate** runs while the target is paused and is the session's first sync: `Page.enable`, `Network.enable` and lifecycle events, then `Page.getFrameTree`, whose reply's receive sequence is the snapshot point, then `Runtime.enable`, whose replayed contexts arrive after it, then auto-attach and the declarations in force. `Runtime.runIfWaitingForDebugger` runs in a finalizer. A declaration that fails emits `PageInitializationFailed` and fails `createPage`; the page still runs.
+  - **Correlation.** A page's main frame shares the target's id. Out-of-process frames move their frame to the new session and back. Realms are keyed by `uniqueId`, and evaluation targets `uniqueContextId`. Navigations are keyed by loader id: a command's navigation is matched to `frameStartedNavigating` by URL, first in, first out. Requests are keyed by session and request id, with one hop per redirect.
+  - **Outcomes** follow review 08's evidence table. A navigation that never started (the reply has an error and no loader id) ends at once as `Failed`, through the client's ordered `run`. An abort with no other evidence stays pending.
+  - **Operations** use `Target.createBrowserContext` (with `disposeOnDetach`), `Target.createTarget` (and wait for the page's gate), `Target.closeTarget` or `Page.close` (to run `beforeunload`), `Page.navigate`, `reload` and `navigateToHistoryEntry`, `Page.createIsolatedWorld`, `Runtime.callFunctionOn`, the `Input` domain (with Windows key codes for keys whose text doesn't say what they are), `Fetch`, `Page.handleJavaScriptDialog`, `DOM.setFileInputFiles`, `Page.captureScreenshot` (beyond the viewport for clips and full pages), `Page.printToPDF`, `Storage` cookies, `Browser.setPermission`, and `Network.getResponseBody`, which waits for the request to finish.
+  - **Capabilities** are a static profile, with evidence: popups can be paused only when the browser was launched, and PDFs only headless.
+- **Launchers** (`src/internal/launch.ts`, `src/internal/chromiumLauncher.ts`).
+  - The executable comes from `executablePath` or a channel's install location, and nothing else; downloading Chrome for Testing, the default, isn't built yet, and `ExecutableNotFound` says so.
+  - The profile is a temporary directory unless the caller owns one. The `automation` profile's arguments turn off what a page can't observe (first run, sync, updates, component extensions); `concurrent` adds the throttling switches.
+  - The pipe is the transport, or a port read from `DevToolsActivePort`. stderr is kept for `ProcessExited`.
+- **Tests:** a conformance suite of 23 tests written against the contract, with a local site (`test/integration/adapter/`), and 6 more for Chromium alone. They cover:
+  - pages, frames and out-of-process frames, orphans, and popups with init scripts before author script;
+  - outcomes: commit, same-document, no content, failure, redirect hops;
+  - evaluation, input, prompts, interception, overrides and their release;
+  - console and exceptions, screenshots and PDFs, bodies, cookies and permissions, file choosers, downloads, workers and WebSockets;
+  - closing pages, removing contexts, `beforeunload`, the browser dying, a crash, an attached browser, and the launcher's errors.
+- **Where the build differs from the sketch above:**
+  - `initialize` isn't a method: every new target runs the gate, and `PageReady` or `PageInitializationFailed` reports how it went;
+  - `model: ModelSink` is the `sink` given to `connect`, and `correlation` stays inside the adapter;
+  - capabilities are named entries of `Browser.CapabilitySet` (`pauseOnStart.popups`, `interception.auth`, …);
+  - `PageCrashed` is a reason for `NavigableRemoved`, not a fact of its own.
+- **Not built yet:**
+  - the `RcMap` for domains beyond the base set (`Page`, `Network`, `Runtime`), which nothing consumes yet;
+  - the on-demand realm strategy (no `Runtime.enable`);
+  - merging `ExtraInfo` headers and `servedBy` into request snapshots;
+  - enrichment;
+  - tests of back/forward-cache restores and prerender activation, which headless Chromium 155 didn't produce (`Page.backForwardCacheNotUsed`).
+
 ### Pause-on-start granularity
 
 Before-author-script setup for *new* targets needs them paused at creation. Granularity differs by backend, and the access model depends on it.
 
-| Backend | Granularity (to be confirmed by probe 22) |
+| Backend | Granularity (probe 22) |
 |---|---|
-| CDP | browser-wide auto-attach filters by target *type*; `autoAttachRelated` covers frames and workers of one target, but popups are unconfirmed |
+| CDP | frames and workers: per page, by auto-attach on the page's session. Popups: **browser-wide only**: neither `autoAttachRelated` nor the opener's auto-attach attaches them (confirmed 2026-10-20, Chromium 155) |
 | BiDi | not needed: declarations are scoped natively by context or user context |
 | Patched WebKit | per page proxy; popup behavior unconfirmed |
 
@@ -306,7 +346,7 @@ This is a planning inventory from the research, not a conformance result. `?` me
 | own process / headless | ✓/✓ | ✓/✓ | ✓/✓ | ✓/✓ | attach-only | ✓/✗ |
 | user contexts | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
 | isolated worlds (`inspect`) | ✓ | ✓ | ✓ | ✓ | ✗ | partial |
-| pause-on-start scope | type-wide (probe 22) | declarative | declarative | per page proxy (probe 22) | partial | n/a |
+| pause-on-start scope | per page for frames and workers; browser-wide for popups (probe 22) | declarative | declarative | per page proxy (probe 22) | partial | n/a |
 | input fidelity | native | webdriver | webdriver | native | synthetic | webdriver |
 | network events / interception | ✓ / req, resp, auth | ✓ / req, resp, auth | ✓ / req, resp*, auth | ✓ / req | ✓ / req, resp | ✗ / ✗ |
 | body access | buffered + stream | collectors | collectors | ✓ | ✓ | ✗ |
