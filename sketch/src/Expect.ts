@@ -5,7 +5,7 @@
  * invalidates a key the subject depends on (a `Watchable` change, a DOM mutation in the subject's subtree),
  * and, for conditions with no change signal, such as layout and visibility, a fixed interval with no backoff.
  * Everything runs on the live clock, within the deadline. Collecting several failures is Effect's job:
- * `Effect.all(…, { mode: "result" })`.
+ * `Effect.validate`, or `Effect.all(…, { mode: "result" })`.
  *
  * Matchers that take arguments are duals: `locator.pipe(Expect.toHaveText("1 item"))` or
  * `Expect.toHaveText(locator, "1 item")`. Matchers without arguments are the function itself:

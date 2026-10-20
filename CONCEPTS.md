@@ -1,6 +1,6 @@
 # CONCEPTS: the native browser model (L1)
 
-*Revision 5.23, 2026-10-19. A condensed restatement of draft 4 (commit `6cc0bc1`), with [review 4](reviews/04-draft-4.md) folded in. The reasoning behind each contract is in that draft and in [reviews/](reviews/); this document keeps the decisions. Spec anchors: `HTML#x` is `https://html.spec.whatwg.org/#x`; `BIDI#x` is the WebDriver BiDi editor's draft.*
+*Revision 5.25, 2026-10-19. A condensed restatement of draft 4 (commit `6cc0bc1`), with [review 4](reviews/04-draft-4.md) folded in. The reasoning behind each contract is in that draft and in [reviews/](reviews/); this document keeps the decisions. Spec anchors: `HTML#x` is `https://html.spec.whatwg.org/#x`; `BIDI#x` is the WebDriver BiDi editor's draft.*
 
 ## Purpose
 
@@ -32,21 +32,21 @@ Realms are siblings of documents, not children. The one exception that forces th
 | `HandleRef = {realm, binding, lease}` | handle acquired by a caller |
 | `PromptId`, `DownloadId`, `InterceptId`, `OperationId`, … | on creation |
 
-**Brand liberally.** Every id, and every string or number that means more than "some text" or "some quantity", is a branded type defined by a `Schema` that validates at the boundary. Ids are distinct brands per kind, so a `DocumentId` can never be passed where a `NavigableId` is expected. **Tokens**, meaning produced values whose meaning depends on their origin (ids, `RefId`, `DocumentGeneration`, registration handles, `OperationId`), are accepted back only in branded or opaque form, never as plain strings or numbers. They are also checked against their origin when used, because a brand alone doesn't prove provenance. Value brands used by the model:
+**Brand liberally.** Every id, and every string or number that means more than "some text" or "some quantity", is a branded type defined by a `Schema` that validates at the boundary. Ids are distinct brands per kind, so a `DocumentId` can never be passed where a `NavigableId` is expected. **Tokens**, meaning produced values whose meaning depends on their origin (ids, `RefId`, `DocumentGeneration`, registration handles, `OperationId`), are accepted back only in branded or opaque form, never as plain strings or numbers. They are also checked against their origin when used, because a brand alone doesn't prove provenance. In the public API each brand is a Schema in the module that owns it (API.md, Conventions), named in parentheses below. Value brands used by the model:
 
 | Brand | Meaning | Validated as |
 |---|---|---|
-| `Url` | an absolute URL | WHATWG URL parse |
-| `UrlPattern` | a matcher (glob or URLPattern), never navigated to | pattern compile |
-| `Origin`, `Site` | scheme+host+port; registrable-domain site (partition keys) | derived from `Url` |
-| `HttpStatusCode` | 100–599 | integer range |
+| `Url` (`Url.Url`) | an absolute URL | WHATWG URL parse |
+| `UrlPattern` (`Url.Pattern`) | a matcher (glob or URLPattern), never navigated to | pattern compile |
+| `Origin`, `Site` (`Url.Origin`, `Url.Site`) | scheme+host+port; registrable-domain site (partition keys) | derived from `Url` |
+| `HttpStatusCode` (`NetworkResponse.StatusCode`) | 100–599 | integer range |
 | `HeaderName` | case-normalized header name | token grammar |
-| `CookieName`, `CookieDomain` | cookie attributes | RFC 6265 grammar |
-| `LocalPath`, `RemotePath` | a path on the driver's machine vs. on the browser's host | non-empty; never interchangeable |
-| `CssPixels`, `DevicePixels` | layout units vs. device pixels (differ by device pixel ratio) | finite number |
-| `Locale`, `TimeZoneId` | BCP 47 tag; IANA zone | `Intl` validation |
-| `RefId` | an agent snapshot ref (`e12`) | `^e\d+$` |
-| `SecretName` | an agent secret placeholder | identifier grammar |
+| `CookieName`, `CookieDomain` (`CookieJar.Name`, `CookieJar.Domain`) | cookie attributes | RFC 6265 grammar |
+| `LocalPath`, `RemotePath` (`FilePath.Local`, `FilePath.Remote`) | a path on the driver's machine vs. on the browser's host | non-empty; never interchangeable |
+| `CssPixels`, `DevicePixels` (`Pixels.Css`, `Pixels.Device`) | layout units vs. device pixels (differ by device pixel ratio) | finite number |
+| `Locale`, `TimeZoneId` (`Emulation.Locale`, `Emulation.TimeZoneId`) | BCP 47 tag; IANA zone | `Intl` validation |
+| `RefId` (`Snapshot.RefId`) | an agent snapshot ref (`e12`) | `^e\d+$` |
+| `SecretName` (`BrowserToolkit.SecretName`) | an agent secret placeholder | identifier grammar |
 
 **Model objects are values.** References are `Equal`/`Hash` by immutable identity within their connection. Mutable state (URL, connectivity, descriptions) never affects hashing. Two independently acquired handle leases are not equal even when they point at the same remote object, because each owns its own release. Event payloads are immutable snapshots, and reading live state is an explicit operation.
 
@@ -195,7 +195,7 @@ interface RequestSnapshot {
   readonly resourceType: ResourceType; readonly servedBy: "network" | "cache" | "serviceWorker"
 }
 interface ResponseSnapshot {
-  readonly hop: RequestHopId; readonly status: HttpStatusCode; readonly url: Url; readonly headers: Headers
+  readonly hop: RequestHopId; readonly status: StatusCode; readonly url: Url; readonly headers: Headers
   readonly body: BodyAccess                             // availability is read through an Effect
 }
 interface ConnectionModel {                            // long-lived connections
@@ -267,7 +267,7 @@ Cleanup groups can span sibling pages, independently of this graph.
   - **Seeing an event acquires nothing.** A popup of an owned page is released with the scope that acquired its opener, even if the opener has already closed; subscribing to it changes nothing. A popup of a `LeaveOpen` page is `observe`/`LeaveOpen`. A download's file belongs to its context.
   - Transfer to another scope is explicit and atomic with respect to shutdown. Ambiguous opener evidence never implies ownership.
 - **Ownership ledger.** The connection records owned resources, groups and transfers. A persisted ledger yields *reclamation candidates* only. Automatic destructive reclaim across connections needs verified browser incarnation, resource identity and claimant coordination, and is deferred.
-- **Requesting a close is not ending a lifetime.** `closeWith({runBeforeUnload: true})` can be refused (`CloseCanceled`), and the page stays usable. A close timeout leaves closure unconfirmed rather than fabricating `PageClosed`. Teardown of owned resources uses a bounded close without beforeunload.
+- **Requesting a close is not ending a lifetime.** `close({ runBeforeUnload: true })` can be refused (`PageError{CloseCanceled}`), and the page stays usable. A close timeout leaves closure unconfirmed rather than fabricating `PageClosed`. Teardown of owned resources uses a bounded close without beforeunload.
 - **Lifetime signal and `within`.** Each object has a single-assignment `closed: Effect<CloseReason>`. `within(effect): Effect<A, E | TargetGone, R>` arbitrates completion against the end of the lifetime and delivers the typed reason; closing a `Scope` alone would only interrupt. Caller interruption remains interruption. Whichever of completion or end wins the race is recorded once.
 - **Remote facts and model loss.** A remote close invalidates local bindings without sending another close. Permanent loss of observation ends lifetimes with `ConnectionLost` or `ModelUnavailable` without asserting remote destruction. A temporary quarantine fails current operations without completing `closed`, and resumes only after a verified resynchronization.
 - **Suspension** (back/forward cache) is a domain state, not a scope operation. Explicit-ref operations fail fast; waits may opt in to resume within their deadline. Resuming never revives invalid handles.
@@ -304,7 +304,7 @@ Cleanup groups can span sibling pages, independently of this graph.
 - **Projection for callers** (API.md):
   - **Success:** `Committed`, `SameDocument`, `Restored`, `Activated`. An HTTP 404/500 document is a successful commit.
   - **`back`/`forward`:** `NoOp{noHistoryEntry}` becomes `None`.
-  - **Failure:** everything else becomes `NavigationError{reason}`. `Download` and `NoContent` count as failures unless the call accepts them.
+  - **Failure:** everything else becomes `PageError` with a navigation reason (`NavigationFailed`, `NavigationCanceled`, `NavigationSuperseded`, `BecameDownload`, `NoContent`). `BecameDownload` and `NoContent` count as failures unless the call accepts them.
   - **`waitUntil`:** a navigation resolves at commit. `domContentLoaded` or `load`, when asked for, waits on the resulting document and generation within the same deadline.
 
 ## 5. Input and obligations
@@ -387,7 +387,7 @@ Declarations are init scripts, routes, overrides, emulation, download and prompt
       | { _tag: "Partitioned"; topLevelSite: Site; crossSiteAncestor: Option<boolean>; vendor: Option<VendorPartition> }
     ```
     `topLevelSite` is the common core: CDP's cookie `partitionKey`, Firefox's `originAttributes` and BiDi's `storage.PartitionKey` all carry it. `crossSiteAncestor` is an `Option` because only Chromium reports it. Backend-specific detail, such as Chromium's nonces for anonymous iframes, goes in `vendor` and round-trips within the same backend only.
-  - **`StorageState`.** It is portable into fresh contexts. Source context is provenance, not a restriction. Mismatched opaque partitions fail with `StorageStateError{Incompatible}`, and partial restores are reported.
+  - **`StorageState`.** It is portable into fresh contexts. Source context is provenance, not a restriction. Mismatched opaque partitions fail the new context with `UserContextError{Incompatible}`, and partial restores are reported.
   - **Export and import.** Export is an explicit, versioned codec to `Redacted<Uint8Array>`, and import validates it. Diagnostic JSON is never a persistence format.
 - **Permissions** are scoped to a user context and combined (AND) with Permissions Policy.
 
@@ -427,18 +427,18 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
 | resource creation | nothing created | may exist | late-reply adoption or cleanup |
 
 - **Subscriptions.** A subscription is the internal resource behind an event module's `next` and `stream`.
-  - **Before it returns:** it acquires collectors and remote enablement, so the caller's next line already runs subscribed. If that fails, the caller gets `ObserveError` before reaching its action.
+  - **Before it returns:** it acquires collectors and remote enablement, so the caller's next line already runs subscribed. If that fails, the caller gets `SubscriptionError` before reaching its action.
   - **Revision boundary:** it sets one between the current-state snapshot and the live subscription.
   - **Correlation:** by the strongest identity available.
   - **Owner ends without a match:** fails promptly.
   - **Results:** a latched immutable result outlives the subscription.
 - **Event logs.** Each page and context keeps a bounded log per event kind, fed by the same fold as subscriptions. Entries are copied metadata or handles to resources owned elsewhere, never collected bodies, so nothing in a log decays. A log counts what it drops. Logs serve `history`, the digest that agent tools and CLI commands return between calls, and the hint on a late subscription's `Timeout`, which names a match that arrived just before it subscribed.
-- **Deadline.** There is one monotonic deadline per operation, inherited by nested calls and only ever shortened. It lives in `Deadline.Current`, an absolute instant on the live clock, set only by `Deadline.within`; an operation with no enclosing deadline gets `Deadline.DefaultBudget` from when it starts. An event wait takes its deadline at `next`. Cleanup has its own budget. Deadline failures are `Timeout{phase}`, carrying the last observation and its de-duplicated history.
+- **Deadline.** There is one monotonic deadline per operation, inherited by nested calls and only ever shortened. It lives in `Deadline.CurrentDeadline`, an absolute instant on the live clock, set only by `Deadline.within`; an operation with no enclosing deadline gets `Deadline.DefaultBudget` from when it starts. An event wait takes its deadline at `next`. Cleanup has its own budget. Deadline failures are `Timeout{phase}`, carrying the last observation and its de-duplicated history.
 - **Retries.** Retry decisions depend on the operation, its phase, the target binding, dispatch evidence and the remaining deadline, never on an error tag alone.
   - Locators re-resolve before dispatch.
   - Explicit refs never rebind.
   - Nothing that may have dispatched is repeated automatically.
-- **Errors (L1 view).** Lifetime ends surface as `TargetGone{reason: CloseReason}` and deadlines as `Timeout`. Everything else is a domain error per verb family whose `reason` includes `NotPermitted`, `Unsupported` and `BackendFailure{Rejected | IncompatibleResponse}`. L0 hands over a normalized `RejectReason`, which L1 maps using its own state (`NoSuchNode` becomes `StaleRef{Detached}`); reasons it doesn't map surface as `BackendFailure{Rejected}`. All of them carry the diagnostic envelope, and every reason carries a one-line remediation `hint`. Defects are reserved for bugs. `SessionSwapped` is internal.
+- **Errors (L1 view).** Lifetime ends surface as `TargetGone{reason: CloseReason}` and deadlines as `Timeout`. Everything else is the error of the module whose operation failed (`LocatorError`, `PageError`, …; one per module), whose `reason` includes the shared `NotPermitted`, `Unsupported` and `BackendFailure{Rejected | IncompatibleResponse}`. L0 hands over a normalized `RejectReason`, which L1 maps using its own state (`NoSuchNode` becomes `StaleRef{Detached}`); reasons it doesn't map surface as `BackendFailure{Rejected}`. All of them carry the diagnostic envelope, and every reason carries a one-line remediation `hint`. Defects are reserved for bugs. `SessionSwapped` is internal.
 - **State and event streams have different contracts.**
   - **State** (`Watchable`) is a read-only view of an entity's state ref:
     - reading it is an `Effect`;

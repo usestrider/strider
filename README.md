@@ -18,7 +18,7 @@ Each layer document has the same shape: purpose, top data models, interface sket
 | — | [README.md](README.md) | goals, principles, cross-cutting decisions, guarantees |
 | L2 | [API.md](API.md) | the public API: entry points, pages, locators, actions, expectations, state and events, network, clock, agents, testing, errors, call sites |
 | L1 | [CONCEPTS.md](CONCEPTS.md) | the native browser model: identities, data models, lifetimes, contracts |
-| — | [sketch/](sketch/) | the whole public API as declarations type-checked against Effect 4.0.5, with the acceptance scenarios and the rules the types enforce (`npm run check`) |
+| — | [sketch/](sketch/) | the whole public API in the package's real shape: 48 modules plus subpaths, Effect's JSDoc contract on every declaration, type tests, type-checked examples and acceptance scenarios; generates [INDEX.md](sketch/INDEX.md) and the API reference dataset (`npm run all`) |
 | — | [CLI.md](CLI.md) | the command line: named sessions, commands, files, storage and forks, export |
 | L0 | [PROTOCOL.md](PROTOCOL.md) | transports, protocol clients, code generation, ingestion, backend adapters, capabilities |
 | — | [PROBES.md](PROBES.md) | conformance probes, hazard coverage, deterministic model tests |
@@ -27,7 +27,7 @@ Each layer document has the same shape: purpose, top data models, interface sket
 | — | [upstream/](upstream/) | drafts of proposals for upstream projects, for the maintainer to post |
 
 ```
-L2  API       Browser · UserContext · Page · Locator · Expect · Watchable · event modules · Route · PageClock · Trace · Har · Toolkit · BrowserTest · CLI
+L2  API       Browser · UserContext · Page · Locator · Expect · Watchable · event modules · Route · PageClock · Trace · Har · BrowserToolkit · TestRun · CurrentSession
 L1  Model     ids · navigables · documents · realms · navigations · requests · obligations · declarations · readiness
 L0  Protocol  transports · sessions · generated commands and events · ingestion · backend adapters · capabilities
 ```
@@ -45,15 +45,15 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 7. **Capabilities belong to instances.** A missing capability is a typed `Unsupported` reason or a missing method, never a silent no-op.
 8. **Protocol features are demand-driven.** Domains and subscriptions are reference-counted (an `RcMap`), so a stealth configuration that never enables `Runtime` remains possible.
 9. **Declarations are acknowledged, timed and composed by fixed rules.** Init scripts, routes, overrides and clocks state the timing they need and fail rather than degrade. One precedence rule orders settings and handlers, and an ordered bundle orders scripts.
-10. **Small error channels, rich evidence.** An ordinary call fails with `TargetGone`, `Timeout` or its own domain error. Detail lives in `reason` fields and a shared diagnostic envelope.
+10. **Small error channels, rich evidence.** An ordinary call fails with `TargetGone`, `Timeout` or its module's error. Detail lives in a `reason`, a class with its own fields, and a shared diagnostic envelope.
 11. **Secrets are protected in diagnostics, and export is explicit.** `Redacted` goes in, classified fields come out wrapped, and secret-bearing exports are deliberate operations.
-12. **If it doesn't have to be a function, it's a value.** Operations without arguments are `Effect`s (`locator.click`, `browser.newPage`), and pure derivations are properties (`locator.first`). A member whose parameters are all optional is a default value plus `xWith(options)`. Cross-cutting settings such as timeouts are dual combinators, not option fields. Anything with a lifecycle requires `Scope`.
+12. **If it doesn't have to be a function, it's a value.** A member with nothing to configure is a value: an `Effect` for operations (`page.title`, `tab.inspect`, `context.newPage`) or a property for pure derivations (`locator.first`). Settings are a trailing `options` parameter, as in Effect's own modules, so actions are calls (`button.click()`, `button.click({ button: "right" })`). Cross-cutting settings such as deadlines are dual combinators, not option fields. Anything with a lifecycle requires `Scope`.
 13. **Immutable by default; mutable state lives in a `Ref` and is read through an `Effect`.** Entities are immutable identity plus one `SubscriptionRef` of state. Snapshots, events and errors are immutable. Nothing that can change is exposed as a plain field, so every read happens at the moment its effect runs. A plain field on a live handle or entity is a claim that it never changes, so it carries a one-line justification.
-14. **Brand liberally.** Ids and meaningful strings and numbers are branded types with validating schemas (`Url`, `UrlPattern`, `HttpStatusCode`, `LocalPath`/`RemotePath`, `CssPixels`, …). Outputs are always branded. Tokens are accepted back only in branded or opaque form, and are checked against their origin when used. These are produced values that only mean something relative to where they came from: ids, snapshot refs, registration handles. Other inputs require the brand where meanings could be confused, and otherwise parse plain strings at the boundary.
-15. **Unions of valid models; `Option` for what's truly optional.** Fields that only make sense together form a tagged union of valid shapes, so impossible states can't be built. Genuinely optional values are `Option`, never `?:`, `undefined` or `null`. Input option bags keep `?:` for "use the default", and their mutually exclusive alternatives are unions.
+14. **Brand liberally.** Ids and meaningful strings and numbers are branded types with validating schemas, each in the module that owns it (`Url.Url`, `Url.Pattern`, `NetworkResponse.StatusCode`, `FilePath.Local`/`FilePath.Remote`, `Pixels.Css`, `Download.Id`, …). Outputs are always branded. Tokens are accepted back only in branded or opaque form, and are checked against their origin when used. These are produced values that only mean something relative to where they came from: ids, snapshot refs, registration handles. Other inputs require the brand where meanings could be confused, and otherwise parse plain strings at the boundary.
+15. **Unions of valid models; `Option` for what's truly optional.** Fields that only make sense together form a tagged union of valid shapes, so impossible states can't be built. Genuinely optional values are `Option`, never `?:`, `undefined` or `null`. Input option bags keep `?:` for "use the default", written `?: T | undefined` as Effect writes it, and their mutually exclusive alternatives are unions.
 16. **State is watchable; each event type is a module.** A `Watchable` reads now, streams changes (conflated, starting from the current value) and waits level-triggered. An event module (`Popup`, `Download`, `NetworkResponse`, …) has three verbs: `next` (subscribe now, await the first match later) and `stream` (every match from now on) subscribe eagerly; `history` reads a bounded log and never waits. Events report and handlers decide, and seeing an event acquires nothing.
 17. **No public fibers, no writable `Deferred`s or `Ref`s.** Callers own concurrency (`Effect.forkScoped`). The library exposes only read-only views of what it latches and stores.
-18. **Names encode behavior.** Verbs act, `read*`/`is*`/nouns read once, `Expect.to*` retries, `next`/`stream` subscribe to events, `handle` registers a deciding handler, `new*` creates, `*With` configures a member, `with*` configures any effect (grammar in API.md).
+18. **Names encode behavior.** Verbs act, `read*`/`is*`/nouns read once, `Expect.to*` retries, `next`/`stream` subscribe to events, `handle` registers a deciding handler, `new*` creates, `*With(f)` takes a function, `with*` configures any effect, `layer*` provides a service (grammar in API.md).
 19. **Every scoped acquisition returns a handle.** Never `void`: registrations have `remove` and, where useful, state such as `hits`.
 20. **Every effect ends.** Waits run under the operation deadline, open-ended things are `Stream`s, and lifetime signals (`closed`) are the only exception.
 21. **Every error reason carries a hint.** The rendered message says what to do next.
@@ -86,10 +86,10 @@ Each user-visible operation has one monotonic deadline covering everything it do
 |---|---|---|
 | Lifetime | `TargetGone{target, reason}` | Something the operation needed ended. `reason` is a `CloseReason`: page closed, frame detached, document replaced, connection lost, and so on |
 | Deadline | `Timeout{operation, phase}` | `phase` is `resolving \| waitingForCondition \| dispatchedUnconfirmed \| postcondition` |
-| Domain | one per verb family: `ActionError`, `NavigationError`, `EvaluationError`, `ResponseError`, `ExpectationFailed`, `RouteError`, `DeclarationError`, … | `reason` covers invalid input, `StrictViolation`, `NotPermitted{required}`, `Unsupported{capability}` and `BackendFailure` |
+| Module | one per module: `LocatorError`, `PageError`, `DownloadError`, `DeclarationError`, `SubscriptionError`, `ResponseError`, `ExpectationFailed`, … | `reason` is a class: the module's own (`StrictViolation`, `NavigationFailed`) or one shared from `Reason` (`InvalidInput`, `NotPermitted{required}`, `Unsupported{capability}`, `BackendFailure`) |
 
 - **Evidence.** Every failure carries the same diagnostic envelope: operation id, dispatch state (`NotSent | MayHaveBeenSent | Acknowledged`), per-step progress, the last observation and cleanup notes. A caller asking "did my click happen?" reads the evidence. Nothing is retried automatically once a mutation may have reached the page.
-- **Two different "can't" reasons.** `NotPermitted` means "you haven't granted the access this needs", and the fix is a different call. `Unsupported` means "this backend cannot do it", and the fix is a different backend. Both are reasons inside the verb's own error, so they never add tags. `BrowserError.isUnsupported(e)` and `isNotPermitted(e)` work across verb families.
+- **Two different "can't" reasons.** `NotPermitted` means "you haven't granted the access this needs", and the fix is a different call. `Unsupported` means "this backend cannot do it", and the fix is a different backend. Both are `Reason` classes that every module's error can carry, so they never add tags, and one check works across modules: `Effect.catchReason(tag, "Unsupported", …)` for any module's tag.
 - **Defects are bugs only.** Defects are reserved for programming and invariant failures. External backend failures stay typed, and caller-supplied error and requirement types pass through every combinator unchanged.
 
 ### Diagnostics and secrets
@@ -104,7 +104,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ### Observability
 
-- **Spans.** Every public operation is an `Effect.fn` span. Attempts, readiness observations and automatically resolved dialogs become span events, so each operation carries its step-by-step log as structured data. Protocol commands are debug-level child spans. `effect/observability` exports them over OTLP, and `effect/devtools` shows them live.
+- **Spans.** Every user-visible operation opens one span, as Effect's `HttpClient` opens one per request, named like `Locator.click` with attributes in OpenTelemetry's style (`browser.operation`, `browser.page.id`, a redacted `url.full`, `error.type`). Attempts, readiness observations and automatically resolved dialogs become span events, so each operation carries its step-by-step log as structured data. Everything beneath an operation is `Effect.fnUntraced`, and protocol commands get child spans only when `Browser.TraceProtocolCommands` is on, because they are a hot path. `Browser.SpanNameGenerator` and `Browser.TracerDisabledWhen` rename or suppress spans. `effect/observability` exports them over OTLP, and `effect/devtools` shows them live.
 - **Metrics.** `Metric`s count operations by verb and outcome, actionability attempts per action, `Timeout`s by phase, `EventOverflow`s, protocol commands by method and latency, and obligations decided by policy. They export through `effect/observability` (OTLP or Prometheus).
 - **Wording.** "No matching event observed" is never reported as "the action had no effect".
 
@@ -125,6 +125,15 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ## Status
 
+- **Revision 5.25** adopted the Effect core team's own conventions ([review 7](reviews/07-effect-conventions.md)), so the library reads as if they wrote it, and generates its API reference as effect.website does:
+  - modules are namespaces from a generated barrel (`Page.Page`, `Download.Download`), with short names inside (`UserContext.Options`, `CookieJar.Input`); brands are Schemas in the modules that own them;
+  - settings are a trailing `options?`, so actions are calls (`button.click()`), and `*With` takes a function. This reverses 5.2's `xWith(options)`. Principle 22 then removed two duplicates the change exposed: `ariaSnapshot` is `snapshot({ sources: "aria" })`, and a snapshot's `root` option is `locator.snapshot()`;
+  - layers are named `layer…` (`Chromium.layer()`, `layerConfig`, `layerConnect`, `WebKit.layerAttach`); `Browser.newPage()` and `newContext()` are accessors, which replace `BrowserTest.page` (reversing 5.18 and 5.21); the fake browser is public, as `Browser.layerTest(timeline)` (experimental);
+  - data that crosses a boundary is Schema: data events, states, cookies, snapshot trees, diagnostics, errors, and storage state, whose `Json` codec replaces `StorageState.import`;
+  - one error per module, with `Schema.Error` reason classes and the shared ones in `Reason`, replaces principle 10's verb families; `Target.TargetGone` and `Deadline.Timeout` cross every module; backends add error detail by augmentation;
+  - one span per operation with internals untraced, string TypeIds with kind guards, `Pipeable` and `Inspectable` handles, and `?: T | undefined`;
+  - Effect's JSDoc contract on all 536 declarations, enforced by `effect-jsdocs --check` run from an Effect checkout; 48 examples type-checked, ready for `@effect/doctest`; Tstyche type tests replace `@ts-expect-error`; `Effect.fn` call sites, enforced by the language service as Effect enforces them;
+  - `npm run api-reference` writes TypeDoc JSON per module with a manifest, the dataset effect.website renders Effect's reference from, for any site to render.
 - **Revision 5.24** folded in the type-checked sketch ([sketch/](sketch/)), which is now the source of truth for signatures; API.md keeps the contracts:
   - type-checking changed two designs: an event predicate (`where`) is a trailing argument, so it is typed from the filter's body decoder, and body decoders take Effect's decoders as they are;
   - existing decisions corrected: viewport, locale and timezone moved into `Emulation` (one type for creation options and `emulate`); `ReadonlyFrame` became `FrameLocator`, because it is lazy; `selectOption` states `value`, `label` or `index`; event streams fail with `TargetGone` too; Effect's date input is `DateTime.DateTime.Input`;
@@ -239,4 +248,4 @@ Each user-visible operation has one monotonic deadline covering everything it do
   - finding 7, dual `Observe` combinators that return both values: API.md (superseded in 5.19: event modules);
   - finding 8, diagnostic presets: Diagnostics above;
   - the smaller items: CONCEPTS.md.
-- **Next:** start implementing, bottom-up. All three layers are designed (API.md, CONCEPTS.md, PROTOCOL.md), and none is built. Building starts at L0, the protocol layer, because the others sit on it: first the codegen pipeline and the transports, then the conformance probes (PROBES.md) against Chrome and Firefox, whose results settle questions the upper layers depend on. Compiling the API sketches against stub types is an optional cheap check of the error-channel and `E`/`R` claims.
+- **Next:** start implementing, bottom-up. All three layers are designed (API.md, CONCEPTS.md, PROTOCOL.md), and none is built. Building starts at L0, the protocol layer, because the others sit on it: first the codegen pipeline and the transports, then the conformance probes (PROBES.md) against Chrome and Firefox, whose results settle questions the upper layers depend on. The implementation replaces the sketch's declarations module by module and keeps their JSDoc, so the sketch's checks (`npm run all`) keep holding the API to its design as it is built.

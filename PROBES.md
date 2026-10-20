@@ -1,6 +1,6 @@
 # PROBES: conformance probes, hazard coverage and model tests
 
-*Revision 5, 2026-10-18. The specs leave key orderings and identities undefined, and the research disagrees in places. These questions are to be measured, not argued. The probe suite is also the adapters' regression suite: recorded traffic must decode against the generated schemas, and recorded behavior is re-run on each browser roll. Probe results and recorded traces are also the evidence that spec corrections cite (PROTOCOL.md, Code generation). Probe numbers are stable across revisions.*
+*Revision 5.25, 2026-10-19. The specs leave key orderings and identities undefined, and the research disagrees in places. These questions are to be measured, not argued. The probe suite is also the adapters' regression suite: recorded traffic must decode against the generated schemas, and recorded behavior is re-run on each browser roll. Probe results and recorded traces are also the evidence that spec corrections cite (PROTOCOL.md, Code generation). Probe numbers are stable across revisions.*
 
 ## Conformance probes (run against each backend)
 
@@ -83,15 +83,16 @@ The hazards are catalogued in `research/platform-concept-model.md` §4.
 
 These run against synthetic protocol traffic with an injected clock. They check L1 and L0 logic, not browser behavior.
 
-**Timelines.** Most of these tests are about *when* things happen relative to each other, so a fake browser is driven by marble-style timelines, after RxJS's `TestScheduler`, under `TestClock`. Each character is one virtual tick, and each named token is a scripted model event:
+**Timelines.** Most of these tests are about *when* things happen relative to each other, so a fake browser, `Browser.layerTest(timeline)` (API.md, Testing), is driven by marble-style timelines, after RxJS's `TestScheduler`, under `TestClock`. Each character is one virtual tick, and each named token is a scripted model event:
 
 ```ts
-FakeBrowser.timeline("--resp(cart)--commit--load--|", ({ page }) =>
-  Effect.gen(function* () {
-    const cart = yield* NetworkResponse.next(page, { url: "**/api/cart" })     // subscribed at tick 0
-    yield* TestClock.adjust("20 millis")                                       // the response arrives at tick 2
-    expect((yield* Deferred.await(cart)).url).toContain("/api/cart")          // latched before the await
-  }))
+it.effect("latches a response before it is awaited", () =>
+  Effect.gen(function*() {
+    const page = yield* Browser.newPage()                                     // the first page plays the timeline
+    const cart = yield* NetworkResponse.next(page, { url: "https://shop.example.com/api/cart" })   // subscribed at tick 0
+    yield* TestClock.adjust("20 millis")                                      // the response arrives at tick 2
+    assert.include((yield* Deferred.await(cart)).url, "/api/cart")            // latched before the await
+  }).pipe(Effect.provide(Browser.layerTest("--resp(cart)--commit--load--|"))))
 ```
 
 Tokens map to fold inputs: `resp(name)`, `req(name)`, `commit`, `load`, `dialog(kind)`, `popup`, `crash`, and `|` for a normal close. The timeline sits on the in-memory transport, so the same tests also exercise ingestion. Cases:

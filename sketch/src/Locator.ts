@@ -440,7 +440,7 @@ export interface Locator extends ReadonlyLocator {
     options?: Snapshot.Options | undefined
   ): Effect.Effect<Snapshot.Snapshot<Locator>, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
-   * Clicks the one match. Checks: visible, enabled, notInert, stable, inViewport (scrolling it into view),
+   * Clicks the one match. Checks: visible, stable, enabled, notInert, inViewport (scrolling it into view),
    * receivesPointer.
    */
   click(options?: ClickOptions | undefined): ActionEffect
@@ -453,7 +453,8 @@ export interface Locator extends ReadonlyLocator {
    */
   tap(options?: PointerOptions | undefined): ActionEffect
   /**
-   * Moves the pointer over the one match. Checks: visible, notInert, stable, inViewport, receivesPointer.
+   * Moves the pointer over the one match. Checks: visible, stable, enabled, notInert, inViewport,
+   * receivesPointer.
    */
   hover(options?: PointerOptions | undefined): ActionEffect
   /**
@@ -469,7 +470,7 @@ export interface Locator extends ReadonlyLocator {
    */
   focus(options?: ActionOptions | undefined): ActionEffect
   /**
-   * Clears an input or editable element. Checks: visible, enabled, editable.
+   * Clears an input or editable element. Checks: visible, enabled, editable, notInert.
    */
   clear(options?: ActionOptions | undefined): ActionEffect
   /**
@@ -477,7 +478,7 @@ export interface Locator extends ReadonlyLocator {
    */
   scrollIntoView(options?: ActionOptions | undefined): ActionEffect
   /**
-   * Replaces the value of an input or editable element. Checks: visible, enabled, editable.
+   * Replaces the value of an input or editable element. Checks: visible, enabled, editable, notInert.
    *
    * **Details**
    *

@@ -1,6 +1,6 @@
 # CLI: driving a live session from the command line
 
-*Revision 5.23, 2026-10-19. These are sketches, like API.md: names are provisional. The binary is `eb` here, but `eb` is already AWS Elastic Beanstalk's CLI, so the real name follows the project's.*
+*Revision 5.25, 2026-10-19. These are sketches, like API.md: names are provisional, and `effect-browser/cli` is declared in [sketch/src/cli/](sketch/src/cli/). The binary is `eb` here, but `eb` is already AWS Elastic Beanstalk's CLI, so the real name follows the project's.*
 
 ## Purpose
 
@@ -13,35 +13,37 @@ It adds no browser behavior of its own. Every command expands to one TypeScript 
 ```ts
 interface SessionSpec {                                   // what `eb start` was given; printed back in full
   readonly name: SessionName                              // [a-z0-9-], short enough for a Unix socket path
-  readonly backend: "chromium" | "firefox" | "webkit" | { readonly _tag: "Attach"; readonly endpoint: Url }
-  readonly userDataDir: Option<LocalPath>                 // None: profile/ in the session directory, deleted at stop
+  readonly backend: "chromium" | "firefox" | "webkit" | { readonly _tag: "Attach"; readonly endpoint: Url.Url }
+  readonly userDataDir: Option<FilePath.Local>            // None: profile/ in the session directory, deleted at stop
   readonly initialState:
     | { readonly _tag: "Empty" }
-    | { readonly _tag: "File"; readonly path: LocalPath }            // --state ./auth/shop.state
+    | { readonly _tag: "File"; readonly path: FilePath.Local }       // --state ./auth/shop.state
     | { readonly _tag: "Fork"; readonly session: SessionName }       // --fork shop-login: copied in memory, nothing on disk
   readonly lifetime: { readonly idle: Duration; readonly ownerPid: Option<number> }   // default: 1 hour idle
-  readonly secrets: ReadonlyArray<SecretName>             // --secret password=PASSWORD: Config.Redacted("PASSWORD") from the daemon's ConfigProvider; used as %password%
+  readonly secrets: ReadonlyArray<BrowserToolkit.SecretName>   // --secret password=PASSWORD: Config.Redacted("PASSWORD") from the daemon's ConfigProvider; used as %password%
 }
 
 type Handle = PageHandle | WaitHandle | DownloadHandle | RegistrationHandle   // p1, w1, d1, r1: per session, printed on acquisition
                                                           // a page takes its --name instead of p1 when given one
 
-interface CommandResult {                                 // text by default; --json for tools, NDJSON (effect/encoding) for streams
+interface CommandResult {                                 // a Schema: text by default; --json is its encoding, NDJSON (effect/encoding) for streams
   readonly page: Option<PageHandle>                       // every line names its page
   readonly outcome:
     | { readonly _tag: "Ok"; readonly value: string }
-    | { readonly _tag: "Failed"; readonly tag: string; readonly hint: string; readonly dispatch: DispatchState }
+    | { readonly _tag: "Failed"; readonly tag: string; readonly hint: string; readonly dispatch: Diagnostics.DispatchState }
   readonly elapsed: Duration
   readonly acquired: ReadonlyArray<Handle>
   readonly sinceLast: ReadonlyArray<DigestEntry>          // navigations, popups, dialogs and who decided them, downloads,
                                                           // uncaught exceptions, console errors, failed requests, crashes, latched waits
-  readonly files: ReadonlyArray<LocalPath>                // screenshots, snapshots, traces: written to artifacts/, only the path printed
+  readonly files: ReadonlyArray<FilePath.Local>           // screenshots, snapshots, traces: written to artifacts/, only the path printed
 }
 
-class CurrentSession extends Context.Service<CurrentSession, {   // from "effect-browser/cli"; provided only by `eb run`
-  readonly context: UserContext                           // the session's one context: newPage, pages
-  page(name: PageName | string): Effect<Page, PageNotFound>   // by name only; a generated handle like p2 is a token (principle 14)
-}>()("effect-browser/cli/CurrentSession") {}
+// CurrentSession, from "effect-browser/cli"
+interface CurrentSession {
+  readonly context: UserContext.UserContext               // the session's one context: newPage, pages
+  page(name: PageName | string): Effect<Page.Page, PageNotFound>   // by name only; a generated handle like p2 is a token (principle 14)
+}
+declare const CurrentSession: Context.Service<CurrentSession, CurrentSession>   // provided only by `eb run`
 ```
 
 ```
@@ -83,11 +85,11 @@ since last: navigated to /cart · popup p2 opened · dialog "Leave site?" dismis
 
 ```ts
 // pay.ts: a segment, run with `eb run` against a live session
-export default Effect.gen(function* () {
-  const session = yield* CurrentSession
+export default Effect.gen(function*() {
+  const session = yield* CurrentSession.CurrentSession
   const shop = yield* session.page("shop")                // looked up first, so a missing page fails before any step
   const popups = yield* Popup.next(shop)
-  yield* shop.getByText("Pay").click
+  yield* shop.getByText("Pay").click()
   const popup = yield* Deferred.await(popups)
   yield* popup.getByLabel("Card number").fill("4242 4242 4242 4242")
   return { popup }                                        // returned handles move into the session, as p2
@@ -114,18 +116,18 @@ export default Effect.gen(function* () {
   - Saving is explicit (principle 11), and `stop` never saves. `start --state` prints the state's age and its earliest cookie expiry.
 
 **Commands**
-- **Commands are the toolkit's tools.** Each is an `effect/ai` `Tool`, defined once with Schemas. The daemon serves them as an `effect/rpc` group over an `effect/socket` `SocketServer`, the commands are `effect/cli` `Command`s derived from them, and the MCP server and `BrowserToolkit` use them directly (API.md, Agents). Session commands (`start`, `stop`, `sessions`, `page`, `run`, `state`, `export`, `prune`) are added on top.
+- **Commands are the toolkit's tools.** Each is an `effect/ai` `Tool`, defined once with Schemas, and its results and failures are the library's own Schemas, so `--json` and the RPC encode them without a serializer of their own. The daemon serves them as an `effect/rpc` group over an `effect/socket` `SocketServer`, the commands are `effect/cli` `Command`s derived from them, and the MCP server and `BrowserToolkit` use them directly (API.md, Agents). Session commands (`start`, `stop`, `sessions`, `page`, `run`, `state`, `export`, `prune`) are added on top.
 - **Commands for the live session, the library for programs.** An agent loops by running commands. Self-contained programs use the library directly, run with node or bun. `state save` and `export` are the bridges to programs, segments (below) bring code into a live session, and there is no shell mini-language.
 - **Decisions are declarative commands.** `eb route <pattern> abort | continue | fulfill …` and `eb dialog handle accept | dismiss` register scoped handlers in the session and print a registration handle; `eb remove r1` ends one. A decision that needs logic belongs in a segment or a program.
 - **Targets** are a bare ref (`e9`), checked against the named page's latest snapshot (a ref from another page's snapshot fails with a hint naming that page), or a locator string that maps to exactly one `getBy*`: `role=button[name="Sign in"]`, `text="Add to cart"`, `label=Email`, `testid=cart`, `css=…`. Strings are parsed at the boundary, so a bad one fails immediately.
 - **Events work across commands.** `eb next` subscribes in the session's scope and prints a wait handle, and `eb await` collects it. The wait's deadline starts at `next` (`--within`, or the default budget), so a wait an agent leaves too long reports `Timeout` when collected. The since-last digest is `history`, read from where the previous command stopped.
 - **A failed request in the digest** got no response (a network, DNS or TLS error, or blocked by CORS, CSP or mixed content) or a status of 400 or more. Canceled requests, superseded by a navigation or aborted by the app, are not failures. Nothing is filtered by resource type, which would be a heuristic (rule 23). Identical failures are grouped with a count, and a long list shows the first few, then "+N more · `eb history network --failed`".
 - **Nothing changes implicitly.** A popup is announced in the digest and gets a handle, but nothing follows it. Attaching to your own browser gives observed pages, and acting on one needs `eb control p3`.
-- **Failures say what happened:** the error's tag, its hint and the dispatch evidence ("the click may have reached the page"), with an exit code per error family. Interrupting a command (Ctrl-C) interrupts that command, never the session.
+- **Failures say what happened:** the error's tag, its hint and the dispatch evidence ("the click may have reached the page"), with an exit code per module error. Interrupting a command (Ctrl-C) interrupts that command, never the session.
 
 **Segments**
 - **`eb run` runs a file's default export,** an `Effect` that requires `CurrentSession` and `Scope`. There are no named exports and no arguments; a file without a default `Effect` fails with a hint.
-- **A segment finds its pages by name.** `session.page("shop")` fails with `PageNotFound`, whose hint lists the session's pages. Only names are accepted, never generated handles such as `p2`. Looking pages up first makes a missing one fail before any step runs.
+- **A segment finds its pages by name.** `session.page("shop")` fails with `CurrentSession.PageNotFound`, whose hint lists the session's pages. Only names are accepted, never generated handles such as `p2`. Looking pages up first makes a missing one fail before any step runs.
 - **Segments belong to the CLI.** `CurrentSession` comes from `effect-browser/cli`, and only `eb run` provides it. Programs and tests pass pages around as values, as they always do, and never construct a session.
 - **`eb run` provides `CurrentSession`, `Scope` and the daemon's platform services.** A segment that requires anything else fails with an error naming the missing service.
 - **The CLI doesn't type-check.** A segment is a file in your project, so your `tsc` checks it against the same effect-browser version the daemon runs from. Agent skills run `tsc --noEmit` before `eb run`, because a segment that fails halfway leaves its earlier steps done.

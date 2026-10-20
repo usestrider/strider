@@ -9,7 +9,7 @@ A library that latches a result for its caller (the first matching event, a comp
 - **Return the `Deferred`.** Then the caller can complete it too (`Deferred.succeed`, `fail`, `complete`, `interrupt`), and the library's single-writer guarantee depends on the caller's good manners.
 - **Return `Deferred.await(deferred)`.** Then the caller loses `poll` and `isDone`, and the value is an anonymous `Effect` rather than something with a name in the type.
 
-`Deferred<in out A, in out E>` is also invariant, so a `Deferred<Download, ObserveError>` can't be passed where a `Deferred<unknown, unknown>` is expected, even by code that only reads it.
+`Deferred<in out A, in out E>` is also invariant, so a `Deferred<Download, Timeout>` can't be passed where a `Deferred<unknown, unknown>` is expected, even by code that only reads it.
 
 ## Proposal
 
@@ -47,8 +47,8 @@ Effect has no deadline that nested calls inherit. `Effect.timeout` interrupts fr
 Deadline.within: Dual<Duration.Input>          // provides min(outer, now + duration), as an absolute instant on the live clock
 Deadline.withDefaultBudget: Dual<Duration.Input>
 Deadline.remaining: Effect<Option<Duration>>
-Deadline.Current: Context.Reference<Option<MonotonicInstant>>
+Deadline.CurrentDeadline: Context.Reference<Option<MonotonicInstant>>
 Deadline.DefaultBudget: Context.Reference<Duration>
 ```
 
-Operations read `Deadline.Current` and fail with their own typed error when it passes. If this shape works for effect-browser, it may be worth proposing separately, so that HTTP clients, SQL and other libraries could honor the same budget.
+Operations read `Deadline.CurrentDeadline` and fail with their own typed error when it passes. If this shape works for effect-browser, it may be worth proposing separately, so that HTTP clients, SQL and other libraries could honor the same budget.
