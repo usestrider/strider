@@ -7,8 +7,8 @@
  *
  * **Gotchas**
  *
- * `effect/http` also exports a `Url` module, for working with `URL` objects. A file that needs both aliases
- * one of them.
+ * `effect/http` also exports a `Url` module, for working with `URL` objects, which is how a `Url` is changed.
+ * A file that needs both aliases one of them.
  *
  * @stability unstable
  * @since 0.1.0
@@ -26,6 +26,25 @@ export const Url = Schema.String.pipe(Schema.brand("~effect-browser/Url/Url"))
 
 /**
  * An absolute URL after WHATWG parsing; immutable and equal by value.
+ *
+ * **Details**
+ *
+ * URLs are stored as strings, as Effect's own `HttpClientRequest.url` is, because a `URL` object can be
+ * changed in place and compares by reference. To work on one, use `effect/http`'s `Url` module:
+ * `Url.fromString(url)` gives a `URL`, its setters change it, and `href` is a string again.
+ *
+ * **Example** (Reading the path of a page's URL)
+ *
+ * ```ts import.meta.vitest
+ * import { Effect, Result } from "effect"
+ * import { Url as HttpUrl } from "effect/http"
+ * import { Page } from "effect-browser"
+ *
+ * const pathOf = Effect.fn("pathOf")(function*(page: Page.ObservedPage) {
+ *   const url = yield* page.url
+ *   return HttpUrl.fromString(url).pipe(Result.map((parsed) => parsed.pathname))
+ * })
+ * ```
  *
  * @stability unstable
  * @category models
