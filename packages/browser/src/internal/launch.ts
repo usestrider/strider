@@ -1,6 +1,6 @@
 /**
- * What every launcher shares: finding an executable without guessing, a profile directory that lives as long
- * as the browser, a child process whose stderr is kept for errors, and the `BrowserError`s a launch fails
+ * What every launcher shares: checking the executable a launch names, and looking up nothing else, a profile
+ * directory that lives as long as the browser, a child process whose stderr is kept for errors, and the `BrowserError`s a launch fails
  * with (API.md, Modules and backends).
  */
 import * as Deferred from "effect/Deferred"
@@ -27,14 +27,6 @@ export interface Launched {
   readonly stderrLine: (pattern: RegExp) => Effect.Effect<Option.Option<RegExpMatchArray>>
 }
 
-/**
- * Which browser a launch runs: its executable, or a channel the launcher knows, exactly one. Nothing else is
- * looked up, and nothing is downloaded (review 10).
- */
-export type Named<Channel extends string> =
-  | { readonly executablePath: string; readonly channel?: undefined }
-  | { readonly channel: Channel; readonly executablePath?: undefined }
-
 /** The `Diagnostics` of a launch: one step, never dispatched to a page. */
 export const diagnostics = (step: string): Diagnostics.Diagnostics =>
   new Diagnostics.Diagnostics({
@@ -49,43 +41,43 @@ export const diagnostics = (step: string): Diagnostics.Diagnostics =>
 export const fail = (reason: Browser.BrowserErrorReason, step: string) =>
   Effect.fail(new Browser.BrowserError({ reason, diagnostics: diagnostics(step) }))
 
-/**
- * The first candidate that exists. Nothing is searched beyond the candidates given, so a launch never picks
- * up a browser nobody named.
- */
-export const findExecutable = Effect.fnUntraced(function*(candidates: ReadonlyArray<string>, hint: string) {
-  const fs = yield* FileSystem.FileSystem
-  for (const candidate of candidates) {
-    if (yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false))) return candidate
-  }
-  return yield* fail(new Browser.ExecutableNotFound({ searched: [...candidates], hint }), "find the executable")
-})
+/** Whether a path is absolute, on POSIX or Windows; the package doesn't assume Node's `path`. */
+export const isAbsolute = (path: string): boolean =>
+  path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\")
+
+const lookup = "`strider browsers` lists the browsers it can find, by absolute path"
 
 /**
- * The executable a launch names: its path, or the first of its channel's candidates that exists. The types
- * require exactly one; a caller they don't reach, such as plain JavaScript, that names neither or both fails
- * with `InvalidInput` rather than being given a browser.
+ * The executable a launch names, checked: an absolute path to a file that exists. Nothing else is looked up,
+ * so a launch never runs a browser nobody named (reviews 10 and 11). A relative path, whose meaning depends on
+ * the working directory, and a bare command name, which the process spawner would look up on `PATH`, fail with
+ * `InvalidInput`, as does a missing path from a caller the types don't reach, such as plain JavaScript.
  */
-export const namedExecutable = <Channel extends string>(
-  options: Named<Channel>,
-  channel: (channel: Channel) => { readonly candidates: ReadonlyArray<string>; readonly hint: string }
-) => {
-  if (options.executablePath !== undefined && options.channel === undefined) {
-    return findExecutable([options.executablePath], "The executablePath given doesn't exist")
+export const executable = Effect.fnUntraced(function*(executablePath: string | undefined) {
+  if (typeof executablePath !== "string" || !isAbsolute(executablePath)) {
+    return yield* fail(
+      new Reason.InvalidInput({
+        input: "executablePath",
+        expected: "an absolute path to the browser's executable",
+        hint: typeof executablePath !== "string"
+          ? `A launch names its browser, and nothing is looked up or downloaded in its place; ${lookup}`
+          : `${
+            JSON.stringify(executablePath)
+          } isn't absolute, so it would depend on the working directory or on PATH; ${lookup}`
+      }),
+      "check the executable"
+    )
   }
-  if (options.channel !== undefined && options.executablePath === undefined) {
-    const { candidates, hint } = channel(options.channel)
-    return findExecutable(candidates, hint)
-  }
-  return fail(
-    new Reason.InvalidInput({
-      input: "launch options",
-      expected: "exactly one of executablePath and channel",
-      hint: "A launch names its browser; nothing is looked up or downloaded in its place"
+  const fs = yield* FileSystem.FileSystem
+  if (yield* fs.exists(executablePath).pipe(Effect.orElseSucceed(() => false))) return executablePath
+  return yield* fail(
+    new Browser.ExecutableNotFound({
+      searched: [executablePath],
+      hint: `Nothing is at the executablePath given; ${lookup}`
     }),
-    "find the executable"
+    "check the executable"
   )
-}
+})
 
 /** A profile directory: the caller's, or a temporary one deleted after the browser exits. */
 export const profileDirectory = Effect.fnUntraced(function*(userDataDir: string | undefined, prefix: string) {

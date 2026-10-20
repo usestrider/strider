@@ -2,9 +2,10 @@
  * The WebKit backend (`@usestrider/browser/webkit`): Playwright-patched WebKit builds, launched, and stock WebKit
  * targets, attached.
  *
- * A launch runs the build it names: an executable, or the `playwright` channel, Playwright's browser cache. The
- * build must be the one the adapter is generated from, which the launch checks by its `protocol.json`. Nothing is
- * downloaded. Protocol failures carry the inspector error under `metadata.webkit`.
+ * A launch runs the build's executable it names, and nothing is looked up or downloaded: `strider browsers` lists
+ * the builds it can find, in Playwright's browser cache among other places. The build must be the one the adapter
+ * is generated from, which the launch checks by its `protocol.json`. Protocol failures carry the inspector error
+ * under `metadata.webkit`.
  *
  * @stability unstable
  * @since 0.1.0
@@ -25,17 +26,8 @@ declare module "../Reason.ts" {
 }
 
 /**
- * The channel a launch can name: `playwright`, Playwright's browser cache (`PLAYWRIGHT_BROWSERS_PATH`, or the
- * cache directory Playwright's installer uses), at the build the adapter is generated from.
- *
- * @stability unstable
- * @category models
- * @since 0.1.0
- */
-export type Channel = "playwright"
-
-/**
- * Launches the Playwright-patched WebKit build it names and provides it as `Browser`.
+ * Launches the Playwright-patched WebKit build whose executable it names (`pw_run.sh`, or `Playwright.exe` on
+ * Windows) and provides it as `Browser`.
  *
  * **Details**
  *
@@ -52,7 +44,7 @@ export type Channel = "playwright"
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
  *   yield* page.goto("https://example.com")
- * })).pipe(Effect.provide(WebKit.layer({ channel: "playwright" })))
+ * })).pipe(Effect.provide(WebKit.layer({ executablePath: "/home/me/.cache/ms-playwright/webkit-2359/pw_run.sh" })))
  * ```
  *
  * @stability unstable
@@ -60,12 +52,25 @@ export type Channel = "playwright"
  * @since 0.1.0
  */
 export declare const layer: (
-  options: Browser.LaunchOptions<Channel>
+  options: Browser.LaunchOptions
 ) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>
 
 /**
  * Launches the Playwright-patched WebKit build it names with options read from configuration, such as the
- * executable path from CI's environment.
+ * executable path from each machine's environment.
+ *
+ * **Example** (The executable from each machine's environment)
+ *
+ * ```ts import.meta.vitest
+ * import { Config, Effect } from "effect"
+ * import { Browser } from "@usestrider/browser"
+ * import { WebKit } from "@usestrider/browser/webkit"
+ *
+ * const program = Effect.scoped(Effect.gen(function*() {
+ *   const page = yield* Browser.newPage()
+ *   yield* page.goto("https://example.com")
+ * })).pipe(Effect.provide(WebKit.layerConfig({ executablePath: Config.String("WEBKIT_PATH") })))
+ * ```
  *
  * @see {@link layer}
  *
@@ -74,7 +79,7 @@ export declare const layer: (
  * @since 0.1.0
  */
 export declare const layerConfig: (
-  options: Config.Wrap<Browser.LaunchOptions<Channel>>
+  options: Config.Wrap<Browser.LaunchOptions>
 ) => Layer.Layer<
   Browser.Browser,
   Browser.BrowserError | Config.ConfigError,

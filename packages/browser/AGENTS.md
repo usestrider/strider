@@ -9,9 +9,11 @@ Strider is pre-release: the API is designed and type-checked, and the implementa
 
 - Import modules as namespaces: `import { Browser, Expect, Page } from "@usestrider/browser"`. Types are
   `Page.Page`, `Locator.Locator`, `Download.Download`.
-- A backend layer provides `Browser`, from a subpath: `Chromium.layer({ channel: "stable" })` from
-  `"@usestrider/browser/chromium"`, also `/firefox`, `/webkit` and `/bidi`. A launch names its browser, by
-  `channel` or `executablePath`; nothing is downloaded or installed.
+- A backend layer provides `Browser`, from a subpath: `Chromium.layer({ executablePath: "/usr/bin/chromium" })`
+  from `"@usestrider/browser/chromium"`, also `/firefox`, `/webkit` and `/bidi`. `executablePath` is required and
+  absolute; nothing is looked up, downloaded or installed. `npx strider browsers` lists the browsers on the machine,
+  by path. Code that runs on several machines reads the path from the environment:
+  `Chromium.layerConfig({ executablePath: Config.String("CHROMIUM_PATH") })`.
 - Open a page with `Browser.newPage(options?)` inside `Effect.scoped`; the page and its context close with the scope.
 - Write reusable steps as `Effect.fn("name")(function*(page: Page.Page) { … })`.
 

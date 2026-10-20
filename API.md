@@ -74,7 +74,7 @@ The README's principles, as they apply to this layer, written the way Effect's o
   | `new*` | creates an owned resource | `Browser.newPage()`, `context.newPage`, `Browser.newContext()` |
   | `*With(f)` | the same operation, with a function | `Route.continueWith(change)`, `fetchWith(change)` |
   | `with*`, `within` (dual) | a cross-cutting setting over any effect | `Deadline.within`, `Diagnostics.withPreset`, `Page.withUserGesture` |
-  | `layer*` | a layer that provides a service | `Chromium.layer({ channel: "stable" })`, `Browser.layerTest(timeline)` |
+  | `layer*` | a layer that provides a service | `Chromium.layer({ executablePath })`, `Browser.layerTest(timeline)` |
   | `export*`, `Json` | crosses a persistence boundary; carries secrets | `exportStorageState`, `StorageState.Json`, `exportTrace` |
 
 **Behavior**
@@ -182,20 +182,16 @@ import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"   // buil
 import * as Cdp from "@usestrider/browser/cdp"                 // raw generated L0 commands, for power users
 
 // Chromium (and Firefox: the same three; WebKit: layer, layerConfig, layerAttach; Bidi: layerConnect)
-type Channel = "stable" | "beta" | "canary"           // Firefox: the same, canary being Nightly; WebKit: "playwright"
-declare const layer: (options: Browser.LaunchOptions<Channel>) =>   // the browser it names, headless, temporary profile
+declare const layer: (options: Browser.LaunchOptions) =>   // the executable it names, headless, temporary profile
   Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner | FileSystem>
-declare const layerConfig: (options: Config.Wrap<Browser.LaunchOptions<Channel>>) =>   // e.g. the executable path from CI's environment
+declare const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) =>   // e.g. the executable path from each machine's environment
   Layer<Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner | FileSystem>
 declare const layerConnect: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) =>
   Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>
 
 // Browser
-type LaunchOptions<Channel extends string> = LaunchSettings & (   // exactly one names the browser; there is no default
-  | { readonly executablePath: FilePath.Local | string; readonly channel?: undefined }
-  | { readonly channel: Channel; readonly executablePath?: undefined }   // an install location the backend knows
-)
-interface LaunchSettings {
+interface LaunchOptions {
+  readonly executablePath: FilePath.Local | string     // absolute; required, and nothing is looked up
   readonly headless?: boolean | undefined               // default true
   readonly args?: ReadonlyArray<string> | undefined
   readonly profile?: LaunchProfile.LaunchProfile | undefined    // default LaunchProfile.automation
@@ -212,10 +208,12 @@ declare const stock: LaunchProfile                       // the browser's own de
 declare const automation: LaunchProfile                  // first-run, sync and update prompts off; nothing a page can observe
 declare const concurrent: LaunchProfile                  // automation, plus background-timer and renderer throttling off, for many pages at once
 
-program.pipe(Effect.provide(Chromium.layer({ channel: "stable" })))
+program.pipe(Effect.provide(Chromium.layer({ executablePath: "/usr/bin/chromium" })))
+program.pipe(Effect.provide(Chromium.layerConfig({ executablePath: Config.String("CHROMIUM_PATH") })))   // each machine says
 ```
 
-- **A launch names its browser, and the library never downloads or installs one.** Exactly one of `executablePath` and `channel` names it, so `Chromium.layer({})` doesn't compile, and nothing else is looked up: not `PATH`, not a default channel. A channel is an install location the backend knows: Chrome's and Firefox's `stable`, `beta` and `canary` where their installers put them, and for WebKit, `playwright`, Playwright's browser cache at the build the adapter is generated from. Install a browser as you would any program (an operating system's package, Chrome's installer, a Nix package, Playwright's installer for its WebKit). A named browser that isn't there is `ExecutableNotFound{searched}`, and a caller the types don't reach, such as plain JavaScript, that names neither or both fails with `InvalidInput` before anything is looked up.
+- **A launch names its browser's executable, and the library never looks for or installs one** (reviews 10 and 11). `executablePath` is required, so `Chromium.layer({})` doesn't compile, and it must be absolute: a relative path depends on the working directory and a bare command name on `PATH`, so either fails with `InvalidInput`. There are no channels, because no table of install locations is right on every system: NixOS, Snap, Flatpak and the open-source Chromium are never where it says, and Firefox's channels share their install paths. Install a browser as you would any program (an operating system's package, a vendor's installer, a Nix package, Playwright's installer for its WebKit). A path where nothing is fails with `ExecutableNotFound{searched}`.
+- **`strider browsers` finds the paths, for a person or an agent, once.** It lists the browsers on the machine, by backend: on `PATH` under the command names browsers install, where Chrome's, Edge's and Firefox's installers put them, and in Playwright's cache, each with the version it prints, where its path leads, and for a WebKit build whether it is the one the adapter needs. `--json` prints the same as data. It runs nothing but `--version`, and the library never calls it. Code that runs on several machines reads the path from each one's environment with `layerConfig`.
 - **No platform packages of our own.** Launching needs only Effect's `ChildProcessSpawner`, `FileSystem` and `WebSocketConstructor` services, which `@effect/platform-node` and `@effect/platform-bun` provide.
 - **Profiles are temporary by default.** A launch acquires a directory with `FileSystem.makeTempDirectoryScoped` before the browser starts, and it is deleted after the browser exits. The profile, downloads and crash dumps never outlive the `Browser` layer. `userDataDir` names a directory you own instead: it is never deleted, and the browser locks it, so one browser uses it at a time. Reusing a login across browsers is storage state, not a shared profile.
 - **Launch and connect fail with `Browser.BrowserError`.** Its reasons are `ExecutableNotFound{searched}`, `ProcessExited{code, stderrTail}`, `IncompatibleRevision`, `ConnectionFailed{stage}` and `InvalidInput`.
@@ -889,11 +887,12 @@ interface Recording extends Declaration.Registration {
 
 ```ts
 import { layer } from "@effect/vitest"
+import { Config, Effect } from "effect"
 import { Browser } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
 import { VitestBrowser } from "@usestrider/browser/test/vitest"
 
-layer(VitestBrowser.layer(Chromium.layer({ channel: "stable" })))("checkout", (it) => {
+layer(VitestBrowser.layer(Chromium.layerConfig({ executablePath: Config.String("CHROMIUM_PATH") })))("checkout", (it) => {
   it.effect("adds to cart", () =>
     Effect.gen(function*() {
       const page = yield* Browser.newPage()      // a fresh context and page per test, closed after

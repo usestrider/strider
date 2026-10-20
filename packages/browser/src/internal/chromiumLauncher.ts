@@ -1,5 +1,5 @@
 /**
- * Launches Chromium, Chrome or Edge for the CDP adapter: the executable named by path or channel, a profile
+ * Launches Chromium, Chrome or Edge for the CDP adapter: the executable named by its absolute path, a profile
  * that lives as long as the browser, the launch profile's arguments, and a transport.
  *
  * The pipe is the transport unless a runtime can't pass extra file descriptors (probe 12), in which case the
@@ -57,40 +57,7 @@ export const profileArgs: Readonly<Record<Profile, ReadonlyArray<string>>> = {
   ]
 }
 
-/** Where each channel installs itself, per platform. */
-export const channelCandidates = (
-  platform: string,
-  channel: Channel,
-  env: Readonly<Record<string, string | undefined>>
-): ReadonlyArray<string> => {
-  switch (platform) {
-    case "darwin": {
-      const app = { stable: "Google Chrome", beta: "Google Chrome Beta", canary: "Google Chrome Canary" }[channel]
-      return [`/Applications/${app}.app/Contents/MacOS/${app}`]
-    }
-    case "win32": {
-      const folder = { stable: "Chrome", beta: "Chrome Beta", canary: "Chrome SxS" }[channel]
-      const roots = channel === "canary"
-        ? [env["LOCALAPPDATA"]]
-        : [env["PROGRAMFILES"], env["PROGRAMFILES(X86)"], env["LOCALAPPDATA"]]
-      return roots.filter((root): root is string => root !== undefined).map((root) =>
-        `${root}\\Google\\${folder}\\Application\\chrome.exe`
-      )
-    }
-    default: {
-      const suffix = { stable: "", beta: "-beta", canary: "-unstable" }[channel]
-      return [
-        `/opt/google/chrome${suffix}/chrome`,
-        `/usr/bin/google-chrome${channel === "stable" ? "-stable" : suffix}`
-      ]
-    }
-  }
-}
-
-/** Chrome's release channels, each where its installer puts it. */
-export type Channel = "stable" | "beta" | "canary"
-
-/** Settings for a launch, beside the browser it names. */
+/** Settings for a launch, beside the executable it names. */
 export interface Settings {
   /** @default true */
   readonly headless?: boolean | undefined
@@ -102,8 +69,10 @@ export interface Settings {
   readonly userDataDir?: string | undefined
 }
 
-/** A launch: the browser it names, and its settings. */
-export type Options = Settings & Launch.Named<Channel>
+/** A launch: the executable it names, as an absolute path, and its settings. */
+export interface Options extends Settings {
+  readonly executablePath: string
+}
 
 /** The arguments a launch passes, in order: the profile's, the caller's, then ours. */
 export const argsFor = (options: Settings, userDataDir: string, debugging: "pipe" | "port"): ReadonlyArray<string> => [
@@ -115,17 +84,6 @@ export const argsFor = (options: Settings, userDataDir: string, debugging: "pipe
   "about:blank"
 ]
 
-// The platform and environment, where the runtime has them; the package doesn't assume Node.
-const host = (globalThis as {
-  readonly process?: { readonly platform: string; readonly env: Readonly<Record<string, string | undefined>> }
-}).process
-
-const executable = (options: Options) =>
-  Launch.namedExecutable(options, (channel: Channel) => ({
-    candidates: channelCandidates(host?.platform ?? "linux", channel, host?.env ?? {}),
-    hint: `Chrome's ${channel} channel isn't installed where its installer puts it`
-  }))
-
 /** Launches over the pipe. */
 export const launch: (
   options: Options
@@ -134,7 +92,7 @@ export const launch: (
   Browser.BrowserError,
   Scope.Scope | FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner
 > = Effect.fnUntraced(function*(options: Options) {
-  const path = yield* executable(options)
+  const path = yield* Launch.executable(options.executablePath)
   const userDataDir = yield* Launch.profileDirectory(options.userDataDir, "strider-chromium-")
   const launched = yield* Launch.spawn(path, argsFor(options, userDataDir, "pipe"), userDataDir, {
     additionalFds: Transport.pipeFds
@@ -151,7 +109,7 @@ export const launchWithPort = Effect.fnUntraced(function*(
   options: Options & { readonly timeout?: Duration.Input | undefined }
 ) {
   const fs = yield* FileSystem.FileSystem
-  const path = yield* executable(options)
+  const path = yield* Launch.executable(options.executablePath)
   const userDataDir = yield* Launch.profileDirectory(options.userDataDir, "strider-chromium-")
   const launched = yield* Launch.spawn(path, argsFor(options, userDataDir, "port"), userDataDir, {})
   const timeout = options.timeout ?? "30 seconds"

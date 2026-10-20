@@ -1,8 +1,8 @@
 /**
  * The Firefox backend (`@usestrider/browser/firefox`): Firefox over WebDriver BiDi.
  *
- * A launch runs the browser it names: an executable, or an installed channel of Firefox. Nothing is downloaded.
- * Protocol failures carry the BiDi error under `metadata.bidi`.
+ * A launch runs the executable it names, and nothing is looked up or downloaded: `strider browsers` lists the
+ * browsers it can find. Protocol failures carry the BiDi error under `metadata.bidi`.
  *
  * @stability unstable
  * @since 0.1.0
@@ -23,16 +23,7 @@ declare module "../Reason.ts" {
 }
 
 /**
- * The Firefox release channels a launch can name, each at the location its installer uses; `canary` is Nightly.
- *
- * @stability unstable
- * @category models
- * @since 0.1.0
- */
-export type Channel = "stable" | "beta" | "canary"
-
-/**
- * Launches the Firefox it names and provides it as `Browser`.
+ * Launches the Firefox executable it names and provides it as `Browser`.
  *
  * **Details**
  *
@@ -49,7 +40,7 @@ export type Channel = "stable" | "beta" | "canary"
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
  *   yield* page.goto("https://example.com")
- * })).pipe(Effect.provide(Firefox.layer({ channel: "stable" })))
+ * })).pipe(Effect.provide(Firefox.layer({ executablePath: "/usr/bin/firefox" })))
  * ```
  *
  * @stability unstable
@@ -57,12 +48,25 @@ export type Channel = "stable" | "beta" | "canary"
  * @since 0.1.0
  */
 export declare const layer: (
-  options: Browser.LaunchOptions<Channel>
+  options: Browser.LaunchOptions
 ) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>
 
 /**
- * Launches the Firefox it names with options read from configuration, such as the executable path from CI's
- * environment.
+ * Launches the Firefox executable it names with options read from configuration, such as the executable path
+ * from each machine's environment.
+ *
+ * **Example** (The executable from each machine's environment)
+ *
+ * ```ts import.meta.vitest
+ * import { Config, Effect } from "effect"
+ * import { Browser } from "@usestrider/browser"
+ * import { Firefox } from "@usestrider/browser/firefox"
+ *
+ * const program = Effect.scoped(Effect.gen(function*() {
+ *   const page = yield* Browser.newPage()
+ *   yield* page.goto("https://example.com")
+ * })).pipe(Effect.provide(Firefox.layerConfig({ executablePath: Config.String("FIREFOX_PATH") })))
+ * ```
  *
  * @see {@link layer}
  *
@@ -71,7 +75,7 @@ export declare const layer: (
  * @since 0.1.0
  */
 export declare const layerConfig: (
-  options: Config.Wrap<Browser.LaunchOptions<Channel>>
+  options: Config.Wrap<Browser.LaunchOptions>
 ) => Layer.Layer<
   Browser.Browser,
   Browser.BrowserError | Config.ConfigError,

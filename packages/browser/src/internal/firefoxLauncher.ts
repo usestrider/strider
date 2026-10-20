@@ -1,6 +1,6 @@
 /**
- * Launches Firefox for the BiDi adapter: the executable named by path or channel, a profile that lives as long
- * as the browser, with the launch profile's preferences in its `user.js`, and a WebSocket to the WebDriver BiDi
+ * Launches Firefox for the BiDi adapter: the executable named by its absolute path, a profile that lives as
+ * long as the browser, with the launch profile's preferences in its `user.js`, and a WebSocket to the WebDriver BiDi
  * endpoint Firefox reports on stderr.
  *
  * Firefox's remote agent also applies its own recommended preferences for automation
@@ -39,34 +39,7 @@ export const profilePrefs: Readonly<Record<Profile, Prefs>> = {
   concurrent: { ...automation, "dom.timeout.enable_budget_timer_throttling": false }
 }
 
-/** Where each channel installs itself, per platform. */
-export const channelCandidates = (
-  platform: string,
-  channel: Channel,
-  env: Readonly<Record<string, string | undefined>>
-): ReadonlyArray<string> => {
-  switch (platform) {
-    case "darwin": {
-      const app = { stable: "Firefox", beta: "Firefox", canary: "Firefox Nightly" }[channel]
-      return [`/Applications/${app}.app/Contents/MacOS/firefox`]
-    }
-    case "win32": {
-      const folder = { stable: "Mozilla Firefox", beta: "Mozilla Firefox", canary: "Firefox Nightly" }[channel]
-      return [env["PROGRAMFILES"], env["PROGRAMFILES(X86)"]]
-        .filter((root): root is string => root !== undefined)
-        .map((root) => `${root}\\${folder}\\firefox.exe`)
-    }
-    default:
-      return channel === "canary"
-        ? ["/usr/bin/firefox-nightly", "/opt/firefox-nightly/firefox"]
-        : ["/usr/bin/firefox", "/usr/lib/firefox/firefox", "/opt/firefox/firefox"]
-  }
-}
-
-/** Firefox's release channels, each where its installer puts it; `canary` is Nightly. */
-export type Channel = "stable" | "beta" | "canary"
-
-/** Settings for a launch, beside the browser it names. */
+/** Settings for a launch, beside the executable it names. */
 export interface Settings {
   /** @default true */
   readonly headless?: boolean | undefined
@@ -84,8 +57,10 @@ export interface Settings {
   readonly timeout?: Duration.Input | undefined
 }
 
-/** A launch: the browser it names, and its settings. */
-export type Options = Settings & Launch.Named<Channel>
+/** A launch: the executable it names, as an absolute path, and its settings. */
+export interface Options extends Settings {
+  readonly executablePath: string
+}
 
 /** The arguments a launch passes. */
 export const argsFor = (options: Settings, profile: string): ReadonlyArray<string> => [
@@ -103,21 +78,10 @@ export const userJs = (prefs: Prefs): string =>
   Object.entries(prefs).map(([name, value]) => `user_pref(${JSON.stringify(name)}, ${JSON.stringify(value)});\n`)
     .join("")
 
-// The platform and environment, where the runtime has them; the package doesn't assume Node.
-const host = (globalThis as {
-  readonly process?: { readonly platform: string; readonly env: Readonly<Record<string, string | undefined>> }
-}).process
-
-const executable = (options: Options) =>
-  Launch.namedExecutable(options, (channel: Channel) => ({
-    candidates: channelCandidates(host?.platform ?? "linux", channel, host?.env ?? {}),
-    hint: `Firefox's ${channel} channel isn't installed where its installer puts it`
-  }))
-
 /** Launches Firefox and connects to its WebDriver BiDi endpoint. */
 export const launch = Effect.fnUntraced(function*(options: Options) {
   const fs = yield* FileSystem.FileSystem
-  const path = yield* executable(options)
+  const path = yield* Launch.executable(options.executablePath)
   const profile = yield* Launch.profileDirectory(options.userDataDir, "strider-firefox-")
   yield* fs.writeFileString(`${profile}/user.js`, userJs(profilePrefs[options.profile ?? "automation"])).pipe(
     Effect.catch((error) =>

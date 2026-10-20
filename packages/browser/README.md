@@ -16,7 +16,11 @@ const program = Effect.scoped(Effect.gen(function*() {
   yield* page.goto("https://shop.example.com")
   yield* page.getByRole("button", { name: "Add to cart" }).click()
   yield* page.getByText("1 item").pipe(Expect.toBeVisible)
-})).pipe(Effect.provide(Chromium.layer({ channel: "stable" })))
+})).pipe(Effect.provide(Chromium.layer({ executablePath: "/usr/bin/chromium" })))
 ```
+
+A launch runs the executable you name, and the library never looks for or installs a browser. To find the paths
+on your machine, run `npx strider browsers` in a project that has the package; it lists each browser it finds with
+its version.
 
 The design, its principles and the full API are in the repository: https://github.com/usestrider/strider.

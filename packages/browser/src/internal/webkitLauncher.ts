@@ -1,7 +1,6 @@
 /**
- * Launches Playwright's WebKit build for the WebKit adapter: the build's executable, named by path or by the
- * `playwright` channel (Playwright's browser cache, looked in only when named), a profile that lives as long as the
- * browser, and the pipe. Nothing is downloaded.
+ * Launches Playwright's WebKit build for the WebKit adapter: the build's executable, named by its absolute path,
+ * a profile that lives as long as the browser, and the pipe. Nothing is looked up or downloaded.
  *
  * The profile is always a persistent one (`--user-data-dir`), so the browser has a default context, as a
  * stock browser does, and opens one page in it. That page exists before the adapter attaches, so it isn't
@@ -12,47 +11,15 @@
  * unless `checkRevision` is off (PROTOCOL.md, Drift test).
  */
 import * as Effect from "effect/Effect"
-import * as Hex from "effect/encoding/Hex"
-import * as FileSystem from "effect/FileSystem"
+import type * as FileSystem from "effect/FileSystem"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Scope from "effect/Scope"
 import * as Browser from "../Browser.ts"
 import * as Transport from "../protocol/Transport.ts"
 import * as Launch from "./launch.ts"
+import { build, protocolDigest } from "./webkitBuild.ts"
 
-/** The Playwright WebKit build the adapter was generated from, and the SHA-256 of its `protocol.json`. */
-export const build = {
-  revision: "2359",
-  protocolSha256: "5962bc790bde7750ce127029962a6c1bd93aed884cbcf832da8393c2a12c106c"
-} as const
-
-/**
- * Where Playwright installs the build, per platform: `PLAYWRIGHT_BROWSERS_PATH` if set, otherwise
- * Playwright's own cache directory.
- */
-export const cacheCandidates = (
-  platform: string,
-  env: Readonly<Record<string, string | undefined>>
-): ReadonlyArray<string> => {
-  const folder = `webkit-${build.revision}`
-  const executable = platform === "win32" ? `${folder}\\Playwright.exe` : `${folder}/pw_run.sh`
-  const separator = platform === "win32" ? "\\" : "/"
-  const roots = env["PLAYWRIGHT_BROWSERS_PATH"] !== undefined
-    ? [env["PLAYWRIGHT_BROWSERS_PATH"]]
-    : platform === "darwin"
-    ? [env["HOME"] && `${env["HOME"]}/Library/Caches/ms-playwright`]
-    : platform === "win32"
-    ? [env["LOCALAPPDATA"] && `${env["LOCALAPPDATA"]}\\ms-playwright`]
-    : [env["XDG_CACHE_HOME"] ?? (env["HOME"] && `${env["HOME"]}/.cache`)].map((cache) =>
-      cache && `${cache}/ms-playwright`
-    )
-  return roots.filter((root): root is string => typeof root === "string" && root !== "").map((root) =>
-    `${root}${separator}${executable}`
-  )
-}
-
-/** The one channel: Playwright's browser cache, at the pinned build. */
-export type Channel = "playwright"
+export { build } from "./webkitBuild.ts"
 
 /** Settings for a launch, beside the build it names. */
 export interface Settings {
@@ -75,10 +42,12 @@ export interface Settings {
 }
 
 /**
- * A launch: the build it names, by its executable (`pw_run.sh`, or `Playwright.exe` on Windows) or the
- * `playwright` channel, and its settings.
+ * A launch: the build it names, by its executable's absolute path (`pw_run.sh`, or `Playwright.exe` on Windows),
+ * and its settings.
  */
-export type Options = Settings & Launch.Named<Channel>
+export interface Options extends Settings {
+  readonly executablePath: string
+}
 
 /** The arguments a launch passes. */
 export const argsFor = (options: Settings, userDataDir: string): ReadonlyArray<string> => [
@@ -88,30 +57,10 @@ export const argsFor = (options: Settings, userDataDir: string): ReadonlyArray<s
   ...(options.args ?? [])
 ]
 
-// The platform and environment, where the runtime has them; the package doesn't assume Node.
-const host = (globalThis as {
-  readonly process?: { readonly platform: string; readonly env: Readonly<Record<string, string | undefined>> }
-}).process
-
-const executable = (options: Options) =>
-  Launch.namedExecutable(options, () => ({
-    candidates: cacheCandidates(host?.platform ?? "linux", host?.env ?? {}),
-    hint:
-      `Playwright's WebKit ${build.revision} isn't in Playwright's browser cache, which its installer fills (\`npx playwright install webkit\`, Playwright 1.63)`
-  }))
-
-const sha256 = (bytes: Uint8Array) =>
-  Effect.promise(() => globalThis.crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>)).pipe(
-    Effect.map((digest) => Hex.encode(new Uint8Array(digest)))
-  )
-
 /** Fails unless the build beside `executable` ships the `protocol.json` the adapter was generated from. */
 export const checkRevision = Effect.fnUntraced(function*(executable: string) {
-  const fs = yield* FileSystem.FileSystem
-  const directory = executable.slice(0, Math.max(executable.lastIndexOf("/"), executable.lastIndexOf("\\")))
-  const file = `${directory}/protocol.json`
-  const bytes = yield* fs.readFile(file).pipe(Effect.option)
-  if (bytes._tag === "None") {
+  const digest = yield* protocolDigest(executable)
+  if (digest._tag === "None") {
     return yield* Launch.fail(
       new Browser.IncompatibleRevision({
         revision: "unknown",
@@ -121,11 +70,10 @@ export const checkRevision = Effect.fnUntraced(function*(executable: string) {
       "check the revision"
     )
   }
-  const digest = yield* sha256(bytes.value)
-  if (digest !== build.protocolSha256) {
+  if (digest.value !== build.protocolSha256) {
     return yield* Launch.fail(
       new Browser.IncompatibleRevision({
-        revision: `protocol.json ${digest.slice(0, 12)}`,
+        revision: `protocol.json ${digest.value.slice(0, 12)}`,
         hint:
           `This build's protocol differs from build ${build.revision}'s, which the adapter is generated from and tested against. Use Playwright's WebKit ${build.revision}, or turn checkRevision off to try this one`
       }),
@@ -142,7 +90,7 @@ export const launch: (
   Browser.BrowserError,
   Scope.Scope | FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner
 > = Effect.fnUntraced(function*(options: Options) {
-  const path = yield* executable(options)
+  const path = yield* Launch.executable(options.executablePath)
   if (options.checkRevision ?? true) yield* checkRevision(path)
   const userDataDir = yield* Launch.profileDirectory(options.userDataDir, "strider-webkit-")
   const launched = yield* Launch.spawn(path, argsFor(options, userDataDir), userDataDir, {

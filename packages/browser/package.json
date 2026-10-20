@@ -20,7 +20,13 @@
     "cdp",
     "webdriver-bidi"
   ],
-  "sideEffects": [],
+  "sideEffects": [
+    "./src/bin/strider.ts",
+    "./dist/bin/strider.js"
+  ],
+  "bin": {
+    "strider": "./src/bin/strider.ts"
+  },
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
@@ -38,6 +44,7 @@
     "./webkit-protocol": "./src/webkit-protocol/index.ts",
     "./*": "./src/*.ts",
     "./internal/*": null,
+    "./bin/*": null,
     "./index": null,
     "./*/index": null
   },
@@ -54,6 +61,9 @@
   "publishConfig": {
     "access": "public",
     "provenance": true,
+    "bin": {
+      "strider": "./dist/bin/strider.js"
+    },
     "exports": {
       "./package.json": "./package.json",
       ".": "./dist/index.js",
@@ -71,6 +81,7 @@
       "./webkit-protocol": "./dist/webkit-protocol/index.js",
       "./*": "./dist/*.js",
       "./internal/*": null,
+      "./bin/*": null,
       "./index": null,
       "./*/index": null
     }
@@ -82,7 +93,13 @@
     "check": "tsc -b tsconfig.json"
   },
   "peerDependencies": {
+    "@effect/platform-node": "^4.0.5",
     "effect": "^4.0.5"
+  },
+  "peerDependenciesMeta": {
+    "@effect/platform-node": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@effect/platform-node": "^4.0.5",

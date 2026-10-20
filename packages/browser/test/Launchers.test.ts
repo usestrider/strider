@@ -1,6 +1,6 @@
 /**
- * The launchers, without a browser: where each looks for its executable, the arguments and profiles it passes,
- * how it fails, and WebKit's revision check. The integration tests launch the real browsers.
+ * The launchers, without a browser: the executable each accepts (an absolute path, and nothing looked up), the
+ * arguments and profiles it passes, how it fails, and WebKit's revision check. The integration tests launch the real browsers.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
@@ -17,37 +17,39 @@ import { pins } from "./integration/pins.ts"
 
 describe("Chromium launcher", () => {
   layer(NodeServices.layer, { excludeTestServices: true })((it) => {
-    it.effect("fails with ExecutableNotFound for a browser that isn't there, naming what it searched", () =>
+    it.effect("fails with ExecutableNotFound for a path where nothing is, pointing to strider browsers", () =>
       Effect.gen(function*() {
         const error = yield* ChromiumLauncher.launch({ executablePath: "/nowhere/chrome" }).pipe(Effect.flip)
         assert(error.reason._tag === "ExecutableNotFound")
         assert.deepStrictEqual(error.reason.searched, ["/nowhere/chrome"])
+        assert.include(error.reason.hint, "strider browsers")
       }))
 
-    it.effect("fails with InvalidInput, looking nowhere, for a caller the types don't reach that names no browser or two", () =>
+    it.effect("fails with InvalidInput, looking nowhere, for a relative path, a command name or no path", () =>
       Effect.gen(function*() {
-        const untyped = [{}, { executablePath: "/usr/bin/chromium", channel: "stable" }] as unknown as ReadonlyArray<
-          ChromiumLauncher.Options
-        >
+        const untyped = [
+          { executablePath: "chromium" },
+          { executablePath: "./browsers/chrome" },
+          {}
+        ] as unknown as ReadonlyArray<ChromiumLauncher.Options>
         for (const options of untyped) {
           const error = yield* ChromiumLauncher.launch(options).pipe(Effect.flip)
           assert(error.reason._tag === "InvalidInput")
-          assert.strictEqual(error.reason.expected, "exactly one of executablePath and channel")
+          assert.strictEqual(error.reason.input, "executablePath")
+          assert.include(error.reason.hint, "strider browsers")
         }
       }))
 
-    it.effect("knows where each channel installs itself", () =>
+    it.effect("takes a path as absolute on POSIX and on Windows", () =>
       Effect.sync(() => {
-        assert.deepStrictEqual(ChromiumLauncher.channelCandidates("linux", "beta", {}), [
-          "/opt/google/chrome-beta/chrome",
-          "/usr/bin/google-chrome-beta"
-        ])
-        assert.deepStrictEqual(ChromiumLauncher.channelCandidates("darwin", "canary", {}), [
-          "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary"
-        ])
-        assert.deepStrictEqual(ChromiumLauncher.channelCandidates("win32", "stable", { LOCALAPPDATA: "C:\\L" }), [
-          "C:\\L\\Google\\Chrome\\Application\\chrome.exe"
-        ])
+        for (
+          const path of ["/usr/bin/chromium", "C:\\Chrome\\chrome.exe", "c:/chrome.exe", "\\\\host\\share\\chrome.exe"]
+        ) {
+          assert.isTrue(Launch.isAbsolute(path), path)
+        }
+        for (const path of ["chromium", "./chrome", "bin/chrome", "C:chrome.exe", ""]) {
+          assert.isFalse(Launch.isAbsolute(path), path)
+        }
       }))
 
     it.effect("passes the profile's arguments, then the caller's, then its own", () =>
@@ -85,7 +87,7 @@ describe("Firefox launcher", () => {
           assert.deepStrictEqual(error.reason.searched, ["/nowhere/firefox"])
         }))
 
-      it.effect("writes the profile's preferences, and knows where each channel installs itself", () =>
+      it.effect("writes the profile's preferences", () =>
         Effect.sync(() => {
           assert.include(
             FirefoxLauncher.userJs(FirefoxLauncher.profilePrefs.automation),
@@ -93,9 +95,6 @@ describe("Firefox launcher", () => {
           )
           assert.strictEqual(FirefoxLauncher.userJs(FirefoxLauncher.profilePrefs.stock), "")
           assert.include(FirefoxLauncher.argsFor({}, "/p"), "--headless")
-          assert.deepStrictEqual(FirefoxLauncher.channelCandidates("darwin", "canary", {}), [
-            "/Applications/Firefox Nightly.app/Contents/MacOS/firefox"
-          ])
         }))
     }
   )
@@ -115,26 +114,8 @@ describe("WebKit launcher", () => {
         assert.deepStrictEqual(error.reason.searched, ["/nowhere/pw_run.sh"])
       }))
 
-    it.effect("looks for the pinned build where Playwright installs it, and nowhere else", () =>
+    it.effect("passes the inspector pipe and the profile", () =>
       Effect.sync(() => {
-        const revision = WebKitLauncher.build.revision
-        assert.deepStrictEqual(
-          WebKitLauncher.cacheCandidates("linux", { PLAYWRIGHT_BROWSERS_PATH: "/browsers", HOME: "/home/a" }),
-          [`/browsers/webkit-${revision}/pw_run.sh`]
-        )
-        assert.deepStrictEqual(WebKitLauncher.cacheCandidates("linux", { HOME: "/home/a" }), [
-          `/home/a/.cache/ms-playwright/webkit-${revision}/pw_run.sh`
-        ])
-        assert.deepStrictEqual(WebKitLauncher.cacheCandidates("darwin", { HOME: "/Users/a" }), [
-          `/Users/a/Library/Caches/ms-playwright/webkit-${revision}/pw_run.sh`
-        ])
-        assert.deepStrictEqual(
-          WebKitLauncher.cacheCandidates("win32", { LOCALAPPDATA: "C:\\Users\\a\\AppData\\Local" }),
-          [
-            `C:\\Users\\a\\AppData\\Local\\ms-playwright\\webkit-${revision}\\Playwright.exe`
-          ]
-        )
-        assert.deepStrictEqual(WebKitLauncher.cacheCandidates("linux", {}), [])
         assert.deepStrictEqual(WebKitLauncher.argsFor({}, "/p"), [
           "--inspector-pipe",
           "--headless",

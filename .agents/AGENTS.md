@@ -55,6 +55,7 @@ Use the narrowest check that covers the change:
 | Runtime behavior                    | `pnpm test --run <file>`                                                                                                                 |
 | The protocol client or transports   | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts`, then `pnpm test:integration` |
 | A backend adapter or launcher       | `pnpm test:integration`                                                                                                                  |
+| The `strider` command               | `pnpm test --run packages/browser/test/Browsers.test.ts`, then try it with `pnpm strider <command>`                                      |
 | Access rules or other type behavior | `pnpm test-types`                                                                                                                        |
 | JSDoc text, categories or links     | `pnpm jsdocs`                                                                                                                            |
 | JSDoc examples                      | `pnpm jsdocs`, then `pnpm examples`                                                                                                      |

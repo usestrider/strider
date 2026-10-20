@@ -13,7 +13,9 @@ It adds no browser behavior of its own. Every command expands to one TypeScript 
 ```ts
 interface SessionSpec {                                   // what `strider start` was given; printed back in full
   readonly name: SessionName                              // [a-z0-9-], short enough for a Unix socket path
-  readonly backend: "chromium" | "firefox" | "webkit" | { readonly _tag: "Attach"; readonly endpoint: Url.Url }
+  readonly browser:                                       // exactly one of --chromium, --firefox, --webkit <path> or --attach <endpoint>
+    | { readonly _tag: "Launch"; readonly backend: "chromium" | "firefox" | "webkit"; readonly executablePath: FilePath.Local }
+    | { readonly _tag: "Attach"; readonly endpoint: Url.Url }
   readonly userDataDir: Option<FilePath.Local>            // None: profile/ in the session directory, deleted at stop
   readonly initialState:
     | { readonly _tag: "Empty" }
@@ -58,7 +60,8 @@ $XDG_RUNTIME_DIR/strider/       # per user; the OS temp directory where there is
 ## A session
 
 ```sh
-strider start --name checkout                   # session checkout · chromium · idle timeout 1 h
+strider browsers                                # the browsers on this machine, by path, with their versions
+strider start --name checkout --chromium /usr/bin/chromium   # session checkout · Chromium 155 at /usr/bin/chromium · idle timeout 1 h
 strider -s checkout page new --name shop https://shop.test   # → shop (p1 without --name)
 strider -s checkout -p shop snapshot            # refs e1…, kept as shop's latest snapshot
 strider -s checkout -p shop fill e4 "ada@example.com"
@@ -74,8 +77,8 @@ strider -s checkout state save ./auth/shop.state
 strider -s checkout export test checkout.test.ts
 strider stop -s checkout
 
-strider start --name task-1 --state ./auth/shop.state    # a fork from a saved state
-strider start --name task-2 --fork checkout              # a fork from a running session
+strider start --name task-1 --chromium /usr/bin/chromium --state ./auth/shop.state   # a fork from a saved state
+strider start --name task-2 --chromium /usr/bin/chromium --fork checkout             # a fork from a running session
 ```
 
 ```
@@ -102,6 +105,8 @@ export default Effect.gen(function*() {
 - **Every command names its session.** It comes from `--session`/`-s` or `STRIDER_SESSION`, and the flag wins. There is no fallback, even when only one session is running, because with several agents on one machine "the only session" is a race. The error lists the running sessions. Agent shells often don't keep environment variables between calls, so documentation and skills use the flag.
 - **Names are the ids.** They are unique, and starting a name that is taken fails instead of attaching. Handles belong to their session, so `p1` in one session has nothing to do with `p1` in another.
 - **Every page command names its page** with `--page`/`-p`. There is no current page and no fallback, even when the session has one page, for the same reason as sessions: an implicit selection is how agents act on the wrong tab (Stagehand followed focus; Chrome DevTools MCP raced on a global selected page). Pages take an optional `--name` when created, and the handle is that name or else `p1`. A page opened without one, such as a popup, is named later with `strider -s checkout -p p2 page name consent`.
+- **`start` names its browser** ([review 11](reviews/11-executable-paths.md)): exactly one of `--chromium <path>`, `--firefox <path>` and `--webkit <path>`, absolute, or `--attach <endpoint>`. There is no default browser and nothing is looked up; the session's spec prints the path back, with the version the browser reports.
+- **`strider browsers` finds a path.** It lists the browsers on the machine, by backend, with their versions and where each path leads, and `--json` prints the same as data. It is the one command that needs no session and no daemon, and the only one built (PROTOCOL.md, Not built).
 - **One context per session.** `--state` and `--fork` apply to it. Two logins at once, such as two users of a chat, are two sessions.
 - **One daemon and one browser per session.** Contexts share launch flags, the downloads directory and OS focus (API.md, Testing), so separate browsers keep concurrent agents apart, and a crash ends one session.
 - **Lifetime.** A session ends at `strider stop`, after its idle timeout, or when `--owner-pid` exits. Whichever applies is printed at start. `strider sessions` lists name, backend, pages, idle time and owner.

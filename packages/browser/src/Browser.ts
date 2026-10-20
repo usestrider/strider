@@ -1,7 +1,7 @@
 /**
  * The `Browser` service, its accessors, and the settings every backend shares.
  *
- * A backend layer provides `Browser`: `Chromium.layer({ channel: "stable" })` launches the browser it names,
+ * A backend layer provides `Browser`: `Chromium.layer({ executablePath })` launches the browser it names,
  * `Chromium.layerConnect(endpoint)` attaches to one. Backends are imports, not option values (`@usestrider/browser/chromium`, `/firefox`, `/webkit`,
  * `/bidi`), so only the protocol code you import is loaded. A launch uses a temporary profile, acquired with
  * `FileSystem.makeTempDirectoryScoped` before the browser starts and deleted after it exits.
@@ -191,13 +191,30 @@ export declare const newContext: (
 ) => Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Browser | Scope.Scope>
 
 /**
- * Settings every launch takes, whichever browser it runs.
+ * Settings for launching a browser: the executable to run, and how to run it.
+ *
+ * **Details**
+ *
+ * `executablePath` is the browser, and nothing else is looked up: not `PATH`, not an install location. It must be
+ * absolute, so it means the same file in every working directory; a relative path or a bare command name fails
+ * with `InvalidInput`. Code that runs on several machines reads it from the environment with the backend's
+ * `layerConfig`.
+ *
+ * **Gotchas**
+ *
+ * The library never downloads or installs a browser. Install it as you would any program (an operating
+ * system's package, a vendor's installer, a Nix package, Playwright's installer for its WebKit), and name its
+ * executable here. `strider browsers` lists the ones it can find on this machine, with their versions.
  *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
-export interface LaunchSettings {
+export interface LaunchOptions {
+  /**
+   * The browser's executable, as an absolute path.
+   */
+  readonly executablePath: FilePath.Local | string
   /**
    * Run without a visible window.
    *
@@ -223,45 +240,6 @@ export interface LaunchSettings {
    */
   readonly userDataDir?: FilePath.Local | string | undefined
 }
-
-/**
- * Settings for launching a browser: the browser, named by its executable or by a channel, and the settings every
- * launch takes.
- *
- * **Details**
- *
- * Exactly one of `executablePath` and `channel` names the browser, and nothing else is looked up. A channel is an
- * install location the backend knows: Chrome's and Firefox's release channels, or Playwright's browser cache
- * for WebKit. Each backend's `layer` states its channels.
- *
- * **Gotchas**
- *
- * The library never downloads or installs a browser. Install it as you would any program (an operating
- * system's package, Chrome's installer for a channel, a Nix package, Playwright's installer for its WebKit),
- * and name it here.
- *
- * @stability unstable
- * @category models
- * @since 0.1.0
- */
-export type LaunchOptions<Channel extends string> =
-  & LaunchSettings
-  & (
-    | {
-      /**
-       * The browser's executable.
-       */
-      readonly executablePath: FilePath.Local | string
-      readonly channel?: undefined
-    }
-    | {
-      /**
-       * An install location the backend knows, such as an installed release channel.
-       */
-      readonly channel: Channel
-      readonly executablePath?: undefined
-    }
-  )
 
 /**
  * Settings for connecting to a running browser.
