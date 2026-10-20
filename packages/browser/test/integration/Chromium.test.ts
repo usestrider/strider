@@ -1,8 +1,8 @@
 /**
  * L0 against a real Chromium: both transports, the session lifecycle, and CDP's error table.
  *
- * It runs against the pinned Chromium (`browsers.ts`), which `nix develop` names in `STRIDER_CHROMIUM`. Without
- * it, the suite is skipped and Vitest reports it as skipped; another version fails it.
+ * It runs against the pinned Chromium (`browsers.ts`), in the Nix environment `pnpm test:integration` enters;
+ * another version fails it.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
@@ -36,7 +36,7 @@ const timeout = 30_000
 const launch = Effect.fnUntraced(function*(debugging: "pipe" | "port") {
   const fs = yield* FileSystem.FileSystem
   const userDataDir = yield* fs.makeTempDirectoryScoped({ prefix: "strider-test-" })
-  const handle = yield* ChildProcess.make(executable!, [
+  const handle = yield* ChildProcess.make(executable, [
     "--headless",
     "--no-first-run",
     "--no-default-browser-check",
@@ -71,7 +71,7 @@ const reasonOf = <A>(exit: Exit.Exit<A, Protocol.ProtocolError>) => {
   return error.value.reason
 }
 
-describe.skipIf(executable === undefined)("Chromium over CDP", () => {
+describe("Chromium over CDP", () => {
   // The real clock: these tests wait on a real browser.
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {

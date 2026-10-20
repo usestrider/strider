@@ -87,7 +87,7 @@ const newPage = Effect.fnUntraced(function*(world: World) {
 
 /** Registers the conformance suite for a backend. */
 export const conformance = (backend: Backend) =>
-  describe.skipIf(backend.skip)(`${backend.name} adapter`, () => {
+  describe(`${backend.name} adapter`, () => {
     // The real clock: these tests wait on a real browser.
     layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
       (it) => {
@@ -766,12 +766,18 @@ export const conformance = (backend: Backend) =>
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
             yield* goto(world, page, `${world.site.origin}/beforeunload`)
-            // A beforeunload prompt needs the page to have been interacted with: a real click
+            // A beforeunload prompt needs the page to have been interacted with: a real click, once the page has
+            // rendered a frame, since a busy browser drops input that comes before one
+            yield* evaluate(world, page, "() => new Promise((resolve) => requestAnimationFrame(() => resolve(true)))")
             const none = { alt: false, control: false, meta: false, shift: false }
             yield* world.adapter.dispatchInput(page, [
               { _tag: "Mouse", type: "down", x: 5, y: 5, button: "left", clickCount: 1, modifiers: none },
               { _tag: "Mouse", type: "up", x: 5, y: 5, button: "left", clickCount: 1, modifiers: none }
             ])
+            assert.isTrue(
+              yield* evaluate(world, page, "() => navigator.userActivation.hasBeenActive"),
+              "the click activated the page"
+            )
             yield* world.adapter.closePage(page, { runBeforeUnload: true })
             const opened = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "Prompt")
             assert.deepInclude(opened.subject, { kind: "beforeunload" })

@@ -3,19 +3,21 @@ import { defineConfig } from "vitest/config"
 
 const src = (subpath: string) => path.join(import.meta.dirname, "packages/browser/src", subpath)
 
+/** Tests read the package's source, as Effect's tests do; the integration tests' configuration shares it. */
+export const resolve = {
+  alias: [
+    { find: /^@usestrider\/browser$/, replacement: src("index.ts") },
+    {
+      find:
+        /^@usestrider\/browser\/(ai|bidi|bidi-protocol|cdp|chromium|cli|firefox|protocol|test|test\/vitest|webkit|webkit-protocol)$/,
+      replacement: src("$1/index.ts")
+    },
+    { find: /^@usestrider\/browser\/(.+)$/, replacement: src("$1.ts") }
+  ]
+}
+
 export default defineConfig({
-  resolve: {
-    // Tests read the package's source, as Effect's tests do.
-    alias: [
-      { find: /^@usestrider\/browser$/, replacement: src("index.ts") },
-      {
-        find:
-          /^@usestrider\/browser\/(ai|bidi|bidi-protocol|cdp|chromium|cli|firefox|protocol|test|test\/vitest|webkit|webkit-protocol)$/,
-        replacement: src("$1/index.ts")
-      },
-      { find: /^@usestrider\/browser\/(.+)$/, replacement: src("$1.ts") }
-    ]
-  },
+  resolve,
   test: {
     projects: [{
       extends: true,
@@ -23,6 +25,8 @@ export default defineConfig({
         name: "browser",
         root: "packages/browser",
         include: ["test/**/*.test.ts"],
+        // The browser integration tests run in the Nix environment: vitest.integration.config.ts
+        exclude: ["test/integration/**"],
         setupFiles: [path.join(import.meta.dirname, "vitest.setup.ts")]
       }
     }, {

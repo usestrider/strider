@@ -1,5 +1,5 @@
 {
-  description = "Strider: the toolchain, and the browsers the integration tests are pinned to";
+  description = "Strider: the toolchain, and the machine the browser integration tests run on";
 
   # The revision the integration tests' browsers come from: Chromium 155.0.8059.79, Firefox 158.0 and
   # Playwright 1.63.0's WebKit build 2359, with Node 24.21.0 and pnpm 12.9.0. The tests' traffic fixtures and
@@ -45,18 +45,43 @@
         pkgs:
         let
           pinnedBrowsers = browsers pkgs;
+          toolchain = [
+            pkgs.nodejs_24
+            pkgs.pnpm
+          ];
         in
         assert pinned "pnpm" "pnpm@${pkgs.pnpm.version}" packageManager;
         {
-          default = pkgs.mkShellNoCC {
-            packages = [
-              pkgs.nodejs_24
-              pkgs.pnpm
-            ];
-            # What the integration tests run against; nothing else is looked up
+          # The toolchain, for the standard checks, which run anywhere
+          default = pkgs.mkShellNoCC { packages = toolchain; };
+
+          # The machine the browser integration tests see, the same wherever they run. `pnpm test:integration`
+          # enters it with `--ignore-environment`, so nothing else of the host's reaches them: no display, no
+          # user configuration, no variables but these.
+          integration = pkgs.mkShellNoCC {
+            packages = toolchain;
+            # What the tests check that they run in
+            STRIDER_ENVIRONMENT = "nix-integration";
+            # The browsers, and nothing else looked up
             STRIDER_CHROMIUM = lib.getExe pinnedBrowsers.chromium;
             STRIDER_FIREFOX = lib.getExe pinnedBrowsers.firefox;
             STRIDER_WEBKIT = "${pinnedBrowsers.webkit}/pw_run.sh";
+            # Fonts, time zone and locale, which pages measure text and format dates and numbers with
+            FONTCONFIG_FILE = pkgs.makeFontsConf {
+              fontDirectories = [
+                pkgs.dejavu_fonts
+                pkgs.liberation_ttf
+              ];
+            };
+            LANG = "C.UTF-8";
+            LC_ALL = "C.UTF-8";
+            shellHook = ''
+              # nix develop doesn't pass a shell's TZ through, so it is set here
+              export TZ=UTC
+              # An empty home of its own, deleted on exit, so no profile or cache of the user's is read
+              export HOME="$(mktemp -d -t strider-home-XXXXXX)"
+              trap 'rm -rf "$HOME"' EXIT
+            '';
           };
         }
       );

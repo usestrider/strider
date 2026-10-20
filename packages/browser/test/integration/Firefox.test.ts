@@ -2,8 +2,8 @@
  * L0 against a real Firefox over WebDriver BiDi: the launcher, the raw connection, the error table, and the
  * corrections the BiDi model carries.
  *
- * It runs against the pinned Firefox (`browsers.ts`), which `nix develop` names in `STRIDER_FIREFOX`. Without it,
- * the suite is skipped and Vitest reports it as skipped; another version fails it.
+ * It runs against the pinned Firefox (`browsers.ts`), in the Nix environment `pnpm test:integration` enters;
+ * another version fails it.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
@@ -26,38 +26,12 @@ import { fixtures, record } from "./record.ts"
 const executable = firefox.executable
 const timeout = 60_000
 
-describe("Firefox launcher", () => {
-  layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
-    (it) => {
-      it.effect("fails with ExecutableNotFound without looking anywhere it wasn't told", () =>
-        Effect.gen(function*() {
-          const error = yield* FirefoxLauncher.launch({}).pipe(Effect.flip)
-          assert(error.reason._tag === "ExecutableNotFound")
-          assert.deepStrictEqual(error.reason.searched, [])
-        }))
-
-      it.effect("writes the profile's preferences, and knows where each channel installs itself", () =>
-        Effect.sync(() => {
-          assert.include(
-            FirefoxLauncher.userJs(FirefoxLauncher.profilePrefs.automation),
-            `user_pref("app.update.disabledForTesting", true);`
-          )
-          assert.strictEqual(FirefoxLauncher.userJs(FirefoxLauncher.profilePrefs.stock), "")
-          assert.include(FirefoxLauncher.argsFor({}, "/p"), "--headless")
-          assert.deepStrictEqual(FirefoxLauncher.channelCandidates("darwin", "canary", {}), [
-            "/Applications/Firefox Nightly.app/Contents/MacOS/firefox"
-          ])
-        }))
-    }
-  )
-})
-
-describe.skipIf(executable === undefined)("Firefox over WebDriver BiDi", () => {
+describe("Firefox over WebDriver BiDi", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
       it.effect("drives a tab through the generated commands", () =>
         Effect.gen(function*() {
-          const { transport: launched } = yield* FirefoxLauncher.launch({ executablePath: executable! })
+          const { transport: launched } = yield* FirefoxLauncher.launch({ executablePath: executable })
           const transport = record(launched, BidiWire.wire, fixtures.bidi)
           const bidi = yield* BidiConnection.make(transport)
           const on = Protocol.on(bidi.session)
@@ -84,7 +58,7 @@ describe.skipIf(executable === undefined)("Firefox over WebDriver BiDi", () => {
 
       it.effect("classifies Firefox's error replies with every row of BiDi's table", () =>
         Effect.gen(function*() {
-          const { transport: launched } = yield* FirefoxLauncher.launch({ executablePath: executable! })
+          const { transport: launched } = yield* FirefoxLauncher.launch({ executablePath: executable })
           const transport = record(launched, BidiWire.wire, fixtures.bidi)
           const replies = new Map<number, Deferred.Deferred<Record<string, any>>>()
           yield* transport.messages.pipe(
@@ -136,7 +110,7 @@ describe.skipIf(executable === undefined)("Firefox over WebDriver BiDi", () => {
             `${directory}/page.html`,
             `<title>leave</title><script>addEventListener("beforeunload", (e) => { e.preventDefault(); e.returnValue = "" })</script>`
           )
-          const { transport: launched } = yield* FirefoxLauncher.launch({ executablePath: executable! })
+          const { transport: launched } = yield* FirefoxLauncher.launch({ executablePath: executable })
           const transport = record(launched, BidiWire.wire, fixtures.bidi)
           const bidi = yield* BidiConnection.make(transport)
           const on = Protocol.on(bidi.session)

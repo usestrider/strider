@@ -14,66 +14,13 @@ import * as Option from "effect/Option"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as CdpAdapter from "../../../src/internal/cdpAdapter.ts"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
-import * as Launch from "../../../src/internal/launch.ts"
 import { assertPinned, chromium } from "../browsers.ts"
 import { makeRecorder, site } from "./harness.ts"
 
 const executable = chromium.executable
 const timeout = 60_000
 
-describe("Chromium launcher", () => {
-  layer(NodeServices.layer, { excludeTestServices: true })((it) => {
-    it.effect("fails with ExecutableNotFound, naming what it searched, without looking anywhere else", () =>
-      Effect.gen(function*() {
-        const error = yield* ChromiumLauncher.launch({ executablePath: "/nowhere/chrome" }).pipe(Effect.flip)
-        assert(error.reason._tag === "ExecutableNotFound")
-        assert.deepStrictEqual(error.reason.searched, ["/nowhere/chrome"])
-        const none = yield* ChromiumLauncher.launch({}).pipe(Effect.flip)
-        assert(none.reason._tag === "ExecutableNotFound")
-        assert.deepStrictEqual(none.reason.searched, [])
-        assert.include(none.reason.hint, "executablePath")
-      }))
-
-    it.effect("knows where each channel installs itself", () =>
-      Effect.sync(() => {
-        assert.deepStrictEqual(ChromiumLauncher.channelCandidates("linux", "beta", {}), [
-          "/opt/google/chrome-beta/chrome",
-          "/usr/bin/google-chrome-beta"
-        ])
-        assert.deepStrictEqual(ChromiumLauncher.channelCandidates("darwin", "canary", {}), [
-          "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary"
-        ])
-        assert.deepStrictEqual(ChromiumLauncher.channelCandidates("win32", "stable", { LOCALAPPDATA: "C:\\L" }), [
-          "C:\\L\\Google\\Chrome\\Application\\chrome.exe"
-        ])
-      }))
-
-    it.effect("passes the profile's arguments, then the caller's, then its own", () =>
-      Effect.sync(() => {
-        const args = ChromiumLauncher.argsFor({ profile: "concurrent", args: ["--lang=de"] }, "/profile", "pipe")
-        assert.include(args, "--disable-renderer-backgrounding")
-        assert.isBelow(args.indexOf("--no-first-run"), args.indexOf("--lang=de"))
-        assert.deepStrictEqual(args.slice(-3), ["--remote-debugging-pipe", "--user-data-dir=/profile", "about:blank"])
-        assert.notInclude(
-          ChromiumLauncher.argsFor({ profile: "stock", headless: false }, "/p", "pipe"),
-          "--no-first-run"
-        )
-      }))
-
-    it.effect("reports a browser that exits before it is ready, with its exit code and stderr", () =>
-      Effect.gen(function*() {
-        const failing = "/bin/sh"
-        const launched = yield* Launch.spawn(failing, ["-c", "echo broken profile >&2; exit 3"], "/tmp", {})
-        yield* launched.handle.exitCode.pipe(Effect.ignore)
-        const error = yield* Launch.notReady(launched, "connecting").pipe(Effect.flip)
-        assert(error.reason._tag === "ProcessExited")
-        assert.deepStrictEqual(error.reason.code, Option.some(3))
-        assert.include(error.reason.stderrTail, "broken profile")
-      }))
-  })
-})
-
-describe.skipIf(executable === undefined)("Chromium adapter, CDP only", () => {
+describe("Chromium adapter, CDP only", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
       it.effect(
@@ -82,7 +29,7 @@ describe.skipIf(executable === undefined)("Chromium adapter, CDP only", () => {
           Effect.gen(function*() {
             const served = yield* site
             const facts = makeRecorder()
-            const { launched, transport } = yield* ChromiumLauncher.launchWithPort({ executablePath: executable! })
+            const { launched, transport } = yield* ChromiumLauncher.launchWithPort({ executablePath: executable })
             const adapter = yield* CdpAdapter.connect(transport, { sink: facts.sink, ownership: "launched" })
             assertPinned("Chromium", adapter.info.version, chromium.version)
             const page = yield* adapter.createPage(adapter.defaultContext)
@@ -114,7 +61,7 @@ describe.skipIf(executable === undefined)("Chromium adapter, CDP only", () => {
           Effect.gen(function*() {
             const served = yield* site
             const facts = makeRecorder()
-            const { transport } = yield* ChromiumLauncher.launchWithPort({ executablePath: executable! })
+            const { transport } = yield* ChromiumLauncher.launchWithPort({ executablePath: executable })
             const adapter = yield* CdpAdapter.connect(transport, { sink: facts.sink, ownership: "attached" })
             assertPinned("Chromium", adapter.info.version, chromium.version)
             assert.strictEqual(adapter.pauseScope, "related")

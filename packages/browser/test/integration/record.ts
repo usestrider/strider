@@ -4,11 +4,11 @@
  * With `STRIDER_RECORD` naming a directory, `record` wraps a transport so that a few samples of each method are
  * appended to `<directory>/<fixture>.ndjson`: every event with its parameters, every reply with the command it
  * answers, and every error reply with what the backend's table made of it. Without it, the transport is
- * returned as it is. Recording appends to the file, so run the integration tests one file at a time:
+ * returned as it is. Recording appends to the file, so run the integration tests one file at a time, with an
+ * absolute directory, since the Nix environment starts elsewhere:
  *
  * ```sh
- * STRIDER_RECORD=packages/browser/test/fixtures/traffic pnpm vitest --run --no-file-parallelism \
- *   packages/browser/test/integration
+ * STRIDER_RECORD=$PWD/packages/browser/test/fixtures/traffic pnpm test:integration --no-file-parallelism
  * ```
  */
 import * as Effect from "effect/Effect"
@@ -17,13 +17,13 @@ import * as fs from "node:fs"
 import type { Classification, Wire, WireError } from "../../src/internal/protocolClient.ts"
 import * as ProtocolClient from "../../src/internal/protocolClient.ts"
 import type * as Transport from "../../src/protocol/Transport.ts"
-import { chromium, firefox, webkit } from "./browsers.ts"
+import { pins } from "./pins.ts"
 
 /** The fixture each backend's browser records into, named for the pinned browser recorded (`browsers.json`). */
 export const fixtures = {
-  cdp: chromium.fixture,
-  bidi: firefox.fixture,
-  webkit: webkit.fixture
+  cdp: pins.chromium.fixture,
+  bidi: pins.firefox.fixture,
+  webkit: pins.webkit.fixture
 } as const
 
 /** One recorded message. */

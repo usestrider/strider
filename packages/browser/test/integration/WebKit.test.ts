@@ -2,9 +2,8 @@
  * L0 against Playwright's WebKit build: the launcher, the raw connection, the error table, and what only the
  * WebKit adapter does.
  *
- * They run against the pinned build (`browsers.ts`), whose `pw_run.sh` `nix develop` names in `STRIDER_WEBKIT`.
- * Without it, the browser suites are skipped and Vitest reports them as skipped; the launcher refuses another
- * build by its `protocol.json`.
+ * They run against the pinned build (`browsers.ts`), in the Nix environment `pnpm test:integration` enters; the
+ * launcher refuses another build by its `protocol.json`.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, layer } from "@effect/vitest"
@@ -14,7 +13,6 @@ import * as Runtime from "@usestrider/browser/webkit-protocol/Runtime"
 import * as Target from "@usestrider/browser/webkit-protocol/Target"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
-import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import type * as Adapter from "../../src/internal/adapter.ts"
@@ -30,71 +28,14 @@ import { fixtures, record } from "./record.ts"
 const executable = webkit.executable
 const timeout = 60_000
 
-describe("WebKit launcher", () => {
-  layer(NodeServices.layer, { excludeTestServices: true })((it) => {
-    it.effect("is pinned to the build the adapter is generated from", () =>
-      Effect.sync(() => {
-        assert.strictEqual(webkit.revision, WebKitLauncher.build.revision)
-      }))
-
-    it.effect("fails with ExecutableNotFound for a path that doesn't exist", () =>
-      Effect.gen(function*() {
-        const error = yield* WebKitLauncher.launch({ executablePath: "/nowhere/pw_run.sh" }).pipe(Effect.flip)
-        assert(error.reason._tag === "ExecutableNotFound")
-        assert.deepStrictEqual(error.reason.searched, ["/nowhere/pw_run.sh"])
-      }))
-
-    it.effect("looks for the pinned build where Playwright installs it, and nowhere else", () =>
-      Effect.sync(() => {
-        const revision = WebKitLauncher.build.revision
-        assert.deepStrictEqual(
-          WebKitLauncher.cacheCandidates("linux", { PLAYWRIGHT_BROWSERS_PATH: "/browsers", HOME: "/home/a" }),
-          [`/browsers/webkit-${revision}/pw_run.sh`]
-        )
-        assert.deepStrictEqual(WebKitLauncher.cacheCandidates("linux", { HOME: "/home/a" }), [
-          `/home/a/.cache/ms-playwright/webkit-${revision}/pw_run.sh`
-        ])
-        assert.deepStrictEqual(WebKitLauncher.cacheCandidates("darwin", { HOME: "/Users/a" }), [
-          `/Users/a/Library/Caches/ms-playwright/webkit-${revision}/pw_run.sh`
-        ])
-        assert.deepStrictEqual(
-          WebKitLauncher.cacheCandidates("win32", { LOCALAPPDATA: "C:\\Users\\a\\AppData\\Local" }),
-          [
-            `C:\\Users\\a\\AppData\\Local\\ms-playwright\\webkit-${revision}\\Playwright.exe`
-          ]
-        )
-        assert.deepStrictEqual(WebKitLauncher.cacheCandidates("linux", {}), [])
-        assert.deepStrictEqual(WebKitLauncher.argsFor({}, "/p"), [
-          "--inspector-pipe",
-          "--headless",
-          "--user-data-dir=/p"
-        ])
-      }))
-
-    it.effect("fails with IncompatibleRevision for a build whose protocol differs, or that has none", () =>
-      Effect.gen(function*() {
-        const fs = yield* FileSystem.FileSystem
-        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-test-" })
-        yield* fs.writeFileString(`${directory}/pw_run.sh`, "#!/bin/sh\nexit 1\n")
-        const missing = yield* WebKitLauncher.launch({ executablePath: `${directory}/pw_run.sh` }).pipe(Effect.flip)
-        assert(missing.reason._tag === "IncompatibleRevision")
-        assert.strictEqual(missing.reason.revision, "unknown")
-        yield* fs.writeFileString(`${directory}/protocol.json`, "[]")
-        const other = yield* WebKitLauncher.launch({ executablePath: `${directory}/pw_run.sh` }).pipe(Effect.flip)
-        assert(other.reason._tag === "IncompatibleRevision")
-        assert.match(other.reason.revision, /^protocol\.json [0-9a-f]{12}$/)
-      }))
-  })
-})
-
-describe.skipIf(executable === undefined)("WebKit over its inspector protocol", () => {
+describe("WebKit over its inspector protocol", () => {
   layer(NodeServices.layer, { excludeTestServices: true })((it) => {
     it.effect(
       "launches the pinned build, and drives a page through the generated commands",
       () =>
         Effect.gen(function*() {
-          yield* WebKitLauncher.checkRevision(executable!)
-          const { transport } = yield* WebKitLauncher.launch({ executablePath: executable! })
+          yield* WebKitLauncher.checkRevision(executable)
+          const { transport } = yield* WebKitLauncher.launch({ executablePath: executable })
           const webkit = yield* WebKitConnection.make(record(transport, WebKitWire.wire, fixtures.webkit))
           yield* Playwright.enable().pipe(Protocol.on(webkit.browser))
           const { browserContextId } = yield* Playwright.createContext({}).pipe(Protocol.on(webkit.browser))
@@ -118,7 +59,7 @@ describe.skipIf(executable === undefined)("WebKit over its inspector protocol", 
 
     it.effect("classifies WebKit's error replies with every row of its table", () =>
       Effect.gen(function*() {
-        const { transport: launched } = yield* WebKitLauncher.launch({ executablePath: executable! })
+        const { transport: launched } = yield* WebKitLauncher.launch({ executablePath: executable })
         const transport = record(launched, WebKitWire.wire, fixtures.webkit)
         const replies = new Map<number, Deferred.Deferred<ProtocolClient.Incoming>>()
         const created = yield* Deferred.make<{ readonly pageProxyId: string; readonly targetId: string }>()
@@ -195,7 +136,7 @@ describe.skipIf(executable === undefined)("WebKit over its inspector protocol", 
         Effect.gen(function*() {
           const served = yield* site
           const facts = makeRecorder()
-          const { transport } = yield* WebKitLauncher.launch({ executablePath: executable! })
+          const { transport } = yield* WebKitLauncher.launch({ executablePath: executable })
           // A tap on the connection: the targets it announces, and a way to send what the adapter never would
           const targets: Array<{ readonly pageProxyId: string; readonly targetId: string }> = []
           const tapped: Transport.Transport = {

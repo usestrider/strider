@@ -1,6 +1,6 @@
 /**
- * The adapter conformance suite against Firefox over WebDriver BiDi: the pinned Firefox (`browsers.ts`), which
- * `nix develop` names in `STRIDER_FIREFOX`. Another version fails it.
+ * The adapter conformance suite against Firefox over WebDriver BiDi: the pinned Firefox (`browsers.ts`), in the
+ * Nix environment `pnpm test:integration` enters. Another version fails it.
  */
 import * as Effect from "effect/Effect"
 import * as BidiAdapter from "../../../src/internal/bidiAdapter.ts"
@@ -14,9 +14,8 @@ const executable = firefox.executable
 
 conformance({
   name: "Firefox (BiDi)",
-  skip: executable === undefined,
   connect: Effect.fnUntraced(function*(sink) {
-    const { launched, transport } = yield* FirefoxLauncher.launch({ executablePath: executable! })
+    const { launched, transport } = yield* FirefoxLauncher.launch({ executablePath: executable })
     const adapter = yield* BidiAdapter.connect(record(transport, BidiWire.wire, fixtures.bidi), {
       sink,
       ownership: "launched"

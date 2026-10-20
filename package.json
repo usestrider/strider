@@ -10,6 +10,7 @@
     "lint": "oxlint && dprint check",
     "lint-fix": "oxlint --fix && dprint fmt",
     "test": "vitest",
+    "test:integration": "nix develop .#integration --ignore-environment --keep TERM --keep STRIDER_RECORD --command pnpm exec vitest --run --config vitest.integration.config.ts",
     "test-types": "tstyche",
     "jsdocs": "strider-docs jsdocs",
     "examples": "strider-docs examples",

@@ -18,14 +18,17 @@ layer. Use `pnpm` from the repository root.
     launcher and adapter.
   - `scenarios/`: the acceptance scenarios from API.md, type-checked as ordinary code.
   - `typetest/`: Tstyche tests of access rules, requirement channels and what crosses by value.
-  - `test/`: runtime tests with `@effect/vitest`. `test/integration/` drives real browsers, pinned in
-    `test/integration/browsers.json`: Chromium 155.0.8059.79, Firefox 158.0 and Playwright's WebKit build 2359. Run
-    them in `nix develop` (`flake.nix`, Linux): its nixpkgs revision provides exactly these, with Node and pnpm, and
-    names them in `STRIDER_CHROMIUM`, `STRIDER_FIREFOX` and `STRIDER_WEBKIT`. Nothing else is looked up: a browser
-    that isn't named has its tests reported as skipped, and one of another version fails them.
-    `test/integration/adapter/` is the adapter conformance suite, written once and run against each backend. With `STRIDER_RECORD` naming a directory, the
-    integration tests record each browser's traffic for the drift test (`test/integration/record.ts`); record with
-    `--no-file-parallelism`, into `test/fixtures/traffic/`, when a browser rolls.
+  - `test/`: runtime tests with `@effect/vitest`, which run anywhere (`pnpm test --run`), except
+    `test/integration/`: the browser integration tests, which run only in the Nix environment that fixes the
+    machine they see. `pnpm test:integration` enters it (`flake.nix`, `devShells.integration`, Linux) with nothing
+    of the host's environment, and runs them: the pinned browsers (`test/integration/browsers.json`: Chromium
+    155.0.8059.79, Firefox 158.0, Playwright's WebKit build 2359), fixed fonts, UTC, `C.UTF-8`, an empty home that
+    is deleted after, and no display. Run anywhere else, they fail and say so; a browser of another version fails
+    them too. Extra arguments go to Vitest (`pnpm test:integration packages/browser/test/integration/WebKit.test.ts`).
+    `test/integration/adapter/` is the adapter conformance suite, written once and run against each backend. With
+    `STRIDER_RECORD` naming an absolute directory, the integration tests record each browser's traffic for the
+    drift test (`test/integration/record.ts`): `pnpm test:integration --no-file-parallelism`, into
+    `test/fixtures/traffic/`, when a browser rolls.
   - `INDEX.md`: every declaration and member, generated.
 - `packages/tools/docs`: the JSDoc checker (vendored from Effect; don't edit it), the example check, `INDEX.md` and
   the API reference dataset.
@@ -44,18 +47,18 @@ layer. Use `pnpm` from the repository root.
 
 Use the narrowest check that covers the change:
 
-| Change                              | Run                                                                                                                                                         |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Source, scenarios or configuration  | `pnpm check`, `pnpm lint-fix`                                                                                                                               |
-| A new, renamed or removed module    | `pnpm codegen`, then `pnpm check`                                                                                                                           |
-| Protocol corrections or annotations | `pnpm codegen:protocol`, then `pnpm check` and `pnpm test --run packages/browser/test/Drift.test.ts`                                                        |
-| Runtime behavior                    | `pnpm test --run <file>`                                                                                                                                    |
-| The protocol client or transports   | `nix develop -c pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts packages/browser/test/integration` |
-| A backend adapter                   | `nix develop -c pnpm test --run packages/browser/test/integration/adapter`                                                                                  |
-| Access rules or other type behavior | `pnpm test-types`                                                                                                                                           |
-| JSDoc text, categories or links     | `pnpm jsdocs`                                                                                                                                               |
-| JSDoc examples                      | `pnpm jsdocs`, then `pnpm examples`                                                                                                                         |
-| Before a commit that touches `src/` | `nix develop -c pnpm all`, so the integration tests run rather than skip                                                                                    |
+| Change                              | Run                                                                                                                                      |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Source, scenarios or configuration  | `pnpm check`, `pnpm lint-fix`                                                                                                            |
+| A new, renamed or removed module    | `pnpm codegen`, then `pnpm check`                                                                                                        |
+| Protocol corrections or annotations | `pnpm codegen:protocol`, then `pnpm check` and `pnpm test --run packages/browser/test/Drift.test.ts`                                     |
+| Runtime behavior                    | `pnpm test --run <file>`                                                                                                                 |
+| The protocol client or transports   | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts`, then `pnpm test:integration` |
+| A backend adapter or launcher       | `pnpm test:integration`                                                                                                                  |
+| Access rules or other type behavior | `pnpm test-types`                                                                                                                        |
+| JSDoc text, categories or links     | `pnpm jsdocs`                                                                                                                            |
+| JSDoc examples                      | `pnpm jsdocs`, then `pnpm examples`                                                                                                      |
+| Before a commit that touches `src/` | `pnpm all`, and `pnpm test:integration` if it touches what drives a browser                                                              |
 
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
 

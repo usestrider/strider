@@ -231,7 +231,6 @@ export const makeRecorder = (): Recorder => {
 
 export interface Backend {
   readonly name: string
-  readonly skip: boolean
   /** Launches the browser and connects the adapter, for the scope; `kill` kills the browser outright. */
   readonly connect: (
     sink: Adapter.Sink

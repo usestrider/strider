@@ -1,6 +1,6 @@
 /**
  * The adapter conformance suite against Chromium over CDP, launched over the pipe: the pinned Chromium
- * (`browsers.ts`), which `nix develop` names in `STRIDER_CHROMIUM`. Another version fails it.
+ * (`browsers.ts`), in the Nix environment `pnpm test:integration` enters. Another version fails it.
  */
 import * as Effect from "effect/Effect"
 import * as CdpAdapter from "../../../src/internal/cdpAdapter.ts"
@@ -14,9 +14,8 @@ const executable = chromium.executable
 
 conformance({
   name: "Chromium (CDP)",
-  skip: executable === undefined,
   connect: Effect.fnUntraced(function*(sink) {
-    const { launched, transport } = yield* ChromiumLauncher.launch({ executablePath: executable! })
+    const { launched, transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
     const adapter = yield* CdpAdapter.connect(record(transport, CdpWire.wire, fixtures.cdp), {
       sink,
       ownership: "launched"
