@@ -6,17 +6,24 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
+import * as Cddl from "./Cddl.ts"
 import type { CdpProtocol } from "./Cdp.ts"
-import { parse } from "./Cdp.ts"
+import * as Cdp from "./Cdp.ts"
 import { fromThrown } from "./CodegenError.ts"
 import { applyCorrections, applyOverlays, Correction, Overlay } from "./Corrections.ts"
 import type { ProtocolModel } from "./Model.ts"
 
-export const Backend = Schema.Literals(["cdp"])
+export const Backend = Schema.Literals(["cdp", "bidi"])
 export type Backend = typeof Backend.Type
 
-/** The CDP revision the vendored source is pinned to; see `protocols/cdp/source/SOURCE.md`. */
-const revisions: Record<Backend, string> = { cdp: "0.0.1696802" }
+/** The revision each vendored source is pinned to; see `protocols/<backend>/source/SOURCE.md`. */
+export const revisions: Record<Backend, string> = {
+  cdp: "0.0.1696802",
+  bidi: "f922e6af669ead51496db85f37813f39438ef171"
+}
+
+/** Where each backend's modules are written, under `packages/browser/src`. */
+export const outputs: Record<Backend, string> = { cdp: "cdp", bidi: "bidi-protocol" }
 
 const readJson = Effect.fnUntraced(function*<S extends Schema.Top>(path: string, schema: S) {
   const fs = yield* FileSystem.FileSystem
@@ -42,20 +49,25 @@ export const protocolDirectory = Effect.fnUntraced(function*(root: string, backe
 
 /** Builds the model: parse the source, apply corrections, apply annotations. */
 export const build = Effect.fnUntraced(function*(root: string, backend: Backend) {
+  const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const directory = yield* protocolDirectory(root, backend)
-  const sources = yield* Effect.forEach(
-    ["browser_protocol.json", "js_protocol.json"],
-    (name) => readJson(path.join(directory, "source", name), Schema.Unknown)
-  )
+  const parse = backend === "cdp"
+    ? yield* Effect.forEach(
+      ["browser_protocol.json", "js_protocol.json"],
+      (name) => readJson(path.join(directory, "source", name), Schema.Unknown)
+    ).pipe(Effect.map((sources) => () => Cdp.parse(revisions.cdp, sources as ReadonlyArray<CdpProtocol>)))
+    : yield* Effect.forEach(
+      ["remote", "local"] as const,
+      (side) =>
+        fs.readFileString(path.join(directory, "source", `${side}.cddl`)).pipe(
+          Effect.map((text): Cddl.CddlSource => ({ file: `${side}.cddl`, side, text }))
+        )
+    ).pipe(Effect.map((sources) => () => Cddl.parse(revisions.bidi, sources)))
   const corrections = yield* readDirectory(path.join(directory, "patches"), Correction)
   const overlays = yield* readDirectory(path.join(directory, "overlay"), Overlay)
   return yield* Effect.try({
-    try: () =>
-      applyOverlays(
-        applyCorrections(parse(revisions[backend], sources as ReadonlyArray<CdpProtocol>), corrections),
-        overlays
-      ),
+    try: () => applyOverlays(applyCorrections(parse(), corrections), overlays),
     catch: fromThrown
   })
 })

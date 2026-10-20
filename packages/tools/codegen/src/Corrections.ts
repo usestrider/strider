@@ -103,7 +103,11 @@ const checkReleases = (model: ProtocolModel): void => {
       const params = releaseShape?._tag === "Command" && releaseShape.params !== null
         ? model.shapes[releaseShape.params]
         : undefined
-      if (params?._tag !== "Struct" || !(release.param in params.members)) {
+      // Parameters that are a union (BiDi's session.unsubscribe) take the parameter if any case does
+      const cases = params?._tag === "Alias" && params.type._tag === "Union"
+        ? params.type.members.map((member) => member._tag === "Ref" ? model.shapes[member.shape] : undefined)
+        : [params]
+      if (!cases.some((shape) => shape?._tag === "Struct" && release.param in shape.members)) {
         throw new Error(`${id}: ${release.method} has no parameter ${release.param}`)
       }
       if (shape.result === null) throw new Error(`${id}: has no result to release from`)

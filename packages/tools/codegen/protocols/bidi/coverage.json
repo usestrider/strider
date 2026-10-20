@@ -1,0 +1,218 @@
+{
+  "revision": "f922e6af669ead51496db85f37813f39438ef171",
+  "counts": {
+    "domains": 11,
+    "types": 339,
+    "commands": 68,
+    "events": 24,
+    "excluded": 0,
+    "approximated": 41
+  },
+  "entries": [
+    {
+      "item": "browser#CloseResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "browser#RemoveUserContextResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "browser#SetDownloadBehaviorResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "browsingContext#ActivateResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "browsingContext#CloseResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "browsingContext#HandleUserPromptResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "browsingContext#SetBypassCSPResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "browsingContext#SetViewportResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "browsingContext#TraverseHistoryResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "emulation#SetForcedColorsModeThemeOverrideResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "emulation#SetGeolocationOverrideResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "emulation#SetLocaleOverrideResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "emulation#SetMediaFeaturesOverrideResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "emulation#SetNetworkConditionsResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "emulation#SetScreenOrientationOverrideResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "emulation#SetScreenSettingsOverrideResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "emulation#SetScriptingEnabledResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "emulation#SetScrollbarTypeOverrideResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "emulation#SetTextLayoutModeOverrideResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "emulation#SetTimezoneOverrideResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "emulation#SetTouchOverrideResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "emulation#SetUserAgentOverrideResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "emulation#SetViewportMetaOverrideResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "input#PerformActionsResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "input#ReleaseActionsResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "input#SetFilesResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "network#ContinueRequestResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "network#ContinueResponseResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "network#ContinueWithAuthResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "network#DisownDataResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "network#FailRequestResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "network#ProvideResponseResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "network#RemoveDataCollectorResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "network#RemoveInterceptResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "network#SetCacheBehaviorResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "network#SetExtraHeadersResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "script#DisownResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "script#RemovePreloadScriptResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "session#EndResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "session#UnsubscribeResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    },
+    {
+      "item": "webExtension#UninstallResult",
+      "verdict": "approximated",
+      "reason": "untyped-object"
+    }
+  ]
+}

@@ -22,6 +22,7 @@
       "@usestrider/browser": ["./packages/browser/src/index.ts"],
       "@usestrider/browser/ai": ["./packages/browser/src/ai/index.ts"],
       "@usestrider/browser/bidi": ["./packages/browser/src/bidi/index.ts"],
+      "@usestrider/browser/bidi-protocol": ["./packages/browser/src/bidi-protocol/index.ts"],
       "@usestrider/browser/cdp": ["./packages/browser/src/cdp/index.ts"],
       "@usestrider/browser/chromium": ["./packages/browser/src/chromium/index.ts"],
       "@usestrider/browser/cli": ["./packages/browser/src/cli/index.ts"],

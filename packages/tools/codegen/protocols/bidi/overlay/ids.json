@@ -1,0 +1,107 @@
+{
+  "reason": "Ids: each is a token minted by the browser and meaningful only relative to where it came from, so each kind is its own brand and never crosses protocols or kinds (CONCEPTS.md, Brand liberally). The spec writes them all as text.",
+  "annotate": [
+    {
+      "target": "browser#ClientWindow",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "browser#UserContext",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "browsingContext#BrowsingContext",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "browsingContext#Download",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "browsingContext#Navigation",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "browsingContext#Screencast",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "network#Collector",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "network#Intercept",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "network#Request",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "script#Channel",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "script#Handle",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "script#InternalId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "script#PreloadScript",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "script#Realm",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "script#SharedId",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "session#Subscription",
+      "traits": {
+        "id": true
+      }
+    },
+    {
+      "target": "webExtension#Extension",
+      "traits": {
+        "id": true
+      }
+    }
+  ]
+}

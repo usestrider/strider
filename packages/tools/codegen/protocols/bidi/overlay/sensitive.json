@@ -1,0 +1,47 @@
+{
+  "reason": "Classified values (README, Diagnostics and secrets): cookie values, authentication passwords and typed keys. They decode as Redacted, so L0 traffic captured in diagnostics can't leak them. A cookie's value is a network.BytesValue, a type it shares with header values and bodies, so the member is redacted whole, not the shared type. Headers are redacted by name through Effect's Headers, not here.",
+  "annotate": [
+    {
+      "target": "network#Cookie:value",
+      "traits": {
+        "sensitive": true
+      }
+    },
+    {
+      "target": "network#CookieHeader:value",
+      "traits": {
+        "sensitive": true
+      }
+    },
+    {
+      "target": "network#SetCookieHeader:value",
+      "traits": {
+        "sensitive": true
+      }
+    },
+    {
+      "target": "storage#PartialCookie:value",
+      "traits": {
+        "sensitive": true
+      }
+    },
+    {
+      "target": "network#AuthCredentials:password",
+      "traits": {
+        "sensitive": true
+      }
+    },
+    {
+      "target": "input#KeyDownAction:value",
+      "traits": {
+        "sensitive": true
+      }
+    },
+    {
+      "target": "input#KeyUpAction:value",
+      "traits": {
+        "sensitive": true
+      }
+    }
+  ]
+}

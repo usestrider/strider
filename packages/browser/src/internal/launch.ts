@@ -3,6 +3,7 @@
  * as the browser, a child process whose stderr is kept for errors, and the `BrowserError`s a launch fails
  * with (API.md, Modules and backends).
  */
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
@@ -21,6 +22,8 @@ export interface Launched {
   readonly handle: ChildProcessSpawner.ChildProcessHandle
   /** The last 8 KiB the browser wrote to stderr. */
   readonly stderrTail: Effect.Effect<string>
+  /** Waits for a line of stderr that matches, and returns its match; `None` if stderr ends first. */
+  readonly stderrLine: (pattern: RegExp) => Effect.Effect<Option.Option<RegExpMatchArray>>
 }
 
 /** The `Diagnostics` of a launch: one step, never dispatched to a page. */
@@ -101,22 +104,49 @@ export const spawn = Effect.fnUntraced(function*(
     )
   )
   let tail = ""
+  let partial = ""
+  const lines: Array<string> = []
+  const waiters = new Set<() => void>()
+  const ended = yield* Deferred.make<void>()
   yield* handle.stderr.pipe(
     Stream.decodeText,
     Stream.runForEach((text) =>
       Effect.sync(() => {
         tail = (tail + text).slice(-tailBytes)
+        const split = (partial + text).split("\n")
+        partial = split.pop()!
+        lines.push(...split)
+        for (const waiter of Array.from(waiters)) waiter()
       })
     ),
     Effect.ignore,
+    Effect.ensuring(Deferred.succeed(ended, undefined)),
     Effect.forkScoped
   )
+  const stderrLine = (pattern: RegExp) =>
+    Effect.callback<Option.Option<RegExpMatchArray>>((resume) => {
+      let seen = 0
+      const check = () => {
+        for (; seen < lines.length; seen++) {
+          const match = lines[seen]!.match(pattern)
+          if (match !== null) {
+            waiters.delete(check)
+            resume(Effect.succeed(Option.some(match)))
+            return
+          }
+        }
+      }
+      waiters.add(check)
+      check()
+      return Effect.sync(() => waiters.delete(check))
+    }).pipe(Effect.raceFirst(Deferred.await(ended).pipe(Effect.as(Option.none<RegExpMatchArray>()))))
   return {
     executable,
     args,
     userDataDir,
     handle,
-    stderrTail: Effect.sync(() => tail)
+    stderrTail: Effect.sync(() => tail),
+    stderrLine
   } satisfies Launched
 })
 

@@ -1,0 +1,11 @@
+{
+  "reason": "Input that can leave a key or button held when the caller is interrupted after dispatch. L1 releases it with input.releaseActions (CONCEPTS.md \u00a75).",
+  "annotate": [
+    {
+      "target": "input#performActions",
+      "traits": {
+        "compensation": "releaseInput"
+      }
+    }
+  ]
+}

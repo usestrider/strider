@@ -9,6 +9,12 @@
  * @stability experimental
  * @since 0.1.0
  */
+export * as BidiConnection from "./BidiConnection.ts"
+
+/**
+ * @stability experimental
+ * @since 0.1.0
+ */
 export * as CdpConnection from "./CdpConnection.ts"
 
 /**

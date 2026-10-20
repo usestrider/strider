@@ -1817,6 +1817,10 @@ The generic BiDi backend (`@usestrider/browser/bidi`): any WebDriver BiDi endpoi
 
 - `const layerConnect: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
 
+## `@usestrider/browser/bidi-protocol`
+
+11 generated modules: Browser, BrowsingContext, Common, Emulation, Input, Log, Network, Script, Session, Storage, WebExtension. Their declarations are in the API reference.
+
 ## `@usestrider/browser/cdp`
 
 56 generated modules: Accessibility, Ads, Animation, Audits, Autofill, BackgroundService, BluetoothEmulation, Browser, CacheStorage, Cast, CrashReportContext, CSS, Debugger, DeviceAccess, DeviceOrientation, DigitalCredentials, DOM, DOMDebugger, DOMSnapshot, DOMStorage, Emulation, EventBreakpoints, Extensions, FedCm, Fetch, FileSystem, HeadlessExperimental, HeapProfiler, IndexedDB, Input, Inspector, IO, LayerTree, Log, Media, Memory, Network, Overlay, Page, Performance, PerformanceTimeline, Preload, Profiler, PWA, Runtime, Security, ServiceWorker, SmartCardEmulation, Storage, SystemInfo, Target, Tethering, Tracing, WebAudio, WebAuthn, WebMCP. Their declarations are in the API reference.
@@ -1879,6 +1883,20 @@ The Firefox backend (`@usestrider/browser/firefox`): Firefox over WebDriver BiDi
 
 ## `@usestrider/browser/protocol`
 
+### BidiConnection
+
+A raw WebDriver BiDi connection (L0): one session over one `Transport`.
+
+*models*
+
+- `interface BidiConnection` (experimental)
+  - `readonly session: Protocol.ProtocolSession`
+  - `readonly closed: Effect.Effect<Transport.ConnectionLost>`
+
+*constructors*
+
+- `const make: (transport: Transport.Transport) => Effect.Effect<BidiConnection, never, Scope.Scope>` (experimental)
+
 ### CdpConnection
 
 A raw CDP connection (L0): the browser's own session, plus each target session the browser announces, over one `Transport`.
@@ -1925,6 +1943,7 @@ The protocol layer's client contract (L0): commands and events as data, the sess
   - `readonly method: string`
   - `readonly param: string`
   - `readonly from: string`
+  - `readonly list?: true | undefined`
 - `interface Command<M extends string, P, A> extends Effect.Effect<A, ProtocolError, ProtocolSession>` (experimental)
   - `readonly method: M`
   - `readonly params: P`

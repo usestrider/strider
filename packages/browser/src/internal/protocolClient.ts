@@ -649,7 +649,9 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
     const state = entry.session
     const release = Effect.forEach(
       entry.release.flatMap((release) =>
-        valuesAt(entry.raw, release.from).map((value) => [release.method, { [release.param]: value }] as const)
+        valuesAt(entry.raw, release.from).map((value) =>
+          [release.method, { [release.param]: release.list === true ? [value] : value }] as const
+        )
       ),
       ([method, params]) => Effect.ignore(sendRaw(state, method, params)),
       { discard: true }

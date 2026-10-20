@@ -1,0 +1,12 @@
+{
+  "spec": "browsingContext.ContextCreatedParameters requires hasPlannedNavigation: bool (editor's draft at f922e6a).",
+  "wire": "Firefox 158.0 sends browsingContext.contextCreated without hasPlannedNavigation, so the member is optional on the wire.",
+  "evidence": "Recorded 2026-10-20 from Firefox 158.0: {\"context\":…,\"userContext\":\"default\",\"children\":null,\"originalOpener\":null,\"url\":\"about:blank\",\"clientWindow\":…,\"parent\":null}, for the initial tab and for browsingContext.create.",
+  "operations": [
+    {
+      "op": "replace",
+      "path": "/shapes/browsingContext#ContextCreatedParameters/members/hasPlannedNavigation/optional",
+      "value": true
+    }
+  ]
+}

@@ -9,7 +9,8 @@ export default defineConfig({
     alias: [
       { find: /^@usestrider\/browser$/, replacement: src("index.ts") },
       {
-        find: /^@usestrider\/browser\/(ai|bidi|cdp|chromium|cli|firefox|protocol|test|test\/vitest|webkit)$/,
+        find:
+          /^@usestrider\/browser\/(ai|bidi|bidi-protocol|cdp|chromium|cli|firefox|protocol|test|test\/vitest|webkit)$/,
         replacement: src("$1/index.ts")
       },
       { find: /^@usestrider\/browser\/(.+)$/, replacement: src("$1.ts") }

@@ -19,10 +19,11 @@ import * as Path from "effect/Path"
 import { execFileSync } from "node:child_process"
 import { CodegenError, fromThrown } from "./CodegenError.ts"
 import { emit } from "./Emit.ts"
-import { Backend, build, protocolDirectory, serialize } from "./Pipeline.ts"
+import { Backend, build, outputs, protocolDirectory, serialize } from "./Pipeline.ts"
 
 const sources: Record<Backend, string> = {
-  cdp: "the Chrome DevTools Protocol, devtools-protocol 0.0.1696802 (Chrome 155)"
+  cdp: "the Chrome DevTools Protocol, devtools-protocol 0.0.1696802 (Chrome 155)",
+  bidi: "WebDriver BiDi's CDDL, w3c/webdriver-bidi f922e6a (2026-10-08)"
 }
 
 const writeOrCheck = Effect.fnUntraced(function*(file: string, content: string, check: boolean) {
@@ -69,10 +70,10 @@ const generate = Command.make("generate", { backend, check }, ({ backend, check 
     yield* writeOrCheck(path.join(directory, "model.json"), serialize(built), check)
 
     const { coverage, modules } = yield* Effect.try({
-      try: () => emit(built, { description: sources[backend] }),
+      try: () => emit(built, { description: sources[backend], output: outputs[backend] }),
       catch: fromThrown
     })
-    const output = path.join(root, "packages/browser/src", backend)
+    const output = path.join(root, "packages/browser/src", outputs[backend])
     yield* fs.makeDirectory(output, { recursive: true })
     let written = 0
     for (const [name, source] of modules) {

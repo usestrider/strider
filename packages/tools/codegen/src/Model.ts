@@ -26,6 +26,8 @@ export const Traits = Schema.Struct({
   session: Schema.optionalKey(Schema.Literals(["browser", "target"])),
   /** Overlay: what L1 must undo if the caller is interrupted after dispatch. */
   compensation: Schema.optionalKey(Schema.String),
+  /** BiDi: a map that admits keys beyond its members (`Extensible`). */
+  extensible: Schema.optionalKey(Schema.Literal(true)),
   /** Overlay: late replies route to an owner for adoption or cleanup. */
   createsResource: Schema.optionalKey(Schema.Literal(true)),
   /**
@@ -35,7 +37,9 @@ export const Traits = Schema.Struct({
   release: Schema.optionalKey(Schema.Array(Schema.Struct({
     method: Schema.String,
     param: Schema.String,
-    from: Schema.String
+    from: Schema.String,
+    /** The parameter is a list: the value goes in one. */
+    list: Schema.optionalKey(Schema.Literal(true))
   })))
 })
 export type Traits = typeof Traits.Type
@@ -48,12 +52,26 @@ export type TypeExpr =
   | { readonly _tag: "List"; readonly items: TypeExpr }
   /** An object the spec leaves untyped: string keys, unknown values. */
   | { readonly _tag: "Record" }
+  /** BiDi: one exact value, such as a union's discriminator (`type: "window"`). */
+  | { readonly _tag: "Literal"; readonly value: string | number | boolean | null }
+  /** BiDi: any of several types, tried in order. */
+  | { readonly _tag: "Union"; readonly members: ReadonlyArray<TypeExpr> }
+  /** BiDi: a fixed-length array. */
+  | { readonly _tag: "Tuple"; readonly items: ReadonlyArray<TypeExpr> }
+  /** BiDi: string keys, values of one type. */
+  | { readonly _tag: "Map"; readonly values: TypeExpr }
+
+const self = Schema.suspend((): Schema.Codec<TypeExpr> => TypeExpr)
 
 export const TypeExpr: Schema.Codec<TypeExpr> = Schema.Union([
   Schema.TaggedStruct("Ref", { shape: Schema.String }),
   Schema.TaggedStruct("Scalar", { scalar: Schema.Literals(["string", "integer", "number", "boolean", "unknown"]) }),
-  Schema.TaggedStruct("List", { items: Schema.suspend((): Schema.Codec<TypeExpr> => TypeExpr) }),
-  Schema.TaggedStruct("Record", {})
+  Schema.TaggedStruct("List", { items: self }),
+  Schema.TaggedStruct("Record", {}),
+  Schema.TaggedStruct("Literal", { value: Schema.Union([Schema.String, Schema.Number, Schema.Boolean, Schema.Null]) }),
+  Schema.TaggedStruct("Union", { members: Schema.Array(self) }),
+  Schema.TaggedStruct("Tuple", { items: Schema.Array(self) }),
+  Schema.TaggedStruct("Map", { values: self })
 ])
 
 export const Member = Schema.Struct({

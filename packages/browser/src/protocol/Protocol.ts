@@ -53,7 +53,7 @@ export interface Traits {
 
 /**
  * One command that releases a resource a reply handed out: `method`, with `param` taken from the result at
- * the JSON pointer `from`.
+ * the JSON pointer `from`, or a list of it when `list` is set.
  *
  * @stability experimental
  * @category models
@@ -63,6 +63,7 @@ export interface Release {
   readonly method: string
   readonly param: string
   readonly from: string
+  readonly list?: true | undefined
 }
 
 /**

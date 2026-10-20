@@ -19,6 +19,8 @@ import { splitId } from "./Model.ts"
 export interface Source {
   /** Where the spec came from, for the generated header. */
   readonly description: string
+  /** The output directory under `packages/browser/src`, which also keys brands: `cdp`, `bidi-protocol`. */
+  readonly output: string
 }
 
 export type Verdict =
@@ -45,6 +47,46 @@ export interface Emitted {
   readonly coverage: Coverage
 }
 
+const reserved = new Set([
+  "break",
+  "case",
+  "catch",
+  "class",
+  "const",
+  "continue",
+  "debugger",
+  "default",
+  "delete",
+  "do",
+  "else",
+  "enum",
+  "export",
+  "extends",
+  "false",
+  "finally",
+  "for",
+  "function",
+  "if",
+  "import",
+  "in",
+  "instanceof",
+  "new",
+  "null",
+  "return",
+  "super",
+  "switch",
+  "this",
+  "throw",
+  "true",
+  "try",
+  "typeof",
+  "var",
+  "void",
+  "while",
+  "with",
+  "yield"
+])
+
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
 /** `Page#navigate.Params` → `NavigateParams`; `Page#Frame.adFrameStatus` → `FrameAdFrameStatus`. */
@@ -52,8 +94,22 @@ const localName = (id: string) => splitId(id)[1].split(".").map(cap).join("")
 
 const isDeprecated = (traits: Traits) => traits.status === "deprecated"
 
-const refsOf = (type: TypeExpr): ReadonlyArray<string> =>
-  type._tag === "Ref" ? [type.shape] : type._tag === "List" ? refsOf(type.items) : []
+const refsOf = (type: TypeExpr): ReadonlyArray<string> => {
+  switch (type._tag) {
+    case "Ref":
+      return [type.shape]
+    case "List":
+      return refsOf(type.items)
+    case "Map":
+      return refsOf(type.values)
+    case "Union":
+      return type.members.flatMap(refsOf)
+    case "Tuple":
+      return type.items.flatMap(refsOf)
+    default:
+      return []
+  }
+}
 
 const jsdoc = (indent: string, lines: ReadonlyArray<string>) => {
   // `*/` would end the comment, and CDP's descriptions mention CSS at-rules (`@media`) that read as tags
@@ -128,7 +184,9 @@ export const emit = (model: ProtocolModel, source: Source): Emitted => {
   for (const id of [...emitted].sort()) {
     const domain = domainOf(id)
     const shape = shapes[id]!
-    const name = shape._tag === "Command" || shape._tag === "Event" ? splitId(id)[1] : localName(id)
+    const spelled = shape._tag === "Command" || shape._tag === "Event" ? splitId(id)[1] : localName(id)
+    // A reserved word can't name a const: BiDi's `session.new` becomes `new_`
+    const name = reserved.has(spelled) ? `${spelled}_` : spelled
     const taken = byDomain.get(domain) ?? []
     if (taken.some((other) => names.get(other) === name)) throw new Error(`${id}: name ${name} is taken in ${domain}`)
     names.set(id, name)
@@ -160,7 +218,7 @@ export const emit = (model: ProtocolModel, source: Source): Emitted => {
       if (name === undefined) throw new Error(`${id} is referenced but not emitted`)
       if (owner === domain) return name
       ;(asType ? typeImports : valueImports).add(owner)
-      return `${alias(owner)}.${name}`
+      return `${alias(cap(owner))}.${name}`
     }
     const typeOf = (type: TypeExpr, item: string): string => {
       switch (type._tag) {
@@ -174,6 +232,17 @@ export const emit = (model: ProtocolModel, source: Source): Emitted => {
         case "Record":
           entries.push({ item, verdict: "approximated", reason: "untyped-object" })
           return "{ readonly [key: string]: unknown }"
+        case "Literal":
+          return JSON.stringify(type.value)
+        case "Union":
+          return type.members.map((member) => {
+            const text = typeOf(member, item)
+            return member._tag === "Union" ? `(${text})` : text
+          }).join(" | ")
+        case "Tuple":
+          return `readonly [${type.items.map((member) => typeOf(member, item)).join(", ")}]`
+        case "Map":
+          return `{ readonly [key: string]: ${typeOf(type.values, item)} }`
       }
     }
     const codecOf = (type: TypeExpr): string => {
@@ -188,6 +257,14 @@ export const emit = (model: ProtocolModel, source: Source): Emitted => {
           return `${$Schema}.Array(${codecOf(type.items)})`
         case "Record":
           return `${$Schema}.Record(${$Schema}.String, ${$Schema}.Unknown)`
+        case "Literal":
+          return type.value === null ? `${$Schema}.Null` : `${$Schema}.Literal(${JSON.stringify(type.value)})`
+        case "Union":
+          return `${$Schema}.Union([${type.members.map(codecOf).join(", ")}])`
+        case "Tuple":
+          return `${$Schema}.Tuple([${type.items.map(codecOf).join(", ")}])`
+        case "Map":
+          return `${$Schema}.Record(${$Schema}.String, ${codecOf(type.values)})`
       }
     }
     const stability = (traits: Traits) => {
@@ -235,14 +312,14 @@ export const emit = (model: ProtocolModel, source: Source): Emitted => {
               throw new Error(`${id}: only string and integer ids are branded`)
             }
             usesBrand = true
-            const key = `~@usestrider/browser/cdp/${domain}/${name}`
+            const key = `~@usestrider/browser/${source.output}/${cap(domain)}/${name}`
             type = `${$Brand}.Branded<${scalar === "integer" ? "number" : "string"}, ${JSON.stringify(key)}>`
             codec = `/*#__PURE__*/ ${$Schema}.${
               scalar === "integer" ? "Int" : "String"
             }.pipe(/*#__PURE__*/ ${$Schema}.brand(${JSON.stringify(key)}))`
           } else {
             type = typeOf(shape.type, id)
-            codec = shape.type._tag === "Scalar" || shape.type._tag === "Record"
+            codec = shape.type._tag === "Scalar" || shape.type._tag === "Record" || shape.type._tag === "Literal"
               ? codecOf(shape.type)
               : `/*#__PURE__*/ ${$Schema}.suspend(() => ${codecOf(shape.type)})`
           }
@@ -259,16 +336,15 @@ export const emit = (model: ProtocolModel, source: Source): Emitted => {
           const fields = members.map(([member, spec]) => {
             const optional = spec.optional || spec.traits.status === "experimental"
             const sensitive = spec.traits.sensitive === true
-            if (sensitive && !(spec.type._tag === "Scalar" && spec.type.scalar === "string")) {
-              throw new Error(`${id}:${member}: only string members can be sensitive`)
-            }
             if (sensitive) usesRedacted = true
-            const type = sensitive ? `${$Redacted}.Redacted<string>` : typeOf(spec.type, `${id}:${member}`)
-            const codec = sensitive ? `${$Schema}.RedactedFromValue(${$Schema}.String)` : codecOf(spec.type)
+            const inner = typeOf(spec.type, `${id}:${member}`)
+            const type = sensitive ? `${$Redacted}.Redacted<${inner}>` : inner
+            const codec = sensitive ? `${$Schema}.RedactedFromValue(${codecOf(spec.type)})` : codecOf(spec.type)
             const doc = spec.traits.description === undefined ? "" : jsdoc("  ", [spec.traits.description])
+            const key = /^[A-Za-z_$][\w$]*$/.test(member) ? member : JSON.stringify(member)
             return {
-              type: `${doc}  readonly ${member}${optional ? "?" : ""}: ${type}${optional ? " | undefined" : ""}`,
-              codec: `    ${member}: ${optional ? `${$Schema}.optional(${codec})` : codec}`
+              type: `${doc}  readonly ${key}${optional ? "?" : ""}: ${type}${optional ? " | undefined" : ""}`,
+              codec: `    ${key}: ${optional ? `${$Schema}.optional(${codec})` : codec}`
             }
           })
           const identifier = `${domain}.${name}`
@@ -318,21 +394,21 @@ export const emit = (model: ProtocolModel, source: Source): Emitted => {
       ...(usesRedacted ? [`import type * as ${$Redacted} from "effect/Redacted"`] : []),
       `import * as ${$Schema} from "effect/Schema"`,
       ...(usesProtocol ? [`import * as ${$Protocol} from "../protocol/Protocol.ts"`] : []),
-      ...[...valueImports].sort().map((other) => `import * as ${alias(other)} from "./${other}.ts"`),
+      ...[...valueImports].sort().map((other) => `import * as ${alias(cap(other))} from "./${cap(other)}.ts"`),
       ...[...typeImports].filter((other) => !valueImports.has(other)).sort().map((other) =>
-        `import type * as ${alias(other)} from "./${other}.ts"`
+        `import type * as ${alias(cap(other))} from "./${cap(other)}.ts"`
       )
     ]
     const header = jsdoc("", [
-      domainTraits.description ?? `The ${domain} domain.`,
+      domainTraits.description ?? `The ${domain} ${model.backend === "bidi" ? "module" : "domain"}.`,
       "",
-      `Generated from ${source.description}. Don't edit: correct the model (\`packages/tools/codegen/protocols/cdp\`) and run \`pnpm codegen:protocol\`.`,
+      `Generated from ${source.description}. Don't edit: correct the model (\`packages/tools/codegen/protocols/${model.backend}\`) and run \`pnpm codegen:protocol\`.`,
       "",
       `@stability ${domainTraits.status === "experimental" ? "experimental" : "unstable"}`,
       "@since 0.1.0"
     ])
     modules.set(
-      `${domain}.ts`,
+      `${cap(domain)}.ts`,
       `${header}${imports.join("\n")}\n\n${[...types, ...commands, ...events].join("\n")}`
     )
   }
@@ -369,7 +445,7 @@ const traitsLiteral = (traits: Traits) => {
         traits.release.map((release) =>
           `{ method: ${JSON.stringify(release.method)}, param: ${JSON.stringify(release.param)}, from: ${
             JSON.stringify(release.from)
-          } }`
+          }${release.list === true ? ", list: true" : ""} }`
         ).join(", ")
       }]`
     )

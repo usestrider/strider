@@ -179,7 +179,7 @@ describe("emit", () => {
       { target: "Net#Cookie:value", traits: { sensitive: true } }
     ]
   }]])
-  const { coverage, modules } = emit(annotated, { description: "a fixture" })
+  const { coverage, modules } = emit(annotated, { description: "a fixture", output: "cdp" })
   const net = modules.get("Net.ts")!
   const card = modules.get("Card.ts")!
 
