@@ -13,10 +13,11 @@
  * - **The worker** takes events in the order they were received. For each, it decodes and folds the events the
  *   fold needs, then publishes to subscribers, so the model is updated before anyone sees the event. It never
  *   waits on commands or on subscribers; a subscriber's buffer fills or slides on its own.
+ * - **Syncs.** A session the lifecycle attaches is held until the fold syncs it: its events are published but
+ *   not folded until a snapshot of its state is in, and then those after the snapshot are folded on top.
  * - **Integrity.** Each session's queued events are limited in count and bytes. Going past a limit, or a folded
- *   event that won't decode, makes the session's model unavailable: the fold is told, and its `resync` rebuilds
- *   the model from a snapshot. Events that arrive meanwhile are still published, and are folded once the
- *   snapshot is in. A resync that fails ends the session with `modelUnavailable`.
+ *   event that won't decode, makes the session's model unavailable: the fold is told, and syncs the session
+ *   again. A sync that fails, or that falls behind the same limits, ends the session with `modelUnavailable`.
  * - **Decoding** of results and event parameters happens in the fiber that asked for them, so a payload that
  *   doesn't match its codec fails that caller or subscriber, not the connection.
  */
@@ -108,6 +109,25 @@ export interface Session extends Protocol.ProtocolSession {
   ) => Effect.Effect<{ readonly result: A; readonly received: number }, Protocol.ProtocolError>
 }
 
+/** A session's snapshot: what it installs into the model, and how far into the session's events it reaches. */
+export interface Synced {
+  /** The receive sequence number up to which the snapshot accounts for events; later ones are folded on top. */
+  readonly through: number
+  /** Installs the snapshot into the model, in the worker, before the held events are folded. */
+  readonly apply: Effect.Effect<void>
+}
+
+/** What a fold may do to the client's sessions. */
+export interface FoldControl {
+  /**
+   * Syncs a session. `sync` runs in a fiber of its own while the session's events are held; once it succeeds,
+   * its snapshot is applied in the worker and the held events after it are folded. A sync that fails ends the
+   * session with `modelUnavailable`.
+   */
+  readonly sync: (session: Session, sync: Effect.Effect<Synced, unknown>) => void
+  readonly session: (key: Protocol.SessionKey) => Session | undefined
+}
+
 /**
  * An adapter's model of each session, kept up to date by the worker. Every hook runs in the worker, in
  * receive order, and must never wait on a command, a subscriber or user code.
@@ -117,21 +137,22 @@ export interface Fold {
   readonly events: ReadonlyMap<string, Protocol.EventDef<string, any>>
   /** Folds one event, before it is published. */
   readonly apply: (session: Session, method: string, params: unknown, received: number) => Effect.Effect<void>
-  /** The session's model can't be trusted any more; wake whatever waits on it. */
-  readonly lost: (session: Session, failure: IntegrityFailure) => Effect.Effect<void>
   /**
-   * Rebuilds the session's model from a backend snapshot, in a fiber of its own, and returns the receive
-   * sequence number up to which the snapshot accounts for events. Later events are folded on top. Failing
-   * ends the session with `modelUnavailable`.
+   * The session's model can't be trusted any more: wake whatever waits on it, and sync the session again.
+   * Until it is synced, its events are held.
    */
-  readonly resync: (session: Session) => Effect.Effect<number, unknown>
+  readonly lost: (session: Session, failure: IntegrityFailure) => Effect.Effect<void>
   /** The session ended, after every event received before the end was folded and published. */
   readonly ended: (session: Session, reason: Protocol.SessionEnded) => Effect.Effect<void>
 }
 
 /** Settings for a client. */
 export interface Options {
-  readonly fold?: Fold | undefined
+  /**
+   * The fold, given the client's control. Every session the lifecycle attaches is held until the fold syncs
+   * it, so the fold must sync each one, if only with an empty snapshot.
+   */
+  readonly fold?: ((control: FoldControl) => Fold) | undefined
   /** @default defaultLimits */
   readonly limits?: Limits | undefined
 }
@@ -427,7 +448,7 @@ interface QueuedEvent {
 type Work =
   | QueuedEvent
   | { readonly _tag: "Overloaded"; readonly state: SessionState; readonly failure: IntegrityFailure }
-  | { readonly _tag: "Resynced"; readonly state: SessionState; readonly through: number }
+  | { readonly _tag: "Synced"; readonly state: SessionState; readonly synced: Synced }
   | { readonly _tag: "End"; readonly state: SessionState; readonly reason: Protocol.SessionEnded }
 
 interface SessionState {
@@ -450,7 +471,8 @@ interface SessionState {
   lastQueued: number
   /** The receive sequence of the last event the worker folded and published. */
   processed: number
-  resyncing: boolean
+  /** Events are held for the fold until a sync completes. */
+  holding: boolean
   held: Array<QueuedEvent>
   heldBytes: number
   drains: Array<{ readonly target: number; readonly done: Deferred.Deferred<void> }>
@@ -461,7 +483,6 @@ interface SessionState {
  * and ends every session.
  */
 export const make = Effect.fnUntraced(function*(transport: Transport.Transport, wire: Wire, options?: Options) {
-  const fold = options?.fold
   const limits = options?.limits ?? defaultLimits
   const validation = yield* Protocol.CurrentValidation
   const pending = new Map<number, Pending>()
@@ -470,6 +491,24 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
   const inbox = yield* Queue.unbounded<Work>()
   const closed = yield* Deferred.make<ConnectionLost>()
   const run = yield* FiberSet.makeRuntime()
+  const states = new WeakMap<Session, SessionState>()
+  const control: FoldControl = {
+    sync: (session, sync) => {
+      const state = states.get(session)
+      if (state === undefined || state.endedWith !== undefined) return
+      state.holding = true
+      run(
+        sync.pipe(
+          Effect.matchCause({
+            onFailure: () => end(state, "modelUnavailable"),
+            onSuccess: (synced) => Queue.offerUnsafe(inbox, { _tag: "Synced", state, synced })
+          })
+        )
+      )
+    },
+    session: (key) => sessions.get(key)?.handle
+  }
+  const fold = options?.fold?.(control)
   const foldDecoders = new Map(
     [...(fold?.events.values() ?? [])].map((event) =>
       [
@@ -723,7 +762,7 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
       epoch: 0,
       lastQueued: received,
       processed: received,
-      resyncing: false,
+      holding: fold !== undefined && parent !== undefined,
       held: [],
       heldBytes: 0,
       drains: []
@@ -731,6 +770,7 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
     parent?.children.add(state)
     if (key !== undefined) sessions.set(key, state)
     live.add(state)
+    states.set(state.handle, state)
     return state
   }
 
@@ -845,17 +885,9 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
   }
 
   const lose = Effect.fnUntraced(function*(state: SessionState, integrity: IntegrityFailure) {
-    if (fold === undefined || state.resyncing) return
-    state.resyncing = true
+    if (fold === undefined || state.holding) return
+    state.holding = true
     yield* fold.lost(state.handle, integrity)
-    run(
-      fold.resync(state.handle).pipe(
-        Effect.matchCause({
-          onFailure: () => end(state, "modelUnavailable"),
-          onSuccess: (through) => Queue.offerUnsafe(inbox, { _tag: "Resynced", state, through })
-        })
-      )
-    )
   })
 
   // Folds one event; one that won't decode makes the session's model unavailable.
@@ -888,7 +920,7 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
         }
         state.queuedEvents--
         state.queuedBytes -= work.bytes
-        if (state.resyncing) {
+        if (state.holding) {
           publish(work, undefined)
           state.held.push(work)
           state.heldBytes += work.bytes
@@ -896,21 +928,28 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
           return
         }
         publish(work, yield* foldEvent(work))
-        if (!state.resyncing) advance(state, work.received)
+        if (!state.holding) advance(state, work.received)
         return
       }
       case "Overloaded":
         return yield* lose(state, work.failure)
-      case "Resynced": {
-        state.resyncing = false
+      case "Synced": {
+        yield* work.synced.apply
+        state.holding = false
         const held = state.held
         state.held = []
         state.heldBytes = 0
-        advance(state, work.through)
-        for (const event of held) {
-          if (event.received <= work.through) continue
+        advance(state, work.synced.through)
+        for (let i = 0; i < held.length; i++) {
+          const event = held[i]!
+          if (event.received <= work.synced.through) continue
           yield* foldEvent(event)
-          if (state.resyncing) return
+          if (state.holding) {
+            // Lost again: what is left waits for the next sync
+            state.held = [...held.slice(i + 1), ...state.held]
+            state.heldBytes = state.held.reduce((bytes, held) => bytes + held.bytes, 0)
+            return
+          }
           advance(state, event.received)
         }
         return

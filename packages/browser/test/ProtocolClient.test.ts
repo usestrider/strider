@@ -4,6 +4,7 @@
  */
 import { assert, describe, it } from "@effect/vitest"
 import * as Page from "@usestrider/browser/cdp/Page"
+import * as Target from "@usestrider/browser/cdp/Target"
 import { Protocol } from "@usestrider/browser/protocol"
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
@@ -21,30 +22,56 @@ interface Recorder {
   readonly ended: Array<string>
 }
 
-/** A fold of `Page.loadEventFired` that records what it sees; `resync` and `apply` can be scripted. */
+/**
+ * A fold of `Page.loadEventFired` that records what it sees. It syncs each attached session with an empty
+ * snapshot, and resyncs a lost one with `resync`, which fails unless scripted.
+ */
 const makeFold = (options?: {
   readonly resync?: (session: ProtocolClient.Session) => Effect.Effect<number, unknown>
   readonly apply?: (params: Page.LoadEventFiredParams) => Effect.Effect<void>
 }) => {
   const recorder: Recorder = { folded: [], lost: [], ended: [] }
-  const fold: ProtocolClient.Fold = {
-    events: new Map([[Page.loadEventFired.method, Page.loadEventFired]]),
-    apply: (_session, _method, params) =>
-      Effect.andThen(
+  const fold = (control: ProtocolClient.FoldControl): ProtocolClient.Fold => ({
+    events: new Map<string, Protocol.EventDef<string, any>>([
+      [Page.loadEventFired.method, Page.loadEventFired],
+      [Target.attachedToTarget.method, Target.attachedToTarget]
+    ]),
+    apply: (_session, method, params) => {
+      if (method === Target.attachedToTarget.method) {
+        const session = control.session(
+          (params as Target.AttachedToTargetParams).sessionId as string as Protocol.SessionKey
+        )
+        if (session !== undefined) control.sync(session, Effect.succeed({ through: 0, apply: Effect.void }))
+        return Effect.void
+      }
+      return Effect.andThen(
         Effect.sync(() => recorder.folded.push(String((params as Page.LoadEventFiredParams).timestamp))),
         options?.apply?.(params as Page.LoadEventFiredParams) ?? Effect.void
-      ),
-    lost: (_session, failure) => Effect.sync(() => recorder.lost.push(failure)),
-    resync: options?.resync ?? (() => Effect.fail("no snapshot")),
+      )
+    },
+    lost: (session, failure) =>
+      Effect.sync(() => {
+        recorder.lost.push(failure)
+        control.sync(
+          session,
+          (options?.resync ?? (() => Effect.fail("no snapshot")))(session).pipe(
+            Effect.map((through) => ({ through, apply: Effect.void }))
+          )
+        )
+      }),
     ended: (session, reason) => Effect.sync(() => recorder.ended.push(`${session.key ?? "browser"} ${reason.why}`))
-  }
+  })
   return { fold, recorder }
 }
 
 const attach = Effect.fnUntraced(function*(browser: FakeBrowser, client: ProtocolClient.Client, sessionId: string) {
   yield* browser.receive({
     method: "Target.attachedToTarget",
-    params: { sessionId, targetInfo: {}, waitingForDebugger: false }
+    params: {
+      sessionId,
+      targetInfo: { targetId: `T-${sessionId}`, type: "page", title: "", url: "about:blank", attached: true },
+      waitingForDebugger: false
+    }
   })
   yield* browser.delivered
   const session = client.session(sessionId as Protocol.SessionKey)
@@ -80,6 +107,45 @@ describe("ProtocolClient", () => {
       )
       assert.deepStrictEqual(seen, [true, true])
       assert.deepStrictEqual(recorder.folded, ["1", "2"])
+    }))
+
+  it.effect("holds a new session's events until the fold syncs it, then folds those after the snapshot", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const snapshot = yield* Deferred.make<number>()
+      const folded: Array<string> = []
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, {
+        fold: (control) => ({
+          events: new Map<string, Protocol.EventDef<string, any>>([
+            [Page.loadEventFired.method, Page.loadEventFired],
+            [Target.attachedToTarget.method, Target.attachedToTarget]
+          ]),
+          apply: (_session, method, params) =>
+            Effect.sync(() => {
+              if (method === Target.attachedToTarget.method) {
+                const session = control.session("S1" as Protocol.SessionKey)!
+                control.sync(
+                  session,
+                  Deferred.await(snapshot).pipe(
+                    Effect.map((through) => ({ through, apply: Effect.sync(() => folded.push("snapshot")) }))
+                  )
+                )
+              } else folded.push(String((params as Page.LoadEventFiredParams).timestamp))
+            }),
+          lost: () => Effect.void,
+          ended: () => Effect.void
+        })
+      })
+      const page = yield* attach(browser, client, "S1")
+      const loaded = yield* page.subscribe(Page.loadEventFired)
+      yield* load(browser, 1) // message 2: covered by the snapshot
+      yield* load(browser, 2) // message 3: after it
+      const published = yield* loaded.pipe(Stream.take(2), Stream.map((event) => event.timestamp), Stream.runCollect)
+      assert.deepStrictEqual(published, [1, 2])
+      assert.deepStrictEqual(folded, [])
+      yield* Deferred.succeed(snapshot, 2)
+      yield* page.drainObserved
+      assert.deepStrictEqual(folded, ["snapshot", "2"])
     }))
 
   it.effect("waits in drainObserved until the fold has processed what was received", () =>
