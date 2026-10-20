@@ -66,6 +66,10 @@ export type CommandArgs<P> = [P] extends [void] ? [] : {} extends P ? [params?: 
 export interface Command<M extends string, P, A> extends Effect.Effect<A, ProtocolError, ProtocolSession> {
   readonly method: M
   readonly params: P
+  /**
+   * The definition this command came from, whose codecs the session encodes and decodes with.
+   */
+  readonly definition: CommandDef<M, P, A>
 }
 
 /**
@@ -121,11 +125,12 @@ export const command = <M extends string, P, A>(
   const make = (...args: ReadonlyArray<unknown>): Command<M, P, A> => {
     const self: Command<M, P, A> = Object.assign(
       Effect.flatMap(Effect.service(ProtocolSession), (session) => session.send(self)),
-      { method, params: args[0] as P }
+      { method, params: args[0] as P, definition }
     )
     return self
   }
-  return Object.assign(make, { method, Params, Result, traits }) as CommandDef<M, P, A>
+  const definition = Object.assign(make, { method, Params, Result, traits }) as CommandDef<M, P, A>
+  return definition
 }
 
 /**
@@ -169,8 +174,8 @@ export type SessionKey = typeof SessionKey.Type
  */
 export interface SubscribeOptions {
   /**
-   * `"lossless"` fails the stream when its buffer is full; `{ sliding }` keeps the newest events and marks the
-   * gap.
+   * `"lossless"` keeps every event until it is read; `{ sliding }` keeps only the newest `sliding` events and
+   * drops older unread ones.
    *
    * @default "lossless"
    */
@@ -185,19 +190,26 @@ export interface SubscribeOptions {
  * Commands sent on a session reply in any order; events arrive in order, per session only. A subscription is
  * live by the time `subscribe` returns, so code order is subscription order.
  *
+ * A session ends when the browser detaches it, when its parent session ends, or when the connection is lost.
+ * Then pending commands fail and subscriptions end, both with `SessionEnded`.
+ *
  * @stability experimental
  * @category services
  * @since 0.1.0
  */
 export interface ProtocolSession {
-  readonly key: SessionKey
+  /**
+   * The key the protocol routes this session's messages by, or `undefined` for the browser's own session.
+   */
+  readonly key: SessionKey | undefined
   /**
    * Sends a command and waits for its reply. Interrupting the caller abandons the reply; it never cancels the
    * command, which no protocol can do.
    */
   send<M extends string, P, A>(command: Command<M, P, A>): Effect.Effect<A, ProtocolError>
   /**
-   * Subscribes to an event; live by the time this returns.
+   * Subscribes to an event; live by the time this returns. Each event's parameters are decoded as the stream
+   * is read, so one that doesn't match its codec fails this stream with `Decode` and no other.
    */
   subscribe<M extends string, A>(
     event: EventDef<M, A>,
@@ -287,6 +299,23 @@ export class Decode extends Schema.Error<Decode>("@usestrider/browser/protocol/P
 }
 
 /**
+ * Reason for a command whose parameters didn't match their codec, so it was never sent.
+ *
+ * @stability experimental
+ * @category reasons
+ * @since 0.1.0
+ */
+export class Encode extends Schema.Error<Encode>("@usestrider/browser/protocol/Protocol/Encode")({
+  _tag: Schema.tag("Encode"),
+  method: Schema.String,
+  issue: Schema.String
+}) {
+  override get message(): string {
+    return `${this.method}'s parameters didn't encode: ${this.issue}`
+  }
+}
+
+/**
  * Reason for a session that ended before the reply arrived.
  *
  * @stability experimental
@@ -328,7 +357,7 @@ const ProtocolErrorTypeId = "~@usestrider/browser/protocol/Protocol/ProtocolErro
  * @since 0.1.0
  */
 export class ProtocolError extends Schema.TaggedError<ProtocolError>(ProtocolErrorTypeId)("ProtocolError", {
-  reason: Schema.Union([Rejected, Decode, SessionEnded, Unsupported])
+  reason: Schema.Union([Rejected, Encode, Decode, SessionEnded, Unsupported])
 }) {
   readonly [ProtocolErrorTypeId] = ProtocolErrorTypeId
   override get message(): string {

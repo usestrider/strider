@@ -81,6 +81,7 @@
     "effect": "^4.0.5"
   },
   "devDependencies": {
+    "@effect/platform-node": "^4.0.5",
     "@usestrider/utils": "workspace:^",
     "effect": "^4.0.5"
   }

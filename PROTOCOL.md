@@ -1,6 +1,6 @@
 # PROTOCOL: transports, protocol clients and backend adapters (L0)
 
-*Revision 5.25, 2026-10-19; CDP code generation built 2026-10-20. A condensed sketch drawn from draft 4 of the native model (commit `6cc0bc1`) and the research notes, especially `research/effect-building-blocks.md`, `research/non-js-cdp-clients.md`, `research/puppeteer-and-chromium-bidi.md`, `research/webdriver-bidi.md` and `research/webkit.md`.*
+*Revision 5.25, 2026-10-19; CDP code generation, the transports and the CDP client built 2026-10-19. A condensed sketch drawn from draft 4 of the native model (commit `6cc0bc1`) and the research notes, especially `research/effect-building-blocks.md`, `research/non-js-cdp-clients.md`, `research/puppeteer-and-chromium-bidi.md`, `research/webdriver-bidi.md` and `research/webkit.md`.*
 
 ## Purpose
 
@@ -70,6 +70,17 @@ interface ErrorMatcher {
 - **One reader per connection.** Writes fail promptly after close. Effect 4.0.5's `Socket` writer *waits* for a reconnection after a disconnect, so L0 wraps it to fail instead.
 - **No reconnect.** A new connection is a new model namespace (CONCEPTS.md §1).
 
+**Built** (2026-10-19). `@usestrider/browser/protocol` exports `Transport`: `pipe(handle)` over a process spawned with `Transport.pipeFds`, and `webSocket(url, options?)` through the `Socket.WebSocketConstructor` in context. Both are our own small, fail-fast transports; neither goes through Effect's `Socket`, so there is nothing to wrap.
+
+- **Errors.** `TransportError` has two reasons. `ConnectFailed`: refused, rejected at the handshake, or not open within `openTimeout` (default 10 seconds). `ConnectionLost`: its `initiator` is `local` when our scope closed it and `remote` when the browser closed its pipe, exited or closed the socket, and its `description` says which.
+- **Closing a pipe** ends file descriptor 3, and Chrome then exits with code 0 on its own (an integration test checks the exit code). The writer outlives the transport's scope for that: interrupting it would leave the pipe open. The process's own scope still terminates the browser.
+- **Message limits, measured** with Chromium 155 and Node 24.21:
+  - Chrome sends 200 MiB replies over both transports.
+  - Node's built-in WebSocket (undici) closes the connection with code 1006 on a message over 128 MiB, its default `maxPayloadSize`. `ws` stops at 100 MiB unless `maxPayload` is raised; with it raised to 256 MiB, a 200 MiB reply arrives. `NodeSocket.layerWebSocketConstructor` uses the first, or the second when headers are given.
+  - The pipe has no limit of its own. A 300 MiB reply took 1.7 seconds through `CdpConnection`, against 1.35 seconds for 200 MiB read by plain Node.
+  - No transport can deliver a message longer than V8's longest string, 2^29 − 24 characters. Chrome escapes non-ASCII text as `\uXXXX`, six bytes a character, so a string of 100 million accented characters is a 600 MB message. Such a message loses the connection, and the description says why. A probe found that, before this was handled, the reader died on it and the command waited forever.
+- **Not built:** our own `ws` constructor (`maxPayload` 256 MiB, no `perMessageDeflate`), decided in 5.15. Where it lives is an open question (below).
+
 ## Protocol client
 
 - **Commands are yieldable values.** `yield* Page.navigate({ url })` runs on the session in `R`, and `.pipe(Protocol.on(session))` picks a session explicitly.
@@ -82,6 +93,38 @@ interface ErrorMatcher {
   - A reply that nothing matches becomes `Rejected{Unrecognized}`, never a guess.
   - The tables live in `overlay/`, and each entry cites its evidence (probe 24). A `RejectReason` that no table produces is removed.
   - Above L0, error handling never matches message text. L1 maps reasons using its own state, for example `NoSuchNode` becomes `StaleRef{Detached}`.
+
+**Built for CDP** (2026-10-19). `CdpConnection.make(transport)` starts one reader in its scope, on a client every backend will share (`src/internal/protocolClient.ts`); BiDi and WebKit bring their own envelope, lifecycle and table. `browser` is the browser's own session, and `session(sessionId)` returns a session the browser announced with `Target.attachedToTarget`.
+
+- **The reader is synchronous and never waits on a consumer.** It parses the envelope, resolves the pending reply, applies the session lifecycle and offers events to subscriber queues. Results are decoded by the caller and event parameters by each subscriber, in their own fibers, so a payload that doesn't match its codec fails one call or one subscription. Anything that stops the reader, a defect included, ends the connection.
+- **Sessions form a tree.** `attachedToTarget` registers a session under the session it arrived on, and it arrives before any message on the new session and before the `attachToTarget` reply (recorded). `detachedFromTarget` ends the session and its children. A session that ends fails its pending commands and its subscriptions with `SessionEnded`, and later sends fail at once without reaching the wire.
+- **Interruption** removes the pending entry; a late reply finds none and is dropped.
+- **The error table** has six rows, recorded against Chromium 155, each citing its evidence:
+
+  | Reply | Becomes |
+  |---|---|
+  | `-32601` (JSON-RPC "Method not found": `'Nope.nothing' wasn't found`) | `Unsupported` |
+  | `-32602` "Invalid parameters" | `Rejected{InvalidArgument}` |
+  | `-32602` "No target with given id found" | `Rejected{NoSuchTarget}` |
+  | `-32602` "No frame for given id found" | `Rejected{NoSuchFrame}` |
+  | `-32000` "Could not find node with given id" | `Rejected{NoSuchNode}` |
+  | `-32001` "Session with given id not found." | `SessionEnded{detached}` |
+
+  An integration test sends each case to a real browser and checks that the reply still matches its row, which is the first half of the drift test. `-32000` "Cannot find context with specified id", for an unknown execution context or remote object, stays `Unrecognized`, because no `RejectReason` fits it yet.
+- **Tests:** 14 against a scripted browser, and 7 against Chromium 155: both transports, a failed connection, a closed target, a killed browser, a clean exit, and the error table. The Chromium suite uses `STRIDER_CHROMIUM`, or the first Chromium or Chrome on `PATH`, and is reported as skipped without one.
+- **Where the build differs from the sketch above:**
+  - `ProtocolSession.key` is `undefined` for the browser's own session, which CDP doesn't key;
+  - a command carries its `definition`, which is where the session finds its codecs;
+  - parameters that don't match their codec fail with a new reason, `Encode`, and nothing is sent. A command whose parameters are all optional, called with none, sends none;
+  - transports fail with `TransportError` (`ConnectFailed` or `ConnectionLost`), where the sketch had a bare `ConnectionLost`;
+  - the error table is data next to the client's code (`src/internal/cdpWire.ts`), not in `overlay/`: the client reads it at run time, nothing is emitted from it, and the integration test holds each row to its evidence;
+  - lossless subscriptions are unbounded, and sliding ones drop their oldest events without a gap marker. Bounded queues, `EventOverflow` and gap markers belong to the ingestion pipeline.
+- **Not built yet:**
+  - the protocol-level fallback timeout: until it exists, a raw command waits until it is answered, its session ends, or the caller times it out;
+  - routing late replies of `createsResource` commands to an owner: they are dropped like any late reply;
+  - the validation policy's `trust` mode;
+  - the ingestion pipeline (fold, integrity, prefilters, `drainObserved`);
+  - the backend adapter.
 
 ## Code generation
 
@@ -144,7 +187,7 @@ interface Traits {                               // spec facts plus overlay anno
 - **Validation is a policy:** `decode` (JIT-compiled, the default) or `trust`. The reader decodes only the envelope; each consumer decodes params in its own fiber, so protocol drift fails one consumer rather than the connection.
 - **Drift test.** Recorded traffic from the oldest and newest supported browsers must decode, and recorded error replies must classify as they did when recorded, so a browser that rewords an error fails the test instead of quietly becoming `Unrecognized`. Patched WebKit additionally checks its `protocol.json` at launch and fails with `BrowserError{IncompatibleRevision}`.
 
-**Built for CDP** (2026-10-20). `pnpm codegen:protocol` runs the pipeline; `pnpm check` regenerates in memory and fails if anything differs from what is committed.
+**Built for CDP** (2026-10-19). `pnpm codegen:protocol` runs the pipeline; `pnpm check` regenerates in memory and fails if anything differs from what is committed.
 
 - **Layout.** `packages/tools/codegen/protocols/cdp/` holds the vendored source (`source/`, devtools-protocol 0.0.1696802, the revision Puppeteer 25.14 pins for Chrome 155), `patches/`, `overlay/`, and the committed `model.json` and `coverage.json`. The tool is `packages/tools/codegen`, an Effect program.
 - **Output.** 56 domain modules in `packages/browser/src/cdp/`, published as `@usestrider/browser/cdp`, with 603 types, 619 commands and 223 events. The 150 deprecated items no emitted shape references are excluded, and 32 are approximated (`any`, and objects the spec leaves untyped), each recorded in `coverage.json`. They target `@usestrider/browser/protocol`, the hand-written `Protocol` module: `CommandDef`, the yieldable `Command`, `EventDef`, `ProtocolSession`, `Protocol.on` and `ProtocolError`.
@@ -155,7 +198,7 @@ interface Traits {                               // spec facts plus overlay anno
   - shapes are tagged with `_tag`, as Effect's are, rather than `kind`;
   - one module per domain holds both the interfaces and the codecs, rendered by separate functions, with a separate types-only output deferred until something needs it;
   - an import that would collide with a module's own names is renamed (CDP's `SmartCardEmulation` has a type named `Protocol`).
-- **Next:** the transports and the session that runs these commands, then the error matcher tables and the drift test once probes record real traffic. BiDi's CDDL and WebKit's JSON get their parsers when those backends start; the correction audit is built with the first correction.
+- **Next:** the transports and the CDP client are built (Transports and Protocol client above). The error table's next rows, and the rest of the drift test, come from probes recording real traffic. BiDi's CDDL and WebKit's JSON get their parsers when those backends start; the correction audit is built with the first correction.
 
 ## Ingestion pipeline
 
@@ -262,7 +305,9 @@ This is a planning inventory from the research, not a conformance result. `?` me
 
 ## Open questions
 
-None. Decided:
+- **Where our `ws` constructor lives.** Remote endpoints need it for replies over 128 MiB (measured under Transports). `ws` runs only on Node and Bun, so `@usestrider/browser/protocol`, which must load in any runtime, can't import it. One option is a subpath of our own, such as `@usestrider/browser/node`, with `ws` as an optional peer dependency; that bends API.md's "no platform packages of our own". The other is to wait for the `ws` option passthrough we planned to propose upstream in 5.15, and document the 128 MiB limit until it is released.
+
+Decided:
 - **Codegen route:** our own emitter over a committed protocol model, with audited corrections and a separate overlay (Code generation above). The pipeline follows Alchemy's distilled; the lessons and sources are in [research/codegen-prior-art.md](research/codegen-prior-art.md).
   - `SchemaRepresentation.toCodeDocument` was rejected because it takes no options and the representation can't carry brands, `/*#__PURE__*/` or opaque types. Effect's OpenAPI generator, which uses it, has to rewrite JSON Schema before it and swap whole entries by name after it.
   - Smithy as the model format was rejected because distilled's generator is HTTP-bound, and events, sessions and BiDi union kinds would all need custom traits.

@@ -14,9 +14,11 @@ layer. Use `pnpm` from the repository root.
   rewrite them.
 - `packages/browser` is the published package:
   - `src/`: one module per file, exported as namespaces. `src/index.ts` and each subpath's `index.ts` are generated.
+    `src/internal/` is implementation that no subpath exports, such as the protocol client and CDP's wire.
   - `scenarios/`: the acceptance scenarios from API.md, type-checked as ordinary code.
   - `typetest/`: Tstyche tests of access rules, requirement channels and what crosses by value.
-  - `test/`: runtime tests with `@effect/vitest`.
+  - `test/`: runtime tests with `@effect/vitest`. `test/integration/` drives a real Chromium: set `STRIDER_CHROMIUM`, or
+    put Chromium or Chrome on `PATH`; without one, those tests are reported as skipped.
   - `INDEX.md`: every declaration and member, generated.
 - `packages/tools/docs`: the JSDoc checker (vendored from Effect; don't edit it), the example check, `INDEX.md` and
   the API reference dataset.
@@ -32,16 +34,17 @@ layer. Use `pnpm` from the repository root.
 
 Use the narrowest check that covers the change:
 
-| Change                              | Run                                        |
-| ----------------------------------- | ------------------------------------------ |
-| Source, scenarios or configuration  | `pnpm check`, `pnpm lint-fix`              |
-| A new, renamed or removed module    | `pnpm codegen`, then `pnpm check`          |
-| Protocol corrections or annotations | `pnpm codegen:protocol`, then `pnpm check` |
-| Runtime behavior                    | `pnpm test --run <file>`                   |
-| Access rules or other type behavior | `pnpm test-types`                          |
-| JSDoc text, categories or links     | `pnpm jsdocs`                              |
-| JSDoc examples                      | `pnpm jsdocs`, then `pnpm examples`        |
-| Before a commit that touches `src/` | `pnpm all`                                 |
+| Change                              | Run                                                                                             |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Source, scenarios or configuration  | `pnpm check`, `pnpm lint-fix`                                                                   |
+| A new, renamed or removed module    | `pnpm codegen`, then `pnpm check`                                                               |
+| Protocol corrections or annotations | `pnpm codegen:protocol`, then `pnpm check`                                                      |
+| Runtime behavior                    | `pnpm test --run <file>`                                                                        |
+| The protocol client or transports   | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/integration` |
+| Access rules or other type behavior | `pnpm test-types`                                                                               |
+| JSDoc text, categories or links     | `pnpm jsdocs`                                                                                   |
+| JSDoc examples                      | `pnpm jsdocs`, then `pnpm examples`                                                             |
+| Before a commit that touches `src/` | `pnpm all`                                                                                      |
 
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
 

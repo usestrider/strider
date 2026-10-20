@@ -217,6 +217,9 @@ importers:
 
   packages/browser:
     devDependencies:
+      '@effect/platform-node':
+        specifier: ^4.0.5
+        version: 4.0.5(effect@4.0.5)(redis@6.3.0)
       '@usestrider/utils':
         specifier: workspace:^
         version: link:../tools/utils

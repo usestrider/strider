@@ -1879,6 +1879,21 @@ The Firefox backend (`@usestrider/browser/firefox`): Firefox over WebDriver BiDi
 
 ## `@usestrider/browser/protocol`
 
+### CdpConnection
+
+A raw CDP connection (L0): the browser's own session, plus each target session the browser announces, over one `Transport`.
+
+*models*
+
+- `interface CdpConnection` (experimental)
+  - `readonly browser: Protocol.ProtocolSession`
+  - `readonly session: (sessionId: Target.SessionID) => Effect.Effect<Protocol.ProtocolSession, Protocol.ProtocolError>`
+  - `readonly closed: Effect.Effect<Transport.ConnectionLost>`
+
+*constructors*
+
+- `const make: (transport: Transport.Transport) => Effect.Effect<CdpConnection, never, Scope.Scope>` (experimental)
+
 ### Protocol
 
 The protocol layer's client contract (L0): commands and events as data, the session they run on, and the errors a session reports.
@@ -1886,7 +1901,7 @@ The protocol layer's client contract (L0): commands and events as data, the sess
 *services*
 
 - `interface ProtocolSession` (experimental)
-  - `readonly key: SessionKey`
+  - `readonly key: SessionKey | undefined`
   - `send<M extends string, P, A>(command: Command<M, P, A>): Effect.Effect<A, ProtocolError>`
   - `subscribe<M extends string, A>(event: EventDef<M, A>, options?: SubscribeOptions | undefined): Effect.Effect<Stream.Stream<A, ProtocolError>, never, Scope.Scop…`
   - `readonly ended: Effect.Effect<SessionEnded>`
@@ -1906,6 +1921,7 @@ The protocol layer's client contract (L0): commands and events as data, the sess
 - `interface Command<M extends string, P, A> extends Effect.Effect<A, ProtocolError, ProtocolSession>` (experimental)
   - `readonly method: M`
   - `readonly params: P`
+  - `readonly definition: CommandDef<M, P, A>`
 - `interface CommandDef<M extends string, P, A>` (experimental)
   - `(...args: CommandArgs<P>): Command<M, P, A>`
   - `readonly method: M`
@@ -1948,12 +1964,51 @@ The protocol layer's client contract (L0): commands and events as data, the sess
 
 - `class Rejected: Schema.Error { method, reason, code, description }` (experimental)
 - `class Decode: Schema.Error { method, issue }` (experimental)
+- `class Encode: Schema.Error { method, issue }` (experimental)
 - `class SessionEnded: Schema.Error { why }` (experimental)
 - `class Unsupported: Schema.Error { method }` (experimental)
 
 *utility types*
 
 - `type CommandArgs<P> = [P] extends [void] ? [] : {} extends P ? [params?: P] : [params: P]` (experimental)
+
+### Transport
+
+Transports carry a browser connection's messages (L0): framed text in both directions, read by one consumer, never reconnected.
+
+*models*
+
+- `interface Transport` (experimental)
+  - `readonly send: (message: string) => Effect.Effect<void, TransportError>`
+  - `readonly messages: Stream.Stream<string, TransportError>`
+  - `readonly closed: Effect.Effect<ConnectionLost>`
+- `interface WebSocketOptions` (experimental)
+  - `readonly headers?: Readonly<Record<string, string | Redacted.Redacted<string>>> | undefined`
+  - `readonly openTimeout?: Duration.Input | undefined`
+
+*constructors*
+
+- `const pipe: (handle: ChildProcessSpawner.ChildProcessHandle) => Effect.Effect<Transport, never, Scope.Scope>` (experimental)
+- `const webSocket: (url: string, options?: WebSocketOptions | undefined) => Effect.Effect<Transport, TransportError, Scope.Scope | Socket.WebSocketConstructor>` (experimental)
+
+*constants*
+
+- `const pipeFds` (experimental)
+  - `readonly fd3: { readonly type: "input" }`
+  - `readonly fd4: { readonly type: "output" }`
+
+*guards*
+
+- `const isTransportError: (u: unknown) => u is TransportError` (experimental)
+
+*errors*
+
+- `class TransportError: Schema.TaggedError "TransportError" { reason }` (experimental)
+
+*reasons*
+
+- `class ConnectFailed: Schema.Error { description }` (experimental)
+- `class ConnectionLost: Schema.Error { initiator, description }` (experimental)
 
 ## `@usestrider/browser/test`
 
