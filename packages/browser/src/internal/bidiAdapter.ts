@@ -126,6 +126,8 @@ interface RequestEntry {
   readonly navigable: NavigableEntry | undefined
   readonly navigation: NavigationEntry | undefined
   readonly finished: Deferred.Deferred<void, string>
+  /** A route fulfilled it, which Firefox reports as an ordinary response. */
+  fulfilled: boolean
 }
 
 type ObligationEntry =
@@ -383,6 +385,9 @@ const capabilities = (info: Browser.Info) => {
       entry("pdf", "supported"),
       entry("evaluation.userActivation", "supported"),
       entry("webSocketFrames", "unsupported", ["WebDriver BiDi has no WebSocket frame events"]),
+      entry("network.servedBy", "partial", [
+        "a cache and a service worker look alike: both are cacheOrServiceWorker (Firefox's fromCache)"
+      ]),
       entry("cookies", "supported"),
       entry("permissions", "supported", ["granted per origin; reset sets the ones granted here back to prompt"])
     ]
@@ -994,7 +999,8 @@ export const connect: (
             hop: ids.hop(id, params.redirectCount),
             navigable: navigableOf(params.context),
             navigation: navigation !== undefined && resourceType(data) === "document" ? navigation : undefined,
-            finished: Deferred.makeUnsafe()
+            finished: Deferred.makeUnsafe(),
+            fulfilled: false
           }
           requests.set(data.request, request)
           hops.set(request.hop, request)
@@ -1007,7 +1013,6 @@ export const connect: (
           headers: headersOf(data.headers),
           resourceType: resourceType(data),
           initiator: requestInitiator(params, request.navigation),
-          servedBy: "network",
           at: Adapter.now()
         })
         emit({ _tag: "RequestSent", request: snapshot })
@@ -1022,6 +1027,9 @@ export const connect: (
           url: params.response.url as Url.Url,
           status: Math.min(599, Math.max(100, params.response.status || 200)) as NetworkResponse.StatusCode,
           headers: headersOf(params.response.headers),
+          // BiDi says only whether the network served it: Firefox's fromCache is true for a service
+          // worker's response too (review 09)
+          servedBy: request.fulfilled ? "route" : params.response.fromCache ? "cacheOrServiceWorker" : "network",
           at: Adapter.now()
         })
         emit({ _tag: "ResponseReceived", response })
@@ -1158,7 +1166,6 @@ export const connect: (
             navigable: request.navigable.id,
             navigation: Option.fromUndefinedOr(request.navigation?.id)
           },
-        servedBy: "network",
         at: Adapter.now()
       })
 
@@ -1826,13 +1833,17 @@ export const connect: (
                   ...(overrides?.body === undefined ? {} : { body: { type: "base64", value: base64(overrides.body) } })
                 } as Network.ContinueRequestParameters).pipe(on)
               }
-              case "Fulfill":
+              case "Fulfill": {
+                // Firefox reports what a route made as an ordinary response
+                const entry = requests.get(obligation.request)
+                if (entry !== undefined) entry.fulfilled = true
                 return Network.provideResponse({
                   request,
                   statusCode: decision.status,
                   headers: bidiHeaders(decision.headers),
                   body: { type: "base64", value: base64(decision.body) }
                 } as Network.ProvideResponseParameters).pipe(on)
+              }
               case "Fail":
                 return Network.failRequest({ request }).pipe(on)
               case "ProvideCredentials":

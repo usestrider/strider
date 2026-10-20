@@ -205,6 +205,63 @@ export const conformance = (backend: Backend) =>
             assert.strictEqual(urlOf(reloaded), `${world.site.origin}/json`)
           }), timeout)
 
+        it.effect("says what served each response: the network, the cache, a service worker, a route", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const capabilities = yield* SubscriptionRef.get(world.adapter.capabilities)
+            // Where a cache and a service worker look alike, the capability says so
+            const entry = capabilities.entries.find((entry) =>
+              entry.name === "network.servedBy"
+            )
+            const precise = entry?.status === "supported"
+            const { context, page } = yield* newPage(world)
+            const script = `${world.site.origin}/cached.js`
+            yield* goto(world, page, `${world.site.origin}/cache`)
+            const fresh = yield* world.facts.when("ResponseReceived", (fact) =>
+              fact.response.url === script)
+            assert.strictEqual(fresh.response.servedBy, "network")
+            yield* goto(world, page, `${world.site.origin}/cache?again`)
+            const cached = yield* world.facts.when(
+              "ResponseReceived",
+              (fact) =>
+                fact.response.url === script && fact.response.hop !== fresh.response.hop
+            )
+            assert.strictEqual(cached.response.servedBy, precise ? "cache" : "cacheOrServiceWorker")
+            // A route first, on a page no worker controls: WebKit's intercepts don't see a controlled page's requests
+            yield* world.adapter.declare({ _tag: "UserContext", context }, {
+              _tag: "Intercept",
+              patterns: [`${world.site.origin}/json`],
+              phases: ["request"]
+            })
+            const routed = yield* evaluate(world, page, "() => fetch('/json').then((r) => r.text())").pipe(
+              Effect.forkChild
+            )
+            const paused = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "PausedRequest")
+            yield* world.adapter.resolve(paused.obligation, {
+              _tag: "Fulfill",
+              status: 200,
+              headers: { "content-type": "text/plain" },
+              body: new TextEncoder().encode("from the route")
+            })
+            assert.strictEqual(yield* Fiber.join(routed), "from the route")
+            const fromRoute = yield* world.facts.when(
+              "ResponseReceived",
+              (fact) => fact.response.url === `${world.site.origin}/json`
+            )
+            assert.strictEqual(fromRoute.response.servedBy, "route")
+            yield* goto(world, page, `${world.site.origin}/sw`)
+            assert.isTrue(yield* evaluate(world, page, "() => window.controlled"), "the page is controlled")
+            assert.strictEqual(
+              yield* evaluate(world, page, "() => fetch('/from-sw').then((r) => r.text())"),
+              "made by the worker"
+            )
+            const fromWorker = yield* world.facts.when(
+              "ResponseReceived",
+              (fact) => fact.response.url === `${world.site.origin}/from-sw`
+            )
+            assert.strictEqual(fromWorker.response.servedBy, precise ? "serviceWorker" : "cacheOrServiceWorker")
+          }), timeout)
+
         it.effect("follows a redirect as hops of one request", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)

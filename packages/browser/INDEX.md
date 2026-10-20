@@ -1094,7 +1094,7 @@ Requests a page or context makes: the event, and the data every route and respon
 - `type HopId = typeof HopId.Type`
 - `type ResourceType = typeof ResourceType.Type`
 - `type Initiator = typeof Initiator.Type`
-- `class NetworkRequest: Schema.Class { hop, method, url, headers, resourceType, initiator, servedBy, at }`
+- `class NetworkRequest: Schema.Class { hop, method, url, headers, resourceType, initiator, at }`
 - `interface Filter`
   - `readonly url?: Url.Pattern | string | undefined`
   - `readonly method?: HttpMethod.HttpMethod | undefined`
@@ -1128,7 +1128,8 @@ Responses a page or context receives: the event, and, when asked for, their bodi
 *models*
 
 - `type StatusCode = typeof StatusCode.Type`
-- `class NetworkResponse: Schema.Class { hop, url, status, headers, at }`
+- `type ServedBy = typeof ServedBy.Type`
+- `class NetworkResponse: Schema.Class { hop, url, status, headers, servedBy, at }`
 - `interface CapturedResponse<B> extends NetworkResponse, HttpIncomingMessage.HttpIncomingMessage<ResponseError>`
   - `readonly body: B`
 - `type BodyDecoder<B, DE, DR> = (message: HttpIncomingMessage.HttpIncomingMessage<ResponseError>) => Effect.Effect<B, DE, DR>`
@@ -1141,6 +1142,7 @@ Responses a page or context receives: the event, and, when asked for, their bodi
 *schemas*
 
 - `const StatusCode = Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 100, maximum: 599 })), Schema.brand("~@usestrider/browser/NetworkResponse/StatusCode"))`
+- `const ServedBy = Schema.Literals(["network", "cache", "serviceWorker", "cacheOrServiceWorker", "route", "unknown"])`
 - `const ResponseErrorReason = Schema.Union([BodyUnavailable, Reason.BackendFailure])`
 
 *subscriptions*

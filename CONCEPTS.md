@@ -192,10 +192,11 @@ interface RequestSnapshot {
     | { _tag: "Worker"; realm: RealmId }
     | { _tag: "Unattributed" }                           // e.g. a client-less service-worker fetch
   readonly method: HttpMethod; readonly url: Url; readonly headers: Headers   // classified values are Redacted
-  readonly resourceType: ResourceType; readonly servedBy: "network" | "cache" | "serviceWorker"
+  readonly resourceType: ResourceType
 }
 interface ResponseSnapshot {
   readonly hop: RequestHopId; readonly status: StatusCode; readonly url: Url; readonly headers: Headers
+  readonly servedBy: "network" | "cache" | "serviceWorker" | "cacheOrServiceWorker" | "route" | "unknown"   // what answered (review 09)
   readonly body: BodyAccess                             // availability is read through an Effect
 }
 interface ConnectionModel {                            // long-lived connections

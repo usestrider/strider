@@ -181,6 +181,8 @@ interface RequestEntry {
   readonly worker: WorkerEntry | undefined
   /** Completes when the last hop finishes loading, or fails with the browser's error text. */
   readonly finished: Deferred.Deferred<void, string>
+  /** A route fulfilled it. */
+  fulfilled: boolean
 }
 
 type ObligationEntry =
@@ -366,6 +368,7 @@ const foldEvents: ReadonlyArray<Protocol.EventDef<string, any>> = [
   Network.requestWillBeSent,
   Network.responseReceived,
   Network.loadingFinished,
+  Network.requestServedFromMemoryCache,
   Network.loadingFailed,
   Network.requestIntercepted,
   Network.responseIntercepted,
@@ -513,8 +516,10 @@ const capabilities = (info: Browser.Info) => {
       entry("pauseOnStart.workers", "supported"),
       entry("pauseOnStart.popups", "supported"),
       entry("input.native", "supported"),
-      entry("interception.request", "supported"),
-      entry("interception.response", "supported"),
+      // Recorded: an intercept never sees the requests of a page a service worker controls, even those the
+      // worker passes to the network
+      entry("interception.request", "partial", ["a page a service worker controls sends its requests past it"]),
+      entry("interception.response", "partial", ["a page a service worker controls sends its requests past it"]),
       entry("interception.auth", "unsupported", ["WebKit answers challenges from credentials set in advance"]),
       entry("bodies", "supported"),
       entry("console", "supported", ["a message with only primitive arguments is attributed to the main frame"]),
@@ -525,6 +530,9 @@ const capabilities = (info: Browser.Info) => {
       entry("pdf", "unsupported", ["Playwright's WebKit has no print-to-PDF"]),
       entry("evaluation.userActivation", "supported"),
       entry("webSocketFrames", "supported"),
+      entry("network.servedBy", "supported", [
+        "a script or stylesheet reused from the memory cache within one document produces no request"
+      ]),
       entry("cookies", "supported"),
       entry("permissions", "supported", ["granted per page; reset clears every grant in the context"])
     ]
@@ -1364,7 +1372,8 @@ export const connect: (
             frame,
             navigation: navigation !== undefined && navigation.documentHop === undefined ? navigation : undefined,
             worker,
-            finished: Deferred.makeUnsafe()
+            finished: Deferred.makeUnsafe(),
+            fulfilled: false
           }
           requests.set(key, request)
           hops.set(request.hop, request)
@@ -1390,7 +1399,6 @@ export const connect: (
               : request.worker?.realm !== undefined
               ? { _tag: "Worker", realm: request.worker.realm.id }
               : { _tag: "Unattributed" },
-            servedBy: "network",
             at: Adapter.now()
           })
         })
@@ -1408,6 +1416,60 @@ export const connect: (
           encodedBytes: params.metrics?.responseBodyBytesReceived ?? 0,
           at: Adapter.now()
         })
+        Deferred.doneUnsafe(request.finished, Effect.void)
+      },
+      [Network.requestServedFromMemoryCache.method]: (
+        where,
+        params: Network.RequestServedFromMemoryCacheParams
+      ) => {
+        // A request answered from the memory cache without a load: its request, response and end at once
+        if (where.target === undefined) return
+        const frame = frames.get(params.frameId)
+        const resource = params.resource
+        const id = ids.request()
+        const request: RequestEntry = {
+          id,
+          session: where.session,
+          requestId: params.requestId,
+          redirects: 0,
+          hop: ids.hop(id, 0),
+          responded: undefined,
+          url: resource.url,
+          frame,
+          navigation: undefined,
+          worker: undefined,
+          finished: Deferred.makeUnsafe(),
+          fulfilled: false
+        }
+        requests.set(requestKey(where.session, params.requestId), request)
+        hops.set(request.hop, request)
+        emit({
+          _tag: "RequestSent",
+          request: new NetworkRequest.NetworkRequest({
+            hop: request.hop,
+            method: "GET",
+            url: resource.url as Url.Url,
+            headers: headersOf(resource.response?.requestHeaders),
+            resourceType: resourceTypes[resource.type] ?? "other",
+            initiator: frame !== undefined
+              ? { _tag: "Document", navigable: frame.id, navigation: Option.none() }
+              : { _tag: "Unattributed" },
+            at: Adapter.now()
+          })
+        })
+        request.responded = request.hop
+        emit({
+          _tag: "ResponseReceived",
+          response: new NetworkResponse.NetworkResponse({
+            hop: request.hop,
+            url: resource.url as Url.Url,
+            status: Math.min(599, Math.max(100, resource.response?.status || 200)) as NetworkResponse.StatusCode,
+            headers: headersOf(resource.response?.headers),
+            servedBy: "cache",
+            at: Adapter.now()
+          })
+        })
+        emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
         Deferred.doneUnsafe(request.finished, Effect.void)
       },
       [Network.loadingFailed.method]: (where, params: Network.LoadingFailedParams) => {
@@ -1484,6 +1546,7 @@ export const connect: (
                 url: params.response.url as Url.Url,
                 status: Math.min(599, Math.max(100, params.response.status || 200)) as NetworkResponse.StatusCode,
                 headers: headersOf(params.response.headers),
+                servedBy: servedBy(request, params.response),
                 at: Adapter.now()
               })
             ),
@@ -1528,9 +1591,28 @@ export const connect: (
           url: response.url as Url.Url,
           status: Math.min(599, Math.max(100, response.status || 200)) as NetworkResponse.StatusCode,
           headers: headersOf(response.headers),
+          servedBy: servedBy(request, response),
           at: Adapter.now()
         })
       })
+    }
+
+    // What answered, from the response's source (review 09); a route's response is `inspector-override`
+    const servedBy = (request: RequestEntry | undefined, response: Network.Response): NetworkResponse.ServedBy => {
+      if (request?.fulfilled === true) return "route"
+      switch (response.source) {
+        case "network":
+          return "network"
+        case "memory-cache":
+        case "disk-cache":
+          return "cache"
+        case "service-worker":
+          return "serviceWorker"
+        case "inspector-override":
+          return "route"
+        default:
+          return "unknown"
+      }
     }
 
     const webSocketFrame = (
@@ -1569,7 +1651,6 @@ export const connect: (
         initiator: entry?.frame !== undefined
           ? { _tag: "Document", navigable: entry.frame.id, navigation: Option.fromUndefinedOr(entry.navigation?.id) }
           : { _tag: "Document", navigable: target.page.id, navigation: Option.none() },
-        servedBy: "network",
         at: Adapter.now()
       })
 
@@ -2565,6 +2646,8 @@ export const connect: (
                   }).pipe(on)
               }
               case "Fulfill": {
+                const entry = requests.get(requestKey(obligation.target.session, obligation.requestId))
+                if (entry !== undefined) entry.fulfilled = true
                 const headers = decision.headers
                 const mimeType = Object.entries(headers).find(([name]) => name.toLowerCase() === "content-type")?.[1]
                   ?.split(";")[0] ?? ""

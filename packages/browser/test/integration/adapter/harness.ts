@@ -100,6 +100,26 @@ const routes: Record<string, Route> = {
       response,
       `<title>socket</title><script>const s = new WebSocket("ws://" + location.host + "/ws"); s.onopen = () => s.send("ping"); s.onmessage = (e) => { window.echo = e.data; s.close() }</script>`
     ),
+  "/cached.js": (_request, response) => {
+    response.writeHead(200, { "content-type": "text/javascript", "cache-control": "max-age=3600" })
+    response.end(`window.cachedLoaded = (window.cachedLoaded ?? 0) + 1`)
+  },
+  "/cache": (_request, response) => html(response, `<title>cache</title><script src="/cached.js"></script>`),
+  "/sw.js": (_request, response) => {
+    response.writeHead(200, { "content-type": "text/javascript" })
+    response.end(
+      `self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+self.addEventListener("fetch", (event) => {
+  if (new URL(event.request.url).pathname === "/from-sw") event.respondWith(new Response("made by the worker"))
+})`
+    )
+  },
+  "/sw": (_request, response) =>
+    html(
+      response,
+      `<title>sw</title><script>window.controlled = navigator.serviceWorker.register("/sw.js").then(() => navigator.serviceWorker.ready).then(() => navigator.serviceWorker.controller ? true : new Promise((resolve) => navigator.serviceWorker.addEventListener("controllerchange", () => resolve(true))))</script>`
+    ),
   "/beforeunload": (_request, response) =>
     html(
       response,

@@ -1,6 +1,6 @@
 # PROTOCOL: transports, protocol clients and backend adapters (L0)
 
-*Revision 5.25, 2026-10-19; CDP code generation, the transports and the CDP client built 2026-10-19; the client's timeouts, late replies and validation modes, the ingestion pipeline, and the CDP and BiDi adapters built 2026-10-20; WebKit code generation and the WebKit backend built 2026-10-20. A condensed sketch drawn from draft 4 of the native model (commit `6cc0bc1`) and the research notes, especially `research/effect-building-blocks.md`, `research/non-js-cdp-clients.md`, `research/puppeteer-and-chromium-bidi.md`, `research/webdriver-bidi.md` and `research/webkit.md`.*
+*Revision 5.25, 2026-10-19; CDP code generation, the transports and the CDP client built 2026-10-19; the client's timeouts, late replies and validation modes, the ingestion pipeline, and the CDP and BiDi adapters built 2026-10-20; WebKit code generation and the WebKit backend built 2026-10-20; who served a response (review 09) built 2026-10-20. A condensed sketch drawn from draft 4 of the native model (commit `6cc0bc1`) and the research notes, especially `research/effect-building-blocks.md`, `research/non-js-cdp-clients.md`, `research/puppeteer-and-chromium-bidi.md`, `research/webdriver-bidi.md` and `research/webkit.md`.*
 
 ## Purpose
 
@@ -343,7 +343,7 @@ Adapter responsibilities:
 - **Not built yet:**
   - the `RcMap` for domains beyond the base set (`Page`, `Network`, `Runtime`), which nothing consumes yet;
   - the on-demand realm strategy (no `Runtime.enable`);
-  - merging `ExtraInfo` headers and `servedBy` into request snapshots;
+  - merging `ExtraInfo` headers into request snapshots (`servedBy` is built since: Who served a response, below);
   - enrichment;
   - a test of prerender activation, which headless Chromium 155 doesn't produce; back/forward-cache restores, which it didn't in the first probe, it does between plain pages, and are built and tested since (History and restores, below).
 
@@ -408,10 +408,22 @@ Adapter responsibilities:
 
 **Not built, across backends** (2026-10-20). With these, the protocol layer is otherwise built for CDP, BiDi and patched WebKit:
 
-- **`servedBy` is always `network`.** A request's snapshot is reported when it is sent, before anything says what serves it, and what the response says (CDP's `fromDiskCache` and `fromServiceWorker`, BiDi's `fromCache`, WebKit's `source`) would need a fact that updates the request. That changes the fact contract, so it waits for a review; CDP's `ExtraInfo` headers, the ones the network stack adds, wait for the same fact.
+- **CDP's `ExtraInfo` headers**, the ones the network stack adds, such as cookies. They change a request after it is reported, so they need a fact that updates it, a change to the fact contract that waits for a review. (`servedBy` was listed here too; review 09 put it on the response instead, and it is built: Who served a response, below.)
 - **Enrichment and the domain `RcMap`** wait for what consumes them in L1, and the on-demand realm strategy for a measured need.
 - **A test of prerender activation**, which headless Chromium doesn't produce, and **downloading Chrome for Testing**, which the Chromium launcher's `ExecutableNotFound` says isn't built.
-- **The attach-only stock WebKit profile** (Built for WebKit, above).
+- **The attach-only stock WebKit profile** (Built for WebKit, above). Its endpoint is available after all: nixpkgs has WebKitGTK 2.54 and WPE (cog), whose remote inspector an environment variable turns on. What it needs is stock WebKit's own protocol, vendored as a backend of its own, a wire for it, and a smaller adapter.
+
+**Built** (2026-10-20, after [review 09](reviews/09-served-by.md)): who served a response.
+
+- **The field moved.** `servedBy` is on `NetworkResponse` now, not `NetworkRequest`: every backend says what answered a request with its response, and a request that fails has no answer to describe. It is `network`, `cache`, `serviceWorker`, `cacheOrServiceWorker`, `route` or `unknown`, from each response's own evidence:
+  - **CDP:** `Network.requestServedFromCache` before the response, or `fromDiskCache` or `fromPrefetchCache`, is `cache`; Chromium 155 sent `requestServedFromCache` with `fromDiskCache: false` for every cache hit recorded. `fromServiceWorker` is `serviceWorker`.
+  - **BiDi:** `fromCache` is `cacheOrServiceWorker`, because Firefox 158 sets it for a service worker's responses too; the capability `network.servedBy` is `partial` there, and `supported` on CDP and WebKit.
+  - **WebKit:** `source` says it: `memory-cache` and `disk-cache` are `cache`, `service-worker` is `serviceWorker`, `inspector-override` is `route`. Its `unknown`, which the probes never produced, is `unknown`: where the build differs from the review, which mapped everything onto five values.
+  - **Routes:** a response a route fulfilled reads as an ordinary network response on Chromium and Firefox, so each adapter marks the request when it sends the decision, before the response can arrive.
+- **Nothing dropped.** WebKit's `requestServedFromMemoryCache`, a request answered from the memory cache without a load, is now a request, a `cache` response and its end; the adapter used to drop it. A script reused from the memory cache within one document produces no request at all on Chromium and WebKit, which the capability's limitations say; Firefox reports it.
+- **Service workers on CDP never started.** Each one was attached twice, by the browser's auto-attach and by its page's, and the gate waited for `Runtime.enable` on each before resuming it. A service worker waiting for the debugger hasn't started, and answers `Runtime.enable` only once it has, so it waited forever: no service worker ever ran under the CDP adapter. A page's auto-attach now leaves service and shared workers to the browser's, and a worker's domains are enabled and the worker resumed in one go, as Playwright does.
+- **WebKit's intercepts don't see a controlled page.** A page a service worker controls sends its requests past `Network.addInterception`, even those the worker passes to the network; a page it doesn't control is intercepted as before. WebKit's `interception.request` and `interception.response` capabilities are `partial` with that limitation. Chromium and Firefox intercept the controlled page's requests.
+- **The test.** A conformance test loads a cacheable script fresh and again, fulfills a request through a route, registers a service worker and fetches a response it made, and checks what served each, by the capability's precision. It passes on all three backends; the drift fixtures are recorded again with this traffic.
 
 ### Pause-on-start granularity
 

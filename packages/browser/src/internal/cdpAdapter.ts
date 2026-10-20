@@ -160,6 +160,10 @@ interface RequestEntry {
   readonly navigation: NavigationEntry | undefined
   /** Completes when the last hop finishes loading, or fails with the browser's error text. */
   readonly finished: Deferred.Deferred<void, string>
+  /** `Network.requestServedFromCache` came for the current hop: `responseReceived` doesn't say so. */
+  servedFromCache: boolean
+  /** A route fulfilled it, which the browser reports as an ordinary response. */
+  fulfilled: boolean
 }
 
 type ObligationEntry =
@@ -169,6 +173,8 @@ type ObligationEntry =
     readonly target: TargetEntry
     readonly requestId: string
     readonly phase: "request" | "response" | "auth"
+    /** The request the `Network` domain knows it as, when `Fetch` names it. */
+    readonly request: RequestEntry | undefined
   }
   | {
     readonly _tag: "Prompt"
@@ -343,6 +349,7 @@ const foldEvents: ReadonlyArray<Protocol.EventDef<string, any>> = [
   Network.requestWillBeSent,
   Network.responseReceived,
   Network.loadingFinished,
+  Network.requestServedFromCache,
   Network.loadingFailed,
   Network.webSocketCreated,
   Network.webSocketFrameSent,
@@ -516,6 +523,9 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
       ),
       entry("evaluation.userActivation", "supported"),
       entry("webSocketFrames", "supported"),
+      entry("network.servedBy", "supported", [
+        "a script or stylesheet reused from the memory cache within one document produces no request"
+      ]),
       entry("cookies", "supported"),
       entry("permissions", "supported")
     ]
@@ -1348,6 +1358,7 @@ export const connect: (
           emitResponse(request, params.redirectResponse)
           emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
           hops.delete(request.hop)
+          request.servedFromCache = false
           request.redirects++
           request.hop = ids.hop(request.id, request.redirects)
           request.url = params.request.url
@@ -1365,7 +1376,9 @@ export const connect: (
             url: params.request.url,
             frame,
             navigation,
-            finished: Deferred.makeUnsafe()
+            finished: Deferred.makeUnsafe(),
+            servedFromCache: false,
+            fulfilled: false
           }
           requests.set(key, request)
           hops.set(request.hop, request)
@@ -1393,10 +1406,15 @@ export const connect: (
               : target.realm !== undefined
               ? { _tag: "Worker", realm: target.realm.id }
               : { _tag: "Unattributed" },
-            servedBy: "network",
             at: Adapter.now()
           })
         })
+      },
+      [Network.requestServedFromCache.method]: (target, params: Network.RequestServedFromCacheParams) => {
+        if (target === undefined) return
+        const request = requests.get(requestKey(target, params.requestId))
+        // Its response comes next, and doesn't say it came from the cache (recorded)
+        if (request !== undefined) request.servedFromCache = true
       },
       [Network.responseReceived.method]: (target, params: Network.ResponseReceivedParams) => {
         if (target === undefined) return
@@ -1501,7 +1519,8 @@ export const connect: (
           id: obligation,
           target,
           requestId: params.requestId,
-          phase
+          phase,
+          request
         })
         const hop = request?.hop ?? ids.hop(ids.request(), 0)
         emit({
@@ -1521,6 +1540,7 @@ export const connect: (
                   headers: Headers.fromInput(
                     Object.fromEntries((params.responseHeaders ?? []).map((header) => [header.name, header.value]))
                   ),
+                  servedBy: request?.servedFromCache === true ? "cache" : "network",
                   at: Adapter.now()
                 })
               ),
@@ -1536,7 +1556,8 @@ export const connect: (
           id: obligation,
           target,
           requestId: params.requestId,
-          phase: "auth"
+          phase: "auth",
+          request: undefined
         })
         const hop = ids.hop(ids.request(), 0)
         emit({
@@ -1568,10 +1589,21 @@ export const connect: (
           url: response.url as Url.Url,
           status: Math.min(599, Math.max(100, response.status || 200)) as NetworkResponse.StatusCode,
           headers: headersOf(response.headers),
+          servedBy: servedBy(request, response),
           at: Adapter.now()
         })
       })
     }
+
+    // What answered, from the response's flags and what came before it (review 09)
+    const servedBy = (request: RequestEntry, response: Network.Response): NetworkResponse.ServedBy =>
+      request.fulfilled
+        ? "route"
+        : response.fromServiceWorker === true
+        ? "serviceWorker"
+        : request.servedFromCache || response.fromDiskCache === true || response.fromPrefetchCache === true
+        ? "cache"
+        : "network"
 
     const webSocketFrame = (
       target: TargetEntry | undefined,
@@ -1613,7 +1645,6 @@ export const connect: (
           : target.page !== undefined
           ? { _tag: "Document", navigable: target.page.id, navigation: Option.none() }
           : { _tag: "Unattributed" },
-        servedBy: "network",
         at: Adapter.now()
       })
 
@@ -1703,7 +1734,14 @@ export const connect: (
       const { result, received } = yield* target.session.sendSequenced(Page.getFrameTree())
       // Contexts it replays arrive after the snapshot, so they are folded on top of it
       yield* Runtime.enable().pipe(on)
-      yield* Target.setAutoAttach({ autoAttach: true, waitForDebuggerOnStart: true, flatten: true }).pipe(on)
+      // Service and shared workers belong to the browser, whose session attaches them; attached here too, a
+      // service worker would wait for two sessions
+      yield* Target.setAutoAttach({
+        autoAttach: true,
+        waitForDebuggerOnStart: true,
+        flatten: true,
+        filter: [{ type: "service_worker", exclude: true }, { type: "shared_worker", exclude: true }, {}]
+      }).pipe(on)
       const failure = yield* configure.pipe(Effect.flip, Effect.option)
       return {
         through: received,
@@ -1733,15 +1771,16 @@ export const connect: (
         Effect.ensuring(resume(target.session, waiting))
       )
 
-    const workerGate = (target: TargetEntry, waiting: boolean) =>
-      Effect.gen(function*() {
-        const on = Protocol.on(target.session)
-        yield* Effect.all([Runtime.enable().pipe(on), Network.enable({}).pipe(on)], {
-          concurrency: "unbounded",
-          discard: true
-        }).pipe(Effect.ignore)
-        return { through: 0, apply: Effect.void } satisfies ProtocolClient.Synced
-      }).pipe(Effect.ensuring(resume(target.session, waiting)))
+    // A service worker waiting for the debugger hasn't started, and answers `Runtime.enable` only once it has
+    // (recorded): the domains are enabled and the worker resumed in one go, in that order, before any reply.
+    const workerGate = Effect.fnUntraced(function*(target: TargetEntry, waiting: boolean) {
+      const on = Protocol.on(target.session)
+      yield* Effect.all([Runtime.enable().pipe(on), Network.enable({}).pipe(on), resume(target.session, waiting)], {
+        concurrency: "unbounded",
+        discard: true
+      }).pipe(Effect.ignore)
+      return { through: 0, apply: Effect.void } satisfies ProtocolClient.Synced
+    })
 
     // ── Declarations ──
 
@@ -2378,6 +2417,8 @@ export const connect: (
                   }).pipe(on)
               }
               case "Fulfill":
+                // The browser reports what a route made as an ordinary response
+                if (obligation.request !== undefined) obligation.request.fulfilled = true
                 return Fetch.fulfillRequest({
                   requestId,
                   responseCode: decision.status,

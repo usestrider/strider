@@ -157,7 +157,6 @@ export class NetworkRequest extends Schema.Class<NetworkRequest>("@usestrider/br
   headers: Schema.Headers,
   resourceType: ResourceType,
   initiator: Initiator,
-  servedBy: Schema.Literals(["network", "cache", "serviceWorker"]),
   at: MonotonicInstant.MonotonicInstant
 }) {}
 

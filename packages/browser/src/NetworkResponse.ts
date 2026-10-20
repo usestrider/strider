@@ -50,7 +50,52 @@ export const StatusCode = Schema.Int.pipe(
 export type StatusCode = typeof StatusCode.Type
 
 /**
+ * Schema for what answered a request.
+ *
+ * **Details**
+ *
+ * - `network`: the server, over the network.
+ * - `cache`: the browser's HTTP cache, in memory or on disk.
+ * - `serviceWorker`: a service worker's `respondWith`, whether the worker made the response or fetched it.
+ * - `cacheOrServiceWorker`: not the network, and the browser doesn't say which. Firefox reports both the same
+ *   way, which its `network.servedBy` capability says.
+ * - `route`: a route that fulfilled the request.
+ * - `unknown`: the browser says it doesn't know, as WebKit can.
+ *
+ * **Gotchas**
+ *
+ * A script or stylesheet reused from the memory cache within the same document produces no request at all on
+ * Chromium and WebKit, so it has no response to describe; Firefox reports it as `cacheOrServiceWorker`.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const ServedBy = Schema.Literals([
+  "network",
+  "cache",
+  "serviceWorker",
+  "cacheOrServiceWorker",
+  "route",
+  "unknown"
+])
+
+/**
+ * What answered a request.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type ServedBy = typeof ServedBy.Type
+
+/**
  * The metadata of one redirect hop's response.
+ *
+ * **Details**
+ *
+ * `servedBy` says what answered: the network, a cache, a service worker or a route. A request that fails has
+ * no response, so nothing to say.
  *
  * @stability unstable
  * @category models
@@ -61,6 +106,7 @@ export class NetworkResponse extends Schema.Class<NetworkResponse>("@usestrider/
   url: Url.Url,
   status: StatusCode,
   headers: Schema.Headers,
+  servedBy: ServedBy,
   at: MonotonicInstant.MonotonicInstant
 }) {}
 
