@@ -65,7 +65,7 @@ interface ErrorMatcher {
 | Transport | Details |
 |---|---|
 | **Pipe** (launched Chromium; patched WebKit) | fd 3 in, fd 4 out, NUL-framed JSON. One long-lived outbox stream feeds fd 3, because a finite stream would send EOF and disconnect the browser. Spawned with `forceKillAfter`, and stderr is drained or ignored |
-| **WebSocket** (remote CDP, BiDi, iOS) | Our own `ws` constructor with `maxPayload` of about 256 MiB (a `ByteSize`) and no `perMessageDeflate`. Headers are allowed for remote providers |
+| **WebSocket** (remote CDP, BiDi, iOS) | Through the `Socket.WebSocketConstructor` in context. Headers are allowed for remote providers. The constructor sets the largest message: 128 MiB for Node's built-in WebSocket |
 
 - **One reader per connection.** Writes fail promptly after close. Effect 4.0.5's `Socket` writer *waits* for a reconnection after a disconnect, so L0 wraps it to fail instead.
 - **No reconnect.** A new connection is a new model namespace (CONCEPTS.md §1).
@@ -79,7 +79,7 @@ interface ErrorMatcher {
   - Node's built-in WebSocket (undici) closes the connection with code 1006 on a message over 128 MiB, its default `maxPayloadSize`. `ws` stops at 100 MiB unless `maxPayload` is raised; with it raised to 256 MiB, a 200 MiB reply arrives. `NodeSocket.layerWebSocketConstructor` uses the first, or the second when headers are given.
   - The pipe has no limit of its own. A 300 MiB reply took 1.7 seconds through `CdpConnection`, against 1.35 seconds for 200 MiB read by plain Node.
   - No transport can deliver a message longer than V8's longest string, 2^29 − 24 characters. Chrome escapes non-ASCII text as `\uXXXX`, six bytes a character, so a string of 100 million accented characters is a 600 MB message. Such a message loses the connection, and the description says why. A probe found that, before this was handled, the reader died on it and the command waited forever.
-- **Not built:** our own `ws` constructor (`maxPayload` 256 MiB, no `perMessageDeflate`), decided in 5.15. Where it lives is an open question (below).
+- **No `ws` constructor of our own** (decided 2026-10-19, below). Until Effect's Node constructor passes `ws` options through, a remote endpoint's replies are limited to 128 MiB; launched browsers use the pipe.
 
 ## Protocol client
 
@@ -305,9 +305,7 @@ This is a planning inventory from the research, not a conformance result. `?` me
 
 ## Open questions
 
-- **Where our `ws` constructor lives.** Remote endpoints need it for replies over 128 MiB (measured under Transports). `ws` runs only on Node and Bun, so `@usestrider/browser/protocol`, which must load in any runtime, can't import it. One option is a subpath of our own, such as `@usestrider/browser/node`, with `ws` as an optional peer dependency; that bends API.md's "no platform packages of our own". The other is to wait for the `ws` option passthrough we planned to propose upstream in 5.15, and document the 128 MiB limit until it is released.
-
-Decided:
+None. Decided:
 - **Codegen route:** our own emitter over a committed protocol model, with audited corrections and a separate overlay (Code generation above). The pipeline follows Alchemy's distilled; the lessons and sources are in [research/codegen-prior-art.md](research/codegen-prior-art.md).
   - `SchemaRepresentation.toCodeDocument` was rejected because it takes no options and the representation can't carry brands, `/*#__PURE__*/` or opaque types. Effect's OpenAPI generator, which uses it, has to rewrite JSON Schema before it and swap whole entries by name after it.
   - Smithy as the model format was rejected because distilled's generator is HTTP-bound, and events, sessions and BiDi union kinds would all need custom traits.
@@ -323,4 +321,5 @@ Decided:
   - high-volume telemetry is decoded by its consumer;
   - `trust` mode is an explicit opt-in layer;
   - AOT compilation is an explicit build choice with the same semantics.
-- **Effect `Socket`:** ship our own small fail-fast transport and `ws` constructor now, and propose upstream a fail-fast writer mode and `ws` option passthrough, switching over once they're released.
+- **Effect `Socket`:** ship our own small fail-fast transport now, and propose upstream a fail-fast writer mode, switching over once it's released.
+- **`ws` constructor** (2026-10-19, replacing 5.15's "our own `ws` constructor"): we don't ship one. `ws` runs only on Node and Bun, so `@usestrider/browser/protocol` can't import it, and a platform subpath of our own would bend API.md's "no platform packages of our own". Instead we propose upstream that `NodeSocket.layerWebSocketConstructor` pass `ws` options (`maxPayload`, `perMessageDeflate`) through, and document the 128 MiB limit of Node's built-in WebSocket until it ships.
