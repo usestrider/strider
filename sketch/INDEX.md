@@ -1,492 +1,206 @@
 # effect-browser API index
 
-Generated from `src/` by `npm run index`; don't edit by hand. One line per declaration and member. ● marks what is new in the sketch, beyond API.md.
+Generated from `src/` by `npm run index`; don't edit by hand. One line per declaration and member, by entry point, module and `@category`. Experimental APIs are marked. The browsable reference is generated from the same sources by `npm run api-reference`.
 
-## Entry and settings
+## `effect-browser`
 
-### Browser and backends (`src/Browser.ts`)
+### AriaPattern
 
-- `interface BackendInfo`
-  - `readonly product: "chrome" | "chromium" | "edge" | "firefox" | "webkit" | "safari" | (string & {})`
-  - `readonly version: string`
-  - `readonly protocol: "cdp" | "bidi" | "webkit"`
-  - `readonly revision: string`
-- `interface CapabilityEntry`
-  - `readonly name: string`
-  - `readonly status: "supported" | "partial" | "unsupported" | "unknown"`
-  - `readonly evidence: string`
-  - `readonly limitations: ReadonlyArray<string>`
-- `interface CapabilitySet`
-  - `readonly entries: ReadonlyArray<CapabilityEntry>`
+Patterns over the accessibility tree, for `Expect.toMatchAria`.
+
+*models*
+
+- `interface AriaPattern`
+  - `readonly [TypeId]: typeof TypeId`
+- `interface Children`
+  - `readonly [ChildrenTypeId]: typeof ChildrenTypeId`
+
+*constructors*
+
+- `const node: (role: AriaRole.AriaRole, name: string | RegExp, children: Children) => AriaPattern`
+- `const text: (value: string | RegExp) => AriaPattern`
+- `const exactly: (...children: ReadonlyArray<AriaPattern>) => Children`
+- `const including: (...children: ReadonlyArray<AriaPattern>) => Children`
+
+*constants*
+
+- `const unchecked: Children`
+
+*guards*
+
+- `const isAriaPattern: (u: unknown) => u is AriaPattern`
+
+### AriaRole
+
+WAI-ARIA roles, as used by `getByRole`, snapshots and `AriaPattern`.
+
+*models*
+
+- `type AriaRole = | "alert" | "alertdialog" | "application" | "article" | "banner" | "blockquote" | "button" | "caption" | "cell" | "checkbox" | "code" | "columnheader" | "combobox" | "complementary" | "contentinfo" |…`
+
+*constants*
+
+- `const all: ReadonlySet<AriaRole>`
+
+*guards*
+
+- `const isAriaRole: (u: unknown) => u is AriaRole`
+
+### AutoResolution
+
+Obligations decided by a default policy because no handler decided them.
+
+*models*
+
+- `type Subject = typeof Subject.Type`
+- `class AutoResolution: Schema.Class { subject, decision, policy, at }`
+- `interface Filter`
+  - `readonly subject?: Subject["_tag"] | ReadonlyArray<Subject["_tag"]> | undefined`
+
+*schemas*
+
+- `const Subject = Schema.Union([Schema.TaggedStruct("Dialog", { kind: Schema.Literals(["Alert", "Confirm", "Prompt", "BeforeUnload"]), message: Schema.String }), Schema.TaggedStruct("FileChooser", {}), Schema.TaggedSt…`
+
+*subscriptions*
+
+- `const next: <PE = never, PR = never>(target: Page.Page | UserContext.UserContext, filter?: Filter | undefined, where?: Subscription.Where<AutoResolution, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyD…`
+- `const stream: <PE = never, PR = never>(target: Page.Page | UserContext.UserContext, filter?: Filter | undefined, where?: Subscription.Where<AutoResolution, PE, PR> | undefined) => Effect.Effect< Stream.Stream<Auto…`
+
+*getters*
+
+- `const history: (target: Page.Page | UserContext.UserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<AutoResolution>>`
+
+### Browser
+
+The `Browser` service, its accessors, and the settings every backend shares.
+
+*services*
+
+- `interface Browser`
+  - `readonly [TypeId]: typeof TypeId`
+  - `readonly info: Info`
+  - `readonly capabilities: Watchable.Watchable<CapabilitySet>`
+  - `newContext(options?: UserContext.Options | undefined): Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Scope.Scope>`
+  - `newPage(options?: UserContext.Options | undefined): Effect.Effect<Page.Page, Page.PageError, Scope.Scope>`
+  - `readonly pages: Watchable.Watchable<ReadonlyArray<Page.ObservedPage>>`
+  - `readonly defaultContext: UserContext.ObservedUserContext`
+
+*tags*
+
+- `const Browser: Context.Service<Browser, Browser>`
+
+*accessors*
+
+- `const newPage: (options?: UserContext.Options | undefined) => Effect.Effect<Page.Page, Page.PageError, Browser | Scope.Scope>`
+- `const newContext: (options?: UserContext.Options | undefined) => Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Browser | Scope.Scope>`
+
+*layers*
+
+- `const layerTest: (timeline: string) => Layer.Layer<Browser>` (experimental)
+
+*models*
+
+- `class Info: Schema.Class { product, version, protocol, revision }`
+- `type CapabilityEntry = typeof CapabilityEntry.Type`
+- `class CapabilitySet: Schema.Class { entries }`
   - `has(name: string): boolean`
-- `interface BrowserHandle`
-  - `readonly info: BackendInfo`
-  - `readonly capabilities: Watchable<CapabilitySet>`
-  - `readonly newContext: Effect.Effect<UserContext, UserContextError, Scope.Scope>`
-  - `newContextWith(options: UserContextOptions): Effect.Effect<UserContext, UserContextError, Scope.Scope>`
-  - `readonly newPage: Effect.Effect<Page, PageError, Scope.Scope>`
-  - `newPageWith(options: UserContextOptions): Effect.Effect<Page, PageError, Scope.Scope>`
-  - `readonly pages: Watchable<ReadonlyArray<ObservedPage>>`
-  - `readonly defaultContext: ObservedUserContext`
-- `class Browser extends Context.Service<Browser, BrowserHandle>()("effect-browser/Browser")`
-- `interface LaunchProfile`
-  - `readonly name: "stock" | "automation" | "concurrent"`
-  - `readonly args: ReadonlyArray<string>`
-  - `readonly prefs: Readonly<Record<string, string | number | boolean>>`
-- `const LaunchProfile`
-  - `readonly stock: LaunchProfile`
-  - `readonly automation: LaunchProfile`
-  - `readonly concurrent: LaunchProfile`
 - `interface LaunchOptions`
-  - `readonly headless?: boolean`
-  - `readonly channel?: "stable" | "beta" | "canary"`
-  - `readonly executablePath?: LocalPath | string`
-  - `readonly args?: ReadonlyArray<string>`
-  - `readonly profile?: LaunchProfile`
-  - `readonly userDataDir?: LocalPath | string`
-- `interface LaunchingBackend`
-  - `readonly launch: Layer.Layer<Browser, LaunchError, LaunchRequirements>`
-  - `launchWith(options: LaunchOptions): Layer.Layer<Browser, LaunchError, LaunchRequirements>`
-  - `launchConfig(options: Config.Wrap<LaunchOptions>): Layer.Layer<Browser, LaunchError | Config.ConfigError, LaunchRequirements>`
+  - `readonly headless?: boolean | undefined`
+  - `readonly channel?: "stable" | "beta" | "canary" | undefined`
+  - `readonly executablePath?: FilePath.Local | string | undefined`
+  - `readonly args?: ReadonlyArray<string> | undefined`
+  - `readonly profile?: LaunchProfile.LaunchProfile | undefined`
+  - `readonly userDataDir?: FilePath.Local | string | undefined`
 - `interface ConnectOptions`
-  - `readonly headers?: Readonly<Record<string, string | Redacted.Redacted<string>>>`
-- `interface ConnectingBackend`
-  - `connect(endpoint: Url | string, options?: ConnectOptions): Layer.Layer<Browser, ConnectError, Socket.WebSocketConstructor>`
-- `const Chromium`
-  - `…LaunchingBackend`
-  - `…ConnectingBackend`
-- `const Firefox`
-  - `…LaunchingBackend`
-  - `…ConnectingBackend`
-- `const WebKit`
-  - `…LaunchingBackend`
-  - `attach(endpoint: Url | string, options?: ConnectOptions): Layer.Layer<Browser, ConnectError, Socket.WebSocketConstructor>`
-- `const Bidi`
-  - `…ConnectingBackend`
+  - `readonly headers?: Readonly<Record<string, string | Redacted.Redacted<string>>> | undefined`
+- `interface Operation`
+  - `readonly name: string`
+  - `readonly target: Target.Description`
+- `type BrowserErrorReason = typeof BrowserErrorReason.Type`
 
-### Deadline (`src/Deadline.ts`)
+*schemas*
 
-- `interface Dual<X>`
-  - `(x: X): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>`
-  - `<A, E, R>(self: Effect.Effect<A, E, R>, x: X): Effect.Effect<A, E, R>`
-- `const Deadline`
-  - `readonly within: Dual<Duration.Input>`
-  - `readonly withDefaultBudget: Dual<Duration.Input>`
-  - `readonly remaining: Effect.Effect<Option.Option<Duration.Duration>>`
-  - `readonly Current: Context.Reference<Option.Option<MonotonicInstant>>`
-  - `readonly DefaultBudget: Context.Reference<Duration.Duration>`
+- `const CapabilityEntry = Schema.Struct({ name: Schema.String, status: Schema.Literals(["supported", "partial", "unsupported", "unknown"]), evidence: Schema.String, limitations: Schema.Array(Schema.String) })`
+- `const BrowserErrorReason = Schema.Union([ExecutableNotFound, ProcessExited, IncompatibleRevision, ConnectionFailed, Reason.InvalidInput])`
 
-### Diagnostics (`src/Diagnostics.ts`)
+*references*
 
-- `interface Diagnostics`
-  - `readonly operationId: OperationId`
-  - `readonly dispatch: DispatchState`
-  - `readonly progress: ReadonlyArray<StepEvidence>`
-  - `readonly lastObserved: Option.Option<ObservedValue>`
-  - `readonly cleanup: CleanupState`
-- `type DispatchState = | { readonly _tag: "NotSent" } | { readonly _tag: "MayHaveBeenSent" } | { readonly _tag: "Acknowledged"; readonly result: "ok" | "rejected" }`
-- `interface StepEvidence`
-  - `readonly step: string`
-  - `readonly state: "unsent" | "uncertain" | "ok" | "rejected"`
-  - `readonly at: MonotonicInstant`
-- `interface ObservedValue`
-  - `readonly at: MonotonicInstant`
-  - `readonly value: unknown`
-- `type CleanupState = | { readonly _tag: "NotNeeded" } | { readonly _tag: "Pending" } | { readonly _tag: "Completed" } | { readonly _tag: "Failed"; readonly cause: string }`
-- `type DiagnosticsPreset = | "local" | "strict"`
-- `const Diagnostics`
-  - `readonly withPreset: Dual<DiagnosticsPreset>`
-  - `readonly Preset: Context.Reference<DiagnosticsPreset>`
+- `const SpanNameGenerator: Context.Reference<(operation: Operation) => string>`
+- `const TracerDisabledWhen: Context.Reference<Predicate.Predicate<Operation>>`
+- `const TraceProtocolCommands: Context.Reference<boolean>`
 
-### Brands and ids (`src/Brand.ts`)
+*guards*
 
-- `type Url = Branded<string, "Url">`
-- `type UrlPattern = Branded<string, "UrlPattern">`
-- `type Origin = Branded<string, "Origin">`
-- `type Site = Branded<string, "Site">`
-- `type HttpStatusCode = Branded<number, "HttpStatusCode">`
-- `type CookieName = Branded<string, "CookieName">`
-- `type CookieDomain = Branded<string, "CookieDomain">`
-- `type LocalPath = Branded<string, "LocalPath">`
-- `type RemotePath = Branded<string, "RemotePath">`
-- `type CssPixels = Branded<number, "CssPixels">`
-- `type DevicePixels = Branded<number, "DevicePixels">`
-- `type Locale = Branded<string, "Locale">`
-- `type TimeZoneId = Branded<string, "TimeZoneId">`
-- `type FileName = Branded<string, "FileName">`
-- `type MimeType = Branded<string, "MimeType">`
-- `type KeyName = Branded<string, "KeyName">`
-- `type SecretName = Branded<string, "SecretName">`
-- `type PageName = Branded<string, "PageName">`
-- `type UserContextId = Branded<string, "UserContextId">`
-- `type NavigableId = Branded<string, "NavigableId">`
-- `type DocumentId = Branded<string, "DocumentId">`
-- `type DocumentGeneration = Branded<number, "DocumentGeneration">`
-- `type RealmId = Branded<string, "RealmId">`
-- `type NavigationId = Branded<string, "NavigationId">`
-- `type RequestId = Branded<string, "RequestId">`
-- `type RequestHopId = Branded<string, "RequestHopId">`
-- `type DownloadId = Branded<string, "DownloadId">`
-- `type ConnectionId = Branded<string, "ConnectionId">`
-- `type PromptId = Branded<string, "PromptId">`
-- `type InitScriptId = Branded<string, "InitScriptId">`
-- `type OperationId = Branded<string, "OperationId">`
-- `type RefId = Branded<string, "RefId">`
-- `type MonotonicInstant = Branded<number, "MonotonicInstant">`
-- `type AriaRole = | "alert" | "alertdialog" | "application" | "article" | "banner" | "blockquote" | "button" | "caption" | "cell" | "checkbox" | "code" | "columnheader" | "combobox" | "complementary" | "contentinfo" | "definition" | "…`
+- `const isBrowser: (u: unknown) => u is Browser`
+- `const isBrowserError: (u: unknown) => u is BrowserError`
 
-## Pages and contexts
+*errors*
 
-### Pages (`src/Page.ts`)
+- `class BrowserError: Schema.TaggedError "BrowserError" { reason, diagnostics }`
 
-- `type PageStatus = | { readonly _tag: "Open"; readonly url: Url; readonly document: DocumentStatus; readonly prompt: Option.Option<PromptSnapshot> } | { readonly _tag: "Closed"; readonly reason: CloseReason }`
-- `interface DocumentStatus`
-  - `readonly id: DocumentId`
-  - `readonly readiness: "loading" | "interactive" | "complete"`
-  - `readonly lifecycle: "active" | "suspended"`
-- `interface PromptSnapshot`
-  - `readonly id: PromptId`
-  - `readonly kind: "alert" | "confirm" | "prompt" | "beforeunload"`
-  - `readonly blocking: "confirmed" | "suspected"`
-- `interface FrameTree`
-  - `readonly id: NavigableId`
-  - `readonly url: Url`
-  - `readonly name: Option.Option<string>`
-  - `readonly children: ReadonlyArray<FrameTree>`
-- `type LoadState = "commit" | "domContentLoaded" | "load"`
-- `interface ScreenshotOptions`
-  - `readonly area?: | { readonly _tag: "Viewport" } | { readonly _tag: "FullPage" } | { readonly _tag: "Clip"; readonly rect: { readonly x: CssPixels; re…`
-  - `readonly format?: { readonly _tag: "Png" } | { readonly _tag: "Jpeg"; readonly quality: number }`
-  - `readonly scale?: "css" | "device"`
-  - `readonly omitBackground?: boolean`
-- `interface Length`
-  - `readonly value: number`
-  - `readonly unit: "in" | "cm" | "mm" | "px"`
-- ● `interface PdfOptions`
-  - `readonly paper?: "letter" | "legal" | "tabloid" | "a3" | "a4" | "a5" | { readonly width: Length; readonly height: Length }`
-  - `readonly landscape?: boolean`
-  - `readonly margins?: { readonly top?: Length; readonly right?: Length; readonly bottom?: Length; readonly left?: Length }`
-  - `readonly scale?: number`
-  - `readonly background?: boolean`
-  - `readonly pageRanges?: string`
-  - `readonly preferCssPageSize?: boolean`
-  - `readonly header?: string`
-  - `readonly footer?: string`
-- ● `interface ReadonlyOriginStorage`
-  - `readonly entries: Effect.Effect<ReadonlyArray<readonly [key: string, value: string]>, StorageError | TargetGone>`
-  - `get(key: string): Effect.Effect<Option.Option<string>, StorageError | TargetGone>`
-- ● `interface OriginStorage extends ReadonlyOriginStorage`
-  - `set(key: string, value: string | Redacted.Redacted<string>): Effect.Effect<void, StorageError | TargetGone>`
-  - `remove(key: string): Effect.Effect<void, StorageError | TargetGone>`
-  - `readonly clear: Effect.Effect<void, StorageError | TargetGone>`
-- `interface ObservedPage`
-  - `readonly id: NavigableId`
-  - `readonly status: Watchable<PageStatus>`
-  - `readonly url: Watchable<Url>`
-  - `readonly frames: Watchable<FrameTree>`
-  - ● `readonly workers: Watchable<ReadonlyArray<ObservedBrowserWorker>>`
-  - `readonly closed: Effect.Effect<CloseReason>`
-  - `readonly inspect: Effect.Effect<ReadonlyPage, PageError, Scope.Scope>`
-  - `readonly control: Effect.Effect<Page, PageError, Scope.Scope>`
-- `interface ReadonlyPage extends ObservedPage`
-  - `getByRole(role: AriaRole, options?: RoleOptions): ReadonlyLocator`
-  - `getByText(text: string | RegExp, options?: TextOptions): ReadonlyLocator`
-  - `getByLabel(text: string | RegExp, options?: TextOptions): ReadonlyLocator`
-  - `getByPlaceholder(text: string | RegExp, options?: TextOptions): ReadonlyLocator`
-  - `getByAltText(text: string | RegExp, options?: TextOptions): ReadonlyLocator`
-  - `getByTitle(text: string | RegExp, options?: TextOptions): ReadonlyLocator`
-  - `getByTestId(id: string): ReadonlyLocator`
-  - `locator(css: string): ReadonlyLocator`
-  - `frame(iframe: ReadonlyLocator): ReadonlyFrameLocator`
-  - `readonly title: Effect.Effect<string, ReadError>`
-  - ● `readonly readHtml: Effect.Effect<string, ReadError>`
-  - `readonly ariaSnapshot: Effect.Effect<Snapshot<ReadonlyLocator>, ReadError>`
-  - `readonly snapshot: Effect.Effect<Snapshot<ReadonlyLocator>, ReadError>`
-  - `snapshotWith(options: SnapshotOptions): Effect.Effect<Snapshot<ReadonlyLocator>, ReadError>`
-  - `readonly screenshot: Effect.Effect<Uint8Array, CaptureError>`
-  - `screenshotWith(options: ScreenshotOptions): Effect.Effect<Uint8Array, CaptureError>`
-  - `readonly pdf: Effect.Effect<Uint8Array, CaptureError>`
-  - `pdfWith(options: PdfOptions): Effect.Effect<Uint8Array, CaptureError>`
-  - `readonly localStorage: ReadonlyOriginStorage`
-  - `readonly sessionStorage: ReadonlyOriginStorage`
-  - `evaluate<Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args): Effect.Effect<Serialized<A>, EvaluationError …`
-  - `capability<H>(capability: Capability<H>): Effect.Effect<H, CapabilityError, Scope.Scope>`
-- `interface Page extends ReadonlyPage`
-  - `getByRole(role: AriaRole, options?: RoleOptions): Locator`
-  - `getByText(text: string | RegExp, options?: TextOptions): Locator`
-  - `getByLabel(text: string | RegExp, options?: TextOptions): Locator`
-  - `getByPlaceholder(text: string | RegExp, options?: TextOptions): Locator`
-  - `getByAltText(text: string | RegExp, options?: TextOptions): Locator`
-  - `getByTitle(text: string | RegExp, options?: TextOptions): Locator`
-  - `getByTestId(id: string): Locator`
-  - `locator(css: string): Locator`
-  - `frame(iframe: ReadonlyLocator): FrameLocator`
-  - `readonly ariaSnapshot: Effect.Effect<Snapshot<Locator>, ReadError>`
-  - `readonly snapshot: Effect.Effect<Snapshot<Locator>, ReadError>`
-  - `snapshotWith(options: SnapshotOptions): Effect.Effect<Snapshot<Locator>, ReadError>`
-  - `readonly workers: Watchable<ReadonlyArray<BrowserWorker>>`
-  - `readonly localStorage: OriginStorage`
-  - `readonly sessionStorage: OriginStorage`
-  - `readonly context: UserContext`
-  - `goto(url: Url | string, options?: { readonly waitUntil?: LoadState readonly accept?: ReadonlyArray<"download" | "noContent"> }): Effect.Effect<PageNa…`
-  - `readonly reload: Effect.Effect<PageNavigation, NavigationError | TargetGone | Timeout>`
-  - `reloadWith(options: { readonly waitUntil?: LoadState; readonly bypassCache?: boolean }): Effect.Effect<PageNavigation, NavigationError | TargetGone |…`
-  - `readonly back: Effect.Effect<Option.Option<PageNavigation>, NavigationError | TargetGone | Timeout>`
-  - `backWith(options: { readonly waitUntil?: LoadState }): Effect.Effect<Option.Option<PageNavigation>, NavigationError | TargetGone | Timeout>`
-  - `readonly forward: Effect.Effect<Option.Option<PageNavigation>, NavigationError | TargetGone | Timeout>`
-  - `forwardWith(options: { readonly waitUntil?: LoadState }): Effect.Effect<Option.Option<PageNavigation>, NavigationError | TargetGone | Timeout>`
-  - `evaluateWith<Args extends ReadonlyArray<unknown>, A>(options: { readonly world: "isolated" | "main"; readonly userGesture?: boolean }, fn: (...args: …`
-  - `evaluateHandle<Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args): Effect.Effect<JSHandle<Awaited<A>>, Eva…`
-  - `readonly keyboard: Keyboard`
-  - `readonly mouse: Mouse`
-  - `readonly clock: PageClock`
-  - `route<E, R>(pattern: UrlPattern | string, handler: RouteHandler<E, R>): Effect.Effect<RouteRegistration, RouteError, Scope.Scope | R>`
-  - `addInitScript(script: InitScriptSource, options?: InitScriptOptions): Effect.Effect<InitScript, DeclarationError, Scope.Scope>`
-  - `emulate(settings: Emulation): Effect.Effect<Registration, DeclarationError, Scope.Scope>`
-  - `readonly activate: Effect.Effect<void, TargetGone>`
-  - `readonly close: Effect.Effect<void, TargetGone | Timeout>`
-  - `closeWith(options: { readonly runBeforeUnload: boolean }): Effect.Effect<void, CloseCanceled | TargetGone | Timeout>`
+*reasons*
 
-### UserContext, emulation, cookies (`src/UserContext.ts`)
+- `class ExecutableNotFound: Schema.Error { searched, hint }`
+- `class ProcessExited: Schema.Error { code, stderrTail, hint }`
+- `class IncompatibleRevision: Schema.Error { revision, hint }`
+- `class ConnectionFailed: Schema.Error { stage, hint, cause }`
 
-- `interface ObservedUserContext`
-  - `readonly id: UserContextId`
-  - `readonly pages: Watchable<ReadonlyArray<ObservedPage>>`
-  - ● `readonly workers: Watchable<ReadonlyArray<ObservedBrowserWorker>>`
-  - `readonly closed: Effect.Effect<CloseReason>`
-  - `readonly control: Effect.Effect<UserContext, UserContextError, Scope.Scope>`
-- `interface UserContext extends ObservedUserContext`
-  - `readonly newPage: Effect.Effect<Page, PageError, Scope.Scope>`
-  - `readonly pages: Watchable<ReadonlyArray<Page>>`
-  - `readonly workers: Watchable<ReadonlyArray<BrowserWorker>>`
-  - ● `readonly cookies: CookieJar`
-  - `readonly exportStorageState: Effect.Effect<Redacted.Redacted<StorageStateBytes>, StorageStateError>`
-  - `readonly clock: PageClock`
-  - `route<E, R>(pattern: UrlPattern | string, handler: RouteHandler<E, R>): Effect.Effect<RouteRegistration, RouteError, Scope.Scope | R>`
-  - `addInitScript(script: InitScriptSource, options?: InitScriptOptions): Effect.Effect<InitScript, DeclarationError, Scope.Scope>`
-  - `emulate(settings: Emulation): Effect.Effect<Registration, DeclarationError, Scope.Scope>`
-  - ● `grant(permissions: ReadonlyArray<Permission>, options?: { readonly origin?: Origin | string }): Effect.Effect<Registration, DeclarationError, Scope.S…`
-- `interface UserContextOptions`
-  - `readonly storageState?: StorageState`
-  - `readonly dialogs?: "dismiss" | "accept" | "leaveOpen"`
-  - `readonly focus?: "system" | "emulated"`
-  - `readonly eventLog?: number`
-  - `readonly emulation?: Emulation`
-  - `readonly permissions?: ReadonlyArray<Permission>`
-- ● `interface Emulation`
-  - `readonly viewport?: { readonly width: number; readonly height: number readonly deviceScaleFactor?: number readonly mobile?: boolean }`
-  - `readonly userAgent?: string`
-  - `readonly locale?: Locale | string`
-  - `readonly timezone?: TimeZoneId | string`
-  - `readonly geolocation?: { readonly latitude: number; readonly longitude: number; readonly accuracy?: number } | "unavailable"`
-  - `readonly media?: { readonly type?: "screen" | "print" readonly colorScheme?: "light" | "dark" | "noPreference" readonly reducedMotion?: "reduce" | "n…`
-  - `readonly network?: "offline" | { readonly download: number readonly upload: number readonly latency: Duration.Input }`
-  - `readonly cpuSlowdown?: number`
-  - `readonly javaScript?: "enabled" | "disabled"`
-  - `readonly touch?: boolean`
-- `type Permission = | "geolocation" | "notifications" | "camera" | "microphone" | "clipboard-read" | "clipboard-write" | "midi" | "background-sync" | "persistent-storage" | "accelerometer" | "gyroscope" | "magnetometer" | "payment-handl…`
-- ● `type PartitionKey = | { readonly _tag: "Unpartitioned" } | { readonly _tag: "Partitioned"; readonly topLevelSite: Site; readonly crossSiteAncestor: Option.Option<boolean> }`
-- ● `interface BrowserCookie`
-  - `readonly name: CookieName`
-  - `readonly value: Redacted.Redacted<string>`
-  - `readonly domain: CookieDomain`
-  - `readonly path: string`
-  - `readonly expires: Option.Option<DateTime.Utc>`
-  - `readonly httpOnly: boolean`
-  - `readonly secure: boolean`
-  - `readonly sameSite: "strict" | "lax" | "none"`
-  - `readonly partitionKey: PartitionKey`
-  - `readonly priority: "low" | "medium" | "high"`
-- ● `interface CookieInput`
-  - `readonly name: CookieName | string`
-  - `readonly value: string | Redacted.Redacted<string>`
-  - `readonly scope: | { readonly _tag: "Url"; readonly url: Url | string } | { readonly _tag: "Domain"; readonly domain: CookieDomain | string; readonly …`
-  - `readonly expires?: DateTime.DateTime.Input`
-  - `readonly httpOnly?: boolean`
-  - `readonly secure?: boolean`
-  - `readonly sameSite?: "strict" | "lax" | "none"`
-  - `readonly partitionKey?: PartitionKey`
-- ● `interface CookieJar`
-  - `readonly list: Effect.Effect<ReadonlyArray<BrowserCookie>, StorageError>`
-  - `listFor(url: Url | string): Effect.Effect<ReadonlyArray<BrowserCookie>, StorageError>`
-  - `set(cookie: CookieInput): Effect.Effect<void, StorageError>`
-  - `remove(match: { readonly name: CookieName | string; readonly domain?: CookieDomain | string; readonly path?: string }): Effect.Effect<void, StorageEr…`
-  - `readonly clear: Effect.Effect<void, StorageError>`
-  - `toCookie(cookie: BrowserCookie): Cookies.Cookie`
-- `type StorageStateBytes = Uint8Array & { readonly [StorageStateBytesTypeId]: "StorageStateBytes" }`
-- `interface StorageState`
-  - `readonly [StorageStateTypeId]: "StorageState"`
-- `const StorageState`
-  - `import(bytes: Redacted.Redacted<StorageStateBytes | Uint8Array>): Effect.Effect<StorageState, StorageStateError>`
+### BrowserWorker
 
-## Finding and acting
+Workers: dedicated workers of a page, and shared and service workers of a context.
 
-### Locators and frames (`src/Locator.ts`)
+*models*
 
-- `interface RoleOptions`
-  - `readonly name?: string | RegExp`
-  - `readonly exact?: boolean`
-  - `readonly includeHidden?: boolean`
-- `interface TextOptions`
-  - `readonly exact?: boolean`
-- `interface ReadonlyLocator extends Queries<ReadonlyLocator>, Pipeable.Pipeable, Equal.Equal, Inspectable.Inspectable`
-  - `frame(iframe: ReadonlyLocator): ReadonlyFrameLocator`
-  - `filter(options: { readonly has?: RelativeLocator; readonly hasNot?: RelativeLocator readonly hasText?: string | RegExp; readonly hasNotText?: string …`
-  - `and(other: ReadonlyLocator): ReadonlyLocator`
-  - `or(other: ReadonlyLocator): ReadonlyLocator`
-  - `nth(index: number): ReadonlyLocator`
-  - `readonly first: ReadonlyLocator`
-  - `readonly last: ReadonlyLocator`
-  - `describe(label: string): ReadonlyLocator`
-  - `readonly count: Effect.Effect<number, ReadError>`
-  - `readonly readText: Effect.Effect<string, ReadError>`
-  - `readonly readValue: Effect.Effect<string, ReadError>`
-  - ● `readonly readHtml: Effect.Effect<string, ReadError>`
-  - `readAttribute(name: string): Effect.Effect<Option.Option<string>, ReadError>`
-  - `readonly isVisible: Effect.Effect<boolean, ReadError>`
-  - ● `readonly isEnabled: Effect.Effect<boolean, ReadError>`
-  - ● `readonly isChecked: Effect.Effect<boolean, ReadError>`
-  - `readonly all: Effect.Effect<ReadonlyArray<ReadonlyLocator>, ReadError>`
-  - `readonly snapshot: Effect.Effect<Snapshot<ReadonlyLocator>, ReadError>`
-  - ● `evaluate<Args extends ReadonlyArray<unknown>, B>(fn: (element: Element, ...args: Args) => B | Promise<B>, ...args: Args): Effect.Effect<Serialized<B>…`
-- `interface PointerOptions`
-  - `readonly position?: { readonly x: CssPixels | number; readonly y: CssPixels | number }`
-  - `readonly modifiers?: ReadonlyArray<"Alt" | "Control" | "Meta" | "Shift">`
-  - `readonly checks?: Partial<Record<"visible" | "enabled" | "notInert" | "inViewport" | "receivesPointer", boolean>> & { readonly stable?: boolean | { r…`
-  - `readonly trial?: boolean`
-- `interface ClickOptions extends PointerOptions`
-  - `readonly button?: "left" | "right" | "middle"`
-- `interface DragOptions extends PointerOptions`
-  - `readonly targetPosition?: { readonly x: CssPixels | number; readonly y: CssPixels | number }`
-  - `readonly steps?: number`
-- `type SelectOption = { readonly value: string } | { readonly label: string } | { readonly index: number }`
-- `interface Locator extends ReadonlyLocator`
-  - `getByRole(role: AriaRole, options?: RoleOptions): Locator`
-  - `getByText(text: string | RegExp, options?: TextOptions): Locator`
-  - `getByLabel(text: string | RegExp, options?: TextOptions): Locator`
-  - `getByPlaceholder(text: string | RegExp, options?: TextOptions): Locator`
-  - `getByAltText(text: string | RegExp, options?: TextOptions): Locator`
-  - `getByTitle(text: string | RegExp, options?: TextOptions): Locator`
-  - `getByTestId(id: string): Locator`
-  - `locator(css: string): Locator`
-  - `frame(iframe: ReadonlyLocator): FrameLocator`
-  - `filter(options: Parameters<ReadonlyLocator["filter"]>[0]): Locator`
-  - `and(other: ReadonlyLocator): Locator`
-  - `or(other: ReadonlyLocator): Locator`
-  - `nth(index: number): Locator`
-  - `readonly first: Locator`
-  - `readonly last: Locator`
-  - `describe(label: string): Locator`
-  - `readonly all: Effect.Effect<ReadonlyArray<Locator>, ReadError>`
-  - `readonly snapshot: Effect.Effect<Snapshot<Locator>, ReadError>`
-  - `readonly click: Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - `clickWith(options: ClickOptions): Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - `readonly dblclick: Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - `dblclickWith(options: ClickOptions): Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - ● `readonly tap: Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - `readonly hover: Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - `hoverWith(options: PointerOptions): Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - `readonly check: Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - `readonly uncheck: Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - `readonly focus: Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - `readonly clear: Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - ● `readonly scrollIntoView: Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - `fill(value: string | Redacted.Redacted<string>): Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - `press(key: KeyName | string, options?: { readonly modifiers?: ReadonlyArray<"Alt" | "Control" | "Meta" | "Shift"> }): Effect.Effect<void, ActionError…`
-  - `pressSequentially(text: string | Redacted.Redacted<string>, options?: { readonly delay?: Duration.Input }): Effect.Effect<void, ActionError | TargetG…`
-  - `selectOption(options: SelectOption | ReadonlyArray<SelectOption>): Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - `setInputFiles(files: FileInput | ReadonlyArray<FileInput>): Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - `dragTo(target: ReadonlyLocator, options?: DragOptions): Effect.Effect<void, ActionError | TargetGone | Timeout>`
-- `interface RelativeLocator extends Queries<RelativeLocator>`
-  - `readonly _RelativeLocator: unique symbol`
-- `const RelativeLocator`
-  - `…Queries<RelativeLocator>`
-- `interface ReadonlyFrameLocator extends Queries<ReadonlyLocator>`
-  - `readonly owner: ReadonlyLocator`
-  - `frame(iframe: ReadonlyLocator): ReadonlyFrameLocator`
-- `interface FrameLocator extends ReadonlyFrameLocator`
-  - `getByRole(role: AriaRole, options?: RoleOptions): Locator`
-  - `getByText(text: string | RegExp, options?: TextOptions): Locator`
-  - `getByLabel(text: string | RegExp, options?: TextOptions): Locator`
-  - `getByPlaceholder(text: string | RegExp, options?: TextOptions): Locator`
-  - `getByAltText(text: string | RegExp, options?: TextOptions): Locator`
-  - `getByTitle(text: string | RegExp, options?: TextOptions): Locator`
-  - `getByTestId(id: string): Locator`
-  - `locator(css: string): Locator`
-  - `frame(iframe: ReadonlyLocator): FrameLocator`
-- `interface FileInput`
-  - `readonly [FileInputTypeId]: "FileInput"`
-- `const FileInput`
-  - `local(path: LocalPath | string): FileInput`
-  - `remote(path: RemotePath): FileInput`
-  - `bytes(name: FileName | string, mimeType: MimeType | string, data: Uint8Array): FileInput`
+- `type Kind = "dedicated" | "shared" | "service"`
+- `interface ObservedBrowserWorker extends Pipeable.Pipeable, Inspectable.Inspectable`
+  - `readonly [TypeId]: typeof TypeId`
+  - `readonly realm: Target.RealmId`
+  - `readonly kind: Kind`
+  - `readonly url: Url.Url`
+  - `readonly closed: Effect.Effect<Target.CloseReason>`
+- `interface BrowserWorker extends ObservedBrowserWorker`
+  - `evaluate<Args extends ReadonlyArray<unknown>, B>(fn: (...args: Args) => B | Promise<B>, ...args: Args): Effect.Effect<JSHandle.Serialized<B>, BrowserWorkerErro…`
+- `interface Filter`
+  - `readonly url?: Url.Pattern | string | undefined`
+  - `readonly kind?: Kind | undefined`
+- `type BrowserWorkerErrorReason = typeof BrowserWorkerErrorReason.Type`
 
-### Keyboard and mouse (`src/Input.ts`)
+*schemas*
 
-- ● `type Modifier = "Alt" | "Control" | "Meta" | "Shift"`
-- ● `interface Point`
-  - `readonly x: CssPixels | number`
-  - `readonly y: CssPixels | number`
-- ● `interface HeldInput`
-  - `readonly release: Effect.Effect<void>`
-- ● `interface Keyboard`
-  - `press(key: KeyName | string, options?: { readonly modifiers?: ReadonlyArray<Modifier> }): Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - `pressSequentially(text: string | Redacted.Redacted<string>, options?: { readonly delay?: Duration.Input }): Effect.Effect<void, ActionError | TargetG…`
-  - `insertText(text: string | Redacted.Redacted<string>): Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - `hold(key: KeyName | string): Effect.Effect<HeldInput, ActionError | TargetGone | Timeout, Scope.Scope>`
-- ● `interface Mouse`
-  - `readonly position: Effect.Effect<Point>`
-  - `move(to: Point, options?: { readonly steps?: number }): Effect.Effect<void, ActionError | TargetGone | Timeout>`
-  - `click(at: Point, options?: { readonly button?: "left" | "right" | "middle" readonly clickCount?: number readonly modifiers?: ReadonlyArray<Modifier> …`
-  - `hold(button: "left" | "right" | "middle"): Effect.Effect<HeldInput, ActionError | TargetGone | Timeout, Scope.Scope>`
-  - `wheel(delta: { readonly x: CssPixels | number; readonly y: CssPixels | number }): Effect.Effect<void, ActionError | TargetGone | Timeout>`
+- `const BrowserWorkerErrorReason = Schema.Union([Reason.EvaluationThrown, Reason.NotSerializable, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
 
-## Reading
+*subscriptions*
 
-### Snapshot (`src/Snapshot.ts`)
+- `const next`
+  - `<PE = never, PR = never>(target: Page.Page | UserContext.UserContext, filter?: Filter | undefined, where?: Subscription.Where<BrowserWorker, PE, PR> | undefine…`
+  - `<PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<ObservedBrowserWo…`
+- `const stream`
+  - `<PE = never, PR = never>(target: Page.Page | UserContext.UserContext, filter?: Filter | undefined, where?: Subscription.Where<BrowserWorker, PE, PR> | undefine…`
+  - `<PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<ObservedBrowserWo…`
 
-- `interface Snapshot<L extends ReadonlyLocator = ReadonlyLocator>`
-  - `readonly document: DocumentId`
-  - `readonly generation: DocumentGeneration`
-  - `readonly root: SnapshotNode`
-  - `readonly text: string`
-  - `readonly refs: ReadonlyMap<RefId, SnapshotNode>`
-  - `ref(id: RefId): L`
-  - `diff(previous: Snapshot<ReadonlyLocator>): Effect.Effect<SnapshotDiff, SnapshotDiffError>`
-- `interface SnapshotNode`
-  - `readonly ref: import("effect").Option.Option<RefId>`
-  - `readonly role: | { readonly _tag: "Aria"; readonly role: AriaRole } | { readonly _tag: "Inferred"; readonly role: "clickable" | "editable" | "focusab…`
-  - `readonly name: | { readonly _tag: "Accessible"; readonly value: string } | { readonly _tag: "Inferred"; readonly value: string; readonly from: "text"…`
-  - `readonly states: ReadonlySet<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed">`
-  - `readonly children: ReadonlyArray<SnapshotNode>`
-- `type InteractivityEvidence = "clickListener" | "cursorPointer" | "tabindex" | "contentEditable" | "onclickAttribute"`
-- `interface SnapshotDiff`
-  - `readonly added: ReadonlyArray<SnapshotNode>`
-  - `readonly removed: ReadonlyArray<RefId>`
-  - `readonly changed: ReadonlyArray<SnapshotNode>`
-  - `readonly text: string`
-- `interface SnapshotOptions`
-  - `readonly sources?: "aria" | "aria+interactivity"`
-  - `readonly root?: ReadonlyLocator`
-  - `readonly depth?: number`
-  - `readonly interactiveOnly?: boolean`
+*getters*
 
-### Serialized, JSHandle (`src/Handle.ts`)
+- `const history`
+  - `(target: Page.Page | UserContext.UserContext, filter?: Filter | undefined): Effect.Effect<Subscription.History<BrowserWorker>>`
+  - `(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined): Effect.Effect<Subscription.History<ObservedBrowserWorker>>`
 
-- `interface NotSerializable<Message extends string>`
-  - `readonly [NotSerializableTypeId]: Message`
-- `type Serialized<A> = A extends string | number | boolean | bigint | null | undefined | Date | RegExp ? A : A extends ReadonlyMap<infer K, infer V> ? Map<Serialized<K>, Serialized<V>> : A extends ReadonlySet<infer T> ? Set<Serialized<T>> …`
-- ● `interface JSHandle<A = unknown>`
-  - `readonly realm: RealmId`
-  - `evaluate<Args extends ReadonlyArray<unknown>, B>(fn: (value: A, ...args: Args) => B | Promise<B>, ...args: Args): Effect.Effect<Serialized<B>, Evalua…`
-  - `evaluateHandle<Args extends ReadonlyArray<unknown>, B>(fn: (value: A, ...args: Args) => B | Promise<B>, ...args: Args): Effect.Effect<JSHandle<Awaite…`
-  - `readonly read: Effect.Effect<Serialized<A>, EvaluationError | TargetGone | Timeout>`
-  - `readonly release: Effect.Effect<void>`
+*guards*
 
-### Capability (`src/Capability.ts`)
+- `const isBrowserWorker: (u: unknown) => u is ObservedBrowserWorker`
+- `const isBrowserWorkerError: (u: unknown) => u is BrowserWorkerError`
+
+*errors*
+
+- `class BrowserWorkerError: Schema.TaggedError "BrowserWorkerError" { reason, diagnostics }`
+
+### Capability
+
+Specialized features that not every backend offers, reached through a handle bound to one page.
+
+*models*
 
 - `interface Capability<out H>`
-  - `readonly [CapabilityTypeId]: () => H`
+  - `readonly [TypeId]: () => H`
   - `readonly name: string`
 - `interface AxNode`
   - `readonly role: string`
@@ -494,423 +208,1714 @@ Generated from `src/` by `npm run index`; don't edit by hand. One line per decla
   - `readonly properties: Readonly<Record<string, unknown>>`
   - `readonly children: ReadonlyArray<AxNode>`
 - `interface AxTreeReader`
-  - `readonly read: Effect.Effect<AxNode, ReadError | TargetGone>`
+  - `readonly read: Effect.Effect<AxNode, CapabilityError | Target.TargetGone>`
 - `interface ScreencastFrame`
-  - `readonly at: MonotonicInstant`
-  - `readonly width: DevicePixels`
-  - `readonly height: DevicePixels`
+  - `readonly at: MonotonicInstant.MonotonicInstant`
+  - `readonly width: Pixels.Device`
+  - `readonly height: Pixels.Device`
   - `readonly jpeg: Uint8Array`
 - `interface ScreencastControl`
-  - `readonly frames: Stream.Stream<ScreencastFrame, TargetGone>`
-- `const Capability`
-  - `readonly AxTree: Capability<AxTreeReader>`
-  - `readonly Screencast: Capability<ScreencastControl>`
+  - `readonly frames: Stream.Stream<ScreencastFrame, Target.TargetGone>`
+- `type CapabilityErrorReason = typeof CapabilityErrorReason.Type`
 
-## State and events
+*schemas*
 
-### Watchable (`src/Watchable.ts`)
+- `const CapabilityErrorReason = Schema.Union([Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
 
-- `interface Watchable<A> extends Effect.Effect<A>`
-  - `readonly changes: Stream.Stream<A>`
-  - `waitFor<B extends A>(refinement: Predicate.Refinement<A, B>): Effect.Effect<B, Timeout | TargetGone>`
-  - `waitFor(predicate: Predicate.Predicate<A>): Effect.Effect<A, Timeout | TargetGone>`
-  - `map<B>(f: (a: A) => B): Watchable<B>`
+*constants*
 
-### Event modules (`src/Events.ts`)
+- `const AxTree: Capability<AxTreeReader>`
+- `const Screencast: Capability<ScreencastControl>`
 
-- `type Where<A, PE, PR> = (event: A) => Effect.Effect<boolean, PE, PR>`
-- `interface EventModule<T, A, F, E = never>`
-  - `next<PE = never, PR = never>(target: T, filter?: F, where?: Where<A, PE, PR>): Effect.Effect<ReadonlyDeferred<A, E | PE | TargetGone | Timeout>, Obse…`
-  - `stream<PE = never, PR = never>(target: T, filter?: F, where?: Where<A, PE, PR>): Effect.Effect<Stream.Stream<A, E | PE | EventOverflow | TargetGone>,…`
-  - `history(target: T, filter?: F): Effect.Effect<EventHistory<A>>`
-- `interface EventHistory<A>`
-  - `readonly entries: ReadonlyArray<A>`
-  - `readonly dropped: number`
-- `type PageNavigation = | { readonly _tag: "Committed"; readonly id: NavigationId; readonly document: DocumentId; readonly response: Option.Option<NetworkResponse> } | { readonly _tag: "SameDocument"; readonly id: NavigationId; readonly doc…`
-- `interface NavigationFilter`
-  - `readonly url?: UrlPattern | string`
-- `const PageNavigation`
-  - `…EventModule<AnyPage, PageNavigation, NavigationFilter, NavigationError>`
-  - `next<PE = never, PR = never>(target: AnyPage, filter?: NavigationFilter & { readonly waitUntil?: LoadState }, where?: Where<PageNavigation, PE, PR>):…`
-- `interface PopupFilter`
-  - `readonly url?: UrlPattern | string`
-- `const Popup`
-  - `next<PE = never, PR = never>(target: Page, filter?: PopupFilter, where?: Where<Page, PE, PR>): Effect.Effect<ReadonlyDeferred<Page, PE | TargetGone |…`
-  - `next<PE = never, PR = never>(target: AnyPage, filter?: PopupFilter, where?: Where<ObservedPage, PE, PR>): Effect.Effect<ReadonlyDeferred<ObservedPage…`
-  - `stream<PE = never, PR = never>(target: Page, filter?: PopupFilter, where?: Where<Page, PE, PR>): Effect.Effect<Stream.Stream<Page, PE | EventOverflow…`
-  - `stream<PE = never, PR = never>(target: AnyPage, filter?: PopupFilter, where?: Where<ObservedPage, PE, PR>): Effect.Effect<Stream.Stream<ObservedPage,…`
-  - `history(target: Page, filter?: PopupFilter): Effect.Effect<EventHistory<Page>>`
-  - `history(target: AnyPage, filter?: PopupFilter): Effect.Effect<EventHistory<ObservedPage>>`
-- `interface NetworkRequest`
-  - `readonly hop: RequestHopId`
-  - `readonly method: HttpMethod.HttpMethod`
-  - `readonly url: Url`
-  - `readonly headers: Headers.Headers`
-  - `readonly resourceType: ResourceType`
-  - `readonly initiator: Initiator`
-  - `readonly servedBy: "network" | "cache" | "serviceWorker"`
-  - `readonly at: MonotonicInstant`
-- `interface RequestFilter`
-  - `readonly url?: UrlPattern | string`
-  - `readonly method?: HttpMethod.HttpMethod`
-  - `readonly resourceType?: ResourceType | ReadonlyArray<ResourceType>`
-- `const NetworkRequest`
-  - `next<PE = never, PR = never>(target: AnyPageOrContext, filter: RequestFilter & { readonly url: UrlPattern | string }, where?: Where<NetworkRequest, P…`
-  - `stream<PE = never, PR = never>(target: AnyPageOrContext, filter?: RequestFilter, where?: Where<NetworkRequest, PE, PR>): Effect.Effect<Stream.Stream<…`
-  - `history(target: AnyPageOrContext, filter?: RequestFilter): Effect.Effect<EventHistory<NetworkRequest>>`
-  - `toHttpClientRequest(request: NetworkRequest): import("effect/http").HttpClientRequest.HttpClientRequest`
-- `interface NetworkResponse`
-  - `readonly hop: RequestHopId`
-  - `readonly url: Url`
-  - `readonly status: HttpStatusCode`
-  - `readonly headers: Headers.Headers`
-  - `readonly at: MonotonicInstant`
-- `interface CapturedResponse<B> extends NetworkResponse, HttpIncomingMessage.HttpIncomingMessage<ResponseError>`
-  - `readonly body: B`
-- `interface ResponseFilter`
-  - `readonly url?: UrlPattern | string`
-  - `readonly method?: HttpMethod.HttpMethod`
-  - `readonly status?: HttpStatusCode | number | ((status: HttpStatusCode) => boolean)`
-- `const NetworkResponse`
-  - `next<B, DE, DR, PE = never, PR = never>(target: ReadonlyPage | UserContext, filter: ResponseFilter & { readonly url: UrlPattern | string readonly bod…`
-  - `next<PE = never, PR = never>(target: AnyPageOrContext, filter: ResponseFilter & { readonly url: UrlPattern | string }, where?: Where<NetworkResponse,…`
-  - `stream<B, DE, DR, PE = never, PR = never>(target: ReadonlyPage | UserContext, filter: ResponseFilter & { readonly body: BodyDecoder<B, DE, DR> }, whe…`
-  - `stream<PE = never, PR = never>(target: AnyPageOrContext, filter?: ResponseFilter, where?: Where<NetworkResponse, PE, PR>): Effect.Effect<Stream.Strea…`
-  - `history(target: AnyPageOrContext, filter?: ResponseFilter): Effect.Effect<EventHistory<NetworkResponse>>`
-- `type EventOrigin = | { readonly _tag: "Page"; readonly page: NavigableId } | { readonly _tag: "Worker"; readonly realm: RealmId }`
-- `interface SourceLocation`
-  - `readonly url: Url`
-  - `readonly line: number`
-  - `readonly column: number`
-- `interface ConsoleMessage`
-  - `readonly level: "debug" | "log" | "info" | "warning" | "error"`
-  - `readonly text: string`
-  - `readonly location: Option.Option<SourceLocation>`
-  - `readonly source: EventOrigin`
-  - `readonly at: MonotonicInstant`
-- `interface ConsoleFilter`
-  - `readonly level?: ConsoleMessage["level"] | ReadonlyArray<ConsoleMessage["level"]>`
-  - `readonly text?: string | RegExp`
-- `const ConsoleMessage`
-  - `…EventModule<AnyPageOrContext, ConsoleMessage, ConsoleFilter>`
-- `interface UncaughtException`
-  - `readonly kind: "thrown" | "unhandledRejection"`
-  - `readonly name: string`
-  - `readonly message: string`
-  - `readonly stack: Option.Option<string>`
-  - `readonly source: EventOrigin`
-  - `readonly at: MonotonicInstant`
-- `interface UncaughtExceptionFilter`
-  - `readonly message?: string | RegExp`
-- `const UncaughtException`
-  - `…EventModule<AnyPageOrContext, UncaughtException, UncaughtExceptionFilter>`
-- `interface DialogDecision`
-  - `readonly [DialogDecisionTypeId]: "DialogDecision"`
-- `type Dialog = | { readonly _tag: "Alert"; readonly message: string; readonly accept: DialogDecision } | { readonly _tag: "Confirm"; readonly message: string; readonly accept: DialogDecision; readonly dismiss: DialogDecision } | { …`
-- `interface DialogFilter`
-  - `readonly kind?: Dialog["_tag"] | ReadonlyArray<Dialog["_tag"]>`
-- `const Dialog`
-  - `…EventModule<AnyPage, Dialog, DialogFilter>`
-  - `handle<E, R>(page: Page, handler: (dialog: Dialog) => Effect.Effect<DialogDecision, E, R>): Effect.Effect<HandlerRegistration, DeclarationError, Scop…`
-  - `readonly acceptAll: (dialog: Dialog) => Effect.Effect<DialogDecision>`
-  - `readonly dismissAll: (dialog: Dialog) => Effect.Effect<DialogDecision>`
-- `interface FileChooserDecision`
-  - `readonly [FileChooserDecisionTypeId]: "FileChooserDecision"`
-- `type FileChooser = | { readonly _tag: "Single"; select(file: FileInput): FileChooserDecision; readonly cancel: FileChooserDecision } | { readonly _tag: "Multiple"; select(files: ReadonlyArray<FileInput>): FileChooserDecision; readonly …`
-- `const FileChooser`
-  - `…EventModule<Page, FileChooser, {}>`
-  - `handle<E, R>(page: Page, handler: (chooser: FileChooser) => Effect.Effect<FileChooserDecision, E, R>): Effect.Effect<HandlerRegistration, Declaration…`
-  - `choose(files: FileInput | ReadonlyArray<FileInput>): (chooser: FileChooser) => Effect.Effect<FileChooserDecision, import("./Errors.ts").ActionError>`
-- `type DownloadStatus = | { readonly _tag: "InProgress"; readonly received: number; readonly total: Option.Option<number> } | { readonly _tag: "Completed" } | { readonly _tag: "Canceled" } | { readonly _tag: "Failed"; readonly reason: strin…`
-- `interface Download`
-  - `readonly id: DownloadId`
-  - `readonly url: Url`
-  - `readonly suggestedFilename: FileName`
-  - `readonly status: Watchable<DownloadStatus>`
-  - `readonly finished: Effect.Effect<void, DownloadError | TargetGone | Timeout>`
-  - `readonly stream: Stream.Stream<Uint8Array, DownloadError>`
-  - `saveAs(path: import("./Brand.ts").LocalPath | string): Effect.Effect<void, DownloadError>`
-  - ● `readonly cancel: Effect.Effect<void, DownloadError>`
-- `interface DownloadFilter`
-  - `readonly url?: UrlPattern | string`
-- `const Download`
-  - `…EventModule<Page | UserContext, Download, DownloadFilter>`
-- `interface AutoResolution`
-  - `readonly subject: | { readonly _tag: "Dialog"; readonly dialog: Dialog } | { readonly _tag: "FileChooser" } | { readonly _tag: "PausedRequest"; reado…`
-  - `readonly decision: string`
-  - `readonly policy: string`
-  - `readonly at: MonotonicInstant`
-- `const AutoResolution`
-  - `…EventModule<Page | UserContext, AutoResolution, {}>`
-- ● `interface ObservedBrowserWorker`
-  - `readonly realm: RealmId`
-  - `readonly kind: "dedicated" | "shared" | "service"`
-  - `readonly url: Url`
-  - `readonly closed: Effect.Effect<CloseReason>`
-- ● `interface BrowserWorker extends ObservedBrowserWorker`
-  - `evaluate<Args extends ReadonlyArray<unknown>, B>(fn: (...args: Args) => B | Promise<B>, ...args: Args): Effect.Effect<Serialized<B>, EvaluationError …`
-- ● `interface WorkerFilter`
-  - `readonly url?: UrlPattern | string`
-  - `readonly kind?: ObservedBrowserWorker["kind"]`
-- ● `const BrowserWorker`
-  - `next<PE = never, PR = never>(target: Page | UserContext, filter?: WorkerFilter, where?: Where<BrowserWorker, PE, PR>): Effect.Effect<ReadonlyDeferred…`
-  - `next<PE = never, PR = never>(target: AnyPageOrContext, filter?: WorkerFilter, where?: Where<ObservedBrowserWorker, PE, PR>): Effect.Effect<ReadonlyDe…`
-  - `stream<PE = never, PR = never>(target: Page | UserContext, filter?: WorkerFilter, where?: Where<BrowserWorker, PE, PR>): Effect.Effect<Stream.Stream<…`
-  - `stream<PE = never, PR = never>(target: AnyPageOrContext, filter?: WorkerFilter, where?: Where<ObservedBrowserWorker, PE, PR>): Effect.Effect<Stream.S…`
-  - `history(target: Page | UserContext, filter?: WorkerFilter): Effect.Effect<EventHistory<BrowserWorker>>`
-  - `history(target: AnyPageOrContext, filter?: WorkerFilter): Effect.Effect<EventHistory<ObservedBrowserWorker>>`
-- ● `type ConnectionFrame = { readonly direction: "sent" | "received" readonly payload: { readonly _tag: "Text"; readonly text: string } | { readonly _tag: "Binary"; readonly bytes: Uint8Array } readonly at: MonotonicInstant }`
-- ● `interface NetworkConnection`
-  - `readonly id: ConnectionId`
-  - `readonly kind: "webSocket" | "eventSource"`
-  - `readonly url: Url`
-  - `readonly openedAt: DateTime.Utc`
-  - `readonly frames: Effect.Effect<Stream.Stream<ConnectionFrame, EventOverflow | TargetGone>, ObserveError, Scope.Scope>`
-  - `readonly closed: Effect.Effect<CloseReason>`
-- ● `interface ConnectionFilter`
-  - `readonly url?: UrlPattern | string`
-  - `readonly kind?: NetworkConnection["kind"]`
-- ● `const NetworkConnection`
-  - `…EventModule<AnyPageOrContext, NetworkConnection, ConnectionFilter>`
+*guards*
 
-### ReadonlyDeferred (proposed upstream) (`src/upstream.ts`)
+- `const isCapability: (u: unknown) => u is Capability<unknown>`
+- `const isCapabilityError: (u: unknown) => u is CapabilityError`
 
-- `interface ReadonlyDeferred<out A, out E = never> extends Pipeable.Pipeable`
-  - `readonly [ReadonlyDeferredTypeId]: { readonly _A: (_: never) => A readonly _E: (_: never) => E }`
-- `const Deferred`
-  - `await<A, E>(self: ReadonlyDeferred<A, E>): Effect.Effect<A, E>`
-  - `poll<A, E>(self: ReadonlyDeferred<A, E>): Effect.Effect<Option.Option<Effect.Effect<A, E>>>`
-  - `isDone<A, E>(self: ReadonlyDeferred<A, E>): Effect.Effect<boolean>`
+*errors*
 
-## Expectations
+- `class CapabilityError: Schema.TaggedError "CapabilityError" { capability, reason, diagnostics }`
 
-### Expect, Condition, AriaPattern (`src/Expect.ts`)
+### Condition
 
-- `interface DualMatcher<S, Args extends ReadonlyArray<unknown>>`
-  - `(...args: Args): (subject: S) => Effect.Effect<void, ExpectationFailed | TargetGone>`
-  - `(subject: S, ...args: Args): Effect.Effect<void, ExpectationFailed | TargetGone>`
-- `const Expect`
-  - `readonly toBeVisible: Matcher<ReadonlyLocator>`
-  - `readonly toBeHidden: Matcher<ReadonlyLocator>`
-  - `readonly toBeEnabled: Matcher<ReadonlyLocator>`
-  - `readonly toBeDisabled: Matcher<ReadonlyLocator>`
-  - `readonly toBeChecked: Matcher<ReadonlyLocator>`
-  - `readonly toBeFocused: Matcher<ReadonlyLocator>`
-  - `readonly toBeEditable: Matcher<ReadonlyLocator>`
-  - `readonly toHaveText: DualMatcher<ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>]>`
-  - `readonly toContainText: DualMatcher<ReadonlyLocator, [expected: string | RegExp]>`
-  - `readonly toHaveValue: DualMatcher<ReadonlyLocator, [expected: string | RegExp]>`
-  - `readonly toHaveAttribute: DualMatcher<ReadonlyLocator, [name: string, expected?: string | RegExp]>`
-  - `readonly toHaveCount: DualMatcher<ReadonlyLocator, [count: number]>`
-  - `readonly toMatchAria: DualMatcher<ReadonlyLocator, [pattern: AriaPattern]>`
-  - `readonly toHaveURL: DualMatcher<ReadonlyPage, [expected: string | RegExp]>`
-  - `readonly toHaveTitle: DualMatcher<ReadonlyPage, [expected: string | RegExp]>`
-  - `that<A, E, R>(subject: Effect.Effect<A, E, R>, condition: Condition<A>): Effect.Effect<void, E | ExpectationFailed | TargetGone, R>`
-  - `readonly withInterval: Dual<import("effect").Duration.Input>`
+Conditions for `Expect.that`: predicates with a description, so a failure says what was expected.
+
+*models*
+
 - `interface Condition<in A>`
-  - `readonly [ConditionTypeId]: (a: A) => boolean`
-- `const Condition`
-  - `make<A>(description: string, predicate: Predicate.Predicate<A>): Condition<A>`
-  - `not<A>(condition: Condition<A>): Condition<A>`
-  - `and<A>(...conditions: ReadonlyArray<Condition<A>>): Condition<A>`
-  - `because<A>(why: string): (condition: Condition<A>) => Condition<A>`
-- `interface AriaPattern`
-  - `readonly [AriaPatternTypeId]: "AriaPattern"`
-- `interface ChildrenPattern`
-  - `readonly [ChildrenPatternTypeId]: "ChildrenPattern"`
-- `const AriaPattern`
-  - `node(role: AriaRole, name: string | RegExp, children: ChildrenPattern): AriaPattern`
-  - `text(value: string | RegExp): AriaPattern`
-  - `exactly(...children: ReadonlyArray<AriaPattern>): ChildrenPattern`
-  - `including(...children: ReadonlyArray<AriaPattern>): ChildrenPattern`
-  - `readonly unchecked: ChildrenPattern`
+  - `readonly [TypeId]: (a: A) => boolean`
 
-## Network and time
+*constructors*
 
-### Routes and declarations (`src/Network.ts`)
+- `const make: <A>(description: string, predicate: P.Predicate<A>) => Condition<A>`
 
-- `type ResourceType = | "document" | "stylesheet" | "image" | "media" | "font" | "script" | "fetch" | "xhr" | "webSocket" | "eventSource" | "manifest" | "ping" | "other"`
-- `type Initiator = | { readonly _tag: "Document"; readonly navigable: NavigableId; readonly navigation: Option.Option<NavigationId> } | { readonly _tag: "Worker"; readonly realm: RealmId } | { readonly _tag: "Unattributed" }`
-- `interface RouteDecision`
-  - `readonly [RouteDecisionTypeId]: "RouteDecision"`
-- `type RouteHandler<E, R> = (request: InterceptedRequest) => Effect.Effect<RouteDecision, E, R>`
-- `interface InterceptedRequest`
-  - `readonly request: NetworkRequest`
-  - `readonly phase: "request" | "response" | "auth"`
-  - `readonly fetch: Effect.Effect<HttpClientResponse.HttpClientResponse, RouteError>`
-  - `fetchWith(change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest): Effect.Effect<HttpClientResponse.HttpClient…`
-- `type AbortReason = | "failed" | "aborted" | "timedOut" | "accessDenied" | "connectionClosed" | "connectionReset" | "connectionRefused" | "connectionAborted" | "connectionFailed" | "nameNotResolved" | "internetDisconnected" | "addressUn…`
-- `const Route`
-  - `readonly continue: RouteDecision`
-  - `continueWith(change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest): RouteDecision`
-  - `fulfill(response: HttpServerResponse.HttpServerResponse): RouteDecision`
-  - `readonly abort: RouteDecision`
-  - `abortWith(reason: AbortReason): RouteDecision`
-  - `readonly fallthrough: RouteDecision`
-  - ● `provideCredentials(credentials: { readonly username: string; readonly password: import("effect").Redacted.Redacted<string> }): RouteDecision`
+*combinators*
+
+- `const not: <A>(condition: Condition<A>) => Condition<A>`
+- `const and: <A>(...conditions: ReadonlyArray<Condition<A>>) => Condition<A>`
+- `const because`
+  - `(why: string): <A>(condition: Condition<A>) => Condition<A>`
+  - `<A>(condition: Condition<A>, why: string): Condition<A>`
+
+*guards*
+
+- `const isCondition: (u: unknown) => u is Condition<never>`
+
+### ConsoleMessage
+
+Messages a page or its workers write to the console.
+
+*models*
+
+- `type Level = typeof Level.Type`
+- `type SourceLocation = typeof SourceLocation.Type`
+- `class ConsoleMessage: Schema.Class { level, text, location, origin, at }`
+- `interface Filter`
+  - `readonly level?: Level | ReadonlyArray<Level> | undefined`
+  - `readonly text?: string | RegExp | undefined`
+
+*schemas*
+
+- `const Level = Schema.Literals(["debug", "log", "info", "warning", "error"])`
+- `const SourceLocation = Schema.Struct({ url: Url.Url, line: Schema.Int, column: Schema.Int })`
+
+*subscriptions*
+
+- `const next: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<ConsoleMessage, PE, PR> | undefined) => Effect.Effect< De…`
+- `const stream: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<ConsoleMessage, PE, PR> | undefined) => Effect.Effect< St…`
+
+*getters*
+
+- `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<ConsoleMessage>>`
+
+### CookieJar
+
+A context's cookies.
+
+*models*
+
+- `type Name = typeof Name.Type`
+- `type Domain = typeof Domain.Type`
+- `type PartitionKey = typeof PartitionKey.Type`
+- `class Cookie: Schema.Class { name, value, domain, path, expires, httpOnly, secure, sameSite, partitionKey, priority }`
+- `interface Input`
+  - `readonly name: Name | string`
+  - `readonly value: string | Redacted.Redacted<string>`
+  - `readonly scope: | { readonly _tag: "Url"; readonly url: Url.Url | string } | { readonly _tag: "Domain"; readonly domain: Domain | string; readonly path: string…`
+  - `readonly expires?: DateTime.DateTime.Input | undefined`
+  - `readonly httpOnly?: boolean | undefined`
+  - `readonly secure?: boolean | undefined`
+  - `readonly sameSite?: "strict" | "lax" | "none" | undefined`
+  - `readonly partitionKey?: PartitionKey | undefined`
+- `interface Match`
+  - `readonly name: Name | string`
+  - `readonly domain?: Domain | string | undefined`
+  - `readonly path?: string | undefined`
+- `interface CookieJar`
+  - `readonly list: Effect.Effect<ReadonlyArray<Cookie>, CookieJarError>`
+  - `listFor(url: Url.Url | string): Effect.Effect<ReadonlyArray<Cookie>, CookieJarError>`
+  - `set(cookie: Input): Effect.Effect<void, CookieJarError>`
+  - `remove(match: Match): Effect.Effect<void, CookieJarError>`
+  - `readonly clear: Effect.Effect<void, CookieJarError>`
+- `type CookieJarErrorReason = typeof CookieJarErrorReason.Type`
+
+*schemas*
+
+- `const Name = Schema.String.pipe(Schema.brand("~effect-browser/CookieJar/Name"))`
+- `const Domain = Schema.String.pipe(Schema.brand("~effect-browser/CookieJar/Domain"))`
+- `const PartitionKey = Schema.Union([Schema.TaggedStruct("Unpartitioned", {}), Schema.TaggedStruct("Partitioned", { topLevelSite: Url.Site, crossSiteAncestor: Schema.Option(Schema.Boolean) })])`
+- `const CookieJarErrorReason = Schema.Union([Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
+
+*converting*
+
+- `const toCookie: (cookie: Cookie) => Cookies.Cookie`
+
+*guards*
+
+- `const isCookieJarError: (u: unknown) => u is CookieJarError`
+
+*errors*
+
+- `class CookieJarError: Schema.TaggedError "CookieJarError" { operation, reason, diagnostics }`
+
+### Deadline
+
+One deadline per operation (README, "One deadline per operation").
+
+*combinators*
+
+- `const within`
+  - `(duration: Duration.Input): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>`
+  - `<A, E, R>(self: Effect.Effect<A, E, R>, duration: Duration.Input): Effect.Effect<A, E, R>`
+- `const withDefaultBudget`
+  - `(duration: Duration.Input): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>`
+  - `<A, E, R>(self: Effect.Effect<A, E, R>, duration: Duration.Input): Effect.Effect<A, E, R>`
+
+*getters*
+
+- `const remaining: Effect.Effect<Option.Option<Duration.Duration>>`
+
+*references*
+
+- `const CurrentDeadline: Context.Reference<Option.Option<MonotonicInstant.MonotonicInstant>>`
+- `const DefaultBudget: Context.Reference<Duration.Duration>`
+
+*guards*
+
+- `const isTimeout: (u: unknown) => u is Timeout`
+
+*errors*
+
+- `class Timeout: Schema.TaggedError "Timeout" { operation, phase, budget, last, history, hint, diagnostics }`
+
+### Declaration
+
+Declarations: scoped registrations that change how a page or context behaves while they live (principle 19).
+
+*models*
+
 - `interface Registration`
   - `readonly remove: Effect.Effect<void>`
-- `interface RouteRegistration extends Registration`
-  - `readonly hits: Watchable<number>`
 - `interface HandlerRegistration extends Registration`
-  - `readonly handled: Watchable<number>`
-- `interface InitScript extends Registration`
-  - `readonly id: InitScriptId`
-- `type InitScriptSource = | (() => void) | { readonly source: string } | { readonly path: LocalPath | string }`
-- `interface InitScriptOptions`
-  - `readonly world?: "main" | "isolated"`
-  - `readonly after?: ReadonlyArray<InitScript>`
-  - `readonly timing?: "beforeAuthorScript" | "bestEffort"`
+  - `readonly handled: Watchable.Watchable<number>`
+- `type DeclarationErrorReason = typeof DeclarationErrorReason.Type`
 
-### PageClock (`src/PageClock.ts`)
+*schemas*
 
-- `type PageClockMode = | { readonly mode: "fixed"; readonly at: DateTime.DateTime.Input } | { readonly mode: "offset"; readonly by: Duration.Input } | { readonly mode: "controlled"; readonly at: DateTime.DateTime.Input }`
-- `interface PageClock`
-  - `install(mode: PageClockMode): Effect.Effect<Registration, DeclarationError, Scope.Scope>`
-  - `adjust(duration: Duration.Input): Effect.Effect<void, ClockError>`
-  - `setTime(at: DateTime.DateTime.Input): Effect.Effect<void, ClockError>`
-  - `readonly resume: Effect.Effect<void, ClockError>`
+- `const DeclarationErrorReason = Schema.Union([TimingUnsupported, Conflict, DependencyReleased, Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
 
-## Recordings
+*guards*
 
-### Trace, Har (`src/Recordings.ts`)
+- `const isDeclarationError: (u: unknown) => u is DeclarationError`
 
-- `interface TraceOptions`
-  - `readonly screenshots?: "perAction" | "off"`
-  - `readonly screencast?: "native" | { readonly polled: Duration.Input } | "off"`
-  - `readonly domSnapshots?: boolean`
-  - `readonly network?: boolean`
-- `interface TraceRecording extends Registration`
-  - `exportTrace(path: LocalPath | string): Effect.Effect<LocalPath, TraceError>`
-- `const Trace`
-  - `record(target: UserContext | Page): Effect.Effect<TraceRecording, TraceError, Scope.Scope>`
-  - `recordWith(target: UserContext | Page, options: TraceOptions): Effect.Effect<TraceRecording, TraceError | Unsupported, Scope.Scope>`
-- `type SecretClass = "credentials" | "cookies" | "authorizationHeaders" | "typedText"`
-- `interface HarOptions`
+*errors*
+
+- `class DeclarationError: Schema.TaggedError "DeclarationError" { declaration, reason, diagnostics }`
+
+*reasons*
+
+- `class TimingUnsupported: Schema.Error { needed, hint }`
+- `class Conflict: Schema.Error { with, hint }`
+- `class DependencyReleased: Schema.Error { hint }`
+
+### Deferred
+
+The read side of Effect's `Deferred`, as proposed upstream (upstream/effect-readonly-deferred.md).
+
+*models*
+
+- `interface ReadonlyDeferred<out A, out E = never> extends Pipeable.Pipeable` (experimental)
+  - `readonly [TypeId]: { readonly _A: Types.Covariant<A> readonly _E: Types.Covariant<E> }`
+
+*getters*
+
+- `const await: <A, E>(self: ReadonlyDeferred<A, E>) => Effect.Effect<A, E>` (experimental)
+- `const poll: <A, E>(self: ReadonlyDeferred<A, E>) => Effect.Effect<Option.Option<Effect.Effect<A, E>>>` (experimental)
+- `const isDone: <A, E>(self: ReadonlyDeferred<A, E>) => Effect.Effect<boolean>` (experimental)
+
+*guards*
+
+- `const isReadonlyDeferred: (u: unknown) => u is ReadonlyDeferred<unknown, unknown>` (experimental)
+
+### Diagnostics
+
+The evidence every failure carries, and the preset that decides how much of it is shown.
+
+*models*
+
+- `type OperationId = typeof OperationId.Type`
+- `type DispatchState = typeof DispatchState.Type`
+- `type StepEvidence = typeof StepEvidence.Type`
+- `type ObservedValue = typeof ObservedValue.Type`
+- `type CleanupState = typeof CleanupState.Type`
+- `class Diagnostics: Schema.Class { operationId, dispatch, progress, lastObserved, cleanup }`
+- `type Preset = typeof Preset.Type`
+
+*schemas*
+
+- `const OperationId = Schema.String.pipe(Schema.brand("~effect-browser/Diagnostics/OperationId"))`
+- `const DispatchState = Schema.Union([Schema.TaggedStruct("NotSent", {}), Schema.TaggedStruct("MayHaveBeenSent", {}), Schema.TaggedStruct("Acknowledged", { result: Schema.Literals(["ok", "rejected"]) })])`
+- `const StepEvidence = Schema.Struct({ step: Schema.String, state: Schema.Literals(["unsent", "uncertain", "ok", "rejected"]), at: MonotonicInstant.MonotonicInstant })`
+- `const ObservedValue = Schema.Struct({ at: MonotonicInstant.MonotonicInstant, value: Schema.Unknown })`
+- `const CleanupState = Schema.Union([Schema.TaggedStruct("NotNeeded", {}), Schema.TaggedStruct("Pending", {}), Schema.TaggedStruct("Completed", {}), Schema.TaggedStruct("Failed", { cause: Schema.String })])`
+- `const Preset = Schema.Literals(["local", "strict"])`
+
+*combinators*
+
+- `const withPreset`
+  - `(preset: Preset): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>`
+  - `<A, E, R>(self: Effect.Effect<A, E, R>, preset: Preset): Effect.Effect<A, E, R>`
+
+*references*
+
+- `const CurrentPreset: Context.Reference<Preset>`
+
+### Dialog
+
+Dialogs: `alert`, `confirm`, `prompt` and `beforeunload`.
+
+*models*
+
+- `type PromptId = typeof PromptId.Type`
+- `interface Decision`
+  - `readonly [DecisionTypeId]: typeof DecisionTypeId`
+- `type Dialog = | { readonly _tag: "Alert"; readonly message: string; readonly accept: Decision } | { readonly _tag: "Confirm"; readonly message: string; readonly accept: Decision; readonly dismiss: Decision } | { r…`
+- `type Kind = Dialog["_tag"]`
+- `interface Filter`
+  - `readonly kind?: Kind | ReadonlyArray<Kind> | undefined`
+
+*schemas*
+
+- `const PromptId = Schema.String.pipe(Schema.brand("~effect-browser/Dialog/PromptId"))`
+
+*subscriptions*
+
+- `const next: <PE = never, PR = never>(target: Page.ObservedPage, filter?: Filter | undefined, where?: Subscription.Where<Dialog, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyDeferred<Dialog, PE | Targe…`
+- `const stream: <PE = never, PR = never>(target: Page.ObservedPage, filter?: Filter | undefined, where?: Subscription.Where<Dialog, PE, PR> | undefined) => Effect.Effect< Stream.Stream<Dialog, PE | Subscription.Even…`
+
+*getters*
+
+- `const history: (target: Page.ObservedPage, filter?: Filter | undefined) => Effect.Effect<Subscription.History<Dialog>>`
+
+*handlers*
+
+- `const handle: <E, R>(page: Page.Page, handler: (dialog: Dialog) => Effect.Effect<Decision, E, R>) => Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope.Scope | R>`
+- `const acceptAll: (dialog: Dialog) => Effect.Effect<Decision>`
+- `const dismissAll: (dialog: Dialog) => Effect.Effect<Decision>`
+
+*guards*
+
+- `const isDecision: (u: unknown) => u is Decision`
+
+### Download
+
+Downloads a page starts.
+
+*models*
+
+- `type Id = typeof Id.Type`
+- `type Status = typeof Status.Type`
+- `interface Download extends Pipeable.Pipeable, Inspectable.Inspectable`
+  - `readonly [TypeId]: typeof TypeId`
+  - `readonly id: Id`
+  - `readonly url: Url.Url`
+  - `readonly suggestedFilename: FileInput.FileName`
+  - `readonly status: Watchable.Watchable<Status>`
+  - `readonly finished: Effect.Effect<void, DownloadError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly stream: Stream.Stream<Uint8Array, DownloadError>`
+  - `saveAs(path: FilePath.Local | string): Effect.Effect<void, DownloadError>`
+  - `readonly cancel: Effect.Effect<void, DownloadError>`
+- `interface Filter`
+  - `readonly url?: Url.Pattern | string | undefined`
+- `type DownloadErrorReason = typeof DownloadErrorReason.Type`
+
+*schemas*
+
+- `const Id = Schema.String.pipe(Schema.brand("~effect-browser/Download/Id"))`
+- `const Status = Schema.Union([Schema.TaggedStruct("InProgress", { received: Schema.Int, total: Schema.Option(Schema.Int) }), Schema.TaggedStruct("Completed", {}), Schema.TaggedStruct("Canceled", {}), Schema.TaggedSt…`
+- `const DownloadErrorReason = Schema.Union([DownloadCanceled, DownloadFailed, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
+
+*subscriptions*
+
+- `const next: <PE = never, PR = never>(target: Page.Page | UserContext.UserContext, filter?: Filter | undefined, where?: Subscription.Where<Download, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyDeferre…`
+- `const stream: <PE = never, PR = never>(target: Page.Page | UserContext.UserContext, filter?: Filter | undefined, where?: Subscription.Where<Download, PE, PR> | undefined) => Effect.Effect< Stream.Stream<Download, …`
+
+*getters*
+
+- `const history: (target: Page.Page | UserContext.UserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<Download>>`
+
+*guards*
+
+- `const isDownload: (u: unknown) => u is Download`
+- `const isDownloadError: (u: unknown) => u is DownloadError`
+
+*errors*
+
+- `class DownloadError: Schema.TaggedError "DownloadError" { operation, reason, diagnostics }`
+
+*reasons*
+
+- `class DownloadCanceled: Schema.Error { hint }`
+- `class DownloadFailed: Schema.Error { why, hint }`
+
+### Emulation
+
+Emulated settings: viewport, locale, time zone, media features, network conditions and more.
+
+*models*
+
+- `type Locale = typeof Locale.Type`
+- `type TimeZoneId = typeof TimeZoneId.Type`
+- `interface Viewport`
+  - `readonly width: number`
+  - `readonly height: number`
+  - `readonly deviceScaleFactor?: number | undefined`
+  - `readonly mobile?: boolean | undefined`
+- `interface Media`
+  - `readonly type?: "screen" | "print" | undefined`
+  - `readonly colorScheme?: "light" | "dark" | "noPreference" | undefined`
+  - `readonly reducedMotion?: "reduce" | "noPreference" | undefined`
+  - `readonly forcedColors?: "active" | "none" | undefined`
+  - `readonly contrast?: "more" | "less" | "custom" | "noPreference" | undefined`
+- `interface NetworkConditions`
+  - `readonly download: number`
+  - `readonly upload: number`
+  - `readonly latency: Duration.Input`
+- `interface Geolocation`
+  - `readonly latitude: number`
+  - `readonly longitude: number`
+  - `readonly accuracy?: number | undefined`
+- `interface Emulation`
+  - `readonly viewport?: Viewport | undefined`
+  - `readonly userAgent?: string | undefined`
+  - `readonly locale?: Locale | string | undefined`
+  - `readonly timezone?: TimeZoneId | string | undefined`
+  - `readonly geolocation?: Geolocation | "unavailable" | undefined`
+  - `readonly media?: Media | undefined`
+  - `readonly network?: NetworkConditions | "offline" | undefined`
+  - `readonly cpuSlowdown?: number | undefined`
+  - `readonly javaScript?: "enabled" | "disabled" | undefined`
+  - `readonly touch?: boolean | undefined`
+
+*schemas*
+
+- `const Locale = Schema.String.pipe(Schema.brand("~effect-browser/Emulation/Locale"))`
+- `const TimeZoneId = Schema.String.pipe(Schema.brand("~effect-browser/Emulation/TimeZoneId"))`
+
+### Expect
+
+Retrying expectations: each `Expect.to*` checks until it passes or the deadline ends.
+
+*models*
+
+- `type Matcher<S> = (subject: S) => Effect.Effect<void, ExpectationFailed | Target.TargetGone>`
+- `interface DualMatcher<S, Args extends ReadonlyArray<unknown>>`
+  - `(...args: Args): (subject: S) => Effect.Effect<void, ExpectationFailed | Target.TargetGone>`
+  - `(subject: S, ...args: Args): Effect.Effect<void, ExpectationFailed | Target.TargetGone>`
+
+*combinators*
+
+- `const withCheckInterval`
+  - `(interval: Duration.Input): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>`
+  - `<A, E, R>(self: Effect.Effect<A, E, R>, interval: Duration.Input): Effect.Effect<A, E, R>`
+
+*matchers*
+
+- `const toBeVisible: Matcher<Locator.ReadonlyLocator>`
+- `const toBeHidden: Matcher<Locator.ReadonlyLocator>`
+- `const toBeEnabled: Matcher<Locator.ReadonlyLocator>`
+- `const toBeDisabled: Matcher<Locator.ReadonlyLocator>`
+- `const toBeChecked: Matcher<Locator.ReadonlyLocator>`
+- `const toBeFocused: Matcher<Locator.ReadonlyLocator>`
+- `const toBeEditable: Matcher<Locator.ReadonlyLocator>`
+- `const toHaveText: DualMatcher< Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>] >`
+- `const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
+- `const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
+- `const toHaveAttribute: DualMatcher< Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined] >`
+- `const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]>`
+- `const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPattern.AriaPattern]>`
+- `const toHaveURL: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]>`
+- `const toHaveTitle: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]>`
+- `const that: <A, E, R>(subject: Effect.Effect<A, E, R>, condition: Condition.Condition<A>) => Effect.Effect<void, E | ExpectationFailed | Target.TargetGone, R>`
+
+*references*
+
+- `const CheckInterval: Context.Reference<Duration.Duration>`
+
+*guards*
+
+- `const isExpectationFailed: (u: unknown) => u is ExpectationFailed`
+
+*errors*
+
+- `class ExpectationFailed: Schema.TaggedError "ExpectationFailed" { subject, condition, last, history, elapsed, checks, nearest, suggestions, diagnostics }`
+
+### FileChooser
+
+File choosers: what a page opens when a file input is clicked.
+
+*models*
+
+- `interface Decision`
+  - `readonly [DecisionTypeId]: typeof DecisionTypeId`
+- `type FileChooser = | { readonly _tag: "Single"; select(file: FileInput.FileInput): Decision; readonly cancel: Decision } | { readonly _tag: "Multiple"; select(files: ReadonlyArray<FileInput.FileInput>): Decision; reado…`
+- `interface Filter`
+  - `readonly multiple?: boolean | undefined`
+- `type FileChooserErrorReason = typeof FileChooserErrorReason.Type`
+
+*schemas*
+
+- `const FileChooserErrorReason = Schema.Union([Reason.InvalidInput])`
+
+*subscriptions*
+
+- `const next: <PE = never, PR = never>(target: Page.Page, filter?: Filter | undefined, where?: Subscription.Where<FileChooser, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyDeferred<FileChooser, PE | Tar…`
+- `const stream: <PE = never, PR = never>(target: Page.Page, filter?: Filter | undefined, where?: Subscription.Where<FileChooser, PE, PR> | undefined) => Effect.Effect< Stream.Stream<FileChooser, PE | Subscription.Ev…`
+
+*getters*
+
+- `const history: (target: Page.Page, filter?: Filter | undefined) => Effect.Effect<Subscription.History<FileChooser>>`
+
+*handlers*
+
+- `const handle: <E, R>(page: Page.Page, handler: (chooser: FileChooser) => Effect.Effect<Decision, E, R>) => Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope.Scope | R>`
+- `const choose: (files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>) => (chooser: FileChooser) => Effect.Effect<Decision, FileChooserError>`
+
+*guards*
+
+- `const isDecision: (u: unknown) => u is Decision`
+- `const isFileChooserError: (u: unknown) => u is FileChooserError`
+
+*errors*
+
+- `class FileChooserError: Schema.TaggedError "FileChooserError" { reason, diagnostics }`
+
+### FileInput
+
+Files to upload, saying where their bytes come from.
+
+*models*
+
+- `type FileName = typeof FileName.Type`
+- `type MimeType = typeof MimeType.Type`
+- `interface FileInput`
+  - `readonly [TypeId]: typeof TypeId`
+
+*schemas*
+
+- `const FileName = Schema.String.pipe(Schema.brand("~effect-browser/FileInput/FileName"))`
+- `const MimeType = Schema.String.pipe(Schema.brand("~effect-browser/FileInput/MimeType"))`
+
+*constructors*
+
+- `const local: (path: FilePath.Local | string) => FileInput`
+- `const remote: (path: FilePath.Remote) => FileInput`
+- `const bytes: (name: FileName | string, mimeType: MimeType | string, data: Uint8Array) => FileInput`
+
+*guards*
+
+- `const isFileInput: (u: unknown) => u is FileInput`
+
+### FilePath
+
+File paths, branded by whose machine they are on.
+
+*models*
+
+- `type Local = typeof Local.Type`
+- `type Remote = typeof Remote.Type`
+
+*schemas*
+
+- `const Local = Schema.String.pipe(Schema.brand("~effect-browser/FilePath/Local"))`
+- `const Remote = Schema.String.pipe(Schema.brand("~effect-browser/FilePath/Remote"))`
+
+### Har
+
+HAR recordings: a page's or context's network traffic, exported as an HTTP Archive.
+
+*models*
+
+- `type SecretClass = "credentials" | "cookies" | "authorizationHeaders" | "typedText"` (experimental)
+- `interface Options` (experimental)
   - `readonly content: "embed" | "attach" | "omit"`
-  - `readonly detail?: "full" | "minimal"`
-  - `readonly url?: UrlPattern | string`
-  - `readonly webSocketFrames?: boolean`
-  - `readonly inFlightAtStop?: "wait" | "markIncomplete"`
-- `interface HarRecording extends Registration`
-  - `readonly entries: Watchable<number>`
-  - `exportHar(path: LocalPath | string, options?: { readonly include?: ReadonlyArray<SecretClass> }): Effect.Effect<LocalPath, HarError>`
-- `const Har`
-  - `record(target: UserContext | Page, options: HarOptions): Effect.Effect<HarRecording, HarError | Unsupported, Scope.Scope>`
+  - `readonly detail?: "full" | "minimal" | undefined`
+  - `readonly url?: Url.Pattern | string | undefined`
+  - `readonly webSocketFrames?: boolean | undefined`
+  - `readonly inFlightAtStop?: "wait" | "markIncomplete" | undefined`
+- `interface ExportOptions` (experimental)
+  - `readonly include?: ReadonlyArray<SecretClass> | undefined`
+- `interface Recording extends Declaration.Registration` (experimental)
+  - `readonly entries: Watchable.Watchable<number>`
+  - `exportHar(path: FilePath.Local | string, options?: ExportOptions | undefined): Effect.Effect<FilePath.Local, HarError>`
+- `type HarErrorReason = typeof HarErrorReason.Type` (experimental)
 
-## Surfaces
+*schemas*
 
-### BrowserToolkit (effect-browser/ai) (`src/ai.ts`)
+- `const HarErrorReason = Schema.Union([WriteFailed, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])` (experimental)
 
-- `type BrowserToolName = | "pages" | "newPage" | "goto" | "back" | "snapshot" | "screenshot" | "click" | "fill" | "press" | "select" | "scroll" | "next" | "await" | "expect" | "history" | "route" | "dialog"`
-- `type BrowserTools = { readonly [K in BrowserToolName]: Tool.Any }`
-- `interface CapturePolicy`
-  - `readonly screenshots: "allowed" | "denied"`
-  - `readonly snapshotText: "full" | "redacted"`
-  - `readonly consoleText: "full" | "redacted" | "omitted"`
-- `const CapturePolicy`
-  - `readonly strict: CapturePolicy`
-  - `readonly local: CapturePolicy`
-- `const BrowserToolkit`
-  - `readonly toolkit: Toolkit.Toolkit<BrowserTools>`
-  - `make(options: { readonly context: UserContext readonly secrets: Readonly<Record<string, Redacted.Redacted<string>>> readonly capture: CapturePolicy }…`
+*constructors*
 
-### BrowserTest, VitestBrowser (effect-browser/test) (`src/test.ts`, `src/test-vitest.ts`)
+- `const record: (target: UserContext.UserContext | Page.Page, options: Options) => Effect.Effect<Recording, HarError, Scope.Scope>` (experimental)
 
-- `interface TestInfo`
-  - `readonly project: string`
-  - `readonly file: string`
+*guards*
+
+- `const isHarError: (u: unknown) => u is HarError` (experimental)
+
+*errors*
+
+- `class HarError: Schema.TaggedError "HarError" { reason, diagnostics }` (experimental)
+
+*reasons*
+
+- `class WriteFailed: Schema.Error { path, hint, cause }` (experimental)
+
+### InitScript
+
+Init scripts: code that runs in every new document of a page or context, before the page's own scripts.
+
+*models*
+
+- `type Id = typeof Id.Type`
+- `interface InitScript extends Declaration.Registration`
+  - `readonly id: Id`
+- `type Source = | (() => void) | { readonly source: string } | { readonly path: FilePath.Local | string }`
+- `interface Options`
+  - `readonly world?: "main" | "isolated" | undefined`
+  - `readonly after?: ReadonlyArray<InitScript> | undefined`
+  - `readonly timing?: "beforeAuthorScript" | "bestEffort" | undefined`
+
+*schemas*
+
+- `const Id = Schema.String.pipe(Schema.brand("~effect-browser/InitScript/Id"))`
+
+### JSHandle
+
+Values that cross into and out of the page.
+
+*models*
+
+- `interface JSHandle<A = unknown> extends Pipeable.Pipeable, Inspectable.Inspectable`
+  - `readonly [TypeId]: typeof TypeId`
+  - `readonly realm: Target.RealmId`
+  - `evaluate<Args extends ReadonlyArray<unknown>, B>(fn: (value: A, ...args: Args) => B | Promise<B>, ...args: Args): Effect.Effect<Serialized<B>, JSHandleError | …`
+  - `evaluateHandle<Args extends ReadonlyArray<unknown>, B>(fn: (value: A, ...args: Args) => B | Promise<B>, ...args: Args): Effect.Effect<JSHandle<Awaited<B>>, JSH…`
+  - `readonly read: Effect.Effect<Serialized<A>, JSHandleError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly release: Effect.Effect<void>`
+- `type JSHandleErrorReason = typeof JSHandleErrorReason.Type`
+
+*schemas*
+
+- `const JSHandleErrorReason = Schema.Union([Reason.EvaluationThrown, Reason.NotSerializable, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
+
+*guards*
+
+- `const isJSHandle: (u: unknown) => u is JSHandle`
+- `const isJSHandleError: (u: unknown) => u is JSHandleError`
+
+*errors*
+
+- `class JSHandleError: Schema.TaggedError "JSHandleError" { operation, reason, diagnostics }`
+
+*utility types*
+
+- `interface NotSerializable<Message extends string>`
+  - `readonly [NotSerializableTypeId]: Message`
+- `type Serialized<A> = A extends string | number | boolean | bigint | null | undefined | Date | RegExp ? A : A extends ReadonlyMap<infer K, infer V> ? Map<Serialized<K>, Serialized<V>> : A extends ReadonlySet<infer T> ? Se…`
+
+### Keyboard
+
+Keys sent to whatever has focus, for what locators can't express.
+
+*models*
+
+- `type Key = typeof Key.Type`
+- `type Modifier = "Alt" | "Control" | "Meta" | "Shift"`
+- `interface PressOptions`
+  - `readonly modifiers?: ReadonlyArray<Modifier> | undefined`
+- `interface TypeOptions`
+  - `readonly delay?: Duration.Input | undefined`
+- `interface HeldKey`
+  - `readonly release: Effect.Effect<void>`
+- `interface Keyboard`
+  - `press(key: Key | string, options?: PressOptions | undefined): Effect.Effect<void, KeyboardError | Target.TargetGone | Deadline.Timeout>`
+  - `pressSequentially(text: string | Redacted.Redacted<string>, options?: TypeOptions | undefined): Effect.Effect<void, KeyboardError | Target.TargetGone | Deadlin…`
+  - `insertText(text: string | Redacted.Redacted<string>): Effect.Effect<void, KeyboardError | Target.TargetGone | Deadline.Timeout>`
+  - `hold(key: Key | string): Effect.Effect<HeldKey, KeyboardError | Target.TargetGone | Deadline.Timeout, Scope.Scope>`
+- `type KeyboardErrorReason = typeof KeyboardErrorReason.Type`
+
+*schemas*
+
+- `const Key = Schema.String.pipe(Schema.brand("~effect-browser/Keyboard/Key"))`
+- `const KeyboardErrorReason = Schema.Union([Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
+
+*guards*
+
+- `const isKeyboardError: (u: unknown) => u is KeyboardError`
+
+*errors*
+
+- `class KeyboardError: Schema.TaggedError "KeyboardError" { operation, reason, diagnostics }`
+
+### LaunchProfile
+
+Launch profiles: a browser's flags and preferences, as values you can inspect.
+
+*models*
+
+- `class LaunchProfile: Schema.Class { name, args, prefs }`
+
+*constants*
+
+- `const stock: LaunchProfile`
+- `const automation: LaunchProfile`
+- `const concurrent: LaunchProfile`
+
+### Locator
+
+Locators find elements, and act on them or read them.
+
+*models*
+
+- `interface RoleOptions`
+  - `readonly name?: string | RegExp | undefined`
+  - `readonly exact?: boolean | undefined`
+  - `readonly includeHidden?: boolean | undefined`
+- `interface TextOptions`
+  - `readonly exact?: boolean | undefined`
+- `interface Queries<L>`
+  - `getByRole(role: AriaRole.AriaRole, options?: RoleOptions | undefined): L`
+  - `getByText(text: string | RegExp, options?: TextOptions | undefined): L`
+  - `getByLabel(text: string | RegExp, options?: TextOptions | undefined): L`
+  - `getByPlaceholder(text: string | RegExp, options?: TextOptions | undefined): L`
+  - `getByAltText(text: string | RegExp, options?: TextOptions | undefined): L`
+  - `getByTitle(text: string | RegExp, options?: TextOptions | undefined): L`
+  - `getByTestId(id: string): L`
+  - `locator(css: string): L`
+- `interface FilterOptions`
+  - `readonly has?: RelativeLocator | undefined`
+  - `readonly hasNot?: RelativeLocator | undefined`
+  - `readonly hasText?: string | RegExp | undefined`
+  - `readonly hasNotText?: string | RegExp | undefined`
+  - `readonly visible?: boolean | undefined`
+- `interface ReadonlyLocator extends Queries<ReadonlyLocator>, Pipeable.Pipeable, Equal.Equal, Inspectable.Inspectable`
+  - `readonly [TypeId]: typeof TypeId`
+  - `frame(iframe: ReadonlyLocator): ReadonlyFrameLocator`
+  - `filter(options: FilterOptions): ReadonlyLocator`
+  - `and(other: ReadonlyLocator): ReadonlyLocator`
+  - `or(other: ReadonlyLocator): ReadonlyLocator`
+  - `nth(index: number): ReadonlyLocator`
+  - `readonly first: ReadonlyLocator`
+  - `readonly last: ReadonlyLocator`
+  - `describe(label: string): ReadonlyLocator`
+  - `readonly count: Effect.Effect<number, LocatorError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly readText: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly readValue: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly readHtml: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>`
+  - `readAttribute(name: string): Effect.Effect<Option.Option<string>, LocatorError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly isVisible: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly isEnabled: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly isChecked: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly all: Effect.Effect<ReadonlyArray<ReadonlyLocator>, LocatorError | Target.TargetGone | Deadline.Timeout>`
+  - `snapshot(options?: Snapshot.Options | undefined): Effect.Effect<Snapshot.Snapshot<ReadonlyLocator>, LocatorError | Target.TargetGone | Deadline.Timeout>`
+  - `evaluate<Args extends ReadonlyArray<unknown>, B>(fn: (element: Element, ...args: Args) => B | Promise<B>, ...args: Args): Effect.Effect<JSHandle.Serialized<B>,…`
+- `interface Checks`
+  - `readonly visible?: boolean | undefined`
+  - `readonly enabled?: boolean | undefined`
+  - `readonly editable?: boolean | undefined`
+  - `readonly notInert?: boolean | undefined`
+  - `readonly inViewport?: boolean | undefined`
+  - `readonly receivesPointer?: boolean | undefined`
+  - `readonly stable?: boolean | { readonly frames: number } | undefined`
+- `interface ActionOptions`
+  - `readonly checks?: Checks | undefined`
+  - `readonly trial?: boolean | undefined`
+- `interface PointerOptions extends ActionOptions`
+  - `readonly position?: Mouse.Point | undefined`
+  - `readonly modifiers?: ReadonlyArray<Keyboard.Modifier> | undefined`
+- `interface ClickOptions extends PointerOptions`
+  - `readonly button?: Mouse.Button | undefined`
+- `interface DragOptions extends PointerOptions`
+  - `readonly targetPosition?: Mouse.Point | undefined`
+  - `readonly steps?: number | undefined`
+- `interface PressOptions extends ActionOptions, Keyboard.PressOptions`
+- `interface TypeOptions extends ActionOptions, Keyboard.TypeOptions`
+- `type SelectOption = | { readonly value: string } | { readonly label: string } | { readonly index: number }`
+- `interface Locator extends ReadonlyLocator`
+  - `getByRole(role: AriaRole.AriaRole, options?: RoleOptions | undefined): Locator`
+  - `getByText(text: string | RegExp, options?: TextOptions | undefined): Locator`
+  - `getByLabel(text: string | RegExp, options?: TextOptions | undefined): Locator`
+  - `getByPlaceholder(text: string | RegExp, options?: TextOptions | undefined): Locator`
+  - `getByAltText(text: string | RegExp, options?: TextOptions | undefined): Locator`
+  - `getByTitle(text: string | RegExp, options?: TextOptions | undefined): Locator`
+  - `getByTestId(id: string): Locator`
+  - `locator(css: string): Locator`
+  - `frame(iframe: ReadonlyLocator): FrameLocator`
+  - `filter(options: FilterOptions): Locator`
+  - `and(other: ReadonlyLocator): Locator`
+  - `or(other: ReadonlyLocator): Locator`
+  - `nth(index: number): Locator`
+  - `readonly first: Locator`
+  - `readonly last: Locator`
+  - `describe(label: string): Locator`
+  - `readonly all: Effect.Effect<ReadonlyArray<Locator>, LocatorError | Target.TargetGone | Deadline.Timeout>`
+  - `snapshot(options?: Snapshot.Options | undefined): Effect.Effect<Snapshot.Snapshot<Locator>, LocatorError | Target.TargetGone | Deadline.Timeout>`
+  - `click(options?: ClickOptions | undefined): ActionEffect`
+  - `dblclick(options?: ClickOptions | undefined): ActionEffect`
+  - `tap(options?: PointerOptions | undefined): ActionEffect`
+  - `hover(options?: PointerOptions | undefined): ActionEffect`
+  - `check(options?: PointerOptions | undefined): ActionEffect`
+  - `uncheck(options?: PointerOptions | undefined): ActionEffect`
+  - `focus(options?: ActionOptions | undefined): ActionEffect`
+  - `clear(options?: ActionOptions | undefined): ActionEffect`
+  - `scrollIntoView(options?: ActionOptions | undefined): ActionEffect`
+  - `fill(value: string | Redacted.Redacted<string>, options?: ActionOptions | undefined): ActionEffect`
+  - `press(key: Keyboard.Key | string, options?: PressOptions | undefined): ActionEffect`
+  - `pressSequentially(text: string | Redacted.Redacted<string>, options?: TypeOptions | undefined): ActionEffect`
+  - `selectOption(choice: SelectOption | ReadonlyArray<SelectOption>, options?: ActionOptions | undefined): ActionEffect`
+  - `setInputFiles(files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>, options?: ActionOptions | undefined): ActionEffect`
+  - `dragTo(target: ReadonlyLocator, options?: DragOptions | undefined): ActionEffect`
+- `interface RelativeLocator extends Queries<RelativeLocator>`
+  - `readonly [RelativeLocatorTypeId]: typeof RelativeLocatorTypeId`
+- `interface ReadonlyFrameLocator extends Queries<ReadonlyLocator>`
+  - `readonly owner: ReadonlyLocator`
+  - `frame(iframe: ReadonlyLocator): ReadonlyFrameLocator`
+- `interface FrameLocator extends ReadonlyFrameLocator`
+  - `getByRole(role: AriaRole.AriaRole, options?: RoleOptions | undefined): Locator`
+  - `getByText(text: string | RegExp, options?: TextOptions | undefined): Locator`
+  - `getByLabel(text: string | RegExp, options?: TextOptions | undefined): Locator`
+  - `getByPlaceholder(text: string | RegExp, options?: TextOptions | undefined): Locator`
+  - `getByAltText(text: string | RegExp, options?: TextOptions | undefined): Locator`
+  - `getByTitle(text: string | RegExp, options?: TextOptions | undefined): Locator`
+  - `getByTestId(id: string): Locator`
+  - `locator(css: string): Locator`
+  - `frame(iframe: ReadonlyLocator): FrameLocator`
+- `type LocatorErrorReason = typeof LocatorErrorReason.Type`
+
+*schemas*
+
+- `const LocatorErrorReason = Schema.Union([StrictViolation, StaleRef, NotEditable, FileUnreadable, Reason.InvalidInput, Reason.EvaluationThrown, Reason.NotSerializable, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFail…`
+
+*constructors*
+
+- `const relative: Queries<RelativeLocator>`
+
+*guards*
+
+- `const isLocator: (u: unknown) => u is ReadonlyLocator`
+- `const isLocatorError: (u: unknown) => u is LocatorError`
+
+*errors*
+
+- `class LocatorError: Schema.TaggedError "LocatorError" { operation, locator, reason, diagnostics }`
+
+*reasons*
+
+- `class StrictViolation: Schema.Error { candidates, suggestions, hint }`
+- `class StaleRef: Schema.Error { why, hint }`
+- `class NotEditable: Schema.Error { element, hint }`
+- `class FileUnreadable: Schema.Error { path, hint, cause }`
+
+### MonotonicInstant
+
+Points on the live monotonic clock, used for deadlines and event timestamps.
+
+*models*
+
+- `type MonotonicInstant = typeof MonotonicInstant.Type`
+
+*schemas*
+
+- `const MonotonicInstant = Schema.Number.pipe(Schema.brand("~effect-browser/MonotonicInstant"))`
+
+### Mouse
+
+Pointer input by coordinates, for canvas-like interfaces that locators can't reach.
+
+*models*
+
+- `interface Point`
+  - `readonly x: Pixels.Css | number`
+  - `readonly y: Pixels.Css | number`
+- `type Button = "left" | "right" | "middle"`
+- `interface MoveOptions`
+  - `readonly steps?: number | undefined`
+- `interface ClickOptions`
+  - `readonly button?: Button | undefined`
+  - `readonly clickCount?: number | undefined`
+  - `readonly modifiers?: ReadonlyArray<Keyboard.Modifier> | undefined`
+- `interface HeldButton`
+  - `readonly release: Effect.Effect<void>`
+- `interface Mouse`
+  - `readonly position: Effect.Effect<Point>`
+  - `move(to: Point, options?: MoveOptions | undefined): Effect.Effect<void, MouseError | Target.TargetGone | Deadline.Timeout>`
+  - `click(at: Point, options?: ClickOptions | undefined): Effect.Effect<void, MouseError | Target.TargetGone | Deadline.Timeout>`
+  - `hold(button: Button): Effect.Effect<HeldButton, MouseError | Target.TargetGone | Deadline.Timeout, Scope.Scope>`
+  - `wheel(delta: Point): Effect.Effect<void, MouseError | Target.TargetGone | Deadline.Timeout>`
+- `type MouseErrorReason = typeof MouseErrorReason.Type`
+
+*schemas*
+
+- `const MouseErrorReason = Schema.Union([Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
+
+*guards*
+
+- `const isMouseError: (u: unknown) => u is MouseError`
+
+*errors*
+
+- `class MouseError: Schema.TaggedError "MouseError" { operation, reason, diagnostics }`
+
+### NetworkConnection
+
+Long-lived connections a page opens: WebSockets and EventSource streams.
+
+*models*
+
+- `type Id = typeof Id.Type`
+- `type Kind = "webSocket" | "eventSource"`
+- `class Frame: Schema.Class { direction, payload, at }`
+- `interface NetworkConnection extends Pipeable.Pipeable, Inspectable.Inspectable`
+  - `readonly [TypeId]: typeof TypeId`
+  - `readonly id: Id`
+  - `readonly kind: Kind`
+  - `readonly url: Url.Url`
+  - `readonly openedAt: DateTime.Utc`
+  - `readonly frames: Effect.Effect< Stream.Stream<Frame, Subscription.EventOverflow | Target.TargetGone>, Subscription.SubscriptionError, Scope.Scope >`
+  - `readonly closed: Effect.Effect<Target.CloseReason>`
+- `interface Filter`
+  - `readonly url?: Url.Pattern | string | undefined`
+  - `readonly kind?: Kind | undefined`
+
+*schemas*
+
+- `const Id = Schema.String.pipe(Schema.brand("~effect-browser/NetworkConnection/Id"))`
+
+*subscriptions*
+
+- `const next: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<NetworkConnection, PE, PR> | undefined) => Effect.Effect<…`
+- `const stream: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<NetworkConnection, PE, PR> | undefined) => Effect.Effect<…`
+
+*getters*
+
+- `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<NetworkConnection>>`
+
+*guards*
+
+- `const isNetworkConnection: (u: unknown) => u is NetworkConnection`
+
+### NetworkRequest
+
+Requests a page or context makes: the event, and the data every route and response refers to.
+
+*models*
+
+- `type Id = typeof Id.Type`
+- `type HopId = typeof HopId.Type`
+- `type ResourceType = typeof ResourceType.Type`
+- `type Initiator = typeof Initiator.Type`
+- `class NetworkRequest: Schema.Class { hop, method, url, headers, resourceType, initiator, servedBy, at }`
+- `interface Filter`
+  - `readonly url?: Url.Pattern | string | undefined`
+  - `readonly method?: HttpMethod.HttpMethod | undefined`
+  - `readonly resourceType?: ResourceType | ReadonlyArray<ResourceType> | undefined`
+
+*schemas*
+
+- `const Id = Schema.String.pipe(Schema.brand("~effect-browser/NetworkRequest/Id"))`
+- `const HopId = Schema.String.pipe(Schema.brand("~effect-browser/NetworkRequest/HopId"))`
+- `const ResourceType = Schema.Literals(["document", "stylesheet", "image", "media", "font", "script", "fetch", "xhr", "webSocket", "eventSource", "manifest", "ping", "other"])`
+- `const Initiator = Schema.Union([Schema.TaggedStruct("Document", { navigable: Target.NavigableId, navigation: Schema.Option(Schema.String.pipe(Schema.brand("~effect-browser/PageNavigation/Id"))) }), Schema.TaggedStruct…`
+- `const Method = Schema.Literals(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE", "QUERY"] as const satisfies ReadonlyArray<HttpMethod.HttpMethod>)`
+
+*subscriptions*
+
+- `const next: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter: Filter & { readonly url: Url.Pattern | string }, where?: Subscription.Where<NetworkRequest, PE, PR> | und…`
+- `const stream: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<NetworkRequest, PE, PR> | undefined) => Effect.Effect< St…`
+
+*getters*
+
+- `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<NetworkRequest>>`
+
+*converting*
+
+- `const toHttpClientRequest: (request: NetworkRequest) => HttpClientRequest.HttpClientRequest`
+
+### NetworkResponse
+
+Responses a page or context receives: the event, and, when asked for, their bodies.
+
+*models*
+
+- `type StatusCode = typeof StatusCode.Type`
+- `class NetworkResponse: Schema.Class { hop, url, status, headers, at }`
+- `interface CapturedResponse<B> extends NetworkResponse, HttpIncomingMessage.HttpIncomingMessage<ResponseError>`
+  - `readonly body: B`
+- `type BodyDecoder<B, DE, DR> = (message: HttpIncomingMessage.HttpIncomingMessage<ResponseError>) => Effect.Effect<B, DE, DR>`
+- `interface Filter`
+  - `readonly url?: Url.Pattern | string | undefined`
+  - `readonly method?: HttpMethod.HttpMethod | undefined`
+  - `readonly status?: StatusCode | number | ((status: StatusCode) => boolean) | undefined`
+- `type ResponseErrorReason = typeof ResponseErrorReason.Type`
+
+*schemas*
+
+- `const StatusCode = Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 100, maximum: 599 })), Schema.brand("~effect-browser/NetworkResponse/StatusCode"))`
+- `const ResponseErrorReason = Schema.Union([BodyUnavailable, Reason.BackendFailure])`
+
+*subscriptions*
+
+- `const next`
+  - `<B, DE, DR, PE = never, PR = never>(target: Page.ReadonlyPage | UserContext.UserContext, filter: Filter & { readonly url: Url.Pattern | string readonly body: B…`
+  - `<PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter: Filter & { readonly url: Url.Pattern | string }, where?: Subscrip…`
+- `const stream`
+  - `<B, DE, DR, PE = never, PR = never>(target: Page.ReadonlyPage | UserContext.UserContext, filter: Filter & { readonly body: BodyDecoder<B, DE, DR> }, where?: Su…`
+  - `<PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<NetworkResponse, …`
+
+*getters*
+
+- `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<NetworkResponse>>`
+
+*guards*
+
+- `const isResponseError: (u: unknown) => u is ResponseError`
+
+*errors*
+
+- `class ResponseError: Schema.TaggedError "ResponseError" { url, reason, diagnostics }`
+
+*reasons*
+
+- `class BodyUnavailable: Schema.Error { why, hint }`
+
+### OriginStorage
+
+`localStorage` and `sessionStorage` of a page's current document's origin.
+
+*models*
+
+- `interface ReadonlyOriginStorage`
+  - `readonly entries: Effect.Effect< ReadonlyArray<readonly [key: string, value: string]>, OriginStorageError | Target.TargetGone >`
+  - `get(key: string): Effect.Effect<Option.Option<string>, OriginStorageError | Target.TargetGone>`
+- `interface OriginStorage extends ReadonlyOriginStorage`
+  - `set(key: string, value: string | Redacted.Redacted<string>): Effect.Effect<void, OriginStorageError | Target.TargetGone>`
+  - `remove(key: string): Effect.Effect<void, OriginStorageError | Target.TargetGone>`
+  - `readonly clear: Effect.Effect<void, OriginStorageError | Target.TargetGone>`
+- `type OriginStorageErrorReason = typeof OriginStorageErrorReason.Type`
+
+*schemas*
+
+- `const OriginStorageErrorReason = Schema.Union([Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
+
+*guards*
+
+- `const isOriginStorageError: (u: unknown) => u is OriginStorageError`
+
+*errors*
+
+- `class OriginStorageError: Schema.TaggedError "OriginStorageError" { operation, reason, diagnostics }`
+
+### Page
+
+Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, like `ReadonlyArray` ⊂ `Array`.
+
+*models*
+
+- `type DocumentStatus = typeof DocumentStatus.Type`
+- `type Prompt = typeof Prompt.Type`
+- `type Status = typeof Status.Type`
+- `interface FrameTree`
+  - `readonly id: Target.NavigableId`
+  - `readonly url: Url.Url`
+  - `readonly name: Option.Option<string>`
+  - `readonly children: ReadonlyArray<FrameTree>`
+- `interface FrameTreeEncoded`
   - `readonly id: string`
-  - `readonly attempt: number`
-  - `readonly worker: string`
-  - `readonly shard: string`
-- `type TestArtifact = | { readonly _tag: "Trace"; readonly path: LocalPath } | { readonly _tag: "Har"; readonly path: LocalPath } | { readonly _tag: "Screenshot"; readonly path: LocalPath }`
-- `class TestRun extends Context.Service<TestRun, { readonly info: TestInfo attach(artifact: TestArtifact): Effect.Effect<void> }>()("effect-browser/TestRun")`
-- `const BrowserTest`
-  - `readonly page: Effect.Effect<Page, PageError, Browser | Scope.Scope>`
-  - `pageWith(options: UserContextOptions): Effect.Effect<Page, PageError, Browser | Scope.Scope>`
-- `const VitestBrowser`
-  - `layer<E, R>(backend: Layer.Layer<Browser, E, R>): Layer.Layer<Browser | TestRun, E, R>`
+  - `readonly url: string`
+  - `readonly name: Option.Option<string>`
+  - `readonly children: ReadonlyArray<FrameTreeEncoded>`
+- `interface ScreenshotOptions`
+  - `readonly area?: | { readonly _tag: "Viewport" } | { readonly _tag: "FullPage" } | { readonly _tag: "Clip" readonly rect: { readonly x: Pixels.Css readonly y: P…`
+  - `readonly format?: { readonly _tag: "Png" } | { readonly _tag: "Jpeg"; readonly quality: number } | undefined`
+  - `readonly scale?: "css" | "device" | undefined`
+  - `readonly omitBackground?: boolean | undefined`
+- `interface Length`
+  - `readonly value: number`
+  - `readonly unit: "in" | "cm" | "mm" | "px"`
+- `interface PdfOptions`
+  - `readonly paper?: | "letter" | "legal" | "tabloid" | "a3" | "a4" | "a5" | { readonly width: Length; readonly height: Length } | undefined`
+  - `readonly landscape?: boolean | undefined`
+  - `readonly margins?: { readonly top?: Length | undefined readonly right?: Length | undefined readonly bottom?: Length | undefined readonly left?: Length | undefi…`
+  - `readonly scale?: number | undefined`
+  - `readonly background?: boolean | undefined`
+  - `readonly pageRanges?: string | undefined`
+  - `readonly preferCssPageSize?: boolean | undefined`
+  - `readonly header?: string | undefined`
+  - `readonly footer?: string | undefined`
+- `interface GotoOptions`
+  - `readonly waitUntil?: PageNavigation.LoadState | undefined`
+  - `readonly accept?: ReadonlyArray<"download" | "noContent"> | undefined`
+- `interface ReloadOptions`
+  - `readonly waitUntil?: PageNavigation.LoadState | undefined`
+  - `readonly bypassCache?: boolean | undefined`
+- `interface TraverseOptions`
+  - `readonly waitUntil?: PageNavigation.LoadState | undefined`
+- `interface ObservedPage extends Pipeable.Pipeable, Equal.Equal, Inspectable.Inspectable`
+  - `readonly [TypeId]: typeof TypeId`
+  - `readonly id: Target.NavigableId`
+  - `readonly status: Watchable.Watchable<Status>`
+  - `readonly url: Watchable.Watchable<Url.Url>`
+  - `readonly frames: Watchable.Watchable<FrameTree>`
+  - `readonly workers: Watchable.Watchable<ReadonlyArray<BrowserWorker.ObservedBrowserWorker>>`
+  - `readonly closed: Effect.Effect<Target.CloseReason>`
+  - `readonly inspect: Effect.Effect<ReadonlyPage, PageError, Scope.Scope>`
+  - `readonly control: Effect.Effect<Page, PageError, Scope.Scope>`
+- `interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.ReadonlyLocator>`
+  - `frame(iframe: Locator.ReadonlyLocator): Locator.ReadonlyFrameLocator`
+  - `readonly title: Effect.Effect<string, PageError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly readHtml: Effect.Effect<string, PageError | Target.TargetGone | Deadline.Timeout>`
+  - `snapshot(options?: Snapshot.Options | undefined): Effect.Effect<Snapshot.Snapshot<Locator.ReadonlyLocator>, PageError | Target.TargetGone | Deadline.Timeout>`
+  - `screenshot(options?: ScreenshotOptions | undefined): Effect.Effect<Uint8Array, PageError | Target.TargetGone | Deadline.Timeout>`
+  - `pdf(options?: PdfOptions | undefined): Effect.Effect<Uint8Array, PageError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly localStorage: OriginStorage.ReadonlyOriginStorage`
+  - `readonly sessionStorage: OriginStorage.ReadonlyOriginStorage`
+  - `evaluate<Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args): Effect.Effect<JSHandle.Serialized<A>, PageError | Targe…`
+  - `capability<H>(capability: Capability.Capability<H>): Effect.Effect<H, Capability.CapabilityError, Scope.Scope>`
+- `interface Page extends ReadonlyPage`
+  - `getByRole(role: AriaRole.AriaRole, options?: Locator.RoleOptions | undefined): Locator.Locator`
+  - `getByText(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator`
+  - `getByLabel(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator`
+  - `getByPlaceholder(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator`
+  - `getByAltText(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator`
+  - `getByTitle(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator`
+  - `getByTestId(id: string): Locator.Locator`
+  - `locator(css: string): Locator.Locator`
+  - `frame(iframe: Locator.ReadonlyLocator): Locator.FrameLocator`
+  - `snapshot(options?: Snapshot.Options | undefined): Effect.Effect<Snapshot.Snapshot<Locator.Locator>, PageError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly workers: Watchable.Watchable<ReadonlyArray<BrowserWorker.BrowserWorker>>`
+  - `readonly localStorage: OriginStorage.OriginStorage`
+  - `readonly sessionStorage: OriginStorage.OriginStorage`
+  - `readonly context: UserContext.UserContext`
+  - `goto(url: Url.Url | string, options?: GotoOptions | undefined): Effect.Effect<PageNavigation.PageNavigation, PageError | Target.TargetGone | Deadline.Timeout>`
+  - `reload(options?: ReloadOptions | undefined): Effect.Effect<PageNavigation.PageNavigation, PageError | Target.TargetGone | Deadline.Timeout>`
+  - `back(options?: TraverseOptions | undefined): Effect.Effect<Option.Option<PageNavigation.PageNavigation>, PageError | Target.TargetGone | Deadline.Timeout>`
+  - `forward(options?: TraverseOptions | undefined): Effect.Effect<Option.Option<PageNavigation.PageNavigation>, PageError | Target.TargetGone | Deadline.Timeout>`
+  - `evaluateInMainWorld<Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args): Effect.Effect<JSHandle.Serialized<A>, PageEr…`
+  - `evaluateHandle<Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args): Effect.Effect<JSHandle.JSHandle<Awaited<A>>, Page…`
+  - `readonly keyboard: Keyboard.Keyboard`
+  - `readonly mouse: Mouse.Mouse`
+  - `readonly clock: PageClock.PageClock`
+  - `route<E, R>(pattern: Url.Pattern | string, handler: Route.Handler<E, R>): Effect.Effect<Route.Registration, Route.RouteError, Scope.Scope | R>`
+  - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError, Scope.Sc…`
+  - `emulate(settings: Emulation.Emulation): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope>`
+  - `readonly activate: Effect.Effect<void, Target.TargetGone>`
+  - `close(): Effect.Effect<void, Target.TargetGone | Deadline.Timeout>`
+  - `close(options: { readonly runBeforeUnload: boolean }): Effect.Effect<void, PageError | Target.TargetGone | Deadline.Timeout>`
+- `type PageErrorReason = typeof PageErrorReason.Type`
 
-### CurrentSession (effect-browser/cli) (`src/cli.ts`)
+*schemas*
 
-- `interface PageNotFound extends Cause.YieldableError`
-  - `readonly _tag: "PageNotFound"`
-  - `readonly name: string`
+- `const DocumentStatus = Schema.Struct({ id: Target.DocumentId, readiness: Schema.Literals(["loading", "interactive", "complete"]), lifecycle: Schema.Literals(["active", "suspended"]) })`
+- `const Prompt = Schema.Struct({ id: Dialog.PromptId, kind: Schema.Literals(["alert", "confirm", "prompt", "beforeunload"]), blocking: Schema.Literals(["confirmed", "suspected"]) })`
+- `const Status = Schema.Union([Schema.TaggedStruct("Open", { url: Url.Url, document: DocumentStatus, prompt: Schema.Option(Prompt) }), Schema.TaggedStruct("Closed", { reason: Target.CloseReason })])`
+- `const FrameTree: Schema.Codec<FrameTree, FrameTreeEncoded>`
+- `const PageErrorReason = Schema.Union([PageNavigation.NavigationFailed, PageNavigation.NavigationCanceled, PageNavigation.NavigationSuperseded, PageNavigation.BecameDownload, PageNavigation.NoContent, InitializationFailed, C…`
+
+*combinators*
+
+- `const withUserGesture: <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>`
+
+*references*
+
+- `const UserGesture: Context.Reference<boolean>`
+
+*guards*
+
+- `const isPage: (u: unknown) => u is ObservedPage`
+- `const isPageError: (u: unknown) => u is PageError`
+
+*errors*
+
+- `class PageError: Schema.TaggedError "PageError" { operation, reason, diagnostics }`
+
+*reasons*
+
+- `class InitializationFailed: Schema.Error { step, hint }`
+- `class CloseCanceled: Schema.Error { hint }`
+
+### PageClock
+
+Page time: the clock a page's scripts see, under your control.
+
+*models*
+
+- `type Mode = | { readonly mode: "fixed"; readonly at: DateTime.DateTime.Input } | { readonly mode: "offset"; readonly by: Duration.Input } | { readonly mode: "controlled"; readonly at: DateTime.DateTime.Input }`
+- `interface PageClock`
+  - `install(mode: Mode): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope>`
+  - `adjust(duration: Duration.Input): Effect.Effect<void, PageClockError>`
+  - `setTime(at: DateTime.DateTime.Input): Effect.Effect<void, PageClockError>`
+  - `readonly resume: Effect.Effect<void, PageClockError>`
+- `type PageClockErrorReason = typeof PageClockErrorReason.Type`
+
+*schemas*
+
+- `const PageClockErrorReason = Schema.Union([NotInstalled, WrongMode, Reason.BackendFailure])`
+
+*guards*
+
+- `const isPageClockError: (u: unknown) => u is PageClockError`
+
+*errors*
+
+- `class PageClockError: Schema.TaggedError "PageClockError" { operation, reason, diagnostics }`
+
+*reasons*
+
+- `class NotInstalled: Schema.Error { hint }`
+- `class WrongMode: Schema.Error { mode, hint }`
+
+### PageNavigation
+
+Navigations of a page: the event, and the success value of `goto`, `reload`, `back` and `forward`.
+
+*models*
+
+- `type Id = typeof Id.Type`
+- `type PageNavigation = typeof PageNavigation.Type`
+- `type LoadState = "commit" | "domContentLoaded" | "load"`
+- `interface Filter`
+  - `readonly url?: Url.Pattern | string | undefined`
+- `interface NextFilter extends Filter`
+  - `readonly waitUntil?: LoadState | undefined`
+
+*schemas*
+
+- `const Id = Schema.String.pipe(Schema.brand("~effect-browser/PageNavigation/Id"))`
+- `const PageNavigation = Schema.Union([Schema.TaggedStruct("Committed", { id: Id, document: Target.DocumentId, response: Schema.Option(NetworkResponse.NetworkResponse) }), Schema.TaggedStruct("SameDocument", { id: Id, docume…`
+
+*subscriptions*
+
+- `const next: <PE = never, PR = never>(target: Page.ObservedPage, filter?: NextFilter | undefined, where?: Subscription.Where<PageNavigation, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyDeferred<PageNa…`
+- `const stream: <PE = never, PR = never>(target: Page.ObservedPage, filter?: Filter | undefined, where?: Subscription.Where<PageNavigation, PE, PR> | undefined) => Effect.Effect< Stream.Stream<PageNavigation, PE | S…`
+
+*getters*
+
+- `const history: (target: Page.ObservedPage, filter?: Filter | undefined) => Effect.Effect<Subscription.History<PageNavigation>>`
+
+*reasons*
+
+- `class NavigationFailed: Schema.Error { url, netError, hint }`
+- `class NavigationCanceled: Schema.Error { url, why, hint }`
+- `class NavigationSuperseded: Schema.Error { url, by, hint }`
+- `class BecameDownload: Schema.Error { url, hint }`
+- `class NoContent: Schema.Error { url, hint }`
+
+### Pixels
+
+CSS pixels and device pixels, which differ by the device pixel ratio.
+
+*models*
+
+- `type Css = typeof Css.Type`
+- `type Device = typeof Device.Type`
+
+*schemas*
+
+- `const Css = Schema.Number.pipe(Schema.brand("~effect-browser/Pixels/Css"))`
+- `const Device = Schema.Number.pipe(Schema.brand("~effect-browser/Pixels/Device"))`
+
+### Popup
+
+Pages opened by another page, such as with `window.open` or a `target="_blank"` link.
+
+*models*
+
+- `interface Filter`
+  - `readonly url?: Url.Pattern | string | undefined`
+
+*subscriptions*
+
+- `const next`
+  - `<PE = never, PR = never>(target: Page.Page, filter?: Filter | undefined, where?: Subscription.Where<Page.Page, PE, PR> | undefined): Effect.Effect< Deferred.Re…`
+  - `<PE = never, PR = never>(target: Page.ObservedPage, filter?: Filter | undefined, where?: Subscription.Where<Page.ObservedPage, PE, PR> | undefined): Effect.Eff…`
+- `const stream`
+  - `<PE = never, PR = never>(target: Page.Page, filter?: Filter | undefined, where?: Subscription.Where<Page.Page, PE, PR> | undefined): Effect.Effect< Stream.Stre…`
+  - `<PE = never, PR = never>(target: Page.ObservedPage, filter?: Filter | undefined, where?: Subscription.Where<Page.ObservedPage, PE, PR> | undefined): Effect.Eff…`
+
+*getters*
+
+- `const history`
+  - `(target: Page.Page, filter?: Filter | undefined): Effect.Effect<Subscription.History<Page.Page>>`
+  - `(target: Page.ObservedPage, filter?: Filter | undefined): Effect.Effect<Subscription.History<Page.ObservedPage>>`
+
+### Reason
+
+Failure reasons that more than one module's error can carry.
+
+*models*
+
+- `interface Reason`
+  - `readonly _tag: string`
   - `readonly hint: string`
-- `class CurrentSession extends Context.Service<CurrentSession, { readonly context: UserContext page(name: PageName | string): Effect.Effect<Page, PageNotFound> }>()("effect-browser/cli/CurrentSession")`
+  - `readonly message: string`
+- `type Metadata = typeof Metadata.Type`
 
-## Errors
+*schemas*
 
-### Errors (`src/Errors.ts`)
+- `const Metadata = Schema.Record(Schema.String, Schema.NullOr(Schema.MutableJson))`
 
-- `type CloseReason = | { readonly _tag: "BrowserClosed" } | { readonly _tag: "BrowserCrashed" } | { readonly _tag: "ConnectionLost" } | { readonly _tag: "ModelUnavailable" } | { readonly _tag: "UserContextRemoved" } | { readonly _tag: "A…`
-- `type TargetDescription = | { readonly _tag: "Page"; readonly id: NavigableId } | { readonly _tag: "Frame"; readonly id: NavigableId } | { readonly _tag: "Document"; readonly id: DocumentId } | { readonly _tag: "Realm"; readonly id: RealmId }…`
-- `interface TargetGone extends Failure<"TargetGone">`
-  - `readonly target: TargetDescription`
-  - `readonly reason: CloseReason`
-- `interface Timeout extends Failure<"Timeout">`
-  - `readonly operation: string`
-  - `readonly phase: "resolving" | "waitingForCondition" | "dispatchedUnconfirmed" | "postcondition"`
-  - `readonly budget: Duration.Duration`
-  - `readonly last: Option.Option<ObservedValue>`
-  - `readonly history: ReadonlyArray<ObservedValue>`
-  - `readonly hint: Option.Option<string>`
-- `interface NotPermitted extends Reason<"NotPermitted">`
-  - `readonly required: "inspect" | "control" | "browserWide"`
-- `interface Unsupported extends Reason<"Unsupported">`
-  - `readonly capability: string`
-  - `readonly backend: string`
-- `interface BackendFailure extends Reason<"BackendFailure">`
-  - `readonly kind: "Rejected" | "IncompatibleResponse"`
-  - `readonly method: string`
-- `interface InvalidInput extends Reason<"InvalidInput">`
-  - `readonly input: string`
-  - `readonly expected: string`
-- `interface StrictViolation extends Reason<"StrictViolation">`
-  - `readonly candidates: ReadonlyArray<{ readonly description: string; readonly visible: boolean }>`
-  - `readonly suggestions: ReadonlyArray<string>`
-- `interface StaleRef extends Reason<"StaleRef">`
-  - `readonly why: "Replaced" | "Detached" | "Suspended" | "BindingLost" | "OtherSnapshot"`
-- `interface NotEditable extends Reason<"NotEditable">`
-  - `readonly element: string`
-- `interface FileUnreadable extends Reason<"FileUnreadable">`
-  - `readonly path: string`
-- `interface ActionError extends DomainError<"ActionError", StrictViolation | NotEditable | InvalidInput | StaleRef | FileUnreadable | NotPermi…`
-  - `readonly action: string`
-- `interface ReadError extends DomainError<"ReadError", StrictViolation | StaleRef | NotPermitted | Unsupported | BackendFailure>`
-- `interface CaptureError extends DomainError<"CaptureError", InvalidInput | NotPermitted | Unsupported | BackendFailure>`
-- `interface NavigationError extends DomainError<"NavigationError", | (Reason<"Failed"> & { readonly netError: string }) | Reason<"Download"> | Rea…`
-  - `readonly url: Option.Option<Url>`
-- `interface EvaluationError extends DomainError<"EvaluationError", | (Reason<"Thrown"> & { readonly message: string; readonly stack: Option.Option…`
-- `interface ResponseError extends DomainError<"ResponseError", | (Reason<"BodyUnavailable"> & { readonly why: "notCollected" | "evicted" | "redi…`
-- `interface ExpectationFailed extends Failure<"ExpectationFailed">`
-  - `readonly subject: string`
-  - `readonly condition: string`
-  - `readonly last: Option.Option<ObservedValue>`
-  - `readonly history: ReadonlyArray<ObservedValue>`
-  - `readonly elapsed: Duration.Duration`
-  - `readonly checks: { readonly count: number; readonly triggeredBy: ReadonlyArray<"initial" | "change" | "interval"> }`
-  - `readonly nearest: Option.Option<string>`
-  - `readonly suggestions: ReadonlyArray<string>`
-- `interface RouteError extends DomainError<"RouteError", InvalidInput | NotPermitted | Unsupported | BackendFailure>`
-  - `readonly pattern: UrlPattern`
-- `interface DeclarationError extends DomainError<"DeclarationError", | (Reason<"TimingUnsupported"> & { readonly needed: "beforeAuthorScript" }) | …`
-- `interface ObserveError extends DomainError<"ObserveError", InvalidInput | NotPermitted | Unsupported | BackendFailure>`
-- `interface PageError extends DomainError<"PageError", (Reason<"InitializationFailed"> & { readonly step: string }) | NotPermitted | Unsuppo…`
-- `interface UserContextError extends DomainError<"UserContextError", (Reason<"InitializationFailed"> & { readonly step: string }) | NotPermitted | …`
-- `interface LaunchError extends DomainError<"LaunchError", | (Reason<"ExecutableNotFound"> & { readonly searched: ReadonlyArray<string> }) | (…`
-- `interface ConnectError extends DomainError<"ConnectError", Reason<"Refused"> | Reason<"Handshake"> | Reason<"IncompatibleBrowserRevision"> | …`
-- `interface DownloadError extends DomainError<"DownloadError", Reason<"Canceled"> | (Reason<"Failed"> & { readonly why: string }) | NotPermitted…`
-- `interface StorageError extends DomainError<"StorageError", InvalidInput | NotPermitted | Unsupported | BackendFailure>`
-- `interface StorageStateError extends DomainError<"StorageStateError", (Reason<"Incompatible"> & { readonly partitions: ReadonlyArray<string> }) | I…`
-- `interface ClockError extends DomainError<"ClockError", Reason<"NotInstalled"> | (Reason<"WrongMode"> & { readonly mode: string }) | Backend…`
-- `interface CapabilityError extends DomainError<"CapabilityError", NotPermitted | Unsupported>`
-- `interface TraceError extends DomainError<"TraceError", (Reason<"Io"> & { readonly path: string }) | Unsupported | BackendFailure>`
-- `interface HarError extends DomainError<"HarError", (Reason<"Io"> & { readonly path: string }) | Unsupported | BackendFailure>`
-- `interface SnapshotDiffError extends Failure<"SnapshotDiffError">`
-  - `readonly documents: readonly [DocumentId, DocumentId]`
-- `interface CloseCanceled extends Failure<"CloseCanceled">`
-- `interface EventOverflow extends Failure<"EventOverflow">`
-  - `readonly bound: number`
-  - `readonly at: MonotonicInstant`
+*configuration*
+
+- `interface BackendMetadata extends Metadata`
+
+*reasons*
+
+- `class InvalidInput: Schema.Error { input, expected, hint }`
+- `class NotPermitted: Schema.Error { required, hint }`
+- `class Unsupported: Schema.Error { capability, backend, hint }`
+- `class BackendFailure: Schema.Error { kind, method, metadata, hint, cause }`
+- `class EvaluationThrown: Schema.Error { exception, hint }`
+- `class NotSerializable: Schema.Error { path, hint }`
+
+### Route
+
+Routes intercept requests, and their handlers decide what happens to each one.
+
+*models*
+
+- `interface Decision`
+  - `readonly [DecisionTypeId]: typeof DecisionTypeId`
+- `interface Intercepted`
+  - `readonly request: NetworkRequest.NetworkRequest`
+  - `readonly phase: "request" | "response" | "auth"`
+  - `readonly fetch: Effect.Effect<HttpClientResponse.HttpClientResponse, RouteError>`
+  - `fetchWith(change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest): Effect.Effect<HttpClientResponse.HttpClientResponse, …`
+- `type Handler<E, R> = (intercepted: Intercepted) => Effect.Effect<Decision, E, R>`
+- `type AbortReason = | "failed" | "aborted" | "timedOut" | "accessDenied" | "connectionClosed" | "connectionReset" | "connectionRefused" | "connectionAborted" | "connectionFailed" | "nameNotResolved" | "internetDisconnec…`
+- `interface Registration extends Declaration.Registration`
+  - `readonly hits: Watchable.Watchable<number>`
+- `type RouteErrorReason = typeof RouteErrorReason.Type`
+
+*schemas*
+
+- `const RouteErrorReason = Schema.Union([Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
+
+*constructors*
+
+- `const continue: Decision`
+- `const continueWith: (change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest) => Decision`
+- `const fulfill: (response: HttpServerResponse.HttpServerResponse) => Decision`
+- `const abort: (reason?: AbortReason | undefined) => Decision`
+- `const fallthrough: Decision`
+- `const provideCredentials: (credentials: { readonly username: string readonly password: Redacted.Redacted<string> }) => Decision`
+
+*guards*
+
+- `const isDecision: (u: unknown) => u is Decision`
+- `const isRouteError: (u: unknown) => u is RouteError`
+
+*errors*
+
+- `class RouteError: Schema.TaggedError "RouteError" { pattern, reason, diagnostics }`
+
+### Snapshot
+
+Accessibility snapshots, for agents and for structural expectations.
+
+*models*
+
+- `type RefId = typeof RefId.Type`
+- `type Generation = typeof Generation.Type`
+- `type InteractivityEvidence = typeof InteractivityEvidence.Type`
+- `interface Node`
+  - `readonly ref: Option.Option<RefId>`
+  - `readonly role: | { readonly _tag: "Aria"; readonly role: AriaRole.AriaRole } | { readonly _tag: "Inferred" readonly role: "clickable" | "editable" | "focusable…`
+  - `readonly name: | { readonly _tag: "Accessible"; readonly value: string } | { readonly _tag: "Inferred" readonly value: string readonly from: "text" | "title" |…`
+  - `readonly states: ReadonlySet<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed">`
+  - `readonly children: ReadonlyArray<Node>`
+- `interface NodeEncoded`
+  - `readonly ref: Option.Option<string>`
+  - `readonly role: Node["role"]`
+  - `readonly name: Node["name"]`
+  - `readonly states: Node["states"]`
+  - `readonly children: ReadonlyArray<NodeEncoded>`
+- `class Data: Schema.Class { document, generation, root, text }`
+- `class Diff: Schema.Class { added, removed, changed, text }`
+- `interface Snapshot<L extends Locator.ReadonlyLocator = Locator.ReadonlyLocator> extends Data`
+  - `readonly [TypeId]: typeof TypeId`
+  - `readonly refs: ReadonlyMap<RefId, Node>`
+  - `ref(id: RefId): L`
+  - `diff(previous: Snapshot): Effect.Effect<Diff, SnapshotError>`
+- `interface Options`
+  - `readonly sources?: "aria" | "aria+interactivity" | undefined`
+  - `readonly depth?: number | undefined`
+  - `readonly interactiveOnly?: boolean | undefined`
+
+*schemas*
+
+- `const RefId = Schema.String.pipe(Schema.brand("~effect-browser/Snapshot/RefId"))`
+- `const Generation = Schema.Number.pipe(Schema.brand("~effect-browser/Snapshot/Generation"))`
+- `const InteractivityEvidence = Schema.Literals(["clickListener", "cursorPointer", "tabindex", "contentEditable", "onclickAttribute"])`
+- `const Node: Schema.Codec<Node, NodeEncoded>`
+
+*guards*
+
+- `const isSnapshot: (u: unknown) => u is Snapshot`
+- `const isSnapshotError: (u: unknown) => u is SnapshotError`
+
+*errors*
+
+- `class SnapshotError: Schema.TaggedError "SnapshotError" { reason, diagnostics }`
+
+*reasons*
+
+- `class DocumentsDiffer: Schema.Error { documents, hint }`
+
+### StorageState
+
+A context's saved storage: cookies, `localStorage` and IndexedDB, per partition.
+
+*models*
+
+- `class StorageState: Schema.Class { cookies, origins }`
+
+*schemas*
+
+- `const IndexedDbDatabase = Schema.Struct({ name: Schema.String, version: Schema.Int, stores: Schema.Array(Schema.Struct({ name: Schema.String, records: Schema.Array(Schema.Struct({ key: Schema.Unknown, value: Schema.Redacted(S…`
+- `const OriginState = Schema.Struct({ origin: Url.Origin, partition: CookieJar.PartitionKey, localStorage: Schema.Array(Schema.Tuple([Schema.String, Schema.Redacted(Schema.String)])), indexedDb: Schema.Array(IndexedDbData…`
+- `const Json = Schema.fromJsonString(StorageState)`
+
+*reasons*
+
+- `class Incompatible: Schema.Error { partitions, hint }`
+
+### Subscription
+
+What every event module shares: the three verbs, caller predicates, history and their errors.
+
+*models*
+
+- `type Where<A, PE, PR> = (event: A) => Effect.Effect<boolean, PE, PR>`
+- `interface History<A>`
+  - `readonly entries: ReadonlyArray<A>`
+  - `readonly dropped: number`
+- `type SubscriptionErrorReason = typeof SubscriptionErrorReason.Type`
+
+*schemas*
+
+- `const History = <S extends Schema.Top>(entry: S) => Schema.Struct({ entries: Schema.Array(entry), dropped: Schema.Int })`
+- `const SubscriptionErrorReason = Schema.Union([Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
+
+*guards*
+
+- `const isSubscriptionError: (u: unknown) => u is SubscriptionError`
+- `const isEventOverflow: (u: unknown) => u is EventOverflow`
+
+*errors*
+
+- `class SubscriptionError: Schema.TaggedError "SubscriptionError" { operation, reason, diagnostics }`
+- `class EventOverflow: Schema.TaggedError "EventOverflow" { bound, at, diagnostics }`
+
+### Target
+
+What operations act on: how targets are identified, and how they end.
+
+*models*
+
+- `type NavigableId = typeof NavigableId.Type`
+- `type DocumentId = typeof DocumentId.Type`
+- `type RealmId = typeof RealmId.Type`
+- `type CloseReason = typeof CloseReason.Type`
+- `type Description = typeof Description.Type`
+- `type EventOrigin = typeof EventOrigin.Type`
+
+*schemas*
+
+- `const NavigableId = Schema.String.pipe(Schema.brand("~effect-browser/Target/NavigableId"))`
+- `const DocumentId = Schema.String.pipe(Schema.brand("~effect-browser/Target/DocumentId"))`
+- `const RealmId = Schema.String.pipe(Schema.brand("~effect-browser/Target/RealmId"))`
+- `const CloseReason = Schema.Union([Schema.TaggedStruct("BrowserClosed", {}), Schema.TaggedStruct("BrowserCrashed", {}), Schema.TaggedStruct("ConnectionLost", {}), Schema.TaggedStruct("ModelUnavailable", {}), Schema.Tagge…`
+- `const Description = Schema.Union([Schema.TaggedStruct("Page", { id: NavigableId }), Schema.TaggedStruct("Frame", { id: NavigableId }), Schema.TaggedStruct("Document", { id: DocumentId }), Schema.TaggedStruct("Realm", { …`
+- `const EventOrigin = Schema.Union([Schema.TaggedStruct("Page", { page: NavigableId }), Schema.TaggedStruct("Worker", { realm: RealmId })])`
+
+*guards*
+
+- `const isTargetGone: (u: unknown) => u is TargetGone`
+
+*errors*
+
+- `class TargetGone: Schema.TaggedError "TargetGone" { target, reason, diagnostics }`
+
+### Trace
+
+Trace recordings, exported in the format Playwright's trace viewer reads.
+
+*models*
+
+- `interface Options` (experimental)
+  - `readonly screenshots?: "perAction" | "off" | undefined`
+  - `readonly screencast?: "native" | { readonly polled: Duration.Input } | "off" | undefined`
+  - `readonly domSnapshots?: boolean | undefined`
+  - `readonly network?: boolean | undefined`
+- `interface Recording extends Declaration.Registration` (experimental)
+  - `exportTrace(path: FilePath.Local | string): Effect.Effect<FilePath.Local, TraceError>`
+- `type TraceErrorReason = typeof TraceErrorReason.Type` (experimental)
+
+*schemas*
+
+- `const TraceErrorReason = Schema.Union([WriteFailed, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])` (experimental)
+
+*constructors*
+
+- `const record: (target: UserContext.UserContext | Page.Page, options?: Options | undefined) => Effect.Effect<Recording, TraceError, Scope.Scope>` (experimental)
+
+*guards*
+
+- `const isTraceError: (u: unknown) => u is TraceError` (experimental)
+
+*errors*
+
+- `class TraceError: Schema.TaggedError "TraceError" { reason, diagnostics }` (experimental)
+
+*reasons*
+
+- `class WriteFailed: Schema.Error { path, hint, cause }` (experimental)
+
+### UncaughtException
+
+Errors a page or its workers threw and didn't catch, and promise rejections nothing handled.
+
+*models*
+
+- `class UncaughtException: Schema.Class { kind, name, message, stack, origin, at }`
+- `interface Filter`
+  - `readonly message?: string | RegExp | undefined`
+
+*subscriptions*
+
+- `const next: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<UncaughtException, PE, PR> | undefined) => Effect.Effect<…`
+- `const stream: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<UncaughtException, PE, PR> | undefined) => Effect.Effect<…`
+
+*getters*
+
+- `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<UncaughtException>>`
+
+### Url
+
+URLs, URL patterns, origins and sites, as branded strings.
+
+*models*
+
+- `type Url = typeof Url.Type`
+- `type Pattern = typeof Pattern.Type`
+- `type Origin = typeof Origin.Type`
+- `type Site = typeof Site.Type`
+
+*schemas*
+
+- `const Url = Schema.String.pipe(Schema.brand("~effect-browser/Url/Url"))`
+- `const Pattern = Schema.String.pipe(Schema.brand("~effect-browser/Url/Pattern"))`
+- `const Origin = Schema.String.pipe(Schema.brand("~effect-browser/Url/Origin"))`
+- `const Site = Schema.String.pipe(Schema.brand("~effect-browser/Url/Site"))`
+
+### UserContext
+
+User contexts (the spec's term; Playwright calls them browser contexts), at two access levels.
+
+*models*
+
+- `type Id = typeof Id.Type`
+- `interface ObservedUserContext extends Pipeable.Pipeable, Equal.Equal, Inspectable.Inspectable`
+  - `readonly [TypeId]: typeof TypeId`
+  - `readonly id: Id`
+  - `readonly pages: Watchable.Watchable<ReadonlyArray<Page.ObservedPage>>`
+  - `readonly workers: Watchable.Watchable<ReadonlyArray<BrowserWorker.ObservedBrowserWorker>>`
+  - `readonly closed: Effect.Effect<Target.CloseReason>`
+  - `readonly control: Effect.Effect<UserContext, UserContextError, Scope.Scope>`
+- `type Permission = | "geolocation" | "notifications" | "camera" | "microphone" | "clipboard-read" | "clipboard-write" | "midi" | "background-sync" | "persistent-storage" | "accelerometer" | "gyroscope" | "magnetometer"…`
+- `interface GrantOptions`
+  - `readonly origin?: Url.Origin | string | undefined`
+- `interface UserContext extends ObservedUserContext`
+  - `readonly newPage: Effect.Effect<Page.Page, Page.PageError, Scope.Scope>`
+  - `readonly pages: Watchable.Watchable<ReadonlyArray<Page.Page>>`
+  - `readonly workers: Watchable.Watchable<ReadonlyArray<BrowserWorker.BrowserWorker>>`
+  - `readonly cookies: CookieJar.CookieJar`
+  - `readonly exportStorageState: Effect.Effect<StorageState.StorageState, UserContextError>`
+  - `readonly clock: PageClock.PageClock`
+  - `route<E, R>(pattern: Url.Pattern | string, handler: Route.Handler<E, R>): Effect.Effect<Route.Registration, Route.RouteError, Scope.Scope | R>`
+  - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError, Scope.Sc…`
+  - `emulate(settings: Emulation.Emulation): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope>`
+  - `grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.…`
+- `interface Options`
+  - `readonly storageState?: StorageState.StorageState | undefined`
+  - `readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined`
+  - `readonly focus?: "system" | "emulated" | undefined`
+  - `readonly eventLog?: number | undefined`
+  - `readonly emulation?: Emulation.Emulation | undefined`
+  - `readonly permissions?: ReadonlyArray<Permission> | undefined`
+- `type UserContextErrorReason = typeof UserContextErrorReason.Type`
+
+*schemas*
+
+- `const Id = Schema.String.pipe(Schema.brand("~effect-browser/UserContext/Id"))`
+- `const UserContextErrorReason = Schema.Union([StorageState.Incompatible, Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
+
+*guards*
+
+- `const isUserContext: (u: unknown) => u is ObservedUserContext`
+- `const isUserContextError: (u: unknown) => u is UserContextError`
+
+*errors*
+
+- `class UserContextError: Schema.TaggedError "UserContextError" { operation, reason, diagnostics }`
+
+### Watchable
+
+Read-only views of state that changes, folded from protocol events (principle 16).
+
+*models*
+
+- `interface Watchable<A> extends Effect.Effect<A>`
+  - `readonly [TypeId]: typeof TypeId`
+  - `readonly changes: Stream.Stream<A>`
+  - `waitFor<B extends A>(refinement: Predicate.Refinement<A, B>): Effect.Effect<B, Deadline.Timeout | Target.TargetGone>`
+  - `waitFor(predicate: Predicate.Predicate<A>): Effect.Effect<A, Deadline.Timeout | Target.TargetGone>`
+  - `map<B>(f: (a: A) => B): Watchable<B>`
+
+*guards*
+
+- `const isWatchable: (u: unknown) => u is Watchable<unknown>`
+
+## `effect-browser/ai`
+
+### BrowserToolkit
+
+The agent toolkit (`effect-browser/ai`): one definition that serves an in-process model, an MCP server and the CLI.
+
+*models*
+
+- `type SecretName = typeof SecretName.Type` (experimental)
+- `type ToolName = | "pages" | "newPage" | "goto" | "back" | "snapshot" | "screenshot" | "click" | "fill" | "press" | "select" | "scroll" | "next" | "await" | "expect" | "history" | "route" | "dialog"` (experimental)
+- `type Tools = { readonly [K in ToolName]: Tool.Any }` (experimental)
+- `interface MakeOptions` (experimental)
+  - `readonly context: UserContext.UserContext`
+  - `readonly secrets: Readonly<Record<SecretName | string, Redacted.Redacted<string>>>`
+  - `readonly capture: CapturePolicy.CapturePolicy`
+
+*schemas*
+
+- `const SecretName = Schema.String.pipe(Schema.brand("~effect-browser/ai/BrowserToolkit/SecretName"))` (experimental)
+
+*constructors*
+
+- `const make: (options: MakeOptions) => Effect.Effect<Toolkit.WithHandler<Tools>, never, Scope.Scope>` (experimental)
+
+*constants*
+
+- `const toolkit: Toolkit.Toolkit<Tools>` (experimental)
+
+### CapturePolicy
+
+What page content may reach a model.
+
+*models*
+
+- `class CapturePolicy: Schema.Class { screenshots, snapshotText, consoleText }` (experimental)
+
+*constants*
+
+- `const strict: CapturePolicy` (experimental)
+- `const local: CapturePolicy` (experimental)
+
+## `effect-browser/bidi`
+
+### Bidi
+
+The generic BiDi backend (`effect-browser/bidi`): any WebDriver BiDi endpoint, such as Safari Technology Preview or a remote grid.
+
+*layers*
+
+- `const layerConnect: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
+
+## `effect-browser/chromium`
+
+### Chromium
+
+The Chromium backend (`effect-browser/chromium`): Chromium, Chrome and Edge over the Chrome DevTools Protocol.
+
+*layers*
+
+- `const layer: (options?: Browser.LaunchOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>`
+- `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
+- `const layerConnect: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
+
+## `effect-browser/cli`
+
+### CurrentSession
+
+What `eb run` provides to a segment (`effect-browser/cli`).
+
+*services*
+
+- `interface CurrentSession` (experimental)
+  - `readonly context: UserContext.UserContext`
+  - `page(name: PageName | string): Effect.Effect<Page.Page, PageNotFound>`
+
+*tags*
+
+- `const CurrentSession: Context.Service<CurrentSession, CurrentSession>` (experimental)
+
+*models*
+
+- `type PageName = typeof PageName.Type` (experimental)
+
+*schemas*
+
+- `const PageName = Schema.String.pipe(Schema.brand("~effect-browser/cli/CurrentSession/PageName"))` (experimental)
+
+*guards*
+
+- `const isPageNotFound: (u: unknown) => u is PageNotFound` (experimental)
+
+*errors*
+
+- `class PageNotFound: Schema.TaggedError "PageNotFound" { name, hint }` (experimental)
+
+## `effect-browser/firefox`
+
+### Firefox
+
+The Firefox backend (`effect-browser/firefox`): Firefox over WebDriver BiDi.
+
+*layers*
+
+- `const layer: (options?: Browser.LaunchOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>`
+- `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
+- `const layerConnect: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
+
+## `effect-browser/test`
+
+### TestRun
+
+Runner-agnostic test support (`effect-browser/test`).
+
+*services*
+
+- `interface TestRun`
+  - `readonly info: TestInfo`
+  - `attach(artifact: TestArtifact): Effect.Effect<void>`
+
+*tags*
+
+- `const TestRun: Context.Service<TestRun, TestRun>`
+
+*models*
+
+- `class TestInfo: Schema.Class { project, file, id, attempt, worker, shard }`
+- `type TestArtifact = typeof TestArtifact.Type`
+
+*schemas*
+
+- `const TestArtifact = Schema.Union([Schema.TaggedStruct("Trace", { path: FilePath.Local }), Schema.TaggedStruct("Har", { path: FilePath.Local }), Schema.TaggedStruct("Screenshot", { path: FilePath.Local })])`
+
+## `effect-browser/test/vitest`
+
+### VitestBrowser
+
+The Vitest adapter (`effect-browser/test/vitest`; peer dependency: `@effect/vitest`).
+
+*layers*
+
+- `const layer: <E, R>(backend: Layer.Layer<Browser.Browser, E, R>) => Layer.Layer<Browser.Browser | TestRun.TestRun, E, R>`
+
+## `effect-browser/webkit`
+
+### WebKit
+
+The WebKit backend (`effect-browser/webkit`): Playwright-patched WebKit builds, launched, and stock WebKit targets, attached.
+
+*layers*
+
+- `const layer: (options?: Browser.LaunchOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>`
+- `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
+- `const layerAttach: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`

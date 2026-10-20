@@ -1,0 +1,130 @@
+/**
+ * The agent toolkit (`effect-browser/ai`): one definition that serves an in-process model, an MCP server and
+ * the CLI.
+ *
+ * Every page tool names its page; there is no current tab. No tool waits after it acts: each result carries
+ * the call's outcome, then a digest of what the event logs recorded since the previous call. Tools are
+ * `effect/ai` tools with failure mode `"return"`, so a `LocatorError`, `Timeout` or stale ref reaches the
+ * model as data, hint included. Parameters are Schemas: a model's `"e12"` is decoded to a `Snapshot.RefId` and
+ * checked against that page's latest snapshot.
+ *
+ * @stability experimental
+ * @since 0.1.0
+ */
+import type * as Tool from "effect/ai/Tool"
+import type * as Toolkit from "effect/ai/Toolkit"
+import type * as Effect from "effect/Effect"
+import type * as Redacted from "effect/Redacted"
+import * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
+import type * as UserContext from "../UserContext.ts"
+import type * as CapturePolicy from "./CapturePolicy.ts"
+
+/**
+ * Schema for the name of a secret an agent refers to as `%name%`.
+ *
+ * @stability experimental
+ * @category schemas
+ * @since 0.1.0
+ */
+export const SecretName = Schema.String.pipe(Schema.brand("~effect-browser/ai/BrowserToolkit/SecretName"))
+
+/**
+ * The name of a secret an agent refers to as `%name%`; the value is substituted only at dispatch.
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export type SecretName = typeof SecretName.Type
+
+/**
+ * The toolkit's tools.
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export type ToolName =
+  | "pages"
+  | "newPage"
+  | "goto"
+  | "back"
+  | "snapshot"
+  | "screenshot"
+  | "click"
+  | "fill"
+  | "press"
+  | "select"
+  | "scroll"
+  | "next"
+  | "await"
+  | "expect"
+  | "history"
+  | "route"
+  | "dialog"
+
+/**
+ * The toolkit's tool definitions, by name.
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export type Tools = { readonly [K in ToolName]: Tool.Any }
+
+/**
+ * The tool definitions alone, for the CLI and MCP surfaces to serve.
+ *
+ * @stability experimental
+ * @category constants
+ * @since 0.1.0
+ */
+export declare const toolkit: Toolkit.Toolkit<Tools>
+
+/**
+ * Settings for a toolkit bound to a context.
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export interface MakeOptions {
+  /**
+   * The context the model works in.
+   */
+  readonly context: UserContext.UserContext
+  /**
+   * Secrets the model may use by name; it sees `%name%`, and the value is substituted at dispatch.
+   */
+  readonly secrets: Readonly<Record<SecretName | string, Redacted.Redacted<string>>>
+  /**
+   * What snapshots, screenshots and digests may contain before they reach the model. Required.
+   */
+  readonly capture: CapturePolicy.CapturePolicy
+}
+
+/**
+ * Binds the toolkit to a context, with handlers, for an in-process model.
+ *
+ * **Example** (A toolkit for one context)
+ *
+ * ```ts import.meta.vitest
+ * import { Config, Effect } from "effect"
+ * import { Page } from "effect-browser"
+ * import { BrowserToolkit, CapturePolicy } from "effect-browser/ai"
+ *
+ * const tools = Effect.fn("tools")(function*(page: Page.Page) {
+ *   return yield* BrowserToolkit.make({
+ *     context: page.context,
+ *     secrets: { password: yield* Config.Redacted("PASSWORD") },
+ *     capture: CapturePolicy.strict
+ *   })
+ * })
+ * ```
+ *
+ * @stability experimental
+ * @category constructors
+ * @since 0.1.0
+ */
+export declare const make: (options: MakeOptions) => Effect.Effect<Toolkit.WithHandler<Tools>, never, Scope.Scope>

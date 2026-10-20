@@ -1,133 +1,308 @@
 /**
  * User contexts (the spec's term; Playwright calls them browser contexts), at two access levels.
  *
- * Options at creation are declarations for the context's whole life; members such as `emulate` and `grant`
- * are the same declarations, scoped. One concept, two lifetimes: `UserContextOptions.emulation` is
- * `emulate(...)` held for the context's life. Reading storage needs control.
+ * A context isolates storage, cookies, permissions and emulation from every other context. An
+ * `ObservedUserContext` is one you don't control, such as a browser's default context when attached; a
+ * `UserContext` is one you control. There are two levels only, because reads happen on pages.
+ *
+ * Options at creation are declarations held for the context's whole life. Members such as `emulate` and
+ * `grant` are the same declarations, scoped: `Options.emulation` is `emulate(…)` held for the context's life.
+ *
+ * @stability unstable
+ * @since 0.1.0
  */
-import type { DateTime, Duration, Effect, Option, Redacted, Scope } from "effect"
-import type { Cookies } from "effect/http"
-import type { CookieDomain, CookieName, Locale, Origin, Site, TimeZoneId, Url, UrlPattern, UserContextId } from "./Brand.ts"
-import type { CloseReason, DeclarationError, PageError, RouteError, StorageError, StorageStateError, UserContextError } from "./Errors.ts"
-import type { BrowserWorker, ObservedBrowserWorker } from "./Events.ts"
-import type { InitScript, InitScriptOptions, InitScriptSource, Registration, RouteHandler, RouteRegistration } from "./Network.ts"
-import type { ObservedPage, Page } from "./Page.ts"
-import type { PageClock } from "./PageClock.ts"
-import type { Watchable } from "./Watchable.ts"
+import type * as Effect from "effect/Effect"
+import type * as Equal from "effect/Equal"
+import type * as Inspectable from "effect/Inspectable"
+import type * as Pipeable from "effect/Pipeable"
+import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
+import type * as BrowserWorker from "./BrowserWorker.ts"
+import type * as CookieJar from "./CookieJar.ts"
+import type * as Declaration from "./Declaration.ts"
+import * as Diagnostics from "./Diagnostics.ts"
+import type * as Emulation from "./Emulation.ts"
+import type * as InitScript from "./InitScript.ts"
+import type * as Page from "./Page.ts"
+import type * as PageClock from "./PageClock.ts"
+import * as Reason from "./Reason.ts"
+import type * as Route from "./Route.ts"
+import * as StorageState from "./StorageState.ts"
+import type * as Target from "./Target.ts"
+import type * as Url from "./Url.ts"
+import type * as Watchable from "./Watchable.ts"
 
-export interface ObservedUserContext {                  // one we don't control, e.g. the default context when attached
-  readonly id: UserContextId
-  readonly pages: Watchable<ReadonlyArray<ObservedPage>>
-  readonly workers: Watchable<ReadonlyArray<ObservedBrowserWorker>>   // shared and service workers (new in the sketch)
-  readonly closed: Effect.Effect<CloseReason>
-  readonly control: Effect.Effect<UserContext, UserContextError, Scope.Scope>   // explicit; reading storage needs it too
-}
+/**
+ * Schema for the id of a user context.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Id = Schema.String.pipe(Schema.brand("~effect-browser/UserContext/Id"))
 
-export interface UserContext extends ObservedUserContext {   // two levels only: reads happen on pages
-  readonly newPage: Effect.Effect<Page, PageError, Scope.Scope>   // closed with its unsolicited popups when the scope closes
-  readonly pages: Watchable<ReadonlyArray<Page>>
-  readonly workers: Watchable<ReadonlyArray<BrowserWorker>>
-  readonly cookies: CookieJar                           // a sub-handle bound to the context (new in the sketch)
-  readonly exportStorageState: Effect.Effect<Redacted.Redacted<StorageStateBytes>, StorageStateError>
-  readonly clock: PageClock                             // context-wide timeline (opt-in)
-  route<E, R>(pattern: UrlPattern | string, handler: RouteHandler<E, R>): Effect.Effect<RouteRegistration, RouteError, Scope.Scope | R>
-  addInitScript(script: InitScriptSource, options?: InitScriptOptions): Effect.Effect<InitScript, DeclarationError, Scope.Scope>
-  emulate(settings: Emulation): Effect.Effect<Registration, DeclarationError, Scope.Scope>
-  /** Grants permissions while the registration lives; combined (AND) with Permissions Policy (new in the sketch). */
-  grant(permissions: ReadonlyArray<Permission>, options?: { readonly origin?: Origin | string }): Effect.Effect<Registration, DeclarationError, Scope.Scope>   // default every origin
-}
+/**
+ * Id of a user context.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type Id = typeof Id.Type
 
-export interface UserContextOptions {                   // each unset option keeps the browser's own value unless a default is stated
-  readonly storageState?: StorageState                  // from StorageState.import(bytes)
-  readonly dialogs?: "dismiss" | "accept" | "leaveOpen" // decision when no handler claims a dialog; default "dismiss"
-  readonly focus?: "system" | "emulated"                // default "system"; "emulated" makes every page report focus
-  readonly eventLog?: number                            // retained events per module and page, for history; default 100, 0 keeps none
-  readonly emulation?: Emulation                        // held for the context's life (viewport, locale, timezone moved here in the sketch)
-  readonly permissions?: ReadonlyArray<Permission>      // granted for the context's life, every origin
+const TypeId = "~effect-browser/UserContext"
+
+/**
+ * A context you can observe but not control, such as the default context when attached.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface ObservedUserContext extends Pipeable.Pipeable, Equal.Equal, Inspectable.Inspectable {
+  readonly [TypeId]: typeof TypeId
+  readonly id: Id
+  /**
+   * The context's pages, as they open and close.
+   */
+  readonly pages: Watchable.Watchable<ReadonlyArray<Page.ObservedPage>>
+  /**
+   * The context's shared and service workers.
+   */
+  readonly workers: Watchable.Watchable<ReadonlyArray<BrowserWorker.ObservedBrowserWorker>>
+  /**
+   * Waits as long as the context lives, then gives the reason it ended.
+   */
+  readonly closed: Effect.Effect<Target.CloseReason>
+  /**
+   * Gains control for the scope. Reading storage needs it too.
+   */
+  readonly control: Effect.Effect<UserContext, UserContextError, Scope.Scope>
 }
 
 /**
- * Settings a declaration overrides while it lives (new in the sketch: API.md only named Emulation). Unset
- * fields are untouched. Restored on removal only when the previous value is known and access permits it.
- * A field the backend can't apply fails with Unsupported, naming it.
+ * Permissions a context can grant, by their Permissions API names.
+ *
+ * **Details**
+ *
+ * The open string keeps permissions added after this list usable.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
  */
-export interface Emulation {
-  readonly viewport?: {
-    readonly width: number; readonly height: number     // CSS pixels by definition
-    readonly deviceScaleFactor?: number                 // default 1
-    readonly mobile?: boolean                           // default false
-  }
-  readonly userAgent?: string
-  readonly locale?: Locale | string
-  readonly timezone?: TimeZoneId | string
-  readonly geolocation?: { readonly latitude: number; readonly longitude: number; readonly accuracy?: number } | "unavailable"
-  readonly media?: {
-    readonly type?: "screen" | "print"
-    readonly colorScheme?: "light" | "dark" | "noPreference"
-    readonly reducedMotion?: "reduce" | "noPreference"
-    readonly forcedColors?: "active" | "none"
-    readonly contrast?: "more" | "less" | "custom" | "noPreference"
-  }
-  readonly network?: "offline" | {
-    readonly download: number                           // bytes per second
-    readonly upload: number
-    readonly latency: Duration.Input
-  }
-  readonly cpuSlowdown?: number                         // a factor; CDP only
-  readonly javaScript?: "enabled" | "disabled"
-  readonly touch?: boolean
-}
-
 export type Permission =
-  | "geolocation" | "notifications" | "camera" | "microphone" | "clipboard-read" | "clipboard-write"
-  | "midi" | "background-sync" | "persistent-storage" | "accelerometer" | "gyroscope" | "magnetometer"
-  | "payment-handler" | "storage-access" | "local-fonts" | "screen-wake-lock"
+  | "geolocation"
+  | "notifications"
+  | "camera"
+  | "microphone"
+  | "clipboard-read"
+  | "clipboard-write"
+  | "midi"
+  | "background-sync"
+  | "persistent-storage"
+  | "accelerometer"
+  | "gyroscope"
+  | "magnetometer"
+  | "payment-handler"
+  | "storage-access"
+  | "local-fonts"
+  | "screen-wake-lock"
   | (string & {})
 
-// ── Cookies (new in the sketch) ───────────────────────────────
-export type PartitionKey =
-  | { readonly _tag: "Unpartitioned" }
-  | { readonly _tag: "Partitioned"; readonly topLevelSite: Site; readonly crossSiteAncestor: Option.Option<boolean> }
-export interface BrowserCookie {                        // what a browser stores: Effect's cookie attributes plus browser-only fields
-  readonly name: CookieName
-  readonly value: Redacted.Redacted<string>             // cookie values are classified
-  readonly domain: CookieDomain
-  readonly path: string
-  readonly expires: Option.Option<DateTime.Utc>         // None: a session cookie
-  readonly httpOnly: boolean
-  readonly secure: boolean
-  readonly sameSite: "strict" | "lax" | "none"
-  readonly partitionKey: PartitionKey
-  readonly priority: "low" | "medium" | "high"
-}
-export interface CookieInput {
-  readonly name: CookieName | string
-  readonly value: string | Redacted.Redacted<string>
-  readonly scope:                                       // which one is always stated
-    | { readonly _tag: "Url"; readonly url: Url | string }
-    | { readonly _tag: "Domain"; readonly domain: CookieDomain | string; readonly path: string }
-  readonly expires?: DateTime.DateTime.Input            // default: a session cookie
-  readonly httpOnly?: boolean                           // default false
-  readonly secure?: boolean                             // default false
-  readonly sameSite?: "strict" | "lax" | "none"         // default "lax"
-  readonly partitionKey?: PartitionKey                  // default Unpartitioned
-}
-export interface CookieJar {
-  readonly list: Effect.Effect<ReadonlyArray<BrowserCookie>, StorageError>   // every cookie in the context
-  listFor(url: Url | string): Effect.Effect<ReadonlyArray<BrowserCookie>, StorageError>   // what a request to url would send
-  set(cookie: CookieInput): Effect.Effect<void, StorageError>                // a change, not a declaration: it isn't undone with a scope
-  remove(match: { readonly name: CookieName | string; readonly domain?: CookieDomain | string; readonly path?: string }): Effect.Effect<void, StorageError>
-  readonly clear: Effect.Effect<void, StorageError>
-  /** Converts to effect/http's Cookie, unredacting the value explicitly. */
-  toCookie(cookie: BrowserCookie): Cookies.Cookie
+/**
+ * Settings for `grant`.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface GrantOptions {
+  /**
+   * The origin the permissions apply to.
+   *
+   * @default every origin
+   */
+  readonly origin?: Url.Origin | string | undefined
 }
 
-// ── Storage state ─────────────────────────────────────────────
-declare const StorageStateBytesTypeId: unique symbol
-export type StorageStateBytes = Uint8Array & { readonly [StorageStateBytesTypeId]: "StorageStateBytes" }
-declare const StorageStateTypeId: unique symbol
-export interface StorageState { readonly [StorageStateTypeId]: "StorageState" }   // cookies, localStorage and IndexedDB, per partition
-export declare const StorageState: {
-  /** Validates either way; accepts bytes read back from disk. */
-  import(bytes: Redacted.Redacted<StorageStateBytes | Uint8Array>): Effect.Effect<StorageState, StorageStateError>
+/**
+ * A context you control.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface UserContext extends ObservedUserContext {
+  /**
+   * Opens a page in this context. It is closed, with the popups it opened, when the scope closes.
+   */
+  readonly newPage: Effect.Effect<Page.Page, Page.PageError, Scope.Scope>
+  readonly pages: Watchable.Watchable<ReadonlyArray<Page.Page>>
+  readonly workers: Watchable.Watchable<ReadonlyArray<BrowserWorker.BrowserWorker>>
+  /**
+   * The context's cookies.
+   */
+  readonly cookies: CookieJar.CookieJar
+  /**
+   * Reads the context's storage, to save and start other contexts from.
+   */
+  readonly exportStorageState: Effect.Effect<StorageState.StorageState, UserContextError>
+  /**
+   * A clock for every page of the context, as one timeline (opt-in).
+   */
+  readonly clock: PageClock.PageClock
+  /**
+   * Intercepts requests from every page of the context while the registration lives.
+   */
+  route<E, R>(
+    pattern: Url.Pattern | string,
+    handler: Route.Handler<E, R>
+  ): Effect.Effect<Route.Registration, Route.RouteError, Scope.Scope | R>
+  /**
+   * Runs a script in every new document of every page while the registration lives.
+   */
+  addInitScript(
+    script: InitScript.Source,
+    options?: InitScript.Options | undefined
+  ): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError, Scope.Scope>
+  /**
+   * Overrides the given settings for every page while the registration lives.
+   */
+  emulate(settings: Emulation.Emulation): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope>
+  /**
+   * Grants permissions while the registration lives. Grants are combined (AND) with Permissions Policy.
+   *
+   * **Example** (Geolocation for one origin)
+   *
+   * ```ts import.meta.vitest
+   * import { Effect } from "effect"
+   * import { Page } from "effect-browser"
+   *
+   * const allowLocation = Effect.fn("allowLocation")(function*(page: Page.Page) {
+   *   yield* page.context.grant(["geolocation"], { origin: "https://maps.example.com" })
+   * })
+   * ```
+   */
+  grant(
+    permissions: ReadonlyArray<Permission>,
+    options?: GrantOptions | undefined
+  ): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope>
 }
+
+/**
+ * Checks whether a value is a context.
+ *
+ * **Gotchas**
+ *
+ * This identifies the kind, not the access: it narrows to `ObservedUserContext`.
+ *
+ * @stability unstable
+ * @category guards
+ * @since 0.1.0
+ */
+export const isUserContext = (u: unknown): u is ObservedUserContext => Predicate.hasProperty(u, TypeId)
+
+/**
+ * Settings for a new context. An unset option keeps the browser's own value unless a default is stated.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface Options {
+  /**
+   * Storage to start from, such as a saved login.
+   *
+   * @default empty storage
+   */
+  readonly storageState?: StorageState.StorageState | undefined
+  /**
+   * What happens to a dialog no handler claims.
+   *
+   * @default "dismiss"
+   */
+  readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined
+  /**
+   * `"emulated"` makes every page report focus, so many pages can run at once.
+   *
+   * @default "system"
+   */
+  readonly focus?: "system" | "emulated" | undefined
+  /**
+   * Events retained per event module and page, for `history`; 0 keeps none.
+   *
+   * @default 100
+   */
+  readonly eventLog?: number | undefined
+  /**
+   * Settings held for the context's life: `emulate(…)` without a scope.
+   *
+   * @default none
+   */
+  readonly emulation?: Emulation.Emulation | undefined
+  /**
+   * Permissions granted for the context's life, for every origin: `grant(…)` without a scope.
+   *
+   * @default none
+   */
+  readonly permissions?: ReadonlyArray<Permission> | undefined
+}
+
+/**
+ * Schema for the reasons a context operation can fail.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const UserContextErrorReason = Schema.Union([
+  StorageState.Incompatible,
+  Reason.InvalidInput,
+  Reason.NotPermitted,
+  Reason.Unsupported,
+  Reason.BackendFailure
+])
+
+/**
+ * The reasons a context operation can fail.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type UserContextErrorReason = typeof UserContextErrorReason.Type
+
+const UserContextErrorTypeId = "~effect-browser/UserContext/UserContextError"
+
+/**
+ * Error for a context that couldn't be created or controlled, or whose storage couldn't be read.
+ *
+ * @stability unstable
+ * @category errors
+ * @since 0.1.0
+ */
+export class UserContextError extends Schema.TaggedError<UserContextError>(UserContextErrorTypeId)(
+  "UserContextError",
+  {
+    operation: Schema.String,
+    reason: UserContextErrorReason,
+    diagnostics: Diagnostics.Diagnostics
+  }
+) {
+  readonly [UserContextErrorTypeId] = UserContextErrorTypeId
+  override get message(): string {
+    return `${this.operation}: ${this.reason.message}`
+  }
+}
+
+/**
+ * Checks whether a value is a `UserContextError`.
+ *
+ * @stability unstable
+ * @category guards
+ * @since 0.1.0
+ */
+export const isUserContextError = (u: unknown): u is UserContextError =>
+  Predicate.hasProperty(u, UserContextErrorTypeId)
