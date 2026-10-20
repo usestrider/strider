@@ -10,7 +10,7 @@ import * as Cddl from "./Cddl.ts"
 import type { CdpProtocol } from "./Cdp.ts"
 import * as Cdp from "./Cdp.ts"
 import { fromThrown } from "./CodegenError.ts"
-import { applyCorrections, applyOverlays, Correction, Overlay } from "./Corrections.ts"
+import { applyCorrections, applyOverlays, audit, Correction, Overlay } from "./Corrections.ts"
 import type { ProtocolModel } from "./Model.ts"
 
 export const Backend = Schema.Literals(["cdp", "bidi", "webkit"])
@@ -48,8 +48,8 @@ export const protocolDirectory = Effect.fnUntraced(function*(root: string, backe
   return path.join(root, "packages/tools/codegen/protocols", backend)
 })
 
-/** Builds the model: parse the source, apply corrections, apply annotations. */
-export const build = Effect.fnUntraced(function*(root: string, backend: Backend) {
+/** A backend's committed inputs: its source's parser, its corrections and its annotations. */
+export const inputs = Effect.fnUntraced(function*(root: string, backend: Backend) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const directory = yield* protocolDirectory(root, backend)
@@ -77,10 +77,22 @@ export const build = Effect.fnUntraced(function*(root: string, backend: Backend)
     ).pipe(Effect.map((sources) => () => Cddl.parse(revisions.bidi, sources)))
   const corrections = yield* readDirectory(path.join(directory, "patches"), Correction)
   const overlays = yield* readDirectory(path.join(directory, "overlay"), Overlay)
+  return { parse, corrections, overlays }
+})
+
+/** Builds the model: parse the source, apply corrections, apply annotations. */
+export const build = Effect.fnUntraced(function*(root: string, backend: Backend) {
+  const { corrections, overlays, parse } = yield* inputs(root, backend)
   return yield* Effect.try({
     try: () => applyOverlays(applyCorrections(parse(), corrections), overlays),
     catch: fromThrown
   })
+})
+
+/** Audits the corrections: which of them the vendored spec has absorbed. */
+export const auditCorrections = Effect.fnUntraced(function*(root: string, backend: Backend) {
+  const { corrections, parse } = yield* inputs(root, backend)
+  return yield* Effect.try({ try: () => audit(parse(), corrections), catch: fromThrown })
 })
 
 /** The committed form of a model: sorted, two-space JSON, with a trailing newline. */

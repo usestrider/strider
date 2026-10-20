@@ -202,7 +202,7 @@ interface Traits {                               // spec facts plus overlay anno
   - shapes are tagged with `_tag`, as Effect's are, rather than `kind`;
   - one module per domain holds both the interfaces and the codecs, rendered by separate functions, with a separate types-only output deferred until something needs it;
   - an import that would collide with a module's own names is renamed (CDP's `SmartCardEmulation` has a type named `Protocol`).
-- **Next:** the transports and the CDP client are built (Transports and Protocol client above). The error table's next rows, and the rest of the drift test, come from probes recording real traffic. BiDi's CDDL and WebKit's JSON get their parsers when those backends start (both now have them: Built for BiDi and Built for WebKit, below); the correction audit is built with the first correction.
+- **Next:** the transports and the CDP client are built (Transports and Protocol client above). The error table's next rows, and the rest of the drift test, come from probes recording real traffic (both built since: Built, below). BiDi's CDDL and WebKit's JSON get their parsers when those backends start (both now have them: Built for BiDi and Built for WebKit, below); the correction audit is built with the first correction (built with BiDi's first two: Built, below).
 
 **Built for BiDi** (2026-10-20), after review 08 (candidate 12):
 
@@ -230,6 +230,13 @@ interface Traits {                               // spec facts plus overlay anno
 - **Overlay:** 21 id brands (targets, workers and downloads have bare string ids, with no type to brand); 9 sensitive members (cookie values, credentials, typed text); 8 resource-creating commands, with `Playwright.deleteContext`, `Playwright.closePage` and `Runtime.releaseObject` as their releases (`Page.createUserWorld` has none: a world lasts as long as its page); input compensation; and the `Playwright` domain marked as sent on the browser session.
 - **Corrections:** none so far; the adapter's probes record what the wire does (Backend adapters, Built for WebKit).
 - **Output:** 33 modules at `@usestrider/browser/webkit-protocol`, with 206 types, 308 commands and 128 events.
+
+**Built** (2026-10-20): the correction audit and the rest of the drift test.
+
+- **The correction audit.** `pnpm codegen:audit` (`strider-codegen audit <backend> [--check]`) rebuilds each backend's model once without each correction, and lists the ones whose absence changes nothing: the spec has absorbed them, so they can go, and `--check` fails until they do. A correction another one builds on is needed. It runs on each roll; today BiDi's two corrections are both needed, and CDP and WebKit have none.
+- **Recording.** With `STRIDER_RECORD` naming a directory, the integration tests record what each browser sends (`test/integration/record.ts`): three distinct samples of each event, of each command's result, and of each error reply with what its table made of it, leaving out messages over 32 KiB, which are screenshots and bodies. The recordings are committed, one per browser (`test/fixtures/traffic/`: Chromium 155, Firefox 158, Playwright's WebKit 2359), about 150 KB together.
+- **Replay.** `test/Drift.test.ts` runs without a browser: every recorded event and result must decode through the generated codecs, and every recorded error reply must classify as it did when it was recorded. So a regeneration that drops or tightens a member a browser sends fails, and so does a table edit that reclassifies a reply. A method with no generated definition fails unless the coverage report excludes it by policy: Chromium 155 still sends four deprecated events nothing subscribes to (`Page.frameScheduledNavigation`, `frameClearedScheduledNavigation`, `downloadWillBegin` and `downloadProgress`), which the first recording found.
+- **The drift test is now whole for the browsers recorded:** the replay, the integration tests that hold each error row to the live browser, and the WebKit launch's `protocol.json` check. The oldest supported version of each browser will be recorded beside the newest when there is more than one.
 
 ## Ingestion pipeline
 

@@ -5,6 +5,8 @@
  *   strider-codegen model <backend> [--check]      write protocols/<backend>/model.json
  *   strider-codegen generate <backend> [--check]   the model, then packages/browser/src/<backend>/*.ts and
  *                                                  protocols/<backend>/coverage.json
+ *   strider-codegen audit <backend> [--check]      which corrections the vendored spec has absorbed; run on
+ *                                                  each roll (`--check` fails if any has)
  *
  * Run from the repository root. `--check` regenerates in memory and fails if anything differs from what is
  * committed, so CI never regenerates.
@@ -19,7 +21,7 @@ import * as Path from "effect/Path"
 import { execFileSync } from "node:child_process"
 import { CodegenError, fromThrown } from "./CodegenError.ts"
 import { emit } from "./Emit.ts"
-import { Backend, build, outputs, protocolDirectory, serialize } from "./Pipeline.ts"
+import { auditCorrections, Backend, build, outputs, protocolDirectory, serialize } from "./Pipeline.ts"
 
 const sources: Record<Backend, string> = {
   cdp: "the Chrome DevTools Protocol, devtools-protocol 0.0.1696802 (Chrome 155)",
@@ -97,6 +99,19 @@ const generate = Command.make("generate", { backend, check }, ({ backend, check 
     )
   }))
 
-const cli = Command.make("strider-codegen").pipe(Command.withSubcommands([model, generate]))
+const auditCommand = Command.make("audit", { backend, check }, ({ backend, check }) =>
+  Effect.gen(function*() {
+    const entries = yield* auditCorrections(process.cwd(), backend)
+    for (const entry of entries) yield* Console.log(`${backend} ${entry.file}: ${entry.verdict}`)
+    if (entries.length === 0) yield* Console.log(`${backend}: no corrections`)
+    const absorbed = entries.filter((entry) => entry.verdict === "absorbed")
+    if (check && absorbed.length > 0) {
+      return yield* new CodegenError({
+        message: `The spec absorbed ${absorbed.map((entry) => entry.file).join(", ")}; delete them and regenerate`
+      })
+    }
+  }))
+
+const cli = Command.make("strider-codegen").pipe(Command.withSubcommands([model, generate, auditCommand]))
 
 Command.run(cli, { version: "0.0.0" }).pipe(Effect.provide(NodeServices.layer), NodeRuntime.runMain)

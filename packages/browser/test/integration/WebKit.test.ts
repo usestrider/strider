@@ -24,6 +24,7 @@ import * as WebKitLauncher from "../../src/internal/webkitLauncher.ts"
 import * as WebKitWire from "../../src/internal/webkitWire.ts"
 import type * as Transport from "../../src/protocol/Transport.ts"
 import { makeRecorder, site } from "./adapter/harness.ts"
+import { fixtures, record } from "./record.ts"
 
 const findWebKit = (): string | undefined => {
   const configured = process.env["STRIDER_WEBKIT"]
@@ -94,7 +95,7 @@ describe.skipIf(executable === undefined)("WebKit over its inspector protocol", 
         Effect.gen(function*() {
           yield* WebKitLauncher.checkRevision(executable!)
           const { transport } = yield* WebKitLauncher.launch({ executablePath: executable! })
-          const webkit = yield* WebKitConnection.make(transport)
+          const webkit = yield* WebKitConnection.make(record(transport, WebKitWire.wire, fixtures.webkit))
           yield* Playwright.enable().pipe(Protocol.on(webkit.browser))
           const { browserContextId } = yield* Playwright.createContext({}).pipe(Protocol.on(webkit.browser))
           const { pageProxyId } = yield* Playwright.createPage({ browserContextId }).pipe(Protocol.on(webkit.browser))
@@ -117,7 +118,8 @@ describe.skipIf(executable === undefined)("WebKit over its inspector protocol", 
 
     it.effect("classifies WebKit's error replies with every row of its table", () =>
       Effect.gen(function*() {
-        const { transport } = yield* WebKitLauncher.launch({ executablePath: executable! })
+        const { transport: launched } = yield* WebKitLauncher.launch({ executablePath: executable! })
+        const transport = record(launched, WebKitWire.wire, fixtures.webkit)
         const replies = new Map<number, Deferred.Deferred<ProtocolClient.Incoming>>()
         const created = yield* Deferred.make<{ readonly pageProxyId: string; readonly targetId: string }>()
         yield* transport.messages.pipe(

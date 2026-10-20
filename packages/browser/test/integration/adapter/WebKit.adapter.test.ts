@@ -6,6 +6,8 @@ import * as Effect from "effect/Effect"
 import { existsSync } from "node:fs"
 import * as WebKitAdapter from "../../../src/internal/webkitAdapter.ts"
 import * as WebKitLauncher from "../../../src/internal/webkitLauncher.ts"
+import * as WebKitWire from "../../../src/internal/webkitWire.ts"
+import { fixtures, record } from "../record.ts"
 import { conformance } from "./conformance.ts"
 
 const findWebKit = (): string | undefined => {
@@ -21,7 +23,7 @@ conformance({
   skip: executable === undefined,
   connect: Effect.fnUntraced(function*(sink) {
     const { launched, transport } = yield* WebKitLauncher.launch({ executablePath: executable! })
-    const adapter = yield* WebKitAdapter.connect(transport, {
+    const adapter = yield* WebKitAdapter.connect(record(transport, WebKitWire.wire, fixtures.webkit), {
       sink,
       ownership: "launched",
       revision: WebKitLauncher.build.revision

@@ -25,6 +25,7 @@ import { existsSync } from "node:fs"
 import * as path from "node:path"
 import * as CdpWire from "../../src/internal/cdpWire.ts"
 import * as ProtocolClient from "../../src/internal/protocolClient.ts"
+import { fixtures, record } from "./record.ts"
 
 const findChromium = (): string | undefined => {
   const configured = process.env["STRIDER_CHROMIUM"]
@@ -65,7 +66,7 @@ const launch = Effect.fnUntraced(function*(debugging: "pipe" | "port") {
 
 const connect = Effect.fnUntraced(function*() {
   const { handle } = yield* launch("pipe")
-  const cdp = yield* CdpConnection.make(yield* Transport.pipe(handle))
+  const cdp = yield* CdpConnection.make(record(yield* Transport.pipe(handle), CdpWire.wire, fixtures.cdp))
   return { handle, cdp }
 })
 
@@ -162,7 +163,7 @@ describe.skipIf(executable === undefined)("Chromium over CDP", () => {
         Effect.gen(function*() {
           const { handle } = yield* launch("pipe")
           yield* Effect.scoped(Effect.gen(function*() {
-            const cdp = yield* CdpConnection.make(yield* Transport.pipe(handle))
+            const cdp = yield* CdpConnection.make(record(yield* Transport.pipe(handle), CdpWire.wire, fixtures.cdp))
             yield* Browser.getVersion().pipe(Protocol.on(cdp.browser))
           }))
           assert.strictEqual(yield* handle.exitCode, 0)
@@ -173,7 +174,7 @@ describe.skipIf(executable === undefined)("Chromium over CDP", () => {
           // Raw replies, read straight off the transport, so the browser answers even what the session would
           // refuse to send.
           const { handle } = yield* launch("pipe")
-          const transport = yield* Transport.pipe(handle)
+          const transport = record(yield* Transport.pipe(handle), CdpWire.wire, fixtures.cdp)
           const replies = new Map<number, Deferred.Deferred<Record<string, any>>>()
           yield* transport.messages.pipe(
             Stream.runForEach((text) => {

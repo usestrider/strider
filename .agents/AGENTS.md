@@ -22,7 +22,9 @@ layer. Use `pnpm` from the repository root.
     `STRIDER_CHROMIUM`, or put Chromium or Chrome on `PATH`), Firefox (`STRIDER_FIREFOX`, or `firefox` on `PATH`) and
     Playwright's WebKit build 2359 (`STRIDER_WEBKIT` naming its `pw_run.sh`, or installed where Playwright installs
     it); a browser that isn't there has its tests reported as skipped. `test/integration/adapter/` is the adapter
-    conformance suite, written once and run against each backend.
+    conformance suite, written once and run against each backend. With `STRIDER_RECORD` naming a directory, the
+    integration tests record each browser's traffic for the drift test (`test/integration/record.ts`); record with
+    `--no-file-parallelism`, into `test/fixtures/traffic/`, when a browser rolls.
   - `INDEX.md`: every declaration and member, generated.
 - `packages/tools/docs`: the JSDoc checker (vendored from Effect; don't edit it), the example check, `INDEX.md` and
   the API reference dataset.
@@ -32,7 +34,8 @@ layer. Use `pnpm` from the repository root.
   output is `packages/browser/src/cdp/`, `packages/browser/src/bidi-protocol/` and
   `packages/browser/src/webkit-protocol/`. Never edit generated files:
   change a correction or an annotation and run `pnpm codegen:protocol`. A correction says what the spec states,
-  what the wire does, and the evidence.
+  what the wire does, and the evidence. On a roll, `pnpm codegen:audit` lists the corrections the new spec has
+  absorbed.
 - `.repos/`: read-only references cloned by `scripts/worktree-setup.sh`, such as Effect's sources and its
   `.agents/skills`. Never import from them.
 
@@ -44,7 +47,7 @@ Use the narrowest check that covers the change:
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Source, scenarios or configuration  | `pnpm check`, `pnpm lint-fix`                                                                                                                |
 | A new, renamed or removed module    | `pnpm codegen`, then `pnpm check`                                                                                                            |
-| Protocol corrections or annotations | `pnpm codegen:protocol`, then `pnpm check`                                                                                                   |
+| Protocol corrections or annotations | `pnpm codegen:protocol`, then `pnpm check` and `pnpm test --run packages/browser/test/Drift.test.ts`                                         |
 | Runtime behavior                    | `pnpm test --run <file>`                                                                                                                     |
 | The protocol client or transports   | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts packages/browser/test/integration` |
 | A backend adapter                   | `pnpm test --run packages/browser/test/integration/adapter`                                                                                  |

@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import type { CdpProtocol } from "../src/Cdp.ts"
 import { parse, possible } from "../src/Cdp.ts"
-import { applyCorrections, applyOverlays } from "../src/Corrections.ts"
+import { applyCorrections, applyOverlays, audit } from "../src/Corrections.ts"
 import { emit } from "../src/Emit.ts"
 
 const fixture: CdpProtocol = {
@@ -131,6 +131,38 @@ describe("corrections", () => {
       operations: [{ ...correction.operations[0]!, path: "/shapes/Net#gone.Params/members/urls/optional" }]
     }
     assert.throws(() => applyCorrections(model, [["stale.json", stale]]), /stale\.json/)
+  })
+
+  it("are audited: one the spec now agrees with is absorbed, and one another builds on is needed", () => {
+    // The fixture's spec already says urls is optional, so this one changes nothing
+    const absorbed = {
+      ...correction,
+      operations: [{ ...correction.operations[0]!, value: true }]
+    }
+    const added = {
+      ...correction,
+      operations: [{
+        op: "add" as const,
+        path: "/shapes/Net#getCookies.Params/members/limit",
+        value: { type: { _tag: "Scalar", scalar: "integer" }, optional: true, traits: { status: "stable" } }
+      }]
+    }
+    const builtOn = {
+      ...correction,
+      operations: [{
+        op: "replace" as const,
+        path: "/shapes/Net#getCookies.Params/members/limit/optional",
+        value: false
+      }]
+    }
+    assert.deepStrictEqual(
+      audit(model, [["absorbed.json", absorbed], ["added.json", added], ["built-on.json", builtOn]]),
+      [
+        { file: "absorbed.json", verdict: "absorbed" },
+        { file: "added.json", verdict: "needed" },
+        { file: "built-on.json", verdict: "needed" }
+      ]
+    )
   })
 })
 

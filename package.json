@@ -17,7 +17,8 @@
     "api-reference": "strider-docs api-reference",
     "all": "pnpm check && pnpm lint && pnpm test --run && pnpm test-types && pnpm reference",
     "reference": "pnpm jsdocs && pnpm examples && pnpm index && pnpm api-reference",
-    "codegen:protocol": "strider-codegen generate cdp && strider-codegen generate bidi && strider-codegen generate webkit"
+    "codegen:protocol": "strider-codegen generate cdp && strider-codegen generate bidi && strider-codegen generate webkit",
+    "codegen:audit": "strider-codegen audit cdp && strider-codegen audit bidi && strider-codegen audit webkit"
   },
   "devDependencies": {
     "@babel/cli": "^8.0.6",

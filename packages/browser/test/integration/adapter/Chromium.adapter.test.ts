@@ -6,7 +6,9 @@ import * as Effect from "effect/Effect"
 import { existsSync } from "node:fs"
 import * as path from "node:path"
 import * as CdpAdapter from "../../../src/internal/cdpAdapter.ts"
+import * as CdpWire from "../../../src/internal/cdpWire.ts"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
+import { fixtures, record } from "../record.ts"
 import { conformance } from "./conformance.ts"
 
 const findChromium = (): string | undefined => {
@@ -28,7 +30,10 @@ conformance({
   skip: executable === undefined,
   connect: Effect.fnUntraced(function*(sink) {
     const { launched, transport } = yield* ChromiumLauncher.launch({ executablePath: executable! })
-    const adapter = yield* CdpAdapter.connect(transport, { sink, ownership: "launched" })
+    const adapter = yield* CdpAdapter.connect(record(transport, CdpWire.wire, fixtures.cdp), {
+      sink,
+      ownership: "launched"
+    })
     return { adapter, kill: launched.handle.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore) }
   })
 })

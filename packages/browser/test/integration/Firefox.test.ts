@@ -22,6 +22,7 @@ import * as path from "node:path"
 import * as BidiWire from "../../src/internal/bidiWire.ts"
 import * as FirefoxLauncher from "../../src/internal/firefoxLauncher.ts"
 import * as ProtocolClient from "../../src/internal/protocolClient.ts"
+import { fixtures, record } from "./record.ts"
 
 const findFirefox = (): string | undefined => {
   const configured = process.env["STRIDER_FIREFOX"]
@@ -67,7 +68,8 @@ describe.skipIf(executable === undefined)("Firefox over WebDriver BiDi", () => {
     (it) => {
       it.effect("drives a tab through the generated commands", () =>
         Effect.gen(function*() {
-          const { transport } = yield* FirefoxLauncher.launch({ executablePath: executable! })
+          const { transport: launched } = yield* FirefoxLauncher.launch({ executablePath: executable! })
+          const transport = record(launched, BidiWire.wire, fixtures.bidi)
           const bidi = yield* BidiConnection.make(transport)
           const on = Protocol.on(bidi.session)
           const session = yield* Session.new_({ capabilities: {} }).pipe(on)
@@ -92,7 +94,8 @@ describe.skipIf(executable === undefined)("Firefox over WebDriver BiDi", () => {
 
       it.effect("classifies Firefox's error replies with every row of BiDi's table", () =>
         Effect.gen(function*() {
-          const { transport } = yield* FirefoxLauncher.launch({ executablePath: executable! })
+          const { transport: launched } = yield* FirefoxLauncher.launch({ executablePath: executable! })
+          const transport = record(launched, BidiWire.wire, fixtures.bidi)
           const replies = new Map<number, Deferred.Deferred<Record<string, any>>>()
           yield* transport.messages.pipe(
             Stream.runForEach((text) => {
@@ -142,7 +145,8 @@ describe.skipIf(executable === undefined)("Firefox over WebDriver BiDi", () => {
             `${directory}/page.html`,
             `<title>leave</title><script>addEventListener("beforeunload", (e) => { e.preventDefault(); e.returnValue = "" })</script>`
           )
-          const { transport } = yield* FirefoxLauncher.launch({ executablePath: executable! })
+          const { transport: launched } = yield* FirefoxLauncher.launch({ executablePath: executable! })
+          const transport = record(launched, BidiWire.wire, fixtures.bidi)
           const bidi = yield* BidiConnection.make(transport)
           const on = Protocol.on(bidi.session)
           yield* Session.new_({ capabilities: { alwaysMatch: { unhandledPromptBehavior: { default: "ignore" } } } })

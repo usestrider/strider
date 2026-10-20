@@ -28,7 +28,7 @@ export type Correction = typeof Correction.Type
 
 /** Overlay traits: everything but the spec's own facts. */
 const Annotation = TraitsSchema.mapFields((
-  { status: _status, description: _description, redirect: _redirect, ...annotations }
+  { status: _status, description: _description, redirect: _redirect, condition: _condition, ...annotations }
 ) => annotations)
 
 export const Overlay = Schema.Struct({
@@ -55,6 +55,35 @@ export const applyCorrections = (
     }
   }
   return sorted(Schema.decodeUnknownSync(ProtocolModelSchema)(current))
+}
+
+/** What the audit found for one correction. */
+export interface AuditEntry {
+  readonly file: string
+  /**
+   * `absorbed`: the model is the same without it, so the spec now says what it says and it can go.
+   * `needed`: leaving it out changes the model, or breaks a correction that builds on it.
+   */
+  readonly verdict: "needed" | "absorbed"
+}
+
+/**
+ * The correction audit, run on each roll: every correction is left out in turn, and one whose absence changes
+ * nothing has been absorbed by the spec.
+ */
+export const audit = (
+  model: ProtocolModel,
+  corrections: ReadonlyArray<readonly [file: string, correction: Correction]>
+): ReadonlyArray<AuditEntry> => {
+  const all = JSON.stringify(applyCorrections(model, corrections))
+  return corrections.map(([file]) => {
+    try {
+      const without = applyCorrections(model, corrections.filter(([other]) => other !== file))
+      return { file, verdict: JSON.stringify(without) === all ? "absorbed" : "needed" }
+    } catch {
+      return { file, verdict: "needed" }
+    }
+  })
 }
 
 /**

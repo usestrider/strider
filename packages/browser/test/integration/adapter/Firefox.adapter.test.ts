@@ -6,7 +6,9 @@ import * as Effect from "effect/Effect"
 import { existsSync } from "node:fs"
 import * as path from "node:path"
 import * as BidiAdapter from "../../../src/internal/bidiAdapter.ts"
+import * as BidiWire from "../../../src/internal/bidiWire.ts"
 import * as FirefoxLauncher from "../../../src/internal/firefoxLauncher.ts"
+import { fixtures, record } from "../record.ts"
 import { conformance } from "./conformance.ts"
 
 const findFirefox = (): string | undefined => {
@@ -26,7 +28,10 @@ conformance({
   skip: executable === undefined,
   connect: Effect.fnUntraced(function*(sink) {
     const { launched, transport } = yield* FirefoxLauncher.launch({ executablePath: executable! })
-    const adapter = yield* BidiAdapter.connect(transport, { sink, ownership: "launched" })
+    const adapter = yield* BidiAdapter.connect(record(transport, BidiWire.wire, fixtures.bidi), {
+      sink,
+      ownership: "launched"
+    })
     return { adapter, kill: launched.handle.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore) }
   })
 })
