@@ -21,6 +21,7 @@ const timeout = 60_000
 /** A connected adapter, its facts and the site. */
 interface World {
   readonly adapter: Adapter.AdapterConnection
+  readonly kill: Effect.Effect<void>
   readonly facts: Recorder
   readonly site: Site
 }
@@ -28,8 +29,8 @@ interface World {
 const setup = Effect.fnUntraced(function*(backend: Backend) {
   const served = yield* site
   const facts = makeRecorder()
-  const adapter = yield* backend.connect(facts.sink)
-  return { adapter, facts, site: served } satisfies World
+  const { adapter, kill } = yield* backend.connect(facts.sink)
+  return { adapter, kill, facts, site: served } satisfies World
 })
 
 /** The realm of a page's current document in a world, waiting for it if it isn't there yet. */
@@ -649,6 +650,23 @@ export const conformance = (backend: Backend) =>
             yield* world.facts.when("PromptClosed")
             // Dismissed, so the page stays
             assert.strictEqual(yield* evaluate(world, page, "() => document.title"), "beforeunload")
+          }), timeout)
+
+        it.effect("ends everything with ConnectionLost when the browser dies", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/frames`)
+            const frame = yield* world.facts.when("FrameAdded", (fact) => fact.parent === page)
+            yield* world.kill
+            const lost = yield* world.adapter.closed
+            assert.strictEqual(lost.initiator, "remote")
+            for (const navigable of [page, frame.frame]) {
+              const removed = yield* world.facts.when("NavigableRemoved", (fact) => fact.navigable === navigable)
+              assert.deepStrictEqual(removed.reason, { _tag: "ConnectionLost" })
+            }
+            const late = yield* world.adapter.createPage(world.adapter.defaultContext).pipe(Effect.flip)
+            assert.strictEqual(late._tag, "AdapterError")
           }), timeout)
       }
     )

@@ -27,7 +27,8 @@ conformance({
   name: "Chromium (CDP)",
   skip: executable === undefined,
   connect: Effect.fnUntraced(function*(sink) {
-    const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable! })
-    return yield* CdpAdapter.connect(transport, { sink, ownership: "launched" })
+    const { launched, transport } = yield* ChromiumLauncher.launch({ executablePath: executable! })
+    const adapter = yield* CdpAdapter.connect(transport, { sink, ownership: "launched" })
+    return { adapter, kill: launched.handle.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore) }
   })
 })

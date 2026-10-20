@@ -212,11 +212,11 @@ export const makeRecorder = (): Recorder => {
 export interface Backend {
   readonly name: string
   readonly skip: boolean
-  /** Launches the browser and connects the adapter, for the scope. */
+  /** Launches the browser and connects the adapter, for the scope; `kill` kills the browser outright. */
   readonly connect: (
     sink: Adapter.Sink
   ) => Effect.Effect<
-    Adapter.AdapterConnection,
+    { readonly adapter: Adapter.AdapterConnection; readonly kill: Effect.Effect<void> },
     Browser.BrowserError,
     Scope.Scope | FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner | Socket.WebSocketConstructor
   >
