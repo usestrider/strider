@@ -213,3 +213,43 @@ These need no change, and are listed so the review is complete:
 | 10 | JSDoc contract and doctests | — | medium, ongoing |
 | 11 | Tstyche for type behavior | — | small |
 | 12 | `Effect.fn` for reusable functions | — | small |
+
+## Decision
+
+*2026-10-19.* All twelve are adopted and applied in revision 5.25. Applying them meant checking `origin/main` again, which refined four of them and added a thirteenth: the API reference is generated, the way effect.website generates Effect's.
+
+### Refinements
+
+- **1, access levels keep their full names.** A bare `Page.Readonly` or `OriginStorage.Readonly` would shadow TypeScript's `Readonly<T>` inside the module. Effect itself writes `Record.ReadonlyRecord` and `Array.ReadonlyArray`. So the access levels are `Page.ObservedPage`, `Page.ReadonlyPage`, `Page.Page`, `Locator.ReadonlyLocator` and `OriginStorage.ReadonlyOriginStorage`. Short names are for the supporting types: `UserContext.Options`, `CookieJar.Input`, `PageNavigation.Filter`.
+- **1, brands are Schemas in the module that owns them.** `cluster/EntityId.ts` is the model. It is a Schema value and a type with the same name, branded `"~effect/cluster/EntityId"`. Ids move to their owners (`Download.Id`, `UserContext.Id`, `Snapshot.RefId`, `InitScript.Id`). Values with no single owner get small modules: `Url` (`Url.Url`, `Url.Pattern`, `Url.Origin`, `Url.Site`), `FilePath` (`Local`, `Remote`), `Pixels` (`Css`, `Device`) and `AriaRole`, which is shaped like `effect/http`'s `HttpMethod`. `effect/http` also exports a `Url` module. A file that needs both aliases one; Effect's own AI provider packages each export a `Generated` module, so a shared name is precedented.
+- **6, reasons shared across modules live in one module.** `Socket.SocketError` is the model: reasons are `Schema.Error` classes with `_tag: Schema.tag(…)`, and the wrapper is a `Schema.TaggedError` with a string TypeId, a `message` derived from the reason, and `cause` lifted from it. Reasons that belong to one module stay in it (`Locator.StrictViolation`, `Page.NavigationFailed`). Reasons that several modules share (`InvalidInput`, `NotPermitted`, `Unsupported`, `BackendFailure`, `EvaluationThrown`, `NotSerializable`) live in a `Reason` module. `TargetGone` lives in a `Target` module, with the ids and close reasons that describe targets. `Timeout` lives in `Deadline`.
+- **10, every module and export states its stability.** Effect has required an explicit `@stability` on every module and importable export since #8770 (2026-10-07), not only where a dependency's types show. Until 1.0 the default is `@stability unstable`: breaking changes may come in minor releases, which 0.x semver allows. `experimental` marks APIs that rest on an upstream proposal or an in-flight module: the `ReadonlyDeferred` shim, Zip-based exports, `Browser.layerTest`. `stable` waits for 1.0.
+- **12, `Effect.fn` versus `fnUntraced` follows tracing.** Since #9506 and #9512 (2026-10-19), Effect sets `@effect/language-service` to `effectFnOpportunity: "error"` with `effectFn: ["untraced"]` for both its sources and its tests. A function that returns `Effect.gen` is a compile error, and the suggested fix is `fnUntraced`. Library code and tests therefore use `Effect.fnUntraced`, which matches 7. Examples written for users use `Effect.fn("name")` where a span helps, as `LLMS.md` advises. The sketch's tsconfig sets the same plugin options.
+
+### 13. The API reference is generated
+
+**Rule.** Effect's API reference on effect.website is generated from the sources on every release. Nothing in it is written by hand. Five pieces make that work:
+
+1. **One module per file, listed in the export map.** `package.json` maps `"."` to `src/index.ts` and `"./*"` to `src/*.ts`. A subpath such as `"./http"` points to its own barrel.
+2. **A generated barrel.** `effect-utils codegen` writes `index.ts` as `export * as X` lines. Each line carries `@stability` and `@since`, and copies the module's own description.
+3. **A checked JSDoc contract.** `effect-jsdocs --check` runs in CI. It enforces the description sections, the tag order, `@category`, `@since` and `@stability`, and that inline `{@link}` targets resolve. It also writes a model of the whole API to `.data/jsdocs.json`: every declaration with its parsed sections, examples, tags, resolved `@see` links and import guidance.
+4. **Examples that run.** `@effect/doctest` is a Vitest plugin. It runs every fence marked ```` ```ts import.meta.vitest ```` from JSDoc, Markdown and MDX, and checks `// =>` assertions with `Equal`.
+5. **The website.** When a release is promoted, `npm-promote` sends a `repository_dispatch` event (`publish-api-reference`, with the revision). Effect-TS/website checks out that revision. Its `packages/api-reference/src/Generate.ts` finds each public module from the package export map and skips barrels and `internal/`. It runs TypeDoc 0.28 over each module with `blockTags` plus `@stability`, `inlineTags` plus `@see`, `excludeInternal`, and the leading module comment attached. It writes one TypeDoc JSON file per module, plus a manifest with the revision and SHA-256 hashes. An Astro loader turns the bold-only paragraphs (**When to use**, **Details**, **Gotchas**) into headings and renders declarations by category, with stability badges and examples, at `/docs/v4/api/<package>/<module>`.
+
+**What we can reuse.**
+
+| Tool | Status | Use |
+|---|---|---|
+| `@effect/doctest` | published, MIT | as is |
+| TypeDoc | published, Apache-2.0 | as is |
+| `@effect/jsdocs` | private workspace tool in the MIT Effect repo | run from a pinned Effect checkout, or vendor it with the license notice |
+| `@effect/docgen` | published | not needed: it writes Markdown for a just-the-docs GitHub Pages site, the older output |
+| Effect-TS/website | no license | can't be copied; we write our own generator against TypeDoc's JSON, which is the documented interface |
+
+**What changes.**
+- The sketch takes the real package's shape: an export map, barrels in Effect's format, and a JSDoc contract that `effect-jsdocs --check` passes. The checker runs unchanged from the local Effect clone; it only reads the clone.
+- Examples are fenced for doctest. Until there is an implementation to run them, `npm run examples` type-checks them against the sketch.
+- `npm run api-reference` writes the dataset in the website's shape: one TypeDoc JSON per module, plus a manifest. Any site, ours included, can render it as effect.website does.
+- `INDEX.md` is generated from the jsdocs model, grouped by module and `@category`, instead of from a second parser.
+
+**Recommendation.** Adopt.
