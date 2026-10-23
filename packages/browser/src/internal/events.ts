@@ -1,0 +1,281 @@
+/**
+ * Events (CONCEPTS.md §9, Subscriptions and Event logs; review 13, candidate 1): one mechanism under every
+ * event module's `next`, `stream` and `history`.
+ *
+ * The model's fold publishes each event to a channel, one per kind and target (a page's popups, a context's
+ * automatic decisions). A channel keeps a bounded log, and offers each event to the live subscriptions whose
+ * filter it matches, each into a buffer of its own; offering never blocks the fold. A subscription is live
+ * once it is in its channel's set, and the fold is the only writer, so a subscription sees every event folded
+ * after `next` or `stream` returns, and none before.
+ *
+ * Entries are L1's data. The public modules map them to what they emit (a `Page` handle, a `Dialog`) as they
+ * are delivered, and filter on what an entry knows, which can grow: a popup's URL arrives with its first
+ * navigation, so `revise` offers the entry again to the subscriptions it now matches.
+ */
+import * as Cause from "effect/Cause"
+import * as Deferred from "effect/Deferred"
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
+import * as Queue from "effect/Queue"
+import type * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
+import type * as Deadline from "../Deadline.ts"
+import type * as PublicDeferred from "../Deferred.ts"
+import type * as MonotonicInstant from "../MonotonicInstant.ts"
+import * as Subscription from "../Subscription.ts"
+import * as Target from "../Target.ts"
+import { now } from "./adapter.ts"
+import * as Operation from "./operation.ts"
+import * as ReadonlyDeferred from "./readonlyDeferred.ts"
+
+/** One event in a channel: L1's data, when the fold received it, and its place in the channel's order. */
+export interface Entry<A> {
+  readonly value: A
+  readonly at: MonotonicInstant.MonotonicInstant
+  readonly sequence: number
+}
+
+/**
+ * How a channel's target ended: normally (closed by a command, its script, or with its context), which ends
+ * its streams, or not, which fails them with `TargetGone`. Either fails its waits with `TargetGone`.
+ */
+export interface End {
+  readonly normal: boolean
+  readonly reason: Target.CloseReason
+}
+
+type Failure = Subscription.EventOverflow | Target.TargetGone | Cause.Done
+
+interface Subscriber<A> {
+  readonly accepts: (entry: Entry<A>) => boolean
+  readonly queue: Queue.Queue<Entry<A>, Failure>
+  /** The entries offered already, so a revised entry reaches a subscription at most once. */
+  readonly offered: WeakSet<Entry<A>>
+  readonly bound: number
+  /** The first entry it may see: none published before it subscribed, even when revised after. */
+  readonly from: number
+}
+
+export interface Channel<A> {
+  readonly target: Target.Description
+  /** The log's cap, read at each append: the context's `eventLog`. */
+  readonly cap: () => number
+  readonly entries: Array<Entry<A>>
+  /** Every entry the cap discarded. */
+  dropped: number
+  /** The sequence number of the next entry. */
+  published: number
+  readonly subscribers: Set<Subscriber<A>>
+  end: Option.Option<End>
+}
+
+export const make = <A>(target: Target.Description, cap: () => number): Channel<A> => ({
+  target,
+  cap,
+  entries: [],
+  dropped: 0,
+  published: 0,
+  subscribers: new Set(),
+  end: Option.none()
+})
+
+const gone = (target: Target.Description, reason: Target.CloseReason) =>
+  new Target.TargetGone({ target, reason, diagnostics: Operation.diagnostics(Operation.operationId()) })
+
+const offer = <A>(channel: Channel<A>, entry: Entry<A>): void => {
+  for (const subscriber of channel.subscribers) {
+    if (entry.sequence < subscriber.from || subscriber.offered.has(entry) || !subscriber.accepts(entry)) continue
+    subscriber.offered.add(entry)
+    if (Queue.offerUnsafe(subscriber.queue, entry)) continue
+    // A full buffer fails its own subscription, and no other
+    channel.subscribers.delete(subscriber)
+    Queue.failCauseUnsafe(
+      subscriber.queue,
+      Cause.fail(
+        new Subscription.EventOverflow({
+          bound: subscriber.bound,
+          at: now(),
+          diagnostics: Operation.diagnostics(Operation.operationId())
+        })
+      )
+    )
+  }
+}
+
+/** Logs an event and offers it to the subscriptions it matches. Never blocks: the fold calls it. */
+export const publish = <A>(channel: Channel<A>, value: A): Entry<A> => {
+  const entry: Entry<A> = { value, at: now(), sequence: channel.published++ }
+  if (Option.isSome(channel.end)) return entry
+  const cap = channel.cap()
+  if (cap > 0) channel.entries.push(entry)
+  else channel.dropped++
+  while (channel.entries.length > cap) {
+    channel.entries.shift()
+    channel.dropped++
+  }
+  offer(channel, entry)
+  return entry
+}
+
+/** Offers an entry again, after what filters read about it changed, to the subscriptions it now matches. */
+export const revise = <A>(channel: Channel<A>, entry: Entry<A>): void => {
+  if (Option.isNone(channel.end)) offer(channel, entry)
+}
+
+/** Ends a channel with its target: streams end, or fail with `TargetGone`; waits fail with `TargetGone`. */
+export const end = <A>(channel: Channel<A>, how: End): void => {
+  if (Option.isSome(channel.end)) return
+  channel.end = Option.some(how)
+  for (const subscriber of channel.subscribers) close(channel, subscriber, how)
+  channel.subscribers.clear()
+}
+
+const close = <A>(channel: Channel<A>, subscriber: Subscriber<A>, how: End): void => {
+  if (how.normal) Queue.endUnsafe(subscriber.queue)
+  else Queue.failCauseUnsafe(subscriber.queue, Cause.fail(gone(channel.target, how.reason)))
+}
+
+/** Adds a subscription for the scope; a channel that already ended hands back one that ended with it. */
+const subscribe = <A>(
+  channel: Channel<A>,
+  accepts: (entry: Entry<A>) => boolean,
+  bound: number
+): Effect.Effect<Subscriber<A>, never, Scope.Scope> =>
+  Effect.gen(function*() {
+    const queue = yield* Queue.make<Entry<A>, Failure>({ capacity: bound })
+    const subscriber: Subscriber<A> = { accepts, queue, offered: new WeakSet(), bound, from: channel.published }
+    if (Option.isSome(channel.end)) {
+      close(channel, subscriber, channel.end.value)
+      return subscriber
+    }
+    channel.subscribers.add(subscriber)
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        channel.subscribers.delete(subscriber)
+        Queue.endUnsafe(queue)
+      })
+    )
+    return subscriber
+  })
+
+/** What a module tells the mechanism about its events. */
+export interface Kind<A, B> {
+  /** The operation, as errors and spans name it: `"Popup.next"`. */
+  readonly operation: string
+  /** What one event is called in a hint: `"a popup"`. */
+  readonly noun: string
+  /** The event a caller sees, made as it is delivered. */
+  readonly deliver: (value: A) => B
+}
+
+/**
+ * `next`: subscribed when it returns; the first event the filter and `where` accept completes the deferred,
+ * or the deadline in force now fails it with `Timeout{waitingForEvent}`, or its target's end with
+ * `TargetGone`. Closing the scope first interrupts it.
+ */
+export const next = <A, B, PE, PR>(
+  kind: Kind<A, B>,
+  channel: Channel<A>,
+  accepts: (entry: Entry<A>) => boolean,
+  where: Subscription.Where<B, PE, PR> | undefined
+): Effect.Effect<
+  PublicDeferred.ReadonlyDeferred<B, PE | Target.TargetGone | Deadline.Timeout>,
+  never,
+  Scope.Scope | PR
+> =>
+  Effect.gen(function*() {
+    const budget = yield* Operation.budget
+    const context = yield* Effect.context<PR>()
+    const since = channel.published
+    const subscribed = now()
+    // Kept until the first match or the deadline, so it needs no bound
+    const subscriber = yield* subscribe(channel, accepts, Number.POSITIVE_INFINITY)
+    const deferred = ReadonlyDeferred.make<B, PE | Target.TargetGone | Deadline.Timeout>()
+    const take: Effect.Effect<B, PE | Target.TargetGone | Subscription.EventOverflow | Cause.Done> = Effect.gen(
+      function*() {
+        while (true) {
+          const entry = yield* Queue.take(subscriber.queue)
+          const event = kind.deliver(entry.value)
+          if (where === undefined || (yield* Effect.provideContext(where(event), context))) return event
+        }
+      }
+    )
+    const missed = (): Option.Option<string> => {
+      const late = channel.entries.filter((entry) => entry.sequence < since && accepts(entry)).at(-1)
+      return late === undefined ? Option.none() : Option.some(
+        `${kind.noun} came ${
+          Math.round((subscribed - late.at) / 1e6)
+        } ms before ${kind.operation} subscribed; call ${kind.operation} before the action that causes it`
+      )
+    }
+    yield* take.pipe(
+      Effect.timeoutOption(Operation.millisLeft(budget.at)),
+      Effect.flatMap(Option.match({
+        onNone: () =>
+          Deferred.fail(
+            deferred,
+            Operation.timeout({
+              operation: kind.operation,
+              id: Operation.operationId(),
+              phase: "waitingForEvent",
+              budget: budget.budget,
+              history: [],
+              hint: missed()
+            })
+          ),
+        onSome: (event) => Deferred.succeed(deferred, event)
+      })),
+      Effect.catch((failure) => {
+        if (Target.isTargetGone(failure)) return Deferred.fail(deferred, failure)
+        if (Cause.isDone(failure)) {
+          // Its target ended normally, which a wait still fails on; or its scope closed, which interrupts it
+          return Option.isSome(channel.end)
+            ? Deferred.fail(deferred, gone(channel.target, channel.end.value.reason))
+            : Deferred.interrupt(deferred)
+        }
+        // A `next` buffer has no bound, so it never overflows
+        return Subscription.isEventOverflow(failure)
+          ? Deferred.interrupt(deferred)
+          : Deferred.fail(deferred, failure as PE)
+      }),
+      Effect.onInterrupt(() => Deferred.interrupt(deferred)),
+      Effect.forkScoped
+    )
+    // The read side only (internal/readonlyDeferred.ts)
+    return deferred as unknown as PublicDeferred.ReadonlyDeferred<B, PE | Target.TargetGone | Deadline.Timeout>
+  })
+
+/**
+ * `stream`: subscribed when it returns; every event the filter and `where` accept, from then on. It ends
+ * when its target ends normally or its scope closes, and fails with `TargetGone` on another end and with
+ * `EventOverflow` when its consumer falls more than `Subscription.Capacity` events behind.
+ */
+export const stream = <A, B, PE, PR>(
+  kind: Kind<A, B>,
+  channel: Channel<A>,
+  accepts: (entry: Entry<A>) => boolean,
+  where: Subscription.Where<B, PE, PR> | undefined
+): Effect.Effect<
+  Stream.Stream<B, PE | Subscription.EventOverflow | Target.TargetGone>,
+  never,
+  Scope.Scope | PR
+> =>
+  Effect.gen(function*() {
+    const context = yield* Effect.context<PR>()
+    const subscriber = yield* subscribe(channel, accepts, yield* Subscription.Capacity)
+    const events = Stream.fromQueue(subscriber.queue).pipe(Stream.map((entry) => kind.deliver(entry.value)))
+    return where === undefined
+      ? events
+      : events.pipe(Stream.filterEffect((event) => Effect.provideContext(where(event), context)))
+  })
+
+/** `history`: what the log retained that the filter accepts, oldest first, and everything it dropped. */
+export const history = <A, B>(
+  kind: Kind<A, B>,
+  channel: Channel<A>,
+  accepts: (entry: Entry<A>) => boolean
+): Effect.Effect<Subscription.History<B>> =>
+  Effect.sync(() => ({
+    entries: channel.entries.filter(accepts).map((entry) => kind.deliver(entry.value)),
+    dropped: channel.dropped
+  }))

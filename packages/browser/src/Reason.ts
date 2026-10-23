@@ -208,3 +208,29 @@ export class NotSerializable extends Schema.Error<NotSerializable>("@usestrider/
     return `Not serializable at ${this.path} (${this.hint})`
   }
 }
+
+/**
+ * Reason for an operation on a page that a dialog blocks, when nothing will decide the dialog.
+ *
+ * **Details**
+ *
+ * A dialog pauses its page: on some backends every evaluation waits for it, and on all of them the input that
+ * opened it does. A dialog a handler or the context's policy is deciding is waited for within the deadline.
+ * This reason is for one nothing will decide: its context's policy is `"leaveOpen"` and no `Dialog.handle`
+ * was registered when it opened, so the operation fails at once rather than at its deadline. `text` is the
+ * dialog's message, empty for a `beforeunload`.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class PromptBlocking extends Schema.Error<PromptBlocking>("@usestrider/browser/Reason/PromptBlocking")({
+  _tag: Schema.tag("PromptBlocking"),
+  kind: Schema.Literals(["alert", "confirm", "prompt", "beforeunload"]),
+  text: Schema.String,
+  hint: Schema.String
+}) {
+  override get message(): string {
+    return `An open ${this.kind}${this.text === "" ? "" : ` "${this.text}"`} blocks the page (${this.hint})`
+  }
+}

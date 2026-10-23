@@ -4,8 +4,8 @@ Instructions for agents writing code that uses Strider. `INDEX.md` in this packa
 The design and its reasons are in the repository: https://github.com/usestrider/strider.
 
 Strider is pre-release: the API is designed and type-checked, and the implementation is in progress. Launching,
-`Browser.newPage`, navigation, the queries, `click`, `Expect.toBeVisible` and `toBeHidden`, and `Deadline` work on
-every backend. A member that isn't built yet fails as the defect `NotBuilt`, naming itself.
+`Browser.newPage`, navigation, the queries, `click`, `Expect.toBeVisible` and `toBeHidden`, `Deadline`, and the
+`Popup`, `Dialog` and `AutoResolution` events with `Dialog.handle` work on every backend. A member that isn't built yet fails as the defect `NotBuilt`, naming itself.
 
 ## Shape
 

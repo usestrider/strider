@@ -1,6 +1,6 @@
 # CONCEPTS: the native browser model (L1)
 
-*Revision 5.25, 2026-10-19; checked against the built adapter contract, with how a locator finds elements (§8) and how an action waits (§5), after [review 12](reviews/12-l1-first-slice.md), and the first slice built, 2026-10-22. A condensed restatement of draft 4 (commit `6cc0bc1`), with [review 4](reviews/04-draft-4.md) folded in. The reasoning behind each contract is in that draft and in [reviews/](reviews/); this document keeps the decisions. Spec anchors: `HTML#x` is `https://html.spec.whatwg.org/#x`; `BIDI#x` is the WebDriver BiDi editor's draft.*
+*Revision 5.25, 2026-10-19; checked against the built adapter contract, with how a locator finds elements (§8) and how an action waits (§5), after [review 12](reviews/12-l1-first-slice.md), and the first slice built, 2026-10-22; how events are delivered, popups and dialogs, after [review 13](reviews/13-events-slice.md), built 2026-10-23. A condensed restatement of draft 4 (commit `6cc0bc1`), with [review 4](reviews/04-draft-4.md) folded in. The reasoning behind each contract is in that draft and in [reviews/](reviews/); this document keeps the decisions. Spec anchors: `HTML#x` is `https://html.spec.whatwg.org/#x`; `BIDI#x` is the WebDriver BiDi editor's draft.*
 
 ## Purpose
 
@@ -69,12 +69,13 @@ Realms are siblings of documents, not children. The one exception that forces th
 | Fact | Folded into |
 |---|---|
 | `UserContextAdded`, `UserContextRemoved` | a context: its id, whether it is the default, its pages, its `closed`; removing it closes its pages |
-| `PageAdded`, `NavigableRemoved` | a page: its id, its context, its status (`Opening{url}` until its first document commits, then `Open{url, document, prompt}`, then `Closed{reason, url}`), its `closed`, its input permit (§5) |
+| `PageAdded`, `NavigableRemoved` | a page: its id, its context, its status (`Opening{url}` until its first document commits, then `Open{url, document, prompt}`, then `Closed{reason, url}`), its `closed`, its input permit (§5), its event channels (§9), the scope that owns it; and for a popup whose opener the backend names, a `Popup` event on the opener, and its release added to the opener's scope (§3) |
+| `NavigationStarted` | a popup's URL, from its first navigation, which its `Popup` event's filters read (review 13) |
 | `DocumentCommitted`, `DocumentUrlChanged`, `DocumentOpened`, `DocumentReadiness` | the page's active document: its id, URL and readiness; the document it replaced ends with `DocumentReplaced` |
 | `RealmAdded`, `RealmRemoved` | which document each window realm belongs to, so the engine's realm (§8, Queries) is forgotten when it goes |
 | `NavigationEnded` | a navigation's outcome, latched once |
 | `RequestSent`, `ResponseReceived` | the responses of navigation requests, so a committed navigation carries its response |
-| `ObligationOpened` for a prompt, `PromptClosed` | the page's prompt, which an owned context's `dialogs` policy decides at once (§5) |
+| `ObligationOpened` for a prompt, `PromptClosed` | the page's prompt and a `Dialog` event; its decision, by the page's latest handler or else the context's `dialogs` policy, reported as an `AutoResolution` on the page and the context; and whether nothing will decide it (§5) |
 
 A page is open from its first commit: `createPage` replies once the page is ready, so `PageReady` adds nothing yet. Connection loss ends everything with `ConnectionLost`. Facts the slice doesn't fold (frames' own documents, other requests, console, downloads, file choosers) wait for the modules that consume them; PROTOCOL.md lists them.
 
@@ -279,7 +280,7 @@ Cleanup groups can span sibling pages, independently of this graph.
   - Created resources are `Owned`.
   - The default context and pages that existed at attach are `LeaveOpen`.
   - **Every acquisition requires a `Scope`, and that scope is the cleanup group.** This covers contexts, pages, access upgrades, handles, capability handles and every declaration. Values with no remote lifetime (locators, snapshots, captured bodies) need none. An early `close` makes the finalizer a no-op.
-  - **Seeing an event acquires nothing.** A popup of an owned page is released with the scope that acquired its opener, even if the opener has already closed; subscribing to it changes nothing. A popup of a `LeaveOpen` page is `observe`/`LeaveOpen`. A download's file belongs to its context.
+  - **Seeing an event acquires nothing.** A popup of an owned page is released with the scope that acquired its opener, even if the opener has already closed; subscribing to it changes nothing. The model records the scope that acquired each owned page and adds a popup's release to it when the popup appears; a scope that has already closed closes the popup at once (review 13). A popup of a `LeaveOpen` page is `observe`/`LeaveOpen`. A download's file belongs to its context.
   - Transfer to another scope is explicit and atomic with respect to shutdown. Ambiguous opener evidence never implies ownership.
 - **Ownership ledger.** The connection records owned resources, groups and transfers. A persisted ledger yields *reclamation candidates* only. Automatic destructive reclaim across connections needs verified browser incarnation, resource identity and claimant coordination, and is deferred.
 - **Requesting a close is not ending a lifetime.** `close({ runBeforeUnload: true })` can be refused (`PageError{CloseCanceled}`), and the page stays usable. A close timeout leaves closure unconfirmed rather than fabricating `PageClosed`. Teardown of owned resources uses a bounded close without beforeunload.
@@ -346,6 +347,8 @@ Cleanup groups can span sibling pages, independently of this graph.
     - owned contexts: an explicit `dialogs` policy (`dismiss` by default, `accept`, or `leaveOpen`) decides immediately when no handler claims the dialog. `beforeunload` is accepted under `dismiss`. There is no grace period, so the policy adds no hidden lag;
     - attached pages: no default unless the caller sets one.
   - Every automatic decision is published and recorded on relevant operations, with correlation but no claim of causation.
+  - **Handlers** (review 13). The page's latest `Dialog.handle` decides, chosen when the dialog opens: the chain is one handler, since `Dialog` has no fallthrough. It runs in its registration's scope with `Deadline.DefaultBudget`, as read at `handle`; failing, being interrupted or running out of time leaves the dialog to the policy, and the failure is logged. A resolver in the model's scope delivers whichever decision comes, apart from the handler's fiber.
+  - **What a dialog blocks** (review 13, probed). Chromium and WebKit block every evaluation, in every world, while a dialog is open, and Firefox doesn't; on all three, the input that opens a dialog returns only once it is decided. When nothing will decide a dialog (no handler when it opened, and a `"leaveOpen"` policy), every operation on its page fails at once with `PromptBlocking{kind, text}`, including the input that opened it, whose dispatch `MayHaveBeenSent`.
 - **File chooser.** It does not pause the page. It is armed before the triggering input, and its default is `Cancel`.
 - **Obligation lifecycle.** States are `pending → decisionSelected → sending → acknowledged | rejected | unknown`, plus `ended`.
   - **One winner.** An atomic transition selects at most one decision.
@@ -442,7 +445,7 @@ Each predicate yields `Ready`, `NotReady{reason}` or an observation error. A rea
 | InViewport | a content quad intersects the viewport (area > 0.99 CSS px²); scrolling is an action policy | `OutsideViewport` |
 | ReceivesPointer | at the action point, the composed-tree hit test (per shadow root, through iframes) lands on the target or a descendant; checked before dispatch *and* guarded on the first trusted event | `Covered{by}` |
 | Unique | exactly one match (hidden matches count); actions fail immediately on ambiguity, with no retry window | `Ambiguous{candidates, visibleCount}` |
-| PromptFree | no known prompt blocking the navigable | `PromptBlocking{prompt, resolution}` |
+| PromptFree | no known prompt blocking the navigable | `PromptBlocking{prompt, resolution}`; built for `resolution: None` as the shared reason `PromptBlocking{kind, text}` (§5) |
 
 There are no time-window predicates such as network idle or DOM quiet: waiting for T ms of silence is a heuristic (rule 23). Compatible instantaneous checks are batched in one injected evaluation. No batch is an atomic guarantee that covers the input that follows it.
 
@@ -468,7 +471,8 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
   - **Correlation:** by the strongest identity available.
   - **Owner ends without a match:** fails promptly.
   - **Results:** a latched immutable result outlives the subscription.
-- **Event logs.** Each page and context keeps a bounded log per event kind, fed by the same fold as subscriptions. Entries are copied metadata or handles to resources owned elsewhere, never collected bodies, so nothing in a log decays. A log counts what it drops. Logs serve `history`, the digest that agent tools and CLI commands return between calls, and the hint on a late subscription's `Timeout`, which names a match that arrived just before it subscribed.
+  - **Delivery** (review 13). The fold publishes each event to a channel per kind and target (a page's popups, a context's automatic decisions), which logs it and offers it to every subscription whose declarative filter matches, each into a buffer of its own; offering never blocks the fold. Registration is the revision boundary, kept by sequence numbers: an entry whose details arrive later (a popup's URL) is offered again to the subscriptions it now matches, but never to one made after it was published. A `stream` buffers `Subscription.Capacity` events (1,000) and then fails with `EventOverflow`, alone; `next` keeps what arrives until its first match or its deadline, and times out in the phase `waitingForEvent`, with a hint naming a match that came before it subscribed. The end of the target ends streams normally when it was closed, and fails waits and other streams with `TargetGone`. `PubSub` doesn't fit: it offers every message to every subscriber, so filters would run after buffering, and its bounded strategies stall the publisher or drop silently.
+- **Event logs.** Each page and context keeps a bounded log per event kind, fed by the same fold as subscriptions. Entries are copied metadata or handles to resources owned elsewhere, never collected bodies, so nothing in a log decays. A log counts what it drops: every event of its kind it discarded, since which ones a later filter would have matched can't be known (review 13). Logs serve `history`, the digest that agent tools and CLI commands return between calls, and the hint on a late subscription's `Timeout`, which names a match that arrived just before it subscribed.
 - **Deadline.** There is one monotonic deadline per operation, inherited by nested calls and only ever shortened. It lives in `Deadline.CurrentDeadline`, an absolute instant on the live clock, set only by `Deadline.within`; an operation with no enclosing deadline gets `Deadline.DefaultBudget` from when it starts. An event wait takes its deadline at `next`. Cleanup has its own budget. Deadline failures are `Timeout{phase}`, carrying the last observation and its de-duplicated history.
 - **Retries.** Retry decisions depend on the operation, its phase, the target binding, dispatch evidence and the remaining deadline, never on an error tag alone.
   - Locators re-resolve before dispatch.
@@ -502,7 +506,8 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
   | handlers and resolvers scoped to their entity | `FiberSet`, `FiberMap` |
   | the persisted ownership ledger (§3) | `KeyValueStore` (`effect/persistence`) |
   | byte limits: payloads, body capture, queues | `ByteSize` |
-  | single-winner decisions and latched first matches | `Deferred`; callers get its read side, `ReadonlyDeferred` |
+  | single-winner decisions and latched first matches | `Deferred`; callers get its read side, `ReadonlyDeferred`, which at run time is Effect's `Deferred` marked read-only (review 13) |
+  | event delivery (Subscriptions) | a `Queue` per subscription that the fold offers to without suspending, not `PubSub` (review 13) |
   | `Expect`'s re-checks on change signals | `Reactivity`: the model invalidates keys (a `Watchable` change, a subtree mutation), and `Reactivity.stream` re-runs the check. Not built yet: expectations re-check at `Expect.CheckInterval` (100 ms), which is what visibility, a condition with no change signal, needs (review 12, candidate 5) |
 
 ## 10. Secrets and diagnostics

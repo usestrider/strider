@@ -1,23 +1,36 @@
 /**
  * Dialogs: `alert`, `confirm`, `prompt` and `beforeunload`.
  *
- * A dialog blocks its page until something decides it. Events report and handlers decide: `next` and
- * `stream` only observe, and `handle` registers the scoped handler that answers. Each dialog shape offers
- * only the decisions valid for it, so a handler can't dismiss an alert. A dialog no handler claims is
- * decided by the context's policy (`UserContext.Options.dialogs`), and the decision is reported as an
- * `AutoResolution`.
+ * A dialog blocks its page until something decides it. Events report and handlers decide: `next`, `stream`
+ * and `history` report a `Dialog`, which is data, and `handle` registers the scoped handler that answers a
+ * `Pending` dialog, which adds the decisions valid for its kind, so a handler can't dismiss an alert. A
+ * dialog no handler decides is decided by the context's policy (`UserContext.Options.dialogs`), and the
+ * decision is reported as an `AutoResolution`.
  *
  * @stability unstable
  * @since 0.1.0
  */
-import type * as Effect from "effect/Effect"
+import * as Cause from "effect/Cause"
+import * as Duration from "effect/Duration"
+import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
+import * as FiberSet from "effect/FiberSet"
+import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
+import * as References from "effect/References"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
-import type * as Deadline from "./Deadline.ts"
+import * as SubscriptionRef from "effect/SubscriptionRef"
+import * as Deadline from "./Deadline.ts"
 import type * as Declaration from "./Declaration.ts"
 import type * as Deferred from "./Deferred.ts"
+import type * as Adapter from "./internal/adapter.ts"
+import * as Events from "./internal/events.ts"
+import * as Handles from "./internal/handles.ts"
+import type * as Model from "./internal/model.ts"
+import * as Watchable from "./internal/watchable.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
 import type * as Target from "./Target.ts"
@@ -63,7 +76,36 @@ export interface Decision {
 export const isDecision = (u: unknown): u is Decision => Predicate.hasProperty(u, DecisionTypeId)
 
 /**
- * A dialog, offering the decisions valid for its kind.
+ * Schema for a dialog, as events report it: which kind, what it says, and its `PromptId`.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Dialog = Schema.Union([
+  Schema.TaggedStruct("Alert", { id: PromptId, message: Schema.String }),
+  Schema.TaggedStruct("Confirm", { id: PromptId, message: Schema.String }),
+  Schema.TaggedStruct("Prompt", { id: PromptId, message: Schema.String, defaultValue: Schema.String }),
+  Schema.TaggedStruct("BeforeUnload", { id: PromptId })
+])
+
+/**
+ * A dialog, as events report it.
+ *
+ * **Details**
+ *
+ * It is data, so a dialog's history encodes like other data events'. `id` is the `PromptId` that
+ * `Page.Status` shows while the dialog is open. Observing a dialog doesn't decide it; a handler does, and
+ * receives it as a `Pending` dialog.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type Dialog = typeof Dialog.Type
+
+/**
+ * A dialog a handler is asked to decide, offering the decisions valid for its kind.
  *
  * **Details**
  *
@@ -74,18 +116,15 @@ export const isDecision = (u: unknown): u is Decision => Predicate.hasProperty(u
  * @category models
  * @since 0.1.0
  */
-export type Dialog =
-  | { readonly _tag: "Alert"; readonly message: string; readonly accept: Decision }
-  | { readonly _tag: "Confirm"; readonly message: string; readonly accept: Decision; readonly dismiss: Decision }
-  | {
-    readonly _tag: "Prompt"
-    readonly message: string
-    readonly defaultValue: string
+export type Pending =
+  | Extract<Dialog, { readonly _tag: "Alert" }> & { readonly accept: Decision }
+  | Extract<Dialog, { readonly _tag: "Confirm" }> & { readonly accept: Decision; readonly dismiss: Decision }
+  | Extract<Dialog, { readonly _tag: "Prompt" }> & {
     readonly accept: Decision
     respond(text: string): Decision
     readonly dismiss: Decision
   }
-  | { readonly _tag: "BeforeUnload"; readonly leave: Decision; readonly stay: Decision }
+  | Extract<Dialog, { readonly _tag: "BeforeUnload" }> & { readonly leave: Decision; readonly stay: Decision }
 
 /**
  * Which kind of dialog.
@@ -112,6 +151,81 @@ export interface Filter {
   readonly kind?: Kind | ReadonlyArray<Kind> | undefined
 }
 
+// ── Implementation ──
+
+/** A decision, carrying what the adapter sends. */
+interface DecisionImpl extends Decision {
+  readonly decision: Adapter.Decision
+}
+
+const decision = (decision: Adapter.Decision): Decision => {
+  const made: DecisionImpl = { [DecisionTypeId]: DecisionTypeId, decision }
+  return made
+}
+
+const accepted = decision({ _tag: "Accept", promptText: Option.none() })
+const dismissed = decision({ _tag: "Dismiss" })
+
+const kinds: Record<Model.PromptEvent["kind"], Kind> = {
+  alert: "Alert",
+  confirm: "Confirm",
+  prompt: "Prompt",
+  beforeunload: "BeforeUnload"
+}
+
+const toDialog = (prompt: Model.PromptEvent): Dialog => {
+  const id = prompt.prompt
+  switch (prompt.kind) {
+    case "alert":
+      return { _tag: "Alert", id, message: prompt.message }
+    case "confirm":
+      return { _tag: "Confirm", id, message: prompt.message }
+    case "prompt":
+      return { _tag: "Prompt", id, message: prompt.message, defaultValue: prompt.defaultValue }
+    case "beforeunload":
+      return { _tag: "BeforeUnload", id }
+  }
+}
+
+const toPending = (prompt: Model.PromptEvent): Pending => {
+  const dialog = toDialog(prompt)
+  switch (dialog._tag) {
+    case "Alert":
+      return { ...dialog, accept: accepted }
+    case "Confirm":
+      return { ...dialog, accept: accepted, dismiss: dismissed }
+    case "Prompt":
+      return {
+        ...dialog,
+        accept: accepted,
+        respond: (text) => decision({ _tag: "Accept", promptText: Option.some(text) }),
+        dismiss: dismissed
+      }
+    case "BeforeUnload":
+      return { ...dialog, leave: accepted, stay: dismissed }
+  }
+}
+
+const accepts = (filter: Filter | undefined) => {
+  const wanted = filter?.kind === undefined ? undefined : new Set<Kind>(
+    typeof filter.kind === "string" ? [filter.kind] : filter.kind
+  )
+  return (entry: Events.Entry<Model.PromptEvent>) => wanted === undefined || wanted.has(kinds[entry.value.kind])
+}
+
+const kind = (operation: string): Events.Kind<Model.PromptEvent, Dialog> => ({
+  operation,
+  noun: "a dialog",
+  deliver: toDialog
+})
+
+/** Logs a handler that didn't decide, at Effect's level for unhandled failures, unless it was interrupted. */
+const report = (message: string, cause: Cause.Cause<unknown>) =>
+  Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.gen(function*() {
+    const level = yield* References.UnhandledLogLevel
+    if (level !== undefined) yield* Effect.logWithLevel(level)(message, cause)
+  })
+
 /**
  * Subscribes to dialogs and returns the first match, latched. Observing doesn't decide it.
  *
@@ -119,15 +233,18 @@ export interface Filter {
  * @category subscriptions
  * @since 0.1.0
  */
-export declare const next: <PE = never, PR = never>(
+export const next = <PE = never, PR = never>(
   target: Page.ObservedPage,
   filter?: Filter | undefined,
   where?: Subscription.Where<Dialog, PE, PR> | undefined
-) => Effect.Effect<
+): Effect.Effect<
   Deferred.ReadonlyDeferred<Dialog, PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
->
+> =>
+  Effect.suspend(() =>
+    Events.next(kind("Dialog.next"), Handles.page(target).entry.events.dialog, accepts(filter), where)
+  ).pipe(Effect.withSpan("Dialog.next"))
 
 /**
  * Subscribes to dialogs and emits every match from now on. Observing doesn't decide them.
@@ -136,15 +253,18 @@ export declare const next: <PE = never, PR = never>(
  * @category subscriptions
  * @since 0.1.0
  */
-export declare const stream: <PE = never, PR = never>(
+export const stream = <PE = never, PR = never>(
   target: Page.ObservedPage,
   filter?: Filter | undefined,
   where?: Subscription.Where<Dialog, PE, PR> | undefined
-) => Effect.Effect<
+): Effect.Effect<
   Stream.Stream<Dialog, PE | Subscription.EventOverflow | Target.TargetGone>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
->
+> =>
+  Effect.suspend(() =>
+    Events.stream(kind("Dialog.stream"), Handles.page(target).entry.events.dialog, accepts(filter), where)
+  )
 
 /**
  * Reads the dialogs a page's log retained; never waits.
@@ -153,18 +273,28 @@ export declare const stream: <PE = never, PR = never>(
  * @category getters
  * @since 0.1.0
  */
-export declare const history: (
+export const history = (
   target: Page.ObservedPage,
   filter?: Filter | undefined
-) => Effect.Effect<Subscription.History<Dialog>>
+): Effect.Effect<Subscription.History<Dialog>> =>
+  Effect.suspend(() =>
+    Events.history(kind("Dialog.history"), Handles.page(target).entry.events.dialog, accepts(filter))
+  )
 
 /**
  * Registers a handler that decides the page's dialogs while its scope lives.
  *
+ * **Details**
+ *
+ * The page's latest handler decides each dialog, chosen when the dialog opens; removing it, or closing its
+ * scope, leaves the dialogs that open after to the one before. A handler has `Deadline.DefaultBudget`, as it
+ * is when `handle` is called, to decide each dialog. `handled` counts the dialogs it decided.
+ *
  * **Gotchas**
  *
- * A dialog blocks its page, so register the handler before the action that opens one. A handler that fails
- * leaves the dialog to the context's policy.
+ * A dialog blocks its page, so register the handler before the action that opens one. A handler that fails,
+ * is interrupted or runs out of time leaves the dialog to the context's policy, and its failure is logged at
+ * Effect's `References.UnhandledLogLevel`.
  *
  * **Example** (Confirming a deletion)
  *
@@ -186,10 +316,58 @@ export declare const history: (
  * @category handlers
  * @since 0.1.0
  */
-export declare const handle: <E, R>(
+export const handle: <E, R>(
   page: Page.Page,
-  handler: (dialog: Dialog) => Effect.Effect<Decision, E, R>
-) => Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope.Scope | R>
+  handler: (dialog: Pending) => Effect.Effect<Decision, E, R>
+) => Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope.Scope | R> = Effect.fnUntraced(
+  function*<E, R>(page: Page.Page, handler: (dialog: Pending) => Effect.Effect<Decision, E, R>) {
+    const { entry } = Handles.page(page)
+    const context = yield* Effect.context<R>()
+    const budget = yield* Effect.service(Deadline.DefaultBudget)
+    // The handler's fibers end with its scope, which leaves an undecided dialog to the policy
+    const fibers = yield* FiberSet.make<Decision, E>()
+    const handled = yield* SubscriptionRef.make(0)
+    const registration: Model.PromptHandler = {
+      decide: Effect.fnUntraced(function*(prompt) {
+        const fiber = yield* FiberSet.run(fibers, Effect.provideContext(handler(toPending(prompt)), context))
+        const exit = yield* Fiber.await(fiber).pipe(Effect.timeoutOption(budget))
+        const described = `Dialog.handle: the handler of ${entry.id} didn't decide the ${prompt.kind}`
+        if (Option.isNone(exit)) {
+          yield* Fiber.interrupt(fiber)
+          yield* report(`${described} within ${Duration.format(budget)}, so the context's policy decides`, Cause.empty)
+          return Option.none()
+        }
+        if (Exit.isFailure(exit.value)) {
+          yield* report(`${described}: it failed, so the context's policy decides`, exit.value.cause)
+          return Option.none()
+        }
+        const chosen = exit.value.value
+        if (!isDecision(chosen) || !("decision" in chosen)) {
+          return yield* Effect.die(new Error(`${described}: it returned something that isn't a Dialog decision`))
+        }
+        yield* SubscriptionRef.update(handled, (count) => count + 1)
+        return Option.some((chosen as DecisionImpl).decision)
+      })
+    }
+    entry.promptHandlers.push(registration)
+    const remove = Effect.sync(() => {
+      const index = entry.promptHandlers.indexOf(registration)
+      if (index >= 0) entry.promptHandlers.splice(index, 1)
+    })
+    yield* Effect.addFinalizer(() => remove)
+    const registered: Declaration.HandlerRegistration = {
+      remove,
+      handled: Watchable.make({
+        ref: handled,
+        project: Option.some,
+        ended: () => Option.none(),
+        target: { _tag: "Page", id: entry.id },
+        operation: "Dialog.handle.handled.waitFor"
+      })
+    }
+    return registered
+  }
+)
 
 /**
  * A handler that accepts every dialog: accept for `Alert`, `Confirm` and `Prompt` (with its default value),
@@ -199,7 +377,8 @@ export declare const handle: <E, R>(
  * @category handlers
  * @since 0.1.0
  */
-export declare const acceptAll: (dialog: Dialog) => Effect.Effect<Decision>
+export const acceptAll = (dialog: Pending): Effect.Effect<Decision> =>
+  Effect.succeed(dialog._tag === "BeforeUnload" ? dialog.leave : dialog.accept)
 
 /**
  * A handler that declines every dialog: dismiss for `Confirm` and `Prompt`, accept for `Alert` (its only
@@ -209,4 +388,7 @@ export declare const acceptAll: (dialog: Dialog) => Effect.Effect<Decision>
  * @category handlers
  * @since 0.1.0
  */
-export declare const dismissAll: (dialog: Dialog) => Effect.Effect<Decision>
+export const dismissAll = (dialog: Pending): Effect.Effect<Decision> =>
+  Effect.succeed(
+    dialog._tag === "BeforeUnload" ? dialog.stay : dialog._tag === "Alert" ? dialog.accept : dialog.dismiss
+  )

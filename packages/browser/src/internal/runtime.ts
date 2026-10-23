@@ -6,14 +6,21 @@
  * there on first use; when the document changes under a request (a navigation committed, the realm went), the
  * request goes again to the new document, within the operation's deadline. Nothing the engine does dispatches
  * input, so sending a request again is always safe.
+ *
+ * A dialog pauses its page, and on some backends every evaluation with it (review 13, P2). A request waits for
+ * a dialog that a handler or the policy is deciding, within its deadline, and fails at once with
+ * `PromptBlocking` when the page has one nothing will decide.
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Filter from "effect/Filter"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
+import type * as Page from "../Page.ts"
+import * as Reason from "../Reason.ts"
 import * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Engine from "./engine.ts"
@@ -27,12 +34,42 @@ export interface Runtime {
   readonly model: Model.Model
   /** The backend, as errors name it: the browser's product. */
   readonly backend: string
+  /**
+   * The connection's handle for a page, the same each time, made on first use and kept as long as the page's
+   * entry is; `None` for a page outside the contexts the connection created.
+   */
+  readonly page: (entry: Model.PageEntry) => Option.Option<Page.Page>
 }
 
 /** Why a request to the engine didn't get an answer. */
 export type SendFailure =
   | Operation.Failure
+  | { readonly _tag: "Reason"; readonly reason: Reason.PromptBlocking }
   | { readonly _tag: "Deadline" }
+
+/** The reason for an operation on a page whose open dialog nothing will decide. */
+export const promptBlocking = (prompt: Model.UndecidedPrompt, dispatched: boolean): Reason.PromptBlocking =>
+  new Reason.PromptBlocking({
+    kind: prompt.kind,
+    text: prompt.text,
+    hint: `${
+      dispatched ? "The input reached the page and opened it. " : ""
+    }The context's dialogs policy is "leaveOpen" and no handler was registered when it opened; register Dialog.handle before the action that opens it`
+  })
+
+/**
+ * Fails when the page has an open dialog nothing will decide, now or later: raced against an operation, it
+ * ends the operation at once rather than at its deadline.
+ */
+export const promptBlocked = (page: Model.PageEntry, dispatched = false) =>
+  SubscriptionRef.changes(page.state).pipe(
+    Stream.filterMap(Filter.fromPredicateOption((state) => state._tag === "Open" ? state.undecided : Option.none())),
+    Stream.runHead,
+    Effect.flatMap(Option.match({
+      onNone: () => Effect.never,
+      onSome: (prompt) => Effect.fail<SendFailure>({ _tag: "Reason", reason: promptBlocking(prompt, dispatched) })
+    }))
+  )
 
 const gone = (target: Target.Description, reason: Target.CloseReason, id: Diagnostics.OperationId): SendFailure => ({
   _tag: "Gone",
@@ -94,7 +131,16 @@ const engineRealm = Effect.fnUntraced(function*(runtime: Runtime, document: Targ
  * Sends the engine a request in the page's current document and returns its answer, going again to a new
  * document when the one it was sent to ends, until `at`.
  */
-export const send = Effect.fnUntraced(function*(
+export const send = (
+  runtime: Runtime,
+  page: Model.PageEntry,
+  request: Engine.Request,
+  id: Diagnostics.OperationId,
+  at: MonotonicInstant.MonotonicInstant
+): Effect.Effect<Engine.Response, SendFailure> =>
+  Effect.raceFirst(sendTo(runtime, page, request, id, at), promptBlocked(page))
+
+const sendTo = Effect.fnUntraced(function*(
   runtime: Runtime,
   page: Model.PageEntry,
   request: Engine.Request,

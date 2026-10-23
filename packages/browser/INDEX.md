@@ -63,8 +63,8 @@ Obligations decided by a default policy because no handler decided them.
 
 *subscriptions*
 
-- `const next: <PE = never, PR = never>(target: Page.Page | UserContext.UserContext, filter?: Filter | undefined, where?: Subscription.Where<AutoResolution, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyD…`
-- `const stream: <PE = never, PR = never>(target: Page.Page | UserContext.UserContext, filter?: Filter | undefined, where?: Subscription.Where<AutoResolution, PE, PR> | undefined) => Effect.Effect< Stream.Stream<Auto…`
+- `const next: <PE = never, PR = never>(target: Page.Page | UserContext.UserContext, filter?: Filter | undefined, where?: Subscription.Where<AutoResolution, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyDeferred<AutoResolution, PE | Target.TargetGone | Deadline.Timeout>, Subscription.SubscriptionError, Scope.Scope | PR >`
+- `const stream: <PE = never, PR = never>(target: Page.Page | UserContext.UserContext, filter?: Filter | undefined, where?: Subscription.Where<AutoResolution, PE, PR> | undefined) => Effect.Effect< Stream.Stream<AutoResolution, PE | Subscription.EventOverflow | Target.TargetGone>, Subscription.SubscriptionError, Scope.Scope | PR >`
 
 *getters*
 
@@ -408,7 +408,7 @@ The read side of Effect's `Deferred`, as proposed upstream (upstream/effect-read
 
 *getters*
 
-- `const await: <A, E>(self: ReadonlyDeferred<A, E>) => Effect.Effect<A, E>` (experimental)
+- `const await: …` (experimental)
 - `const poll: <A, E>(self: ReadonlyDeferred<A, E>) => Effect.Effect<Option.Option<Effect.Effect<A, E>>>` (experimental)
 - `const isDone: <A, E>(self: ReadonlyDeferred<A, E>) => Effect.Effect<boolean>` (experimental)
 
@@ -458,7 +458,8 @@ Dialogs: `alert`, `confirm`, `prompt` and `beforeunload`.
 - `type PromptId = typeof PromptId.Type`
 - `interface Decision`
   - `readonly [DecisionTypeId]: typeof DecisionTypeId`
-- `type Dialog = | { readonly _tag: "Alert"; readonly message: string; readonly accept: Decision } | { readonly _tag: "Confirm"; readonly message: string; readonly accept: Decision; readonly dismiss: Decision } | { r…`
+- `type Dialog = typeof Dialog.Type`
+- `type Pending = | Extract<Dialog, { readonly _tag: "Alert" }> & { readonly accept: Decision } | Extract<Dialog, { readonly _tag: "Confirm" }> & { readonly accept: Decision; readonly dismiss: Decision } | Extract<Dia…`
 - `type Kind = Dialog["_tag"]`
 - `interface Filter`
   - `readonly kind?: Kind | ReadonlyArray<Kind> | undefined`
@@ -466,11 +467,12 @@ Dialogs: `alert`, `confirm`, `prompt` and `beforeunload`.
 *schemas*
 
 - `const PromptId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Dialog/PromptId"))`
+- `const Dialog = Schema.Union([Schema.TaggedStruct("Alert", { id: PromptId, message: Schema.String }), Schema.TaggedStruct("Confirm", { id: PromptId, message: Schema.String }), Schema.TaggedStruct("Prompt", { id: Pro…`
 
 *subscriptions*
 
-- `const next: <PE = never, PR = never>(target: Page.ObservedPage, filter?: Filter | undefined, where?: Subscription.Where<Dialog, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyDeferred<Dialog, PE | Targe…`
-- `const stream: <PE = never, PR = never>(target: Page.ObservedPage, filter?: Filter | undefined, where?: Subscription.Where<Dialog, PE, PR> | undefined) => Effect.Effect< Stream.Stream<Dialog, PE | Subscription.Even…`
+- `const next: <PE = never, PR = never>(target: Page.ObservedPage, filter?: Filter | undefined, where?: Subscription.Where<Dialog, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyDeferred<Dialog, PE | Target.TargetGone | Deadline.Timeout>, Subscription.SubscriptionError, Scope.Scope | PR >`
+- `const stream: <PE = never, PR = never>(target: Page.ObservedPage, filter?: Filter | undefined, where?: Subscription.Where<Dialog, PE, PR> | undefined) => Effect.Effect< Stream.Stream<Dialog, PE | Subscription.EventOverflow | Target.TargetGone>, Subscription.SubscriptionError, Scope.Scope | PR >`
 
 *getters*
 
@@ -478,9 +480,9 @@ Dialogs: `alert`, `confirm`, `prompt` and `beforeunload`.
 
 *handlers*
 
-- `const handle: <E, R>(page: Page.Page, handler: (dialog: Dialog) => Effect.Effect<Decision, E, R>) => Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope.Scope | R>`
-- `const acceptAll: (dialog: Dialog) => Effect.Effect<Decision>`
-- `const dismissAll: (dialog: Dialog) => Effect.Effect<Decision>`
+- `const handle: <E, R>(page: Page.Page, handler: (dialog: Pending) => Effect.Effect<Decision, E, R>) => Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope.Scope | R>`
+- `const acceptAll: (dialog: Pending) => Effect.Effect<Decision>`
+- `const dismissAll: (dialog: Pending) => Effect.Effect<Decision>`
 
 *guards*
 
@@ -1457,6 +1459,7 @@ Failure reasons that more than one module's error can carry.
 - `class BackendFailure: Schema.Error { kind, method, metadata, hint, cause }`
 - `class EvaluationThrown: Schema.Error { exception, hint }`
 - `class NotSerializable: Schema.Error { path, hint }`
+- `class PromptBlocking: Schema.Error { kind, text, hint }`
 
 ### Route
 
@@ -1586,6 +1589,16 @@ What every event module shares: the three verbs, caller predicates, history and 
 
 - `const History = <S extends Schema.Top>(entry: S) => Schema.Struct({ entries: Schema.Array(entry), dropped: Schema.Int })`
 - `const SubscriptionErrorReason = Schema.Union([Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
+
+*combinators*
+
+- `const withCapacity`
+  - `(capacity: number): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>`
+  - `<A, E, R>(self: Effect.Effect<A, E, R>, capacity: number): Effect.Effect<A, E, R>`
+
+*references*
+
+- `const Capacity: Context.Reference<number>`
 
 *guards*
 

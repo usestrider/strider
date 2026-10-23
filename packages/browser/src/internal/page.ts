@@ -24,6 +24,7 @@ import type * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import type * as Adapter from "./adapter.ts"
+import * as Handles from "./handles.ts"
 import * as LocatorImpl from "./locator.ts"
 import type * as Model from "./model.ts"
 import * as NotBuilt from "./notBuilt.ts"
@@ -392,5 +393,6 @@ export const make = (owner: PageOwner): Page.Page => {
       return { _id: "Page", id: entry.id }
     }
   }
+  Handles.registerPage(page, { runtime, entry })
   return page
 }

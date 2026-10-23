@@ -8,21 +8,28 @@
  * navigations, the realms the engine is installed in, and the responses of navigation requests. Other facts
  * (frames' own documents, other requests, console, downloads) belong to the modules that consume them, which
  * aren't built.
+ *
+ * Events (review 13): the fold publishes popups, dialogs and the policy's automatic decisions to channels on
+ * their pages and contexts (`events.ts`). A dialog is decided by the page's latest `Dialog.handle`, or else by
+ * its context's policy, by a resolver in the model's scope; a popup of an owned page is released with its
+ * opener's scope.
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Dialog from "../Dialog.ts"
+import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import type * as NetworkRequest from "../NetworkRequest.ts"
 import type * as NetworkResponse from "../NetworkResponse.ts"
 import type * as Page from "../Page.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import type * as Target from "../Target.ts"
 import type * as UserContext from "../UserContext.ts"
-import type * as Adapter from "./adapter.ts"
+import * as Adapter from "./adapter.ts"
+import * as Events from "./events.ts"
 
 /** What happens to a dialog no handler claims (UserContext.Options.dialogs; CONCEPTS.md §5). */
 export type DialogPolicy = "dismiss" | "accept" | "leaveOpen"
@@ -35,8 +42,42 @@ export type PageState =
     readonly url: string
     readonly document: Page.DocumentStatus
     readonly prompt: Option.Option<Page.Prompt>
+    /** The open prompt, when nothing will decide it: no handler, and a `"leaveOpen"` policy (review 13). */
+    readonly undecided: Option.Option<UndecidedPrompt>
   }
   | { readonly _tag: "Closed"; readonly reason: Target.CloseReason; readonly url: string }
+
+/** A prompt nothing will decide, as `Reason.PromptBlocking` names it. */
+export interface UndecidedPrompt {
+  readonly kind: PromptEvent["kind"]
+  readonly text: string
+}
+
+/** A popup, as its opener's channel has it; its URL arrives with its first navigation (review 13, candidate 4). */
+export interface PopupEvent {
+  readonly page: PageEntry
+  url: Option.Option<string>
+}
+
+/** A dialog, as the adapter reported it. */
+export type PromptEvent = Extract<Adapter.ObligationSubject, { readonly _tag: "Prompt" }>
+
+/** A decision the context's policy made, because no handler did. */
+export interface AutoResolutionEvent {
+  readonly prompt: PromptEvent
+  readonly decision: "accept" | "dismiss"
+  readonly policy: DialogPolicy
+  readonly at: MonotonicInstant.MonotonicInstant
+}
+
+/** A registered `Dialog.handle`, as the model asks it. */
+export interface PromptHandler {
+  /**
+   * Asks the handler, in its own scope, with its own budget: `None` when it failed, was interrupted or ran
+   * out of time, so the policy decides.
+   */
+  readonly decide: (prompt: PromptEvent) => Effect.Effect<Option.Option<Adapter.Decision>>
+}
 
 export interface PageEntry {
   readonly id: Target.NavigableId
@@ -45,6 +86,18 @@ export interface PageEntry {
   readonly closed: Deferred.Deferred<Target.CloseReason>
   /** Input to one page is serialized (CONCEPTS.md §5). */
   readonly input: Semaphore.Semaphore
+  /**
+   * The scope that releases the page, when the library owns it (CONCEPTS.md §3): its creator's, or for a popup,
+   * its opener's. Set once, when the page is acquired or appears.
+   */
+  owner: Option.Option<Scope.Scope>
+  readonly events: {
+    readonly popup: Events.Channel<PopupEvent>
+    readonly dialog: Events.Channel<PromptEvent>
+    readonly autoResolution: Events.Channel<AutoResolutionEvent>
+  }
+  /** `Dialog.handle` registrations, oldest first: the latest decides. */
+  readonly promptHandlers: Array<PromptHandler>
 }
 
 /** A context's state: its pages, until it ends. */
@@ -60,6 +113,11 @@ export interface ContextEntry {
   readonly closed: Deferred.Deferred<Target.CloseReason>
   /** `None` for a context nobody set a policy for, such as the default context: no automatic decision. */
   policy: Option.Option<DialogPolicy>
+  /** Events retained per kind and target, for `history` (`UserContext.Options.eventLog`). */
+  eventLog: number
+  readonly events: {
+    readonly autoResolution: Events.Channel<AutoResolutionEvent>
+  }
 }
 
 export interface DocumentEntry {
@@ -100,12 +158,24 @@ const maxNavigations = 256
 /** The most navigation responses remembered at once. */
 const maxResponses = 256
 
+/** Events retained per kind and target when a context sets no `eventLog` (UserContext.Options.eventLog). */
+const defaultEventLog = 100
+
+/** How a target's end ends its event streams: normally when it was closed, or with `TargetGone` otherwise. */
+const endOf = (reason: Target.CloseReason): Events.End => ({
+  normal: reason._tag === "PageClosed" || reason._tag === "UserContextRemoved",
+  reason
+})
+
+/** A URL a popup reports before it navigates, which says nothing about where it was opened to (review 13, P1). */
+const placeholder = (url: string) => url === "" || url === "about:blank"
+
 /**
  * A model and its fold. The sink is installed before the adapter connects (`connect`), so the model is made
  * first and given its adapter after.
  */
 export const make = Effect.fnUntraced(function*() {
-  const scope = yield* Effect.scope
+  const modelScope = yield* Effect.scope
   const contexts = new Map<UserContext.Id, ContextEntry>()
   const pages = new Map<Target.NavigableId, PageEntry>()
   const documents = new Map<Target.DocumentId, DocumentEntry>()
@@ -115,6 +185,11 @@ export const make = Effect.fnUntraced(function*() {
   const engineRealms = new Map<Target.DocumentId, Target.RealmId>()
   const realmDocuments = new Map<Target.RealmId, Target.DocumentId>()
   const prompts = new Map<Dialog.PromptId, Target.NavigableId>()
+  // Popups whose URL is still unknown, until their first navigation starts
+  const popupUrls = new Map<
+    Target.NavigableId,
+    { readonly channel: Events.Channel<PopupEvent>; readonly entry: Events.Entry<PopupEvent> }
+  >()
   const lost = yield* Deferred.make<void>()
   let adapter: Adapter.AdapterConnection | undefined
 
@@ -138,6 +213,11 @@ export const make = Effect.fnUntraced(function*() {
 
   const endPage = Effect.fnUntraced(function*(page: PageEntry, reason: Target.CloseReason) {
     pages.delete(page.id)
+    popupUrls.delete(page.id)
+    const how = endOf(reason)
+    Events.end(page.events.popup, how)
+    Events.end(page.events.dialog, how)
+    Events.end(page.events.autoResolution, how)
     yield* SubscriptionRef.update(
       page.state,
       (state): PageState => state._tag === "Closed" ? state : { _tag: "Closed", reason, url: state.url }
@@ -163,7 +243,9 @@ export const make = Effect.fnUntraced(function*() {
       isDefault,
       state: yield* SubscriptionRef.make<ContextState>({ pages: [], closed: Option.none() }),
       closed: yield* Deferred.make<Target.CloseReason>(),
-      policy: Option.none()
+      policy: Option.none(),
+      eventLog: defaultEventLog,
+      events: { autoResolution: Events.make({ _tag: "UserContext" }, () => entry.eventLog) }
     }
     contexts.set(id, entry)
     return entry
@@ -171,6 +253,7 @@ export const make = Effect.fnUntraced(function*() {
 
   const end = Effect.fnUntraced(function*(entry: ContextEntry, reason: Target.CloseReason) {
     contexts.delete(entry.id)
+    Events.end(entry.events.autoResolution, endOf(reason))
     yield* SubscriptionRef.update(entry.state, (state) => ({ ...state, closed: Option.some(reason) }))
     yield* Deferred.succeed(entry.closed, reason)
   })
@@ -178,20 +261,52 @@ export const make = Effect.fnUntraced(function*() {
   const setOpen = (page: PageEntry, change: (open: Extract<PageState, { _tag: "Open" }>) => PageState) =>
     SubscriptionRef.update(page.state, (state) => state._tag === "Open" ? change(state) : state)
 
-  // The automatic decision for a dialog no handler claims, delivered apart from the fold
-  const decide = Effect.fnUntraced(function*(
-    obligation: Adapter.ObligationId,
-    subject: Extract<Adapter.ObligationSubject, { _tag: "Prompt" }>
-  ) {
-    const page = pages.get(subject.page)
-    const policy = page === undefined ? Option.none() : contexts.get(page.context)?.policy ?? Option.none()
-    if (adapter === undefined || Option.isNone(policy) || policy.value === "leaveOpen") return
-    const accept = policy.value === "accept" || subject.kind === "beforeunload"
-    yield* adapter.resolve(
-      obligation,
-      accept ? { _tag: "Accept", promptText: Option.none() } : { _tag: "Dismiss" }
-    ).pipe(Effect.ignore, Effect.forkIn(scope))
+  /**
+   * Decides a dialog (review 13, candidate 6), apart from the fold and from any handler's fiber: the page's
+   * latest handler, chosen now; else, or if it doesn't decide, the context's policy, reported as an
+   * `AutoResolution`; else nothing, and operations on the page fail with `PromptBlocking`.
+   */
+  const decide = Effect.fnUntraced(function*(obligation: Adapter.ObligationId, prompt: PromptEvent) {
+    const page = pages.get(prompt.page)
+    const handler = page?.promptHandlers.at(-1)
+    if (handler !== undefined) {
+      const decision = yield* handler.decide(prompt)
+      if (Option.isSome(decision)) return yield* resolve(obligation, decision.value)
+    }
+    const context = page === undefined ? undefined : contexts.get(page.context)
+    const policy = context?.policy ?? Option.none()
+    if (page === undefined || context === undefined || Option.isNone(policy) || policy.value === "leaveOpen") {
+      if (page !== undefined) {
+        yield* setOpen(page, (open) =>
+          Option.isSome(open.prompt) && open.prompt.value.id === prompt.prompt
+            ? { ...open, undecided: Option.some({ kind: prompt.kind, text: prompt.message }) }
+            : open)
+      }
+      return
+    }
+    // `beforeunload` is accepted under "dismiss", so closing never hangs (CONCEPTS.md §5)
+    const accept = policy.value === "accept" || prompt.kind === "beforeunload"
+    const resolution: AutoResolutionEvent = {
+      prompt,
+      decision: accept ? "accept" : "dismiss",
+      policy: policy.value,
+      at: Adapter.now()
+    }
+    Events.publish(page.events.autoResolution, resolution)
+    Events.publish(context.events.autoResolution, resolution)
+    yield* resolve(obligation, accept ? { _tag: "Accept", promptText: Option.none() } : { _tag: "Dismiss" })
   })
+
+  const resolve = (obligation: Adapter.ObligationId, decision: Adapter.Decision) =>
+    adapter === undefined ? Effect.void : adapter.resolve(obligation, decision).pipe(Effect.ignore)
+
+  /** Closes a popup its opener's scope released, unless it already closed. */
+  const release = (page: Target.NavigableId) =>
+    Effect.suspend(() =>
+      adapter === undefined || !pages.has(page)
+        ? Effect.void
+        : adapter.closePage(page, { runBeforeUnload: false }).pipe(Effect.ignore)
+    )
 
   const fold = (fact: Adapter.Fact): Effect.Effect<void> =>
     Effect.gen(function*() {
@@ -212,20 +327,63 @@ export const make = Effect.fnUntraced(function*() {
         }
         case "PageAdded": {
           if (pages.has(fact.page)) return
-          pages.set(fact.page, {
+          const owner = yield* context(fact.context, false)
+          const target: Target.Description = { _tag: "Page", id: fact.page }
+          const cap = () => owner.eventLog
+          const entry: PageEntry = {
             id: fact.page,
             context: fact.context,
             state: yield* SubscriptionRef.make<PageState>({ _tag: "Opening", url: fact.url }),
             closed: yield* Deferred.make<Target.CloseReason>(),
-            input: yield* Semaphore.make(1)
-          })
-          const owner = yield* context(fact.context, false)
+            input: yield* Semaphore.make(1),
+            owner: Option.none(),
+            events: {
+              popup: Events.make(target, cap),
+              dialog: Events.make(target, cap),
+              autoResolution: Events.make(target, cap)
+            },
+            promptHandlers: []
+          }
+          pages.set(fact.page, entry)
           yield* SubscriptionRef.update(owner.state, (state) => ({ ...state, pages: [...state.pages, fact.page] }))
+          // A popup is reported to its opener, when the backend names one (review 13, candidate 4)
+          const opener = fact.kind === "popup" && fact.origin._tag === "Opened"
+            ? Option.flatMap(fact.origin.opener, (id) => Option.fromNullishOr(pages.get(id)))
+            : Option.none()
+          if (Option.isSome(opener)) {
+            const event: PopupEvent = {
+              page: entry,
+              url: placeholder(fact.url) ? Option.none() : Option.some(fact.url)
+            }
+            const published = Events.publish(opener.value.events.popup, event)
+            if (Option.isNone(event.url)) {
+              popupUrls.set(fact.page, { channel: opener.value.events.popup, entry: published })
+            }
+            // Owned with its opener, released by the scope that acquired it (CONCEPTS.md §3); forked, since a
+            // scope that already closed runs the release at once, and the fold must not wait on the browser
+            if (Option.isSome(opener.value.owner)) {
+              const scope = opener.value.owner.value
+              entry.owner = Option.some(scope)
+              yield* Scope.addFinalizer(scope, release(fact.page)).pipe(Effect.forkIn(modelScope))
+            }
+          }
+          return
+        }
+        case "NavigationStarted": {
+          // A popup's first navigation says where it was opened to
+          const pending = popupUrls.get(fact.navigable)
+          if (pending !== undefined && !placeholder(fact.url)) {
+            popupUrls.delete(fact.navigable)
+            pending.entry.value.url = Option.some(fact.url)
+            Events.revise(pending.channel, pending.entry)
+          }
           return
         }
         case "NavigableRemoved": {
           const page = pages.get(fact.navigable)
-          if (page !== undefined) yield* endPage(page, fact.reason)
+          if (page !== undefined) {
+            yield* endPage(page, fact.reason)
+          }
           return
         }
         case "DocumentCommitted": {
@@ -244,7 +402,8 @@ export const make = Effect.fnUntraced(function*() {
               _tag: "Open",
               url: fact.url,
               document: { id: fact.document, readiness: "loading", lifecycle: "active" },
-              prompt: state._tag === "Open" ? state.prompt : Option.none()
+              prompt: state._tag === "Open" ? state.prompt : Option.none(),
+              undecided: state._tag === "Open" ? state.undecided : Option.none()
             })
           return
         }
@@ -319,15 +478,18 @@ export const make = Effect.fnUntraced(function*() {
               ...open,
               prompt: Option.some({ id: subject.prompt, kind: subject.kind, blocking: "confirmed" })
             }))
+            Events.publish(page.events.dialog, subject)
           }
-          yield* decide(fact.obligation, subject)
+          yield* decide(fact.obligation, subject).pipe(Effect.forkIn(modelScope))
           return
         }
         case "PromptClosed": {
           const id = prompts.get(fact.prompt)
           prompts.delete(fact.prompt)
           const page = id === undefined ? undefined : pages.get(id)
-          if (page !== undefined) yield* setOpen(page, (open) => ({ ...open, prompt: Option.none() }))
+          if (page !== undefined) {
+            yield* setOpen(page, (open) => ({ ...open, prompt: Option.none(), undecided: Option.none() }))
+          }
           return
         }
         default:

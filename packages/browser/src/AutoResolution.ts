@@ -8,12 +8,15 @@
  * @stability unstable
  * @since 0.1.0
  */
-import type * as Effect from "effect/Effect"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
 import type * as Deferred from "./Deferred.ts"
+import * as Events from "./internal/events.ts"
+import * as Handles from "./internal/handles.ts"
+import type * as Model from "./internal/model.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import * as NetworkRequest from "./NetworkRequest.ts"
 import type * as Page from "./Page.ts"
@@ -81,6 +84,37 @@ export interface Filter {
   readonly subject?: Subject["_tag"] | ReadonlyArray<Subject["_tag"]> | undefined
 }
 
+// ── Implementation ──
+
+const kinds = { alert: "Alert", confirm: "Confirm", prompt: "Prompt", beforeunload: "BeforeUnload" } as const
+
+// Only dialogs are decided by a policy so far; file choosers and paused requests come with their modules
+const deliver = (event: Model.AutoResolutionEvent): AutoResolution =>
+  new AutoResolution({
+    subject: { _tag: "Dialog", kind: kinds[event.prompt.kind], message: event.prompt.message },
+    decision: event.decision,
+    policy: `dialogs: "${event.policy}"`,
+    at: event.at
+  })
+
+const kind = (operation: string): Events.Kind<Model.AutoResolutionEvent, AutoResolution> => ({
+  operation,
+  noun: "an automatic decision",
+  deliver
+})
+
+const channel = (target: Page.Page | UserContext.UserContext) => {
+  const found = Handles.target(target)
+  return found.behind.entry.events.autoResolution
+}
+
+const accepts = (filter: Filter | undefined) => {
+  const wanted = filter?.subject === undefined ? undefined : new Set<Subject["_tag"]>(
+    typeof filter.subject === "string" ? [filter.subject] : filter.subject
+  )
+  return (_entry: Events.Entry<Model.AutoResolutionEvent>) => wanted === undefined || wanted.has("Dialog")
+}
+
 /**
  * Subscribes to automatic decisions and returns the first match, latched.
  *
@@ -88,15 +122,18 @@ export interface Filter {
  * @category subscriptions
  * @since 0.1.0
  */
-export declare const next: <PE = never, PR = never>(
+export const next = <PE = never, PR = never>(
   target: Page.Page | UserContext.UserContext,
   filter?: Filter | undefined,
   where?: Subscription.Where<AutoResolution, PE, PR> | undefined
-) => Effect.Effect<
+): Effect.Effect<
   Deferred.ReadonlyDeferred<AutoResolution, PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
->
+> =>
+  Effect.suspend(() => Events.next(kind("AutoResolution.next"), channel(target), accepts(filter), where)).pipe(
+    Effect.withSpan("AutoResolution.next")
+  )
 
 /**
  * Subscribes to automatic decisions and emits every match from now on.
@@ -105,15 +142,15 @@ export declare const next: <PE = never, PR = never>(
  * @category subscriptions
  * @since 0.1.0
  */
-export declare const stream: <PE = never, PR = never>(
+export const stream = <PE = never, PR = never>(
   target: Page.Page | UserContext.UserContext,
   filter?: Filter | undefined,
   where?: Subscription.Where<AutoResolution, PE, PR> | undefined
-) => Effect.Effect<
+): Effect.Effect<
   Stream.Stream<AutoResolution, PE | Subscription.EventOverflow | Target.TargetGone>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
->
+> => Effect.suspend(() => Events.stream(kind("AutoResolution.stream"), channel(target), accepts(filter), where))
 
 /**
  * Reads the automatic decisions a log retained; never waits.
@@ -122,7 +159,8 @@ export declare const stream: <PE = never, PR = never>(
  * @category getters
  * @since 0.1.0
  */
-export declare const history: (
+export const history = (
   target: Page.Page | UserContext.UserContext,
   filter?: Filter | undefined
-) => Effect.Effect<Subscription.History<AutoResolution>>
+): Effect.Effect<Subscription.History<AutoResolution>> =>
+  Effect.suspend(() => Events.history(kind("AutoResolution.history"), channel(target), accepts(filter)))

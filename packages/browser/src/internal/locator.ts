@@ -53,7 +53,7 @@ const explain = (reason: Engine.NotReady, frames: number): string => {
     case "NotStable":
       return `The element kept moving: its box changed within ${frames} frames`
     case "NoRenderingOpportunity":
-      return "The page rendered no frame; a page in the background doesn't render"
+      return "The page rendered no frame: a page in the background, such as the opener of a popup, may render none; page.activate brings it to the front"
     case "Covered":
       return `Another element covers the element's action point: ${reason.by}`
   }
@@ -323,7 +323,22 @@ export class LocatorImpl implements Locator.Locator {
                 : this.sendFailure(operation, failure, id, budget, "waitingForCondition")
             )
           )
+      // Set once input may have reached the page: a timeout after it can't say the click didn't happen
+      let sent = false
       const timedOut = () => {
+        if (sent) {
+          return Operation.timeout({
+            operation,
+            id,
+            phase: "dispatchedUnconfirmed",
+            budget: budget.budget,
+            history,
+            hint: Option.some(
+              "The input was sent and the browser hadn't confirmed it by the deadline; a dialog it opened may still be deciding"
+            ),
+            dispatch: { _tag: "MayHaveBeenSent" }
+          })
+        }
         const reasons = history.map((each) => each.value as Engine.NotReady)
         const last = reasons.at(-1)
         return Operation.timeout({
@@ -370,17 +385,25 @@ export class LocatorImpl implements Locator.Locator {
           if (options?.trial === true) return true
           const { x, y } = again.value.point
           const none = { alt: false, control: false, meta: false, shift: false }
+          sent = true
+          // A click that opens a dialog returns once the dialog is decided (review 13, P3), so the dispatch races
+          // a dialog nothing will decide
           yield* owner.runtime.model.adapter.dispatchInput(owner.page.id, [
             { _tag: "Mouse", type: "move", x, y, button: "none", clickCount: 0, modifiers: none },
             { _tag: "Mouse", type: "down", x, y, button, clickCount: 1, modifiers: none },
             { _tag: "Mouse", type: "up", x, y, button, clickCount: 1, modifiers: none }
-          ]).pipe(Effect.mapError((error) => {
-            // The input may have reached the page: the error says so, and nothing is sent again
-            const failure = Operation.fromAdapter(error, id, owner.runtime.backend)
-            return failure._tag === "Gone"
-              ? failure.error
-              : this.error(operation, failure.reason, id, { _tag: "MayHaveBeenSent" })
-          }))
+          ]).pipe(
+            Effect.mapError((error): Runtime.SendFailure => Operation.fromAdapter(error, id, owner.runtime.backend)),
+            Effect.raceFirst(Runtime.promptBlocked(owner.page, true)),
+            Effect.mapError((failure) =>
+              // The input may have reached the page: the error says so, and nothing is sent again
+              failure._tag === "Gone"
+                ? failure.error
+                : failure._tag === "Reason"
+                ? this.error(operation, failure.reason, id, { _tag: "MayHaveBeenSent" })
+                : timedOut()
+            )
+          )
           return true
         })).pipe(
           Effect.timeoutOption(Operation.millisLeft(budget.at)),

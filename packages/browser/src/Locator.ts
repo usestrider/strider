@@ -729,7 +729,8 @@ export const LocatorErrorReason = Schema.Union([
   Reason.NotSerializable,
   Reason.NotPermitted,
   Reason.Unsupported,
-  Reason.BackendFailure
+  Reason.BackendFailure,
+  Reason.PromptBlocking
 ])
 
 /**

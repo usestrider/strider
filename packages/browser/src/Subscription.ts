@@ -6,8 +6,9 @@
  *
  * - `next(target, filter?, where?)` subscribes by the time its effect returns and hands back the first match
  *   as a `ReadonlyDeferred`. Code order is subscription order, so call it before the action that causes the
- *   event.
- * - `stream(target, filter?, where?)` subscribes the same way and emits every match from then on.
+ *   event. It keeps what arrives until its first match or its deadline.
+ * - `stream(target, filter?, where?)` subscribes the same way and emits every match from then on, buffering
+ *   at most `Capacity` events for a consumer that falls behind.
  * - `history(target, filter?)` reads what already happened from a bounded log and never waits.
  *
  * Events report; handlers decide (`Dialog.handle`, `FileChooser.handle`, `route`). Seeing an event acquires
@@ -16,7 +17,9 @@
  * @stability unstable
  * @since 0.1.0
  */
-import type * as Effect from "effect/Effect"
+import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
+import { dual } from "effect/Function"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Diagnostics from "./Diagnostics.ts"
@@ -48,8 +51,9 @@ export type Where<A, PE, PR> = (event: A) => Effect.Effect<boolean, PE, PR>
  *
  * **Details**
  *
- * `dropped` counts the matches the cap discarded, so a truncated log doesn't look complete. The cap is
- * `UserContext.Options.eventLog`.
+ * `dropped` counts every event of the kind the log discarded for its target, so a truncated log doesn't look
+ * complete. Which of them a filter would have matched can't be known once they're gone, so it is an upper
+ * bound on the matches lost, and `0` proves the entries are complete. The cap is `UserContext.Options.eventLog`.
  *
  * @stability unstable
  * @category models
@@ -151,6 +155,42 @@ export class SubscriptionError extends Schema.TaggedError<SubscriptionError>(Sub
  */
 export const isSubscriptionError = (u: unknown): u is SubscriptionError =>
   Predicate.hasProperty(u, SubscriptionErrorTypeId)
+
+/**
+ * Reference to how many events a `stream` buffers for a consumer that falls behind; 1,000 unless set.
+ *
+ * **Details**
+ *
+ * It is read when a stream subscribes. A consumer that falls further behind fails with `EventOverflow` rather
+ * than losing events silently. `next` keeps what arrives until its first match or its deadline, so it needs
+ * no bound.
+ *
+ * @stability unstable
+ * @category references
+ * @since 0.1.0
+ */
+export const Capacity: Context.Reference<number> = Context.Reference<number>(
+  "@usestrider/browser/Subscription/Capacity",
+  { defaultValue: () => 1000 }
+)
+
+/**
+ * Sets how many events every stream subscribed inside an effect buffers.
+ *
+ * @see {@link Capacity} for the reference it sets
+ *
+ * @stability unstable
+ * @category combinators
+ * @since 0.1.0
+ */
+export const withCapacity: {
+  (capacity: number): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
+  <A, E, R>(self: Effect.Effect<A, E, R>, capacity: number): Effect.Effect<A, E, R>
+} = dual(
+  2,
+  <A, E, R>(self: Effect.Effect<A, E, R>, capacity: number): Effect.Effect<A, E, R> =>
+    Effect.provideService(self, Capacity, capacity)
+)
 
 const EventOverflowTypeId = "~@usestrider/browser/Subscription/EventOverflow"
 

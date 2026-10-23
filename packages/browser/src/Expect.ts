@@ -330,7 +330,8 @@ export const isExpectationFailed = (u: unknown): u is ExpectationFailed =>
 /** What one check of a locator's visibility saw. */
 type Seen =
   | { readonly matches: number; readonly visible: number }
-  | { readonly error: string }
+  /** `final`: it can't change while the expectation waits, so it fails at once. */
+  | { readonly error: string; readonly final?: true }
 
 const visibility = (subject: Locator.ReadonlyLocator, expected: "visible" | "hidden") =>
   Effect.gen(function*() {
@@ -370,6 +371,9 @@ const visibility = (subject: Locator.ReadonlyLocator, expected: "visible" | "hid
             ? Effect.fail(failure.error)
             : failure._tag === "Deadline"
             ? Effect.succeed(null)
+            // A dialog nothing will decide holds the page until someone else decides it
+            : failure.reason._tag === "PromptBlocking"
+            ? Effect.succeed({ error: failure.reason.message, final: true as const })
             : Effect.succeed({ error: failure.reason.message })
         )
       )
@@ -380,12 +384,15 @@ const visibility = (subject: Locator.ReadonlyLocator, expected: "visible" | "hid
           : response._tag === "Strict"
           ? { matches: response.count, visible: response.candidates.filter((each) => each.visible).length }
           : response._tag === "InvalidSelector"
-          ? { error: `invalid selector ${JSON.stringify(response.selector)}: ${response.message}` }
+          ? {
+            error: `invalid selector ${JSON.stringify(response.selector)}: ${response.message}`,
+            final: true as const
+          }
           : { error: `unexpected answer ${response._tag}` }
         : response
       Operation.appendObservation(history, seen)
       // A selector that doesn't parse never will
-      if ("error" in seen && seen.error.startsWith("invalid selector")) return yield* Effect.fail(failed())
+      if ("error" in seen && seen.final === true) return yield* Effect.fail(failed())
       if ("matches" in seen) {
         if (expected === "visible" && seen.matches === 1 && seen.visible === 1) return
         if (expected === "hidden" && seen.visible === 0) return

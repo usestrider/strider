@@ -15,14 +15,13 @@
  * @stability experimental
  * @since 0.1.0
  */
+import * as EffectDeferred from "effect/Deferred"
 import type * as Effect from "effect/Effect"
 import type * as Option from "effect/Option"
 import type * as Pipeable from "effect/Pipeable"
 import * as Predicate from "effect/Predicate"
 import type * as Types from "effect/Types"
-import * as NotBuilt from "./internal/notBuilt.ts"
-
-const TypeId = "~@usestrider/browser/Deferred/ReadonlyDeferred"
+import { TypeId } from "./internal/readonlyDeferred.ts"
 
 /**
  * A result that someone else completes, and that you can only read.
@@ -43,8 +42,11 @@ export interface ReadonlyDeferred<out A, out E = never> extends Pipeable.Pipeabl
   }
 }
 
-// Renamed on export, so it needs a binding at run time; not built yet (PROTOCOL.md)
-const _await: <A, E>(self: ReadonlyDeferred<A, E>) => Effect.Effect<A, E> = NotBuilt.fn("Deferred.await")
+// Every `ReadonlyDeferred` the library hands out is Effect's `Deferred` underneath (internal/readonlyDeferred.ts)
+const underlying = <A, E>(self: ReadonlyDeferred<A, E>): EffectDeferred.Deferred<A, E> =>
+  self as unknown as EffectDeferred.Deferred<A, E>
+
+const _await = <A, E>(self: ReadonlyDeferred<A, E>): Effect.Effect<A, E> => EffectDeferred.await(underlying(self))
 
 export {
   /**
@@ -69,7 +71,8 @@ export {
  * @category getters
  * @since 0.1.0
  */
-export declare const poll: <A, E>(self: ReadonlyDeferred<A, E>) => Effect.Effect<Option.Option<Effect.Effect<A, E>>>
+export const poll = <A, E>(self: ReadonlyDeferred<A, E>): Effect.Effect<Option.Option<Effect.Effect<A, E>>> =>
+  EffectDeferred.poll(underlying(self))
 
 /**
  * Checks whether the result is completed, without waiting.
@@ -78,7 +81,8 @@ export declare const poll: <A, E>(self: ReadonlyDeferred<A, E>) => Effect.Effect
  * @category getters
  * @since 0.1.0
  */
-export declare const isDone: <A, E>(self: ReadonlyDeferred<A, E>) => Effect.Effect<boolean>
+export const isDone = <A, E>(self: ReadonlyDeferred<A, E>): Effect.Effect<boolean> =>
+  EffectDeferred.isDone(underlying(self))
 
 /**
  * Checks whether a value is a `ReadonlyDeferred`.

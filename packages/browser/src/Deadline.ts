@@ -150,6 +150,7 @@ const TimeoutTypeId = "~@usestrider/browser/Deadline/Timeout"
  * - `"waitingForCondition"`: found, but a check such as `visible` never passed.
  * - `"dispatchedUnconfirmed"`: the input was sent and its effect wasn't confirmed, so it may have happened.
  * - `"postcondition"`: the operation happened, and what it waits for afterwards didn't.
+ * - `"waitingForEvent"`: an event wait (`next`) saw no matching event.
  *
  * `last` and `history` are the de-duplicated observations, and `hint` explains common causes, such as a
  * download that started before `Download.next` subscribed.
@@ -175,7 +176,13 @@ const TimeoutTypeId = "~@usestrider/browser/Deadline/Timeout"
  */
 export class Timeout extends Schema.TaggedError<Timeout>(TimeoutTypeId)("Timeout", {
   operation: Schema.String,
-  phase: Schema.Literals(["resolving", "waitingForCondition", "dispatchedUnconfirmed", "postcondition"]),
+  phase: Schema.Literals([
+    "resolving",
+    "waitingForCondition",
+    "dispatchedUnconfirmed",
+    "postcondition",
+    "waitingForEvent"
+  ]),
   budget: Schema.Duration,
   last: Schema.Option(Diagnostics.ObservedValue),
   history: Schema.Array(Diagnostics.ObservedValue),

@@ -1,8 +1,8 @@
 # Strider
 
 This repository is Strider (`@usestrider/browser` on npm): Effect-native browser automation that speaks CDP, WebDriver
-BiDi and the WebKit inspector protocol directly. It is at the design stage. L0, the protocol layer, is built, and the
-first slice runs through L1 and L2 on every backend (review 12); the rest of the package's modules are declarations,
+BiDi and the WebKit inspector protocol directly. It is at the design stage. L0, the protocol layer, is built, and two
+slices run through L1 and L2 on every backend (reviews 12 and 13: actions, and events); the rest of the package's modules are declarations,
 type-checked and documented, which the implementation replaces module by module. A member of an object that isn't
 built yet fails as the defect `NotBuilt`, naming itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm`
 from the repository root.
@@ -17,7 +17,8 @@ from the repository root.
 - `packages/browser` is the published package:
   - `src/`: one module per file, exported as namespaces. `src/index.ts` and each subpath's `index.ts` are generated.
     `src/internal/` is implementation that no subpath exports, such as the protocol client, each backend's wire,
-    launcher and adapter, L1's model (`model.ts`), and the query engine that runs in the page (`engine.ts`).
+    launcher and adapter, L1's model (`model.ts`), the query engine that runs in the page (`engine.ts`), and the
+    event mechanism every event module shares (`events.ts`).
   - `scenarios/`: the acceptance scenarios from API.md, type-checked as ordinary code.
   - `typetest/`: Tstyche tests of access rules, requirement channels and what crosses by value.
   - `test/`: runtime tests with `@effect/vitest`, which run anywhere (`pnpm test --run`), except

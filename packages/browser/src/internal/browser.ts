@@ -3,8 +3,11 @@
  * layer every backend builds: launch, connect the adapter, fold its facts into the model, provide `Browser`.
  *
  * Built: `info`, `capabilities`, `newContext`, `newPage`, and a context's `newPage`, `pages`, `closed` and
- * `control`. What a context or page owns is released when the scope that acquired it closes. The other
- * members fail as `NotBuilt`.
+ * `control`. What a context or page owns is released when the scope that acquired it closes, and a page's
+ * popups with it (review 13). The other members fail as `NotBuilt`.
+ *
+ * Each page has one handle per connection, made on first use from its model entry (`Runtime.page`), so
+ * `newPage`, a context's `pages` and `Popup` hand out the same `Page`.
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -18,9 +21,9 @@ import type * as Scope from "effect/Scope"
 import * as Browser from "../Browser.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import * as Page from "../Page.ts"
-import type * as Target from "../Target.ts"
 import * as UserContext from "../UserContext.ts"
 import type * as Adapter from "./adapter.ts"
+import * as Handles from "./handles.ts"
 import * as Model from "./model.ts"
 import * as NotBuilt from "./notBuilt.ts"
 import * as Operation from "./operation.ts"
@@ -30,9 +33,6 @@ import * as Watchable from "./watchable.ts"
 
 const BrowserTypeId = "~@usestrider/browser/Browser"
 const UserContextTypeId = "~@usestrider/browser/UserContext"
-
-/** The pages this connection handed out, by id: what a context's `pages` shows. */
-type Pages = Map<Target.NavigableId, Page.Page>
 
 const contextError = (operation: string, reason: UserContext.UserContextErrorReason, id: Diagnostics.OperationId) =>
   new UserContext.UserContextError({ operation, reason, diagnostics: Operation.diagnostics(id) })
@@ -63,14 +63,19 @@ const objectMembers = (name: string, id: string) => ({
 })
 
 /** A context the caller owns. */
-const makeContext = (runtime: Runtime.Runtime, entry: Model.ContextEntry, pages: Pages): UserContext.UserContext => {
+const makeContext = (runtime: Runtime.Runtime, entry: Model.ContextEntry): UserContext.UserContext => {
   const adapter = runtime.model.adapter
   const context: UserContext.UserContext = {
     [UserContextTypeId]: UserContextTypeId,
     id: entry.id,
     pages: Watchable.make({
       ref: entry.state,
-      project: (state) => Option.some(state.pages.flatMap((id) => Option.toArray(Option.fromNullishOr(pages.get(id))))),
+      project: (state) =>
+        Option.some(
+          state.pages.flatMap((id) =>
+            Option.toArray(Option.flatMap(Option.fromNullishOr(runtime.model.pages.get(id)), runtime.page))
+          )
+        ),
       ended: (state) => state.closed,
       target: { _tag: "UserContext" },
       operation: "UserContext.pages.waitFor"
@@ -80,6 +85,7 @@ const makeContext = (runtime: Runtime.Runtime, entry: Model.ContextEntry, pages:
     control: Effect.sync(() => context),
     newPage: Effect.gen(function*() {
       const id = Operation.operationId()
+      const scope = yield* Effect.scope
       const created = yield* Effect.acquireRelease(
         adapter.createPage(entry.id).pipe(Effect.mapError((error) => {
           const mapped = Operation.fromAdapter(error, id, runtime.backend)
@@ -96,17 +102,13 @@ const makeContext = (runtime: Runtime.Runtime, entry: Model.ContextEntry, pages:
             })
         })),
         // Owned teardown: no beforeunload; a page that already closed needs nothing
-        (page) =>
-          Effect.gen(function*() {
-            pages.delete(page)
-            yield* adapter.closePage(page, { runBeforeUnload: false }).pipe(Effect.ignore)
-          })
+        (page) => adapter.closePage(page, { runBeforeUnload: false }).pipe(Effect.ignore)
       )
       const pageEntry = runtime.model.pages.get(created)
       if (pageEntry === undefined) return yield* Effect.die(new Error(`${created} was created but never added`))
-      const page = PageImpl.make({ runtime, entry: pageEntry, context })
-      pages.set(created, page)
-      return page
+      // Owned by the caller's scope, which releases its popups too (CONCEPTS.md §3)
+      pageEntry.owner = Option.some(scope)
+      return Option.getOrThrow(runtime.page(pageEntry))
     }).pipe(Effect.withSpan("UserContext.newPage", { attributes: { "browser.context.id": entry.id } })),
     cookies: {
       list: NotBuilt.effect("UserContext.cookies"),
@@ -134,6 +136,7 @@ const makeContext = (runtime: Runtime.Runtime, entry: Model.ContextEntry, pages:
     },
     ...objectMembers("UserContext", entry.id)
   }
+  Handles.registerContext(context, { runtime, entry })
   return context
 }
 
@@ -157,8 +160,22 @@ const makeDefaultContext = (entry: Model.ContextEntry): UserContext.ObservedUser
 /** The `Browser` service over a model. */
 export const make = Effect.fnUntraced(function*(model: Model.Model) {
   const adapter = model.adapter
-  const runtime: Runtime.Runtime = { model, backend: adapter.info.product }
-  const pages: Pages = new Map()
+  // The contexts this connection created, whose pages get handles
+  const contexts = new Map<UserContext.Id, UserContext.UserContext>()
+  const handles = new WeakMap<Model.PageEntry, Page.Page>()
+  const runtime: Runtime.Runtime = {
+    model,
+    backend: adapter.info.product,
+    page: (entry) => {
+      const known = handles.get(entry)
+      if (known !== undefined) return Option.some(known)
+      const context = contexts.get(entry.context)
+      if (context === undefined) return Option.none()
+      const page = PageImpl.make({ runtime, entry, context })
+      handles.set(entry, page)
+      return Option.some(page)
+    }
+  }
 
   const newContext = (
     options?: UserContext.Options
@@ -177,12 +194,19 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
               : Effect.fail(contextError("Browser.newContext", mapped.reason, id))
           })
         ),
-        (context) => adapter.removeUserContext(context).pipe(Effect.ignore)
+        (context) =>
+          adapter.removeUserContext(context).pipe(
+            Effect.ignore,
+            Effect.ensuring(Effect.sync(() => contexts.delete(context)))
+          )
       )
       const entry = yield* model.context(created)
       // Owned contexts decide dialogs no handler claims at once (CONCEPTS.md §5)
       entry.policy = Option.some(options?.dialogs ?? "dismiss")
-      return makeContext(runtime, entry, pages)
+      entry.eventLog = options?.eventLog ?? entry.eventLog
+      const context = makeContext(runtime, entry)
+      contexts.set(created, context)
+      return context
     }).pipe(Effect.withSpan("Browser.newContext"))
 
   const defaultEntry = yield* model.context(adapter.defaultContext)
