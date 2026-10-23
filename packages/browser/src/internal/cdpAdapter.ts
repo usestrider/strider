@@ -107,6 +107,11 @@ interface FrameEntry {
   /** Navigations started by a command that the browser hasn't announced yet, oldest first. */
   readonly expected: Array<{ readonly id: PageNavigation.Id; readonly url: string }>
   readonly navigations: Map<string, NavigationEntry>
+  /**
+   * Navigations that failed, by loader id, until the frame's next commit: Chromium commits a failed
+   * navigation's error page under its loader id after the failure is reported, with no new navigation.
+   */
+  readonly failed: Map<string, NavigationEntry>
   /** Main-world realms created during a traversal, for the document it restores. */
   readonly pendingRealms: Array<RealmEntry>
   removed: boolean
@@ -771,6 +776,7 @@ export const connect: (
         document: undefined,
         expected: [],
         navigations: new Map(),
+        failed: new Map(),
         pendingRealms: [],
         removed: false
       }
@@ -847,6 +853,7 @@ export const connect: (
             document: undefined,
             expected: [],
             navigations: new Map(),
+            failed: new Map(),
             pendingRealms: [],
             removed: false
           }
@@ -1082,12 +1089,26 @@ export const connect: (
           if (parent === undefined) return
           frame = addFrame(f.id, parent, target)
         }
+        const errorPage = f.url.startsWith("chrome-error://")
+        // The error page of a navigation that already failed: its document, not a navigation of its own, which
+        // would replace one started since
+        const failed = errorPage ? frame.failed.get(f.loaderId) : undefined
+        frame.failed.clear()
+        if (failed !== undefined) {
+          commit(
+            frame,
+            { loaderId: f.loaderId, url: f.url, origin: f.securityOrigin },
+            () => ({ _tag: "ErrorPage", navigation: failed.id }),
+            failed,
+            "cdp:Page.frameNavigated"
+          )
+          return
+        }
         const restored = params.type === "BackForwardCacheRestore"
         // A restore commits under the restored document's loader id, not the traversal's
         const navigation = navigations.get(f.loaderId) ??
           (restored ? [...frame.navigations.values()].find((pending) => pending.traversal) : undefined) ??
           startNavigation(frame, f.loaderId, f.url, "crossDocument", false)
-        const errorPage = f.url.startsWith("chrome-error://")
         const previous = documentsByLoader.get(f.loaderId)
         const document = commit(
           frame,
@@ -1447,6 +1468,7 @@ export const connect: (
           endNavigation(navigation, { _tag: "NoContent", status: navigation.status }, "cdp:Network.loadingFailed")
         } else if (params.errorText !== "net::ERR_ABORTED") {
           // An error page may still commit under this loader; it is reported as the document it created
+          navigation.frame.failed.set(navigation.loaderId, navigation)
           endNavigation(
             navigation,
             { _tag: "Failed", error: params.errorText, errorDocument: Option.none() },

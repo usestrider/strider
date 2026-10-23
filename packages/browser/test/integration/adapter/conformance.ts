@@ -171,6 +171,29 @@ export const conformance = (backend: Backend) =>
             assert.strictEqual(refused.outcome._tag, "Failed")
           }), timeout)
 
+        it.effect("navigates again at once after a failure: the error page doesn't replace the next navigation", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            const refused = yield* goto(world, page, "http://127.0.0.1:9/refused")
+            assert.strictEqual(refused.outcome._tag, "Failed")
+            const next = yield* goto(world, page, `${world.site.origin}/hello`)
+            const navigations = world.facts.facts.filter((fact) =>
+              fact._tag === "NavigationStarted" || fact._tag === "NavigationEnded" || fact._tag === "DocumentCommitted"
+            )
+            assert.strictEqual(next.outcome._tag, "Committed", JSON.stringify(navigations, null, 1))
+            // An error page is the failed navigation's document, never a navigation of its own
+            const started = world.facts.all("NavigationStarted").filter((fact) =>
+              fact.navigable === page
+            )
+            assert.deepStrictEqual(started.map((fact) => fact.navigation), [refused.navigation, next.navigation])
+            for (const committed of world.facts.all("DocumentCommitted")) {
+              if (committed.createdBy._tag === "ErrorPage") {
+                assert.strictEqual(committed.createdBy.navigation, refused.navigation)
+              }
+            }
+          }), timeout)
+
         it.effect("reloads, and moves through history: back, forward, and nowhere past the end", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
@@ -182,14 +205,17 @@ export const conformance = (backend: Backend) =>
               const started = yield* world.facts.when("NavigationStarted", (fact) =>
                 fact.navigation === navigation)
               assert.strictEqual(started.initiatedAs, initiatedAs)
-              return yield* world.facts.when("NavigationEnded", (fact) => fact.navigation === navigation)
+              return yield* world.facts.when("NavigationEnded", (fact) =>
+                fact.navigation === navigation)
             })
             const urlOf = (outcome: Adapter.NavigationOutcome) => {
               assert(
                 outcome._tag === "Committed" || outcome._tag === "Restored",
                 `a history navigation commits or restores, not ${outcome._tag}`
               )
-              return world.facts.all("DocumentCommitted").find((fact) => fact.document === outcome.document)?.url
+              return world.facts.all("DocumentCommitted").find((fact) =>
+                fact.document === outcome.document
+              )?.url
             }
             const back = yield* world.adapter.traverse(page, -1)
             assert(Option.isSome(back), "there is an entry before")
@@ -223,8 +249,7 @@ export const conformance = (backend: Backend) =>
             yield* goto(world, page, `${world.site.origin}/cache?again`)
             const cached = yield* world.facts.when(
               "ResponseReceived",
-              (fact) =>
-                fact.response.url === script && fact.response.hop !== fresh.response.hop
+              (fact) => fact.response.url === script && fact.response.hop !== fresh.response.hop
             )
             assert.strictEqual(cached.response.servedBy, precise ? "cache" : "cacheOrServiceWorker")
             // A route first, on a page no worker controls: WebKit's intercepts don't see a controlled page's requests
