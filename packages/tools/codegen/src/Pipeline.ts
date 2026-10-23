@@ -35,6 +35,8 @@ const readJson = Effect.fnUntraced(function*<S extends Schema.Top>(path: string,
 const readDirectory = Effect.fnUntraced(function*<S extends Schema.Top>(directory: string, schema: S) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
+  // Git keeps no empty directory, so a backend without corrections has no `patches` in a fresh checkout
+  if (!(yield* fs.exists(directory))) return []
   const names = (yield* fs.readDirectory(directory)).filter((name) => name.endsWith(".json")).sort()
   return yield* Effect.forEach(
     names,
