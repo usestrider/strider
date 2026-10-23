@@ -8,7 +8,7 @@
     "strider-docs": "./src/bin.mjs"
   },
   "dependencies": {
-    "effect": "^4.0.5",
+    "effect": "^4.0.6",
     "glob": "^13.0.6",
     "typedoc": "0.28.20",
     "typescript": "~6.0.3"

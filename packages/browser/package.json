@@ -93,8 +93,8 @@
     "check": "tsc -b tsconfig.json"
   },
   "peerDependencies": {
-    "@effect/platform-node": "^4.0.5",
-    "effect": "^4.0.5"
+    "@effect/platform-node": "^4.0.6",
+    "effect": "^4.0.6"
   },
   "peerDependenciesMeta": {
     "@effect/platform-node": {
@@ -102,8 +102,8 @@
     }
   },
   "devDependencies": {
-    "@effect/platform-node": "^4.0.5",
+    "@effect/platform-node": "^4.0.6",
     "@usestrider/utils": "workspace:^",
-    "effect": "^4.0.5"
+    "effect": "^4.0.6"
   }
 }

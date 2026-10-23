@@ -182,8 +182,8 @@ importers:
         specifier: ^0.54.0
         version: 0.54.0
       '@effect/vitest':
-        specifier: ^4.0.5
-        version: 4.0.5(effect@4.0.5)(vitest@5.0.5(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(yaml@2.9.1)))
+        specifier: ^4.0.6
+        version: 4.0.6(effect@4.0.6)(vitest@5.0.5(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(yaml@2.9.1)))
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -200,8 +200,8 @@ importers:
         specifier: ^0.64.0
         version: 0.64.0
       effect:
-        specifier: ^4.0.5
-        version: 4.0.5
+        specifier: ^4.0.6
+        version: 4.0.6
       oxlint:
         specifier: ^1.89.0
         version: 1.89.0
@@ -218,29 +218,29 @@ importers:
   packages/browser:
     devDependencies:
       '@effect/platform-node':
-        specifier: ^4.0.5
-        version: 4.0.5(effect@4.0.5)(redis@6.3.0)
+        specifier: ^4.0.6
+        version: 4.0.6(effect@4.0.6)(redis@6.3.0)
       '@usestrider/utils':
         specifier: workspace:^
         version: link:../tools/utils
       effect:
-        specifier: ^4.0.5
-        version: 4.0.5
+        specifier: ^4.0.6
+        version: 4.0.6
 
   packages/tools/codegen:
     dependencies:
       '@effect/platform-node':
-        specifier: ^4.0.5
-        version: 4.0.5(effect@4.0.5)(redis@6.3.0)
+        specifier: ^4.0.6
+        version: 4.0.6(effect@4.0.6)(redis@6.3.0)
       effect:
-        specifier: ^4.0.5
-        version: 4.0.5
+        specifier: ^4.0.6
+        version: 4.0.6
 
   packages/tools/docs:
     dependencies:
       effect:
-        specifier: ^4.0.5
-        version: 4.0.5
+        specifier: ^4.0.6
+        version: 4.0.6
       glob:
         specifier: ^13.0.6
         version: 13.0.6
@@ -498,17 +498,17 @@ packages:
     resolution: {integrity: sha512-np/zJgk71/PyHxtoqyUKLYcpQhoRBI+L6+1Z0ILk35JSQ/lvXzwlwOwddYZLDkeC4bdF2ukKekqKlla/F88R5w==}
     hasBin: true
 
-  '@effect/platform-node-shared@4.0.5':
-    resolution: {integrity: sha512-a8rCdEkfZBGe9C6bsIjxVZuRp73svIyK5IHwHdDAVsvZXjrbkxusfI+rZ8WlX31RP1mKizwI/E72GQTNfdMWHw==}
+  '@effect/platform-node-shared@4.0.6':
+    resolution: {integrity: sha512-0PhyC4uG30xGtsajnxjkcBWfTjNRzUh4ZKl1Kvo/MNyCTb+W2O+fBzf7wCRCoqt+nLudiq4V7vX40Q8XIBuMaQ==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
-      effect: ^4.0.5
+      effect: ^4.0.6
 
-  '@effect/platform-node@4.0.5':
-    resolution: {integrity: sha512-v4KD5fWvEUa4QmWFpZFbBsRhmfnTP6ETCME2r9ifyXVDPjhfpxpTZl41prjgQFMqZBHdWWCl7YC5ImbXv5ui5g==}
+  '@effect/platform-node@4.0.6':
+    resolution: {integrity: sha512-gXvGHAy0/8PZbWvMMguloDUyeSP+rzYEo3FSEqUuGduxo9ORcGioDxPI+GOLCIFfam7VuNkmSUxBOiRMIrMrBw==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
-      effect: ^4.0.5
+      effect: ^4.0.6
       redis: '>=5.0.0 <7.0.0'
 
   '@effect/tsgo-darwin-arm64@0.54.0':
@@ -550,10 +550,10 @@ packages:
     resolution: {integrity: sha512-N04IZmYNXD5SQhCGDRp1creYOMzp2q5H79dkU8WPSLjYHOoIcxArq60qk393Hl0hMSijWENDME+q2Bl+bichwg==}
     hasBin: true
 
-  '@effect/vitest@4.0.5':
-    resolution: {integrity: sha512-q64paZ/i4V2NiRhTyqCmT2KiDbFjlxc2EZrZca8GGt+Nf8844946HyJM5bPk/q+YeRkFSxIrlCs+J+LSfky/wA==}
+  '@effect/vitest@4.0.6':
+    resolution: {integrity: sha512-oKNbtyUHK5+0o730CXwojULEu7f3+c235pYFD4U5T//o+hHrJbYbZU4bRkcv936tPr5IOnmujeyQiC/LuJJjHw==}
     peerDependencies:
-      effect: ^4.0.5
+      effect: ^4.0.6
       vitest: '>=5.0.0 <6.0.0'
 
   '@gerrit0/mini-shiki@3.23.0':
@@ -1085,8 +1085,8 @@ packages:
     resolution: {integrity: sha512-xsrbar7ED4WD4ObNlm1mO1GBcBjRI2qCakDExxxeNP3HcPcEBvCOaFRN9fxRRGCgKFufsHN1KIlltempTEzzCg==}
     hasBin: true
 
-  effect@4.0.5:
-    resolution: {integrity: sha512-BY4/28NlpOd99yzmV741xbVGmp+1U7tks4oB7F/Png64bTa5tm5eCA6W0RiXsnuLDDoJpjfVSo4Dnq4BZb/89Q==}
+  effect@4.0.6:
+    resolution: {integrity: sha512-Tc3mkzuLR6t6P9dhLt0D2GrxYtmU5td4XEJEiXCmILz53IRIfJyHsKZWjTA3xEjiwpNTtXBgI4iqYPxMztBDrw==}
 
   electron-to-chromium@1.5.459:
     resolution: {integrity: sha512-4SC9HHSFjO/liAhifpdOL5hG9b4BP7/5G3y3UPZVO8trlAXr1CaUEEJL0gWK3kOcYcZrOA5rkwG45Gra/lTIgg==}
@@ -1796,19 +1796,19 @@ snapshots:
 
   '@effect/language-service@0.87.5': {}
 
-  '@effect/platform-node-shared@4.0.5(effect@4.0.5)':
+  '@effect/platform-node-shared@4.0.6(effect@4.0.6)':
     dependencies:
       '@types/ws': 8.18.2
-      effect: 4.0.5
+      effect: 4.0.6
       ws: 8.22.0
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@effect/platform-node@4.0.5(effect@4.0.5)(redis@6.3.0)':
+  '@effect/platform-node@4.0.6(effect@4.0.6)(redis@6.3.0)':
     dependencies:
-      '@effect/platform-node-shared': 4.0.5(effect@4.0.5)
-      effect: 4.0.5
+      '@effect/platform-node-shared': 4.0.6(effect@4.0.6)
+      effect: 4.0.6
       redis: 6.3.0
       undici: 8.12.2
     transitivePeerDependencies:
@@ -1846,9 +1846,9 @@ snapshots:
       '@effect/tsgo-win32-arm64': 0.54.0
       '@effect/tsgo-win32-x64': 0.54.0
 
-  '@effect/vitest@4.0.5(effect@4.0.5)(vitest@5.0.5(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(yaml@2.9.1)))':
+  '@effect/vitest@4.0.6(effect@4.0.6)(vitest@5.0.5(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(yaml@2.9.1)))':
     dependencies:
-      effect: 4.0.5
+      effect: 4.0.6
       vitest: 5.0.5(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(yaml@2.9.1))
 
   '@gerrit0/mini-shiki@3.23.0':
@@ -2194,7 +2194,7 @@ snapshots:
       '@dprint/win32-arm64': 0.64.0
       '@dprint/win32-x64': 0.64.0
 
-  effect@4.0.5: {}
+  effect@4.0.6: {}
 
   electron-to-chromium@1.5.459: {}
 
