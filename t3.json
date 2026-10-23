@@ -1,0 +1,60 @@
+{
+  "$schema": "https://t3.codes/schema/t3.json",
+  "iconPath": "design/strider/heron/responsive/adaptive/heron-16.svg",
+  "scripts": [
+    {
+      "name": "Setup",
+      "command": "bash scripts/worktree-setup.sh",
+      "icon": "configure",
+      "runOnWorktreeCreate": true
+    },
+    {
+      "name": "Check",
+      "command": "pnpm check",
+      "icon": "build",
+      "runOnWorktreeCreate": false
+    },
+    {
+      "name": "Lint and format",
+      "command": "pnpm lint-fix",
+      "icon": "lint",
+      "runOnWorktreeCreate": false
+    },
+    {
+      "name": "Test",
+      "command": "pnpm test --run",
+      "icon": "test",
+      "runOnWorktreeCreate": false
+    },
+    {
+      "name": "Integration tests",
+      "command": "pnpm test:integration",
+      "icon": "test",
+      "runOnWorktreeCreate": false
+    },
+    {
+      "name": "Type tests",
+      "command": "pnpm test-types",
+      "icon": "test",
+      "runOnWorktreeCreate": false
+    },
+    {
+      "name": "Protocol codegen",
+      "command": "pnpm codegen:protocol",
+      "icon": "build",
+      "runOnWorktreeCreate": false
+    },
+    {
+      "name": "Reference",
+      "command": "pnpm reference",
+      "icon": "build",
+      "runOnWorktreeCreate": false
+    },
+    {
+      "name": "All checks",
+      "command": "pnpm all",
+      "icon": "play",
+      "runOnWorktreeCreate": false
+    }
+  ]
+}
