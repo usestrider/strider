@@ -26,6 +26,7 @@ import type * as AriaRole from "./AriaRole.ts"
 import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as FileInput from "./FileInput.ts"
+import * as Steps from "./internal/steps.ts"
 import type * as JSHandle from "./JSHandle.ts"
 import type * as Keyboard from "./Keyboard.ts"
 import type * as Mouse from "./Mouse.ts"
@@ -95,10 +96,26 @@ export interface TextOptions {
 export interface Queries<L> {
   /**
    * Elements with this ARIA role, and optionally this accessible name.
+   *
+   * **Details**
+   *
+   * An element's role is the first token of its `role` attribute that the library knows, or else its implicit
+   * role under HTML-AAM, and its name is computed under accname 1.2. Elements outside the accessibility tree
+   * (`aria-hidden`, `display: none`, `visibility: hidden`, the `hidden` attribute) aren't matched unless
+   * `includeHidden` is set. A name matches as text does in `getByText`.
    */
   getByRole(role: AriaRole.AriaRole, options?: RoleOptions | undefined): L
   /**
-   * Elements whose rendered text matches.
+   * The smallest elements whose text matches.
+   *
+   * **Details**
+   *
+   * An element matches when its text does and no child element's does, so `<p>1 <b>item</b></p>` is found by
+   * `"1 item"`. An element's text is its text content through open shadow roots, skipping `script`, `style`, `noscript`
+   * and `template`, with a button-like `input`'s value, and with whitespace collapsed and trimmed. It isn't
+   * `innerText`, which depends on layout and differs between browsers. A string matches as a case-insensitive
+   * substring, or with `exact` as the whole text, case-sensitively; a `RegExp` is tested as given. The
+   * document's `head` isn't searched.
    */
   getByText(text: string | RegExp, options?: TextOptions | undefined): L
   /**
@@ -527,7 +544,7 @@ export interface Locator extends ReadonlyLocator {
  */
 export const isLocator = (u: unknown): u is ReadonlyLocator => Predicate.hasProperty(u, TypeId)
 
-declare const RelativeLocatorTypeId: unique symbol
+const RelativeLocatorTypeId = "~@usestrider/browser/Locator/RelativeLocator"
 
 /**
  * A query relative to the element being filtered, valid only inside `filter({ has })`.
@@ -560,7 +577,7 @@ export interface RelativeLocator extends Queries<RelativeLocator> {
  * @category constructors
  * @since 0.1.0
  */
-export declare const relative: Queries<RelativeLocator>
+export const relative: Queries<RelativeLocator> = Steps.relative
 
 /**
  * An iframe's document, entered by its element; lazy like any locator.

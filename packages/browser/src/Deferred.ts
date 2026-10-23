@@ -20,6 +20,7 @@ import type * as Option from "effect/Option"
 import type * as Pipeable from "effect/Pipeable"
 import * as Predicate from "effect/Predicate"
 import type * as Types from "effect/Types"
+import * as NotBuilt from "./internal/notBuilt.ts"
 
 const TypeId = "~@usestrider/browser/Deferred/ReadonlyDeferred"
 
@@ -42,7 +43,8 @@ export interface ReadonlyDeferred<out A, out E = never> extends Pipeable.Pipeabl
   }
 }
 
-declare const _await: <A, E>(self: ReadonlyDeferred<A, E>) => Effect.Effect<A, E>
+// Renamed on export, so it needs a binding at run time; not built yet (PROTOCOL.md)
+const _await: <A, E>(self: ReadonlyDeferred<A, E>) => Effect.Effect<A, E> = NotBuilt.fn("Deferred.await")
 
 export {
   /**

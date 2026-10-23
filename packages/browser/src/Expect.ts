@@ -14,14 +14,21 @@
  * @stability unstable
  * @since 0.1.0
  */
-import type * as Context from "effect/Context"
-import type * as Duration from "effect/Duration"
-import type * as Effect from "effect/Effect"
+import * as Context from "effect/Context"
+import * as Duration from "effect/Duration"
+import * as Effect from "effect/Effect"
+import { dual } from "effect/Function"
+import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as AriaPattern from "./AriaPattern.ts"
 import type * as Condition from "./Condition.ts"
 import * as Diagnostics from "./Diagnostics.ts"
+import { now } from "./internal/adapter.ts"
+import type * as Engine from "./internal/engine.ts"
+import { LocatorImpl } from "./internal/locator.ts"
+import * as Operation from "./internal/operation.ts"
+import * as Runtime from "./internal/runtime.ts"
 import type * as Locator from "./Locator.ts"
 import type * as Page from "./Page.ts"
 import type * as Target from "./Target.ts"
@@ -65,7 +72,7 @@ export interface DualMatcher<S, Args extends ReadonlyArray<unknown>> {
  * @category matchers
  * @since 0.1.0
  */
-export declare const toBeVisible: Matcher<Locator.ReadonlyLocator>
+export const toBeVisible: Matcher<Locator.ReadonlyLocator> = (locator) => visibility(locator, "visible")
 
 /**
  * Expects the element to be hidden; passes when it is missing too.
@@ -74,7 +81,7 @@ export declare const toBeVisible: Matcher<Locator.ReadonlyLocator>
  * @category matchers
  * @since 0.1.0
  */
-export declare const toBeHidden: Matcher<Locator.ReadonlyLocator>
+export const toBeHidden: Matcher<Locator.ReadonlyLocator> = (locator) => visibility(locator, "hidden")
 
 /**
  * Expects the one match to be enabled.
@@ -246,7 +253,10 @@ export declare const that: <A, E, R>(
  * @category references
  * @since 0.1.0
  */
-export declare const CheckInterval: Context.Reference<Duration.Duration>
+export const CheckInterval: Context.Reference<Duration.Duration> = Context.Reference<Duration.Duration>(
+  "@usestrider/browser/Expect/CheckInterval",
+  { defaultValue: () => Duration.millis(100) }
+)
 
 /**
  * Sets the check interval for every expectation inside an effect.
@@ -257,10 +267,14 @@ export declare const CheckInterval: Context.Reference<Duration.Duration>
  * @category combinators
  * @since 0.1.0
  */
-export declare const withCheckInterval: {
+export const withCheckInterval: {
   (interval: Duration.Input): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   <A, E, R>(self: Effect.Effect<A, E, R>, interval: Duration.Input): Effect.Effect<A, E, R>
-}
+} = dual(
+  2,
+  <A, E, R>(self: Effect.Effect<A, E, R>, interval: Duration.Input): Effect.Effect<A, E, R> =>
+    Effect.provideService(self, CheckInterval, Duration.fromInputUnsafe(interval))
+)
 
 const ExpectationFailedTypeId = "~@usestrider/browser/Expect/ExpectationFailed"
 
@@ -310,3 +324,79 @@ export class ExpectationFailed extends Schema.TaggedError<ExpectationFailed>(Exp
  */
 export const isExpectationFailed = (u: unknown): u is ExpectationFailed =>
   Predicate.hasProperty(u, ExpectationFailedTypeId)
+
+// ── Visibility (review 12, candidate 5) ──
+
+/** What one check of a locator's visibility saw. */
+type Seen =
+  | { readonly matches: number; readonly visible: number }
+  | { readonly error: string }
+
+const visibility = (subject: Locator.ReadonlyLocator, expected: "visible" | "hidden") =>
+  Effect.gen(function*() {
+    if (!(subject instanceof LocatorImpl)) return yield* Effect.die(new Error("Expect: not a locator of this library"))
+    const id = Operation.operationId()
+    const budget = yield* Operation.budget
+    const interval = Duration.toMillis(yield* Effect.service(CheckInterval))
+    const started = now()
+    const history: Array<Diagnostics.ObservedValue> = []
+    const triggers = new Set<"initial" | "interval">(["initial"])
+    let checks = 0
+    const condition = expected === "visible" ? "to be visible" : "to be hidden"
+    const failed = () =>
+      new ExpectationFailed({
+        subject: subject.description,
+        condition,
+        last: Option.fromNullishOr(history.at(-1)),
+        history,
+        elapsed: Duration.millis((now() - started) / 1e6),
+        checks: { count: checks, triggeredBy: Array.from(triggers) },
+        nearest: Option.none(),
+        suggestions: [],
+        diagnostics: Operation.diagnostics(id, { last: Option.fromNullishOr(history.at(-1)) })
+      })
+    while (true) {
+      checks++
+      const response = yield* Runtime.send(
+        subject.owner.runtime,
+        subject.owner.page,
+        { op: "visible", steps: subject.steps },
+        id,
+        budget.at
+      ).pipe(
+        Effect.map((response): Engine.Response | Seen => response),
+        Effect.catch((failure): Effect.Effect<Seen | null, Target.TargetGone> =>
+          failure._tag === "Gone"
+            ? Effect.fail(failure.error)
+            : failure._tag === "Deadline"
+            ? Effect.succeed(null)
+            : Effect.succeed({ error: failure.reason.message })
+        )
+      )
+      if (response === null) return yield* Effect.fail(failed())
+      const seen: Seen = "_tag" in response
+        ? response._tag === "Visible"
+          ? { matches: response.count, visible: response.visible ? 1 : 0 }
+          : response._tag === "Strict"
+          ? { matches: response.count, visible: response.candidates.filter((each) => each.visible).length }
+          : response._tag === "InvalidSelector"
+          ? { error: `invalid selector ${JSON.stringify(response.selector)}: ${response.message}` }
+          : { error: `unexpected answer ${response._tag}` }
+        : response
+      Operation.appendObservation(history, seen)
+      // A selector that doesn't parse never will
+      if ("error" in seen && seen.error.startsWith("invalid selector")) return yield* Effect.fail(failed())
+      if ("matches" in seen) {
+        if (expected === "visible" && seen.matches === 1 && seen.visible === 1) return
+        if (expected === "hidden" && seen.visible === 0) return
+      }
+      const left = Operation.millisLeft(budget.at)
+      if (left <= 0) return yield* Effect.fail(failed())
+      triggers.add("interval")
+      yield* Effect.sleep(Math.min(interval, left))
+    }
+  }).pipe(
+    Effect.withSpan(`Expect.${expected === "visible" ? "toBeVisible" : "toBeHidden"}`, {
+      attributes: { "browser.locator": subject instanceof LocatorImpl ? subject.description : "unknown" }
+    })
+  )

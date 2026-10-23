@@ -1,6 +1,6 @@
 # CONCEPTS: the native browser model (L1)
 
-*Revision 5.25, 2026-10-19. A condensed restatement of draft 4 (commit `6cc0bc1`), with [review 4](reviews/04-draft-4.md) folded in. The reasoning behind each contract is in that draft and in [reviews/](reviews/); this document keeps the decisions. Spec anchors: `HTML#x` is `https://html.spec.whatwg.org/#x`; `BIDI#x` is the WebDriver BiDi editor's draft.*
+*Revision 5.25, 2026-10-19; checked against the built adapter contract, with how a locator finds elements (§8) and how an action waits (§5), after [review 12](reviews/12-l1-first-slice.md), and the first slice built, 2026-10-22. A condensed restatement of draft 4 (commit `6cc0bc1`), with [review 4](reviews/04-draft-4.md) folded in. The reasoning behind each contract is in that draft and in [reviews/](reviews/); this document keeps the decisions. Spec anchors: `HTML#x` is `https://html.spec.whatwg.org/#x`; `BIDI#x` is the WebDriver BiDi editor's draft.*
 
 ## Purpose
 
@@ -18,7 +18,7 @@ The spec has three identity layers, and drivers tend to conflate them:
 
 Realms are siblings of documents, not children. The one exception that forces this is the initial `about:blank` Window, which the first same-origin navigation reuses (`HTML#initialise-the-document-object`).
 
-**Every public id is minted by L1.** Backend ids are correlation evidence held in adapter tables. This isolates identity from process swaps and session churn. It also lets a navigation started by a command have its id before the command is sent. A reconnection starts a new id namespace.
+**Every public id is minted by the adapter, in L1's types** (review 08, candidate 2; review 12). Backend ids are correlation evidence held in the adapter's tables, and L1 never sees one. This isolates identity from process swaps and session churn. It also lets a navigation started by a command have its id before the command is sent. Each connection's adapter mints its own, so a reconnection starts a new id namespace.
 
 | Id | Minted when |
 |---|---|
@@ -63,6 +63,20 @@ Realms are siblings of documents, not children. The one exception that forces th
 **Identity fields must be fixed for the entity's lifetime, and say why.** Each plain field carries a one-line justification. Ids, `closed` and streams are exempt by construction. A field that can't be justified moves into `state`. Applying this rule moved three fields: a document's and a window realm's navigable (prerender activation moves both into the existing tab), `isInitialAboutBlank` (cleared by `document.open()`), and a navigation's kind (the Navigation API can intercept a cross-document navigation into a same-document one).
 
 **Unions of valid models, not optional fields.** When fields only make sense together, the model is a tagged union of its valid shapes, so impossible combinations can't be built: a page with a parent, a worker realm attached to a tab, a left-open page with a cleanup scope. A value that is genuinely optional, such as an opener the backend didn't report, is an `Option`, never `?:`, `undefined` or `null`. Generated L0 wire types mirror the protocol's optional keys, and adapters convert them at the L0→L1 boundary.
+
+**The fold** (review 12, candidate 2). The adapter's sink is L1's fold: one per connection, run in receive order before the adapter publishes the event, and the only writer of entity state. The first slice folds what its operations read:
+
+| Fact | Folded into |
+|---|---|
+| `UserContextAdded`, `UserContextRemoved` | a context: its id, whether it is the default, its pages, its `closed`; removing it closes its pages |
+| `PageAdded`, `NavigableRemoved` | a page: its id, its context, its status (`Opening{url}` until its first document commits, then `Open{url, document, prompt}`, then `Closed{reason, url}`), its `closed`, its input permit (§5) |
+| `DocumentCommitted`, `DocumentUrlChanged`, `DocumentOpened`, `DocumentReadiness` | the page's active document: its id, URL and readiness; the document it replaced ends with `DocumentReplaced` |
+| `RealmAdded`, `RealmRemoved` | which document each window realm belongs to, so the engine's realm (§8, Queries) is forgotten when it goes |
+| `NavigationEnded` | a navigation's outcome, latched once |
+| `RequestSent`, `ResponseReceived` | the responses of navigation requests, so a committed navigation carries its response |
+| `ObligationOpened` for a prompt, `PromptClosed` | the page's prompt, which an owned context's `dialogs` policy decides at once (§5) |
+
+A page is open from its first commit: `createPage` replies once the page is ready, so `PageReady` adds nothing yet. Connection loss ends everything with `ConnectionLost`. Facts the slice doesn't fold (frames' own documents, other requests, console, downloads, file choosers) wait for the modules that consume them; PROTOCOL.md lists them.
 
 ```ts
 // ── Containment ────────────────────────────────────────────
@@ -132,9 +146,9 @@ interface DocumentModel {
     isInitialAboutBlank: boolean                        // cleared by document.open()
     generation: DocumentGeneration                      // bumped by document.open()
     url: Url                                            // changes on same-document navigation
-    lifecycle: { _tag: "Active" } | { _tag: "Suspended" } | { _tag: "Ended"; reason: CloseReason }
+    lifecycle: { _tag: "Active" } | { _tag: "Suspended" } | { _tag: "Ended"; reason: CloseReason }   // Suspended: no backend built confirms it (§4)
     readiness: "loading" | "interactive" | "complete"   // current state; can return to loading
-    loading: LoadingResult                              // per generation; post-commit failure lives here
+    loading: LoadingResult                              // per generation; post-commit failure lives here; not observed yet (§4)
   }>
 }
 
@@ -277,6 +291,7 @@ Cleanup groups can span sibling pages, independently of this graph.
 ## 4. Documents, realms and navigation
 
 - **Document lifecycle.** `Active ⇄ Suspended` (back/forward cache, only with confirmed evidence) and `→ Ended{reason}`.
+  - No backend built confirms a suspension (review 12). Chromium and Firefox restores are recorded as new documents, `createdBy: Restored{from}`, after the old one ended, and WebKit keeps no back/forward cache. So every restore is a new epoch, the second branch below, and `Suspended` stays in the model for a backend that can confirm it.
   - Readiness events are accepted only for the matching epoch and generation.
   - `document.open()` keeps the epoch, starts a new generation, and returns readiness to `loading`.
   - A restored document gets the same id only when the adapter can correlate it; otherwise the old epoch ends with `DocumentUnloaded` and the new one is `createdBy: Restored{from}`.
@@ -299,7 +314,8 @@ Cleanup groups can span sibling pages, independently of this graph.
   - `Superseded` needs proof that the navigation was replaced.
   - A `historyUpdated` event with no attribution does not finish a pending navigation.
   - Silence never means `Canceled` or `NoOp`.
-  - A failure after a successful commit is a loading result of the document; the commit outcome is not revised.
+  - A failure after a successful commit is a loading result of the document; the commit outcome is not revised. No backend reports one yet, so a document's `loading` isn't observed (review 12).
+  - An error page that commits after its navigation was reported `Failed` is that navigation's document, `createdBy: ErrorPage{navigation}`, never a navigation of its own, which would supersede one started since. Chromium commits its error pages that way (PROTOCOL.md; found by the first slice).
   - Navigations observed during an action are correlated, not proven caused by it.
   - Browsing-context-group switches are reported as `Confirmed | Suspected | Unknown`.
 - **Projection for callers** (API.md):
@@ -312,6 +328,13 @@ Cleanup groups can span sibling pages, independently of this graph.
 
 - **Input fidelity is a backend property:** `native` (CDP, patched WebKit), `webdriver` (BiDi) or `synthetic` (stock WebKit shims; untrusted, no activation).
 - **Input state** is kept per page: pressed keys and buttons, pointer position, and an undo list. Input to one page is serialized, and acquiring the permit consumes the operation deadline. Actionability is checked again after acquiring the permit.
+- **Actions** (review 12, candidate 4). An action's checks run in the page at each animation frame: every check is about layout, which changes only when the page renders, and a timer would be a cadence nobody chose. An attempt is one evaluation in the engine (§8, Queries) that resolves the locator and checks it at each frame until the checks pass or the round's cap runs out: one second, or what is left of the deadline.
+  1. **Resolve.** No match is `NotReady{NoMatch}`; two or more fail at once with `StrictViolation`.
+  2. **Check**, in §8's order: Visible, Enabled, NotInert, InViewport (scrolling the element to the centre of the viewport, once, when it is outside), Stable (the rect unchanged across *k* frames, 2 by default) and ReceivesPointer at the action point. A round that sees no frame at all ends `NotReady{NoRenderingOpportunity}`.
+  3. **Act.** Ready, L1 takes the page's input permit, checks again under it, and dispatches the pointer move, down and up at the action point: the padding box's centre, or `position` from its top left, in viewport CSS pixels. From the first input event the dispatch may have been sent, and nothing is sent again. `trial` stops after the check under the permit.
+  4. **Fail** at the deadline with `Timeout{phase}`, carrying the last `NotReady`, its de-duplicated history, and a hint that explains it, so the error says what stands in the way: "Another element covers the element's action point: div.toast "Saved"". The phase is `waitingForCondition`, or `resolving` when nothing ever matched.
+
+  Not built yet: the guard on the first trusted event (§8, ReceivesPointer), coordinates in child frames, modifiers, and the actions besides `click`.
 - **Compensation.** On interruption or scope close, owned pressed inputs are released in reverse order. This is bounded and best-effort, and records failures. Input state that might be inconsistent blocks further gestures until it is reset.
 - **Activation.** The library keeps a diagnostic estimate of user activation; it never gates an operation. Operations that need activation declare it, and evaluation can request it from the backend.
 - **Focus.** Key input requires system focus; the adapter focuses the page first.
@@ -363,7 +386,7 @@ Declarations are init scripts, routes, overrides, emulation, download and prompt
   - Declarations stay within the target's access scope.
   - Attaching to a running page cannot precede scripts that already ran.
   - A target is published as ready only after its required setup succeeds. Optional setup failures appear as unavailable capabilities.
-- **Precedence** for settings and handlers: scope specificity first (Frame, then Page, then Context, then Browser), then explicit priority, then recency. Releasing any registration recomputes the effective state, including when fibers finish out of order.
+- **Precedence** for settings and handlers: scope specificity first (Page, then Context, then Browser; the API declares nothing on a frame, so Frame joins when a declaration needs it, review 12), then explicit priority, then recency. Releasing any registration recomputes the effective state, including when fibers finish out of order.
 - **Init scripts** form an ordered bundle per world and revision.
   - **Phases.** A reserved *environment phase* (library shims such as the page clock) runs before user scripts.
   - **Order.** Within a phase, array order applies, then explicit `after` dependencies, then registration sequence.
@@ -392,9 +415,21 @@ Declarations are init scripts, routes, overrides, emulation, download and prompt
   - **Export and import.** Export is an explicit, versioned codec to `Redacted<Uint8Array>`, and import validates it. Diagnostic JSON is never a persistence format.
 - **Permissions** are scoped to a user context and combined (AND) with Permissions Policy.
 
-## 8. Readiness predicates
+## 8. Queries and readiness predicates
 
-Each predicate yields `Ready`, `NotReady{reason}` or an observation error. A reason describes the present condition and does not promise it can never improve. L2 decides whether to wait, scroll, activate or fail.
+### Queries
+
+A locator is data: a list of steps (a query, then `filter`, `and`, `or`, `nth`) that one engine of ours interprets, the same on every backend (review 12, candidate 3). So a locator means the same thing in every browser, and a test of it on one backend speaks for all three. The engine is a self-contained function in our source, installed in each document's utility world on first use, as WebKit's evaluation helper is, and sent requests as JSON. It isn't the browser's accessibility tree: the three engines' trees differ at the edges, WebKit's protocol can't query its tree, and an action needs the element in the utility world anyway to check it. When a request's document ends under it, the request goes again to the page's new document, within the deadline; the engine dispatches nothing, so sending again is always safe.
+
+- **The tree** is the document's composed tree, in tree order: open shadow roots are searched, a shadow root's elements right after its host, and closed ones aren't. Iframes are entered only through `frame()`.
+- **Text** is an element's text content in the flat tree, skipping `script`, `style`, `noscript` and `template`, with a button-like `input`'s value, and with whitespace collapsed and trimmed. It isn't `innerText`, which depends on layout, differs between engines, and forces layout for every candidate.
+- **`getByText`** matches the smallest element whose text matches: one whose text matches while no child element's does, so `<p>1 <b>item</b></p>` is found by "1 item". The document's `head` isn't searched. A string is a case-insensitive substring, `exact` is equality, case-sensitive, and a `RegExp` is tested as given.
+- **`getByRole`** takes an element's role from its `role` attribute (the first token the engine knows), or else its implicit role under HTML-AAM, from a table in the engine. Its name is computed under accname 1.2: `aria-labelledby`, `aria-label`, the native label (`label`, `alt`, `caption`, `legend`, a button's value), the content for roles named from content, then `title` and `placeholder`. An embedded control adds its value to another element's name, never to its own. Elements outside the accessibility tree (`aria-hidden`, `display: none`, `visibility: hidden`, the `hidden` attribute) are skipped unless `includeHidden` is set. A name matches as text does.
+- **The other queries** follow from those: `getByLabel` matches labelable elements by their label (`label[for]`, a wrapping `label`, `aria-labelledby`, `aria-label`); `getByPlaceholder`, `getByAltText` and `getByTitle` match their attribute; `getByTestId` matches `data-testid` exactly; and `locator(css)` runs `querySelectorAll` in the document and each open shadow root, where a malformed selector fails with `InvalidInput` at once.
+
+### Readiness predicates
+
+Each predicate yields `Ready`, `NotReady{reason}` or an observation error. A reason describes the present condition and does not promise it can never improve. L2 decides whether to wait, scroll, activate or fail; an action checks at each animation frame (§5, Actions).
 
 | Predicate | Definition | Reasons |
 |---|---|---|
@@ -439,7 +474,7 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
   - Locators re-resolve before dispatch.
   - Explicit refs never rebind.
   - Nothing that may have dispatched is repeated automatically.
-- **Errors (L1 view).** Lifetime ends surface as `TargetGone{reason: CloseReason}` and deadlines as `Timeout`. Everything else is the error of the module whose operation failed (`LocatorError`, `PageError`, …; one per module), whose `reason` includes the shared `NotPermitted`, `Unsupported` and `BackendFailure{Rejected | IncompatibleResponse}`. L0 hands over a normalized `RejectReason`, which L1 maps using its own state (`NoSuchNode` becomes `StaleRef{Detached}`); reasons it doesn't map surface as `BackendFailure{Rejected}`. All of them carry the diagnostic envelope, and every reason carries a one-line remediation `hint`. Defects are reserved for bugs. `SessionSwapped` is internal.
+- **Errors (L1 view).** Lifetime ends surface as `TargetGone{reason: CloseReason}` and deadlines as `Timeout`. Everything else is the error of the module whose operation failed (`LocatorError`, `PageError`, …; one per module), whose `reason` includes the shared `NotPermitted`, `Unsupported` and `BackendFailure{Rejected | IncompatibleResponse}`. L0 hands over a normalized `RejectReason`, which L1 maps using its own state (`NoSuchNode` becomes `StaleRef{Detached}`); reasons it doesn't map surface as `BackendFailure{Rejected}`. All of them carry the diagnostic envelope, and every reason carries a one-line remediation `hint`. Defects are reserved for bugs, and for gaps: a member the interfaces declare that isn't built yet fails as the defect `NotBuilt{member}`, loud and never a no-op, because no caller could handle it as a condition of the browser (review 12, candidate 6). A module-level function that isn't built stays a declaration, absent at run time, unless its module needs the binding to load: `Deferred.await`, exported under a reserved word, is a `NotBuilt` function, and `Route.continue` a decision nothing reads yet. `SessionSwapped` is internal.
 - **State and event streams have different contracts.**
   - **State** (`Watchable`) is a read-only view of an entity's state ref:
     - reading it is an `Effect`;
@@ -468,7 +503,7 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
   | the persisted ownership ledger (§3) | `KeyValueStore` (`effect/persistence`) |
   | byte limits: payloads, body capture, queues | `ByteSize` |
   | single-winner decisions and latched first matches | `Deferred`; callers get its read side, `ReadonlyDeferred` |
-  | `Expect`'s re-checks on change signals | `Reactivity`: the model invalidates keys (a `Watchable` change, a subtree mutation), and `Reactivity.stream` re-runs the check |
+  | `Expect`'s re-checks on change signals | `Reactivity`: the model invalidates keys (a `Watchable` change, a subtree mutation), and `Reactivity.stream` re-runs the check. Not built yet: expectations re-check at `Expect.CheckInterval` (100 ms), which is what visibility, a condition with no change signal, needs (review 12, candidate 5) |
 
 ## 10. Secrets and diagnostics
 

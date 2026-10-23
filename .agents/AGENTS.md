@@ -1,9 +1,11 @@
 # Strider
 
 This repository is Strider (`@usestrider/browser` on npm): Effect-native browser automation that speaks CDP, WebDriver
-BiDi and the WebKit inspector protocol directly. It is at the design stage: the package's modules are declarations,
-type-checked and documented, and the implementation replaces them module by module, starting at L0, the protocol
-layer. Use `pnpm` from the repository root.
+BiDi and the WebKit inspector protocol directly. It is at the design stage. L0, the protocol layer, is built, and the
+first slice runs through L1 and L2 on every backend (review 12); the rest of the package's modules are declarations,
+type-checked and documented, which the implementation replaces module by module. A member of an object that isn't
+built yet fails as the defect `NotBuilt`, naming itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm`
+from the repository root.
 
 ## Layout
 
@@ -15,7 +17,7 @@ layer. Use `pnpm` from the repository root.
 - `packages/browser` is the published package:
   - `src/`: one module per file, exported as namespaces. `src/index.ts` and each subpath's `index.ts` are generated.
     `src/internal/` is implementation that no subpath exports, such as the protocol client, each backend's wire,
-    launcher and adapter.
+    launcher and adapter, L1's model (`model.ts`), and the query engine that runs in the page (`engine.ts`).
   - `scenarios/`: the acceptance scenarios from API.md, type-checked as ordinary code.
   - `typetest/`: Tstyche tests of access rules, requirement channels and what crosses by value.
   - `test/`: runtime tests with `@effect/vitest`, which run anywhere (`pnpm test --run`), except
@@ -25,7 +27,8 @@ layer. Use `pnpm` from the repository root.
     155.0.8059.79, Firefox 158.0, Playwright's WebKit build 2359), fixed fonts, UTC, `C.UTF-8`, an empty home that
     is deleted after, and no display. Run anywhere else, they fail and say so; a browser of another version fails
     them too. Extra arguments go to Vitest (`pnpm test:integration packages/browser/test/integration/WebKit.test.ts`).
-    `test/integration/adapter/` is the adapter conformance suite, written once and run against each backend. With
+    `test/integration/adapter/` is the adapter conformance suite, written once and run against each backend, with
+    the engine's tests; `test/integration/slice/` runs the public API through each backend's layer. With
     `STRIDER_RECORD` naming an absolute directory, the integration tests record each browser's traffic for the
     drift test (`test/integration/record.ts`): `pnpm test:integration --no-file-parallelism`, into
     `test/fixtures/traffic/`, when a browser rolls.
@@ -47,19 +50,20 @@ layer. Use `pnpm` from the repository root.
 
 Use the narrowest check that covers the change:
 
-| Change                              | Run                                                                                                                                      |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Source, scenarios or configuration  | `pnpm check`, `pnpm lint-fix`                                                                                                            |
-| A new, renamed or removed module    | `pnpm codegen`, then `pnpm check`                                                                                                        |
-| Protocol corrections or annotations | `pnpm codegen:protocol`, then `pnpm check` and `pnpm test --run packages/browser/test/Drift.test.ts`                                     |
-| Runtime behavior                    | `pnpm test --run <file>`                                                                                                                 |
-| The protocol client or transports   | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts`, then `pnpm test:integration` |
-| A backend adapter or launcher       | `pnpm test:integration`                                                                                                                  |
-| The `strider` command               | `pnpm test --run packages/browser/test/Browsers.test.ts`, then try it with `pnpm strider <command>`                                      |
-| Access rules or other type behavior | `pnpm test-types`                                                                                                                        |
-| JSDoc text, categories or links     | `pnpm jsdocs`                                                                                                                            |
-| JSDoc examples                      | `pnpm jsdocs`, then `pnpm examples`                                                                                                      |
-| Before a commit that touches `src/` | `pnpm all`, and `pnpm test:integration` if it touches what drives a browser                                                              |
+| Change                               | Run                                                                                                                                      |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Source, scenarios or configuration   | `pnpm check`, `pnpm lint-fix`                                                                                                            |
+| A new, renamed or removed module     | `pnpm codegen`, then `pnpm check`                                                                                                        |
+| Protocol corrections or annotations  | `pnpm codegen:protocol`, then `pnpm check` and `pnpm test --run packages/browser/test/Drift.test.ts`                                     |
+| Runtime behavior                     | `pnpm test --run <file>`                                                                                                                 |
+| The protocol client or transports    | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts`, then `pnpm test:integration` |
+| A backend adapter or launcher        | `pnpm test:integration`                                                                                                                  |
+| The model, engine, locators or pages | `pnpm test:integration packages/browser/test/integration/adapter packages/browser/test/integration/slice`                                |
+| The `strider` command                | `pnpm test --run packages/browser/test/Browsers.test.ts`, then try it with `pnpm strider <command>`                                      |
+| Access rules or other type behavior  | `pnpm test-types`                                                                                                                        |
+| JSDoc text, categories or links      | `pnpm jsdocs`                                                                                                                            |
+| JSDoc examples                       | `pnpm jsdocs`, then `pnpm examples`                                                                                                      |
+| Before a commit that touches `src/`  | `pnpm all`, and `pnpm test:integration` if it touches what drives a browser                                                              |
 
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
 
@@ -78,6 +82,8 @@ Conventions section applies them. Effect's skills in `.repos/effect/.agents/skil
   compile error.
 - Nothing implicit (principle 23): every default is stated with `@default`, and nothing hidden waits or retries.
 - Generated files (sections marked `// @barrel:`, `INDEX.md`, `src/cdp/`, the protocol models) are regenerated, never edited.
+- A declaration that isn't built is erased at run time, so a module must not use one as it loads, or re-export one
+  under another name; `test/Modules.test.ts` loads every entry point in Node to catch it.
 
 Every public declaration carries Effect's JSDoc contract: one paragraph that starts with what it does; then
 optional **When to use** (starting "Use to", "Use when", "Use as" or "Use with"), **Details** and **Gotchas**;

@@ -1,0 +1,153 @@
+/**
+ * What the public objects of one connection share: the model, the backend's name for errors, and a channel to
+ * the engine in a page's current document (review 12, candidate 3).
+ *
+ * A request goes to the engine in the utility world of the page's active document. The engine is installed
+ * there on first use; when the document changes under a request (a navigation committed, the realm went), the
+ * request goes again to the new document, within the operation's deadline. Nothing the engine does dispatches
+ * input, so sending a request again is always safe.
+ */
+import * as Deferred from "effect/Deferred"
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
+import * as Stream from "effect/Stream"
+import * as SubscriptionRef from "effect/SubscriptionRef"
+import type * as Diagnostics from "../Diagnostics.ts"
+import type * as MonotonicInstant from "../MonotonicInstant.ts"
+import * as Target from "../Target.ts"
+import type * as Adapter from "./adapter.ts"
+import * as Engine from "./engine.ts"
+import type * as Model from "./model.ts"
+import * as Operation from "./operation.ts"
+
+/** The utility world the engine runs in. */
+export const utilityWorld: Adapter.World = { _tag: "Isolated", name: "__strider_utility__" }
+
+export interface Runtime {
+  readonly model: Model.Model
+  /** The backend, as errors name it: the browser's product. */
+  readonly backend: string
+}
+
+/** Why a request to the engine didn't get an answer. */
+export type SendFailure =
+  | Operation.Failure
+  | { readonly _tag: "Deadline" }
+
+const gone = (target: Target.Description, reason: Target.CloseReason, id: Diagnostics.OperationId): SendFailure => ({
+  _tag: "Gone",
+  error: new Target.TargetGone({ target, reason, diagnostics: Operation.diagnostics(id) })
+})
+
+/** A page's open state, waiting while it is still opening; a closed page is gone. */
+const openState = (page: Model.PageEntry, id: Diagnostics.OperationId) =>
+  SubscriptionRef.changes(page.state).pipe(
+    Stream.filter((state) => state._tag !== "Opening"),
+    Stream.runHead,
+    Effect.flatMap((state): Effect.Effect<Extract<Model.PageState, { _tag: "Open" }>, SendFailure> => {
+      if (Option.isNone(state)) {
+        return Effect.fail(gone({ _tag: "Page", id: page.id }, { _tag: "PageClosed", by: "browser" }, id))
+      }
+      const value = state.value
+      return value._tag === "Open"
+        ? Effect.succeed(value)
+        : Effect.fail(
+          gone(
+            { _tag: "Page", id: page.id },
+            value._tag === "Closed" ? value.reason : { _tag: "PageClosed", by: "browser" },
+            id
+          )
+        )
+    })
+  )
+
+const string = (value: string): Adapter.LocalValue => ({ _tag: "Value", value: { type: "string", value } })
+
+const call = (
+  runtime: Runtime,
+  realm: Target.RealmId,
+  functionDeclaration: string,
+  args: ReadonlyArray<Adapter.LocalValue>
+) =>
+  runtime.model.adapter.evaluate(realm, {
+    functionDeclaration,
+    arguments: args,
+    awaitPromise: true,
+    result: "value",
+    userActivation: false
+  })
+
+/** The realm of a document's utility world, with the engine installed. */
+const engineRealm = Effect.fnUntraced(function*(runtime: Runtime, document: Target.DocumentId) {
+  const known = runtime.model.engineRealms.get(document)
+  if (known !== undefined) return known
+  const realm = yield* runtime.model.adapter.realm(document, utilityWorld)
+  const installed = yield* call(runtime, realm, Engine.install, [])
+  if (installed._tag === "Exception") {
+    return yield* Effect.die(new Error(`The engine didn't install: ${installed.text}`))
+  }
+  runtime.model.engineRealms.set(document, realm)
+  return realm
+})
+
+/**
+ * Sends the engine a request in the page's current document and returns its answer, going again to a new
+ * document when the one it was sent to ends, until `at`.
+ */
+export const send = Effect.fnUntraced(function*(
+  runtime: Runtime,
+  page: Model.PageEntry,
+  request: Engine.Request,
+  id: Diagnostics.OperationId,
+  at: MonotonicInstant.MonotonicInstant
+) {
+  while (true) {
+    if (Operation.millisLeft(at) <= 0) return yield* Effect.fail<SendFailure>({ _tag: "Deadline" })
+    const open = yield* openState(page, id).pipe(
+      Effect.timeoutOption(Operation.millisLeft(at)),
+      Effect.flatMap(Option.match({
+        onNone: () => Effect.fail<SendFailure>({ _tag: "Deadline" }),
+        onSome: Effect.succeed
+      }))
+    )
+    const document = open.document.id
+    const answer = yield* engineRealm(runtime, document).pipe(
+      Effect.flatMap((realm) => call(runtime, realm, Engine.run, [string(JSON.stringify(request))])),
+      Effect.map(Option.some),
+      Effect.catch((error: Adapter.AdapterError) => {
+        const reason = error.reason
+        // The document or its realm went while the request was on its way: go again to the new one
+        if (reason._tag === "Gone" && (reason.target._tag === "Document" || reason.target._tag === "Realm")) {
+          runtime.model.engineRealms.delete(document)
+          return Effect.succeed(Option.none())
+        }
+        return Effect.fail<SendFailure>(Operation.fromAdapter(error, id, runtime.backend))
+      })
+    )
+    if (Option.isNone(answer)) continue
+    const result = answer.value
+    if (result._tag === "Exception") {
+      return yield* Effect.die(new Error(`The engine threw: ${result.text}`))
+    }
+    if (result.value.type !== "string") {
+      return yield* Effect.die(new Error("The engine answered with something other than text"))
+    }
+    if (result.value.value === Engine.missing) {
+      // A realm that lost its engine, as a reused realm can: install again
+      runtime.model.engineRealms.delete(document)
+      continue
+    }
+    return JSON.parse(result.value.value) as Engine.Response
+  }
+})
+
+/** Waits for a page to end, as a failure: raced against an operation, it ends the operation with `TargetGone`. */
+export const pageEnded = (page: Model.PageEntry, id: Diagnostics.OperationId) =>
+  Effect.flatMap(Deferred.await(page.closed), (reason) =>
+    Effect.fail(
+      new Target.TargetGone({
+        target: { _tag: "Page", id: page.id },
+        reason,
+        diagnostics: Operation.diagnostics(id)
+      })
+    ))

@@ -17,8 +17,8 @@
  * @stability unstable
  * @since 0.1.0
  */
-import type * as Context from "effect/Context"
-import type * as Effect from "effect/Effect"
+import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import type * as Redacted from "effect/Redacted"
@@ -139,7 +139,7 @@ export interface Browser {
  * @category tags
  * @since 0.1.0
  */
-export declare const Browser: Context.Service<Browser, Browser>
+export const Browser: Context.Service<Browser, Browser> = Context.Service<Browser>("@usestrider/browser/Browser")
 
 /**
  * Checks whether a value is a `Browser`.
@@ -175,9 +175,10 @@ export const isBrowser = (u: unknown): u is Browser => Predicate.hasProperty(u, 
  * @category accessors
  * @since 0.1.0
  */
-export declare const newPage: (
+export const newPage = (
   options?: UserContext.Options | undefined
-) => Effect.Effect<Page.Page, Page.PageError, Browser | Scope.Scope>
+): Effect.Effect<Page.Page, Page.PageError, Browser | Scope.Scope> =>
+  Effect.flatMap(Effect.service(Browser), (browser) => browser.newPage(options))
 
 /**
  * Creates a context you own, using the `Browser` from context; removed when the scope closes.
@@ -186,9 +187,10 @@ export declare const newPage: (
  * @category accessors
  * @since 0.1.0
  */
-export declare const newContext: (
+export const newContext = (
   options?: UserContext.Options | undefined
-) => Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Browser | Scope.Scope>
+): Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Browser | Scope.Scope> =>
+  Effect.flatMap(Effect.service(Browser), (browser) => browser.newContext(options))
 
 /**
  * Settings for launching a browser: the executable to run, and how to run it.

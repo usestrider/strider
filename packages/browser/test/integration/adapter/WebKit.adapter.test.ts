@@ -9,10 +9,12 @@ import * as WebKitWire from "../../../src/internal/webkitWire.ts"
 import { webkit } from "../browsers.ts"
 import { fixtures, record } from "../record.ts"
 import { conformance } from "./conformance.ts"
+import { engine } from "./engine.ts"
+import type { Backend } from "./harness.ts"
 
 const executable = webkit.executable
 
-conformance({
+const backend: Backend = {
   name: "WebKit (Playwright)",
   connect: Effect.fnUntraced(function*(sink) {
     const { launched, transport } = yield* WebKitLauncher.launch({ executablePath: executable })
@@ -23,4 +25,7 @@ conformance({
     })
     return { adapter, kill: launched.handle.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore) }
   })
-})
+}
+
+conformance(backend)
+engine(backend)

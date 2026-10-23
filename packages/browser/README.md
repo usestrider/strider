@@ -4,7 +4,9 @@ Strider: Effect-native browser automation that speaks the Chrome DevTools Protoc
 inspector protocol directly. Scoped lifetimes, typed errors that say what happened, events you subscribe to before
 you act, and an agent toolkit, all built on [Effect](https://effect.website).
 
-**Status:** pre-release. The API is designed, type-checked and documented; the implementation is in progress.
+**Status:** pre-release. The API is designed, type-checked and documented, and the implementation is in progress:
+the program below runs on Chromium, Firefox and WebKit, and a member that isn't built yet fails as the defect
+`NotBuilt`, naming itself.
 
 ```ts
 import { Browser, Expect } from "@usestrider/browser"

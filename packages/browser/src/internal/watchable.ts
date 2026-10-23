@@ -1,0 +1,92 @@
+/**
+ * Builds `Watchable`s over an entity's state ref (CONCEPTS.md §9, State). Effect 4 has no public way to
+ * subclass `Effect`, so a watchable is an effect value, the read, with its members attached (review 12).
+ */
+import * as Effect from "effect/Effect"
+import * as Equal from "effect/Equal"
+import * as Filter from "effect/Filter"
+import * as Option from "effect/Option"
+import type * as Predicate from "effect/Predicate"
+import * as Stream from "effect/Stream"
+import * as SubscriptionRef from "effect/SubscriptionRef"
+import type * as Diagnostics from "../Diagnostics.ts"
+import * as Target from "../Target.ts"
+import type * as Watchable from "../Watchable.ts"
+import * as Operation from "./operation.ts"
+
+/** How to read a watchable from an entity's state. */
+export interface Source<S, A> {
+  readonly ref: SubscriptionRef.SubscriptionRef<S>
+  /** The value, or `None` while there is none to show yet. */
+  readonly project: (state: S) => Option.Option<A>
+  /** Why the entity ended, once it has: the terminal state. */
+  readonly ended: (state: S) => Option.Option<Target.CloseReason>
+  /** The entity, for `TargetGone`. */
+  readonly target: Target.Description
+  /** The operation a wait reports, such as `Page.status.waitFor`. */
+  readonly operation: string
+}
+
+/** The states from now on: the current one first, ending after the terminal one. */
+const states = <S, A>(source: Source<S, A>) =>
+  SubscriptionRef.changes(source.ref).pipe(Stream.takeUntil((state) => Option.isSome(source.ended(state))))
+
+/** A watchable over `source`. */
+export const make = <S, A>(source: Source<S, A>): Watchable.Watchable<A> => {
+  const read = Effect.flatMap(
+    states(source).pipe(Stream.filterMap(Filter.fromPredicateOption(source.project)), Stream.runHead),
+    Option.match({
+      // Ended before it ever had a value: its last value is gone with it
+      onNone: () => Effect.die(new Error(`${source.operation}: ended before it had a value`)),
+      onSome: Effect.succeed
+    })
+  )
+  const changes = states(source).pipe(
+    Stream.filterMap(Filter.fromPredicateOption(source.project)),
+    Stream.changesWith(Equal.equals)
+  )
+  const waitFor = Effect.fnUntraced(function*(predicate: Predicate.Predicate<A>) {
+    const id = Operation.operationId()
+    const { at, budget } = yield* Operation.budget
+    const history: Array<Diagnostics.ObservedValue> = []
+    const outcome = yield* states(source).pipe(
+      Stream.mapEffect((state) => {
+        const value = source.project(state)
+        if (Option.isSome(value)) {
+          Operation.appendObservation(history, value.value)
+          if (predicate(value.value)) return Effect.succeed(Option.some(value.value))
+        }
+        const ended = source.ended(state)
+        return Option.isSome(ended)
+          ? Effect.fail(
+            new Target.TargetGone({
+              target: source.target,
+              reason: ended.value,
+              diagnostics: Operation.diagnostics(id, { last: Option.fromNullishOr(history.at(-1)) })
+            })
+          )
+          : Effect.succeed(Option.none<A>())
+      }),
+      Stream.filterMap(Filter.fromPredicateOption((found: Option.Option<A>) => found)),
+      Stream.runHead,
+      Effect.timeoutOption(Operation.millisLeft(at))
+    )
+    if (Option.isSome(outcome) && Option.isSome(outcome.value)) return outcome.value.value
+    return yield* Effect.fail(
+      Operation.timeout({
+        operation: source.operation,
+        id,
+        phase: "waitingForCondition",
+        budget,
+        history,
+        hint: Option.some("The value never satisfied the predicate; history lists what it was")
+      })
+    )
+  })
+  return Object.assign(Effect.suspend(() => read), {
+    "~@usestrider/browser/Watchable": "~@usestrider/browser/Watchable" as const,
+    changes,
+    waitFor,
+    map: <B>(f: (a: A) => B) => make({ ...source, project: (state: S) => Option.map(source.project(state), f) })
+  }) as unknown as Watchable.Watchable<A>
+}

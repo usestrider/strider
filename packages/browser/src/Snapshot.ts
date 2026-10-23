@@ -141,7 +141,27 @@ export interface NodeEncoded {
  * @category schemas
  * @since 0.1.0
  */
-export declare const Node: Schema.Codec<Node, NodeEncoded>
+export const Node: Schema.Codec<Node, NodeEncoded> = Schema.Struct({
+  ref: Schema.Option(RefId),
+  role: Schema.Union([
+    // A role is an open string (`AriaRole`): one added after this version still decodes
+    Schema.TaggedStruct("Aria", { role: Schema.String }),
+    Schema.TaggedStruct("Inferred", {
+      role: Schema.Literals(["clickable", "editable", "focusable"]),
+      evidence: Schema.NonEmptyArray(InteractivityEvidence)
+    })
+  ]),
+  name: Schema.Union([
+    Schema.TaggedStruct("Accessible", { value: Schema.String }),
+    Schema.TaggedStruct("Inferred", {
+      value: Schema.String,
+      from: Schema.Literals(["text", "title", "placeholder", "alt", "nearbyLabel"])
+    }),
+    Schema.TaggedStruct("None", {})
+  ]),
+  states: Schema.ReadonlySet(Schema.Literals(["checked", "expanded", "selected", "disabled", "focused", "pressed"])),
+  children: Schema.Array(Schema.suspend((): Schema.Codec<Node, NodeEncoded> => Node))
+})
 
 /**
  * The data of a snapshot: which document it describes, its tree, and its text rendering.

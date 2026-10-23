@@ -39,6 +39,11 @@ const html = (response: http.ServerResponse, body: string, status = 200) => {
 }
 
 const routes: Record<string, Route> = {
+  // Any page: its HTML is the `html` parameter
+  "/fixture": (request, response) =>
+    html(response, new URL(request.url ?? "/", "http://site").searchParams.get("html") ?? ""),
+  // An error page: a commit with a status of 404
+  "/missing": (_request, response) => html(response, `<title>missing</title><p>No such page</p>`, 404),
   "/204": (_request, response) => {
     response.writeHead(204)
     response.end()

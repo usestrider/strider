@@ -9,10 +9,12 @@ import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
 import { assertPinned, chromium } from "../browsers.ts"
 import { fixtures, record } from "../record.ts"
 import { conformance } from "./conformance.ts"
+import { engine } from "./engine.ts"
+import type { Backend } from "./harness.ts"
 
 const executable = chromium.executable
 
-conformance({
+const backend: Backend = {
   name: "Chromium (CDP)",
   connect: Effect.fnUntraced(function*(sink) {
     const { launched, transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
@@ -23,4 +25,7 @@ conformance({
     assertPinned("Chromium", adapter.info.version, chromium.version)
     return { adapter, kill: launched.handle.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore) }
   })
-})
+}
+
+conformance(backend)
+engine(backend)

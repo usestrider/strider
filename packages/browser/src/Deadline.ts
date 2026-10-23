@@ -12,13 +12,15 @@
  * @stability unstable
  * @since 0.1.0
  */
-import type * as Context from "effect/Context"
-import type * as Duration from "effect/Duration"
-import type * as Effect from "effect/Effect"
-import type * as Option from "effect/Option"
+import * as Context from "effect/Context"
+import * as Duration from "effect/Duration"
+import * as Effect from "effect/Effect"
+import { dual } from "effect/Function"
+import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Diagnostics from "./Diagnostics.ts"
+import { now } from "./internal/adapter.ts"
 import type * as MonotonicInstant from "./MonotonicInstant.ts"
 
 /**
@@ -53,10 +55,19 @@ import type * as MonotonicInstant from "./MonotonicInstant.ts"
  * @category combinators
  * @since 0.1.0
  */
-export declare const within: {
+export const within: {
   (duration: Duration.Input): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   <A, E, R>(self: Effect.Effect<A, E, R>, duration: Duration.Input): Effect.Effect<A, E, R>
-}
+} = dual(
+  2,
+  <A, E, R>(self: Effect.Effect<A, E, R>, duration: Duration.Input): Effect.Effect<A, E, R> =>
+    Effect.flatMap(CurrentDeadlineEffect, (enclosing) => {
+      const own =
+        (now() + Duration.toMillis(Duration.fromInputUnsafe(duration)) * 1e6) as MonotonicInstant.MonotonicInstant
+      const deadline = Option.match(enclosing, { onNone: () => own, onSome: (at) => Math.min(at, own) })
+      return Effect.provideService(self, CurrentDeadline, Option.some(deadline as MonotonicInstant.MonotonicInstant))
+    })
+)
 
 /**
  * Sets the budget an operation gets when no deadline encloses it.
@@ -72,10 +83,14 @@ export declare const within: {
  * @category combinators
  * @since 0.1.0
  */
-export declare const withDefaultBudget: {
+export const withDefaultBudget: {
   (duration: Duration.Input): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   <A, E, R>(self: Effect.Effect<A, E, R>, duration: Duration.Input): Effect.Effect<A, E, R>
-}
+} = dual(
+  2,
+  <A, E, R>(self: Effect.Effect<A, E, R>, duration: Duration.Input): Effect.Effect<A, E, R> =>
+    Effect.provideService(self, DefaultBudget, Duration.fromInputUnsafe(duration))
+)
 
 /**
  * Reads the time left before the enclosing deadline, or `None` when there is none.
@@ -84,7 +99,12 @@ export declare const withDefaultBudget: {
  * @category getters
  * @since 0.1.0
  */
-export declare const remaining: Effect.Effect<Option.Option<Duration.Duration>>
+export const remaining: Effect.Effect<Option.Option<Duration.Duration>> = Effect.suspend(() =>
+  Effect.map(
+    CurrentDeadlineEffect,
+    Option.map((at) => Duration.millis(Math.max(0, (at - now()) / 1e6)))
+  )
+)
 
 /**
  * Reference to the enclosing deadline, if any.
@@ -98,7 +118,12 @@ export declare const remaining: Effect.Effect<Option.Option<Duration.Duration>>
  * @category references
  * @since 0.1.0
  */
-export declare const CurrentDeadline: Context.Reference<Option.Option<MonotonicInstant.MonotonicInstant>>
+export const CurrentDeadline: Context.Reference<Option.Option<MonotonicInstant.MonotonicInstant>> = Context
+  .Reference<Option.Option<MonotonicInstant.MonotonicInstant>>("@usestrider/browser/Deadline/CurrentDeadline", {
+    defaultValue: () => Option.none()
+  })
+
+const CurrentDeadlineEffect = Effect.service(CurrentDeadline)
 
 /**
  * Reference to the budget an operation gets when no deadline encloses it; 30 seconds unless set.
@@ -107,7 +132,10 @@ export declare const CurrentDeadline: Context.Reference<Option.Option<MonotonicI
  * @category references
  * @since 0.1.0
  */
-export declare const DefaultBudget: Context.Reference<Duration.Duration>
+export const DefaultBudget: Context.Reference<Duration.Duration> = Context.Reference<Duration.Duration>(
+  "@usestrider/browser/Deadline/DefaultBudget",
+  { defaultValue: () => Duration.seconds(30) }
+)
 
 const TimeoutTypeId = "~@usestrider/browser/Deadline/Timeout"
 

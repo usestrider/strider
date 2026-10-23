@@ -3,7 +3,9 @@
 Instructions for agents writing code that uses Strider. `INDEX.md` in this package lists every declaration and member.
 The design and its reasons are in the repository: https://github.com/usestrider/strider.
 
-Strider is pre-release: the API is designed and type-checked, and the implementation is in progress.
+Strider is pre-release: the API is designed and type-checked, and the implementation is in progress. Launching,
+`Browser.newPage`, navigation, the queries, `click`, `Expect.toBeVisible` and `toBeHidden`, and `Deadline` work on
+every backend. A member that isn't built yet fails as the defect `NotBuilt`, naming itself.
 
 ## Shape
 

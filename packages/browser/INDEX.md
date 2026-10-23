@@ -1834,7 +1834,7 @@ The Chromium backend (`@usestrider/browser/chromium`): Chromium, Chrome and Edge
 
 *layers*
 
-- `const layer: (options: Browser.LaunchOptions) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>`
+- `const layer: (options: Browser.LaunchOptions) => Layer.Layer< Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
 - `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
 - `const layerConnect: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
 
@@ -1878,8 +1878,8 @@ The Firefox backend (`@usestrider/browser/firefox`): Firefox over WebDriver BiDi
 
 *layers*
 
-- `const layer: (options: Browser.LaunchOptions) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>`
-- `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
+- `const layer: (options: Browser.LaunchOptions) => Layer.Layer< Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Socket.WebSocketConstructor >`
+- `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Socket.WebSocketConstructor >`
 - `const layerConnect: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
 
 ## `@usestrider/browser/protocol`
@@ -2129,7 +2129,7 @@ The WebKit backend (`@usestrider/browser/webkit`): Playwright-patched WebKit bui
 
 *layers*
 
-- `const layer: (options: Browser.LaunchOptions) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>`
+- `const layer: (options: Browser.LaunchOptions) => Layer.Layer< Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
 - `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
 - `const layerAttach: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
 

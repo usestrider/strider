@@ -92,7 +92,9 @@ export interface Intercepted {
  */
 export type Handler<E, R> = (intercepted: Intercepted) => Effect.Effect<Decision, E, R>
 
-declare const _continue: Decision
+// A value, so its export needs a binding at run time. Routes aren't built, so nothing reads a decision yet, and
+// what each one carries is decided with them (PROTOCOL.md)
+const _continue: Decision = { [DecisionTypeId]: DecisionTypeId }
 
 export {
   /**

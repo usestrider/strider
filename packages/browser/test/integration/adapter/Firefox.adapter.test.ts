@@ -9,10 +9,12 @@ import * as FirefoxLauncher from "../../../src/internal/firefoxLauncher.ts"
 import { assertPinned, firefox } from "../browsers.ts"
 import { fixtures, record } from "../record.ts"
 import { conformance } from "./conformance.ts"
+import { engine } from "./engine.ts"
+import type { Backend } from "./harness.ts"
 
 const executable = firefox.executable
 
-conformance({
+const backend: Backend = {
   name: "Firefox (BiDi)",
   connect: Effect.fnUntraced(function*(sink) {
     const { launched, transport } = yield* FirefoxLauncher.launch({ executablePath: executable })
@@ -23,4 +25,7 @@ conformance({
     assertPinned("Firefox", adapter.info.version, firefox.version)
     return { adapter, kill: launched.handle.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore) }
   })
-})
+}
+
+conformance(backend)
+engine(backend)

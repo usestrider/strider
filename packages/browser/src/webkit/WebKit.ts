@@ -11,11 +11,16 @@
  * @since 0.1.0
  */
 import type * as Config from "effect/Config"
+import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import type * as Layer from "effect/Layer"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Socket from "effect/socket/Socket"
 import type * as Browser from "../Browser.ts"
+import * as BrowserImpl from "../internal/browser.ts"
+import * as LaunchOptions from "../internal/launchOptions.ts"
+import * as WebKitAdapter from "../internal/webkitAdapter.ts"
+import * as WebKitLauncher from "../internal/webkitLauncher.ts"
 import type * as Url from "../Url.ts"
 
 declare module "../Reason.ts" {
@@ -51,9 +56,20 @@ declare module "../Reason.ts" {
  * @category layers
  * @since 0.1.0
  */
-export declare const layer: (
+export const layer = (
   options: Browser.LaunchOptions
-) => Layer.Layer<Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem>
+): Layer.Layer<
+  Browser.Browser,
+  Browser.BrowserError,
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem
+> =>
+  BrowserImpl.layer((sink) =>
+    Effect.flatMap(
+      WebKitLauncher.launch(LaunchOptions.settings(options)),
+      ({ transport }) =>
+        WebKitAdapter.connect(transport, { sink, ownership: "launched", revision: WebKitLauncher.build.revision })
+    )
+  )
 
 /**
  * Launches the Playwright-patched WebKit build it names with options read from configuration, such as the
@@ -78,13 +94,13 @@ export declare const layer: (
  * @category layers
  * @since 0.1.0
  */
-export declare const layerConfig: (
+export const layerConfig = (
   options: Config.Wrap<Browser.LaunchOptions>
-) => Layer.Layer<
+): Layer.Layer<
   Browser.Browser,
   Browser.BrowserError | Config.ConfigError,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem
->
+> => LaunchOptions.fromConfig(options, layer)
 
 /**
  * Attaches to a stock WebKit target, such as Safari on iOS or a WKWebView, through its remote inspector.
