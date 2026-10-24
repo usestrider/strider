@@ -11,7 +11,8 @@ from the repository root.
 ## Layout
 
 - Design documents are at the root: `README.md` (goals, principles, status), `API.md` (L2, the public API),
-  `CONCEPTS.md` (L1, the native model), `PROTOCOL.md` (L0), `CLI.md` and `PROBES.md`.
+  `CONCEPTS.md` (L1, the native model), `PROTOCOL.md` (L0), `CLI.md` and `PROBES.md`. `QUIRKS.md` lists the weird
+  behaviors found while building, browsers' and our own, to reconsider once the library is built.
 - `reviews/` holds one design review per draft; `research/` holds prior-art notes; `upstream/` holds drafts of
   proposals for other projects, which the maintainer posts. Reviews and research are records of their time: don't
   rewrite them.
@@ -99,3 +100,7 @@ is `unstable`, or `experimental` for what rests on an upstream proposal or an in
 A change to the design starts as a review in `reviews/NN-….md`, committed on its own, and is then applied as a
 revision recorded in the README's Status. Keep the documents at even depth and never cut detail to balance them.
 Playwright and other prior art are evidence of what works, not a template.
+
+When a probe or a build turns up something weird (a browser behaving oddly or differently from the others, or a
+compromise in Strider it forced), add it to `QUIRKS.md` in the same commit, with the next number: what it is, where
+it was seen, what Strider does now, and what to reconsider. Entries are never removed, only marked resolved.

@@ -26,6 +26,7 @@ Each layer document has the same shape: purpose, top data models, interface sket
 | — | [CLI.md](CLI.md) | the command line: named sessions, commands, files, storage and forks, export |
 | L0 | [PROTOCOL.md](PROTOCOL.md) | transports, protocol clients, code generation, ingestion, backend adapters, capabilities |
 | — | [PROBES.md](PROBES.md) | conformance probes, hazard coverage, deterministic model tests |
+| — | [QUIRKS.md](QUIRKS.md) | weird behaviors found while building, browsers' and our own, to reconsider when the library is built |
 | — | [research/](research/) | prior-art notes (historical evidence) |
 | — | [reviews/](reviews/) | design reviews, one per draft |
 | — | [upstream/](upstream/) | drafts of proposals for upstream projects, for the maintainer to post |
