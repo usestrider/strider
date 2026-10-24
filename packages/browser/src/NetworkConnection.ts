@@ -23,7 +23,6 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
-import type * as Deferred from "./Deferred.ts"
 import * as Events from "./internal/events.ts"
 import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
@@ -88,12 +87,12 @@ const TypeId = "~@usestrider/browser/NetworkConnection"
  *
  * ```ts import.meta.vitest
  * import { Console, Effect, Stream } from "effect"
- * import { Deferred, NetworkConnection, Page } from "@usestrider/browser"
+ * import { NetworkConnection, Page } from "@usestrider/browser"
  *
  * const watchChat = Effect.fn("watchChat")(function*(page: Page.Page) {
  *   const opened = yield* NetworkConnection.next(page, { kind: "webSocket", url: "wss://chat.example.com/*" })
  *   yield* page.getByRole("button", { name: "Open chat" }).click()
- *   const chat = yield* Deferred.await(opened)
+ *   const chat = yield* opened
  *   const frames = yield* chat.frames
  *   yield* frames.pipe(Stream.take(3), Stream.runForEach((frame) => Console.log(frame.direction)))
  * })
@@ -210,7 +209,7 @@ export const next = <PE = never, PR = never>(
   filter?: Filter | undefined,
   where?: Subscription.Where<NetworkConnection, PE, PR> | undefined
 ): Effect.Effect<
-  Deferred.ReadonlyDeferred<NetworkConnection, PE | Target.TargetGone | Deadline.Timeout>,
+  Effect.Effect<NetworkConnection, PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
 > =>

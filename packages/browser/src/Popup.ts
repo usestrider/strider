@@ -15,7 +15,6 @@ import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
-import type * as Deferred from "./Deferred.ts"
 import * as Events from "./internal/events.ts"
 import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
@@ -77,12 +76,12 @@ const subscribe = <A, R>(
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Deferred, Dialog, Page, Popup } from "@usestrider/browser"
+ * import { Dialog, Page, Popup } from "@usestrider/browser"
  *
  * const connect = Effect.fn("connect")(function*(page: Page.Page) {
  *   const popups = yield* Popup.next(page)
  *   yield* page.getByText("Connect account").click()
- *   const popup = yield* Deferred.await(popups)
+ *   const popup = yield* popups
  *   yield* Dialog.handle(popup, Dialog.acceptAll)
  *   yield* popup.getByRole("button", { name: "Allow" }).click()
  * })
@@ -98,7 +97,7 @@ export const next: {
     filter?: Filter | undefined,
     where?: Subscription.Where<Page.Page, PE, PR> | undefined
   ): Effect.Effect<
-    Deferred.ReadonlyDeferred<Page.Page, PE | Target.TargetGone | Deadline.Timeout>,
+    Effect.Effect<Page.Page, PE | Target.TargetGone | Deadline.Timeout>,
     Subscription.SubscriptionError,
     Scope.Scope | PR
   >
@@ -107,7 +106,7 @@ export const next: {
     filter?: Filter | undefined,
     where?: Subscription.Where<Page.ObservedPage, PE, PR> | undefined
   ): Effect.Effect<
-    Deferred.ReadonlyDeferred<Page.ObservedPage, PE | Target.TargetGone | Deadline.Timeout>,
+    Effect.Effect<Page.ObservedPage, PE | Target.TargetGone | Deadline.Timeout>,
     Subscription.SubscriptionError,
     Scope.Scope | PR
   >

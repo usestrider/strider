@@ -153,7 +153,7 @@ it.effect("latches a response before it is awaited", () =>
     const page = yield* Browser.newPage()                                     // the first page plays the timeline
     const cart = yield* NetworkResponse.next(page, { url: "https://shop.example.com/api/cart" })   // subscribed at tick 0
     yield* TestClock.adjust("20 millis")                                      // the response arrives at tick 2
-    assert.include((yield* Deferred.await(cart)).url, "/api/cart")            // latched before the await
+    assert.include((yield* cart).url, "/api/cart")            // latched before the await
   }).pipe(Effect.provide(Browser.layerTest("--resp(cart)--commit--load--|"))))
 ```
 

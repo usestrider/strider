@@ -58,7 +58,7 @@ export interface CurrentSession {
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Deferred, Popup } from "@usestrider/browser"
+ * import { Popup } from "@usestrider/browser"
  * import { CurrentSession } from "@usestrider/browser/cli"
  *
  * export default Effect.gen(function*() {
@@ -66,7 +66,7 @@ export interface CurrentSession {
  *   const shop = yield* session.page("shop")
  *   const popups = yield* Popup.next(shop)
  *   yield* shop.getByText("Pay").click()
- *   const popup = yield* Deferred.await(popups)
+ *   const popup = yield* popups
  *   yield* popup.getByLabel("Card number").fill("4242 4242 4242 4242")
  *   return { popup }
  * })

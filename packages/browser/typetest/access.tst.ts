@@ -3,23 +3,23 @@
  * `pnpm test-types`.
  */
 import {
-  Deferred,
+  Deadline,
   Download,
   JSHandle,
   Locator,
   NetworkRequest,
   NetworkResponse,
   Page,
-  Snapshot
+  Snapshot,
+  Target
 } from "@usestrider/browser"
-import { Deferred as EffectDeferred, Effect, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { HttpIncomingMessage } from "effect/http"
 import { describe, expect, it } from "tstyche"
 
 declare const observed: Page.ObservedPage
 declare const reader: Page.ReadonlyPage
 declare const page: Page.Page
-declare const latched: Deferred.ReadonlyDeferred<number>
 declare const ref: Snapshot.RefId
 
 describe("access is typed", () => {
@@ -74,9 +74,12 @@ describe("inputs say what they mean", () => {
   })
 })
 
-describe("latched results are read-only", () => {
-  it("a latched result can't be completed by its reader", () => {
-    expect(EffectDeferred.succeed(latched, 1)).type.toRaiseError()
+describe("a wait is an effect", () => {
+  it("next's value is the wait, which fails only with the end of its target or its deadline", () => {
+    const downloads = Download.next(page)
+    expect<Effect.Success<Effect.Success<typeof downloads>>>().type.toBe<Download.Download>()
+    expect<Effect.Error<Effect.Success<typeof downloads>>>().type.toBe<Target.TargetGone | Deadline.Timeout>()
+    expect<Effect.Services<Effect.Success<typeof downloads>>>().type.toBe<never>()
   })
 })
 

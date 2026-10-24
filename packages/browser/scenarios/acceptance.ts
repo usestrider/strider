@@ -7,7 +7,6 @@ import {
   AriaPattern,
   Browser,
   Deadline,
-  Deferred,
   Dialog,
   Download,
   Expect,
@@ -43,14 +42,14 @@ export const loginOnce = Effect.gen(function*() {
 export const namedOutcome = Effect.fn("namedOutcome")(function*(page: Page.Page) {
   const orders = yield* PageNavigation.next(page, { url: "https://app.example.com/orders" }) // subscribed before the click
   yield* page.getByRole("link", { name: "Orders" }).click()
-  return yield* Deferred.await(orders)
+  return yield* orders
 })
 
 // 3. Popup with a dialog inside it
 export const popupWithDialog = Effect.fn("popupWithDialog")(function*(page: Page.Page) {
   const popups = yield* Popup.next(page)
   yield* page.getByText("Connect account").click()
-  const popup = yield* Deferred.await(popups) // a Page: the opener is controlled
+  const popup = yield* popups // a Page: the opener is controlled
   yield* Dialog.handle(popup, Dialog.acceptAll) // a dialog blocks its page, so the decision is registered first
   yield* popup.getByRole("button", { name: "Allow" }).click()
 })
@@ -64,7 +63,7 @@ export const decodedResponse = Effect.fn("decodedResponse")(function*(page: Page
     (response) => Effect.succeed(response.body.items.length > 0) // where: runs off the ingestion path
   )
   yield* page.getByRole("button", { name: "Add to cart" }).click()
-  const response = yield* Deferred.await(added)
+  const response = yield* added
   return response.body.items // typed by the schema
 })
 
@@ -72,7 +71,7 @@ export const decodedResponse = Effect.fn("decodedResponse")(function*(page: Page
 export const download = Effect.fn("download")(function*(page: Page.Page) {
   const next = yield* Download.next(page)
   yield* page.getByText("Export CSV").click()
-  const file = yield* Deferred.await(next)
+  const file = yield* next
   yield* file.saveAs("./export.csv")
 })
 
@@ -166,7 +165,7 @@ export const severalOutcomes = Effect.fn("severalOutcomes")(function*(page: Page
   const checkout = yield* Popup.next(page)
   const order = yield* NetworkResponse.next(page, { url: "https://app.example.com/api/order" })
   yield* page.getByRole("button", { name: "Pay" }).click()
-  return yield* Effect.all([Deferred.await(checkout), Deferred.await(order)]) // each latched, even if it arrived during the click
+  return yield* Effect.all([checkout, order]) // each latched, even if it arrived during the click
 })
 
 // 14. Watch state while doing other work
@@ -174,7 +173,7 @@ declare const renderProgress: (status: Download.Status) => Effect.Effect<void>
 export const watchState = Effect.fn("watchState")(function*(page: Page.Page) {
   const pdf = yield* Download.next(page).pipe(Deadline.within("2 minutes")) // the wait's budget, set where it starts
   yield* page.getByText("Export PDF").click()
-  const report = yield* Deferred.await(pdf)
+  const report = yield* pdf
   yield* report.status.changes.pipe(Stream.runForEach(renderProgress), Effect.forkScoped) // fork first: watching shows the present
   yield* page.status.waitFor((status) => status._tag === "Open" && status.document.readiness === "complete")
   yield* report.finished

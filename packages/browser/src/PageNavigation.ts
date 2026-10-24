@@ -18,7 +18,6 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
-import type * as Deferred from "./Deferred.ts"
 import * as Events from "./internal/events.ts"
 import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
@@ -182,12 +181,12 @@ const subscription = (target: Page.ObservedPage, filter: Filter | undefined, ope
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Deferred, Page, PageNavigation } from "@usestrider/browser"
+ * import { Page, PageNavigation } from "@usestrider/browser"
  *
  * const openOrders = Effect.fn("openOrders")(function*(page: Page.Page) {
  *   const orders = yield* PageNavigation.next(page, { url: "https://shop.example.com/orders" })
  *   yield* page.getByRole("link", { name: "Orders" }).click()
- *   return yield* Deferred.await(orders)
+ *   return yield* orders
  * })
  * ```
  *
@@ -200,7 +199,7 @@ export const next = <PE = never, PR = never>(
   filter?: NextFilter | undefined,
   where?: Subscription.Where<PageNavigation, PE, PR> | undefined
 ): Effect.Effect<
-  Deferred.ReadonlyDeferred<PageNavigation, Page.PageError | PE | Target.TargetGone | Deadline.Timeout>,
+  Effect.Effect<PageNavigation, Page.PageError | PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
 > =>

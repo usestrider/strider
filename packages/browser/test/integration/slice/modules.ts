@@ -11,7 +11,6 @@ import {
   Browser,
   BrowserWorker,
   ConsoleMessage,
-  Deferred,
   Download,
   Expect,
   FileChooser,
@@ -76,7 +75,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             yield* page.goto(url)
             const download = yield* Download.next(page)
             yield* page.getByText("Export CSV").click()
-            const file = yield* Deferred.await(download)
+            const file = yield* download
             yield* file.saveAs(saved)
             assert.strictEqual(fs.readFileSync(saved, "utf8"), "hello, download")
             assert.strictEqual(file.suggestedFilename, "hello.txt")
@@ -96,7 +95,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             yield* page.goto(url)
             const download = yield* Download.next(page)
             yield* page.getByText("Export").click()
-            return yield* Deferred.await(download)
+            return yield* download
           }).pipe(Scope.provide(scope))
           const bytes = yield* Stream.runCollect(file.stream)
           assert.strictEqual(Buffer.concat(Array.from(bytes)).toString("utf8"), "hello, download")
@@ -117,7 +116,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
               yield* page.goto(url)
               const download = yield* Download.next(page)
               yield* page.getByText("Slow").click()
-              const file = yield* Deferred.await(download)
+              const file = yield* download
               if (name === "Chromium") {
                 const progress = yield* file.status.waitFor((status) =>
                   status._tag === "InProgress" && Option.isSome(status.total)
@@ -152,7 +151,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             const choosers = yield* FileChooser.next(page)
             const handler = yield* FileChooser.handle(page, FileChooser.choose(FileInput.local(import.meta.filename)))
             yield* page.getByRole("button", { name: "Upload" }).click()
-            assert.deepStrictEqual(yield* Deferred.await(choosers), { _tag: "Single" })
+            assert.deepStrictEqual(yield* choosers, { _tag: "Single" })
             yield* page.getByText("modules.ts").pipe(Expect.toBeVisible)
             assert.strictEqual(yield* handler.handled, 1)
             assert.strictEqual((yield* FileChooser.history(page, { multiple: false })).entries.length, 1)
@@ -167,7 +166,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             yield* page.goto(url)
             const decisions = yield* AutoResolution.next(page, { subject: "FileChooser" })
             yield* page.getByRole("button", { name: "Upload" }).click()
-            const decided = yield* Deferred.await(decisions)
+            const decided = yield* decisions
             assert.deepStrictEqual(decided.subject, { _tag: "FileChooser" })
             assert.strictEqual(decided.decision, "cancel")
             assert.strictEqual(decided.policy, `fileChoosers: "cancel"`)
@@ -185,7 +184,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             const handler = yield* FileChooser.handle(page, FileChooser.choose(both))
             const decisions = yield* AutoResolution.next(page)
             yield* page.getByRole("button", { name: "Upload" }).click()
-            assert.strictEqual((yield* Deferred.await(decisions)).decision, "cancel")
+            assert.strictEqual((yield* decisions).decision, "cancel")
             assert.strictEqual(yield* handler.handled, 0)
           }))
         }), timeout)
@@ -207,14 +206,14 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
               const errors = yield* ConsoleMessage.next(page, { level: "error", text: /bad/ })
               const fromWorker = yield* ConsoleMessage.next(page.context, { text: "from the worker" })
               yield* page.getByText("Log").click()
-              const message = yield* Deferred.await(errors)
+              const message = yield* errors
               assert.strictEqual(message.text, "bad thing")
               assert.deepStrictEqual(message.origin, { _tag: "Page", page: page.id })
               const location = Option.getOrThrow(message.location)
               assert.strictEqual(location.line, 1, "1-based, on the page's one line")
               assert.isAbove(location.column, 1)
               yield* page.getByText("Work").click()
-              const worker = yield* Deferred.await(fromWorker)
+              const worker = yield* fromWorker
               // Firefox attributes a dedicated worker's console to its page (its `console` capability)
               assert.strictEqual(worker.origin._tag, name === "Firefox" ? "Page" : "Worker")
               const history = yield* ConsoleMessage.history(page.context)
@@ -246,12 +245,12 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
               yield* page.getByText("Throw").click()
               yield* page.getByText("Reject").click()
               yield* page.getByText("Raw").click()
-              const error = yield* Deferred.await(thrown)
+              const error = yield* thrown
               assert.strictEqual(error.name, "TypeError")
               assert.strictEqual(error.kind, name === "Firefox" ? "unknown" : "thrown")
-              const rejection = yield* Deferred.await(rejected)
+              const rejection = yield* rejected
               assert.strictEqual(rejection.kind, name === "Firefox" ? "unknown" : "unhandledRejection")
-              const value = yield* Deferred.await(raw)
+              const value = yield* raw
               assert.deepStrictEqual([value.name, value.message], ["Error", "a string"])
               const history = yield* UncaughtException.history(page)
               Schema.encodeUnknownSync(Subscription.History(UncaughtException.UncaughtException))(history)
@@ -271,7 +270,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             yield* page.goto(url)
             const orders = yield* PageNavigation.next(page, { url: `${origin}/orders` })
             yield* page.getByRole("link", { name: "Orders" }).click()
-            const navigation = yield* Deferred.await(orders)
+            const navigation = yield* orders
             assert(navigation._tag === "Committed", navigation._tag)
             assert.strictEqual(navigation.url, `${origin}/orders`)
             assert.strictEqual(Option.getOrThrow(navigation.response).status, 200)
@@ -288,7 +287,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
               yield* page.goto(url)
               const fragment = yield* PageNavigation.next(page, { url: `${url}#details` })
               yield* page.getByRole("link", { name: "Details" }).click()
-              const navigation = yield* Deferred.await(fragment)
+              const navigation = yield* fragment
               assert(navigation._tag === "SameDocument", navigation._tag)
               assert.strictEqual(navigation.via, "fragment")
               const history = yield* PageNavigation.history(page)
@@ -321,7 +320,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             yield* page.goto(url)
             const broken = yield* PageNavigation.next(page, { url: `http://127.0.0.1:${port}/*` })
             yield* page.getByRole("link", { name: "Broken" }).click()
-            const error = yield* Deferred.await(broken).pipe(Effect.flip)
+            const error = yield* broken.pipe(Effect.flip)
             assert(Page.isPageError(error), String(error))
             assert.strictEqual(error.reason._tag, "NavigationFailed")
             assert.strictEqual(error.operation, "PageNavigation.next")
@@ -338,7 +337,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             yield* page.goto(url)
             const loaded = yield* PageNavigation.next(page, { url: `${origin}/fixture*`, waitUntil: "load" })
             yield* page.getByRole("link", { name: "Slow" }).click()
-            yield* Deferred.await(loaded)
+            yield* loaded
             const status = yield* page.status
             assert(status._tag === "Open")
             assert.strictEqual(status.document.readiness, "complete")
@@ -368,7 +367,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             assert.strictEqual(second!.url, `${origin}/json?from=frame`)
             assert(second!.initiator._tag === "Document")
             assert.notStrictEqual(second!.initiator.navigable, page.id, "the frame's document made it")
-            assert.strictEqual((yield* Deferred.await(one)).hop, first!.hop)
+            assert.strictEqual((yield* one).hop, first!.hop)
             const replay = NetworkRequest.toHttpClientRequest(first!)
             assert.deepStrictEqual([replay.method, replay.url], ["GET", `${origin}/json`])
           }))
@@ -387,7 +386,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
               (response) => Effect.succeed(response.body.items.length > 0)
             )
             yield* page.getByRole("button", { name: "Add to cart" }).click()
-            const response = yield* Deferred.await(added)
+            const response = yield* added
             assert.deepStrictEqual(response.body.items, [{ id: "tea" }])
             assert.strictEqual(response.status, 200)
             assert.deepStrictEqual(yield* response.json, { items: [{ id: "tea" }] })
@@ -411,11 +410,11 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             })
             const landed = yield* NetworkResponse.next(page, { url: `${origin}/landed`, status: 200 })
             yield* page.getByText("Go").click()
-            const error = yield* Deferred.await(hop).pipe(Effect.flip)
+            const error = yield* hop.pipe(Effect.flip)
             assert(NetworkResponse.isResponseError(error), String(error))
             assert(error.reason._tag === "BodyUnavailable")
             assert.strictEqual(error.reason.why, "redirect")
-            assert.strictEqual((yield* Deferred.await(landed)).status, 200)
+            assert.strictEqual((yield* landed).status, 200)
           }))
         }), timeout)
 
@@ -451,7 +450,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
               yield* page.goto(url)
               const started = yield* BrowserWorker.next(page)
               yield* page.getByText("Start").click()
-              const worker = yield* Deferred.await(started)
+              const worker = yield* started
               assert.deepStrictEqual([worker.kind, worker.url], ["dedicated", `${origin}/worker.js`])
               assert.isTrue((yield* page.workers).includes(worker))
               assert.isTrue((yield* page.context.workers).includes(worker))
@@ -477,17 +476,20 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(url)
-            const invalid = yield* BrowserWorker.next(page, { kind: "service" }).pipe(Effect.flip)
+            const invalid = yield* BrowserWorker.next(page, { kind: "service" }).pipe(Effect.asVoid, Effect.flip)
             assert.strictEqual(invalid.reason._tag, "InvalidInput", "a page's workers are dedicated")
             if (name !== "Chromium") {
-              const error = yield* BrowserWorker.next(page.context, { kind: "service" }).pipe(Effect.flip)
+              const error = yield* BrowserWorker.next(page.context, { kind: "service" }).pipe(
+                Effect.asVoid,
+                Effect.flip
+              )
               assert(error.reason._tag === "Unsupported", String(error))
               assert.strictEqual(error.reason.capability, "workers.service")
               return
             }
             const registered = yield* BrowserWorker.next(page.context, { kind: "service" })
             yield* page.getByText("Register").click()
-            const worker = yield* Deferred.await(registered)
+            const worker = yield* registered
             assert.deepStrictEqual([worker.kind, worker.url], ["service", `${origin}/sw.js`])
           }))
         }), timeout)
@@ -508,7 +510,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             yield* page.goto(url)
             if (name === "Firefox") {
               const reads: ReadonlyArray<Effect.Effect<unknown, Subscription.SubscriptionError, Scope.Scope>> = [
-                NetworkConnection.next(page),
+                NetworkConnection.next(page).pipe(Effect.asVoid),
                 NetworkConnection.history(page)
               ]
               for (const read of reads) {
@@ -520,7 +522,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             }
             const opened = yield* NetworkConnection.next(page, { kind: "webSocket" })
             yield* page.getByText("Open").click()
-            const socket = yield* Deferred.await(opened)
+            const socket = yield* opened
             assert.strictEqual(socket.kind, "webSocket")
             assert.match(socket.url, /^ws:\/\/127\.0\.0\.1:\d+\/ws$/)
             const frames = yield* socket.frames
@@ -545,13 +547,16 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             const page = yield* Browser.newPage()
             yield* page.goto(url)
             if (name !== "Chromium") {
-              const error = yield* NetworkConnection.next(page, { kind: "eventSource" }).pipe(Effect.flip)
+              const error = yield* NetworkConnection.next(page, { kind: "eventSource" }).pipe(
+                Effect.asVoid,
+                Effect.flip
+              )
               assert(error.reason._tag === "Unsupported", String(error))
               return
             }
             const opened = yield* NetworkConnection.next(page, { kind: "eventSource" })
             yield* page.getByText("Listen").click()
-            const source = yield* Deferred.await(opened)
+            const source = yield* opened
             const frames = yield* source.frames
             // Chromium reports the connection with its first message, so the frames from now on start at the second
             const [frame] = Array.from(yield* frames.pipe(Stream.take(1), Stream.runCollect))

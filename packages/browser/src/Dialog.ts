@@ -18,7 +18,6 @@ import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
 import type * as Declaration from "./Declaration.ts"
-import type * as Deferred from "./Deferred.ts"
 import type * as Adapter from "./internal/adapter.ts"
 import * as Events from "./internal/events.ts"
 import * as Handlers from "./internal/handlers.ts"
@@ -224,7 +223,7 @@ export const next = <PE = never, PR = never>(
   filter?: Filter | undefined,
   where?: Subscription.Where<Dialog, PE, PR> | undefined
 ): Effect.Effect<
-  Deferred.ReadonlyDeferred<Dialog, PE | Target.TargetGone | Deadline.Timeout>,
+  Effect.Effect<Dialog, PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
 > =>

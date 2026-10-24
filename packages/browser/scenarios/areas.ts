@@ -1,14 +1,5 @@
 /** Call sites for the areas beyond the acceptance scenarios: input, frames, storage, workers, reads, tests. */
-import {
-  Browser,
-  BrowserWorker,
-  Deadline,
-  Deferred,
-  Download,
-  FileInput,
-  NetworkConnection,
-  Page
-} from "@usestrider/browser"
+import { Browser, BrowserWorker, Deadline, Download, FileInput, NetworkConnection, Page } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
 import { Chromium } from "@usestrider/browser/chromium"
 import { VitestBrowser } from "@usestrider/browser/test/vitest"
@@ -56,9 +47,9 @@ export const workersAndSockets = Effect.fn("workersAndSockets")(function*(page: 
   const worker = yield* BrowserWorker.next(page)
   const socket = yield* NetworkConnection.next(page, { kind: "webSocket", url: "wss://chat.example.com/*" })
   yield* page.getByRole("button", { name: "Start sync" }).click()
-  const syncWorker = yield* Deferred.await(worker) // a BrowserWorker: the page is controlled
+  const syncWorker = yield* worker // a BrowserWorker: the page is controlled
   const count = yield* syncWorker.evaluate(() => 42)
-  const chat = yield* Deferred.await(socket)
+  const chat = yield* socket
   const chatFrames = yield* chat.frames
   yield* chatFrames.pipe(Stream.take(3), Stream.runForEach((frame) => Console.log(frame.direction)))
   return count
@@ -81,7 +72,7 @@ export const reads = Effect.fn("reads")(function*(page: Page.Page) {
 export const deadlines = Effect.fn("deadlines")(function*(page: Page.Page) {
   const report = yield* Download.next(page).pipe(Deadline.within("2 minutes"))
   yield* page.getByText("Export").click()
-  yield* Deferred.await(report)
+  yield* report
   return yield* Deadline.remaining
 }, Deadline.withDefaultBudget("1 minute"))
 
@@ -104,5 +95,5 @@ export const testProgram = Effect.scoped(Effect.gen(function*() {
 export const fakeTimeline = Effect.scoped(Effect.gen(function*() {
   const page = yield* Browser.newPage()
   const cart = yield* Download.next(page)
-  return yield* Deferred.await(cart)
+  return yield* cart
 })).pipe(Effect.provide(Browser.layerTest("--download(report)--|")))

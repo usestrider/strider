@@ -20,7 +20,6 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
-import type * as Deferred from "./Deferred.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as FileInput from "./FileInput.ts"
 import type * as FilePath from "./FilePath.ts"
@@ -87,12 +86,12 @@ const TypeId = "~@usestrider/browser/Download"
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
- * import { Deferred, Download, Page } from "@usestrider/browser"
+ * import { Download, Page } from "@usestrider/browser"
  *
  * const exportCsv = Effect.fn("exportCsv")(function*(page: Page.Page) {
  *   const next = yield* Download.next(page)
  *   yield* page.getByText("Export CSV").click()
- *   const file = yield* Deferred.await(next)
+ *   const file = yield* next
  *   yield* file.saveAs("./export.csv")
  * })
  * ```
@@ -200,7 +199,7 @@ export const next = <PE = never, PR = never>(
   filter?: Filter | undefined,
   where?: Subscription.Where<Download, PE, PR> | undefined
 ): Effect.Effect<
-  Deferred.ReadonlyDeferred<Download, PE | Target.TargetGone | Deadline.Timeout>,
+  Effect.Effect<Download, PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
 > =>

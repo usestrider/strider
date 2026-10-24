@@ -24,7 +24,6 @@ import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
 import type * as Declaration from "./Declaration.ts"
-import type * as Deferred from "./Deferred.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as FileInput from "./FileInput.ts"
 import type * as Adapter from "./internal/adapter.ts"
@@ -158,7 +157,7 @@ export const next = <PE = never, PR = never>(
   filter?: Filter | undefined,
   where?: Subscription.Where<FileChooser, PE, PR> | undefined
 ): Effect.Effect<
-  Deferred.ReadonlyDeferred<FileChooser, PE | Target.TargetGone | Deadline.Timeout>,
+  Effect.Effect<FileChooser, PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
 > =>

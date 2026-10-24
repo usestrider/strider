@@ -323,7 +323,7 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *Seen:* review 14's revision.
 - *Reconsider:* moving the navigation reasons out of `PageNavigation`, or the `PageError` constructor out of `Page`, so the import is direct.
 
-**Q60. Unbuilt module functions are erased, so some are odd stubs** (Ours). Node erases a `declare const`, so a module that used one as it loaded failed to load. `Deferred.await` was a `NotBuilt` function until review 13, and `Route.continue` is a decision nothing reads yet.
+**Q60. Unbuilt module functions are erased, so some are odd stubs** (Ours). Node erases a `declare const`, so a module that used one as it loaded failed to load. `Deferred.await` was a `NotBuilt` function until review 13 (the module is gone since review 15), and `Route.continue` is a decision nothing reads yet.
 - *Seen:* review 12's slice; `test/Modules.test.ts`.
 - *Reconsider:* goes away as modules are built.
 

@@ -4,9 +4,10 @@
  * Each event type is its own module (`Download`, `Popup`, `NetworkResponse`, …) with the same three verbs
  * (principle 5, "Waits look forward; reads look back"):
  *
- * - `next(target, filter?, where?)` subscribes by the time its effect returns and hands back the first match
- *   as a `ReadonlyDeferred`. Code order is subscription order, so call it before the action that causes the
- *   event. It keeps what arrives until its first match or its deadline.
+ * - `next(target, filter?, where?)` subscribes by the time its effect returns and hands back the wait: an
+ *   effect whose value is the first match, the same each time it runs. Code order is subscription order, so call
+ *   it before the action that causes the event. It keeps what arrives until its first match or its deadline,
+ *   which starts at `next`.
  * - `stream(target, filter?, where?)` subscribes the same way and emits every match from then on, buffering
  *   at most `Capacity` events for a consumer that falls behind.
  * - `history(target, filter?)` reads what already happened from a bounded log and never waits. Its filter is

@@ -30,7 +30,7 @@ capability. A member that isn't built yet fails as the defect `NotBuilt`, naming
   const exportCsv = Effect.fn("exportCsv")(function*(page: Page.Page) {
     const download = yield* Download.next(page)
     yield* page.getByText("Export CSV").click()
-    return yield* Deferred.await(download)
+    return yield* download
   })
   ```
   `history` reads what already happened and never waits.

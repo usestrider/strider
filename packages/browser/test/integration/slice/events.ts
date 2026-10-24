@@ -10,7 +10,6 @@ import {
   AutoResolution,
   Browser,
   Deadline,
-  Deferred,
   Dialog,
   Expect,
   Locator,
@@ -71,7 +70,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             yield* page.goto(url)
             const popups = yield* Popup.next(page)
             yield* page.getByText("Connect account").click()
-            const popup = yield* Deferred.await(popups)
+            const popup = yield* popups
             const handler = yield* Dialog.handle(popup, Dialog.acceptAll)
             yield* popup.getByRole("button", { name: "Allow" }).click()
             yield* popup.getByText("Connected").pipe(Expect.toBeVisible)
@@ -97,7 +96,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             // The opener of a popup may be in the background now, rendering nothing: bring it back, explicitly
             yield* page.activate
             yield* page.getByText("Second").click()
-            const popup = yield* Deferred.await(second)
+            const popup = yield* second
             const at = yield* popup.url.waitFor((each) => each.includes("/child"))
             assert.strictEqual(at, `${origin}/child?second`)
             assert.strictEqual((yield* Popup.history(page)).entries.length, 2)
@@ -113,9 +112,9 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             yield* page.goto(url)
             const first = yield* Popup.next(page)
             yield* page.getByText("Connect account").click()
-            yield* Deferred.await(first)
+            yield* first
             const late = yield* Popup.next(page).pipe(Deadline.within("300 millis"))
-            const error = yield* Deferred.await(late).pipe(Effect.flip)
+            const error = yield* late.pipe(Effect.flip)
             assert(Deadline.isTimeout(error), String(error))
             assert.strictEqual(error.phase, "waitingForEvent")
             const hint = Option.getOrElse(error.hint, () => "")
@@ -132,7 +131,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             yield* page.goto(url)
             const popups = yield* Popup.next(page)
             yield* page.getByText("Connect account").click()
-            return yield* Deferred.await(popups)
+            return yield* popups
           }).pipe(Scope.provide(scope))
           assert.strictEqual((yield* popup.status)._tag, "Open")
           yield* Scope.close(scope, Exit.void)
@@ -147,7 +146,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             yield* page.goto(url)
             const popups = yield* Popup.next(page)
             yield* page.close()
-            const error = yield* Deferred.await(popups).pipe(Effect.flip)
+            const error = yield* popups.pipe(Effect.flip)
             assert(Target.isTargetGone(error), String(error))
             assert.deepStrictEqual(error.reason, { _tag: "PageClosed", by: "command" })
           }))
@@ -162,10 +161,10 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             const dialogs = yield* Dialog.next(page)
             const decisions = yield* AutoResolution.next(page)
             yield* page.getByText("Ask").click()
-            const dialog = yield* Deferred.await(dialogs)
+            const dialog = yield* dialogs
             assert(dialog._tag === "Confirm")
             assert.strictEqual(dialog.message, "Sure?")
-            const decided = yield* Deferred.await(decisions)
+            const decided = yield* decisions
             assert.deepStrictEqual(decided.subject, { _tag: "Dialog", kind: "Confirm", message: "Sure?" })
             assert.strictEqual(decided.decision, "dismiss")
             assert.strictEqual(decided.policy, `dialogs: "dismiss"`)
@@ -183,7 +182,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             const handler = yield* Dialog.handle(page, () => Effect.fail("no answer"))
             const decisions = yield* AutoResolution.next(page)
             yield* page.getByText("Ask").click()
-            assert.strictEqual((yield* Deferred.await(decisions)).decision, "dismiss")
+            assert.strictEqual((yield* decisions).decision, "dismiss")
             yield* page.getByText("false", { exact: true }).pipe(Expect.toBeVisible)
             assert.strictEqual(yield* handler.handled, 0)
           }))

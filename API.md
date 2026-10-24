@@ -1,6 +1,6 @@
 # API: the ergonomic layer (L2)
 
-*Revision 5.25, 2026-10-19. The first slice is built (2026-10-22, after [review 12](reviews/12-l1-first-slice.md)): each backend's `layer`, `Browser.newPage` and `newContext`, `goto`, `reload`, `back`, `forward` and `close`, the queries, `click`, `Expect.toBeVisible` and `toBeHidden`, and `Deadline`; and events (2026-10-23, after [review 13](reviews/13-events-slice.md)): `Popup`, `Dialog` with `Dialog.handle`, `AutoResolution`, `Subscription.Capacity` and `Deferred`. A member that isn't built yet fails as the defect `NotBuilt`, and [PROTOCOL.md](PROTOCOL.md) (Status) lists what is. The full signatures live in the package's source, [packages/browser/src/](packages/browser/src/), declarations where nothing is built yet (the sketch), with each declaration's own contract in its JSDoc. It type-checks against Effect 4.0.6 and passes Effect's own JSDoc checker, and the API reference is generated from it ([packages/browser/INDEX.md](packages/browser/INDEX.md) lists every declaration and member). This document keeps the design: the contracts that span declarations, and the excerpts that explain them. Where an excerpt and the sketch differ, the sketch is right. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
+*Revision 5.25, 2026-10-19. The first slice is built (2026-10-22, after [review 12](reviews/12-l1-first-slice.md)): each backend's `layer`, `Browser.newPage` and `newContext`, `goto`, `reload`, `back`, `forward` and `close`, the queries, `click`, `Expect.toBeVisible` and `toBeHidden`, and `Deadline`; and events (2026-10-23, after [review 13](reviews/13-events-slice.md)): `Popup`, `Dialog` with `Dialog.handle`, `AutoResolution` and `Subscription.Capacity`; and every other event module (2026-10-23, after [review 14](reviews/14-event-modules.md)), whose `next` hands out the wait as an `Effect` (review 15). A member that isn't built yet fails as the defect `NotBuilt`, and [PROTOCOL.md](PROTOCOL.md) (Status) lists what is. The full signatures live in the package's source, [packages/browser/src/](packages/browser/src/), declarations where nothing is built yet (the sketch), with each declaration's own contract in its JSDoc. It type-checks against Effect 4.0.6 and passes Effect's own JSDoc checker, and the API reference is generated from it ([packages/browser/INDEX.md](packages/browser/INDEX.md) lists every declaration and member). This document keeps the design: the contracts that span declarations, and the excerpts that explain them. Where an excerpt and the sketch differ, the sketch is right. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
 
 ## Purpose
 
@@ -35,7 +35,7 @@ The README's principles, as they apply to this layer, written the way Effect's o
 **Lifetimes**
 - **Anything with a lifecycle requires `Scope`:** contexts, pages, access upgrades, handles, capability handles and every declaration (routes, dialog and file-chooser handlers, init scripts, overrides, grants, clocks). Values with no remote lifetime (locators, snapshots, captured bodies, storage state) need none. Seeing an event acquires nothing: a popup belongs to the scope that acquired its opener, and a download's file to its context.
 - **Every scoped acquisition returns a handle,** never `void`, with an idempotent `remove` and, where useful, state such as `hits: Watchable<number>`. Releasing early (`page.close()`, `remove`) makes the finalizer a no-op.
-- **No public fibers, and no writable `Deferred`s or `Ref`s.** The library never forks for you; fork your own consumers with `Effect.forkScoped`. A latched result is handed out as a `ReadonlyDeferred`.
+- **No public fibers, and no writable `Deferred`s or `Ref`s.** The library never forks for you; fork your own consumers with `Effect.forkScoped`. A latched result is handed out as an `Effect` that reads it (review 15).
 - **No platform services at call sites.** They appear only in the launch and connect layers, so `Scope` (and `Browser`, for the accessors) is all an ordinary call site requires.
 
 **Values and types**
@@ -599,8 +599,8 @@ interface Watchable<A> extends Effect<A> {               // yield* reads the cur
 }
 
 // every event module has these three verbs; T: targets, A: the event, F: the module's Filter
-declare const next: <PE = never, PR = never>(target: T, filter?: F, where?: Subscription.Where<A, PE, PR>) =>   // subscribed when this returns; await with Deferred.await
-  Effect<ReadonlyDeferred<A, PE | TargetGone | Timeout>, Subscription.SubscriptionError, Scope | PR>
+declare const next: <PE = never, PR = never>(target: T, filter?: F, where?: Subscription.Where<A, PE, PR>) =>   // subscribed when this returns; its value is the wait
+  Effect<Effect<A, PE | TargetGone | Timeout>, Subscription.SubscriptionError, Scope | PR>   // run the wait for the first match, latched
 declare const stream: <PE = never, PR = never>(target: T, filter?: F, where?: Subscription.Where<A, PE, PR>) =>   // every match from now on
   Effect<Stream<A, PE | EventOverflow | TargetGone>, Subscription.SubscriptionError, Scope | PR>
 declare const history: (target: T, filter?: F) =>   // every retained match; a read, so no where
@@ -650,7 +650,8 @@ Each module has the most specific accurate name, with a prefix only where a bare
 - **Events reveal resources; they don't acquire them.** `Popup.next` and `Popup.history` return the same handle, owned by the scope that acquired its opener; the `Scope` on `next` and `stream` holds only the subscription. Popups of owned pages are owned, and popups of attached pages stay open.
 - **A popup is reported when it appears** (review 13). Every browser reports a popup before it loads, as `about:blank` (or Chromium's `""`), and the URL it was opened for with its first navigation. So the event comes at once, with its `Page`, and a handler or a route registered on it then is in place for its first document. A `url` filter matches the URL of the first navigation, and a popup that never navigates matches no pattern. A popup whose opener the backend didn't name reaches no page's subscriptions; it is still in its context's `pages`, which hands out the same `Page`.
 - **The opener goes to the background.** When a popup opens, Chromium and Firefox report the opener `hidden`, and headless Chromium renders no frames for it, so an action on the opener waits for frames that don't come and times out with `NoRenderingOpportunity`, whose hint names `page.activate`. The library doesn't activate pages behind the caller's back (rule 23).
-- **A wait's deadline is set where the wait starts.** `next` hands out the read side of the `Deferred` that latches the first match (a `ReadonlyDeferred`, proposed upstream: upstream/effect-readonly-deferred.md; until then the `Deferred` module of this package declares it, `@stability experimental`). Its timer comes from the deadline in force at `next`, so the budget is stated where the wait begins: `Download.next(page).pipe(Deadline.within("2 minutes"))`. Time spent in your own steps before you await counts against it. Awaiting always ends: in the match, in `TargetGone` as soon as the owner ends, or in `Timeout`, which fails the deferred rather than interrupting it, because interruption means the caller cancelled. If upstream declines the type, `next` returns the awaiting `Effect` instead, with the same timing.
+- **`next` hands out the wait, an `Effect`** (review 15). Running `next` subscribes; running its value, the wait, gives the first match: `const popup = yield* popups`. The wait is latched, so running it again gives the same result, and it is all a caller ever does with it, which is why it isn't a `Deferred` (revision 5.23 handed out a `ReadonlyDeferred`, proposed upstream; the proposal is withdrawn). Effect has the same shape in `Effect.cached`. Interrupting a wait interrupts that wait only; the subscription lasts until its scope closes, and the scope closing before a match interrupts the wait.
+- **A wait's deadline is set where the wait starts.** Its timer comes from the deadline in force at `next`, so the budget is stated where the wait begins: `Download.next(page).pipe(Deadline.within("2 minutes"))`. Time spent in your own steps before you run the wait counts against it. A wait always ends: in the match, in `TargetGone` as soon as the owner ends, or in `Timeout`, which fails it rather than interrupting it, because interruption means the caller cancelled.
 - **Results outlive the subscription.** A captured response body is owned bytes, so it survives the subscription and even the page closing.
 - **Event streams end** normally when their owner ends normally or the acquiring scope closes. They fail with `TargetGone` on an abnormal end, and with `EventOverflow` past their bound, so both are in every event stream's error type.
 
@@ -1023,13 +1024,13 @@ const page = yield* Browser.newPage({ storageState: yield* Schema.decodeEffect(S
 const namedOutcome = Effect.fn("namedOutcome")(function*(page: Page.Page) {
   const orders = yield* PageNavigation.next(page, { url: "https://app.example.com/orders" })   // subscribed before the click
   yield* page.getByRole("link", { name: "Orders" }).click()
-  return yield* Deferred.await(orders)
+  return yield* orders
 })
 
 // 3. Popup with a dialog inside it
 const popups = yield* Popup.next(page)
 yield* page.getByText("Connect account").click()
-const popup = yield* Deferred.await(popups)              // a Page, owned by the scope that acquired `page`
+const popup = yield* popups              // a Page, owned by the scope that acquired `page`
 yield* Dialog.handle(popup, Dialog.acceptAll)            // a dialog blocks its page, so the decision is registered first
 yield* popup.getByRole("button", { name: "Allow" }).click()
 
@@ -1038,12 +1039,12 @@ const added = yield* NetworkResponse.next(page,
   { url: "https://app.example.com/api/cart", method: "POST", body: HttpIncomingMessage.schemaBodyJson(Cart) },
   (response) => Effect.succeed(response.body.items.length > 0))   // where: typed from the decoded body
 yield* page.getByRole("button", { name: "Add to cart" }).click()
-const response = yield* Deferred.await(added)            // CapturedResponse<Cart>
+const response = yield* added            // CapturedResponse<Cart>
 
 // 5. Download
 const download = yield* Download.next(page)
 yield* page.getByText("Export CSV").click()
-const file = yield* Deferred.await(download)
+const file = yield* download
 yield* file.saveAs("./export.csv")
 
 // 6. Concurrent pages, settings isolated by context
@@ -1091,12 +1092,12 @@ yield* page.getByRole("button", { name: "Pay" }).click().pipe(Deadline.within("5
 const checkout = yield* Popup.next(page)
 const order = yield* NetworkResponse.next(page, { url: "https://app.example.com/api/order" })
 yield* page.getByRole("button", { name: "Pay" }).click()
-const [tab, placed] = yield* Effect.all([Deferred.await(checkout), Deferred.await(order)])   // each latched, even if it arrived during the click
+const [tab, placed] = yield* Effect.all([checkout, order])   // each latched, even if it arrived during the click
 
 // 14. Watch state while doing other work
 const pdf = yield* Download.next(page).pipe(Deadline.within("2 minutes"))   // the wait's budget, set where it starts
 yield* page.getByText("Export PDF").click()
-const report = yield* Deferred.await(pdf)
+const report = yield* pdf
 yield* report.status.changes.pipe(Stream.runForEach(renderProgress), Effect.forkScoped)   // fork first: watching shows the present
 yield* page.status.waitFor((status) => status._tag === "Open" && status.document.readiness === "complete")
 yield* report.finished

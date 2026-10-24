@@ -2,6 +2,8 @@
 
 *Draft, 2026-10-19, for the maintainer to post. Not posted. Written against Effect `main` at `93abf0208`.*
 
+> **Withdrawn, 2026-10-23** ([review 15](../reviews/15-next-returns-an-effect.md)). Strider's `next` now hands out `Deferred.await(deferred)`, an `Effect`: every caller only ever awaited the result, so the read side bought nothing it needed. Kept as a record; not to be posted.
+
 ## Problem
 
 A library that latches a result for its caller (the first matching event, a completed handshake, a resource that becomes ready) has two options today:

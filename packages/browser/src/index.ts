@@ -72,12 +72,6 @@ export * as Deadline from "./Deadline.ts"
 export * as Declaration from "./Declaration.ts"
 
 /**
- * @stability experimental
- * @since 0.1.0
- */
-export * as Deferred from "./Deferred.ts"
-
-/**
  * @stability unstable
  * @since 0.1.0
  */

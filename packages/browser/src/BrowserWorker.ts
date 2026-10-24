@@ -19,7 +19,6 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
-import type * as Deferred from "./Deferred.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import * as Events from "./internal/events.ts"
 import * as Filters from "./internal/filters.ts"
@@ -179,7 +178,7 @@ export const next: {
     filter?: Filter | undefined,
     where?: Subscription.Where<BrowserWorker, PE, PR> | undefined
   ): Effect.Effect<
-    Deferred.ReadonlyDeferred<BrowserWorker, PE | Target.TargetGone | Deadline.Timeout>,
+    Effect.Effect<BrowserWorker, PE | Target.TargetGone | Deadline.Timeout>,
     Subscription.SubscriptionError,
     Scope.Scope | PR
   >
@@ -188,7 +187,7 @@ export const next: {
     filter?: Filter | undefined,
     where?: Subscription.Where<ObservedBrowserWorker, PE, PR> | undefined
   ): Effect.Effect<
-    Deferred.ReadonlyDeferred<ObservedBrowserWorker, PE | Target.TargetGone | Deadline.Timeout>,
+    Effect.Effect<ObservedBrowserWorker, PE | Target.TargetGone | Deadline.Timeout>,
     Subscription.SubscriptionError,
     Scope.Scope | PR
   >

@@ -24,13 +24,11 @@ import * as Queue from "effect/Queue"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type * as Deadline from "../Deadline.ts"
-import type * as PublicDeferred from "../Deferred.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Subscription from "../Subscription.ts"
 import * as Target from "../Target.ts"
 import { now } from "./adapter.ts"
 import * as Operation from "./operation.ts"
-import * as ReadonlyDeferred from "./readonlyDeferred.ts"
 
 /** One event in a channel: L1's data, when the fold received it, and its place in the channel's order. */
 export interface Entry<A> {
@@ -187,9 +185,10 @@ const immediate = <A, B>(kind: Kind<A, B>): Delivery<A, B, never> => ({
 })
 
 /**
- * `next`: subscribed when it returns; the first event the filter and `where` accept completes the deferred,
- * or the deadline in force now fails it with `Timeout{waitingForEvent}`, or its target's end with
- * `TargetGone`. Closing the scope first interrupts it.
+ * `next`: subscribed when it returns, with the wait as its value (review 15). The first event the filter and
+ * `where` accept completes the deferred the wait reads, or the deadline in force now fails it with
+ * `Timeout{waitingForEvent}`, or its target's end with `TargetGone`. Closing the scope first interrupts it. The
+ * wait is latched: running it again gives the same result.
  */
 export const next = <A, B, PE, PR, DE = never>(
   kind: Kind<A, B>,
@@ -198,7 +197,7 @@ export const next = <A, B, PE, PR, DE = never>(
   where: Subscription.Where<B, PE, PR> | undefined,
   delivery: Delivery<A, B, DE> = immediate(kind) as Delivery<A, B, DE>
 ): Effect.Effect<
-  PublicDeferred.ReadonlyDeferred<B, PE | DE | Target.TargetGone | Deadline.Timeout>,
+  Effect.Effect<B, PE | DE | Target.TargetGone | Deadline.Timeout>,
   never,
   Scope.Scope | PR
 > =>
@@ -209,7 +208,7 @@ export const next = <A, B, PE, PR, DE = never>(
     const subscribed = now()
     // Kept until the first match or the deadline, so it needs no bound
     const subscriber = yield* subscribe(channel, accepts, Number.POSITIVE_INFINITY)
-    const deferred = ReadonlyDeferred.make<B, PE | DE | Target.TargetGone | Deadline.Timeout>()
+    const deferred = Deferred.makeUnsafe<B, PE | DE | Target.TargetGone | Deadline.Timeout>()
     // The entry being delivered, if the deadline passes while it is
     let delivering: Option.Option<A> = Option.none()
     const take: Effect.Effect<B, PE | DE | Target.TargetGone | Subscription.EventOverflow | Cause.Done> = Effect.gen(
@@ -265,8 +264,8 @@ export const next = <A, B, PE, PR, DE = never>(
       Effect.onInterrupt(() => Deferred.interrupt(deferred)),
       Effect.forkScoped
     )
-    // The read side only (internal/readonlyDeferred.ts)
-    return deferred as unknown as PublicDeferred.ReadonlyDeferred<B, PE | DE | Target.TargetGone | Deadline.Timeout>
+    // The read side only: an effect that awaits it, which nothing can complete
+    return Deferred.await(deferred)
   })
 
 /**

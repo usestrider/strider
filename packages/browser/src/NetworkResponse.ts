@@ -29,7 +29,6 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Deadline from "./Deadline.ts"
-import type * as PublicDeferred from "./Deferred.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as Adapter from "./internal/adapter.ts"
 import * as Events from "./internal/events.ts"
@@ -402,7 +401,7 @@ const collect = (
  * ```ts import.meta.vitest
  * import { Effect, Schema } from "effect"
  * import { HttpIncomingMessage } from "effect/http"
- * import { Deferred, NetworkResponse, Page } from "@usestrider/browser"
+ * import { NetworkResponse, Page } from "@usestrider/browser"
  *
  * const Cart = Schema.Struct({ items: Schema.Array(Schema.Struct({ id: Schema.String })) })
  *
@@ -413,7 +412,7 @@ const collect = (
  *     (response) => Effect.succeed(response.body.items.length > 0)
  *   )
  *   yield* page.getByRole("button", { name: "Add to cart" }).click()
- *   const response = yield* Deferred.await(added)
+ *   const response = yield* added
  *   return response.body.items
  * })
  * ```
@@ -431,7 +430,7 @@ export const next: {
     },
     where?: Subscription.Where<CapturedResponse<B>, PE, PR> | undefined
   ): Effect.Effect<
-    PublicDeferred.ReadonlyDeferred<
+    Effect.Effect<
       CapturedResponse<B>,
       DE | PE | ResponseError | Target.TargetGone | Deadline.Timeout
     >,
@@ -443,7 +442,7 @@ export const next: {
     filter: Filter & { readonly url: Url.Pattern | string },
     where?: Subscription.Where<NetworkResponse, PE, PR> | undefined
   ): Effect.Effect<
-    PublicDeferred.ReadonlyDeferred<NetworkResponse, PE | ResponseError | Target.TargetGone | Deadline.Timeout>,
+    Effect.Effect<NetworkResponse, PE | ResponseError | Target.TargetGone | Deadline.Timeout>,
     Subscription.SubscriptionError,
     Scope.Scope | PR
   >

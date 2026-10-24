@@ -488,7 +488,7 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
   - Locators re-resolve before dispatch.
   - Explicit refs never rebind.
   - Nothing that may have dispatched is repeated automatically.
-- **Errors (L1 view).** Lifetime ends surface as `TargetGone{reason: CloseReason}` and deadlines as `Timeout`. Everything else is the error of the module whose operation failed (`LocatorError`, `PageError`, …; one per module), whose `reason` includes the shared `NotPermitted`, `Unsupported` and `BackendFailure{Rejected | IncompatibleResponse}`. L0 hands over a normalized `RejectReason`, which L1 maps using its own state (`NoSuchNode` becomes `StaleRef{Detached}`); reasons it doesn't map surface as `BackendFailure{Rejected}`. All of them carry the diagnostic envelope, and every reason carries a one-line remediation `hint`. Defects are reserved for bugs, and for gaps: a member the interfaces declare that isn't built yet fails as the defect `NotBuilt{member}`, loud and never a no-op, because no caller could handle it as a condition of the browser (review 12, candidate 6). A module-level function that isn't built stays a declaration, absent at run time, unless its module needs the binding to load: `Deferred.await`, exported under a reserved word, is a `NotBuilt` function, and `Route.continue` a decision nothing reads yet. `SessionSwapped` is internal.
+- **Errors (L1 view).** Lifetime ends surface as `TargetGone{reason: CloseReason}` and deadlines as `Timeout`. Everything else is the error of the module whose operation failed (`LocatorError`, `PageError`, …; one per module), whose `reason` includes the shared `NotPermitted`, `Unsupported` and `BackendFailure{Rejected | IncompatibleResponse}`. L0 hands over a normalized `RejectReason`, which L1 maps using its own state (`NoSuchNode` becomes `StaleRef{Detached}`); reasons it doesn't map surface as `BackendFailure{Rejected}`. All of them carry the diagnostic envelope, and every reason carries a one-line remediation `hint`. Defects are reserved for bugs, and for gaps: a member the interfaces declare that isn't built yet fails as the defect `NotBuilt{member}`, loud and never a no-op, because no caller could handle it as a condition of the browser (review 12, candidate 6). A module-level function that isn't built stays a declaration, absent at run time, unless its module needs the binding to load: `Route.continue` is a decision nothing reads yet (and `Deferred.await`, exported under a reserved word, was a `NotBuilt` function until review 13 built it; review 15 removed the module). `SessionSwapped` is internal.
 - **State and event streams have different contracts.**
   - **State** (`Watchable`) is a read-only view of an entity's state ref:
     - reading it is an `Effect`;
@@ -502,7 +502,7 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
   - **Filtering:** declarative metadata prefilters run before buffering. Caller predicates run in subscriber workers, never on the ingestion path.
 - **No public fibers, no writable `Deferred`s or `Ref`s.**
   - **Internal:** the model's background work (state folds, handlers, resolvers) runs in fibers scoped to the owning entity. `Deferred`s latch first matches, lifetime ends and obligation decisions; `Deferred.succeed` returning `false` enforces a single winner.
-  - **Public:** only read-only views cross the API: `Effect`, `Watchable`, `ReadonlyDeferred`, and `Stream` from eager subscriptions.
+  - **Public:** only read-only views cross the API: `Effect`, `Watchable`, and `Stream` from eager subscriptions. A latched first match is handed out as an `Effect` that awaits its `Deferred` (review 15).
 - **Effect primitives behind these mechanisms.** Named so the implementation uses them rather than rebuilding them:
 
   | Mechanism | Effect module |
@@ -516,7 +516,7 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
   | handlers and resolvers scoped to their entity | `FiberSet`, `FiberMap` |
   | the persisted ownership ledger (§3) | `KeyValueStore` (`effect/persistence`) |
   | byte limits: payloads, body capture, queues | `ByteSize` |
-  | single-winner decisions and latched first matches | `Deferred`; callers get its read side, `ReadonlyDeferred`, which at run time is Effect's `Deferred` marked read-only (review 13) |
+  | single-winner decisions and latched first matches | `Deferred`; callers get an `Effect` that awaits it, `Deferred.await`, which nothing can complete (review 15; review 13 handed out a read-only `Deferred`) |
   | event delivery (Subscriptions) | a `Queue` per subscription that the fold offers to without suspending, not `PubSub` (review 13) |
   | `Expect`'s re-checks on change signals | `Reactivity`: the model invalidates keys (a `Watchable` change, a subtree mutation), and `Reactivity.stream` re-runs the check. Not built yet: expectations re-check at `Expect.CheckInterval` (100 ms), which is what visibility, a condition with no change signal, needs (review 12, candidate 5) |
 

@@ -278,13 +278,13 @@ export interface ConnectOptions {
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
  * import { TestClock } from "effect/testing"
- * import { Browser, Deferred, NetworkResponse } from "@usestrider/browser"
+ * import { Browser, NetworkResponse } from "@usestrider/browser"
  *
  * const test = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
  *   const cart = yield* NetworkResponse.next(page, { url: "https://shop.example.com/api/cart" })
  *   yield* TestClock.adjust("20 millis")
- *   return yield* Deferred.await(cart)
+ *   return yield* cart
  * })).pipe(Effect.provide(Browser.layerTest("--resp(cart)--commit--load--|")))
  * ```
  *
