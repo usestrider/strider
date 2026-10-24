@@ -36,6 +36,7 @@ import type * as UncaughtException from "../UncaughtException.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
 import * as Events from "./events.ts"
+import * as Input from "./input.ts"
 
 /** What happens to a dialog no handler claims (UserContext.Options.dialogs; CONCEPTS.md §5). */
 export type DialogPolicy = "dismiss" | "accept" | "leaveOpen"
@@ -191,6 +192,8 @@ export interface PageEntry {
   readonly closed: Deferred.Deferred<Target.CloseReason>
   /** Input to one page is serialized (CONCEPTS.md §5). */
   readonly input: Semaphore.Semaphore
+  /** The keys and buttons held and the pointer's position, which every gesture is built from (review 16). */
+  readonly inputState: Input.State
   /**
    * The scope that releases the page, when the library owns it (CONCEPTS.md §3): its creator's, or for a popup,
    * its opener's. Set once, when the page is acquired or appears.
@@ -598,6 +601,7 @@ export const make = Effect.fnUntraced(function*() {
             state: yield* SubscriptionRef.make<PageState>({ _tag: "Opening", url: fact.url }),
             closed: yield* Deferred.make<Target.CloseReason>(),
             input: yield* Semaphore.make(1),
+            inputState: Input.make(),
             owner: Option.none(),
             events: {
               popup: Events.make(target, cap),
@@ -618,8 +622,8 @@ export const make = Effect.fnUntraced(function*() {
             workers: yield* SubscriptionRef.make<ReadonlyArray<WorkerEntry>>([])
           }
           pages.set(fact.page, entry)
-          yield* SubscriptionRef.update(owner.state, (state) => ({ ...state, pages: [...state.pages, fact.page] }))
-          // A popup is reported to its opener, when the backend names one (review 13, candidate 4)
+          // A popup is reported to its opener, when the backend names one (review 13, candidate 4); before the
+          // context's pages change, so a caller woken by that change subscribes after it, as with every event
           const opener = fact.kind === "popup" && fact.origin._tag === "Opened"
             ? Option.flatMap(fact.origin.opener, (id) => Option.fromNullishOr(pages.get(id)))
             : Option.none()
@@ -640,6 +644,7 @@ export const make = Effect.fnUntraced(function*() {
               yield* Scope.addFinalizer(scope, release(fact.page)).pipe(Effect.forkIn(modelScope))
             }
           }
+          yield* SubscriptionRef.update(owner.state, (state) => ({ ...state, pages: [...state.pages, fact.page] }))
           return
         }
         case "FrameAdded": {
@@ -702,10 +707,10 @@ export const make = Effect.fnUntraced(function*() {
           }
           return
         }
+        // The page's status first, then the document's readiness: a wait woken by the readiness reads the status
         case "DocumentOpened": {
           const document = documents.get(fact.document)
           if (document === undefined) return
-          yield* SubscriptionRef.set(document.readiness, "loading")
           const page = pages.get(document.navigable)
           if (page !== undefined) {
             yield* setOpen(page, (open) =>
@@ -713,12 +718,12 @@ export const make = Effect.fnUntraced(function*() {
                 ? { ...open, document: { ...open.document, readiness: "loading" } }
                 : open)
           }
+          yield* SubscriptionRef.set(document.readiness, "loading")
           return
         }
         case "DocumentReadiness": {
           const document = documents.get(fact.document)
           if (document === undefined) return
-          yield* SubscriptionRef.set(document.readiness, fact.readiness)
           const page = pages.get(document.navigable)
           if (page !== undefined) {
             yield* setOpen(page, (open) =>
@@ -726,6 +731,7 @@ export const make = Effect.fnUntraced(function*() {
                 ? { ...open, document: { ...open.document, readiness: fact.readiness } }
                 : open)
           }
+          yield* SubscriptionRef.set(document.readiness, fact.readiness)
           return
         }
         case "RealmAdded": {
@@ -749,10 +755,10 @@ export const make = Effect.fnUntraced(function*() {
           }
           workers.set(fact.realm, worker)
           realmOwners.set(fact.realm, { page, context })
+          publish({ page, context }, worker, (events) => events.worker, (events) => events.worker)
           const add = (list: ReadonlyArray<WorkerEntry>) => [...list, worker]
           if (Option.isSome(page)) yield* SubscriptionRef.update(page.value.workers, add)
           if (Option.isSome(context)) yield* SubscriptionRef.update(context.value.workers, add)
-          publish({ page, context }, worker, (events) => events.worker, (events) => events.worker)
           return
         }
         case "RealmRemoved": {
@@ -765,16 +771,20 @@ export const make = Effect.fnUntraced(function*() {
           return
         }
         case "NavigationEnded": {
-          yield* Deferred.succeed(navigation(fact.navigation).outcome, fact.outcome)
+          // The event first, then the outcome: `goto` returns once the outcome is latched, and a `next` its caller
+          // subscribes then must not see the navigation `goto` made (found by review 16's build)
           const start = started.get(fact.navigation)
-          if (start === undefined) return
-          started.delete(fact.navigation)
-          if (!pages.has(start.page.id)) return
-          Events.publish(start.page.events.navigation, {
-            navigation: fact.navigation,
-            url: endedAt(fact.outcome, start.url),
-            outcome: fact.outcome
-          })
+          if (start !== undefined) {
+            started.delete(fact.navigation)
+            if (pages.has(start.page.id)) {
+              Events.publish(start.page.events.navigation, {
+                navigation: fact.navigation,
+                url: endedAt(fact.outcome, start.url),
+                outcome: fact.outcome
+              })
+            }
+          }
+          yield* Deferred.succeed(navigation(fact.navigation).outcome, fact.outcome)
           return
         }
         case "RequestSent": {
@@ -924,11 +934,11 @@ export const make = Effect.fnUntraced(function*() {
           prompts.set(subject.prompt, subject.page)
           const page = pages.get(subject.page)
           if (page !== undefined) {
+            Events.publish(page.events.dialog, subject)
             yield* setOpen(page, (open) => ({
               ...open,
               prompt: Option.some({ id: subject.prompt, kind: subject.kind, blocking: "confirmed" })
             }))
-            Events.publish(page.events.dialog, subject)
           }
           yield* decide(fact.obligation, subject).pipe(Effect.forkIn(modelScope))
           return

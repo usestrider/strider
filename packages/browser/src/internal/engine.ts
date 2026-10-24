@@ -57,6 +57,7 @@ export type Step =
 export interface Checks {
   readonly visible: boolean
   readonly enabled: boolean
+  readonly editable: boolean
   readonly notInert: boolean
   readonly inViewport: boolean
   /** Frames the rect must stay unchanged across; 0 skips the check. */
@@ -69,12 +70,72 @@ export type NotReady =
   | { readonly _tag: "NoMatch" }
   | { readonly _tag: "NotVisible" }
   | { readonly _tag: "Disabled" }
+  | { readonly _tag: "ReadOnly" }
   | { readonly _tag: "Inert" }
   | { readonly _tag: "BlockedByModal"; readonly dialog: string }
   | { readonly _tag: "OutsideViewport" }
   | { readonly _tag: "NotStable" }
   | { readonly _tag: "NoRenderingOpportunity" }
   | { readonly _tag: "Covered"; readonly by: string }
+  /** The guard stopped the gesture: its first trusted event landed on another element (review 16, candidate 5). */
+  | { readonly _tag: "Intercepted"; readonly by: string }
+  | { readonly _tag: "NoSuchOption"; readonly option: string }
+
+/** An option of a `<select>`, by value, label or index. */
+export type Choice =
+  | { readonly value: string }
+  | { readonly label: string }
+  | { readonly index: number }
+
+/**
+ * What an action does in the page once its checks pass (review 16, candidate 4): answer the action point, and
+ * guard the gesture that follows; or focus, scroll, prepare a fill, choose options, or read whether it is checked.
+ */
+export type Action =
+  | {
+    readonly _tag: "Point"
+    readonly position: { readonly x: number; readonly y: number } | null
+    readonly guard: boolean
+  }
+  | { readonly _tag: "Focus" }
+  | { readonly _tag: "Scroll" }
+  | { readonly _tag: "Fill"; readonly value: string }
+  | { readonly _tag: "Select"; readonly choices: ReadonlyArray<Choice> }
+  | { readonly _tag: "Checked" }
+  | { readonly _tag: "FileInput" }
+  | { readonly _tag: "None" }
+
+/** A one-shot read of the one match (review 16, candidate 6). */
+export type Read =
+  | { readonly _tag: "Text" }
+  | { readonly _tag: "Value" }
+  | { readonly _tag: "Html" }
+  | { readonly _tag: "Attribute"; readonly name: string }
+  | { readonly _tag: "Enabled" }
+  | { readonly _tag: "Checked" }
+
+/** What an expectation waits for (review 16, candidate 7). */
+export type Expectation =
+  | { readonly _tag: "Visible" }
+  | { readonly _tag: "Hidden" }
+  | { readonly _tag: "Enabled" }
+  | { readonly _tag: "Disabled" }
+  | { readonly _tag: "Checked" }
+  | { readonly _tag: "Focused" }
+  | { readonly _tag: "Editable" }
+  /** The whole text of the one match, or with `list`, of each match in order. */
+  | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
+  | { readonly _tag: "ContainsText"; readonly expected: TextMatcher }
+  | { readonly _tag: "Value"; readonly expected: TextMatcher }
+  | { readonly _tag: "Attribute"; readonly name: string; readonly expected: TextMatcher | null }
+  | { readonly _tag: "Count"; readonly count: number }
+  | { readonly _tag: "Title"; readonly expected: TextMatcher }
+
+/** A failure no waiting can mend: the one match isn't the kind of element the operation needs. */
+export type Final =
+  | { readonly _tag: "WrongElement"; readonly expected: string; readonly element: string }
+  | { readonly _tag: "NotEditable"; readonly element: string }
+  | { readonly _tag: "Refused"; readonly element: string; readonly value: string }
 
 /** A request to the engine. */
 export type Request =
@@ -86,8 +147,22 @@ export type Request =
     readonly checks: Checks
     /** Milliseconds this round may wait for the checks to pass. */
     readonly cap: number
-    /** From the padding box's top left, in CSS pixels; `null` is its centre. */
-    readonly position: { readonly x: number; readonly y: number } | null
+    readonly action: Action
+    /**
+     * Whether to do what `action` asks once the checks pass: only under the page's input permit. Without it, the
+     * round only checks, and answers the point and what it read.
+     */
+    readonly apply: boolean
+  }
+  /** Removes the guard an action armed, and says whether it stopped the gesture. */
+  | { readonly op: "disarm" }
+  | { readonly op: "read"; readonly steps: ReadonlyArray<Step>; readonly read: Read }
+  | {
+    readonly op: "expect"
+    readonly steps: ReadonlyArray<Step>
+    readonly expectation: Expectation
+    /** Milliseconds this round may wait in the page for the expectation to hold. */
+    readonly cap: number
   }
   | { readonly op: "title" }
   | { readonly op: "role"; readonly steps: ReadonlyArray<Step> }
@@ -104,9 +179,16 @@ export type Response =
   | { readonly _tag: "Visible"; readonly count: number; readonly visible: boolean }
   | {
     readonly _tag: "Ready"
-    readonly point: { readonly x: number; readonly y: number }
     readonly element: string
     readonly scrolled: boolean
+    /** The action point, for `Point`. */
+    readonly point: { readonly x: number; readonly y: number } | null
+    /** Whether an HTML drag would start from it: it or an ancestor is `draggable`. */
+    readonly draggable: boolean
+    /** For `Checked`: whether it is checked. */
+    readonly checked: boolean | null
+    /** For `Fill`: whether the value is to be typed (focused, contents selected) or was set. */
+    readonly fill: "type" | "set" | null
   }
   | {
     readonly _tag: "NotReady"
@@ -114,6 +196,18 @@ export type Response =
     /** Each reason seen this round, de-duplicated in order. */
     readonly history: ReadonlyArray<NotReady>
     readonly scrolled: boolean
+  }
+  | { readonly _tag: "Final"; readonly final: Final }
+  | { readonly _tag: "Guarded"; readonly blocked: string | null }
+  | { readonly _tag: "Read"; readonly value: string | boolean | null }
+  | { readonly _tag: "NoMatch" }
+  | {
+    readonly _tag: "Expected"
+    readonly passed: boolean
+    /** What the last check saw, for the expectation's history. */
+    readonly observed: unknown
+    /** Whether it re-checked in the page after a change. */
+    readonly changed: boolean
   }
   | { readonly _tag: "Strict"; readonly candidates: ReadonlyArray<Candidate>; readonly count: number }
   | { readonly _tag: "InvalidSelector"; readonly selector: string; readonly message: string }
@@ -853,6 +947,65 @@ export function engine() {
     return true
   }
 
+  /** Text inputs whose value is typed; the other input types have it set (review 16, candidate 4). */
+  const TYPED = new Set(["", "text", "search", "email", "password", "tel", "url", "number"])
+
+  const typed = (element: Element): element is HTMLInputElement | HTMLTextAreaElement =>
+    element instanceof HTMLTextAreaElement ||
+    (element instanceof HTMLInputElement && TYPED.has(element.getAttribute("type")?.toLowerCase() ?? ""))
+
+  const SET = new Set(["date", "datetime-local", "month", "week", "time", "color", "range"])
+
+  const settable = (element: Element): element is HTMLInputElement =>
+    element instanceof HTMLInputElement && SET.has(element.type)
+
+  const contentEditable = (element: Element): element is HTMLElement =>
+    element instanceof HTMLElement && element.isContentEditable
+
+  /** Whether an element's kind takes input at all, whatever its state. */
+  const editableKind = (element: Element): boolean => typed(element) || settable(element) || contentEditable(element)
+
+  /** The Editable predicate: enabled, not read-only, and an editable kind (CONCEPTS.md §8). */
+  const readOnly = (element: Element): boolean =>
+    ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) && element.readOnly) ||
+    element.getAttribute("aria-readonly") === "true"
+
+  const CHECKABLE_ROLES = new Set([
+    "checkbox",
+    "radio",
+    "switch",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "option",
+    "treeitem"
+  ])
+
+  /** Whether it is checked, or `null` when it isn't a checkbox, a radio or an ARIA checkable. */
+  const checkedOf = (element: Element): boolean | null => {
+    if (element instanceof HTMLInputElement && (element.type === "checkbox" || element.type === "radio")) {
+      return element.checked
+    }
+    const role = roleOf(element)
+    if (role === null || !CHECKABLE_ROLES.has(role)) return null
+    const state = element.getAttribute(role === "option" || role === "treeitem" ? "aria-selected" : "aria-checked")
+    return state === null ? (role === "option" || role === "treeitem" ? null : false) : state === "true"
+  }
+
+  /** The element with focus, through open shadow roots. */
+  const deepActive = (): Element | null => {
+    let active: Element | null = document.activeElement
+    while (active !== null && active.shadowRoot !== null && active.shadowRoot.activeElement !== null) {
+      active = active.shadowRoot.activeElement
+    }
+    return active
+  }
+
+  const valueOf = (element: Element): string | null =>
+    element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement ||
+      element instanceof HTMLSelectElement
+      ? element.value
+      : null
+
   const inertReason = (element: Element): NotReady | null => {
     for (let current: Element | null = element; current !== null; current = composedParent(current)) {
       if (current.hasAttribute("inert")) return { _tag: "Inert" }
@@ -906,6 +1059,90 @@ export function engine() {
       })
     })
 
+  const fire = (element: Element, type: "input" | "change") =>
+    element.dispatchEvent(new Event(type, { bubbles: true, composed: type === "input" }))
+
+  /** Focuses an element and selects its contents, so text inserted next replaces them. */
+  const selectContents = (element: HTMLElement) => {
+    element.focus()
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      element.select()
+      return
+    }
+    const selection = getSelection()
+    if (selection === null) return
+    const range = document.createRange()
+    range.selectNodeContents(element)
+    selection.removeAllRanges()
+    selection.addRange(range)
+  }
+
+  const optionMatches = (option: HTMLOptionElement, index: number, choice: Choice) =>
+    "value" in choice ? option.value === choice.value : "label" in choice
+      ? option.label === choice.label || collapse(option.textContent ?? "") === choice.label
+      : index === choice.index
+
+  const describeChoice = (choice: Choice) =>
+    "value" in choice ? `value ${JSON.stringify(choice.value)}` : "label" in choice
+      ? `label ${JSON.stringify(choice.label)}`
+      : `index ${choice.index}`
+
+  // ── The guard on the first trusted event (review 16, candidate 5) ──
+
+  /** The gesture's events a guard watches, on the window, capturing. */
+  const GUARDED = [
+    "pointerdown",
+    "mousedown",
+    "pointerup",
+    "mouseup",
+    "click",
+    "dblclick",
+    "auxclick",
+    "contextmenu",
+    "touchstart",
+    "touchend"
+  ]
+
+  let guard: { readonly remove: () => void; blocked: string | null } | null = null
+
+  const disarm = (): string | null => {
+    if (guard === null) return null
+    guard.remove()
+    const blocked = guard.blocked
+    guard = null
+    return blocked
+  }
+
+  /** Arms a guard on `element`: the gesture's first trusted event must land in it, or the gesture is stopped. */
+  const arm = (element: Element) => {
+    disarm()
+    let decided = false
+    const handler = (event: Event) => {
+      if (!event.isTrusted || current === null) return
+      if (!decided) {
+        decided = true
+        const target = event.composedPath()[0]
+        if (!(target instanceof Element) || !composedContains(element, target)) {
+          current.blocked = target instanceof Element ? describe(target) : "nothing at that point"
+        }
+      }
+      if (current.blocked !== null) {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+      }
+    }
+    const current: { readonly remove: () => void; blocked: string | null } = {
+      remove: () => {
+        for (const type of GUARDED) removeEventListener(type, handler, true)
+      },
+      blocked: null
+    }
+    for (const type of GUARDED) addEventListener(type, handler, true)
+    guard = current
+  }
+
+  // ── Actions ──
+
   const act = async (request: Extract<Request, { op: "act" }>): Promise<Response> => {
     const end = performance.now() + request.cap
     const history: Array<NotReady> = []
@@ -924,6 +1161,7 @@ export function engine() {
     // The rects of one element across frames, for the stable check
     let tracked: Element | null = null
     let rects: Array<DOMRect> = []
+    const action = request.action
     while (true) {
       const left = end - performance.now()
       if (left <= 0) return { _tag: "NotReady", reason: last, history, scrolled }
@@ -942,11 +1180,37 @@ export function engine() {
         tracked = element ?? null
         rects = []
       }
+      // What no waiting mends fails at once
+      if (element !== undefined) {
+        if (request.checks.editable && !editableKind(element)) {
+          return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
+        }
+        if (action._tag === "Checked" && checkedOf(element) === null) {
+          return {
+            _tag: "Final",
+            final: {
+              _tag: "WrongElement",
+              expected: "a checkbox, a radio or an ARIA checkable",
+              element: describe(element)
+            }
+          }
+        }
+        if (action._tag === "Select" && !(element instanceof HTMLSelectElement)) {
+          return { _tag: "Final", final: { _tag: "WrongElement", expected: "a <select>", element: describe(element) } }
+        }
+        if (action._tag === "FileInput" && !(element instanceof HTMLInputElement && element.type === "file")) {
+          return {
+            _tag: "Final",
+            final: { _tag: "WrongElement", expected: "a file input", element: describe(element) }
+          }
+        }
+      }
       const checks = request.checks
       let reason: NotReady | null = null
       if (element === undefined) reason = { _tag: "NoMatch" }
       else if (checks.visible && !visible(element)) reason = { _tag: "NotVisible" }
       else if (checks.enabled && !enabled(element)) reason = { _tag: "Disabled" }
+      else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
       else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
       else if (checks.inViewport && !inViewport(element)) {
         reason = { _tag: "OutsideViewport" }
@@ -961,16 +1225,22 @@ export function engine() {
           reason = { _tag: "NotStable" }
         }
       }
+      const position = action._tag === "Point" ? action.position : null
       if (reason === null && element !== undefined && checks.receivesPointer) {
-        const point = actionPoint(element, request.position)
+        const point = actionPoint(element, position)
         const hit = hitTarget(point.x, point.y)
         if (hit === null || !composedContains(element, hit)) {
           reason = { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
         }
       }
-      if (reason === null && element !== undefined) {
-        return { _tag: "Ready", point: actionPoint(element, request.position), element: describe(element), scrolled }
+      if (reason === null && element !== undefined && action._tag === "Select") {
+        const options = Array.from(element instanceof HTMLSelectElement ? element.options : [])
+        const missing = action.choices.find((choice) =>
+          !options.some((option, index) => optionMatches(option, index, choice))
+        )
+        if (missing !== undefined) reason = { _tag: "NoSuchOption", option: describeChoice(missing) }
       }
+      if (reason === null && element !== undefined) return ready(element, action, request.apply, scrolled)
       if (reason!._tag !== "NotStable") rects = []
       // A rect still settling within its first frames is the check working, not a reason to report
       if (reason!._tag !== "NotStable" || rects.length === checks.stable + 1) note(reason!)
@@ -978,11 +1248,262 @@ export function engine() {
     }
   }
 
+  /** Does what the action asks of the element, now that its checks pass. */
+  const ready = (element: Element, action: Action, apply: boolean, scrolled: boolean): Response => {
+    const answer = {
+      _tag: "Ready" as const,
+      element: describe(element),
+      scrolled,
+      point: null as { x: number; y: number } | null,
+      draggable: false,
+      checked: null as boolean | null,
+      fill: null as "type" | "set" | null
+    }
+    switch (action._tag) {
+      case "Point": {
+        let draggable = false
+        for (let current: Element | null = element; current !== null; current = composedParent(current)) {
+          if (current.getAttribute("draggable") === "true") draggable = true
+        }
+        if (apply && action.guard) arm(element)
+        return { ...answer, point: actionPoint(element, action.position), draggable }
+      }
+      case "Checked":
+        return { ...answer, checked: checkedOf(element) }
+      default:
+        break
+    }
+    if (!apply) return answer
+    switch (action._tag) {
+      case "Focus":
+        if (element instanceof HTMLElement || element instanceof SVGElement) element.focus()
+        return answer
+      case "Scroll":
+        element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
+        return answer
+      case "Fill": {
+        if (settable(element)) {
+          element.focus()
+          element.value = action.value
+          // A value the input refuses, such as "soon" for a date, leaves it otherwise
+          if (element.value !== action.value) {
+            return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
+          }
+          fire(element, "input")
+          fire(element, "change")
+          return { ...answer, fill: "set" }
+        }
+        selectContents(element as HTMLElement)
+        return { ...answer, fill: "type" }
+      }
+      case "Select": {
+        const select = element as HTMLSelectElement
+        const options = Array.from(select.options)
+        for (const [index, option] of options.entries()) {
+          option.selected = action.choices.some((choice) => optionMatches(option, index, choice))
+        }
+        fire(select, "input")
+        fire(select, "change")
+        return answer
+      }
+      default:
+        return answer
+    }
+  }
+
+  // ── Reads (review 16, candidate 6) ──
+
+  const read = (request: Extract<Request, { op: "read" }>): Response => {
+    const found = resolve(request.steps)
+    if (found.length > 1) return strict(found)
+    const element = found[0]
+    if (element === undefined) return { _tag: "NoMatch" }
+    const wrong = (expected: string): Response => ({
+      _tag: "Final",
+      final: { _tag: "WrongElement", expected, element: describe(element) }
+    })
+    switch (request.read._tag) {
+      case "Text":
+        return { _tag: "Read", value: textOf(element) }
+      case "Value": {
+        const value = valueOf(element)
+        return value === null ? wrong("an input, a textarea or a select") : { _tag: "Read", value }
+      }
+      case "Html":
+        return { _tag: "Read", value: element.outerHTML }
+      case "Attribute":
+        return { _tag: "Read", value: element.getAttribute(request.read.name) }
+      case "Enabled":
+        return { _tag: "Read", value: enabled(element) }
+      case "Checked": {
+        const checked = checkedOf(element)
+        return checked === null ? wrong("a checkbox, a radio or an ARIA checkable") : { _tag: "Read", value: checked }
+      }
+    }
+  }
+
+  // ── Expectations, waiting in the page (review 16, candidate 7) ──
+
+  const expected = (matcher: TextMatcher, text: string): boolean =>
+    matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(text) : text === collapse(matcher.value)
+
+  /** Checks an expectation once: whether it holds, and what was seen. */
+  const evaluate = (steps: ReadonlyArray<Step>, expectation: Expectation): { passed: boolean; observed: unknown } => {
+    rawText.clear()
+    roleCache.clear()
+    nameCache.clear()
+    if (expectation._tag === "Title") {
+      const title = collapse(document.title)
+      return { passed: expected(expectation.expected, title), observed: title }
+    }
+    const found = resolve(steps)
+    switch (expectation._tag) {
+      case "Visible": {
+        const visibleCount = found.filter(visible).length
+        return {
+          passed: found.length === 1 && visibleCount === 1,
+          observed: { matches: found.length, visible: visibleCount }
+        }
+      }
+      case "Hidden": {
+        const visibleCount = found.filter(visible).length
+        return { passed: visibleCount === 0, observed: { matches: found.length, visible: visibleCount } }
+      }
+      case "Count":
+        return { passed: found.length === expectation.count, observed: found.length }
+      case "Text": {
+        const texts = found.map(textOf)
+        if (expectation.list) {
+          return {
+            passed: texts.length === expectation.expected.length &&
+              texts.every((text, index) => expected(expectation.expected[index]!, text)),
+            observed: texts
+          }
+        }
+        if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
+        return { passed: expected(expectation.expected[0]!, texts[0]!), observed: texts[0] }
+      }
+      default:
+        break
+    }
+    if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
+    const element = found[0]!
+    switch (expectation._tag) {
+      case "Enabled":
+        return { passed: enabled(element), observed: enabled(element) ? "enabled" : "disabled" }
+      case "Disabled":
+        return { passed: !enabled(element), observed: enabled(element) ? "enabled" : "disabled" }
+      case "Checked": {
+        const checked = checkedOf(element)
+        return {
+          passed: checked === true,
+          observed: checked === null ? "not checkable" : checked ? "checked" : "unchecked"
+        }
+      }
+      case "Focused": {
+        const active = deepActive()
+        return { passed: active === element, observed: active === null ? "nothing focused" : describe(active) }
+      }
+      case "Editable": {
+        const editable = editableKind(element) && enabled(element) && !readOnly(element)
+        return { passed: editable, observed: editable ? "editable" : "not editable" }
+      }
+      case "ContainsText": {
+        const text = textOf(element)
+        const matcher = expectation.expected
+        return {
+          passed: matcher._tag === "RegExp"
+            ? new RegExp(matcher.source, matcher.flags).test(text)
+            : text.includes(collapse(matcher.value)),
+          observed: text
+        }
+      }
+      case "Value": {
+        const value = valueOf(element)
+        const matcher = expectation.expected
+        return {
+          passed: value !== null &&
+            (matcher._tag === "RegExp"
+              ? new RegExp(matcher.source, matcher.flags).test(value)
+              : value === matcher.value),
+          observed: value === null ? "not a form control" : value
+        }
+      }
+      case "Attribute": {
+        const value = element.getAttribute(expectation.name)
+        const matcher = expectation.expected
+        return {
+          passed: value !== null &&
+            (matcher === null ||
+              (matcher._tag === "RegExp"
+                ? new RegExp(matcher.source, matcher.flags).test(value)
+                : value === matcher.value)),
+          observed: value
+        }
+      }
+      default:
+        return { passed: false, observed: null }
+    }
+  }
+
+  /**
+   * One round of an expectation: a check now, then again on each change the page makes (a mutation, an `input`,
+   * `change` or focus event, an animation frame) until it holds or the round's cap runs out.
+   */
+  const expect = (request: Extract<Request, { op: "expect" }>): Promise<Response> => {
+    const first = evaluate(request.steps, request.expectation)
+    if (first.passed || request.cap <= 0) {
+      return Promise.resolve({ _tag: "Expected", passed: first.passed, observed: first.observed, changed: false })
+    }
+    return new Promise((resume) => {
+      let done = false
+      let last = first
+      const finish = (changed: boolean) => {
+        if (done) return
+        done = true
+        observer.disconnect()
+        for (const type of EVENTS) removeEventListener(type, recheck, true)
+        clearTimeout(timer)
+        resume({ _tag: "Expected", passed: last.passed, observed: last.observed, changed })
+      }
+      const recheck = () => {
+        if (done) return
+        try {
+          last = evaluate(request.steps, request.expectation)
+        } catch {
+          return
+        }
+        if (last.passed) finish(true)
+      }
+      const EVENTS = ["input", "change", "focusin", "focusout"]
+      const observer = new MutationObserver(recheck)
+      observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true })
+      for (const type of EVENTS) addEventListener(type, recheck, true)
+      const tick = () => {
+        if (done) return
+        recheck()
+        requestAnimationFrame(tick)
+      }
+      requestAnimationFrame(tick)
+      const timer = setTimeout(() => finish(true), request.cap)
+    })
+  }
+
   const strict = (found: ReadonlyArray<Element>): Response => ({
     _tag: "Strict",
     count: found.length,
     candidates: found.slice(0, 10).map((element) => ({ description: describe(element), visible: visible(element) }))
   })
+
+  /** The one match itself, for an evaluation that returns it by value with its node binding (`setInputFiles`). */
+  const element = (text: string): Element | string => {
+    const request = JSON.parse(text) as { readonly steps: ReadonlyArray<Step> }
+    rawText.clear()
+    roleCache.clear()
+    nameCache.clear()
+    const found = resolve(request.steps)
+    return found.length === 1 ? found[0]! : `${found.length} matches`
+  }
 
   const run = async (text: string): Promise<string> => {
     const request = JSON.parse(text) as Request
@@ -1006,6 +1527,12 @@ export function engine() {
         }
         case "act":
           return JSON.stringify(await act(request))
+        case "disarm":
+          return JSON.stringify({ _tag: "Guarded", blocked: disarm() } satisfies Response)
+        case "read":
+          return JSON.stringify(read(request))
+        case "expect":
+          return JSON.stringify(await expect(request))
         case "title":
           return JSON.stringify({ _tag: "Title", title: document.title } satisfies Response)
         case "role":
@@ -1029,7 +1556,7 @@ export function engine() {
     }
   }
 
-  return { run }
+  return { run, element }
 }
 
 /** The key the engine is installed under in a realm's global: a symbol, out of the way of anything else. */
@@ -1048,6 +1575,15 @@ export const install = `function() {
 export const run = `function(request) {
   const engine = globalThis[Symbol.for(${JSON.stringify(installKey)})];
   return engine === undefined ? "\\u0000missing" : engine.run(request);
+}`
+
+/**
+ * Returns the one match itself, by value, so the adapter gives its node binding: a function declaration for
+ * `evaluate`, taking the steps as JSON text. A string says why there is no one match.
+ */
+export const element = `function(request) {
+  const engine = globalThis[Symbol.for(${JSON.stringify(installKey)})];
+  return engine === undefined ? "\\u0000missing" : engine.element(request);
 }`
 
 /** What `run` answers when the realm has no engine yet. */

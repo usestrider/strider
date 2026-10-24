@@ -310,8 +310,6 @@ const keyCode = (key: string): number | undefined => {
 const modifierBits = (modifiers: Adapter.Modifiers): number =>
   (modifiers.alt ? 1 : 0) | (modifiers.control ? 2 : 0) | (modifiers.meta ? 4 : 0) | (modifiers.shift ? 8 : 0)
 
-const buttonBits: Readonly<Record<string, number>> = { left: 1, right: 2, middle: 4, back: 8, forward: 16 }
-
 const failTypes: Readonly<
   Record<Extract<Adapter.Decision, { _tag: "Fail" }>["error"], Network.ResourceErrorType>
 > = {
@@ -531,6 +529,11 @@ const capabilities = (info: Browser.Info) => {
       entry("screenshot", "supported"),
       entry("pdf", "unsupported", ["Playwright's WebKit has no print-to-PDF"]),
       entry("evaluation.userActivation", "supported"),
+      entry("input.insertText", "supported"),
+      entry("input.pointerModifiers", "unsupported", [
+        "modifiers don't reach this build's mouse events, held or flagged"
+      ]),
+      entry("input.dragAndDrop", "unsupported", ["Playwright's WebKit protocol has no drag commands"]),
       entry("webSocketFrames", "supported"),
       entry("networkConnections", "partial", ["no EventSource connections: WebKit reports only their request"]),
       entry("networkConnections.eventSource", "unsupported", ["WebKit reports an EventSource as a request"]),
@@ -2558,20 +2561,17 @@ export const connect: (
       function*(id: L1Target.NavigableId, events: ReadonlyArray<Adapter.InputEvent>) {
         const page = yield* pageOf(id)
         const on = Protocol.on(page.session)
-        let buttons = 0
         for (const event of events) {
           switch (event._tag) {
             case "Mouse": {
-              const bit = buttonBits[event.button] ?? 0
-              if (event.type === "down") buttons |= bit
-              if (event.type === "up") buttons &= ~bit
               yield* protocol(
                 Input.dispatchMouseEvent({
                   type: event.type,
                   x: Math.round(event.x),
                   y: Math.round(event.y),
                   button: event.button,
-                  buttons,
+                  // What L1 says is held, across calls (review 16, P9)
+                  buttons: event.buttons,
                   clickCount: event.clickCount,
                   modifiers: modifierBits(event.modifiers)
                 }).pipe(on)

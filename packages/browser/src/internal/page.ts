@@ -1,6 +1,6 @@
 /**
  * Pages (API.md, Pages; review 12, candidate 7). Built: the state (`status`, `url`, `workers`, `closed`), the
- * queries, `goto`, `reload`, `back` and `forward`, `title`, `activate` and `close`. The other members fail as
+ * queries, `goto`, `reload`, `back` and `forward`, `title`, `activate`, `close`, and the keyboard and mouse. The other members fail as
  * `NotBuilt`.
  *
  * A navigation resolves at commit, with the outcome the adapter reports for the navigation it started, or with
@@ -22,6 +22,7 @@ import type * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import type * as Adapter from "./adapter.ts"
+import * as Devices from "./devices.ts"
 import * as Handles from "./handles.ts"
 import * as LocatorImpl from "./locator.ts"
 import type * as Model from "./model.ts"
@@ -233,19 +234,8 @@ export const make = (owner: PageOwner): Page.Page => {
       ),
     evaluateInMainWorld: NotBuilt.fn("Page.evaluateInMainWorld") as Page.Page["evaluateInMainWorld"],
     evaluateHandle: NotBuilt.fn("Page.evaluateHandle") as Page.Page["evaluateHandle"],
-    keyboard: {
-      press: NotBuilt.fn("Page.keyboard.press"),
-      pressSequentially: NotBuilt.fn("Page.keyboard.pressSequentially"),
-      insertText: NotBuilt.fn("Page.keyboard.insertText"),
-      hold: NotBuilt.fn("Page.keyboard.hold")
-    },
-    mouse: {
-      position: NotBuilt.effect("Page.mouse.position"),
-      move: NotBuilt.fn("Page.mouse.move"),
-      click: NotBuilt.fn("Page.mouse.click"),
-      hold: NotBuilt.fn("Page.mouse.hold"),
-      wheel: NotBuilt.fn("Page.mouse.wheel")
-    },
+    keyboard: Devices.keyboard({ runtime, page: entry }),
+    mouse: Devices.mouse({ runtime, page: entry }),
     clock: {
       install: NotBuilt.fn("Page.clock.install"),
       adjust: NotBuilt.fn("Page.clock.adjust"),

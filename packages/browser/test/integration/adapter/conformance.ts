@@ -453,9 +453,36 @@ export const conformance = (backend: Backend) =>
             )) as [number, number]
             const none = { alt: false, control: false, meta: false, shift: false }
             yield* world.adapter.dispatchInput(page, [
-              { _tag: "Mouse", type: "move", x: box[0], y: box[1], button: "none", clickCount: 0, modifiers: none },
-              { _tag: "Mouse", type: "down", x: box[0], y: box[1], button: "left", clickCount: 1, modifiers: none },
-              { _tag: "Mouse", type: "up", x: box[0], y: box[1], button: "left", clickCount: 1, modifiers: none }
+              {
+                _tag: "Mouse",
+                type: "move",
+                x: box[0],
+                y: box[1],
+                button: "none",
+                clickCount: 0,
+                modifiers: none,
+                buttons: 0
+              },
+              {
+                _tag: "Mouse",
+                type: "down",
+                x: box[0],
+                y: box[1],
+                button: "left",
+                clickCount: 1,
+                modifiers: none,
+                buttons: 1
+              },
+              {
+                _tag: "Mouse",
+                type: "up",
+                x: box[0],
+                y: box[1],
+                button: "left",
+                clickCount: 1,
+                modifiers: none,
+                buttons: 0
+              }
             ])
             assert.strictEqual(yield* evaluate(world, page, "() => window.clicked"), 1)
             yield* evaluate(world, page, "() => document.querySelector('#t').focus()")
@@ -481,6 +508,62 @@ export const conformance = (backend: Backend) =>
               { _tag: "InsertText", text: "éllo" }
             ])
             assert.strictEqual(yield* evaluate(world, page, "() => document.querySelector('#t').value"), "héllo")
+          }), timeout)
+
+        it.effect("carries the buttons held through a drag, and sends Enter as Enter", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/form`)
+            yield* evaluate(
+              world,
+              page,
+              "() => { window.seen = []; addEventListener('mousemove', (e) => seen.push('move ' + e.buttons)); addEventListener('keydown', (e) => seen.push(e.key + ' ' + e.code)) }"
+            )
+            const none = { alt: false, control: false, meta: false, shift: false }
+            const mouse = (type: "move" | "down" | "up", x: number, buttons: number): Adapter.InputEvent => ({
+              _tag: "Mouse",
+              type,
+              x,
+              y: 5,
+              button: type === "move" ? "none" : "left",
+              clickCount: type === "move" ? 0 : 1,
+              modifiers: none,
+              buttons
+            })
+            // Review 16, P9: the CDP adapter sent no buttons, and WebKit's forgot them between calls
+            yield* world.adapter.dispatchInput(page, [mouse("move", 5, 0), mouse("down", 5, 1)])
+            yield* world.adapter.dispatchInput(page, [mouse("move", 10, 1), mouse("move", 15, 1)])
+            yield* world.adapter.dispatchInput(page, [mouse("up", 15, 0), mouse("move", 20, 0)])
+            yield* evaluate(world, page, "() => document.querySelector('#t').focus()")
+            // Review 16, P2: BiDi's Enter was the numpad's
+            yield* world.adapter.dispatchInput(page, [
+              {
+                _tag: "Key",
+                type: "down",
+                key: "Enter",
+                code: "Enter",
+                text: Option.some("\r"),
+                modifiers: none,
+                autoRepeat: false
+              },
+              {
+                _tag: "Key",
+                type: "up",
+                key: "Enter",
+                code: "Enter",
+                text: Option.none(),
+                modifiers: none,
+                autoRepeat: false
+              }
+            ])
+            assert.deepStrictEqual(yield* evaluate(world, page, "() => window.seen"), [
+              "move 0",
+              "move 1",
+              "move 1",
+              "move 0",
+              "Enter Enter"
+            ])
           }), timeout)
 
         it.effect("delivers a prompt as an obligation that takes one decision", () =>
@@ -832,8 +915,8 @@ export const conformance = (backend: Backend) =>
             yield* evaluate(world, page, "() => new Promise((resolve) => requestAnimationFrame(() => resolve(true)))")
             const none = { alt: false, control: false, meta: false, shift: false }
             yield* world.adapter.dispatchInput(page, [
-              { _tag: "Mouse", type: "down", x: 5, y: 5, button: "left", clickCount: 1, modifiers: none },
-              { _tag: "Mouse", type: "up", x: 5, y: 5, button: "left", clickCount: 1, modifiers: none }
+              { _tag: "Mouse", type: "down", x: 5, y: 5, button: "left", clickCount: 1, modifiers: none, buttons: 1 },
+              { _tag: "Mouse", type: "up", x: 5, y: 5, button: "left", clickCount: 1, modifiers: none, buttons: 0 }
             ])
             assert.isTrue(
               yield* evaluate(world, page, "() => navigator.userActivation.hasBeenActive"),

@@ -958,7 +958,7 @@ Locators find elements, and act on them or read them.
 
 *schemas*
 
-- `const LocatorErrorReason = Schema.Union([StrictViolation, StaleRef, NotEditable, FileUnreadable, Reason.InvalidInput, Reason.EvaluationThrown, Reason.NotSerializable, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFail…`
+- `const LocatorErrorReason = Schema.Union([StrictViolation, StaleRef, NoMatch, WrongElement, StateUnchanged, NotEditable, FileUnreadable, Reason.InvalidInput, Reason.EvaluationThrown, Reason.NotSerializable, Reason.NotPermitted,…`
 
 *constructors*
 
@@ -977,6 +977,9 @@ Locators find elements, and act on them or read them.
 
 - `class StrictViolation: Schema.Error { candidates, suggestions, hint }`
 - `class StaleRef: Schema.Error { why, hint }`
+- `class NoMatch: Schema.Error { hint }`
+- `class WrongElement: Schema.Error { expected, element, hint }`
+- `class StateUnchanged: Schema.Error { expected, hint }`
 - `class NotEditable: Schema.Error { element, hint }`
 - `class FileUnreadable: Schema.Error { path, hint, cause }`
 

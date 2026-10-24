@@ -226,7 +226,8 @@ export interface ReadonlyLocator
    */
   readonly count: Effect.Effect<number, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
-   * The rendered text of the one match (`innerText`).
+   * The text of the one match: the text `getByText` matches, its text content with whitespace collapsed, not
+   * `innerText`, which depends on layout and differs between engines.
    */
   readonly readText: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
@@ -459,39 +460,68 @@ export interface Locator extends ReadonlyLocator {
   /**
    * Clicks the one match. Checks: visible, stable, enabled, notInert, inViewport (scrolling it into view),
    * receivesPointer.
+   *
+   * **Details**
+   *
+   * A move to the action point, then a press and a release, carrying the keys and buttons the page holds. The
+   * first of the gesture's pointer, mouse, touch and click events must land in the element: if the page covered it
+   * between the checks and the input, that event and the rest of the gesture are stopped before the page's
+   * handlers see them, and the action checks again. `modifiers` are pressed before the gesture and released after
+   * it; on WebKit, whose pointer events can't carry them, an action with modifiers fails with
+   * `Unsupported{capability: "input.pointerModifiers"}` before anything is sent.
    */
   click(options?: ClickOptions | undefined): ActionEffect
   /**
-   * Double-clicks the one match, with the same checks as `click`.
+   * Double-clicks the one match, with the same checks and guard as `click`: two clicks, the second with a click
+   * count of 2, so the page sees `dblclick`.
    */
   dblclick(options?: ClickOptions | undefined): ActionEffect
   /**
-   * Taps the one match with a touch event, with the same checks as `click`.
+   * Taps the one match: a touch start and end at the action point, with the same checks and guard as `click`.
+   *
+   * **Gotchas**
+   *
+   * No backend needs touch emulation for it. WebKit fires no `click` after a tap, and Firefox on the desktop
+   * dispatches touch events to listeners but has no `ontouchstart` attribute.
    */
   tap(options?: PointerOptions | undefined): ActionEffect
   /**
    * Moves the pointer over the one match. Checks: visible, stable, enabled, notInert, inViewport,
    * receivesPointer.
+   *
+   * **Details**
+   *
+   * Unguarded: a move has no event to stop, and hover effects are what it is for.
    */
   hover(options?: PointerOptions | undefined): ActionEffect
   /**
-   * Checks a checkbox or radio, and confirms it became checked. Checks as `click`.
+   * Checks a checkbox, a radio or an ARIA checkable, and confirms it became checked. Checks as `click`.
+   *
+   * **Details**
+   *
+   * Already checked, it sends nothing. Otherwise it clicks, then reads the state again: a click that didn't check
+   * it fails with `StateUnchanged{expected: "checked"}`. Any other element fails at once with `WrongElement`.
    */
   check(options?: PointerOptions | undefined): ActionEffect
   /**
-   * Unchecks a checkbox, and confirms it became unchecked. Checks as `click`.
+   * Unchecks a checkbox or an ARIA checkable, and confirms it became unchecked. Checks as `click`; otherwise as
+   * `check`, with `StateUnchanged{expected: "unchecked"}`.
    */
   uncheck(options?: PointerOptions | undefined): ActionEffect
   /**
-   * Focuses the one match. Checks: visible, notInert.
+   * Focuses the one match, from the utility world. Checks: visible, notInert.
    */
   focus(options?: ActionOptions | undefined): ActionEffect
   /**
    * Clears an input or editable element. Checks: visible, enabled, editable, notInert.
+   *
+   * **Details**
+   *
+   * As `fill("")`: the contents selected and deleted with a key, or a value that isn't typed set to empty.
    */
   clear(options?: ActionOptions | undefined): ActionEffect
   /**
-   * Scrolls the one match into view. Checks: visible, stable.
+   * Scrolls the one match into view, from the utility world. Checks: visible, stable.
    */
   scrollIntoView(options?: ActionOptions | undefined): ActionEffect
   /**
@@ -499,33 +529,67 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
-   * A `Redacted` value is typed into the page but never shown in spans, traces or errors.
+   * - A text input, a textarea or a `contenteditable` element is focused and its contents selected from the
+   *   utility world, then the value is inserted as text, as an input method would.
+   * - An input whose value isn't typed (`date`, `time`, `color`, `range` and their kin) has it set from the
+   *   utility world, with `input` and `change` dispatched; a value it refuses fails with `InvalidInput`.
+   * - An element that can't be edited fails at once with `NotEditable`; a read-only one waits, as `ReadOnly`.
+   * - A `Redacted` value is typed into the page but never shown in spans, traces or errors.
    */
   fill(value: string | Redacted.Redacted<string>, options?: ActionOptions | undefined): ActionEffect
   /**
-   * Focuses the one match and presses one key.
+   * Focuses the one match and presses one key. Checks: visible, notInert.
+   *
+   * **Details**
+   *
+   * A key is a UI Events `key` value (`"Enter"`, `"a"`, `"ArrowDown"`) or one character; anything else fails with
+   * `InvalidInput`. `modifiers` are pressed before it and released after, and Shift turns `"a"` into `"A"`.
    */
   press(key: Keyboard.Key | string, options?: PressOptions | undefined): ActionEffect
   /**
-   * Focuses the one match and types text one key at a time.
+   * Focuses the one match and types text one key at a time. Checks: visible, notInert.
+   *
+   * **Details**
+   *
+   * `\n` is Enter and `\t` is Tab; `delay` waits between keys. A `Redacted` text is never shown in spans, traces or
+   * errors.
    */
   pressSequentially(text: string | Redacted.Redacted<string>, options?: TypeOptions | undefined): ActionEffect
   /**
-   * Chooses options of a `<select>`, by value, label or index.
+   * Chooses options of a `<select>`, by value, label or index. Checks: visible, enabled.
+   *
+   * **Details**
+   *
+   * Chosen from the utility world, with `input` and `change` dispatched, as a user's choice would be: a select's
+   * popup isn't something input can drive headless. An option that isn't there yet is waited for, as
+   * `NoSuchOption`; any element but a `<select>` fails at once with `WrongElement`.
    */
   selectOption(
     choice: SelectOption | ReadonlyArray<SelectOption>,
     options?: ActionOptions | undefined
   ): ActionEffect
   /**
-   * Sets the files of a file input.
+   * Sets the files of a file input. Checks: none.
+   *
+   * **Details**
+   *
+   * A local file that doesn't exist fails with `FileUnreadable` before anything is sent, and any element but a
+   * file input with `WrongElement`.
    */
   setInputFiles(
     files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>,
     options?: ActionOptions | undefined
   ): ActionEffect
   /**
-   * Drags the one match onto `target`.
+   * Drags the one match onto `target`, with the same checks and guard as `click`; the target is checked visible,
+   * enabled, notInert and inViewport.
+   *
+   * **Details**
+   *
+   * A press at the element's action point, `steps` moves with the button held, and the release at the target's,
+   * which drives pages that drag with pointer events. An HTML drag (`draggable="true"` on the element or an
+   * ancestor) needs `input.dragAndDrop`: Chromium finishes it; elsewhere it fails with `Unsupported` before
+   * anything is sent.
    */
   dragTo(target: ReadonlyLocator, options?: DragOptions | undefined): ActionEffect
 }
@@ -678,6 +742,59 @@ export class StaleRef extends Schema.Error<StaleRef>("@usestrider/browser/Locato
 }
 
 /**
+ * Reason for a read that found nothing to read: a read never waits, so it fails at once.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class NoMatch extends Schema.Error<NoMatch>("@usestrider/browser/Locator/NoMatch")({
+  _tag: Schema.tag("NoMatch"),
+  hint: Schema.String
+}) {
+  override get message(): string {
+    return `Nothing matched (${this.hint})`
+  }
+}
+
+/**
+ * Reason for an action or read the one match's kind of element doesn't support, such as `readValue` of a
+ * `div` or `check` of a button.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class WrongElement extends Schema.Error<WrongElement>("@usestrider/browser/Locator/WrongElement")({
+  _tag: Schema.tag("WrongElement"),
+  expected: Schema.String,
+  element: Schema.String,
+  hint: Schema.String
+}) {
+  override get message(): string {
+    return `Expected ${this.expected}, found ${this.element} (${this.hint})`
+  }
+}
+
+/**
+ * Reason for a `check` or `uncheck` whose click didn't change the element's state, such as when the page
+ * prevented it.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class StateUnchanged extends Schema.Error<StateUnchanged>("@usestrider/browser/Locator/StateUnchanged")({
+  _tag: Schema.tag("StateUnchanged"),
+  expected: Schema.Literals(["checked", "unchecked"]),
+  hint: Schema.String
+}) {
+  override get message(): string {
+    return `The element didn't become ${this.expected} (${this.hint})`
+  }
+}
+
+/**
  * Reason for an input action on an element that can't take input.
  *
  * @stability unstable
@@ -722,6 +839,9 @@ export class FileUnreadable extends Schema.Error<FileUnreadable>("@usestrider/br
 export const LocatorErrorReason = Schema.Union([
   StrictViolation,
   StaleRef,
+  NoMatch,
+  WrongElement,
+  StateUnchanged,
   NotEditable,
   FileUnreadable,
   Reason.InvalidInput,

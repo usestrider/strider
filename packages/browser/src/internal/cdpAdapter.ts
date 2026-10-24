@@ -322,6 +322,10 @@ const keyCode = (key: string): number | undefined => {
 const modifierBits = (modifiers: Adapter.Modifiers): number =>
   (modifiers.alt ? 1 : 0) | (modifiers.control ? 2 : 0) | (modifiers.meta ? 4 : 0) | (modifiers.shift ? 8 : 0)
 
+/** The first button `MouseEvent.buttons` says is held, or none. */
+const heldButton = (buttons: number): "none" | "left" | "right" | "middle" =>
+  buttons & 1 ? "left" : buttons & 2 ? "right" : buttons & 4 ? "middle" : "none"
+
 const failReasons: Readonly<Record<Extract<Adapter.Decision, { _tag: "Fail" }>["error"], string>> = {
   aborted: "Aborted",
   failed: "Failed",
@@ -346,6 +350,7 @@ const foldEvents: ReadonlyArray<Protocol.EventDef<string, any>> = [
   Page.documentOpened,
   Page.lifecycleEvent,
   Page.javascriptDialogOpening,
+  Input.dragIntercepted,
   Page.javascriptDialogClosed,
   Page.fileChooserOpened,
   Runtime.executionContextCreated,
@@ -531,6 +536,9 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
         info.product.includes("Headless") ? [] : ["Chrome prints to PDF only when headless"]
       ),
       entry("evaluation.userActivation", "supported"),
+      entry("input.insertText", "supported"),
+      entry("input.pointerModifiers", "supported"),
+      entry("input.dragAndDrop", "supported", ["the adapter intercepts the drag Chromium starts, and finishes it"]),
       entry("webSocketFrames", "supported"),
       entry("networkConnections", "supported"),
       entry("networkConnections.eventSource", "supported"),
@@ -591,6 +599,9 @@ export const connect: (
     const downloadsById = new Map<Download.Id, DownloadEntry>()
     const handles = new Map<Adapter.HandleId, HandleEntry>()
     const connections = new Map<string, NetworkConnection.Id>()
+    // HTML drags Chromium started and the adapter intercepted, by page, until they are dropped (review 16, candidate 4)
+    const drags = new Map<L1Target.NavigableId, { readonly data: Input.DragData; entered: boolean }>()
+    const interceptingDrags = new Set<L1Target.NavigableId>()
     // A worker no page owns belongs to the context its target names
     const workerContexts = new Map<TargetEntry, ContextEntry>()
     const pausedRequests = new Map<string, number>()
@@ -1007,6 +1018,10 @@ export const connect: (
         if (target?.kind === "page" && target.page !== undefined) {
           endPage(target.page, { _tag: "PageCrashed" }, "cdp:Inspector.targetCrashed")
         }
+      },
+      [Input.dragIntercepted.method]: (target, params: Input.DragInterceptedParams) => {
+        // Headless Chromium starts no drag of its own; an intercepted one is finished with drag events
+        if (target?.page !== undefined) drags.set(target.page.id, { data: params.data, entered: false })
       },
       [BrowserCdp.downloadWillBegin.method]: (_target, params: BrowserCdp.DownloadWillBeginParams) => {
         const frame = frameOf(params.frameId)
@@ -2174,6 +2189,9 @@ export const connect: (
       const { targetId } = yield* protocol(
         Target.createTarget({
           url: "about:blank",
+          // A window of its own, so a page opened after it doesn't put it in the background, where headless
+          // Chromium renders nothing (review 16, P4 and P10)
+          newWindow: true,
           ...(context.isDefault || context.browserContextId === undefined
             ? {}
             : { browserContextId: context.browserContextId as BrowserCdp.BrowserContextID })
@@ -2376,18 +2394,53 @@ export const connect: (
         const on = Protocol.on(page.target.session)
         for (const event of events) {
           switch (event._tag) {
-            case "Mouse":
+            case "Mouse": {
+              const drag = drags.get(page.id)
+              if (drag !== undefined && event.type !== "down") {
+                // An intercepted HTML drag: moves are drag events, and the release drops it
+                const dragEvent = (type: "dragEnter" | "dragOver" | "drop") =>
+                  protocol(
+                    Input.dispatchDragEvent({
+                      type,
+                      x: event.x,
+                      y: event.y,
+                      data: drag.data,
+                      modifiers: modifierBits(event.modifiers)
+                    }).pipe(on)
+                  )
+                if (!drag.entered) {
+                  drag.entered = true
+                  yield* dragEvent("dragEnter")
+                }
+                if (event.type === "move") {
+                  yield* dragEvent("dragOver")
+                } else {
+                  drags.delete(page.id)
+                  yield* dragEvent("dragOver")
+                  yield* dragEvent("drop")
+                }
+                break
+              }
+              // A move with a button held may start an HTML drag, which only an interception lets finish
+              if (event.type === "move" && event.buttons !== 0 && !interceptingDrags.has(page.id)) {
+                interceptingDrags.add(page.id)
+                yield* protocol(Input.setInterceptDrags({ enabled: true }).pipe(on))
+              }
               yield* protocol(
                 Input.dispatchMouseEvent({
                   type: event.type === "move" ? "mouseMoved" : event.type === "down" ? "mousePressed" : "mouseReleased",
                   x: event.x,
                   y: event.y,
-                  button: event.button,
+                  // A move names the button held, as a platform's drag does: Chromium starts an HTML drag only then
+                  button: event.type === "move" ? heldButton(event.buttons) : event.button,
+                  // What L1 says is held: Chromium reports none on a move otherwise (review 16, P9)
+                  buttons: event.buttons,
                   clickCount: event.clickCount,
                   modifiers: modifierBits(event.modifiers)
                 }).pipe(on)
               )
               break
+            }
             case "Wheel":
               yield* protocol(
                 Input.dispatchMouseEvent({

@@ -233,7 +233,8 @@ const webdriverKeys: Readonly<Record<string, string>> = {
   Backspace: "\uE003",
   Tab: "\uE004",
   Clear: "\uE005",
-  Enter: "\uE007",
+  // WebDriver's Return; its Enter (U+E007) is the numpad's, which Firefox reports as `NumpadEnter` (review 16, P2)
+  Enter: "\uE006",
   Shift: "\uE008",
   Control: "\uE009",
   Alt: "\uE00A",
@@ -406,6 +407,13 @@ const capabilities = (info: Browser.Info) => {
       entry("screenshot", "supported"),
       entry("pdf", "supported"),
       entry("evaluation.userActivation", "supported"),
+      entry("input.insertText", "partial", [
+        "WebDriver BiDi has no command for it, so each character is typed as a key"
+      ]),
+      entry("input.pointerModifiers", "supported", ["modifiers are held as keys; a mouse event's flags are ignored"]),
+      entry("input.dragAndDrop", "unsupported", [
+        "Firefox starts an HTML drag from WebDriver actions, and never drops it"
+      ]),
       entry("webSocketFrames", "unsupported", ["WebDriver BiDi has no WebSocket frame events"]),
       entry("networkConnections", "unsupported", [
         "WebDriver BiDi reports a WebSocket's handshake as a request, and not its frames or its close"

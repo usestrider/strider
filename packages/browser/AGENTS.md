@@ -4,11 +4,15 @@ Instructions for agents writing code that uses Strider. `INDEX.md` in this packa
 The design and its reasons are in the repository: https://github.com/usestrider/strider.
 
 Strider is pre-release: the API is designed and type-checked, and the implementation is in progress. Launching,
-`Browser.newPage`, navigation, the queries, `click`, `Expect.toBeVisible` and `toBeHidden`, `Deadline`, every event
-module (`Popup`, `Dialog`, `FileChooser`, `Download`, `ConsoleMessage`, `UncaughtException`, `PageNavigation`,
-`NetworkRequest`, `NetworkResponse`, `BrowserWorker`, `NetworkConnection`, `AutoResolution`), `Dialog.handle` and
-`FileChooser.handle` work on every backend. What a backend can't report fails with `Unsupported`, naming the
-capability. A member that isn't built yet fails as the defect `NotBuilt`, naming itself.
+`Browser.newPage`, navigation, the queries, every locator action (`click`, `dblclick`, `tap`, `hover`, `check`,
+`uncheck`, `focus`, `clear`, `fill`, `press`, `pressSequentially`, `selectOption`, `setInputFiles`, `dragTo`,
+`scrollIntoView`), the one-shot reads, `page.keyboard` and `page.mouse`, every `Expect` matcher but `toMatchAria`,
+`Condition`, `Deadline`, every event module (`Popup`, `Dialog`, `FileChooser`, `Download`, `ConsoleMessage`,
+`UncaughtException`, `PageNavigation`, `NetworkRequest`, `NetworkResponse`, `BrowserWorker`, `NetworkConnection`,
+`AutoResolution`), `Dialog.handle` and `FileChooser.handle` work on every backend. What a backend can't do or report
+fails with `Unsupported`, naming the capability: modifiers on WebKit's pointer, and an HTML drag anywhere but
+Chromium. A member that isn't built yet fails as the defect `NotBuilt`, naming itself (`Locator.evaluate`,
+`Locator.snapshot` and `page.evaluate` among them).
 
 ## Shape
 
@@ -43,3 +47,10 @@ capability. A member that isn't built yet fails as the defect `NotBuilt`, naming
   `Effect.catchReason("LocatorError", "StrictViolation", …)`. Any operation can also fail with `TargetGone` or
   `Timeout`, which says how far it got (`timeout.phase`).
 - **Secrets stay `Redacted`.** Pass `Config.Redacted("PASSWORD")` to `fill`; it is never logged or traced.
+- **Keys are UI Events names, modifiers an option.** `field.press("Enter")`,
+  `field.press("a", { modifiers: ["Control"] })`; there is no `"Control+A"` syntax.
+- **Reads are strict.** `readText`, `readValue` and the other reads need exactly one match and never wait: none is
+  `NoMatch`, several `StrictViolation`. To wait for a value, expect it: `field.pipe(Expect.toHaveValue("Ada"))`.
+- **Held input is scoped.** `yield* page.keyboard.hold("Shift")` inside `Effect.scoped`; the scope releases it.
+- **A page in the background of a Firefox context barely renders,** so actions there time out; call
+  `page.activate` on it first.

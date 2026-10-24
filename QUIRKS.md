@@ -91,6 +91,11 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *We:* nothing special beyond Q4's case.
 - *Reconsider:* whether the viewer's realm should be hidden from callers.
 
+**Q69. Firefox's traversal back from its JSON viewer went unreported under full load** (Browser). In one full integration run after review 16, the conformance test's `traverse(-1)` from `/json` removed the viewer's realm and fetched the page again, but no new realm and no end came within 10 s. Three runs of that test alone passed.
+- *Seen:* review 16's revision, one full run of three.
+- *We:* nothing yet; the restore inference (Q4) waits for a realm that didn't come.
+- *Reconsider:* with Q4 and Q5, an end Firefox reports for every traversal.
+
 ## Browsers: dialogs, popups, focus and input
 
 **Q16. A dialog blocks evaluation on Chromium and WebKit, not on Firefox** (Browser). Every evaluation in every world waits while a dialog is open on Chromium and WebKit; Firefox answers.
@@ -137,6 +142,56 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *Seen:* probe 25.
 - *We:* nothing yet.
 - *Reconsider:* when attaching to browsers others drive is built.
+
+**Q70. A page in the background of its context renders nothing on headless Chromium** (Browser). Not only a popup's opener (Q19): a page created after another in the same context puts the first in the background, `hidden`, with no frames, though keys and clicks still reach it. Pages in different contexts, and every WebKit page, keep rendering. The `concurrent` profile's switches don't change it.
+- *Seen:* review 16, P4, P10 and P11.
+- *We:* create each page the library opens as a window of its own (`Target.createTarget{newWindow}`), which keeps it visible and rendering. A popup still opens where its opener's script puts it (Q19).
+- *Reconsider:* whether a window per page changes anything a page observes (its window's position and size), and whether headless Chromium will render background tabs.
+
+**Q71. A page in the background of a Firefox context renders about once a second** (Browser). It is `hidden`, with 3 animation frames in 4 s, two seconds after the other page opened; P4 had measured one frame in 150 ms, early. Two frames never fall in one second-long round, so the stable check never passes, and an action there times out, alternating `NotStable` and `NoRenderingOpportunity`. `layout.throttled_frame_rate` in the launch prefs didn't change it, and creating Firefox pages as windows broke navigation in review 16's probe.
+- *Seen:* review 16's revision.
+- *We:* don't activate behind the caller's back; the timeout's hint names `page.activate`, after which the action works.
+- *Reconsider:* Firefox pages as windows, probed again; or a stable check that spans rounds, which would make such actions slow rather than stuck.
+
+**Q72. WebKit's mouse events ignore modifiers** (Browser). Neither the event's modifier flags nor Shift held as a key reach a click's `shiftKey`.
+- *Seen:* review 16, P1.
+- *We:* `input.pointerModifiers` is `unsupported` on WebKit. A pointer action or `mouse.click` with modifiers, or while one is held, fails with `Unsupported` before anything is sent.
+- *Reconsider:* when the build is rolled.
+
+**Q73. WebDriver's pointer actions carry no modifier flags** (Browser). Firefox takes modifiers only from keys held in the same actions; Shift held as a key reaches `shiftKey`.
+- *Seen:* review 16, P1.
+- *We:* hold modifiers as keys on every backend, pressed before the gesture and released after, and set the flags too.
+- *Reconsider:* nothing.
+
+**Q74. WebDriver's Enter is the numpad's** (Browser). `\uE007` (Enter) arrives in Firefox with `code: "NumpadEnter"`; `\uE006` (Return) is the main Enter.
+- *Seen:* review 16, P2.
+- *We:* the BiDi adapter sends Return for `Enter`.
+- *Reconsider:* nothing.
+
+**Q75. BiDi has no command to insert text** (Browser). Text is typed as key actions, so `insertText`, and `fill`, fire key events for each character on Firefox, and on no other backend.
+- *Seen:* review 16, P3.
+- *We:* `input.insertText` is `partial` on BiDi, saying so.
+- *Reconsider:* if BiDi adds one.
+
+**Q76. Only Chromium can finish an HTML drag, and only when asked to** (Browser). Chromium starts an HTML drag from input only with `Input.setInterceptDrags` on, and only when each move names the button held (`button`, not just `buttons`); it then hands the drag to the client to finish with drag events. Firefox starts one from WebDriver actions and never drops it. WebKit's protocol has no drag commands.
+- *Seen:* review 16, P5 and P9; the move's button, review 16's revision.
+- *We:* the CDP adapter turns interception on with the first move that holds a button, and finishes the drags it intercepts. `input.dragAndDrop` is unsupported elsewhere, so `dragTo` from a draggable element fails there with `Unsupported` before anything is sent. Drags by pointer events work everywhere.
+- *Reconsider:* Firefox, if it starts dropping; and whether interception, once on, should stay on for the page's life.
+
+**Q77. WebKit fires no `click` after a tap** (Browser). A touch start and end reach the page, with touch pointer events, on all three; Chromium and Firefox follow with compatibility mouse events and `click`, and WebKit doesn't.
+- *Seen:* review 16, P6.
+- *We:* nothing; `tap` sends the touch, and the page decides.
+- *Reconsider:* nothing.
+
+**Q78. Firefox on the desktop has no touch event interface, yet dispatches touch events** (Browser). `TouchEvent` is undefined and `'ontouchstart' in window` is false, so an `ontouchstart` attribute never runs, but `touchstart` and `touchend` reach `addEventListener` listeners.
+- *Seen:* review 16's revision; P6 had listened with `addEventListener`.
+- *We:* nothing; a page that detects touch support finds none on Firefox.
+- *Reconsider:* whether `tap` should need touch emulation where a page checks for support.
+
+**Q79. What the utility world dispatches is untrusted** (Browser, by design). `selectOption`, and `fill` on an input whose value isn't typed, set the value and dispatch `input` and `change` from the utility world, so the page sees `isTrusted: false`.
+- *Seen:* review 16, P7.
+- *We:* accept it: a select's popup and a date picker aren't drivable headless, and pages rarely check `isTrusted` on `change`.
+- *Reconsider:* choosing an option with keys where a backend can.
 
 ## Browsers: downloads and file choosers
 
@@ -358,3 +413,48 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 **Q68. A click that times out after dispatch says `dispatchedUnconfirmed`** (Ours). A dialog the input opened is what holds such a dispatch (Q17).
 - *Seen:* review 13's revision.
 - *Reconsider:* nothing.
+
+**Q80. The fold published events after the state they change** (Ours). `goto`'s outcome was latched before the navigation's end was published, so a `PageNavigation.next` made right after `goto` received `goto`'s own navigation. Popups, workers, dialogs and document readiness had the same order.
+- *Seen:* review 16's revision, through review 14's `waitUntil` test on Chromium.
+- *We:* publish first, then change the state (CONCEPTS.md §9, Subscriptions).
+- *Reconsider:* nothing; recorded because the order is now a rule every new fact must keep.
+
+**Q81. The guard can't stop a page's own earlier window listeners** (Ours). The guard listens on the window in the capture phase, armed just before dispatch, so a page listener added there earlier runs first and sees an event the guard then stops. Listeners anywhere else are protected.
+- *Seen:* review 16's revision.
+- *We:* nothing.
+- *Reconsider:* if a page relies on window capture listeners for clicks.
+
+**Q82. Every waiting expectation evaluates at every animation frame** (Ours). Not only those that depend on layout: one evaluation per frame for each, in the page, while it waits.
+- *Seen:* review 16's revision.
+- *We:* accept the cost, for one rule.
+- *Reconsider:* frames only for layout conditions, if pages with many waiting expectations slow down.
+
+**Q83. A shadow root's mutations don't wake an expectation** (Ours). The `MutationObserver` watches the document, and doesn't see into shadow roots; the next frame, or in a page that renders none the next round, catches the change.
+- *Seen:* review 16's revision.
+- *We:* nothing more.
+- *Reconsider:* observing each open shadow root.
+
+**Q84. A failed release leaves a page unable to take input, for good** (Ours). After a held key's or button's release fails on a live page, every later gesture on it fails with `BackendFailure`, and nothing but a new page resets it.
+- *Seen:* review 16's revision.
+- *We:* fail loudly rather than act with a key that may still be down (CONCEPTS.md §5, Compensation).
+- *Reconsider:* a reset that releases every key and button the page could hold.
+
+**Q85. `Condition` isn't `Pipeable`, though `because` is dual** (Ours). `condition.pipe(Condition.because("…"))` doesn't compile; `Condition.because(condition, "…")` and `pipe(condition, Condition.because("…"))` do.
+- *Seen:* review 16's revision.
+- *We:* nothing.
+- *Reconsider:* making it `Pipeable`, like the handles.
+
+**Q86. Keys are the US layout's** (Ours). Shift turns `1` into `!` as on a US keyboard, and a character outside the table is a key with `code: ""`.
+- *Seen:* review 16.
+- *We:* nothing.
+- *Reconsider:* other layouts, if a test needs one.
+
+**Q87. `Expect.that` turns its subject's timeout into its own failure** (Ours). A subject still running at the expectation's deadline, or failing with `Timeout` once it has passed, ends the expectation with `ExpectationFailed`; a shorter deadline inside the subject stays the subject's failure. The two are told apart only by whether the expectation's deadline has passed.
+- *Seen:* review 16's revision, under full load: a `Locator.count` timed out while resolving.
+- *We:* as above.
+- *Reconsider:* nothing; recorded because it surprises.
+
+**Q88. The CDP adapter assumes Chromium reports an intercepted drag before the next move** (Ours). A drag Chromium intercepts is announced by an event, `Input.dragIntercepted`; the adapter turns the moves after it into drag events, so an announcement that arrived after the release would leave a drag the adapter thinks is in progress.
+- *Seen:* review 16's revision; it held in every run.
+- *We:* nothing yet.
+- *Reconsider:* waiting for the page's `dragstart` after the first held move, as Playwright does, and clearing a drag the release didn't end.

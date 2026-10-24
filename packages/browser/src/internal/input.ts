@@ -1,0 +1,225 @@
+/**
+ * Each page's input state (CONCEPTS.md §5; review 16, candidate 1): the keys and buttons held, and where the
+ * pointer is. Every gesture is built from it, and every event carries what is held, so the adapters keep no
+ * state of their own: the CDP adapter never sent the buttons held, and WebKit's forgot them between calls (P9).
+ *
+ * Modifiers are keys. A gesture with modifiers presses the ones not already held before it and releases them
+ * after, in the same dispatch, and also sets the events' flags, which Firefox ignores (P1).
+ *
+ * Callers hold the page's input permit while they build and send, so the state matches what was sent.
+ */
+import * as Option from "effect/Option"
+import type * as Keyboard from "../Keyboard.ts"
+import type * as Mouse from "../Mouse.ts"
+import type * as Adapter from "./adapter.ts"
+import * as Keys from "./keys.ts"
+
+export interface State {
+  /** The keys held, in the order they were pressed. */
+  readonly keys: Array<Keys.Definition>
+  readonly buttons: Set<Mouse.Button>
+  position: { readonly x: number; readonly y: number }
+  /**
+   * A held input whose release failed, so the page may still have it down: gestures fail until the page is
+   * reset (CONCEPTS.md §5, Compensation).
+   */
+  broken: Option.Option<string>
+}
+
+export const make = (): State => ({ keys: [], buttons: new Set(), position: { x: 0, y: 0 }, broken: Option.none() })
+
+const bits: Readonly<Record<Mouse.Button, number>> = { left: 1, right: 2, middle: 4 }
+
+/** The modifier flags of what is held, with `extra`. */
+export const modifiers = (
+  state: State,
+  extra: ReadonlyArray<Keyboard.Modifier> = []
+): Adapter.Modifiers => {
+  const held = new Set<Keyboard.Modifier>(extra)
+  for (const key of state.keys) {
+    const modifier = Keys.modifierOf(key.key)
+    if (modifier !== undefined) held.add(modifier)
+  }
+  return { alt: held.has("Alt"), control: held.has("Control"), meta: held.has("Meta"), shift: held.has("Shift") }
+}
+
+/** The buttons held, as `MouseEvent.buttons` counts them, with `extra`. */
+export const buttons = (state: State, extra?: Mouse.Button): number => {
+  let mask = 0
+  for (const button of state.buttons) mask |= bits[button]
+  return extra === undefined ? mask : mask | bits[extra]
+}
+
+/** Whether any modifier is held, or asked for: what WebKit's pointer can't carry (`input.pointerModifiers`). */
+export const anyModifier = (state: State, extra: ReadonlyArray<Keyboard.Modifier> = []): boolean => {
+  const flags = modifiers(state, extra)
+  return flags.alt || flags.control || flags.meta || flags.shift
+}
+
+const key = (
+  type: "down" | "up",
+  definition: Keys.Definition,
+  flags: Adapter.Modifiers,
+  text?: string
+): Adapter.InputEvent => ({
+  _tag: "Key",
+  type,
+  key: definition.key,
+  code: definition.code,
+  text: type === "down" && text !== undefined ? Option.some(text) : Option.none(),
+  modifiers: flags,
+  autoRepeat: false
+})
+
+/** Presses the modifiers asked for that aren't held: the events to send before a gesture, and after it. */
+const withModifiers = (state: State, wanted: ReadonlyArray<Keyboard.Modifier>) => {
+  const added = wanted.filter((modifier) => !state.keys.some((held) => held.key === modifier))
+  const before: Array<Adapter.InputEvent> = []
+  const after: Array<Adapter.InputEvent> = []
+  for (const [index, modifier] of added.entries()) {
+    before.push(key("down", Keys.modifier(modifier), modifiers(state, added.slice(0, index + 1))))
+  }
+  for (const [index, modifier] of [...added].reverse().entries()) {
+    after.push(key("up", Keys.modifier(modifier), modifiers(state, [...added].reverse().slice(index + 1))))
+  }
+  return { before, after, flags: modifiers(state, wanted) }
+}
+
+/** The text a key inserts: none with Control, Alt or Meta, which make it a shortcut. */
+const textOf = (definition: Keys.Definition, flags: Adapter.Modifiers) =>
+  flags.control || flags.alt || flags.meta ? undefined : definition.text
+
+/** One key pressed and released, with modifiers; Shift turns `a` into `A`. */
+export const press = (
+  state: State,
+  definition: Keys.Definition,
+  wanted: ReadonlyArray<Keyboard.Modifier> = []
+): Array<Adapter.InputEvent> => {
+  const { after, before, flags } = withModifiers(state, wanted)
+  const pressed = flags.shift ? Keys.withShift(definition) : definition
+  return [...before, key("down", pressed, flags, textOf(pressed, flags)), key("up", pressed, flags), ...after]
+}
+
+/** A key held down, for `keyboard.hold`. */
+export const keyDown = (state: State, definition: Keys.Definition): Adapter.InputEvent =>
+  key(
+    "down",
+    definition,
+    modifiers(state, Keys.modifierOf(definition.key) === undefined ? [] : [Keys.modifierOf(definition.key)!]),
+    textOf(definition, modifiers(state))
+  )
+
+/** A held key released. */
+export const keyUp = (state: State, definition: Keys.Definition): Adapter.InputEvent =>
+  key("up", definition, modifiers({ ...state, keys: state.keys.filter((held) => held !== definition) }))
+
+type Point = { readonly x: number; readonly y: number }
+
+const mouse = (
+  type: "move" | "down" | "up",
+  point: Point,
+  button: "none" | Mouse.Button,
+  clickCount: number,
+  flags: Adapter.Modifiers,
+  held: number
+): Adapter.InputEvent => ({
+  _tag: "Mouse",
+  type,
+  x: point.x,
+  y: point.y,
+  button,
+  clickCount,
+  modifiers: flags,
+  buttons: held
+})
+
+/** Moves from the pointer's position to `to`, in `steps` events, the last at `to`. */
+const path = (from: Point, to: Point, steps: number): Array<Point> =>
+  Array.from({ length: Math.max(1, steps) }, (_, index) => {
+    const share = (index + 1) / Math.max(1, steps)
+    return { x: from.x + (to.x - from.x) * share, y: from.y + (to.y - from.y) * share }
+  })
+
+export const move = (
+  state: State,
+  to: Point,
+  steps: number,
+  wanted: ReadonlyArray<Keyboard.Modifier> = []
+): Array<Adapter.InputEvent> => {
+  const flags = modifiers(state, wanted)
+  return path(state.position, to, steps).map((point) => mouse("move", point, "none", 0, flags, buttons(state)))
+}
+
+/** A move to `point`, then `clickCount` clicks there, the n-th with `clickCount: n` (review 16, P1). */
+export const click = (
+  state: State,
+  point: Point,
+  button: Mouse.Button,
+  clickCount: number,
+  wanted: ReadonlyArray<Keyboard.Modifier> = []
+): Array<Adapter.InputEvent> => {
+  const { after, before, flags } = withModifiers(state, wanted)
+  const events = [...before, mouse("move", point, "none", 0, flags, buttons(state))]
+  for (let count = 1; count <= clickCount; count++) {
+    events.push(mouse("down", point, button, count, flags, buttons(state, button)))
+    events.push(mouse("up", point, button, count, flags, buttons(state)))
+  }
+  return [...events, ...after]
+}
+
+/** A press at `from`, `steps` moves with the button held, and the release at `to`, in one dispatch. */
+export const drag = (
+  state: State,
+  from: Point,
+  to: Point,
+  steps: number,
+  wanted: ReadonlyArray<Keyboard.Modifier> = []
+): Array<Adapter.InputEvent> => {
+  const { after, before, flags } = withModifiers(state, wanted)
+  const held = buttons(state, "left")
+  return [
+    ...before,
+    mouse("move", from, "none", 0, flags, buttons(state)),
+    mouse("down", from, "left", 1, flags, held),
+    ...path(from, to, steps).map((point) => mouse("move", point, "none", 0, flags, held)),
+    mouse("up", to, "left", 1, flags, buttons(state)),
+    ...after
+  ]
+}
+
+/** A touch at `point`: start and end (review 16, P6). */
+export const tap = (
+  state: State,
+  point: Point,
+  wanted: ReadonlyArray<Keyboard.Modifier> = []
+): Array<Adapter.InputEvent> => {
+  const { after, before, flags } = withModifiers(state, wanted)
+  const points = [{ x: point.x, y: point.y, id: 1 }]
+  return [
+    ...before,
+    { _tag: "Touch", type: "start", points, modifiers: flags },
+    { _tag: "Touch", type: "end", points, modifiers: flags },
+    ...after
+  ]
+}
+
+/** A button pressed at the pointer and held. */
+export const buttonDown = (state: State, button: Mouse.Button): Adapter.InputEvent =>
+  mouse("down", state.position, button, 1, modifiers(state), buttons(state, button))
+
+/** A held button released at the pointer. */
+export const buttonUp = (state: State, button: Mouse.Button): Adapter.InputEvent => {
+  const rest = new Set(state.buttons)
+  rest.delete(button)
+  return mouse("up", state.position, button, 1, modifiers(state), buttons({ ...state, buttons: rest }))
+}
+
+/** A wheel at the pointer. */
+export const wheel = (state: State, delta: Point): Adapter.InputEvent => ({
+  _tag: "Wheel",
+  x: state.position.x,
+  y: state.position.y,
+  deltaX: delta.x,
+  deltaY: delta.y,
+  modifiers: modifiers(state)
+})

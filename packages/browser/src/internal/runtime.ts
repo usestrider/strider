@@ -216,6 +216,28 @@ const sendTo = Effect.fnUntraced(function*(
   }
 })
 
+/**
+ * The one match of `steps`, by value from the engine, so its node binding comes with it: what the adapter's
+ * `setInputFiles` takes (review 16, P7). `None` when there is no one match, or the browser gave no binding.
+ */
+export const element = Effect.fnUntraced(function*(
+  runtime: Runtime,
+  page: Model.PageEntry,
+  steps: ReadonlyArray<Engine.Step>,
+  id: Diagnostics.OperationId
+) {
+  const open = yield* openState(page, id)
+  const realm = yield* engineRealm(runtime, open.document.id).pipe(
+    Effect.mapError((error): SendFailure => Operation.fromAdapter(error, id, runtime.backend))
+  )
+  const result = yield* call(runtime, realm, Engine.element, [string(JSON.stringify({ steps }))]).pipe(
+    Effect.mapError((error): SendFailure => Operation.fromAdapter(error, id, runtime.backend))
+  )
+  return result._tag === "Value" && result.value.type === "node" && result.value.node !== undefined
+    ? Option.some(result.value.node)
+    : Option.none<Adapter.NodeBinding>()
+})
+
 /** Waits for a page to end, as a failure: raced against an operation, it ends the operation with `TargetGone`. */
 export const pageEnded = (page: Model.PageEntry, id: Diagnostics.OperationId) =>
   Effect.flatMap(Deferred.await(page.closed), (reason) =>

@@ -534,6 +534,11 @@ export type InputEvent =
     readonly button: "none" | "left" | "middle" | "right" | "back" | "forward"
     readonly clickCount: number
     readonly modifiers: Modifiers
+    /**
+     * The buttons held during the event, as `MouseEvent.buttons` counts them (left 1, right 2, middle 4): L1
+     * keeps the page's input state, and adapters keep none of their own (review 16, candidate 1).
+     */
+    readonly buttons: number
   }
   | {
     readonly _tag: "Wheel"

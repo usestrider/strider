@@ -62,6 +62,7 @@ const role = (name: string, accessibleName: Engine.TextMatcher | null = null, in
 const all: Engine.Checks = {
   visible: true,
   enabled: true,
+  editable: false,
   notInert: true,
   inViewport: true,
   stable: 2,
@@ -201,10 +202,17 @@ export const engine = (backend: Backend) =>
 <div style="height:3000px"></div><button id="far">Far</button>`
             )
             const act = (selector: string) =>
-              send({ op: "act", steps: [{ _tag: "Css", selector }], checks: all, cap: 1000, position: null })
+              send({
+                op: "act",
+                steps: [{ _tag: "Css", selector }],
+                checks: all,
+                cap: 1000,
+                action: { _tag: "Point", position: null, guard: false },
+                apply: false
+              })
             const ready = yield* act("#go")
             assert(ready._tag === "Ready", JSON.stringify(ready))
-            assert.isAbove(ready.point.x, 0)
+            assert.isAbove(ready.point?.x ?? 0, 0)
             const covered = yield* act("#under")
             assert(covered._tag === "NotReady")
             assert.deepStrictEqual(covered.reason, { _tag: "Covered", by: `div.overlay "Saving"` })
