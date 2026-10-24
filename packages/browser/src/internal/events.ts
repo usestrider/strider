@@ -11,6 +11,10 @@
  * Entries are L1's data. The public modules map them to what they emit (a `Page` handle, a `Dialog`) as they
  * are delivered, and filter on what an entry knows, which can grow: a popup's URL arrives with its first
  * navigation, so `revise` offers the entry again to the subscriptions it now matches.
+ *
+ * Delivering can take an effect (review 14, candidate 2): a response's body loads after the response, and a
+ * navigation waited for until `load` ends after it commits. It runs in the subscriber, as `where` does, and its
+ * failure fails the wait or the stream. `history` only projects, and never waits.
  */
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
@@ -164,22 +168,37 @@ export interface Kind<A, B> {
   readonly operation: string
   /** What one event is called in a hint: `"a popup"`. */
   readonly noun: string
-  /** The event a caller sees, made as it is delivered. */
+  /** The event a caller sees, made as it is delivered, and as `history` reads it. */
   readonly deliver: (value: A) => B
 }
+
+/**
+ * Delivery that takes an effect, in place of `Kind.deliver`, for `next` and `stream`: its failure fails the
+ * wait or the stream, and `unfinished` is the hint for a `next` whose deadline passes while it runs.
+ */
+export interface Delivery<A, B, DE> {
+  readonly deliver: (value: A) => Effect.Effect<B, DE>
+  readonly unfinished: (value: A) => string
+}
+
+const immediate = <A, B>(kind: Kind<A, B>): Delivery<A, B, never> => ({
+  deliver: (value) => Effect.succeed(kind.deliver(value)),
+  unfinished: () => ""
+})
 
 /**
  * `next`: subscribed when it returns; the first event the filter and `where` accept completes the deferred,
  * or the deadline in force now fails it with `Timeout{waitingForEvent}`, or its target's end with
  * `TargetGone`. Closing the scope first interrupts it.
  */
-export const next = <A, B, PE, PR>(
+export const next = <A, B, PE, PR, DE = never>(
   kind: Kind<A, B>,
   channel: Channel<A>,
   accepts: (entry: Entry<A>) => boolean,
-  where: Subscription.Where<B, PE, PR> | undefined
+  where: Subscription.Where<B, PE, PR> | undefined,
+  delivery: Delivery<A, B, DE> = immediate(kind) as Delivery<A, B, DE>
 ): Effect.Effect<
-  PublicDeferred.ReadonlyDeferred<B, PE | Target.TargetGone | Deadline.Timeout>,
+  PublicDeferred.ReadonlyDeferred<B, PE | DE | Target.TargetGone | Deadline.Timeout>,
   never,
   Scope.Scope | PR
 > =>
@@ -190,17 +209,22 @@ export const next = <A, B, PE, PR>(
     const subscribed = now()
     // Kept until the first match or the deadline, so it needs no bound
     const subscriber = yield* subscribe(channel, accepts, Number.POSITIVE_INFINITY)
-    const deferred = ReadonlyDeferred.make<B, PE | Target.TargetGone | Deadline.Timeout>()
-    const take: Effect.Effect<B, PE | Target.TargetGone | Subscription.EventOverflow | Cause.Done> = Effect.gen(
+    const deferred = ReadonlyDeferred.make<B, PE | DE | Target.TargetGone | Deadline.Timeout>()
+    // The entry being delivered, if the deadline passes while it is
+    let delivering: Option.Option<A> = Option.none()
+    const take: Effect.Effect<B, PE | DE | Target.TargetGone | Subscription.EventOverflow | Cause.Done> = Effect.gen(
       function*() {
         while (true) {
           const entry = yield* Queue.take(subscriber.queue)
-          const event = kind.deliver(entry.value)
+          delivering = Option.some(entry.value)
+          const event = yield* delivery.deliver(entry.value)
+          delivering = Option.none()
           if (where === undefined || (yield* Effect.provideContext(where(event), context))) return event
         }
       }
     )
     const missed = (): Option.Option<string> => {
+      if (Option.isSome(delivering)) return Option.some(delivery.unfinished(delivering.value))
       const late = channel.entries.filter((entry) => entry.sequence < since && accepts(entry)).at(-1)
       return late === undefined ? Option.none() : Option.some(
         `${kind.noun} came ${
@@ -236,13 +260,13 @@ export const next = <A, B, PE, PR>(
         // A `next` buffer has no bound, so it never overflows
         return Subscription.isEventOverflow(failure)
           ? Deferred.interrupt(deferred)
-          : Deferred.fail(deferred, failure as PE)
+          : Deferred.fail(deferred, failure as PE | DE)
       }),
       Effect.onInterrupt(() => Deferred.interrupt(deferred)),
       Effect.forkScoped
     )
     // The read side only (internal/readonlyDeferred.ts)
-    return deferred as unknown as PublicDeferred.ReadonlyDeferred<B, PE | Target.TargetGone | Deadline.Timeout>
+    return deferred as unknown as PublicDeferred.ReadonlyDeferred<B, PE | DE | Target.TargetGone | Deadline.Timeout>
   })
 
 /**
@@ -250,20 +274,24 @@ export const next = <A, B, PE, PR>(
  * when its target ends normally or its scope closes, and fails with `TargetGone` on another end and with
  * `EventOverflow` when its consumer falls more than `Subscription.Capacity` events behind.
  */
-export const stream = <A, B, PE, PR>(
+export const stream = <A, B, PE, PR, DE = never>(
   kind: Kind<A, B>,
   channel: Channel<A>,
   accepts: (entry: Entry<A>) => boolean,
-  where: Subscription.Where<B, PE, PR> | undefined
+  where: Subscription.Where<B, PE, PR> | undefined,
+  delivery?: Delivery<A, B, DE>
 ): Effect.Effect<
-  Stream.Stream<B, PE | Subscription.EventOverflow | Target.TargetGone>,
+  Stream.Stream<B, PE | DE | Subscription.EventOverflow | Target.TargetGone>,
   never,
   Scope.Scope | PR
 > =>
   Effect.gen(function*() {
     const context = yield* Effect.context<PR>()
     const subscriber = yield* subscribe(channel, accepts, yield* Subscription.Capacity)
-    const events = Stream.fromQueue(subscriber.queue).pipe(Stream.map((entry) => kind.deliver(entry.value)))
+    const entries = Stream.fromQueue(subscriber.queue)
+    const events: Stream.Stream<B, DE | Subscription.EventOverflow | Target.TargetGone> = delivery === undefined
+      ? entries.pipe(Stream.map((entry) => kind.deliver(entry.value)))
+      : entries.pipe(Stream.mapEffect((entry) => delivery.deliver(entry.value)))
     return where === undefined
       ? events
       : events.pipe(Stream.filterEffect((event) => Effect.provideContext(where(event), context)))

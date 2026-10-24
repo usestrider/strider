@@ -10,6 +10,7 @@
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as FilePath from "./FilePath.ts"
+import * as FileInputImpl from "./internal/fileInput.ts"
 
 /**
  * Schema for a file name, such as a download's suggested name.
@@ -65,7 +66,8 @@ export interface FileInput {
  *
  * **Details**
  *
- * The file is read here and uploaded when the browser is remote.
+ * The file is read here and uploaded when the browser is remote. A relative path is resolved against the
+ * working directory with Effect's `Path`, which the browser's layer needs for it.
  *
  * **Example** (Uploading an avatar)
  *
@@ -84,7 +86,7 @@ export interface FileInput {
  * @category constructors
  * @since 0.1.0
  */
-export declare const local: (path: FilePath.Local | string) => FileInput
+export const local = (path: FilePath.Local | string): FileInput => FileInputImpl.make({ _tag: "Local", path })
 
 /**
  * Creates a file input from a path on the browser's host.
@@ -95,7 +97,7 @@ export declare const local: (path: FilePath.Local | string) => FileInput
  * @category constructors
  * @since 0.1.0
  */
-export declare const remote: (path: FilePath.Remote) => FileInput
+export const remote = (path: FilePath.Remote): FileInput => FileInputImpl.make({ _tag: "Remote", path })
 
 /**
  * Creates a file input from bytes in memory.

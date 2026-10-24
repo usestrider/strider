@@ -10,27 +10,20 @@
  * @stability unstable
  * @since 0.1.0
  */
-import * as Cause from "effect/Cause"
-import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Exit from "effect/Exit"
-import * as Fiber from "effect/Fiber"
-import * as FiberSet from "effect/FiberSet"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
-import * as References from "effect/References"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
-import * as SubscriptionRef from "effect/SubscriptionRef"
-import * as Deadline from "./Deadline.ts"
+import type * as Deadline from "./Deadline.ts"
 import type * as Declaration from "./Declaration.ts"
 import type * as Deferred from "./Deferred.ts"
 import type * as Adapter from "./internal/adapter.ts"
 import * as Events from "./internal/events.ts"
+import * as Handlers from "./internal/handlers.ts"
 import * as Handles from "./internal/handles.ts"
 import type * as Model from "./internal/model.ts"
-import * as Watchable from "./internal/watchable.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
 import type * as Target from "./Target.ts"
@@ -219,13 +212,6 @@ const kind = (operation: string): Events.Kind<Model.PromptEvent, Dialog> => ({
   deliver: toDialog
 })
 
-/** Logs a handler that didn't decide, at Effect's level for unhandled failures, unless it was interrupted. */
-const report = (message: string, cause: Cause.Cause<unknown>) =>
-  Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.gen(function*() {
-    const level = yield* References.UnhandledLogLevel
-    if (level !== undefined) yield* Effect.logWithLevel(level)(message, cause)
-  })
-
 /**
  * Subscribes to dialogs and returns the first match, latched. Observing doesn't decide it.
  *
@@ -276,7 +262,7 @@ export const stream = <PE = never, PR = never>(
 export const history = (
   target: Page.ObservedPage,
   filter?: Filter | undefined
-): Effect.Effect<Subscription.History<Dialog>> =>
+): Effect.Effect<Subscription.History<Dialog>, Subscription.SubscriptionError> =>
   Effect.suspend(() =>
     Events.history(kind("Dialog.history"), Handles.page(target).entry.events.dialog, accepts(filter))
   )
@@ -316,58 +302,27 @@ export const history = (
  * @category handlers
  * @since 0.1.0
  */
-export const handle: <E, R>(
+export const handle = <E, R>(
   page: Page.Page,
   handler: (dialog: Pending) => Effect.Effect<Decision, E, R>
-) => Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope.Scope | R> = Effect.fnUntraced(
-  function*<E, R>(page: Page.Page, handler: (dialog: Pending) => Effect.Effect<Decision, E, R>) {
+): Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope.Scope | R> =>
+  Effect.suspend(() => {
     const { entry } = Handles.page(page)
-    const context = yield* Effect.context<R>()
-    const budget = yield* Effect.service(Deadline.DefaultBudget)
-    // The handler's fibers end with its scope, which leaves an undecided dialog to the policy
-    const fibers = yield* FiberSet.make<Decision, E>()
-    const handled = yield* SubscriptionRef.make(0)
-    const registration: Model.PromptHandler = {
-      decide: Effect.fnUntraced(function*(prompt) {
-        const fiber = yield* FiberSet.run(fibers, Effect.provideContext(handler(toPending(prompt)), context))
-        const exit = yield* Fiber.await(fiber).pipe(Effect.timeoutOption(budget))
-        const described = `Dialog.handle: the handler of ${entry.id} didn't decide the ${prompt.kind}`
-        if (Option.isNone(exit)) {
-          yield* Fiber.interrupt(fiber)
-          yield* report(`${described} within ${Duration.format(budget)}, so the context's policy decides`, Cause.empty)
-          return Option.none()
-        }
-        if (Exit.isFailure(exit.value)) {
-          yield* report(`${described}: it failed, so the context's policy decides`, exit.value.cause)
-          return Option.none()
-        }
-        const chosen = exit.value.value
-        if (!isDecision(chosen) || !("decision" in chosen)) {
-          return yield* Effect.die(new Error(`${described}: it returned something that isn't a Dialog decision`))
-        }
-        yield* SubscriptionRef.update(handled, (count) => count + 1)
-        return Option.some((chosen as DecisionImpl).decision)
-      })
-    }
-    entry.promptHandlers.push(registration)
-    const remove = Effect.sync(() => {
-      const index = entry.promptHandlers.indexOf(registration)
-      if (index >= 0) entry.promptHandlers.splice(index, 1)
+    return Handlers.register({
+      page: entry,
+      handlers: entry.promptHandlers,
+      handler,
+      pending: toPending,
+      decision: (chosen) =>
+        isDecision(chosen) && "decision" in chosen
+          ? Effect.succeed((chosen as DecisionImpl).decision)
+          : Effect.die(new Error("Dialog.handle: the handler returned something that isn't a Dialog decision")),
+      noun: (prompt) => prompt.kind,
+      operation: "Dialog.handle.handled.waitFor",
+      name: "Dialog.handle",
+      fallback: "the context's policy"
     })
-    yield* Effect.addFinalizer(() => remove)
-    const registered: Declaration.HandlerRegistration = {
-      remove,
-      handled: Watchable.make({
-        ref: handled,
-        project: Option.some,
-        ended: () => Option.none(),
-        target: { _tag: "Page", id: entry.id },
-        operation: "Dialog.handle.handled.waitFor"
-      })
-    }
-    return registered
-  }
-)
+  })
 
 /**
  * A handler that accepts every dialog: accept for `Alert`, `Confirm` and `Prompt` (with its default value),

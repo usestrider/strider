@@ -198,6 +198,8 @@ interface DownloadEntry {
   readonly id: Download.Id
   readonly guid: string
   readonly directory: string | undefined
+  /** The context it was started in, which canceling it names. */
+  readonly context: ContextEntry | undefined
   ended: boolean
 }
 
@@ -520,6 +522,8 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
       entry("prompts", "supported"),
       entry("fileChooser", "supported"),
       entry("downloads", "supported"),
+      entry("downloads.progress", "supported"),
+      entry("downloads.cancel", "supported"),
       entry("screenshot", "supported"),
       entry(
         "pdf",
@@ -528,6 +532,12 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
       ),
       entry("evaluation.userActivation", "supported"),
       entry("webSocketFrames", "supported"),
+      entry("networkConnections", "supported"),
+      entry("networkConnections.eventSource", "supported"),
+      entry("workers.shared", "supported"),
+      entry("workers.service", "supported"),
+      entry("workers.evaluate", "supported"),
+      entry("exceptions.kind", "supported"),
       entry("network.servedBy", "supported", [
         "a script or stylesheet reused from the memory cache within one document produces no request"
       ]),
@@ -581,6 +591,8 @@ export const connect: (
     const downloadsById = new Map<Download.Id, DownloadEntry>()
     const handles = new Map<Adapter.HandleId, HandleEntry>()
     const connections = new Map<string, NetworkConnection.Id>()
+    // A worker no page owns belongs to the context its target names
+    const workerContexts = new Map<TargetEntry, ContextEntry>()
     const pausedRequests = new Map<string, number>()
     let attachedAtConnect = true
     let defaultUserAgent = ""
@@ -912,6 +924,8 @@ export const connect: (
           }
           targets.set(session, target)
           targetsById.set(info.targetId, target)
+          const context = info.browserContextId === undefined ? undefined : contextsByCdp.get(info.browserContextId)
+          if (context !== undefined) workerContexts.set(target, context)
           control.sync(session, workerGate(target, params.waitingForDebugger))
           return
         }
@@ -1000,6 +1014,7 @@ export const connect: (
           id: ids.download(),
           guid: params.guid,
           directory: frame === undefined ? undefined : downloadDirectory(frame.page.context.id),
+          context: frame?.page.context,
           ended: false
         }
         downloads.set(params.guid, download)
@@ -1274,7 +1289,8 @@ export const connect: (
                 ? { _tag: "Shared" }
                 : { _tag: "Service", scope: Option.none() },
               url: target.url,
-              page: Option.fromUndefinedOr(target.page?.id)
+              page: Option.fromUndefinedOr(target.page?.id),
+              context: Option.fromUndefinedOr((target.page?.context ?? workerContexts.get(target))?.id)
             }
           })
           return
@@ -1334,7 +1350,8 @@ export const connect: (
             text: params.args.map(textOf).join(" "),
             location: top === undefined || top.url === ""
               ? Option.none()
-              : Option.some({ url: top.url as Url.Url, line: top.lineNumber, column: top.columnNumber }),
+              // CDP's lines and columns are 0-based; a location is 1-based, as stack traces print it
+              : Option.some({ url: top.url as Url.Url, line: top.lineNumber + 1, column: top.columnNumber + 1 }),
             origin: realm.frame !== undefined
               ? { _tag: "Page", page: realm.frame.page.id }
               : { _tag: "Worker", realm: realm.id },
@@ -1349,17 +1366,23 @@ export const connect: (
           ? target.realm
           : realmsByContext.get(contextKey(target, details.executionContextId as number))
         const exception = details.exception
-        const description = exception?.description ?? details.text
-        const [first = details.text, ...rest] = description.split("\n")
-        const colon = first.indexOf(": ")
+        // `Uncaught TypeError: …`, or with no exception object, as for a timer an evaluation set, `Uncaught a string`
+        const text = details.text.replace(/^Uncaught (\(in promise\) )?/, "")
+        // A thrown value that isn't an Error, such as a string, reads as an Error whose message is the value
+        const primitive = exception !== undefined && exception.type !== "object" && exception.type !== "function"
+        const description = primitive
+          ? exception.description ?? String(exception.value ?? exception.unserializableValue ?? "")
+          : exception?.description ?? text
+        const [first = text, ...rest] = description.split("\n")
+        const colon = primitive ? -1 : first.indexOf(": ")
         const fact: Adapter.Fact = {
           _tag: "UncaughtException",
           realm: Option.fromUndefinedOr(realm?.id),
           exception: new UncaughtException.UncaughtException({
             kind: details.text.startsWith("Uncaught (in promise)") ? "unhandledRejection" : "thrown",
-            name: exception?.className ?? (colon > 0 ? first.slice(0, colon) : "Error"),
+            name: primitive ? "Error" : exception?.className ?? (colon > 0 ? first.slice(0, colon) : "Error"),
             message: colon > 0 ? first.slice(colon + 2) : first,
-            stack: rest.length > 0 ? Option.some(description) : Option.none(),
+            stack: !primitive && rest.length > 0 ? Option.some(description) : Option.none(),
             origin: realm?.frame !== undefined
               ? { _tag: "Page", page: realm.frame.page.id }
               : realm !== undefined
@@ -1635,7 +1658,8 @@ export const connect: (
     ) => {
       if (target === undefined) return
       const id = connections.get(requestKey(target, requestId))
-      if (id === undefined) return
+      // Control frames (close, ping, pong) aren't messages
+      if (id === undefined || frame.opcode >= 8) return
       emit({
         _tag: "ConnectionFrame",
         connection: id,
@@ -2691,6 +2715,21 @@ export const connect: (
         )
       })
 
+    const cancelDownload = (id: Download.Id) =>
+      Effect.suspend(() => {
+        const download = downloadsById.get(id)
+        if (download === undefined) return Effect.fail(foreign(id))
+        if (download.ended) return Effect.void
+        return protocol(
+          BrowserCdp.cancelDownload({
+            guid: download.guid,
+            ...(download.context?.browserContextId === undefined
+              ? {}
+              : { browserContextId: download.context.browserContextId as BrowserCdp.BrowserContextID })
+          }).pipe(Protocol.on(client.root))
+        )
+      })
+
     return {
       info,
       capabilities: capabilitySet,
@@ -2721,7 +2760,8 @@ export const connect: (
       resetPermissions,
       responseBody,
       setInputFiles,
-      downloadPath
+      downloadPath,
+      cancelDownload
     } satisfies Adapter.AdapterConnection
   }
 )

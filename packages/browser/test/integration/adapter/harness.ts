@@ -125,6 +125,45 @@ self.addEventListener("fetch", (event) => {
       response,
       `<title>sw</title><script>window.controlled = navigator.serviceWorker.register("/sw.js").then(() => navigator.serviceWorker.ready).then(() => navigator.serviceWorker.controller ? true : new Promise((resolve) => navigator.serviceWorker.addEventListener("controllerchange", () => resolve(true))))</script>`
     ),
+  // A download that takes a second, reported in four parts
+  "/slow-download": (_request, response) => {
+    const part = Buffer.alloc(64 * 1024, 97)
+    response.writeHead(200, {
+      "content-type": "application/octet-stream",
+      "content-disposition": "attachment; filename=slow.bin",
+      "content-length": String(part.length * 4)
+    })
+    let sent = 0
+    const write = () => {
+      if (response.destroyed) return
+      response.write(part)
+      if (++sent === 4) return response.end()
+      setTimeout(write, 300)
+    }
+    write()
+  },
+  // A cart's contents, for a POST
+  "/cart": (request, response) => {
+    response.writeHead(200, { "content-type": "application/json" })
+    response.end(JSON.stringify({ items: request.method === "POST" ? [{ id: "tea" }] : [] }))
+  },
+  // An image that takes half a second, so a page's load waits for it
+  "/slow-image": (_request, response) => {
+    setTimeout(() => {
+      response.writeHead(200, { "content-type": "image/svg+xml" })
+      response.end(`<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>`)
+    }, 500)
+  },
+  // An event stream that never ends
+  "/events": (_request, response) => {
+    response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" })
+    response.write("data: one\n\n")
+    setTimeout(() => response.destroyed || response.write("data: two\n\n"), 200)
+  },
+  "/shared.js": (_request, response) => {
+    response.writeHead(200, { "content-type": "text/javascript" })
+    response.end(`onconnect = (event) => event.ports[0].postMessage("ready")`)
+  },
   "/beforeunload": (_request, response) =>
     html(
       response,

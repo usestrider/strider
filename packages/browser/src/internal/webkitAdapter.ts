@@ -526,10 +526,18 @@ const capabilities = (info: Browser.Info) => {
       entry("prompts", "supported"),
       entry("fileChooser", "supported"),
       entry("downloads", "supported"),
+      entry("downloads.progress", "unsupported", ["Playwright's WebKit reports a download's start and end only"]),
+      entry("downloads.cancel", "supported"),
       entry("screenshot", "supported"),
       entry("pdf", "unsupported", ["Playwright's WebKit has no print-to-PDF"]),
       entry("evaluation.userActivation", "supported"),
       entry("webSocketFrames", "supported"),
+      entry("networkConnections", "partial", ["no EventSource connections: WebKit reports only their request"]),
+      entry("networkConnections.eventSource", "unsupported", ["WebKit reports an EventSource as a request"]),
+      entry("workers.shared", "unsupported", ["Playwright's WebKit doesn't report shared workers"]),
+      entry("workers.service", "unsupported", ["Playwright's WebKit doesn't report service workers"]),
+      entry("workers.evaluate", "supported"),
+      entry("exceptions.kind", "supported"),
       entry("network.servedBy", "supported", [
         "a script or stylesheet reused from the memory cache within one document produces no request"
       ]),
@@ -1327,7 +1335,8 @@ export const connect: (
             _tag: "Worker",
             worker: { _tag: "Dedicated", owner: Option.fromUndefinedOr(mainRealmOf(target)?.id) },
             url: params.url,
-            page: Option.some(target.page.id)
+            page: Option.some(target.page.id),
+            context: Option.some(target.page.context.id)
           }
         })
         control.sync(session, workerGate(worker))
@@ -1622,7 +1631,8 @@ export const connect: (
       frame: Network.WebSocketFrame
     ) => {
       const id = connections.get(requestKey(session, requestId))
-      if (id === undefined) return
+      // Control frames (close, ping, pong) aren't messages; WebKit reports the close handshake (review 14, P15)
+      if (id === undefined || frame.opcode >= 8) return
       emit({
         _tag: "ConnectionFrame",
         connection: id,
@@ -2961,7 +2971,14 @@ export const connect: (
       resetPermissions,
       responseBody,
       setInputFiles,
-      downloadPath
+      downloadPath,
+      cancelDownload: (id: Download.Id) =>
+        Effect.suspend(() => {
+          const download = downloadsById.get(id)
+          if (download === undefined) return Effect.fail(foreign(id))
+          if (download.ended) return Effect.void
+          return protocol(Playwright.cancelDownload({ uuid: download.uuid }).pipe(Protocol.on(client.root)))
+        })
     } satisfies Adapter.AdapterConnection
   }
 )

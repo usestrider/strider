@@ -8,6 +8,10 @@
  * Options at creation are declarations held for the context's whole life. Members such as `emulate` and
  * `grant` are the same declarations, scoped: `Options.emulation` is `emulate(…)` held for the context's life.
  *
+ * A context the library creates holds two more, which no option changes: downloads are allowed into a
+ * temporary directory the context owns, made before it and removed after it (its path is on the context's span,
+ * `browser.context.downloads`), and file choosers are reported and decided, canceled when no handler answers.
+ *
  * @stability unstable
  * @since 0.1.0
  */

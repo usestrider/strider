@@ -72,6 +72,11 @@ interface NavigableEntry {
   document: DocumentEntry | undefined
   /** Main-world realms created for the next document, before it commits. */
   readonly pendingRealms: Array<RealmEntry>
+  /**
+   * A traversal that replied before its restored document's realm arrived, waiting for it: under load, Firefox
+   * can reply first (review 14's revision).
+   */
+  restoring: ((realm: RealmEntry) => void) | undefined
   /** Navigations started by a command that the browser hasn't announced yet, oldest first. */
   readonly expected: Array<
     { readonly id: PageNavigation.Id; readonly url: string; readonly initiatedAs: Adapter.InitiatedAs }
@@ -284,6 +289,19 @@ const coveringPattern = (glob: string): Network.UrlPattern | undefined => {
 
 const errorPage = (url: string) => url.startsWith("about:neterror") || url.startsWith("about:certerror")
 
+/**
+ * Where a navigation was going: an error page's `u` parameter, since Firefox starts a navigation it refuses at
+ * once (a port browsers don't use, say) as its error page (review 14's revision).
+ */
+const intended = (url: string) => {
+  if (!errorPage(url)) return url
+  try {
+    return new URL(url).searchParams.get("u") ?? url
+  } catch {
+    return url
+  }
+}
+
 /** The events the fold needs. */
 const foldEvents: ReadonlyArray<Protocol.EventDef<string, any>> = [
   BrowsingContext.contextCreated,
@@ -377,14 +395,26 @@ const capabilities = (info: Browser.Info) => {
       entry("interception.response", "supported"),
       entry("interception.auth", "supported"),
       entry("bodies", "supported", ["only with a body collection declared before the request"]),
-      entry("console", "supported"),
+      entry("console", "partial", [
+        "a dedicated worker's messages are attributed to its page, and shared and service workers' aren't reported"
+      ]),
       entry("prompts", "supported"),
-      entry("fileChooser", "supported"),
+      entry("fileChooser", "partial", ["the input gets a cancel event as the chooser opens, before any decision"]),
       entry("downloads", "supported"),
+      entry("downloads.progress", "unsupported", ["WebDriver BiDi reports a download's start and end only"]),
+      entry("downloads.cancel", "unsupported", ["WebDriver BiDi has no command to cancel a download"]),
       entry("screenshot", "supported"),
       entry("pdf", "supported"),
       entry("evaluation.userActivation", "supported"),
       entry("webSocketFrames", "unsupported", ["WebDriver BiDi has no WebSocket frame events"]),
+      entry("networkConnections", "unsupported", [
+        "WebDriver BiDi reports a WebSocket's handshake as a request, and not its frames or its close"
+      ]),
+      entry("networkConnections.eventSource", "unsupported", ["WebDriver BiDi reports an EventSource as a request"]),
+      entry("workers.shared", "unsupported", ["Firefox reports shared workers, but not whose context they are in"]),
+      entry("workers.service", "unsupported", ["Firefox reports service workers, but not whose context they are in"]),
+      entry("workers.evaluate", "unsupported", ["Firefox can't evaluate in a worker realm"]),
+      entry("exceptions.kind", "partial", ["an unhandled rejection is reported as a throw, so its kind is unknown"]),
       entry("network.servedBy", "partial", [
         "a cache and a service worker look alike: both are cacheOrServiceWorker (Firefox's fromCache)"
       ]),
@@ -400,6 +430,9 @@ const gone = (target: L1Target.Description, reason: L1Target.CloseReason) =>
 const foreign = (id: string) => new Adapter.AdapterError({ reason: { _tag: "Foreign", id } })
 
 const protocolError = Adapter.protocolError
+
+// How Firefox's text begins for a thrown value that isn't an object
+const uncaughtValue = "uncaught exception: "
 
 const unsupported = (capability: string, hint: string) =>
   new Adapter.AdapterError({ reason: { _tag: "Unsupported", capability, hint } })
@@ -440,6 +473,8 @@ export const connect: (
     const navigablesById = new Map<L1Target.NavigableId, NavigableEntry>()
     const documents = new Map<L1Target.DocumentId, DocumentEntry>()
     const realms = new Map<string, RealmEntry>()
+    // The page of each dedicated worker, from its owner
+    const workerPages = new Map<RealmEntry, NavigableEntry>()
     const realmsById = new Map<L1Target.RealmId, RealmEntry>()
     const navigations = new Map<string, NavigationEntry>()
     const requests = new Map<string, RequestEntry>()
@@ -657,6 +692,7 @@ export const connect: (
         closing: undefined,
         document: undefined,
         pendingRealms: [],
+        restoring: undefined,
         expected: [],
         past: new Map(),
         navigations: new Map(),
@@ -733,14 +769,15 @@ export const connect: (
         const navigable = navigableOf(params.context)
         if (navigable === undefined || params.navigation === null) return
         // Firefox leaves out the URL of the navigation that closing with promptUnload starts
-        startNavigation(navigable, params.navigation, params.url ?? "", "crossDocument", false)
+        startNavigation(navigable, params.navigation, intended(params.url ?? ""), "crossDocument", false)
       },
       [BrowsingContext.navigationCommitted.method]: (params: BrowsingContext.NavigationInfo) => {
         const navigable = navigableOf(params.context)
         if (navigable === undefined) return
         const url = params.url ?? ""
         const bidi = params.navigation ?? `committed:${navigable.bidi}:${url}`
-        const navigation = navigations.get(bidi) ?? startNavigation(navigable, bidi, url, "crossDocument", false)
+        const navigation = navigations.get(bidi) ??
+          startNavigation(navigable, bidi, intended(url), "crossDocument", false)
         const failed = errorPage(url)
         const document = commit(
           navigable,
@@ -888,6 +925,7 @@ export const connect: (
           // A second main-world realm for a document belongs to the next one, which hasn't committed yet
           if (document === undefined || (realm.world._tag === "Main" && document.hadMainRealm)) {
             navigable.pendingRealms.push(realm)
+            if (realm.world._tag === "Main") navigable.restoring?.(realm)
           } else {
             addWindowRealm(realm, document)
           }
@@ -904,6 +942,10 @@ export const connect: (
         }
         realms.set(realm.bidi, realm)
         realmsById.set(realm.id, realm)
+        // A dedicated worker belongs to its owner's page; BiDi names no context for shared and service workers
+        const owner = params.type === "dedicated-worker" ? realms.get(params.owners[0] ?? "") : undefined
+        const page = owner === undefined ? undefined : owner.navigable?.page ?? workerPages.get(owner)
+        if (page !== undefined) workerPages.set(realm, page)
         emit({
           _tag: "RealmAdded",
           realm: realm.id,
@@ -911,12 +953,14 @@ export const connect: (
           kind: {
             _tag: "Worker",
             worker: params.type === "dedicated-worker"
-              ? { _tag: "Dedicated", owner: Option.fromUndefinedOr(realms.get(params.owners[0] ?? "")?.id) }
+              ? { _tag: "Dedicated", owner: Option.fromUndefinedOr(owner?.id) }
               : params.type === "shared-worker"
               ? { _tag: "Shared" }
               : { _tag: "Service", scope: Option.none() },
+            // A worker realm's origin is its script's URL
             url: params.origin,
-            page: Option.none()
+            page: Option.fromUndefinedOr(page?.id),
+            context: Option.fromUndefinedOr(page?.context.id)
           }
         })
       },
@@ -941,7 +985,8 @@ export const connect: (
         const top = params.stackTrace?.callFrames[0]
         const location = top === undefined || top.url === ""
           ? Option.none()
-          : Option.some({ url: top.url as Url.Url, line: top.lineNumber, column: top.columnNumber })
+          // BiDi's lines and columns are 0-based; a location is 1-based, as stack traces print it
+          : Option.some({ url: top.url as Url.Url, line: top.lineNumber + 1, column: top.columnNumber + 1 })
         const origin: L1Target.EventOrigin = navigable !== undefined
           ? { _tag: "Page", page: navigable.page.id }
           : realm !== undefined
@@ -964,15 +1009,30 @@ export const connect: (
         }
         if (params.type === "javascript") {
           const text = params.text ?? ""
-          const colon = text.indexOf(": ")
+          // A thrown value that isn't an Error, such as a string, reads as an Error whose message is the value
+          const primitive = text.startsWith(uncaughtValue)
+          const colon = primitive ? -1 : text.indexOf(": ")
+          const name = colon > 0 ? text.slice(0, colon) : "Error"
+          const message = primitive ? text.slice(uncaughtValue.length) : colon > 0 ? text.slice(colon + 2) : text
+          const frames = params.stackTrace?.callFrames ?? []
           const fact: Adapter.Fact = {
             _tag: "UncaughtException",
             realm: Option.fromUndefinedOr(realm?.id),
             exception: new UncaughtException.UncaughtException({
-              kind: text.startsWith("uncaught (in promise)") ? "unhandledRejection" : "thrown",
-              name: colon > 0 ? text.slice(0, colon) : "Error",
-              message: colon > 0 ? text.slice(colon + 2) : text,
-              stack: Option.none(),
+              // Firefox reports a rejection exactly as a throw (review 14, P10)
+              kind: "unknown",
+              name,
+              message,
+              stack: frames.length === 0 ? Option.none() : Option.some(
+                [
+                  `${name}: ${message}`,
+                  ...frames.map((frame) =>
+                    `    at ${frame.functionName === "" ? "<anonymous>" : frame.functionName} (${frame.url}:${
+                      frame.lineNumber + 1
+                    }:${frame.columnNumber + 1})`
+                  )
+                ].join("\n")
+              ),
               origin,
               at: Adapter.now()
             })
@@ -1309,7 +1369,7 @@ export const connect: (
     if ((options.session ?? "new") === "new") {
       const created = yield* Session.new_({
         capabilities: {
-          alwaysMatch: { unhandledPromptBehavior: { default: "ignore", file: "ignore" } }
+          alwaysMatch: { unhandledPromptBehavior: { default: "ignore", file: "dismiss" } }
         }
       } as Session.NewParameters).pipe(on, Effect.catch(failConnect))
       product = created.capabilities.browserName
@@ -1570,7 +1630,16 @@ export const connect: (
       yield* run(() => {
         const entry = [...navigable.navigations.values()].find((pending) => pending.id === navigation)
         const realm = pendingRealm()
-        if (realm === undefined) return
+        if (realm === undefined) {
+          // Its realm hasn't arrived yet: restore when it does, unless the traversal has ended by then
+          if (entry !== undefined && !entry.ended) {
+            navigable.restoring = (arrived) => {
+              navigable.restoring = undefined
+              if (!entry.ended) restore(entry, arrived)
+            }
+          }
+          return
+        }
         if (entry !== undefined && !entry.ended) restore(entry, realm)
         else if (navigable.expected.some((expected) => expected.id === navigation)) unannounced = realm
       })
@@ -2146,7 +2215,9 @@ export const connect: (
           yield* protocol(applyDownloads(scope))
           break
         case "FileChooser":
-          // File dialogs are always reported (unhandledPromptBehavior.file is "ignore"), so nothing to arm
+          // File dialogs are always reported, and dismissed so none stays open (unhandledPromptBehavior.file is
+          // "dismiss"; review 14, P5 and P6): the page sees `cancel` before the decision, and files set after it
+          // still arrive
           break
       }
       return id
@@ -2368,7 +2439,13 @@ export const connect: (
           return download === undefined
             ? Effect.fail(foreign(id))
             : Effect.succeed(Option.fromUndefinedOr(download.path))
-        })
+        }),
+      cancelDownload: (id) =>
+        Effect.suspend(() =>
+          downloadsById.has(id)
+            ? Effect.fail(unsupported("downloads.cancel", "WebDriver BiDi has no command to cancel a download"))
+            : Effect.fail(foreign(id))
+        )
     } satisfies Adapter.AdapterConnection
   }
 )

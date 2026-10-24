@@ -2,34 +2,45 @@
  * The `Browser` service and the contexts it creates (API.md, Entry points; review 12, candidate 7), and the
  * layer every backend builds: launch, connect the adapter, fold its facts into the model, provide `Browser`.
  *
- * Built: `info`, `capabilities`, `newContext`, `newPage`, and a context's `newPage`, `pages`, `closed` and
- * `control`. What a context or page owns is released when the scope that acquired it closes, and a page's
- * popups with it (review 13). The other members fail as `NotBuilt`.
+ * Built: `info`, `capabilities`, `newContext`, `newPage`, and a context's `newPage`, `pages`, `workers`,
+ * `closed` and `control`. What a context or page owns is released when the scope that acquired it closes, and
+ * a page's popups with it (review 13). The other members fail as `NotBuilt`.
  *
- * Each page has one handle per connection, made on first use from its model entry (`Runtime.page`), so
- * `newPage`, a context's `pages` and `Popup` hand out the same `Page`.
+ * A context the library creates allows downloads into a temporary directory it owns, made before the context
+ * and removed after it, and has its file choosers reported and decided (review 14, candidates 8 and 9).
+ *
+ * Each page, download, worker and connection has one handle per connection, made on first use from its model
+ * entry (`Runtime`), so `newPage`, a context's `pages` and `Popup` hand out the same `Page`, and every event
+ * module the same `Download`, `BrowserWorker` or `NetworkConnection`.
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
+import * as FileSystem from "effect/FileSystem"
 import * as Hash from "effect/Hash"
 import * as Inspectable from "effect/Inspectable"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Path from "effect/Path"
 import { pipeArguments } from "effect/Pipeable"
 import type * as Scope from "effect/Scope"
 import * as Browser from "../Browser.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import * as Page from "../Page.ts"
+import * as Reason from "../Reason.ts"
 import * as UserContext from "../UserContext.ts"
 import type * as Adapter from "./adapter.ts"
+import * as ConnectionImpl from "./connection.ts"
+import * as DownloadImpl from "./download.ts"
 import * as Handles from "./handles.ts"
 import * as Model from "./model.ts"
+import * as Navigation from "./navigation.ts"
 import * as NotBuilt from "./notBuilt.ts"
 import * as Operation from "./operation.ts"
 import * as PageImpl from "./page.ts"
 import type * as Runtime from "./runtime.ts"
 import * as Watchable from "./watchable.ts"
+import * as WorkerImpl from "./worker.ts"
 
 const BrowserTypeId = "~@usestrider/browser/Browser"
 const UserContextTypeId = "~@usestrider/browser/UserContext"
@@ -80,7 +91,13 @@ const makeContext = (runtime: Runtime.Runtime, entry: Model.ContextEntry): UserC
       target: { _tag: "UserContext" },
       operation: "UserContext.pages.waitFor"
     }),
-    workers: NotBuilt.watchable("UserContext.workers"),
+    workers: Watchable.make({
+      ref: entry.workers,
+      project: (workers) => Option.some(workers.map(runtime.worker)),
+      ended: () => Option.none(),
+      target: { _tag: "UserContext" },
+      operation: "UserContext.workers.waitFor"
+    }),
     closed: Deferred.await(entry.closed),
     control: Effect.sync(() => context),
     newPage: Effect.gen(function*() {
@@ -141,23 +158,40 @@ const makeContext = (runtime: Runtime.Runtime, entry: Model.ContextEntry): UserC
 }
 
 /** The browser's default context, observed: it exists for the whole connection. */
-const makeDefaultContext = (entry: Model.ContextEntry): UserContext.ObservedUserContext => ({
-  [UserContextTypeId]: UserContextTypeId,
-  id: entry.id,
-  pages: NotBuilt.watchable("Browser.defaultContext.pages"),
-  workers: NotBuilt.watchable("Browser.defaultContext.workers"),
-  closed: Deferred.await(entry.closed),
-  control: NotBuilt.effect("Browser.defaultContext.control"),
-  [Equal.symbol](that: unknown) {
-    return UserContext.isUserContext(that) && that.id === entry.id
-  },
-  [Hash.symbol]() {
-    return Hash.string(entry.id)
-  },
-  ...objectMembers("UserContext", entry.id)
-})
+const makeDefaultContext = (runtime: Runtime.Runtime, entry: Model.ContextEntry): UserContext.ObservedUserContext => {
+  const context: UserContext.ObservedUserContext = {
+    [UserContextTypeId]: UserContextTypeId,
+    id: entry.id,
+    pages: NotBuilt.watchable("Browser.defaultContext.pages"),
+    workers: NotBuilt.watchable("Browser.defaultContext.workers"),
+    closed: Deferred.await(entry.closed),
+    control: NotBuilt.effect("Browser.defaultContext.control"),
+    [Equal.symbol](that: unknown) {
+      return UserContext.isUserContext(that) && that.id === entry.id
+    },
+    [Hash.symbol]() {
+      return Hash.string(entry.id)
+    },
+    ...objectMembers("UserContext", entry.id)
+  }
+  // Its events are data events, which modules that take an observed context read
+  Handles.registerContext(context, { runtime, entry })
+  return context
+}
 
 /** The `Browser` service over a model. */
+/** One handle per entry, made on first use and kept as long as the entry is. */
+const cached = <E extends object, H>(make: (entry: E) => H) => {
+  const handles = new WeakMap<E, H>()
+  return (entry: E): H => {
+    const known = handles.get(entry)
+    if (known !== undefined) return known
+    const handle = make(entry)
+    handles.set(entry, handle)
+    return handle
+  }
+}
+
 export const make = Effect.fnUntraced(function*(model: Model.Model) {
   const adapter = model.adapter
   // The contexts this connection created, whose pages get handles
@@ -174,7 +208,15 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       const page = PageImpl.make({ runtime, entry, context })
       handles.set(entry, page)
       return Option.some(page)
-    }
+    },
+    download: cached((entry: Model.DownloadEntry) => DownloadImpl.make(runtime, entry)),
+    worker: cached((entry: Model.WorkerEntry) => WorkerImpl.make(runtime, entry)),
+    connection: cached((entry: Model.ConnectionEntry) => ConnectionImpl.make(entry)),
+    // A launched browser's layer has both; one it connects to may not (review 14, candidates 8 and 9)
+    fileSystem: yield* Effect.serviceOption(FileSystem.FileSystem),
+    path: yield* Effect.serviceOption(Path.Path),
+    settle: (operation, navigation, url, at, outcome, id) =>
+      Navigation.settle(model, operation, navigation, url, at, outcome, id)
   }
 
   const newContext = (
@@ -184,16 +226,33 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       const unbuilt = unbuiltOption(options)
       if (Option.isSome(unbuilt)) return yield* NotBuilt.effect(unbuilt.value)
       const id = Operation.operationId()
+      const failed = (error: Adapter.AdapterError) => {
+        const mapped = Operation.fromAdapter(error, id, runtime.backend)
+        // The browser itself ended: every operation on it ends with the connection, a defect here
+        return mapped._tag === "Gone"
+          ? Effect.die(mapped.error)
+          : Effect.fail(contextError("Browser.newContext", mapped.reason, id))
+      }
+      // A directory the context owns for its downloads, made first so it is removed after the context
+      // (review 14, candidate 8)
+      const downloads = Option.isNone(runtime.fileSystem) ? Option.none<string>() : Option.some(
+        yield* runtime.fileSystem.value.makeTempDirectoryScoped({ prefix: "strider-downloads-" }).pipe(
+          Effect.mapError((error) =>
+            contextError(
+              "Browser.newContext",
+              new Reason.BackendFailure({
+                kind: "Rejected",
+                method: "FileSystem.makeTempDirectoryScoped",
+                metadata: {},
+                hint: `Couldn't create the context's download directory: ${error.message}`
+              }),
+              id
+            )
+          )
+        )
+      )
       const created = yield* Effect.acquireRelease(
-        adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: false }).pipe(
-          Effect.catch((error) => {
-            const mapped = Operation.fromAdapter(error, id, runtime.backend)
-            // The browser itself ended: every operation on it ends with the connection, a defect here
-            return mapped._tag === "Gone"
-              ? Effect.die(mapped.error)
-              : Effect.fail(contextError("Browser.newContext", mapped.reason, id))
-          })
-        ),
+        adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: false }).pipe(Effect.catch(failed)),
         (context) =>
           adapter.removeUserContext(context).pipe(
             Effect.ignore,
@@ -201,9 +260,18 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           )
       )
       const entry = yield* model.context(created)
-      // Owned contexts decide dialogs no handler claims at once (CONCEPTS.md §5)
+      // Owned contexts decide dialogs no handler claims at once, and cancel file choosers no handler answers
+      // (CONCEPTS.md §5)
+      entry.owned = true
       entry.policy = Option.some(options?.dialogs ?? "dismiss")
       entry.eventLog = options?.eventLog ?? entry.eventLog
+      const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: created }
+      yield* adapter.declare(scope, { _tag: "FileChooser" }).pipe(Effect.catch(failed))
+      if (Option.isSome(downloads)) {
+        yield* adapter.declare(scope, { _tag: "Downloads", behavior: { _tag: "Allow", directory: downloads.value } })
+          .pipe(Effect.catch(failed))
+        yield* Effect.annotateCurrentSpan("browser.context.downloads", downloads.value)
+      }
       const context = makeContext(runtime, entry)
       contexts.set(created, context)
       return context
@@ -234,7 +302,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       return yield* context.newPage
     }),
     pages: NotBuilt.watchable("Browser.pages"),
-    defaultContext: makeDefaultContext(defaultEntry)
+    defaultContext: makeDefaultContext(runtime, defaultEntry)
   }
   return browser
 })

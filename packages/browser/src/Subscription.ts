@@ -9,7 +9,8 @@
  *   event. It keeps what arrives until its first match or its deadline.
  * - `stream(target, filter?, where?)` subscribes the same way and emits every match from then on, buffering
  *   at most `Capacity` events for a consumer that falls behind.
- * - `history(target, filter?)` reads what already happened from a bounded log and never waits.
+ * - `history(target, filter?)` reads what already happened from a bounded log and never waits. Its filter is
+ *   checked as the others' are, so a filter it can't apply fails it with `SubscriptionError` too.
  *
  * Events report; handlers decide (`Dialog.handle`, `FileChooser.handle`, `route`). Seeing an event acquires
  * nothing: a popup belongs to the scope that acquired its opener, and a download's file to its context.
@@ -121,12 +122,14 @@ export type SubscriptionErrorReason = typeof SubscriptionErrorReason.Type
 const SubscriptionErrorTypeId = "~@usestrider/browser/Subscription/SubscriptionError"
 
 /**
- * Error for a subscription that couldn't be set up, such as a filter the backend can't apply.
+ * Error for a subscription that couldn't be set up, or a log that couldn't be read, such as for a filter the
+ * backend can't apply.
  *
  * **Details**
  *
- * It fails `next` or `stream` itself, before any event, never the awaited result. `operation` names the call,
- * such as `NetworkResponse.next`.
+ * It fails the call that took the filter, `next`, `stream` or `history`, before any event, never the awaited
+ * result: a filter that doesn't compile is `InvalidInput`, and one that asks for events the backend can't
+ * report is `Unsupported`, naming the capability. `operation` names the call, such as `NetworkResponse.next`.
  *
  * @stability unstable
  * @category errors

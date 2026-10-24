@@ -7,9 +7,11 @@ import { WebKit } from "@usestrider/browser/webkit"
 import * as Layer from "effect/Layer"
 import { webkit } from "../browsers.ts"
 import { events } from "./events.ts"
+import { modules } from "./modules.ts"
 import { slice } from "./slice.ts"
 
 const backend = WebKit.layer({ executablePath: webkit.executable }).pipe(Layer.provide(NodeServices.layer))
 
 slice("WebKit", backend, () => {})
 events("WebKit", backend)
+modules("WebKit", backend)

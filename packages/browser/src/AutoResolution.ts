@@ -15,6 +15,7 @@ import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
 import type * as Deferred from "./Deferred.ts"
 import * as Events from "./internal/events.ts"
+import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
 import type * as Model from "./internal/model.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
@@ -88,14 +89,21 @@ export interface Filter {
 
 const kinds = { alert: "Alert", confirm: "Confirm", prompt: "Prompt", beforeunload: "BeforeUnload" } as const
 
-// Only dialogs are decided by a policy so far; file choosers and paused requests come with their modules
+// Paused requests are decided by a policy once routes are built
 const deliver = (event: Model.AutoResolutionEvent): AutoResolution =>
-  new AutoResolution({
-    subject: { _tag: "Dialog", kind: kinds[event.prompt.kind], message: event.prompt.message },
-    decision: event.decision,
-    policy: `dialogs: "${event.policy}"`,
-    at: event.at
-  })
+  event._tag === "Dialog"
+    ? new AutoResolution({
+      subject: { _tag: "Dialog", kind: kinds[event.prompt.kind], message: event.prompt.message },
+      decision: event.decision,
+      policy: `dialogs: "${event.policy}"`,
+      at: event.at
+    })
+    : new AutoResolution({
+      subject: { _tag: "FileChooser" },
+      decision: event.decision,
+      policy: `fileChoosers: "cancel"`,
+      at: event.at
+    })
 
 const kind = (operation: string): Events.Kind<Model.AutoResolutionEvent, AutoResolution> => ({
   operation,
@@ -109,10 +117,8 @@ const channel = (target: Page.Page | UserContext.UserContext) => {
 }
 
 const accepts = (filter: Filter | undefined) => {
-  const wanted = filter?.subject === undefined ? undefined : new Set<Subject["_tag"]>(
-    typeof filter.subject === "string" ? [filter.subject] : filter.subject
-  )
-  return (_entry: Events.Entry<Model.AutoResolutionEvent>) => wanted === undefined || wanted.has("Dialog")
+  const wanted = Filters.among(filter?.subject)
+  return (entry: Events.Entry<Model.AutoResolutionEvent>) => wanted(entry.value._tag)
 }
 
 /**
@@ -162,5 +168,5 @@ export const stream = <PE = never, PR = never>(
 export const history = (
   target: Page.Page | UserContext.UserContext,
   filter?: Filter | undefined
-): Effect.Effect<Subscription.History<AutoResolution>> =>
+): Effect.Effect<Subscription.History<AutoResolution>, Subscription.SubscriptionError> =>
   Effect.suspend(() => Events.history(kind("AutoResolution.history"), channel(target), accepts(filter)))

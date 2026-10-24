@@ -8,6 +8,7 @@ import { Firefox } from "@usestrider/browser/firefox"
 import * as Layer from "effect/Layer"
 import { assertPinned, firefox } from "../browsers.ts"
 import { events } from "./events.ts"
+import { modules } from "./modules.ts"
 import { slice } from "./slice.ts"
 
 const backend = Firefox.layer({ executablePath: firefox.executable }).pipe(
@@ -16,3 +17,4 @@ const backend = Firefox.layer({ executablePath: firefox.executable }).pipe(
 
 slice("Firefox", backend, (info) => assertPinned("Firefox", info.version, firefox.version))
 events("Firefox", backend)
+modules("Firefox", backend)

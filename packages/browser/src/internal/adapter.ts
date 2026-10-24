@@ -253,6 +253,8 @@ export type Fact =
         readonly worker: WorkerKind
         readonly url: string
         readonly page: Option.Option<Target.NavigableId>
+        /** The worker's context, when the backend says: a page's, or a shared or service worker's own. */
+        readonly context: Option.Option<UserContext.Id>
       }
   }
   | { readonly _tag: "RealmDocumentAdded"; readonly realm: Target.RealmId; readonly document: Target.DocumentId }
@@ -750,6 +752,8 @@ export interface AdapterConnection {
   ) => Effect.Effect<void, AdapterError>
   /** Where a download allowed to a directory is written, on the browser's host. */
   readonly downloadPath: (download: Download.Id) => Effect.Effect<Option.Option<string>, AdapterError>
+  /** Cancels a download in progress; `Unsupported` where the protocol has no command for it. */
+  readonly cancelDownload: (download: Download.Id) => Effect.Effect<void, AdapterError>
 }
 
 /** A backend: connects over a transport. */

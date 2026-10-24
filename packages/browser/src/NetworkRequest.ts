@@ -4,17 +4,24 @@
  * A `NetworkRequest` is one redirect hop, immutable, with Effect's `Headers`; classified header values, such
  * as cookies and authorization, are redacted. It is data (a Schema), so it can be encoded for export.
  *
+ * A request is reported when it is sent, to the page and context that made it: a frame's requests reach its
+ * page, and a worker's its page or context. Firefox and WebKit attribute a dedicated worker's requests to its
+ * page's document, as `initiator` says.
+ *
  * @stability unstable
  * @since 0.1.0
  */
-import type * as Effect from "effect/Effect"
-import type * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as Effect from "effect/Effect"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import type * as HttpMethod from "effect/http/HttpMethod"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
 import type * as Deferred from "./Deferred.ts"
+import * as Events from "./internal/events.ts"
+import * as Filters from "./internal/filters.ts"
+import * as Handles from "./internal/handles.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -188,6 +195,32 @@ export interface Filter {
   readonly resourceType?: ResourceType | ReadonlyArray<ResourceType> | undefined
 }
 
+// ── Implementation ──
+
+const kind = (operation: string): Events.Kind<NetworkRequest, NetworkRequest> => ({
+  operation,
+  noun: "a request",
+  deliver: (request) => request
+})
+
+const subscription = (
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  filter: Filter | undefined,
+  operation: string
+) =>
+  Effect.suspend(() => {
+    const channel = Handles.target(target).behind.entry.events.request
+    const method = Filters.among<string>(filter?.method)
+    const resourceType = Filters.among(filter?.resourceType)
+    return Effect.map(Filters.url(operation, filter?.url), (matches) => ({
+      kind: kind(operation),
+      channel,
+      accepts: (entry: Events.Entry<NetworkRequest>) =>
+        Filters.urlMatches(matches, entry.value.url) && method(entry.value.method) &&
+        resourceType(entry.value.resourceType)
+    }))
+  })
+
 /**
  * Subscribes to requests and returns the first match, latched.
  *
@@ -199,15 +232,19 @@ export interface Filter {
  * @category subscriptions
  * @since 0.1.0
  */
-export declare const next: <PE = never, PR = never>(
+export const next = <PE = never, PR = never>(
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   filter: Filter & { readonly url: Url.Pattern | string },
   where?: Subscription.Where<NetworkRequest, PE, PR> | undefined
-) => Effect.Effect<
+): Effect.Effect<
   Deferred.ReadonlyDeferred<NetworkRequest, PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
->
+> =>
+  Effect.flatMap(
+    subscription(target, filter, "NetworkRequest.next"),
+    ({ accepts, channel, kind }) => Events.next(kind, channel, accepts, where)
+  ).pipe(Effect.withSpan("NetworkRequest.next"))
 
 /**
  * Subscribes to requests and emits every match from now on.
@@ -231,15 +268,19 @@ export declare const next: <PE = never, PR = never>(
  * @category subscriptions
  * @since 0.1.0
  */
-export declare const stream: <PE = never, PR = never>(
+export const stream = <PE = never, PR = never>(
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   filter?: Filter | undefined,
   where?: Subscription.Where<NetworkRequest, PE, PR> | undefined
-) => Effect.Effect<
+): Effect.Effect<
   Stream.Stream<NetworkRequest, PE | Subscription.EventOverflow | Target.TargetGone>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
->
+> =>
+  Effect.flatMap(
+    subscription(target, filter, "NetworkRequest.stream"),
+    ({ accepts, channel, kind }) => Events.stream(kind, channel, accepts, where)
+  )
 
 /**
  * Reads the requests a log retained; never waits.
@@ -248,10 +289,14 @@ export declare const stream: <PE = never, PR = never>(
  * @category getters
  * @since 0.1.0
  */
-export declare const history: (
+export const history = (
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   filter?: Filter | undefined
-) => Effect.Effect<Subscription.History<NetworkRequest>>
+): Effect.Effect<Subscription.History<NetworkRequest>, Subscription.SubscriptionError> =>
+  Effect.flatMap(
+    subscription(target, filter, "NetworkRequest.history"),
+    ({ accepts, channel, kind }) => Events.history(kind, channel, accepts)
+  )
 
 /**
  * Converts a captured request to an `HttpClientRequest`, to replay it with Effect's `HttpClient`.
@@ -265,4 +310,5 @@ export declare const history: (
  * @category converting
  * @since 0.1.0
  */
-export declare const toHttpClientRequest: (request: NetworkRequest) => HttpClientRequest.HttpClientRequest
+export const toHttpClientRequest = (request: NetworkRequest): HttpClientRequest.HttpClientRequest =>
+  HttpClientRequest.make(request.method)(request.url, { headers: request.headers })

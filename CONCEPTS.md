@@ -70,14 +70,19 @@ Realms are siblings of documents, not children. The one exception that forces th
 |---|---|
 | `UserContextAdded`, `UserContextRemoved` | a context: its id, whether it is the default, its pages, its `closed`; removing it closes its pages |
 | `PageAdded`, `NavigableRemoved` | a page: its id, its context, its status (`Opening{url}` until its first document commits, then `Open{url, document, prompt}`, then `Closed{reason, url}`), its `closed`, its input permit (§5), its event channels (§9), the scope that owns it; and for a popup whose opener the backend names, a `Popup` event on the opener, and its release added to the opener's scope (§3) |
-| `NavigationStarted` | a popup's URL, from its first navigation, which its `Popup` event's filters read (review 13) |
+| `NavigationStarted` | a popup's URL, from its first navigation, which its `Popup` event's filters read (review 13); where a page's own navigation was going (review 14) |
+| `FrameAdded`, `NavigableRemoved` for a frame | which page each frame belongs to, so its requests and console reach the page (review 14) |
 | `DocumentCommitted`, `DocumentUrlChanged`, `DocumentOpened`, `DocumentReadiness` | the page's active document: its id, URL and readiness; the document it replaced ends with `DocumentReplaced` |
-| `RealmAdded`, `RealmRemoved` | which document each window realm belongs to, so the engine's realm (§8, Queries) is forgotten when it goes |
-| `NavigationEnded` | a navigation's outcome, latched once |
-| `RequestSent`, `ResponseReceived` | the responses of navigation requests, so a committed navigation carries its response |
+| `RealmAdded`, `RealmRemoved` | which document each window realm belongs to, so the engine's realm (§8, Queries) is forgotten when it goes; which page and context each realm belongs to; a worker, its `BrowserWorker` event on its page and context, the page's and context's `workers`, and its end (review 14) |
+| `NavigationEnded` | a navigation's outcome, latched once; for a page's own navigation, a `PageNavigation` event with where it ended (review 14) |
+| `RequestSent`, `ResponseReceived`, `RequestFinished`, `RequestFailed` | the responses of navigation requests, so a committed navigation carries its response; each hop, bounded, with its request, response and end, and `NetworkRequest` and `NetworkResponse` events on the initiator's page and context (review 14) |
+| `ConsoleMessage`, `UncaughtException` | events on the realm's page and context (review 14) |
+| `ConnectionOpened`, `ConnectionFrame`, `ConnectionClosed` | a connection: its `NetworkConnection` event, its frames and its end (review 14) |
+| `DownloadStarted`, `DownloadProgress`, `DownloadEnded` | a download: its `Download` event on its page and context, and its status, which its context's end cancels (review 14) |
 | `ObligationOpened` for a prompt, `PromptClosed` | the page's prompt and a `Dialog` event; its decision, by the page's latest handler or else the context's `dialogs` policy, reported as an `AutoResolution` on the page and the context; and whether nothing will decide it (§5) |
+| `ObligationOpened` for a file chooser | a `FileChooser` event on its page; its decision, by the page's latest handler or else canceled, reported as an `AutoResolution` (§5, review 14) |
 
-A page is open from its first commit: `createPage` replies once the page is ready, so `PageReady` adds nothing yet. Connection loss ends everything with `ConnectionLost`. Facts the slice doesn't fold (frames' own documents, other requests, console, downloads, file choosers) wait for the modules that consume them; PROTOCOL.md lists them.
+A page is open from its first commit: `createPage` replies once the page is ready, so `PageReady` adds nothing yet. Connection loss ends everything with `ConnectionLost`. Frames' own documents aren't folded yet; PROTOCOL.md lists what is.
 
 ```ts
 // ── Containment ────────────────────────────────────────────
@@ -252,6 +257,7 @@ type CloseReason =
   | PageClosed /* by: command | script | userContextRemoved | browser */ | PageCrashed
   | FrameDetached | DocumentReplaced | DocumentEvicted | DocumentDestroyed | DocumentUnloaded
   | RealmDestroyed
+  | NetworkConnectionClosed                              // a WebSocket or EventSource the page or the server closed (review 14)
 ```
 
 ## 3. Lifetimes, access and cleanup
@@ -350,6 +356,8 @@ Cleanup groups can span sibling pages, independently of this graph.
   - **Handlers** (review 13). The page's latest `Dialog.handle` decides, chosen when the dialog opens: the chain is one handler, since `Dialog` has no fallthrough. It runs in its registration's scope with `Deadline.DefaultBudget`, as read at `handle`; failing, being interrupted or running out of time leaves the dialog to the policy, and the failure is logged. A resolver in the model's scope delivers whichever decision comes, apart from the handler's fiber.
   - **What a dialog blocks** (review 13, probed). Chromium and WebKit block every evaluation, in every world, while a dialog is open, and Firefox doesn't; on all three, the input that opens a dialog returns only once it is decided. When nothing will decide a dialog (no handler when it opened, and a `"leaveOpen"` policy), every operation on its page fails at once with `PromptBlocking{kind, text}`, including the input that opened it, whose dispatch `MayHaveBeenSent`.
 - **File chooser.** It does not pause the page. It is armed before the triggering input, and its default is `Cancel`.
+  - **Armed for every page of an owned context** (review 14), so every chooser is reported and decided and none is shown. The page's latest `FileChooser.handle` decides, as for dialogs; failing, being interrupted or running out of time cancels it, reported as an `AutoResolution`. A chooser in a context the library didn't create is left as the browser has it.
+  - **What each backend does** (review 14, probed). With interception, Chromium and WebKit fire nothing on the input for `Cancel`, and `input` and `change` for files set. Firefox reports every chooser, and with `unhandledPromptBehavior.file: "ignore"` a canceled one stays open, so the page's later clicks open nothing; with `"dismiss"`, which the adapter sets, the input gets `cancel` as it opens and files set after it still arrive.
 - **Obligation lifecycle.** States are `pending → decisionSelected → sending → acknowledged | rejected | unknown`, plus `ended`.
   - **One winner.** An atomic transition selects at most one decision.
   - **Handler chain.** The chain is snapshotted when the obligation arrives and ordered by the precedence rule (§7). Only the current handler holds a decision token. `Fallthrough` passes a new token on.
@@ -373,7 +381,8 @@ Cleanup groups can span sibling pages, independently of this graph.
     - **auth:** `ProvideCredentials | DefaultAuth | CancelAuth`.
   - Defaults are continue for request and response, and `DefaultAuth` for auth.
   - BiDi cannot scope intercepts to a user context, so emulating that needs browser-wide access (§3).
-- **Bodies.** A body may be unavailable for a stated reason: not collected, evicted, a redirect, streaming, or over a limit.
+- **Bodies.** A body may be unavailable for a stated reason: not collected, evicted, a redirect, streaming, over a limit, or a request that failed after its response started (review 14).
+  - **Collected for a subscription** (review 14): up to `NetworkResponse.BodyLimit`, declared in its scope. A body is read once its hop has ended; a redirect hop has none, without asking the browser.
   - A `body` in a `next` or `stream` filter acquires collection before that call returns; BiDi needs a collector before the request starts.
   - Ordinary results are owned bytes. Large or streaming bodies use explicit caller-scoped leases.
 - **Service workers.** Interception may see a request twice or never. Bypassing service workers is a capability.
@@ -472,6 +481,7 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
   - **Owner ends without a match:** fails promptly.
   - **Results:** a latched immutable result outlives the subscription.
   - **Delivery** (review 13). The fold publishes each event to a channel per kind and target (a page's popups, a context's automatic decisions), which logs it and offers it to every subscription whose declarative filter matches, each into a buffer of its own; offering never blocks the fold. Registration is the revision boundary, kept by sequence numbers: an entry whose details arrive later (a popup's URL) is offered again to the subscriptions it now matches, but never to one made after it was published. A `stream` buffers `Subscription.Capacity` events (1,000) and then fails with `EventOverflow`, alone; `next` keeps what arrives until its first match or its deadline, and times out in the phase `waitingForEvent`, with a hint naming a match that came before it subscribed. The end of the target ends streams normally when it was closed, and fails waits and other streams with `TargetGone`. `PubSub` doesn't fit: it offers every message to every subscriber, so filters would run after buffering, and its bounded strategies stall the publisher or drop silently.
+  - **Attribution and delivery** (review 14). The fold publishes each event to its page's channel and its context's, by the page and context each navigable, realm and request belongs to; an event it can attribute to neither reaches no subscription. Delivering can take an effect in the subscriber, such as reading a body or waiting for a load, whose failure fails the wait or the stream. A filter that asks for events the backend can't report fails `next`, `stream` and `history` with `SubscriptionError{Unsupported}`, and `history` checks its filter as they do.
 - **Event logs.** Each page and context keeps a bounded log per event kind, fed by the same fold as subscriptions. Entries are copied metadata or handles to resources owned elsewhere, never collected bodies, so nothing in a log decays. A log counts what it drops: every event of its kind it discarded, since which ones a later filter would have matched can't be known (review 13). Logs serve `history`, the digest that agent tools and CLI commands return between calls, and the hint on a late subscription's `Timeout`, which names a match that arrived just before it subscribed.
 - **Deadline.** There is one monotonic deadline per operation, inherited by nested calls and only ever shortened. It lives in `Deadline.CurrentDeadline`, an absolute instant on the live clock, set only by `Deadline.within`; an operation with no enclosing deadline gets `Deadline.DefaultBudget` from when it starts. An event wait takes its deadline at `next`. Cleanup has its own budget. Deadline failures are `Timeout{phase}`, carrying the last observation and its de-duplicated history.
 - **Retries.** Retry decisions depend on the operation, its phase, the target binding, dispatch evidence and the remaining deadline, never on an error tag alone.

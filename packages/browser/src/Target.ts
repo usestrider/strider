@@ -77,6 +77,8 @@ export type RealmId = typeof RealmId.Type
  * - Pages and frames: `PageClosed` (with who closed it), `PageCrashed`, `FrameDetached`.
  * - Documents and realms: `DocumentReplaced`, `DocumentEvicted`, `DocumentDestroyed`, `DocumentUnloaded`,
  *   `RealmDestroyed`.
+ * - Connections: `NetworkConnectionClosed`, for a WebSocket or EventSource the page or the server closed.
+ *   (`ConnectionLost` is the browser's connection.)
  *
  * @stability unstable
  * @category schemas
@@ -97,7 +99,8 @@ export const CloseReason = Schema.Union([
   Schema.TaggedStruct("DocumentEvicted", {}),
   Schema.TaggedStruct("DocumentDestroyed", {}),
   Schema.TaggedStruct("DocumentUnloaded", {}),
-  Schema.TaggedStruct("RealmDestroyed", {})
+  Schema.TaggedStruct("RealmDestroyed", {}),
+  Schema.TaggedStruct("NetworkConnectionClosed", {})
 ])
 
 /**

@@ -6,15 +6,26 @@
  * the status is in the response. Failures are reasons of `Page.PageError`, so recovery reads the same whether
  * the navigation came from `goto` or was awaited with `next`.
  *
+ * A navigation is an event when it ends, including those `goto` starts. Only the page's own navigations are,
+ * not its frames'.
+ *
  * @stability unstable
  * @since 0.1.0
  */
-import type * as Effect from "effect/Effect"
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
 import type * as Deferred from "./Deferred.ts"
+import * as Events from "./internal/events.ts"
+import * as Filters from "./internal/filters.ts"
+import * as Handles from "./internal/handles.ts"
+import type * as Model from "./internal/model.ts"
+import * as Navigated from "./internal/navigated.ts"
+import * as Operation from "./internal/operation.ts"
+import type * as Runtime from "./internal/runtime.ts"
 import * as NetworkResponse from "./NetworkResponse.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -49,6 +60,9 @@ export type Id = typeof Id.Type
  * - `Restored`: a document came back from the back/forward cache.
  * - `Activated`: a prerendered document became the page's.
  *
+ * `url` is where the page went: the committed document's URL, after any redirects, or the URL a same-document
+ * navigation set.
+ *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
@@ -56,16 +70,18 @@ export type Id = typeof Id.Type
 export const PageNavigation = Schema.Union([
   Schema.TaggedStruct("Committed", {
     id: Id,
+    url: Url.Url,
     document: Target.DocumentId,
     response: Schema.Option(NetworkResponse.NetworkResponse)
   }),
   Schema.TaggedStruct("SameDocument", {
     id: Id,
+    url: Url.Url,
     document: Target.DocumentId,
     via: Schema.Literals(["fragment", "historyApi", "intercepted"])
   }),
-  Schema.TaggedStruct("Restored", { id: Id, document: Target.DocumentId }),
-  Schema.TaggedStruct("Activated", { id: Id, document: Target.DocumentId })
+  Schema.TaggedStruct("Restored", { id: Id, url: Url.Url, document: Target.DocumentId }),
+  Schema.TaggedStruct("Activated", { id: Id, url: Url.Url, document: Target.DocumentId })
 ])
 
 /**
@@ -123,8 +139,44 @@ export interface NextFilter extends Filter {
   readonly waitUntil?: LoadState | undefined
 }
 
+// ── Implementation ──
+
+const kind = (
+  runtime: Runtime.Runtime,
+  operation: string
+): Events.Kind<Model.NavigationEvent, PageNavigation> => ({
+  operation,
+  noun: "a navigation",
+  // Only a navigation that got somewhere is delivered as one (`succeeded` accepts nothing else)
+  deliver: (event) => Option.getOrThrow(Navigated.succeeded(runtime.model, event.navigation, event.url, event.outcome))
+})
+
+const succeeded = (event: Model.NavigationEvent) =>
+  event.outcome._tag === "Committed" || event.outcome._tag === "SameDocument" || event.outcome._tag === "Restored" ||
+  event.outcome._tag === "Activated"
+
+const subscription = (target: Page.ObservedPage, filter: Filter | undefined, operation: string) =>
+  Effect.suspend(() => {
+    const behind = Handles.page(target)
+    return Effect.map(Filters.url(operation, filter?.url), (matches) => ({
+      behind,
+      kind: kind(behind.runtime, operation),
+      channel: behind.entry.events.navigation,
+      matches: (entry: Events.Entry<Model.NavigationEvent>) => Filters.urlMatches(matches, entry.value.url),
+      accepts: (entry: Events.Entry<Model.NavigationEvent>) =>
+        succeeded(entry.value) && Filters.urlMatches(matches, entry.value.url)
+    }))
+  })
+
 /**
  * Subscribes to a page's navigations and returns the first match, latched.
+ *
+ * **Details**
+ *
+ * It settles on the first navigation matching the filter to end, as `goto` would: one that got somewhere
+ * latches its `PageNavigation`, after its document reaches `waitUntil`, and one that didn't fails the deferred
+ * with the `PageError` `goto` gives, such as `NavigationFailed`. `url` matches where the page went, after any
+ * redirects; for a navigation that failed, where it was going.
  *
  * **Example** (Waiting for the navigation a click causes)
  *
@@ -143,44 +195,77 @@ export interface NextFilter extends Filter {
  * @category subscriptions
  * @since 0.1.0
  */
-export declare const next: <PE = never, PR = never>(
+export const next = <PE = never, PR = never>(
   target: Page.ObservedPage,
   filter?: NextFilter | undefined,
   where?: Subscription.Where<PageNavigation, PE, PR> | undefined
-) => Effect.Effect<
+): Effect.Effect<
   Deferred.ReadonlyDeferred<PageNavigation, Page.PageError | PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
->
+> =>
+  Effect.flatMap(subscription(target, filter, "PageNavigation.next"), ({ behind, channel, kind, matches }) => {
+    const waitUntil = filter?.waitUntil ?? "commit"
+    const { model } = behind.runtime
+    const delivery: Events.Delivery<Model.NavigationEvent, PageNavigation, Page.PageError> = {
+      deliver: Effect.fnUntraced(function*(event) {
+        const result = yield* behind.runtime.settle(
+          "PageNavigation.next",
+          event.navigation,
+          Option.some(event.url as Url.Url),
+          event.url,
+          event.outcome,
+          Operation.operationId()
+        )
+        // The deadline is `next`'s, which bounds the whole wait
+        yield* Navigated.reached(model, result, waitUntil, Option.none())
+        return result
+      }),
+      unfinished: (event) => `A navigation to ${event.url} committed, but its document hadn't reached ${waitUntil}`
+    }
+    return Events.next(kind, channel, matches, where, delivery)
+  }).pipe(
+    Effect.withSpan("PageNavigation.next", {
+      attributes: { "browser.navigation.wait_until": filter?.waitUntil ?? "commit" }
+    })
+  )
 
 /**
- * Subscribes to a page's navigations and emits every match from now on.
+ * Subscribes to a page's navigations and emits every match from now on: the ones that got somewhere.
  *
  * @stability unstable
  * @category subscriptions
  * @since 0.1.0
  */
-export declare const stream: <PE = never, PR = never>(
+export const stream = <PE = never, PR = never>(
   target: Page.ObservedPage,
   filter?: Filter | undefined,
   where?: Subscription.Where<PageNavigation, PE, PR> | undefined
-) => Effect.Effect<
+): Effect.Effect<
   Stream.Stream<PageNavigation, PE | Subscription.EventOverflow | Target.TargetGone>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
->
+> =>
+  Effect.flatMap(
+    subscription(target, filter, "PageNavigation.stream"),
+    ({ accepts, channel, kind }) => Events.stream(kind, channel, accepts, where)
+  )
 
 /**
- * Reads the navigations a page's log retained; never waits.
+ * Reads the navigations a page's log retained that got somewhere; never waits.
  *
  * @stability unstable
  * @category getters
  * @since 0.1.0
  */
-export declare const history: (
+export const history = (
   target: Page.ObservedPage,
   filter?: Filter | undefined
-) => Effect.Effect<Subscription.History<PageNavigation>>
+): Effect.Effect<Subscription.History<PageNavigation>, Subscription.SubscriptionError> =>
+  Effect.flatMap(
+    subscription(target, filter, "PageNavigation.history"),
+    ({ accepts, channel, kind }) => Events.history(kind, channel, accepts)
+  )
 
 /**
  * Reason for a navigation that failed at the network level, such as a DNS failure.

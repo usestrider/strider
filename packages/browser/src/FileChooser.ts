@@ -6,10 +6,18 @@
  * cancellation is reported as an `AutoResolution`. Setting files directly with `locator.setInputFiles` needs
  * no chooser at all.
  *
+ * Every page of a context the library creates has its choosers reported and decided, so none is shown. What
+ * `next`, `stream` and `history` report is data; a handler receives it as `Pending`, with the decisions.
+ *
+ * **Gotchas**
+ *
+ * On Firefox the input gets a `cancel` event as the chooser opens, before any decision; files a handler
+ * chooses still arrive after it, with `input` and `change`. Its `fileChooser` capability says so.
+ *
  * @stability unstable
  * @since 0.1.0
  */
-import type * as Effect from "effect/Effect"
+import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
@@ -19,6 +27,13 @@ import type * as Declaration from "./Declaration.ts"
 import type * as Deferred from "./Deferred.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as FileInput from "./FileInput.ts"
+import type * as Adapter from "./internal/adapter.ts"
+import * as Events from "./internal/events.ts"
+import * as FileInputImpl from "./internal/fileInput.ts"
+import * as Handlers from "./internal/handlers.ts"
+import * as Handles from "./internal/handles.ts"
+import type * as Model from "./internal/model.ts"
+import * as Operation from "./internal/operation.ts"
 import type * as Page from "./Page.ts"
 import * as Reason from "./Reason.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -47,13 +62,31 @@ export interface Decision {
 export const isDecision = (u: unknown): u is Decision => Predicate.hasProperty(u, DecisionTypeId)
 
 /**
- * A file chooser, accepting one file or several.
+ * Schema for a file chooser, as events report it: one that accepts one file or several.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const FileChooser = Schema.Union([Schema.TaggedStruct("Single", {}), Schema.TaggedStruct("Multiple", {})])
+
+/**
+ * A file chooser, as events report it; observing it doesn't decide it.
  *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
-export type FileChooser =
+export type FileChooser = typeof FileChooser.Type
+
+/**
+ * A file chooser as a handler receives it: each shape with the decisions it offers.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type Pending =
   | { readonly _tag: "Single"; select(file: FileInput.FileInput): Decision; readonly cancel: Decision }
   | {
     readonly _tag: "Multiple"
@@ -77,6 +110,42 @@ export interface Filter {
   readonly multiple?: boolean | undefined
 }
 
+// ── Implementation ──
+
+/** A decision, carrying the files it chose, or none to cancel. */
+interface DecisionImpl extends Decision {
+  readonly files: ReadonlyArray<FileInput.FileInput> | undefined
+}
+
+const decision = (files: ReadonlyArray<FileInput.FileInput> | undefined): Decision => {
+  const made: DecisionImpl = { [DecisionTypeId]: DecisionTypeId, files }
+  return made
+}
+
+const canceled = decision(undefined)
+
+const toFileChooser = (chooser: Model.FileChooserEvent): FileChooser =>
+  chooser.multiple ? { _tag: "Multiple" } : { _tag: "Single" }
+
+const toPending = (chooser: Model.FileChooserEvent): Pending =>
+  chooser.multiple
+    ? { _tag: "Multiple", select: (files) => decision(files), cancel: canceled }
+    : { _tag: "Single", select: (file) => decision([file]), cancel: canceled }
+
+const kind = (operation: string): Events.Kind<Model.FileChooserEvent, FileChooser> => ({
+  operation,
+  noun: "a file chooser",
+  deliver: toFileChooser
+})
+
+const subscription = (target: Page.ObservedPage, filter: Filter | undefined, operation: string) =>
+  Effect.sync(() => ({
+    kind: kind(operation),
+    channel: Handles.page(target).entry.events.fileChooser,
+    accepts: (entry: Events.Entry<Model.FileChooserEvent>) =>
+      filter?.multiple === undefined || entry.value.multiple === filter.multiple
+  }))
+
 /**
  * Subscribes to file choosers and returns the first match, latched. Observing doesn't decide it.
  *
@@ -84,15 +153,19 @@ export interface Filter {
  * @category subscriptions
  * @since 0.1.0
  */
-export declare const next: <PE = never, PR = never>(
+export const next = <PE = never, PR = never>(
   target: Page.Page,
   filter?: Filter | undefined,
   where?: Subscription.Where<FileChooser, PE, PR> | undefined
-) => Effect.Effect<
+): Effect.Effect<
   Deferred.ReadonlyDeferred<FileChooser, PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
->
+> =>
+  Effect.flatMap(
+    subscription(target, filter, "FileChooser.next"),
+    ({ accepts, channel, kind }) => Events.next(kind, channel, accepts, where)
+  ).pipe(Effect.withSpan("FileChooser.next"))
 
 /**
  * Subscribes to file choosers and emits every match from now on. Observing doesn't decide them.
@@ -101,15 +174,19 @@ export declare const next: <PE = never, PR = never>(
  * @category subscriptions
  * @since 0.1.0
  */
-export declare const stream: <PE = never, PR = never>(
+export const stream = <PE = never, PR = never>(
   target: Page.Page,
   filter?: Filter | undefined,
   where?: Subscription.Where<FileChooser, PE, PR> | undefined
-) => Effect.Effect<
+): Effect.Effect<
   Stream.Stream<FileChooser, PE | Subscription.EventOverflow | Target.TargetGone>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
->
+> =>
+  Effect.flatMap(
+    subscription(target, filter, "FileChooser.stream"),
+    ({ accepts, channel, kind }) => Events.stream(kind, channel, accepts, where)
+  )
 
 /**
  * Reads the file choosers a page's log retained; never waits.
@@ -118,13 +195,28 @@ export declare const stream: <PE = never, PR = never>(
  * @category getters
  * @since 0.1.0
  */
-export declare const history: (
+export const history = (
   target: Page.Page,
   filter?: Filter | undefined
-) => Effect.Effect<Subscription.History<FileChooser>>
+): Effect.Effect<Subscription.History<FileChooser>, Subscription.SubscriptionError> =>
+  Effect.flatMap(
+    subscription(target, filter, "FileChooser.history"),
+    ({ accepts, channel, kind }) => Events.history(kind, channel, accepts)
+  )
 
 /**
  * Registers a handler that decides the page's file choosers while its scope lives.
+ *
+ * **Details**
+ *
+ * The page's latest handler decides each chooser, chosen when the chooser opens; removing it, or closing its
+ * scope, leaves the choosers that open after to the one before. A handler has `Deadline.DefaultBudget`, as it
+ * is when `handle` is called, to decide each chooser. `handled` counts the choosers it decided.
+ *
+ * **Gotchas**
+ *
+ * A handler that fails, is interrupted or runs out of time leaves the chooser canceled, reported as an
+ * `AutoResolution`, and its failure is logged at Effect's `References.UnhandledLogLevel`.
  *
  * **Example** (Uploading through the page's own picker)
  *
@@ -142,10 +234,37 @@ export declare const history: (
  * @category handlers
  * @since 0.1.0
  */
-export declare const handle: <E, R>(
+export const handle = <E, R>(
   page: Page.Page,
-  handler: (chooser: FileChooser) => Effect.Effect<Decision, E, R>
-) => Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope.Scope | R>
+  handler: (chooser: Pending) => Effect.Effect<Decision, E, R>
+): Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope.Scope | R> =>
+  Effect.suspend(() => {
+    const { entry, runtime } = Handles.page(page)
+    return Handlers.register({
+      page: entry,
+      handlers: entry.chooserHandlers,
+      handler,
+      pending: toPending,
+      decision: (chosen): Effect.Effect<Adapter.Decision, unknown> => {
+        if (!isDecision(chosen) || !("files" in chosen)) {
+          return Effect.die(
+            new Error("FileChooser.handle: the handler returned something that isn't a FileChooser decision")
+          )
+        }
+        const files = (chosen as DecisionImpl).files
+        return files === undefined
+          ? Effect.succeed({ _tag: "Cancel" })
+          : Effect.map(
+            Effect.forEach(files, (file) => FileInputImpl.path(runtime, file)),
+            (paths) => ({ _tag: "SetFiles", files: paths })
+          )
+      },
+      noun: () => "file chooser",
+      operation: "FileChooser.handle.handled.waitFor",
+      name: "FileChooser.handle",
+      fallback: "canceling it"
+    })
+  })
 
 /**
  * A handler that selects `files`.
@@ -159,9 +278,24 @@ export declare const handle: <E, R>(
  * @category handlers
  * @since 0.1.0
  */
-export declare const choose: (
+export const choose = (
   files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>
-) => (chooser: FileChooser) => Effect.Effect<Decision, FileChooserError>
+) =>
+(chooser: Pending): Effect.Effect<Decision, FileChooserError> => {
+  const list: ReadonlyArray<FileInput.FileInput> = Array.isArray(files) ? files : [files as FileInput.FileInput]
+  if (chooser._tag === "Multiple") return Effect.succeed(chooser.select(list))
+  if (list.length === 1) return Effect.succeed(chooser.select(list[0]!))
+  return Effect.fail(
+    new FileChooserError({
+      reason: new Reason.InvalidInput({
+        input: "files",
+        expected: "one file, for a chooser that accepts one",
+        hint: `${list.length} files were given, so the chooser is canceled rather than given the first`
+      }),
+      diagnostics: Operation.diagnostics(Operation.operationId())
+    })
+  )
+}
 
 /**
  * Schema for the reasons choosing files can fail.

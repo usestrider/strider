@@ -1,6 +1,6 @@
 /**
- * Pages (API.md, Pages; review 12, candidate 7). Built: the state (`status`, `url`, `closed`), the queries,
- * `goto`, `reload`, `back` and `forward`, `title`, `activate` and `close`. The other members fail as
+ * Pages (API.md, Pages; review 12, candidate 7). Built: the state (`status`, `url`, `workers`, `closed`), the
+ * queries, `goto`, `reload`, `back` and `forward`, `title`, `activate` and `close`. The other members fail as
  * `NotBuilt`.
  *
  * A navigation resolves at commit, with the outcome the adapter reports for the navigation it started, or with
@@ -14,11 +14,9 @@ import * as Hash from "effect/Hash"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import { pipeArguments } from "effect/Pipeable"
-import * as Stream from "effect/Stream"
-import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Diagnostics from "../Diagnostics.ts"
 import * as Page from "../Page.ts"
-import * as PageNavigation from "../PageNavigation.ts"
+import type * as PageNavigation from "../PageNavigation.ts"
 import * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
@@ -27,6 +25,8 @@ import type * as Adapter from "./adapter.ts"
 import * as Handles from "./handles.ts"
 import * as LocatorImpl from "./locator.ts"
 import type * as Model from "./model.ts"
+import * as Navigated from "./navigated.ts"
+import * as Navigation from "./navigation.ts"
 import * as NotBuilt from "./notBuilt.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
@@ -48,90 +48,6 @@ const pageEnded = (state: Model.PageState): Option.Option<Target.CloseReason> =>
 
 const pageError = (operation: string, reason: Page.PageErrorReason, id: Diagnostics.OperationId) =>
   new Page.PageError({ operation, reason, diagnostics: Operation.diagnostics(id) })
-
-/** A navigation's outcome as `goto` reports it: the navigation, or why the page didn't get there. */
-const settle = (
-  model: Model.Model,
-  operation: string,
-  navigation: PageNavigation.Id,
-  url: Option.Option<Url.Url>,
-  outcome: Adapter.NavigationOutcome,
-  id: Diagnostics.OperationId
-): Effect.Effect<PageNavigation.PageNavigation, Page.PageError> => {
-  switch (outcome._tag) {
-    case "Committed":
-      return Effect.succeed({
-        _tag: "Committed",
-        id: navigation,
-        document: outcome.document,
-        response: Option.flatMap(outcome.response, model.response)
-      })
-    case "SameDocument":
-      return Effect.succeed({ _tag: "SameDocument", id: navigation, document: outcome.document, via: outcome.via })
-    case "Restored":
-      return Effect.succeed({ _tag: "Restored", id: navigation, document: outcome.document })
-    case "Activated":
-      return Effect.succeed({ _tag: "Activated", id: navigation, document: outcome.document })
-    case "Download":
-      return Effect.fail(pageError(
-        operation,
-        new PageNavigation.BecameDownload({
-          url,
-          hint: "The response was a download, so the page stayed where it was"
-        }),
-        id
-      ))
-    case "NoContent":
-      return Effect.fail(pageError(
-        operation,
-        new PageNavigation.NoContent({
-          url,
-          hint: "The server answered without content, so the page stayed where it was"
-        }),
-        id
-      ))
-    case "Failed":
-      return Effect.fail(pageError(
-        operation,
-        new PageNavigation.NavigationFailed({
-          url,
-          netError: outcome.error,
-          hint: "The browser couldn't load the page"
-        }),
-        id
-      ))
-    case "Superseded":
-      return Effect.fail(pageError(
-        operation,
-        new PageNavigation.NavigationSuperseded({
-          url,
-          by: outcome.by,
-          hint: "Another navigation of the page replaced this one before it committed"
-        }),
-        id
-      ))
-    case "Canceled":
-      return Effect.fail(pageError(
-        operation,
-        new PageNavigation.NavigationCanceled({
-          url,
-          why: outcome.reason,
-          hint: "The page or the browser canceled the navigation"
-        }),
-        id
-      ))
-    case "NoOp":
-      return Effect.fail(pageError(
-        operation,
-        new PageNavigation.NavigationFailed({
-          url,
-          netError: `noop: ${outcome.reason}`,
-          hint: "The navigation did nothing: a javascript: URL that returned no document"
-        }),
-        id
-      ))
-  }
-}
 
 export interface PageOwner {
   readonly runtime: Runtime.Runtime
@@ -182,22 +98,12 @@ export const make = (owner: PageOwner): Page.Page => {
       if (Option.isNone(outcome)) {
         return yield* Effect.fail(timedOut("postcondition", "The navigation had no outcome before the deadline"))
       }
-      const result = yield* settle(model, operation, started.value, url, outcome.value, id)
-      if (waitUntil !== "commit" && result._tag === "Committed") {
-        const document = model.documents.get(result.document)
-        if (document !== undefined) {
-          const reached = (readiness: string) =>
-            waitUntil === "load" ? readiness === "complete" : readiness === "interactive" || readiness === "complete"
-          const ready = yield* SubscriptionRef.changes(document.readiness).pipe(
-            Stream.filter(reached),
-            Stream.runHead,
-            Effect.raceFirst(Effect.map(Deferred.await(document.ended), () => Option.none<string>())),
-            Effect.timeoutOption(Operation.millisLeft(budget.at))
-          )
-          if (Option.isNone(ready)) {
-            return yield* Effect.fail(timedOut("postcondition", `The document committed but didn't reach ${waitUntil}`))
-          }
-        }
+      // Where it ended: the document's URL, which a same-document navigation set, or where it was going
+      const document = "document" in outcome.value ? model.documents.get(outcome.value.document) : undefined
+      const at = document?.url ?? Option.getOrElse(url, () => "")
+      const result = yield* Navigation.settle(model, operation, started.value, url, at, outcome.value, id)
+      if (!(yield* Navigated.reached(model, result, waitUntil, Option.some(budget.at)))) {
+        return yield* Effect.fail(timedOut("postcondition", `The document committed but didn't reach ${waitUntil}`))
       }
       return Option.some(result)
     }).pipe(
@@ -219,7 +125,13 @@ export const make = (owner: PageOwner): Page.Page => {
       operation: "Page.url.waitFor"
     }),
     frames: NotBuilt.watchable("Page.frames"),
-    workers: NotBuilt.watchable("Page.workers"),
+    workers: Watchable.make({
+      ref: entry.workers,
+      project: (workers) => Option.some(workers.map(runtime.worker)),
+      ended: () => Option.none(),
+      target: { _tag: "Page", id: entry.id },
+      operation: "Page.workers.waitFor"
+    }),
     closed: Deferred.await(entry.closed),
     inspect: NotBuilt.effect("Page.inspect"),
     control: NotBuilt.effect("Page.control"),

@@ -13,15 +13,22 @@
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import type * as FileSystem from "effect/FileSystem"
 import * as Filter from "effect/Filter"
 import * as Option from "effect/Option"
+import type * as Path from "effect/Path"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import type * as BrowserWorker from "../BrowserWorker.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
+import type * as Download from "../Download.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
+import type * as NetworkConnection from "../NetworkConnection.ts"
 import type * as Page from "../Page.ts"
+import type * as PageNavigation from "../PageNavigation.ts"
 import * as Reason from "../Reason.ts"
 import * as Target from "../Target.ts"
+import type * as Url from "../Url.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Engine from "./engine.ts"
 import type * as Model from "./model.ts"
@@ -39,6 +46,28 @@ export interface Runtime {
    * entry is; `None` for a page outside the contexts the connection created.
    */
   readonly page: (entry: Model.PageEntry) => Option.Option<Page.Page>
+  /** The connection's handle for a download, the same each time (review 14, candidate 8). */
+  readonly download: (entry: Model.DownloadEntry) => Download.Download
+  /** The connection's handle for a worker, the same each time (review 14, candidate 10). */
+  readonly worker: (entry: Model.WorkerEntry) => BrowserWorker.BrowserWorker
+  /** The connection's handle for a WebSocket or EventSource, the same each time (review 14, candidate 11). */
+  readonly connection: (entry: Model.ConnectionEntry) => NetworkConnection.NetworkConnection
+  /** The program's file system, which a launched browser shares: a download is copied out with it. */
+  readonly fileSystem: Option.Option<FileSystem.FileSystem>
+  /** Effect's `Path`, which a relative local file path is resolved with. */
+  readonly path: Option.Option<Path.Path>
+  /**
+   * A navigation's outcome as `goto` reports it (`navigation.ts`), for `PageNavigation`, which can't import `Page`
+   * without a load cycle.
+   */
+  readonly settle: (
+    operation: string,
+    navigation: PageNavigation.Id,
+    url: Option.Option<Url.Url>,
+    at: string,
+    outcome: Adapter.NavigationOutcome,
+    id: Diagnostics.OperationId
+  ) => Effect.Effect<PageNavigation.PageNavigation, Page.PageError>
 }
 
 /** Why a request to the engine didn't get an answer. */

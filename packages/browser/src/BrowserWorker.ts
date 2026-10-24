@@ -4,10 +4,14 @@
  * Like popups, a worker arrives with its owner's access: waiting on a `Page` or a `UserContext` gives a
  * `BrowserWorker` you can evaluate in, and waiting on something you only observe gives an observed one.
  *
+ * A worker is reported when its realm starts: a dedicated one to its page and context, and a shared or service
+ * one to its context. Not every backend reports every kind: asking for shared or service workers where the
+ * backend can't say whose they are (`workers.shared`, `workers.service`) fails with `Unsupported`.
+ *
  * @stability unstable
  * @since 0.1.0
  */
-import type * as Effect from "effect/Effect"
+import * as Effect from "effect/Effect"
 import type * as Inspectable from "effect/Inspectable"
 import type * as Pipeable from "effect/Pipeable"
 import * as Predicate from "effect/Predicate"
@@ -17,6 +21,11 @@ import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
 import type * as Deferred from "./Deferred.ts"
 import * as Diagnostics from "./Diagnostics.ts"
+import * as Events from "./internal/events.ts"
+import * as Filters from "./internal/filters.ts"
+import * as Handles from "./internal/handles.ts"
+import type * as Model from "./internal/model.ts"
+import type * as Runtime from "./internal/runtime.ts"
 import type * as JSHandle from "./JSHandle.ts"
 import type * as Page from "./Page.ts"
 import * as Reason from "./Reason.ts"
@@ -119,6 +128,44 @@ export interface Filter {
   readonly kind?: Kind | undefined
 }
 
+// ── Implementation ──
+
+const kind = (runtime: Runtime.Runtime, operation: string): Events.Kind<Model.WorkerEntry, BrowserWorker> => ({
+  operation,
+  noun: "a worker",
+  deliver: (entry) => runtime.worker(entry)
+})
+
+const subscription = (
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  filter: Filter | undefined,
+  operation: string
+) =>
+  Effect.suspend(() => {
+    const found = Handles.target(target)
+    const runtime = found.behind.runtime
+    const wanted = filter?.kind
+    const checked = wanted === undefined || wanted === "dedicated"
+      ? Effect.void
+      : found._tag === "Page"
+      ? Effect.fail(Filters.invalid(
+        operation,
+        "filter.kind",
+        `"dedicated", or none`,
+        `A page's workers are dedicated; ${wanted} workers belong to its context, so subscribe to the context`
+      ))
+      : Filters.requires(runtime, operation, `workers.${wanted}`)
+    return checked.pipe(
+      Effect.andThen(Filters.url(operation, filter?.url)),
+      Effect.map((matches) => ({
+        kind: kind(runtime, operation),
+        channel: found.behind.entry.events.worker,
+        accepts: (entry: Events.Entry<Model.WorkerEntry>) =>
+          Filters.urlMatches(matches, entry.value.url) && (wanted === undefined || entry.value.kind === wanted)
+      }))
+    )
+  })
+
 /**
  * Subscribes to workers and returns the first match, latched, with its owner's access.
  *
@@ -126,7 +173,7 @@ export interface Filter {
  * @category subscriptions
  * @since 0.1.0
  */
-export declare const next: {
+export const next: {
   <PE = never, PR = never>(
     target: Page.Page | UserContext.UserContext,
     filter?: Filter | undefined,
@@ -145,7 +192,15 @@ export declare const next: {
     Subscription.SubscriptionError,
     Scope.Scope | PR
   >
-}
+} = (<PE, PR>(
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  filter?: Filter,
+  where?: Subscription.Where<BrowserWorker, PE, PR>
+) =>
+  Effect.flatMap(
+    subscription(target, filter, "BrowserWorker.next"),
+    ({ accepts, channel, kind }) => Events.next(kind, channel, accepts, where)
+  ).pipe(Effect.withSpan("BrowserWorker.next"))) as typeof next
 
 /**
  * Subscribes to workers and emits every match from now on, with their owner's access.
@@ -154,7 +209,7 @@ export declare const next: {
  * @category subscriptions
  * @since 0.1.0
  */
-export declare const stream: {
+export const stream: {
   <PE = never, PR = never>(
     target: Page.Page | UserContext.UserContext,
     filter?: Filter | undefined,
@@ -173,7 +228,15 @@ export declare const stream: {
     Subscription.SubscriptionError,
     Scope.Scope | PR
   >
-}
+} = (<PE, PR>(
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  filter?: Filter,
+  where?: Subscription.Where<BrowserWorker, PE, PR>
+) =>
+  Effect.flatMap(
+    subscription(target, filter, "BrowserWorker.stream"),
+    ({ accepts, channel, kind }) => Events.stream(kind, channel, accepts, where)
+  )) as typeof stream
 
 /**
  * Reads the workers a log retained; never waits.
@@ -182,16 +245,20 @@ export declare const stream: {
  * @category getters
  * @since 0.1.0
  */
-export declare const history: {
+export const history: {
   (
     target: Page.Page | UserContext.UserContext,
     filter?: Filter | undefined
-  ): Effect.Effect<Subscription.History<BrowserWorker>>
+  ): Effect.Effect<Subscription.History<BrowserWorker>, Subscription.SubscriptionError>
   (
     target: Page.ObservedPage | UserContext.ObservedUserContext,
     filter?: Filter | undefined
-  ): Effect.Effect<Subscription.History<ObservedBrowserWorker>>
-}
+  ): Effect.Effect<Subscription.History<ObservedBrowserWorker>, Subscription.SubscriptionError>
+} = ((target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter) =>
+  Effect.flatMap(
+    subscription(target, filter, "BrowserWorker.history"),
+    ({ accepts, channel, kind }) => Events.history(kind, channel, accepts)
+  )) as typeof history
 
 /**
  * Schema for the reasons evaluating in a worker can fail.

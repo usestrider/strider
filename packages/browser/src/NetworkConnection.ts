@@ -1,19 +1,21 @@
 /**
  * Long-lived connections a page opens: WebSockets and EventSource streams.
  *
- * A connection is reported when it opens. Its frames are a separate subscription, because most tests care
- * that a socket opened and only some care what crossed it.
+ * A connection is reported when it opens, to its page and context. Its frames are a separate subscription,
+ * because most tests care that a socket opened and only some care what crossed it.
  *
  * **Gotchas**
  *
- * Frames are a capability: CDP reports them, and BiDi has no equivalent yet, so `frames` fails with
- * `Unsupported` there.
+ * Connections are a capability, `networkConnections`. CDP reports both kinds with their frames; patched WebKit
+ * reports WebSockets, and an `EventSource` only as its request; BiDi reports a WebSocket's handshake as a
+ * request and nothing after it, so subscribing there fails with `Unsupported`, as asking WebKit for
+ * `kind: "eventSource"` does.
  *
  * @stability unstable
  * @since 0.1.0
  */
 import type * as DateTime from "effect/DateTime"
-import type * as Effect from "effect/Effect"
+import * as Effect from "effect/Effect"
 import type * as Inspectable from "effect/Inspectable"
 import type * as Pipeable from "effect/Pipeable"
 import * as Predicate from "effect/Predicate"
@@ -22,6 +24,11 @@ import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
 import type * as Deferred from "./Deferred.ts"
+import * as Events from "./internal/events.ts"
+import * as Filters from "./internal/filters.ts"
+import * as Handles from "./internal/handles.ts"
+import type * as Model from "./internal/model.ts"
+import type * as Runtime from "./internal/runtime.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -120,7 +127,8 @@ export interface NetworkConnection extends Pipeable.Pipeable, Inspectable.Inspec
     Scope.Scope
   >
   /**
-   * Waits as long as the connection is open, then gives the reason it ended.
+   * Waits as long as the connection is open, then gives the reason it ended: `NetworkConnectionClosed` when the
+   * page or the server closed it.
    */
   readonly closed: Effect.Effect<Target.CloseReason>
 }
@@ -156,6 +164,40 @@ export interface Filter {
   readonly kind?: Kind | undefined
 }
 
+// ── Implementation ──
+
+const kind = (
+  runtime: Runtime.Runtime,
+  operation: string
+): Events.Kind<Model.ConnectionEntry, NetworkConnection> => ({
+  operation,
+  noun: "a connection",
+  deliver: (entry) => runtime.connection(entry)
+})
+
+const subscription = (
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  filter: Filter | undefined,
+  operation: string
+) =>
+  Effect.suspend(() => {
+    const found = Handles.target(target)
+    const runtime = found.behind.runtime
+    const wanted = filter?.kind
+    return Filters.requires(runtime, operation, "networkConnections").pipe(
+      Effect.andThen(
+        wanted === "eventSource" ? Filters.requires(runtime, operation, "networkConnections.eventSource") : Effect.void
+      ),
+      Effect.andThen(Filters.url(operation, filter?.url)),
+      Effect.map((matches) => ({
+        kind: kind(runtime, operation),
+        channel: found.behind.entry.events.connection,
+        accepts: (entry: Events.Entry<Model.ConnectionEntry>) =>
+          Filters.urlMatches(matches, entry.value.url) && (wanted === undefined || entry.value.kind === wanted)
+      }))
+    )
+  })
+
 /**
  * Subscribes to connections and returns the first match, latched.
  *
@@ -163,15 +205,19 @@ export interface Filter {
  * @category subscriptions
  * @since 0.1.0
  */
-export declare const next: <PE = never, PR = never>(
+export const next = <PE = never, PR = never>(
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   filter?: Filter | undefined,
   where?: Subscription.Where<NetworkConnection, PE, PR> | undefined
-) => Effect.Effect<
+): Effect.Effect<
   Deferred.ReadonlyDeferred<NetworkConnection, PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
->
+> =>
+  Effect.flatMap(
+    subscription(target, filter, "NetworkConnection.next"),
+    ({ accepts, channel, kind }) => Events.next(kind, channel, accepts, where)
+  ).pipe(Effect.withSpan("NetworkConnection.next"))
 
 /**
  * Subscribes to connections and emits every match from now on.
@@ -180,15 +226,19 @@ export declare const next: <PE = never, PR = never>(
  * @category subscriptions
  * @since 0.1.0
  */
-export declare const stream: <PE = never, PR = never>(
+export const stream = <PE = never, PR = never>(
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   filter?: Filter | undefined,
   where?: Subscription.Where<NetworkConnection, PE, PR> | undefined
-) => Effect.Effect<
+): Effect.Effect<
   Stream.Stream<NetworkConnection, PE | Subscription.EventOverflow | Target.TargetGone>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
->
+> =>
+  Effect.flatMap(
+    subscription(target, filter, "NetworkConnection.stream"),
+    ({ accepts, channel, kind }) => Events.stream(kind, channel, accepts, where)
+  )
 
 /**
  * Reads the connections a log retained; never waits.
@@ -197,7 +247,11 @@ export declare const stream: <PE = never, PR = never>(
  * @category getters
  * @since 0.1.0
  */
-export declare const history: (
+export const history = (
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   filter?: Filter | undefined
-) => Effect.Effect<Subscription.History<NetworkConnection>>
+): Effect.Effect<Subscription.History<NetworkConnection>, Subscription.SubscriptionError> =>
+  Effect.flatMap(
+    subscription(target, filter, "NetworkConnection.history"),
+    ({ accepts, channel, kind }) => Events.history(kind, channel, accepts)
+  )

@@ -68,7 +68,7 @@ Obligations decided by a default policy because no handler decided them.
 
 *getters*
 
-- `const history: (target: Page.Page | UserContext.UserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<AutoResolution>>`
+- `const history: (target: Page.Page | UserContext.UserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<AutoResolution>, Subscription.SubscriptionError>`
 
 ### Browser
 
@@ -180,8 +180,8 @@ Workers: dedicated workers of a page, and shared and service workers of a contex
 *getters*
 
 - `const history`
-  - `(target: Page.Page | UserContext.UserContext, filter?: Filter | undefined): Effect.Effect<Subscription.History<BrowserWorker>>`
-  - `(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined): Effect.Effect<Subscription.History<ObservedBrowserWorker>>`
+  - `(target: Page.Page | UserContext.UserContext, filter?: Filter | undefined): Effect.Effect<Subscription.History<BrowserWorker>, Subscription.SubscriptionError>`
+  - `(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined): Effect.Effect<Subscription.History<ObservedBrowserWorker>, Subscrip…`
 
 *guards*
 
@@ -280,12 +280,12 @@ Messages a page or its workers write to the console.
 
 *subscriptions*
 
-- `const next: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<ConsoleMessage, PE, PR> | undefined) => Effect.Effect< De…`
-- `const stream: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<ConsoleMessage, PE, PR> | undefined) => Effect.Effect< St…`
+- `const next: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<ConsoleMessage, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyDeferred<ConsoleMessage, PE | Target.TargetGone | Deadline.Timeout>, Subscription.SubscriptionError, Scope.Scope | PR >`
+- `const stream: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<ConsoleMessage, PE, PR> | undefined) => Effect.Effect< Stream.Stream<ConsoleMessage, PE | Subscription.EventOverflow | Target.TargetGone>, Subscription.SubscriptionError, Scope.Scope | PR >`
 
 *getters*
 
-- `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<ConsoleMessage>>`
+- `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<ConsoleMessage>, Subscription.SubscriptionError>`
 
 ### CookieJar
 
@@ -476,7 +476,7 @@ Dialogs: `alert`, `confirm`, `prompt` and `beforeunload`.
 
 *getters*
 
-- `const history: (target: Page.ObservedPage, filter?: Filter | undefined) => Effect.Effect<Subscription.History<Dialog>>`
+- `const history: (target: Page.ObservedPage, filter?: Filter | undefined) => Effect.Effect<Subscription.History<Dialog>, Subscription.SubscriptionError>`
 
 *handlers*
 
@@ -503,8 +503,8 @@ Downloads a page starts.
   - `readonly suggestedFilename: FileInput.FileName`
   - `readonly status: Watchable.Watchable<Status>`
   - `readonly finished: Effect.Effect<void, DownloadError | Target.TargetGone | Deadline.Timeout>`
-  - `readonly stream: Stream.Stream<Uint8Array, DownloadError>`
-  - `saveAs(path: FilePath.Local | string): Effect.Effect<void, DownloadError>`
+  - `readonly stream: Stream.Stream<Uint8Array, DownloadError | Target.TargetGone | Deadline.Timeout>`
+  - `saveAs(path: FilePath.Local | string): Effect.Effect<void, DownloadError | Target.TargetGone | Deadline.Timeout>`
   - `readonly cancel: Effect.Effect<void, DownloadError>`
 - `interface Filter`
   - `readonly url?: Url.Pattern | string | undefined`
@@ -518,12 +518,12 @@ Downloads a page starts.
 
 *subscriptions*
 
-- `const next: <PE = never, PR = never>(target: Page.Page | UserContext.UserContext, filter?: Filter | undefined, where?: Subscription.Where<Download, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyDeferre…`
-- `const stream: <PE = never, PR = never>(target: Page.Page | UserContext.UserContext, filter?: Filter | undefined, where?: Subscription.Where<Download, PE, PR> | undefined) => Effect.Effect< Stream.Stream<Download, …`
+- `const next: <PE = never, PR = never>(target: Page.Page | UserContext.UserContext, filter?: Filter | undefined, where?: Subscription.Where<Download, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyDeferred<Download, PE | Target.TargetGone | Deadline.Timeout>, Subscription.SubscriptionError, Scope.Scope | PR >`
+- `const stream: <PE = never, PR = never>(target: Page.Page | UserContext.UserContext, filter?: Filter | undefined, where?: Subscription.Where<Download, PE, PR> | undefined) => Effect.Effect< Stream.Stream<Download, PE | Subscription.EventOverflow | Target.TargetGone>, Subscription.SubscriptionError, Scope.Scope | PR >`
 
 *getters*
 
-- `const history: (target: Page.Page | UserContext.UserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<Download>>`
+- `const history: (target: Page.Page | UserContext.UserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<Download>, Subscription.SubscriptionError>`
 
 *guards*
 
@@ -639,28 +639,30 @@ File choosers: what a page opens when a file input is clicked.
 
 - `interface Decision`
   - `readonly [DecisionTypeId]: typeof DecisionTypeId`
-- `type FileChooser = | { readonly _tag: "Single"; select(file: FileInput.FileInput): Decision; readonly cancel: Decision } | { readonly _tag: "Multiple" select(files: ReadonlyArray<FileInput.FileInput>): Decision readonl…`
+- `type FileChooser = typeof FileChooser.Type`
+- `type Pending = | { readonly _tag: "Single"; select(file: FileInput.FileInput): Decision; readonly cancel: Decision } | { readonly _tag: "Multiple" select(files: ReadonlyArray<FileInput.FileInput>): Decision readonl…`
 - `interface Filter`
   - `readonly multiple?: boolean | undefined`
 - `type FileChooserErrorReason = typeof FileChooserErrorReason.Type`
 
 *schemas*
 
+- `const FileChooser = Schema.Union([Schema.TaggedStruct("Single", {}), Schema.TaggedStruct("Multiple", {})])`
 - `const FileChooserErrorReason = Schema.Union([Reason.InvalidInput])`
 
 *subscriptions*
 
-- `const next: <PE = never, PR = never>(target: Page.Page, filter?: Filter | undefined, where?: Subscription.Where<FileChooser, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyDeferred<FileChooser, PE | Tar…`
-- `const stream: <PE = never, PR = never>(target: Page.Page, filter?: Filter | undefined, where?: Subscription.Where<FileChooser, PE, PR> | undefined) => Effect.Effect< Stream.Stream<FileChooser, PE | Subscription.Ev…`
+- `const next: <PE = never, PR = never>(target: Page.Page, filter?: Filter | undefined, where?: Subscription.Where<FileChooser, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyDeferred<FileChooser, PE | Target.TargetGone | Deadline.Timeout>, Subscription.SubscriptionError, Scope.Scope | PR >`
+- `const stream: <PE = never, PR = never>(target: Page.Page, filter?: Filter | undefined, where?: Subscription.Where<FileChooser, PE, PR> | undefined) => Effect.Effect< Stream.Stream<FileChooser, PE | Subscription.EventOverflow | Target.TargetGone>, Subscription.SubscriptionError, Scope.Scope | PR >`
 
 *getters*
 
-- `const history: (target: Page.Page, filter?: Filter | undefined) => Effect.Effect<Subscription.History<FileChooser>>`
+- `const history: (target: Page.Page, filter?: Filter | undefined) => Effect.Effect<Subscription.History<FileChooser>, Subscription.SubscriptionError>`
 
 *handlers*
 
-- `const handle: <E, R>(page: Page.Page, handler: (chooser: FileChooser) => Effect.Effect<Decision, E, R>) => Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope.Scope | R>`
-- `const choose: (files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>) => (chooser: FileChooser) => Effect.Effect<Decision, FileChooserError>`
+- `const handle: <E, R>(page: Page.Page, handler: (chooser: Pending) => Effect.Effect<Decision, E, R>) => Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope.Scope | R>`
+- `const choose = (files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>) => (chooser: Pending): Effect.Effect<Decision, FileChooserError> => { const list: ReadonlyArray<FileInput.FileInput> = Array.isArray(…`
 
 *guards*
 
@@ -1074,12 +1076,12 @@ Long-lived connections a page opens: WebSockets and EventSource streams.
 
 *subscriptions*
 
-- `const next: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<NetworkConnection, PE, PR> | undefined) => Effect.Effect<…`
-- `const stream: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<NetworkConnection, PE, PR> | undefined) => Effect.Effect<…`
+- `const next: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<NetworkConnection, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyDeferred<NetworkConnection, PE | Target.TargetGone | Deadline.Timeout>, Subscription.SubscriptionError, Scope.Scope | PR >`
+- `const stream: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<NetworkConnection, PE, PR> | undefined) => Effect.Effect< Stream.Stream<NetworkConnection, PE | Subscription.EventOverflow | Target.TargetGone>, Subscription.SubscriptionError, Scope.Scope | PR >`
 
 *getters*
 
-- `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<NetworkConnection>>`
+- `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<NetworkConnection>, Subscription.SubscriptionError>`
 
 *guards*
 
@@ -1111,12 +1113,12 @@ Requests a page or context makes: the event, and the data every route and respon
 
 *subscriptions*
 
-- `const next: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter: Filter & { readonly url: Url.Pattern | string }, where?: Subscription.Where<NetworkRequest, PE, PR> | und…`
-- `const stream: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<NetworkRequest, PE, PR> | undefined) => Effect.Effect< St…`
+- `const next: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter: Filter & { readonly url: Url.Pattern | string }, where?: Subscription.Where<NetworkRequest, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyDeferred<NetworkRequest, PE | Target.TargetGone | Deadline.Timeout>, Subscription.SubscriptionError, Scope.Scope | PR >`
+- `const stream: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<NetworkRequest, PE, PR> | undefined) => Effect.Effect< Stream.Stream<NetworkRequest, PE | Subscription.EventOverflow | Target.TargetGone>, Subscription.SubscriptionError, Scope.Scope | PR >`
 
 *getters*
 
-- `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<NetworkRequest>>`
+- `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<NetworkRequest>, Subscription.SubscriptionError>`
 
 *converting*
 
@@ -1146,6 +1148,12 @@ Responses a page or context receives: the event, and, when asked for, their bodi
 - `const ServedBy = Schema.Literals(["network", "cache", "serviceWorker", "cacheOrServiceWorker", "route", "unknown"])`
 - `const ResponseErrorReason = Schema.Union([BodyUnavailable, Reason.BackendFailure])`
 
+*combinators*
+
+- `const withBodyLimit`
+  - `(limit: ByteSize.Input): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>`
+  - `<A, E, R>(self: Effect.Effect<A, E, R>, limit: ByteSize.Input): Effect.Effect<A, E, R>`
+
 *subscriptions*
 
 - `const next`
@@ -1157,7 +1165,11 @@ Responses a page or context receives: the event, and, when asked for, their bodi
 
 *getters*
 
-- `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<NetworkResponse>>`
+- `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<NetworkResponse>, Subscription.SubscriptionError>`
+
+*references*
+
+- `const BodyLimit: Context.Reference<ByteSize.ByteSize>`
 
 *guards*
 
@@ -1374,16 +1386,16 @@ Navigations of a page: the event, and the success value of `goto`, `reload`, `ba
 *schemas*
 
 - `const Id = Schema.String.pipe(Schema.brand("~@usestrider/browser/PageNavigation/Id"))`
-- `const PageNavigation = Schema.Union([Schema.TaggedStruct("Committed", { id: Id, document: Target.DocumentId, response: Schema.Option(NetworkResponse.NetworkResponse) }), Schema.TaggedStruct("SameDocument", { id: Id, docume…`
+- `const PageNavigation = Schema.Union([Schema.TaggedStruct("Committed", { id: Id, url: Url.Url, document: Target.DocumentId, response: Schema.Option(NetworkResponse.NetworkResponse) }), Schema.TaggedStruct("SameDocument", { …`
 
 *subscriptions*
 
-- `const next: <PE = never, PR = never>(target: Page.ObservedPage, filter?: NextFilter | undefined, where?: Subscription.Where<PageNavigation, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyDeferred<PageNa…`
-- `const stream: <PE = never, PR = never>(target: Page.ObservedPage, filter?: Filter | undefined, where?: Subscription.Where<PageNavigation, PE, PR> | undefined) => Effect.Effect< Stream.Stream<PageNavigation, PE | S…`
+- `const next: <PE = never, PR = never>(target: Page.ObservedPage, filter?: NextFilter | undefined, where?: Subscription.Where<PageNavigation, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyDeferred<PageNavigation, Page.PageError | PE | Target.TargetGone | Deadline.Timeout>, Subscription.SubscriptionError, Scope.Scope | PR >`
+- `const stream: <PE = never, PR = never>(target: Page.ObservedPage, filter?: Filter | undefined, where?: Subscription.Where<PageNavigation, PE, PR> | undefined) => Effect.Effect< Stream.Stream<PageNavigation, PE | Subscription.EventOverflow | Target.TargetGone>, Subscription.SubscriptionError, Scope.Scope | PR >`
 
 *getters*
 
-- `const history: (target: Page.ObservedPage, filter?: Filter | undefined) => Effect.Effect<Subscription.History<PageNavigation>>`
+- `const history: (target: Page.ObservedPage, filter?: Filter | undefined) => Effect.Effect<Subscription.History<PageNavigation>, Subscription.SubscriptionError>`
 
 *reasons*
 
@@ -1428,8 +1440,8 @@ Pages opened by another page, such as with `window.open` or a `target="_blank"` 
 *getters*
 
 - `const history`
-  - `(target: Page.Page, filter?: Filter | undefined): Effect.Effect<Subscription.History<Page.Page>>`
-  - `(target: Page.ObservedPage, filter?: Filter | undefined): Effect.Effect<Subscription.History<Page.ObservedPage>>`
+  - `(target: Page.Page, filter?: Filter | undefined): Effect.Effect<Subscription.History<Page.Page>, Subscription.SubscriptionError>`
+  - `(target: Page.ObservedPage, filter?: Filter | undefined): Effect.Effect<Subscription.History<Page.ObservedPage>, Subscription.SubscriptionError>`
 
 ### Reason
 
@@ -1687,12 +1699,12 @@ Errors a page or its workers threw and didn't catch, and promise rejections noth
 
 *subscriptions*
 
-- `const next: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<UncaughtException, PE, PR> | undefined) => Effect.Effect<…`
-- `const stream: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<UncaughtException, PE, PR> | undefined) => Effect.Effect<…`
+- `const next: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<UncaughtException, PE, PR> | undefined) => Effect.Effect< Deferred.ReadonlyDeferred<UncaughtException, PE | Target.TargetGone | Deadline.Timeout>, Subscription.SubscriptionError, Scope.Scope | PR >`
+- `const stream: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<UncaughtException, PE, PR> | undefined) => Effect.Effect< Stream.Stream<UncaughtException, PE | Subscription.EventOverflow | Target.TargetGone>, Subscription.SubscriptionError, Scope.Scope | PR >`
 
 *getters*
 
-- `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<UncaughtException>>`
+- `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<UncaughtException>, Subscription.SubscriptionError>`
 
 ### Url
 

@@ -623,11 +623,17 @@ export const conformance = (backend: Backend) =>
             const hello = yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text === "hello 42")
             assert.strictEqual(hello.message.level, "log")
             assert.deepStrictEqual(hello.message.origin, { _tag: "Page", page })
+            // 1-based, as stack traces print it: the page is one line (review 14, P9)
+            assert.strictEqual(Option.getOrThrow(hello.message.location).line, 1)
             const bad = yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text === "bad")
             assert.strictEqual(bad.message.level, "error")
             const thrown = yield* world.facts.when("UncaughtException")
             assert.strictEqual(thrown.exception.name, "TypeError")
             assert.strictEqual(thrown.exception.message, "thrown here")
+            // A thrown value that isn't an Error reads as an Error whose message is the value (review 14, P10)
+            yield* evaluate(world, page, "() => { setTimeout(() => { throw 'a string' }) }")
+            const raw = yield* world.facts.when("UncaughtException", (fact) => fact.exception.message === "a string")
+            assert.strictEqual(raw.exception.name, "Error")
           }), timeout)
 
         it.effect("captures screenshots and PDFs, and reads response bodies", () =>
@@ -739,11 +745,13 @@ export const conformance = (backend: Backend) =>
         it.effect("reports workers as realms, with their console", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
-            const { page } = yield* newPage(world)
+            const { context, page } = yield* newPage(world)
             yield* goto(world, page, `${world.site.origin}/worker`)
             const realm = yield* world.facts.when("RealmAdded", (fact) => fact.kind._tag === "Worker")
             assert(realm.kind._tag === "Worker")
             assert.strictEqual(realm.kind.worker._tag, "Dedicated")
+            // A dedicated worker belongs to its page, and so to its context (review 14, candidate 1)
+            assert.deepStrictEqual([realm.kind.page, realm.kind.context], [Option.some(page), Option.some(context)])
             const message = yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text === "from the worker")
             // Firefox 158 attributes a dedicated worker's console to its owner, the window realm (recorded 2026-10-20)
             const owner = realm.kind.worker._tag === "Dedicated"
@@ -769,6 +777,34 @@ export const conformance = (backend: Backend) =>
             assert.deepStrictEqual(sent.frame.payload, { _tag: "Text", text: "ping" })
             yield* world.facts.when("ConnectionFrame", (fact) => fact.frame.direction === "received")
             yield* world.facts.when("ConnectionClosed", (fact) => fact.connection === opened.connection)
+            // The close handshake's control frames aren't messages (review 14, P15)
+            const frames = world.facts.all("ConnectionFrame").filter((fact) => fact.connection === opened.connection)
+            assert.deepStrictEqual(frames.map((fact) => fact.frame.payload._tag), ["Text", "Text"])
+          }), timeout)
+
+        it.effect("cancels a download in progress, where the protocol can", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { context, page } = yield* newPage(world)
+            const directory = (yield* Effect.promise(() => import("node:os"))).tmpdir() +
+              `/strider-canceled-${process.pid}`
+            yield* world.adapter.declare({ _tag: "UserContext", context }, {
+              _tag: "Downloads",
+              behavior: { _tag: "Allow", directory }
+            })
+            yield* goto(world, page, `${world.site.origin}/hello`)
+            yield* world.adapter.navigate(page, `${world.site.origin}/slow-download`, { referrer: Option.none() })
+            const started = yield* world.facts.when("DownloadStarted")
+            const canceled = world.adapter.cancelDownload(started.download)
+            const capabilities = yield* SubscriptionRef.get(world.adapter.capabilities)
+            if (!capabilities.has("downloads.cancel")) {
+              const error = yield* Effect.flip(canceled)
+              assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "downloads.cancel" })
+              return
+            }
+            yield* canceled
+            const ended = yield* world.facts.when("DownloadEnded", (fact) => fact.download === started.download)
+            assert.strictEqual(ended.outcome._tag, "Canceled")
           }), timeout)
 
         it.effect("closes pages and removes contexts, with the reason", () =>

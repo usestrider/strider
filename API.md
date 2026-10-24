@@ -114,13 +114,14 @@ const DocumentStatus = Schema.Struct({
 })
 
 // PageNavigation: the success value of goto, reload, back and forward; also an event module
+// url: where the page went, after redirects, or the URL a same-document navigation set (review 14)
 const PageNavigation = Schema.Union([
   Schema.TaggedStruct("Committed", {                    // 404/500 is still a commit; response is None for about:blank, data:, …
-    id: Id, document: Target.DocumentId, response: Schema.Option(NetworkResponse.NetworkResponse) }),
+    id: Id, url: Url.Url, document: Target.DocumentId, response: Schema.Option(NetworkResponse.NetworkResponse) }),
   Schema.TaggedStruct("SameDocument", {
-    id: Id, document: Target.DocumentId, via: Schema.Literals(["fragment", "historyApi", "intercepted"]) }),
-  Schema.TaggedStruct("Restored", { id: Id, document: Target.DocumentId }),    // back/forward cache
-  Schema.TaggedStruct("Activated", { id: Id, document: Target.DocumentId })    // prerender
+    id: Id, url: Url.Url, document: Target.DocumentId, via: Schema.Literals(["fragment", "historyApi", "intercepted"]) }),
+  Schema.TaggedStruct("Restored", { id: Id, url: Url.Url, document: Target.DocumentId }),    // back/forward cache
+  Schema.TaggedStruct("Activated", { id: Id, url: Url.Url, document: Target.DocumentId })    // prerender
 ])
 
 // NetworkResponse: immutable; one redirect hop. NetworkRequest is its request-side twin
@@ -134,6 +135,7 @@ class NetworkResponse extends Schema.Class<NetworkResponse>("@usestrider/browser
 interface CapturedResponse<B> extends NetworkResponse, HttpIncomingMessage<ResponseError> {   // owned bytes, readable with Effect's decoders
   readonly body: B                                      // what the subscription's body decoder produced
 }
+declare const BodyLimit: Context.Reference<ByteSize>   // the largest body a subscription collects; 10 MiB unless set with withBodyLimit
 
 // Snapshot: the tree is data; the refs are bound to the page it came from
 class Data extends Schema.Class<Data>("@usestrider/browser/Snapshot/Data")({
@@ -601,7 +603,8 @@ declare const next: <PE = never, PR = never>(target: T, filter?: F, where?: Subs
   Effect<ReadonlyDeferred<A, PE | TargetGone | Timeout>, Subscription.SubscriptionError, Scope | PR>
 declare const stream: <PE = never, PR = never>(target: T, filter?: F, where?: Subscription.Where<A, PE, PR>) =>   // every match from now on
   Effect<Stream<A, PE | EventOverflow | TargetGone>, Subscription.SubscriptionError, Scope | PR>
-declare const history: (target: T, filter?: F) => Effect<Subscription.History<A>>   // every retained match; a read, so no where
+declare const history: (target: T, filter?: F) =>   // every retained match; a read, so no where
+  Effect<Subscription.History<A>, Subscription.SubscriptionError>   // its filter is checked as next's is (review 14)
 
 // Subscription
 type Where<A, PE, PR> = (event: A) => Effect<boolean, PE, PR>   // a caller predicate, after the declarative filter
@@ -621,13 +624,13 @@ declare const History: <S extends Schema.Top>(entry: S) => Schema.Struct<…>   
 | `NetworkRequest` | `NetworkRequest` | `url`, `method`, `resourceType`; `next` requires `url` | any page or context |
 | `NetworkResponse` | `NetworkResponse`, or `CapturedResponse<B>` given `body` | `url`, `method`, `status`; `next` requires `url`. `body` (any decoder of an `HttpIncomingMessage`, such as `HttpIncomingMessage.schemaBodyJson(Cart)`) needs inspect, applies to `next` and `stream`, and types their `where` | any page or context |
 | `ConsoleMessage` | `ConsoleMessage` | `level`, `text` | any page or context |
-| `UncaughtException` | `UncaughtException`: thrown errors and unhandled rejections | `message` | any page or context |
+| `UncaughtException` | `UncaughtException`: thrown errors and unhandled rejections; `kind` is `"unknown"` where the browser can't tell them apart (Firefox) | `message` | any page or context |
 | `Dialog` | `Dialog` | `kind` | any page; `Dialog.handle` needs `Page` |
-| `FileChooser` | `FileChooser` | `multiple` | `Page` |
+| `FileChooser` | `FileChooser`: data (`Single` or `Multiple`); `FileChooser.handle` gets it as `Pending` | `multiple` | `Page` |
 | `Download` | `Download` | `url` | `Page` or `UserContext` |
 | `AutoResolution` | `AutoResolution`: an obligation decided by a default policy | `subject` | `Page` or `UserContext` |
-| `BrowserWorker` | `BrowserWorker` from a `Page` or `UserContext` (it can `evaluate`, which needs control: workers have no isolated world), otherwise `ObservedBrowserWorker` | `url`, `kind` | any page or context |
-| `NetworkConnection` | `NetworkConnection`: a WebSocket or EventSource, whose `frames` subscribe from now on (CDP and patched WebKit; Unsupported on BiDi) | `url`, `kind` | any page or context |
+| `BrowserWorker` | `BrowserWorker` from a `Page` or `UserContext` (it can `evaluate`, which needs control: workers have no isolated world), otherwise `ObservedBrowserWorker` | `url`, `kind`: a page's are dedicated; `shared` and `service` need `workers.shared` and `workers.service` (CDP) | any page or context |
+| `NetworkConnection` | `NetworkConnection`: a WebSocket or EventSource, whose `frames` subscribe from now on (`networkConnections`: CDP; patched WebKit without EventSource; Unsupported on BiDi) | `url`, `kind` | any page or context |
 
 Each module has the most specific accurate name, with a prefix only where a bare name would clash with the fetch `Request`/`Response` or DOM `Navigation` globals. `ConsoleMessage` avoids Effect's `Console`, and `UncaughtException` avoids `Page.PageError` and the `*Error` suffix our failures use.
 
@@ -635,7 +638,10 @@ Each module has the most specific accurate name, with a prefix only where a bare
 - **Filters are data; `where` is a function.** The filter is applied before buffering, so unrelated traffic can't overflow a subscription. `where` runs after it, in the subscriber, never on the ingestion path. It is a separate trailing argument because TypeScript can't type a callback from a sibling property of the same object: as its own argument, `where` gets the decoded body type from `body`. The sketch found this.
 - **Subscribe, act, collect.** `next` and `stream` are subscribed by the time their effect returns, so code order is subscription order, and one action can have several outcomes. A subscription that can't be set up fails `next` or `stream` itself with `Subscription.SubscriptionError`, before any event. A subscription made too late is diagnosed: its `Timeout` names the match that arrived just before it subscribed.
 - **How events are delivered** (review 13). The model's fold publishes each event to a channel per kind and target, which logs it and offers it to every subscription whose filter it matches, each into a buffer of its own, never blocking the fold. A subscription sees every event published after it registered and none before, even one whose details arrive later, such as a popup's URL. A `stream` buffers at most `Subscription.Capacity` events (1,000 unless set with `Subscription.withCapacity`) for a consumer that falls behind, and then fails with `EventOverflow`, alone; `next` keeps what arrives until its first match or its deadline. A `next` that times out does so in the phase `waitingForEvent`, and its hint names a matching event that came before it subscribed: "a popup came 12 ms before Popup.next subscribed; call Popup.next before the action that causes it".
-- **`history` looks back.** It answers questions you couldn't ask in advance (debugging, failure reports, agents, the CLI, a popup's first requests) and never subscribes or waits, so it can't catch what an action causes; that is why there is no `last`.
+- **Every event is attributed to a page and its context** (review 14). Facts name a frame, a realm or a request's initiator, so the model keeps which page and context each belongs to: a frame's requests and console reach its page, a dedicated worker's its page, and a shared or service worker's only its context. An event whose page and context are unknown reaches no subscription, and the backend's capability limitations say which.
+- **Delivering can take an effect** (review 14). A response with a `body` is delivered once its body has loaded and been decoded, and `PageNavigation.next` with `waitUntil` once its document has loaded; the work runs in the subscriber, as `where` does, and its failure fails the wait or the stream.
+- **What a backend can't report is a capability.** A filter that asks for events the backend can't report (`NetworkConnection` on BiDi, `kind: "eventSource"` on WebKit, shared and service workers where the backend can't say whose they are) fails `next`, `stream` and `history` with `SubscriptionError{Unsupported}`, naming the capability; an unfiltered subscription gets what the backend reports, and the capability's limitations say what that leaves out.
+- **`history` looks back.** It answers questions you couldn't ask in advance (debugging, failure reports, agents, the CLI, a popup's first requests) and never subscribes or waits, so it can't catch what an action causes; that is why there is no `last`. Its filter is checked as `next`'s is: one that doesn't compile, or that the backend can't apply, fails with `SubscriptionError` rather than answering an empty history (review 14).
   - The log is capped by `UserContext.Options.eventLog`, so a missing entry proves nothing unless `dropped` is 0. `dropped` counts every event of the kind the log discarded for its target, because which of them a later filter would have matched can't be known: it is an upper bound on the matches lost (review 13). Complete records come from a `stream` opened at the start, or from `Har.record`.
   - Entries never decay: metadata is copied, without bodies, and handles live as long as their owner.
   - The history of a data event encodes with `Subscription.History(NetworkRequest.NetworkRequest)`, for the CLI and test artifacts.
@@ -677,6 +683,8 @@ yield* page.route("https://app.example.com/api/user", () => Effect.succeed(Route
 yield* page.route("https://app.example.com/api/**", () => Effect.succeed(Route.continueWith(HttpClientRequest.setHeader("x-test", "1"))))
 ```
 
+- **Requests and responses are events of their page and context** (review 14). A request is published per hop when it is sent, and a response when it arrives; `NetworkRequest.toHttpClientRequest` turns a captured request into Effect's `HttpClientRequest`, redacted headers still redacted.
+- **Bodies are collected for a subscription, not always** (review 14). `NetworkResponse.next` and `stream` with a `body` declare collection for their page or context in the subscription's scope before they return, up to `NetworkResponse.BodyLimit` (10 MiB; Effect's `HttpIncomingMessage.MaxBodySize` is a separate setting, for what this program reads). The response is delivered once its hop has ended and its bytes were read and decoded. A redirect hop has no body (`BodyUnavailable{redirect}`, without asking the browser), nor does a hop over the limit (`overLimit`), one the browser no longer has (`evicted`), or one that failed after its response started (`failed`). A body that hasn't finished by the deadline, such as an event stream's, times out `next`, with a hint saying the response matched, and fails a `stream` with `BodyUnavailable{streaming}` after `Deadline.DefaultBudget`.
 - **Requests and responses are Effect's HTTP types.** A fulfilled response is an `HttpServerResponse` and a request change is an `HttpClientRequest` transform, so everything `effect/http` offers for building them applies. What each backend can change differs (CDP: URL, method, headers and body; BiDi adds cookies), and a change it can't apply fails with `Unsupported` naming the field rather than being dropped. Effect marks its HTTP modules unstable, so `Route` can change when they do.
 
 ```ts
@@ -714,13 +722,14 @@ declare const acceptAll: (dialog: Pending) => Effect<Decision>    // Alert/Confi
 declare const dismissAll: (dialog: Pending) => Effect<Decision>   // Alert: accept; Confirm/Prompt: dismiss; BeforeUnload: stay
 
 // FileChooser
-type FileChooser =                                     // doesn't pause the page; Cancel when no handler decides
+const FileChooser = Schema.Union([Schema.TaggedStruct("Single", {}), Schema.TaggedStruct("Multiple", {})])   // what events report: data (review 14)
+type Pending =                                         // what a handler decides; doesn't pause the page; Cancel when no handler decides
   | { readonly _tag: "Single"; select(file: FileInput.FileInput): Decision; readonly cancel: Decision }
   | { readonly _tag: "Multiple"; select(files: ReadonlyArray<FileInput.FileInput>): Decision; readonly cancel: Decision }
-declare const handle: <E, R>(page: Page.Page, handler: (chooser: FileChooser) => Effect<Decision, E, R>) =>
+declare const handle: <E, R>(page: Page.Page, handler: (chooser: Pending) => Effect<Decision, E, R>) =>
   Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope | R>
 declare const choose: (files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>) =>
-  (chooser: FileChooser) => Effect<Decision, FileChooserError>   // fails with InvalidInput on a Single chooser given several files, so Cancel applies
+  (chooser: Pending) => Effect<Decision, FileChooserError>   // fails with InvalidInput on a Single chooser given several files, so Cancel applies
 
 // Download
 interface Download extends Pipeable, Inspectable {
@@ -729,10 +738,10 @@ interface Download extends Pipeable, Inspectable {
   readonly suggestedFilename: FileInput.FileName         // fixed when the download begins
   readonly status: Watchable.Watchable<Status>           // InProgress{received, total} | Completed | Canceled | Failed{reason}
   readonly finished: Effect<void, DownloadError | TargetGone | Timeout>   // status.waitFor(terminal), under the deadline
-  readonly stream: Stream<Uint8Array, DownloadError>
-  saveAs(path: FilePath.Local | string): Effect<void, DownloadError>   // always a local path; transfers from a remote browser where supported
-  readonly cancel: Effect<void, DownloadError>
-  // the browser-side file is deleted when its context closes, unless the backend's download policy keeps it; saveAs copies it out first
+  readonly stream: Stream<Uint8Array, DownloadError | TargetGone | Timeout>   // the bytes, once it completes (review 14)
+  saveAs(path: FilePath.Local | string): Effect<void, DownloadError | TargetGone | Timeout>   // always a local path; waits for completion, under the deadline
+  readonly cancel: Effect<void, DownloadError>          // Unsupported where the protocol has no command for it (BiDi)
+  // the file is in a temporary directory its context owns, deleted when the context closes; saveAs copies it out first
 }
 
 // CookieJar: context.cookies
@@ -773,6 +782,8 @@ declare const Json: Schema.Codec<StorageState, string>   // Schema.fromJsonStrin
 - **Which handler decides.** The page's latest `Dialog.handle` still in its scope, chosen when the dialog opens; removing it leaves later dialogs to the one before. It has `Deadline.DefaultBudget`, as read at `handle`, per dialog. A handler that fails, is interrupted or runs out of time leaves the dialog to the policy, and its failure is logged at Effect's `References.UnhandledLogLevel`. The decision is delivered by a resolver in the model's scope, apart from the handler's fiber, so a late handler can't contradict it. `handled` counts what a registration decided.
 - **Default dialog policy.** It is explicit and has no delay. A context's `dialogs` option (`"dismiss"`, the default for owned contexts; `"accept"`; or `"leaveOpen"`) decides immediately when no handler claims a dialog. `beforeunload` is accepted under `"dismiss"`, so closing never hangs. On attached pages there is no default unless the caller sets one. Every automatic decision is an `AutoResolution` event on the page and its context (`decision: "dismiss"`, `policy: 'dialogs: "dismiss"'`) and is recorded on the operation that was running.
 - **Waiting on a dialog.** An operation blocked by a dialog that a handler or the policy is resolving waits within its deadline, normally just a round trip. Under `"leaveOpen"` it fails immediately with a hint naming the dialog: the shared reason `PromptBlocking{kind, text}`, in `LocatorError` and `PageError`. That includes the click that opened it, whose dispatch `MayHaveBeenSent`, and an expectation on the page fails at once too. What blocks differs by browser (review 13): Chromium and WebKit block every evaluation while a dialog is open and Firefox doesn't, and on all three the input that opens a dialog returns only once it is decided; failing on every backend keeps one rule.
+- **A file chooser is data; a handler's argument adds the decisions** (review 14), as for dialogs. Every page of a context the library creates has its choosers reported and decided, so none is shown: the page's latest `FileChooser.handle` decides, with `Deadline.DefaultBudget` as read at `handle`, and otherwise the chooser is canceled and reported as an `AutoResolution` (`policy: 'fileChoosers: "cancel"'`, the one policy). On Firefox the input gets a `cancel` event as the chooser opens, before any decision, and the files a handler chooses still arrive after it; its `fileChooser` capability is `partial`. `FileInput.local` resolves a relative path with Effect's `Path`, which the layer needs for it; `FileInput.bytes` isn't built.
+- **Downloads go to a directory each context owns** (review 14). Left to themselves, one browser cancels downloads and two save them into the user's home, so every context the library creates allows downloads into a temporary directory made before it and removed after it, recorded on its span; there is no option yet, and a route can abort a download's request. Every browser writes into a partial file and renames it when done, so `saveAs` and `stream` wait for completion, under the deadline in force. Progress is reported on CDP only (`downloads.progress`), and a download in progress when its context closes ends `Canceled`, whatever the backend says after.
 - **Cookies are a change, not a declaration.** `set` and `remove` act once, like a click; a scope closing doesn't undo them. Reading cookies needs a controlled context, as reading storage state does.
 - **Storage state is a Schema, and saving it is explicit.** `context.exportStorageState` returns the full restorable state with every secret `Redacted`, so logging it shows nothing. Writing it somewhere is a visible step through the codec: `Schema.encodeEffect(StorageState.Json)(state)` writes the secrets out in full, because that is the point of saving them, and `Schema.decodeEffect(StorageState.Json)` reads them back, validating either way. The codec is built with `Schema.toCodecJson` for that reason: Effect's default JSON encoding writes a `Redacted` as `"<redacted>"`, which is what the CLI's `--json`, MCP results and logs should show, and would empty a saved file of its secrets. A runtime test pins the difference. Diagnostic JSON of a context never contains secrets.
 

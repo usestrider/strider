@@ -9,6 +9,7 @@ import * as Option from "effect/Option"
 import type * as Predicate from "effect/Predicate"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import * as Target from "../Target.ts"
 import type * as Watchable from "../Watchable.ts"
@@ -21,15 +22,22 @@ export interface Source<S, A> {
   readonly project: (state: S) => Option.Option<A>
   /** Why the entity ended, once it has: the terminal state. */
   readonly ended: (state: S) => Option.Option<Target.CloseReason>
+  /**
+   * A state no other follows, though the entity lives on, such as a download that completed: changes end after
+   * it, and a wait it doesn't satisfy fails at once, since nothing else will.
+   */
+  readonly final?: ((state: S) => boolean) | undefined
   /** The entity, for `TargetGone`. */
   readonly target: Target.Description
   /** The operation a wait reports, such as `Page.status.waitFor`. */
   readonly operation: string
 }
 
-/** The states from now on: the current one first, ending after the terminal one. */
+/** The states from now on: the current one first, ending after the terminal or final one. */
 const states = <S, A>(source: Source<S, A>) =>
-  SubscriptionRef.changes(source.ref).pipe(Stream.takeUntil((state) => Option.isSome(source.ended(state))))
+  SubscriptionRef.changes(source.ref).pipe(
+    Stream.takeUntil((state) => Option.isSome(source.ended(state)) || source.final?.(state) === true)
+  )
 
 /** A watchable over `source`. */
 export const make = <S, A>(source: Source<S, A>): Watchable.Watchable<A> => {
@@ -50,19 +58,31 @@ export const make = <S, A>(source: Source<S, A>): Watchable.Watchable<A> => {
     const { at, budget } = yield* Operation.budget
     const history: Array<Diagnostics.ObservedValue> = []
     const outcome = yield* states(source).pipe(
-      Stream.mapEffect((state) => {
+      Stream.mapEffect((state): Effect.Effect<Option.Option<A>, Target.TargetGone | Deadline.Timeout> => {
         const value = source.project(state)
         if (Option.isSome(value)) {
           Operation.appendObservation(history, value.value)
           if (predicate(value.value)) return Effect.succeed(Option.some(value.value))
         }
         const ended = source.ended(state)
-        return Option.isSome(ended)
-          ? Effect.fail(
+        if (Option.isSome(ended)) {
+          return Effect.fail(
             new Target.TargetGone({
               target: source.target,
               reason: ended.value,
               diagnostics: Operation.diagnostics(id, { last: Option.fromNullishOr(history.at(-1)) })
+            })
+          )
+        }
+        return source.final?.(state) === true
+          ? Effect.fail(
+            Operation.timeout({
+              operation: source.operation,
+              id,
+              phase: "waitingForCondition",
+              budget,
+              history,
+              hint: Option.some("It reached a final value, which doesn't satisfy the predicate, so nothing else will")
             })
           )
           : Effect.succeed(Option.none<A>())

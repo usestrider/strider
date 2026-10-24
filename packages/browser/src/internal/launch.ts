@@ -14,6 +14,7 @@ import * as Browser from "../Browser.ts"
 import * as Diagnostics from "../Diagnostics.ts"
 import * as Reason from "../Reason.ts"
 import { now } from "./adapter.ts"
+import * as Paths from "./paths.ts"
 
 /** A browser process, started. */
 export interface Launched {
@@ -42,8 +43,7 @@ export const fail = (reason: Browser.BrowserErrorReason, step: string) =>
   Effect.fail(new Browser.BrowserError({ reason, diagnostics: diagnostics(step) }))
 
 /** Whether a path is absolute, on POSIX or Windows; the package doesn't assume Node's `path`. */
-export const isAbsolute = (path: string): boolean =>
-  path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\")
+export const isAbsolute = Paths.isAbsolute
 
 const lookup = "`strider browsers` lists the browsers it can find, by absolute path"
 
