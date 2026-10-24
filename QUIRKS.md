@@ -308,7 +308,7 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *Seen:* review 14's revision runs; traced in review 17's revision (Q103).
 - *We:* nothing yet; listed in PROTOCOL.md.
 - *Reconsider:* find whether an intercept declaration is acknowledged before it is in force (CONCEPTS.md §7, Installation), when routes are built.
-- **Resolved** in review 17's revision: the declaration was acknowledged before it was in force, apparently because `Fetch` enabled with no patterns gave up its interceptor. Q103 says what we do now.
+- **Resolved** in `e7821c1` (review 17's revision): the declaration was acknowledged before it was in force, apparently because `Fetch` enabled with no patterns gave up its interceptor. Q103 says what we do now.
 
 **Q89. Only Chromium shows a route the CORS preflight** (Browser). A cross-origin `PUT` with a custom header pauses first as an `OPTIONS` request on Chromium; Firefox and WebKit pause only the `PUT`. A fulfilled cross-origin response needs CORS headers on all three.
 - *Seen:* review 17, P9.
