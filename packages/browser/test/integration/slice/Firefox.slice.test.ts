@@ -6,7 +6,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { Firefox } from "@usestrider/browser/firefox"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import { assertPinned, firefox } from "../browsers.ts"
+import { attaching, firefoxAttachable } from "./attaching.ts"
 import { contents } from "./contents.ts"
 import { declarations } from "./declarations.ts"
 import { events } from "./events.ts"
@@ -24,3 +26,4 @@ modules("Firefox", backend)
 interaction("Firefox", backend)
 declarations("Firefox", backend)
 contents("Firefox", backend)
+attaching("Firefox", backend, Option.some(firefoxAttachable((endpoint) => Firefox.layerConnect(endpoint))))

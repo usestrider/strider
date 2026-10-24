@@ -3,14 +3,18 @@
  * whose functions take handles (`Popup.next(page)`, `Dialog.handle(page, …)`). A handle this package didn't
  * make is a bug in the caller's types, so it is a defect.
  */
+import type * as Option from "effect/Option"
 import type * as Page from "../Page.ts"
 import type * as UserContext from "../UserContext.ts"
+import type * as Access from "./access.ts"
 import type * as Model from "./model.ts"
 import type * as Runtime from "./runtime.ts"
 
 export interface Behind<E> {
   readonly runtime: Runtime.Runtime
   readonly entry: E
+  /** The grant the handle was made under (review 19); `None` for one controlled for its life, or observed. */
+  readonly grant: Option.Option<Access.Grant>
 }
 
 const pages = new WeakMap<object, Behind<Model.PageEntry>>()

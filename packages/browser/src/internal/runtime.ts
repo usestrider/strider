@@ -44,10 +44,15 @@ export interface Runtime {
   /** The backend, as errors name it: the browser's product. */
   readonly backend: string
   /**
-   * The connection's handle for a page, the same each time, made on first use and kept as long as the page's
-   * entry is; `None` for a page outside the contexts the connection created.
+   * The connection's handle for a page it controls for its life, the same each time, made on first use and kept as
+   * long as the page's entry is: one it created, or one in a context it created; `None` for any other page.
    */
   readonly page: (entry: Model.PageEntry) => Option.Option<Page.Page>
+  /**
+   * The connection's handle for any page: the `Page`, for one it controls for life, or an observed handle, the same
+   * each time (review 19, candidate 2).
+   */
+  readonly observed: (entry: Model.PageEntry) => Page.ObservedPage
   /** The connection's handle for a download, the same each time (review 14, candidate 8). */
   readonly download: (entry: Model.DownloadEntry) => Download.Download
   /** The connection's handle for a worker, the same each time (review 14, candidate 10). */
@@ -76,7 +81,8 @@ export interface Runtime {
 export type SendFailure =
   | Operation.Failure
   | { readonly _tag: "Reason"; readonly reason: Reason.PromptBlocking }
-  | { readonly _tag: "Deadline" }
+  /** The deadline passed; `hint` says why when the page never had a document to send to. */
+  | { readonly _tag: "Deadline"; readonly hint?: string | undefined }
 
 /** The reason for an operation on a page whose open dialog nothing will decide. */
 export const promptBlocking = (prompt: Model.UndecidedPrompt, dispatched: boolean): Reason.PromptBlocking =>
@@ -368,7 +374,12 @@ const routing = <A>(
       const open = yield* openState(page, id).pipe(
         Effect.timeoutOption(Operation.millisLeft(at)),
         Effect.flatMap(Option.match({
-          onNone: () => Effect.fail<SendFailure>({ _tag: "Deadline" }),
+          onNone: () =>
+            Effect.fail<SendFailure>({
+              _tag: "Deadline",
+              hint:
+                "The page reported no document before the deadline; a page attached while a dialog is open reports none until the dialog closes (QUIRKS.md)"
+            }),
           onSome: Effect.succeed
         }))
       )

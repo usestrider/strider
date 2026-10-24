@@ -473,7 +473,7 @@ Adapter responsibilities:
   - the one-shot reads besides `count`, `isVisible` and `all` (`readText`, `readValue`, `readHtml`, `readAttribute`, `isEnabled`, `isChecked`), and a reason in `LocatorError` for a read with nothing to read (since built: review 16, below);
   - the other expectations, and re-checks on the model's change signals (`Reactivity`) (since built, with re-checks in the page: review 16, below);
   - the event modules (since built in part: review 13, below), evaluation, snapshots, screenshots, storage, cookies, routes, init scripts, emulation, permissions and page time (routes, init scripts, emulation, permissions and page time since built: review 17, below; evaluation, snapshots, screenshots, storage and cookies: review 18, below);
-  - `Browser.pages`, and the default context's `pages` and `control`.
+  - `Browser.pages`, and the default context's `pages` and `control` (since built: review 19, below).
 
 **Built** (2026-10-23, after [review 13](reviews/13-events-slice.md)): events, through `Popup` and `Dialog`. Call site 3 of API.md runs on Chromium, Firefox and WebKit: `Popup.next` subscribes before the click, `Deferred.await` gives the popup's `Page` (since review 15, running the wait `next` hands out does), `Dialog.handle` registers before the click that opens a `confirm` in it, and the confirm is accepted.
 
@@ -494,7 +494,7 @@ Adapter responsibilities:
 - **Not built yet:**
   - the other event modules: `Download`, `FileChooser`, `NetworkRequest`, `NetworkResponse`, `ConsoleMessage`, `UncaughtException`, `PageNavigation`, `BrowserWorker`, `NetworkConnection` (since built: review 14, below);
   - automatic decisions for file choosers (since built: review 14, below) and paused requests, and recording an automatic decision on the operation that was running;
-  - popups of observed pages, at `observe` access, and dialogs on attached pages, which wait for attaching;
+  - popups of observed pages, at `observe` access, and dialogs on attached pages, which wait for attaching (since built: review 19, below);
   - `FileChooser.handle`, routes, and the other declarations.
 
 **Built** (2026-10-23, after [review 14](reviews/14-event-modules.md)): the other event modules. `Download`, `FileChooser`, `ConsoleMessage`, `UncaughtException`, `PageNavigation`, `NetworkRequest`, `NetworkResponse`, `BrowserWorker` and `NetworkConnection` run on Chromium, Firefox and WebKit through the mechanism review 13 built, as do call sites 2, 4 + 9, 5 and 8 of API.md.
@@ -526,7 +526,7 @@ Adapter responsibilities:
   - `FileInput.bytes`, which needs `setInputFiles`'s mechanism to keep its MIME type;
   - downloads and `FileInput.local` paths for a browser the layer doesn't launch, which has no `FileSystem` shared with it;
   - routes, and automatic decisions for paused requests (since built: review 17, below); recording an automatic decision on the operation that was running;
-  - observed pages and contexts as access levels, and frames' own navigations as `PageNavigation` events;
+  - observed pages and contexts as access levels (since built: review 19, below), and frames' own navigations as `PageNavigation` events;
   - shared and service workers' contexts on BiDi, and their console;
   - a flake seen in the conformance suite under full load, before and after this revision: Chromium's interception tests, where a request occasionally isn't paused or isn't marked as routed. It needs a look when routes are built (since traced and fixed: review 17, below).
 
@@ -589,7 +589,7 @@ Adapter responsibilities:
   - routes for a page's service worker, which WebKit doesn't intercept at all;
   - page time in workers, and restoring a document's clock when it is removed;
   - init scripts in workers;
-  - storage state, cookies and origin storage (batch 3; since built: review 18, below), and attaching (batch 4).
+  - storage state, cookies and origin storage (batch 3; since built: review 18, below), and attaching (batch 4; since built: review 19, below).
 
 **Built** (2026-10-24, after [review 18](reviews/18-evaluation-frames-captures.md)): a page's contents. Call sites 1 (to the end) and 16 of API.md run on Chromium, Firefox and WebKit: evaluation and handles, frames, snapshots and `toMatchAria`, captures, cookies, origin storage and storage state with IndexedDB.
 
@@ -618,8 +618,29 @@ Adapter responsibilities:
   - a frame's own evaluation (`frame.evaluate`), which the API doesn't declare;
   - a drag from one document to another on Firefox (Q111);
   - batched handle releases (Q132);
-  - `Page.inspect` and `control`, `Page.capability`, and access levels in general;
-  - attaching (batch 4).
+  - `Page.inspect` and `control`, `Page.capability`, and access levels in general (since built, but for `Page.capability`: review 19, below);
+  - attaching (batch 4; since built: review 19, below).
+
+**Built** (2026-10-24, after [review 19](reviews/19-attaching-and-access.md)): attaching and access. Call site 7 of API.md runs on Chromium and Firefox, against a browser started with two tabs that a layer attaches to; access levels run on all three backends, through a launched browser's own first tab and its default context.
+
+- **Connecting** (`src/internal/connect.ts`; `Chromium.layerConnect`, `Firefox.layerConnect`, `Bidi.layerConnect`). An endpoint is parsed and resolved: Chromium's WebSocket URL as given, or its HTTP endpoint through `/json/version`, read with `HttpClient` over `fetch` (Q148); Firefox's remote agent with `/session` added when the URL has no path; any BiDi endpoint as given. The WebSocket gets `ConnectOptions.headers`, and the adapter connects with `ownership: "attached"`.
+- **The BiDi adapter** ends a session it started in its scope's finalizer, bounded by a second (Q137), and says why a connect is refused while another client holds Firefox's one session. It maps and reports the default context before subscribing, since Firefox reports existing contexts as the subscription is answered (Q138). An attached session's prompt settings leave file choosers to the browser, and `fileChooser`'s limitation says so (Q140).
+- **Access** (`src/internal/access.ts`, `refusals.ts`; `browser.ts`, `page.ts`, `locator.ts`, `handles.ts`). A page the connection created, or one in a context it created, is controlled for its life. Any other page has an observed handle (`PageImpl.observed`): its state, frames, workers, `closed`, the event modules, and `inspect` and `control`, which acquire a grant in the caller's scope (`Access.acquire`) and return a handle made under it; `inspect` installs the caller's isolated world first. A handle under a grant is guarded: each member above observe checks the grant, failing with `TargetGone{AccessReleased}` once it is released, or, for members whose errors have no `TargetGone`, with their module's `NotPermitted` (or the clock's `NotInstalled`, Q143); locators carry the grant in their owner, and `Expect`, `Dialog.handle` and `FileChooser.handle` check it through `Handles`. Declarations made through a granted handle are removed when the grant is released. `ObservedUserContext.control` grants a context, whose pages come under the same grant (Q145); a page's `context`, when its context isn't controlled, refuses with `NotPermitted` (Q144).
+- **What a connection sees.** The model keeps every page in a list (`pageList`), which `Browser.pages` shows, `Page`s for the pages controlled for life and observed handles for the rest (`Runtime.observed`). The default context has `pages`, `workers` and `control`. Popups of observed pages are delivered as observed pages. A request to a page that never reported a document times out with a hint that a dialog may be open (Q139).
+- **Where the build differs from the review.**
+  - **Firefox renders an attached browser's background tab about once a second** (Q71), so the call site's click in the second tab never settled until the tab was brought to the front; the tests call `tab.activate` under control. The review's call site doesn't.
+  - **A released grant refuses some members with their module's `NotPermitted`,** or the clock with `NotInstalled`, since their errors declare no `TargetGone` (Q143); the review said `AccessReleased` for all.
+  - **A page's `context` refuses with `NotPermitted`** when its context isn't controlled (Q144); the review said so of the context's members, and the handle is what refuses.
+  - **A launched browser's first tab is observed on every backend** (Q141), which the access tests use, as the review planned.
+  - **Chromium's endpoint lookup is read with `fetch` provided inside the layer** (Q148).
+- **Probes** (review 19, What the browsers do): a launched browser's first tab; two tabs adopted on connect, an isolated world and an intercept on them; headless Chromium with two URLs; Chromium's HTTP endpoint; several clients; what a closed connection leaves, and Firefox's sessions; a dialog across a disconnect; and the BiDi adapter's contexts, on the pinned builds.
+- **Tests.** `test/integration/slice/attaching.ts` runs on each backend: a launched browser's pages, its first tab controlled for a scope, `AccessReleased` and `NotPermitted` after it, a route removed with its grant, and `inspect`; the default context controlled for a scope, a cookie, a page it made closed with the scope, and a dialog no policy decides, which blocks reads with `PromptBlocking`. On Chromium and Firefox: call site 7 against a browser the test starts with two tabs, attached through Chromium's HTTP endpoint, and both tabs and the route's end checked by a second connection. On Firefox: a second client refused while one holds the session, and accepted after it ends. The conformance suite checks the browser's first tab is in the default context. Integration tests: 414; each of two full runs failed one test, a Chromium close under load (Q149, new) and Q69.
+- **Not built yet:**
+  - `WebKit.layerAttach`, for stock WebKit's remote inspector, which needs its protocol generated as a backend of its own;
+  - `Page.capability` (`AxTree`, `Screencast`), with the tooling (batch 5);
+  - a dialog open on a page when a client attaches, which nothing reports (Q139);
+  - ending a session a dead program left behind (Q146);
+  - a persisted ledger of what a connection owns, which CONCEPTS.md §3 defers.
 
 ### Pause-on-start granularity
 

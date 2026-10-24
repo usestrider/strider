@@ -33,6 +33,7 @@ import type * as Mouse from "../Mouse.ts"
 import * as Reason from "../Reason.ts"
 import type * as Snapshot from "../Snapshot.ts"
 import type * as Target from "../Target.ts"
+import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
 import type * as Engine from "./engine.ts"
 import * as Evaluation from "./evaluation.ts"
@@ -144,10 +145,12 @@ export const staleRef = (why: Engine.Stale): Locator.StaleRef =>
 
 const LocatorTypeId = "~@usestrider/browser/Locator"
 
-/** The page a locator belongs to. */
+/** The page a locator belongs to, and the grant it was made under (review 19). */
 export interface Owner {
   readonly runtime: Runtime.Runtime
   readonly page: Model.PageEntry
+  /** `None` for a page controlled for its life. */
+  readonly grant: Option.Option<Access.Grant>
 }
 
 export class LocatorImpl implements Locator.Locator {
@@ -305,6 +308,7 @@ export class LocatorImpl implements Locator.Locator {
   snapshot(options?: Snapshot.Options) {
     const operation = "Locator.snapshot"
     return Effect.gen({ self: this }, function*() {
+      yield* Access.check(this.owner.grant)
       const id = Operation.operationId()
       const budget = yield* Operation.budget
       const taken = yield* Snapshots.take(this.owner, this.steps, options, id, budget.at).pipe(
@@ -334,6 +338,7 @@ export class LocatorImpl implements Locator.Locator {
     const operation = "Locator.evaluate"
     const owner = this.owner
     return Effect.gen({ self: this }, function*() {
+      yield* Access.check(owner.grant)
       const id = Operation.operationId()
       const budget = yield* Operation.budget
       const found = yield* Runtime.element(owner.runtime, owner.page, this.steps, id, budget.at).pipe(
@@ -696,7 +701,7 @@ export class LocatorImpl implements Locator.Locator {
           phase,
           budget: budget?.budget ?? Duration.zero,
           history: [],
-          hint: Option.none()
+          hint: Option.fromUndefinedOr(failure.hint)
         })
     }
   }
@@ -728,6 +733,7 @@ export class LocatorImpl implements Locator.Locator {
     answer: (response: Engine.Response, id: Diagnostics.OperationId) => Effect.Effect<A, Locator.LocatorError>
   ) {
     return Effect.gen({ self: this }, function*() {
+      yield* Access.check(this.owner.grant)
       const id = Operation.operationId()
       const budget = yield* Operation.budget
       const response = yield* Runtime.send(this.owner.runtime, this.owner.page, request, id, budget.at).pipe(
@@ -767,6 +773,7 @@ export class LocatorImpl implements Locator.Locator {
   /** The action point of the one match, now: a drag's target, which must be visible and reachable. */
   pointOf(position: Mouse.Point | undefined) {
     return Effect.gen({ self: this }, function*() {
+      yield* Access.check(this.owner.grant)
       const id = Operation.operationId()
       const budget = yield* Operation.budget
       const answer = yield* Runtime.sendRouted(
@@ -1010,6 +1017,7 @@ export class LocatorImpl implements Locator.Locator {
   ) {
     const owner = this.owner
     return Effect.gen({ self: this }, function*() {
+      yield* Access.check(owner.grant)
       const id = Operation.operationId()
       const budget = yield* Operation.budget
       const checks = checksFor(defaults, options?.checks)
@@ -1031,7 +1039,7 @@ export class LocatorImpl implements Locator.Locator {
           )
       // Set once input may have reached the page: a timeout after it can't say the action didn't happen
       let sent = false
-      const timedOut = () => {
+      const timedOut = (noDocument?: string) => {
         if (sent) {
           return Operation.timeout({
             operation,
@@ -1059,7 +1067,7 @@ export class LocatorImpl implements Locator.Locator {
           hint: Option.map(
             Option.fromNullishOr(starved ? { _tag: "NoRenderingOpportunity" } as const : last),
             (reason) => explain(reason, checks.stable)
-          )
+          ).pipe(Option.orElse(() => Option.fromUndefinedOr(noDocument)))
         })
       }
       const notReady = (reason: Engine.NotReady) => {
@@ -1148,18 +1156,24 @@ export class LocatorImpl implements Locator.Locator {
         if (left <= 0) return yield* Effect.fail(timedOut())
         const first = yield* round(Math.min(1000, left), false).pipe(
           Effect.flatMap(settle),
-          Effect.catch((failure) => failure._tag === "Deadline" ? Effect.fail(timedOut()) : Effect.fail(failure))
+          Effect.catch((failure) =>
+            failure._tag === "Deadline" ? Effect.fail(timedOut(failure.hint)) : Effect.fail(failure)
+          )
         )
         if (Option.isNone(first)) continue
         // Input to a page is serialized; acquiring the permit takes from the deadline, and the checks run again
         const outcome = yield* owner.page.input.withPermit(Effect.gen({ self: this }, function*() {
           const apply = options?.trial !== true
           const answer = yield* round(Math.min(1000, Operation.millisLeft(budget.at)), apply).pipe(
-            Effect.catch((failure) => failure._tag === "Deadline" ? Effect.fail(timedOut()) : Effect.fail(failure))
+            Effect.catch((failure) =>
+              failure._tag === "Deadline" ? Effect.fail(timedOut(failure.hint)) : Effect.fail(failure)
+            )
           )
           const disarm = this.disarm(answer.routed.document, id)
           const again = yield* settle(answer).pipe(
-            Effect.catch((failure) => failure._tag === "Deadline" ? Effect.fail(timedOut()) : Effect.fail(failure)),
+            Effect.catch((failure) =>
+              failure._tag === "Deadline" ? Effect.fail(timedOut(failure.hint)) : Effect.fail(failure)
+            ),
             // A guard the round armed comes off when the point outside its frame wasn't ready
             Effect.tap((ready) =>
               Option.isNone(ready) && apply && answer.response._tag === "Ready" ? Effect.ignore(disarm) : Effect.void

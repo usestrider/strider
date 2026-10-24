@@ -10,14 +10,16 @@ action (`click`, `dblclick`, `tap`, `hover`, `check`, `uncheck`, `focus`, `clear
 `page.keyboard` and `page.mouse`, every `Expect` matcher, `Condition`, `Deadline`, evaluation (`page.evaluate`,
 `evaluateInMainWorld`, `evaluateHandle`, `JSHandle`, `Locator.evaluate`), snapshots with refs and `AriaPattern`,
 `screenshot`, `pdf` and `readHtml`, cookies, `localStorage` and `sessionStorage`, storage state with IndexedDB
-(`exportStorageState`, the context option `storageState`), every event module (`Popup`, `Dialog`, `FileChooser`, `Download`, `ConsoleMessage`,
+(`exportStorageState`, the context option `storageState`), attaching (`Chromium.layerConnect`,
+`Firefox.layerConnect`, `Bidi.layerConnect`), `browser.pages`, the default context, `inspect` and `control` for a scope,
+every event module (`Popup`, `Dialog`, `FileChooser`, `Download`, `ConsoleMessage`,
 `UncaughtException`, `PageNavigation`, `NetworkRequest`, `NetworkResponse`, `BrowserWorker`, `NetworkConnection`,
 `AutoResolution`), `Dialog.handle` and `FileChooser.handle`, and the declarations (`route`, `addInitScript`,
 `emulate`, `grant`, `clock`, and the context options `emulation`, `permissions` and `focus`) work on every backend. What a backend can't do or report
 fails with `Unsupported`, naming the capability: modifiers on WebKit's pointer, an HTML drag anywhere but
 Chromium, a CSS-pixel or transparent screenshot and a PDF's header on Firefox, a PDF on WebKit, and a partitioned
 cookie anywhere but Chromium. A member that isn't built yet fails as the defect `NotBuilt`, naming itself
-(`Page.inspect`, `Page.control` and `Page.capability` among them).
+(`Page.capability` and `WebKit.layerAttach` among them).
 
 ## Shape
 
@@ -47,7 +49,11 @@ cookie anywhere but Chromium. A member that isn't built yet fails as the defect 
   `Expect.to*` retries until the deadline; reads never retry.
 - **No sleeps.** Wait for something specific: `Expect.toBeVisible`, `page.status.waitFor(…)`, or an event's `next`.
 - **Deadlines are cross-cutting.** `effect.pipe(Deadline.within("5 seconds"))` sets one budget for everything inside.
-- **Access is typed.** A `Page.ReadonlyPage` can read but not act; `observed.control` gains control for a scope.
+- **Access is typed, and held by a scope.** A `Page.ReadonlyPage` can read but not act. A page you didn't open
+  (`browser.pages`, an attached browser's tabs, a launched browser's first tab) is observed: `yield* page.inspect` or
+  `yield* page.control` inside `Effect.scoped` gains access for the scope, after which the handle fails with
+  `TargetGone{AccessReleased}` and its routes are removed. Attach with `Chromium.layerConnect("http://127.0.0.1:9222")`
+  or `Firefox.layerConnect("ws://127.0.0.1:9222")`; Firefox takes one client at a time.
 - **Errors are per module, with a reason.** Recover with
   `Effect.catchReason("LocatorError", "StrictViolation", …)`. Any operation can also fail with `TargetGone` or
   `Timeout`, which says how far it got (`timeout.phase`).

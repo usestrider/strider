@@ -23,9 +23,10 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
-import type * as Declaration from "./Declaration.ts"
+import * as Declaration from "./Declaration.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as FileInput from "./FileInput.ts"
+import * as Access from "./internal/access.ts"
 import type * as Adapter from "./internal/adapter.ts"
 import * as Events from "./internal/events.ts"
 import * as FileInputImpl from "./internal/fileInput.ts"
@@ -238,31 +239,39 @@ export const handle = <E, R>(
   handler: (chooser: Pending) => Effect.Effect<Decision, E, R>
 ): Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope.Scope | R> =>
   Effect.suspend(() => {
-    const { entry, runtime } = Handles.page(page)
-    return Handlers.register({
-      page: entry,
-      handlers: entry.chooserHandlers,
-      handler,
-      pending: toPending,
-      decision: (chosen): Effect.Effect<Adapter.Decision, unknown> => {
-        if (!isDecision(chosen) || !("files" in chosen)) {
-          return Effect.die(
-            new Error("FileChooser.handle: the handler returned something that isn't a FileChooser decision")
-          )
-        }
-        const files = (chosen as DecisionImpl).files
-        return files === undefined
-          ? Effect.succeed({ _tag: "Cancel" })
-          : Effect.map(
-            Effect.forEach(files, (file) => FileInputImpl.path(runtime, file)),
-            (paths) => ({ _tag: "SetFiles", files: paths })
-          )
-      },
-      noun: () => "file chooser",
-      operation: "FileChooser.handle.handled.waitFor",
-      name: "FileChooser.handle",
-      fallback: "canceling it"
-    })
+    const { entry, grant, runtime } = Handles.page(page)
+    return Access.checkOr(grant, (reason) =>
+      new Declaration.DeclarationError({
+        declaration: "FileChooser.handle",
+        reason,
+        diagnostics: Operation.diagnostics(Operation.operationId())
+      })).pipe(
+        Effect.andThen(Handlers.register({
+          page: entry,
+          handlers: entry.chooserHandlers,
+          handler,
+          pending: toPending,
+          decision: (chosen): Effect.Effect<Adapter.Decision, unknown> => {
+            if (!isDecision(chosen) || !("files" in chosen)) {
+              return Effect.die(
+                new Error("FileChooser.handle: the handler returned something that isn't a FileChooser decision")
+              )
+            }
+            const files = (chosen as DecisionImpl).files
+            return files === undefined
+              ? Effect.succeed({ _tag: "Cancel" })
+              : Effect.map(
+                Effect.forEach(files, (file) => FileInputImpl.path(runtime, file)),
+                (paths) => ({ _tag: "SetFiles", files: paths })
+              )
+          },
+          noun: () => "file chooser",
+          operation: "FileChooser.handle.handled.waitFor",
+          name: "FileChooser.handle",
+          fallback: "canceling it"
+        })),
+        Effect.flatMap(Access.track(grant))
+      )
   })
 
 /**

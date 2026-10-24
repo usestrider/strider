@@ -314,6 +314,8 @@ export interface Model {
   readonly engineRealms: Map<Target.DocumentId, Target.RealmId>
   /** The page a navigable belongs to: itself, or the page whose frame it is. */
   readonly pageOf: (navigable: Target.NavigableId) => Option.Option<PageEntry>
+  /** Every page of the browser, in the order they were added. */
+  readonly pageList: SubscriptionRef.SubscriptionRef<ReadonlyArray<Target.NavigableId>>
   /** A page's or a frame's current document; `None` until one commits, and once it is gone. */
   readonly documentOf: (navigable: Target.NavigableId) => Effect.Effect<Option.Option<Target.DocumentId>>
   /** Ends when the connection does. */
@@ -363,6 +365,8 @@ export const make = Effect.fnUntraced(function*() {
   const modelScope = yield* Effect.scope
   const contexts = new Map<UserContext.Id, ContextEntry>()
   const pages = new Map<Target.NavigableId, PageEntry>()
+  // Every page of the browser, in the order they were added (review 19, candidate 3)
+  const pageList = yield* SubscriptionRef.make<ReadonlyArray<Target.NavigableId>>([])
   // Frames, by the page they belong to (review 14, candidate 1)
   const frames = new Map<Target.NavigableId, PageEntry>()
   const documents = new Map<Target.DocumentId, DocumentEntry>()
@@ -487,6 +491,7 @@ export const make = Effect.fnUntraced(function*() {
 
   const endPage = Effect.fnUntraced(function*(page: PageEntry, reason: Target.CloseReason) {
     pages.delete(page.id)
+    yield* SubscriptionRef.update(pageList, (list) => list.filter((id) => id !== page.id))
     popupUrls.delete(page.id)
     for (const [frame, owner] of frames) if (owner === page) frames.delete(frame)
     const how = endOf(reason)
@@ -797,6 +802,7 @@ export const make = Effect.fnUntraced(function*() {
             }
           }
           yield* SubscriptionRef.update(owner.state, (state) => ({ ...state, pages: [...state.pages, fact.page] }))
+          yield* SubscriptionRef.update(pageList, (list) => [...list, fact.page])
           return
         }
         case "FrameAdded": {
@@ -1191,6 +1197,7 @@ export const make = Effect.fnUntraced(function*() {
         response: (hop) => Option.fromNullishOr(responses.get(hop)),
         engineRealms,
         pageOf,
+        pageList,
         documentOf,
         lost
       }

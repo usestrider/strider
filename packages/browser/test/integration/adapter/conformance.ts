@@ -102,6 +102,10 @@ export const conformance = (backend: Backend) =>
             assert.strictEqual(added.context, world.adapter.defaultContext)
             const capabilities = yield* SubscriptionRef.get(world.adapter.capabilities)
             assert.isTrue(capabilities.has("userContexts"))
+            // The browser's own first tab is adopted into the default context, which exists before it (review 19, P8)
+            const adopted = yield* world.facts.when("PageAdded", (fact) => fact.origin._tag === "Adopted")
+            assert.strictEqual(adopted.context, world.adapter.defaultContext)
+            assert.isFalse(world.facts.all("UserContextAdded").some((fact) => !fact.isDefault))
           }), timeout)
 
         it.effect("creates a page: added, its initial document, then ready", () =>

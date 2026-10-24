@@ -7,9 +7,13 @@
  * @stability unstable
  * @since 0.1.0
  */
+import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import type * as Socket from "effect/socket/Socket"
 import type * as Browser from "../Browser.ts"
+import * as BidiAdapter from "../internal/bidiAdapter.ts"
+import * as BrowserImpl from "../internal/browser.ts"
+import * as Connect from "../internal/connect.ts"
 import type * as Url from "../Url.ts"
 
 declare module "../Reason.ts" {
@@ -21,6 +25,11 @@ declare module "../Reason.ts" {
 
 /**
  * Connects to a WebDriver BiDi endpoint and provides it as `Browser`.
+ *
+ * **Details**
+ *
+ * `endpoint` is taken as given, such as a grid's session URL. The connection starts a session and ends it when the
+ * layer's scope closes; the pages that were open are observed, as an attached browser's are.
  *
  * **Example** (A browser on a remote grid)
  *
@@ -42,7 +51,14 @@ declare module "../Reason.ts" {
  * @category layers
  * @since 0.1.0
  */
-export declare const layerConnect: (
+export const layerConnect = (
   endpoint: Url.Url | string,
   options?: Browser.ConnectOptions | undefined
-) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>
+): Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor> =>
+  BrowserImpl.layer((sink) =>
+    Effect.gen(function*() {
+      const url = yield* Connect.bidiWebSocket(endpoint)
+      const transport = yield* Connect.webSocket(url, options)
+      return yield* BidiAdapter.connect(transport, { sink, ownership: "attached" })
+    })
+  )

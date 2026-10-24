@@ -5,7 +5,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { Chromium } from "@usestrider/browser/chromium"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import { assertPinned, chromium } from "../browsers.ts"
+import { attaching, chromiumAttachable } from "./attaching.ts"
 import { contents } from "./contents.ts"
 import { declarations } from "./declarations.ts"
 import { events } from "./events.ts"
@@ -21,3 +23,4 @@ modules("Chromium", backend)
 interaction("Chromium", backend)
 declarations("Chromium", backend)
 contents("Chromium", backend)
+attaching("Chromium", backend, Option.some(chromiumAttachable((endpoint) => Chromium.layerConnect(endpoint))))

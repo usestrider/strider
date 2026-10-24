@@ -16,6 +16,7 @@ import type * as Socket from "effect/socket/Socket"
 import type * as Browser from "../Browser.ts"
 import * as BidiAdapter from "../internal/bidiAdapter.ts"
 import * as BrowserImpl from "../internal/browser.ts"
+import * as Connect from "../internal/connect.ts"
 import * as FirefoxLauncher from "../internal/firefoxLauncher.ts"
 import * as LaunchOptions from "../internal/launchOptions.ts"
 import type * as Url from "../Url.ts"
@@ -98,14 +99,33 @@ export const layerConfig = (
 > => LaunchOptions.fromConfig(options, layer)
 
 /**
- * Connects to a running browser at `endpoint` and provides it as `Browser`. Pages and contexts that were
- * already open stay open after the layer's scope closes.
+ * Connects to a running Firefox at `endpoint` and provides it as `Browser`. Pages and contexts that were already
+ * open stay open after the layer's scope closes.
+ *
+ * **Details**
+ *
+ * `endpoint` is Firefox's remote agent, as `--remote-debugging-port` starts it (`ws://127.0.0.1:9222`); `/session`
+ * is added when the URL has no path. The connection starts a WebDriver BiDi session and ends it when the layer's
+ * scope closes.
+ *
+ * **Gotchas**
+ *
+ * Firefox allows one session at a time, and keeps a session after its connection closes until something ends it:
+ * a connect while another client holds it fails with `ConnectionFailed`. An attached session leaves file choosers
+ * to the browser, since its prompt settings are the whole browser's.
  *
  * @stability unstable
  * @category layers
  * @since 0.1.0
  */
-export declare const layerConnect: (
+export const layerConnect = (
   endpoint: Url.Url | string,
   options?: Browser.ConnectOptions | undefined
-) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>
+): Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor> =>
+  BrowserImpl.layer((sink) =>
+    Effect.gen(function*() {
+      const url = yield* Connect.firefoxWebSocket(endpoint)
+      const transport = yield* Connect.webSocket(url, options)
+      return yield* BidiAdapter.connect(transport, { sink, ownership: "attached" })
+    })
+  )

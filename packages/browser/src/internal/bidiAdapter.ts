@@ -386,7 +386,7 @@ const localOf = (value: Adapter.RemoteValue): Script.LocalValue => {
 
 // ── Capabilities ──────────────────────────────────────────────────────────────────────────────────────────
 
-const capabilities = (info: Browser.Info) => {
+const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["ownership"]) => {
   const evidence = `BiDi adapter static profile, ${info.product} ${info.version}`
   const entry = (
     name: string,
@@ -410,7 +410,15 @@ const capabilities = (info: Browser.Info) => {
         "a dedicated worker's messages are attributed to its page, and shared and service workers' aren't reported"
       ]),
       entry("prompts", "supported"),
-      entry("fileChooser", "partial", ["the input gets a cancel event as the chooser opens, before any decision"]),
+      entry(
+        "fileChooser",
+        "partial",
+        ownership === "launched"
+          ? ["the input gets a cancel event as the chooser opens, before any decision"]
+          : [
+            "an attached session leaves file choosers to the browser, since a session's prompt settings are the whole browser's and dismissing would cancel the user's own (review 19)"
+          ]
+      ),
       entry("downloads", "supported"),
       entry("downloads.progress", "unsupported", ["WebDriver BiDi reports a download's start and end only"]),
       entry("downloads.cancel", "unsupported", ["WebDriver BiDi has no command to cancel a download"]),
@@ -1417,36 +1425,56 @@ export const connect: (
     // ── Connecting ──
 
     const failConnect = (error: Protocol.ProtocolError) =>
-      Launch.fail(new Browser.ConnectionFailed({ stage: "handshake", hint: error.message }), "connect")
+      Launch.fail(
+        new Browser.ConnectionFailed({
+          stage: "handshake",
+          hint: error.message.includes("Maximum number of active sessions")
+            ? `${error.message}: Firefox allows one WebDriver BiDi session at a time, and another client holds it; a session ends with session.end, not when its connection closes, or with the browser (QUIRKS.md)`
+            : error.message
+        }),
+        "connect"
+      )
     let product = "WebDriver BiDi"
     let version = ""
     if ((options.session ?? "new") === "new") {
       const created = yield* Session.new_({
         capabilities: {
-          alwaysMatch: { unhandledPromptBehavior: { default: "ignore", file: "dismiss" } }
+          alwaysMatch: {
+            // A session's prompt settings are the whole browser's: an attached one leaves the user's file choosers
+            // alone (review 19, candidate 1)
+            unhandledPromptBehavior: {
+              default: "ignore",
+              file: options.ownership === "launched" ? "dismiss" : "ignore"
+            }
+          }
         }
       } as Session.NewParameters).pipe(on, Effect.catch(failConnect))
       product = created.capabilities.browserName
       version = created.capabilities.browserVersion
+      // Firefox keeps a session after its socket closes, and allows one: a session this connection started ends
+      // with it, or every later client is refused until the browser restarts (review 19, P6)
+      yield* Effect.addFinalizer(() => Session.end().pipe(on, Effect.timeoutOption("1 second"), Effect.ignore))
     }
     const info = new Browser.Info({ product, version, protocol: "bidi", revision: version })
-    yield* Session.subscribe({ events: ["browsingContext", "script", "network", "log", "input"] }).pipe(
-      on,
-      Effect.catch(failConnect)
-    )
+    // The default context is mapped before subscribing: Firefox reports the contexts that exist as the subscription
+    // is answered, and a tab in `"default"` mapped before it would land in a context of its own (review 19, P8)
     const defaultContext = ids.userContext()
     const defaultEntry: ContextEntry = { id: defaultContext, bidi: "default", removing: false }
     contexts.set(defaultContext, defaultEntry)
     contextsByBidi.set("default", defaultEntry)
+    emit({ _tag: "UserContextAdded", context: defaultContext, isDefault: true })
+    yield* Session.subscribe({ events: ["browsingContext", "script", "network", "log", "input"] }).pipe(
+      on,
+      Effect.catch(failConnect)
+    )
     const { tree, received } = yield* snapshot.pipe(Effect.catch(failConnect))
     void received
     yield* control.run(Effect.suspend(() => {
-      emit({ _tag: "UserContextAdded", context: defaultContext, isDefault: true })
       reconcile(tree)
       adopting = false
       return flush
     }))
-    const capabilitySet = yield* SubscriptionRef.make(capabilities(info))
+    const capabilitySet = yield* SubscriptionRef.make(capabilities(info, options.ownership))
 
     // ── Operations ──
 

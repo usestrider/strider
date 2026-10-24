@@ -18,6 +18,7 @@ import type * as Browser from "../Browser.ts"
 import * as BrowserImpl from "../internal/browser.ts"
 import * as CdpAdapter from "../internal/cdpAdapter.ts"
 import * as ChromiumLauncher from "../internal/chromiumLauncher.ts"
+import * as Connect from "../internal/connect.ts"
 import * as LaunchOptions from "../internal/launchOptions.ts"
 import type * as Url from "../Url.ts"
 
@@ -99,14 +100,42 @@ export const layerConfig = (
 > => LaunchOptions.fromConfig(options, layer)
 
 /**
- * Connects to a running browser at `endpoint` and provides it as `Browser`. Pages and contexts that were
- * already open stay open after the layer's scope closes.
+ * Connects to a running Chromium, Chrome or Edge at `endpoint` and provides it as `Browser`. Pages and contexts that
+ * were already open stay open after the layer's scope closes.
+ *
+ * **Details**
+ *
+ * `endpoint` is the browser's WebSocket (`ws://127.0.0.1:9222/devtools/browser/…`), or its HTTP endpoint
+ * (`http://127.0.0.1:9222`), whose `/json/version` names the WebSocket. The pages that were open are observed:
+ * `browser.pages` lists them, and `inspect` and `control` gain access to one for a scope. `options.headers` go with
+ * the handshake and the lookup.
+ *
+ * **Example** (Inspecting a tab of a browser started with `--remote-debugging-port=9222`)
+ *
+ * ```ts import.meta.vitest
+ * import { Effect } from "effect"
+ * import { Browser } from "@usestrider/browser"
+ * import { Chromium } from "@usestrider/browser/chromium"
+ *
+ * const firstHeading = Effect.scoped(Effect.gen(function*() {
+ *   const [first] = yield* (yield* Browser.Browser).pages
+ *   const page = yield* first!.inspect
+ *   return yield* page.getByRole("heading").readText
+ * })).pipe(Effect.provide(Chromium.layerConnect("http://127.0.0.1:9222")))
+ * ```
  *
  * @stability unstable
  * @category layers
  * @since 0.1.0
  */
-export declare const layerConnect: (
+export const layerConnect = (
   endpoint: Url.Url | string,
   options?: Browser.ConnectOptions | undefined
-) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>
+): Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor> =>
+  BrowserImpl.layer((sink) =>
+    Effect.gen(function*() {
+      const url = yield* Connect.chromiumWebSocket(endpoint, options)
+      const transport = yield* Connect.webSocket(url, options)
+      return yield* CdpAdapter.connect(transport, { sink, ownership: "attached" })
+    })
+  )

@@ -27,6 +27,7 @@ import type * as AriaPattern from "./AriaPattern.ts"
 import type * as Condition from "./Condition.ts"
 import * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
+import * as Access from "./internal/access.ts"
 import { now } from "./internal/adapter.ts"
 import * as AriaPatterns from "./internal/ariaPattern.ts"
 import * as ConditionImpl from "./internal/condition.ts"
@@ -304,9 +305,9 @@ export const toHaveURL: DualMatcher<Page.ReadonlyPage, [expected: string | RegEx
 export const toHaveTitle: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]> = dual(
   2,
   (page: Page.ReadonlyPage, expected: string | RegExp) => {
-    const { entry, runtime } = Handles.page(page)
+    const { entry, grant, runtime } = Handles.page(page)
     return expectIn(
-      { runtime, page: entry, steps: [], description: `page ${page.id}` },
+      { runtime, page: entry, grant, steps: [], description: `page ${page.id}` },
       { _tag: "Title", expected: matcher(expected, true) },
       "toHaveTitle",
       `to have the title ${show(expected)}`
@@ -506,6 +507,8 @@ const explain = (subject: InPage, id: Diagnostics.OperationId): Effect.Effect<Ex
 interface InPage {
   readonly runtime: Runtime.Runtime
   readonly page: Model.PageEntry
+  /** The grant the subject's handle was made under (review 19). */
+  readonly grant: Option.Option<Access.Grant>
   readonly steps: ReadonlyArray<Engine.Step>
   readonly description: string
 }
@@ -522,6 +525,7 @@ const expectLocator = (
       {
         runtime: subject.owner.runtime,
         page: subject.owner.page,
+        grant: subject.owner.grant,
         steps: subject.steps,
         description: subject.description
       },
@@ -537,6 +541,7 @@ const expectLocator = (
  */
 const expectIn = (subject: InPage, expectation: Engine.Expectation, matcherName: string, condition: string) =>
   Effect.gen(function*() {
+    yield* Access.check(subject.grant)
     const id = Operation.operationId()
     const budget = yield* Operation.budget
     const started = now()

@@ -96,6 +96,11 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *We:* nothing yet; the restore inference (Q4) waits for a realm that didn't come.
 - *Reconsider:* with Q4 and Q5, an end Firefox reports for every traversal.
 
+**Q149. A Chromium page closed under full load went unreported** (Browser). In one full integration run after review 19, the conformance test's `closePage` was answered, and no `NavigableRemoved` came within 10 s; three runs of that test alone passed.
+- *Seen:* review 19's revision, once.
+- *We:* nothing yet.
+- *Reconsider:* whether `Target.targetDestroyed` or `detachedFromTarget` was lost, or arrived for a target the adapter no longer tracked, if it happens again.
+
 ## Browsers: dialogs, popups, focus and input
 
 **Q16. A dialog blocks evaluation on Chromium and WebKit, not on Firefox** (Browser). Every evaluation in every world waits while a dialog is open on Chromium and WebKit; Firefox answers.
@@ -464,6 +469,33 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *We:* the storage state's page is closed with `page.close()`, which waits for the close, before the context is returned.
 - *Reconsider:* waiting for the close in a page's scope finalizer too (Q135).
 
+## Browsers: attaching
+
+**Q136. Headless Chromium takes one URL on its command line** (Browser). A second fails the launch: "Multiple targets are not supported in headless mode". Firefox opens each as a tab.
+- *Seen:* review 19, P3.
+- *We:* nothing; the attach tests open Chromium's second tab through its HTTP endpoint (`PUT /json/new`).
+- *Reconsider:* nothing.
+
+**Q137. Firefox allows one WebDriver BiDi session, and keeps it after its connection closes** (Browser). A second `session.new` fails "Maximum number of active sessions"; a session started over a socket outlives the socket, 13 s and counting, so every later client is refused until the browser restarts; `session.end` frees it at once; and a second socket to the session's own URL is refused.
+- *Seen:* review 19, P5 and P6.
+- *We:* the BiDi adapter ends a session it started when its scope closes, bounded by a second, and a connect refused for it says why (`ConnectionFailed{handshake}`).
+- *Reconsider:* a program that dies without ending its session still locks Firefox (Q146).
+
+**Q138. Firefox reports the contexts that exist as `session.subscribe` is answered** (Browser). The BiDi adapter mapped Firefox's `"default"` user context after subscribing, so the tabs those events reported landed in a context of their own, never the default: a launched Firefox's first tab, and an attached Firefox's first tab.
+- *Seen:* review 19, P8, through the facts; nothing at L1 read the default context's pages before.
+- *We:* the default context is mapped, and reported, before the adapter subscribes; the conformance suite checks the first tab is in it.
+- *Reconsider:* nothing.
+
+**Q139. Chromium leaves a dialog open when its client disconnects, and tells the next client nothing about it** (Browser). A client attaching later gets the tab, but no `javascriptDialogOpening`, and no document for the tab while the dialog is open.
+- *Seen:* review 19, P7.
+- *We:* such a page is observed but stays opening: an operation on it times out, and the hint says a dialog may be open; `inspect` fails with `InitializationFailed`, saying the same.
+- *Reconsider:* `Page.handleJavaScriptDialog` blindly on attach, which would decide the user's dialog.
+
+**Q140. A WebDriver BiDi session's prompt settings are the whole browser's** (Browser). `unhandledPromptBehavior` can't be set per user context, so the `file: "dismiss"` a launched Firefox gets (Q29) would cancel the user's own file choosers on an attached one.
+- *Seen:* review 19.
+- *We:* an attached session leaves file choosers to the browser, and its `fileChooser` capability says so.
+- *Reconsider:* when BiDi scopes prompt handling to contexts.
+
 ## Browsers: protocols and transports
 
 **Q53. Firefox deviates from the BiDi spec in two events** (Browser). `contextCreated` has no `hasPlannedNavigation`, which the spec requires, and `navigationStarted` has no `url` for the navigation that `close({ promptUnload: true })` starts.
@@ -696,3 +728,43 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *Seen:* review 18's revision.
 - *We:* nothing yet, beyond the storage state's page (Q119).
 - *Reconsider:* waiting for the close in the finalizer, under a short deadline.
+
+**Q141. A launched browser's own first tab is observed** (Ours). Every backend opens one tab in the default context before any page is created (review 19, P1); no scope created it, so it is an observed page, open as long as the browser, which `inspect` and `control` gain access to.
+- *Seen:* review 19, P1.
+- *We:* as above; `browser.pages` and the default context's `pages` list it.
+- *Reconsider:* closing it at launch, which would make the browser exit on some platforms when the last tab goes.
+
+**Q142. Access is a contract at the handle, not at the protocol** (Ours). A handle made under a grant has every member, its type narrowing what a caller sees: a `ReadonlyPage` from `inspect` still has `goto` at run time. A released grant is enforced at run time, by wrapping each member and through each locator's owner.
+- *Seen:* review 19's revision.
+- *We:* as above (CONCEPTS.md §3: access is a library contract).
+- *Reconsider:* refusing control members at run time on an `inspect` handle, if a cast ever reaches one.
+
+**Q143. A released grant refuses some members with `NotPermitted`, or a clock with `NotInstalled`** (Ours). `route`, `addInitScript`, `emulate`, a context's cookies, `newPage` and storage state declare no `TargetGone`, so they fail with their module's `NotPermitted`; the clock's `adjust`, `setTime` and `resume`, whose errors have no `NotPermitted`, fail with `NotInstalled`, which is true, since the clock went with the grant.
+- *Seen:* review 19's revision.
+- *We:* as above; every other member fails with `TargetGone{AccessReleased}`.
+- *Reconsider:* `TargetGone` in those signatures, with the next API revision.
+
+**Q144. A page's `context`, when its context isn't controlled, refuses** (Ours). `Page.context` is a `UserContext`, but controlling a page doesn't control its context, so it is a handle whose members needing control fail with `NotPermitted`, and whose `control` gains it.
+- *Seen:* review 19's revision.
+- *We:* as above.
+- *Reconsider:* an `ObservedUserContext` there, with the next API revision.
+
+**Q145. Controlling a context controls its pages** (Ours). A context granted for a scope hands out its pages as `Page`s under the same grant, as `UserContext.pages` is typed.
+- *Seen:* review 19's revision.
+- *We:* as above.
+- *Reconsider:* nothing.
+
+**Q146. A program that dies without ending its session locks Firefox** (Ours). The session is ended in the connection's finalizer; a killed process never runs it (Q137).
+- *Seen:* review 19.
+- *We:* nothing more.
+- *Reconsider:* a CLI command that ends a stuck session, if one turns up.
+
+**Q147. An attached Chromium's every page gets the library's interceptor** (Ours). The CDP adapter enables `Fetch` for every page from its start, with a pattern nothing matches (Q103), observed pages included: nothing changes for the page, but the interceptor is installed while the client is attached.
+- *Seen:* review 19.
+- *We:* as above.
+- *Reconsider:* enabling it only when a page is controlled, which brings back Q46's race for the first route.
+
+**Q148. Chromium's HTTP endpoint is read with Effect's `HttpClient` over `fetch`** (Ours). `Chromium.layerConnect` provides `FetchHttpClient` inside the layer to read `/json/version`, so its requirements stay `WebSocketConstructor`.
+- *Seen:* review 19's revision.
+- *We:* as above.
+- *Reconsider:* taking `HttpClient` from the caller, if a runtime has no `fetch`.

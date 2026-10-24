@@ -1,8 +1,12 @@
 /**
  * Pages (API.md, Pages; review 12, candidate 7). Built: the state (`status`, `url`, `frames`, `workers`, `closed`), the
  * queries and `frame`, `goto`, `reload`, `back` and `forward`, `title`, `readHtml`, `snapshot`, `screenshot`, `pdf`,
- * origin storage, evaluation (review 18), the declarations (review 17), `activate`, `close`, and the keyboard and
- * mouse. The other members (`inspect`, `control`, `capability`) fail as `NotBuilt`.
+ * origin storage, evaluation (review 18), the declarations (review 17), `activate`, `close`, the keyboard and mouse,
+ * and `inspect` and `control` (review 19). `capability` fails as `NotBuilt`.
+ *
+ * Every handle for a page shares its observe members (`observeMembers`). A page the connection controls for its life
+ * has one `Page`; any other page has an observed handle, and `inspect` and `control` make handles under a grant,
+ * whose other members `Access.guard` checks (review 19, candidate 2).
  *
  * A navigation resolves at commit, with the outcome the adapter reports for the navigation it started, or with
  * the readiness `waitUntil` asks for of the document it committed, all under one deadline; a navigation with
@@ -15,6 +19,7 @@ import * as Hash from "effect/Hash"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import { pipeArguments } from "effect/Pipeable"
+import type * as Scope from "effect/Scope"
 import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as JSHandle from "../JSHandle.ts"
@@ -27,6 +32,7 @@ import type * as Snapshot from "../Snapshot.ts"
 import type * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
+import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Captures from "./captures.ts"
 import * as Clock from "./clock.ts"
@@ -41,6 +47,7 @@ import * as Navigated from "./navigated.ts"
 import * as Navigation from "./navigation.ts"
 import * as NotBuilt from "./notBuilt.ts"
 import * as Operation from "./operation.ts"
+import * as Refusals from "./refusals.ts"
 import * as Routes from "./routes.ts"
 import * as Runtime from "./runtime.ts"
 import * as Snapshots from "./snapshot.ts"
@@ -77,27 +84,92 @@ const frameTree = (page: Target.NavigableId, state: Model.FrameTreeState): Page.
 const pageError = (operation: string, reason: Page.PageErrorReason, id: Diagnostics.OperationId) =>
   new Page.PageError({ operation, reason, diagnostics: Operation.diagnostics(id) })
 
-export interface PageOwner {
+/** What any handle for a page is made from: its runtime and entry, and how it gains access (review 19). */
+export interface ObservedOwner {
   readonly runtime: Runtime.Runtime
   readonly entry: Model.PageEntry
+  /** `inspect` and `control`: a grant for the caller's scope, or the page itself when it is controlled for life. */
+  readonly upgrade: (level: "inspect" | "control") => Effect.Effect<Page.Page, Page.PageError, Scope.Scope>
+}
+
+export interface PageOwner extends ObservedOwner {
   readonly context: UserContext.UserContext
+  /** The grant the handle was made under; `None` for a page controlled for its whole life. */
+  readonly grant: Option.Option<Access.Grant>
+}
+
+/** A page's observe members: its state and `closed`, `inspect` and `control`, and its identity. */
+const observeMembers = (owner: ObservedOwner) => {
+  const { entry, runtime } = owner
+  return {
+    [PageTypeId]: PageTypeId as typeof PageTypeId,
+    id: entry.id,
+    status: Watchable.make({
+      ref: entry.state,
+      project: opened,
+      ended: pageEnded,
+      target: { _tag: "Page", id: entry.id },
+      operation: "Page.status.waitFor"
+    }),
+    url: Watchable.make({
+      ref: entry.state,
+      project: (state: Model.PageState) => state._tag === "Opening" ? Option.none() : Option.some(state.url as Url.Url),
+      ended: pageEnded,
+      target: { _tag: "Page", id: entry.id },
+      operation: "Page.url.waitFor"
+    }),
+    frames: Watchable.make({
+      ref: entry.tree,
+      project: (state: Model.FrameTreeState) => Option.some(frameTree(entry.id, state)),
+      ended: (state: Model.FrameTreeState) => state.closed,
+      target: { _tag: "Page", id: entry.id },
+      operation: "Page.frames.waitFor"
+    }),
+    workers: Watchable.make({
+      ref: entry.workers,
+      project: (workers: ReadonlyArray<Model.WorkerEntry>) => Option.some(workers.map(runtime.worker)),
+      ended: () => Option.none(),
+      target: { _tag: "Page", id: entry.id },
+      operation: "Page.workers.waitFor"
+    }),
+    closed: Deferred.await(entry.closed),
+    inspect: owner.upgrade("inspect") as Effect.Effect<Page.ReadonlyPage, Page.PageError, Scope.Scope>,
+    control: owner.upgrade("control"),
+    [Equal.symbol](that: unknown) {
+      return Page.isPage(that) && that.id === entry.id
+    },
+    [Hash.symbol]() {
+      return Hash.string(entry.id)
+    },
+    pipe() {
+      return pipeArguments(this, arguments)
+    },
+    toString() {
+      return `Page(${entry.id})`
+    },
+    toJSON() {
+      return { _id: "Page", id: entry.id }
+    },
+    [Inspectable.NodeInspectSymbol]() {
+      return { _id: "Page", id: entry.id }
+    }
+  }
+}
+
+/** A page the connection observes: its state, its events, and the upgrades (review 19, candidate 2). */
+export const observed = (owner: ObservedOwner): Page.ObservedPage => {
+  const page = observeMembers(owner) as unknown as Page.ObservedPage
+  Handles.registerPage(page, { runtime: owner.runtime, entry: owner.entry, grant: Option.none() })
+  return page
 }
 
 export const make = (owner: PageOwner): Page.Page => {
   const { runtime, entry } = owner
   const model = runtime.model
   const adapter = model.adapter
-  const queries = LocatorImpl.pageQueries({ runtime, page: entry })
+  const queries = LocatorImpl.pageQueries({ runtime, page: entry, grant: owner.grant })
   /** Where the page's declarations apply (review 17). */
   const declared: Adapter.DeclarationScope = { _tag: "Page", page: entry.id }
-
-  const status = Watchable.make({
-    ref: entry.state,
-    project: opened,
-    ended: pageEnded,
-    target: { _tag: "Page", id: entry.id },
-    operation: "Page.status.waitFor"
-  })
 
   /** A request to the engine that got no answer, as the page's errors say it. */
   const fromSend = (operation: string, id: Diagnostics.OperationId, budget: Operation.Budget) =>
@@ -114,7 +186,7 @@ export const make = (owner: PageOwner): Page.Page => {
         phase: "resolving",
         budget: budget.budget,
         history: [],
-        hint: Option.none()
+        hint: Option.fromUndefinedOr(failure.hint)
       })
 
   const failure = (operation: string, id: Diagnostics.OperationId, error: Adapter.AdapterError) => {
@@ -226,35 +298,9 @@ export const make = (owner: PageOwner): Page.Page => {
     )
 
   const page: Page.Page = {
-    [PageTypeId]: PageTypeId,
-    id: entry.id,
-    status,
-    url: Watchable.make({
-      ref: entry.state,
-      project: (state) => state._tag === "Opening" ? Option.none() : Option.some(state.url as Url.Url),
-      ended: pageEnded,
-      target: { _tag: "Page", id: entry.id },
-      operation: "Page.url.waitFor"
-    }),
-    frames: Watchable.make({
-      ref: entry.tree,
-      project: (state) => Option.some(frameTree(entry.id, state)),
-      ended: (state) => state.closed,
-      target: { _tag: "Page", id: entry.id },
-      operation: "Page.frames.waitFor"
-    }),
-    workers: Watchable.make({
-      ref: entry.workers,
-      project: (workers) => Option.some(workers.map(runtime.worker)),
-      ended: () => Option.none(),
-      target: { _tag: "Page", id: entry.id },
-      operation: "Page.workers.waitFor"
-    }),
-    closed: Deferred.await(entry.closed),
-    inspect: NotBuilt.effect("Page.inspect"),
-    control: NotBuilt.effect("Page.control"),
+    ...observeMembers(owner),
     ...queries,
-    frame: (iframe) => LocatorImpl.pageFrame({ runtime, page: entry }, iframe),
+    frame: (iframe) => LocatorImpl.pageFrame({ runtime, page: entry, grant: owner.grant }, iframe),
     get title() {
       return Effect.gen(function*() {
         const id = Operation.operationId()
@@ -294,9 +340,10 @@ export const make = (owner: PageOwner): Page.Page => {
       Effect.gen(function*() {
         const id = Operation.operationId()
         const budget = yield* Operation.budget
-        const taken = yield* Snapshots.take({ runtime, page: entry }, null, options, id, budget.at).pipe(
-          Effect.mapError(fromSend("Page.snapshot", id, budget))
-        )
+        const taken = yield* Snapshots.take({ runtime, page: entry, grant: owner.grant }, null, options, id, budget.at)
+          .pipe(
+            Effect.mapError(fromSend("Page.snapshot", id, budget))
+          )
         return taken._tag === "Taken"
           ? taken.snapshot as Snapshot.Snapshot<Locator.Locator>
           : yield* Effect.die(new Error(`Page.snapshot: ${taken.response._tag}`))
@@ -463,26 +510,12 @@ export const make = (owner: PageOwner): Page.Page => {
           }))
         }
       }).pipe(Effect.withSpan("Page.close", { attributes: { "browser.page.id": entry.id } }))
-    }) as Page.Page["close"],
-    [Equal.symbol](that: unknown) {
-      return Page.isPage(that) && that.id === entry.id
-    },
-    [Hash.symbol]() {
-      return Hash.string(entry.id)
-    },
-    pipe() {
-      return pipeArguments(this, arguments)
-    },
-    toString() {
-      return `Page(${entry.id})`
-    },
-    toJSON() {
-      return { _id: "Page", id: entry.id }
-    },
-    [Inspectable.NodeInspectSymbol]() {
-      return { _id: "Page", id: entry.id }
-    }
+    }) as Page.Page["close"]
   }
-  Handles.registerPage(page, { runtime, entry })
-  return page
+  // A handle made under a grant fails above observe once the grant is released, and its declarations go with it
+  const handle = Option.isSome(owner.grant)
+    ? Access.guard(page, owner.grant.value, Refusals.page)
+    : page
+  Handles.registerPage(handle, { runtime, entry, grant: owner.grant })
+  return handle
 }

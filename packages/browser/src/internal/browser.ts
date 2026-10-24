@@ -25,27 +25,31 @@ import * as Path from "effect/Path"
 import { pipeArguments } from "effect/Pipeable"
 import type * as Scope from "effect/Scope"
 import * as Browser from "../Browser.ts"
-import type * as Declaration from "../Declaration.ts"
+import * as CookieJar from "../CookieJar.ts"
+import * as Declaration from "../Declaration.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import * as Page from "../Page.ts"
+import * as PageClock from "../PageClock.ts"
 import * as Reason from "../Reason.ts"
-import type * as Route from "../Route.ts"
+import * as Route from "../Route.ts"
 import * as StorageState from "../StorageState.ts"
-import type * as Url from "../Url.ts"
+import * as Url from "../Url.ts"
 import * as UserContext from "../UserContext.ts"
+import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Clock from "./clock.ts"
 import * as ConnectionImpl from "./connection.ts"
 import * as DownloadImpl from "./download.ts"
 import * as Emulation from "./emulation.ts"
+import * as Evaluation from "./evaluation.ts"
 import * as Grants from "./grants.ts"
 import * as Handles from "./handles.ts"
 import * as InitScripts from "./initScripts.ts"
 import * as Model from "./model.ts"
 import * as Navigation from "./navigation.ts"
-import * as NotBuilt from "./notBuilt.ts"
 import * as Operation from "./operation.ts"
 import * as PageImpl from "./page.ts"
+import * as Refusals from "./refusals.ts"
 import * as Routes from "./routes.ts"
 import type * as Runtime from "./runtime.ts"
 import * as Storage from "./storage.ts"
@@ -81,8 +85,22 @@ const objectMembers = (name: string, id: string) => ({
   }
 })
 
-/** A context the caller owns. */
-const makeContext = (runtime: Runtime.Runtime, entry: Model.ContextEntry): UserContext.UserContext => {
+/** How a context handle reaches its pages and gains control (review 19, candidate 2). */
+interface ContextAccess {
+  /** `None` for a context the connection created, controlled for its whole life. */
+  readonly grant: Option.Option<Access.Grant>
+  /** The handle of one of its pages, under this access. */
+  readonly page: (entry: Model.PageEntry) => Page.Page
+  /** `control`: the context itself, when it is controlled for life; otherwise a grant for the caller's scope. */
+  readonly control: Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Scope.Scope>
+}
+
+/** A context the caller controls: one it created, or one it was granted for a scope. */
+const makeContext = (
+  runtime: Runtime.Runtime,
+  entry: Model.ContextEntry,
+  access: ContextAccess
+): UserContext.UserContext => {
   const adapter = runtime.model.adapter
   /** Where the context's declarations apply (review 17). */
   const declared: Adapter.DeclarationScope = { _tag: "UserContext", context: entry.id }
@@ -94,7 +112,7 @@ const makeContext = (runtime: Runtime.Runtime, entry: Model.ContextEntry): UserC
       project: (state) =>
         Option.some(
           state.pages.flatMap((id) =>
-            Option.toArray(Option.flatMap(Option.fromNullishOr(runtime.model.pages.get(id)), runtime.page))
+            Option.toArray(Option.map(Option.fromNullishOr(runtime.model.pages.get(id)), access.page))
           )
         ),
       ended: (state) => state.closed,
@@ -109,7 +127,7 @@ const makeContext = (runtime: Runtime.Runtime, entry: Model.ContextEntry): UserC
       operation: "UserContext.workers.waitFor"
     }),
     closed: Deferred.await(entry.closed),
-    control: Effect.sync(() => context),
+    control: access.control,
     newPage: Effect.gen(function*() {
       const id = Operation.operationId()
       const scope = yield* Effect.scope
@@ -179,19 +197,44 @@ const makeContext = (runtime: Runtime.Runtime, entry: Model.ContextEntry): UserC
     },
     ...objectMembers("UserContext", entry.id)
   }
-  Handles.registerContext(context, { runtime, entry })
-  return context
+  // A context granted for a scope fails above observe once the grant is released, and its declarations go with it
+  const handle = Option.isSome(access.grant)
+    ? Access.guard(context, access.grant.value, Refusals.context)
+    : context
+  Handles.registerContext(handle, { runtime, entry, grant: access.grant })
+  return handle
 }
 
-/** The browser's default context, observed: it exists for the whole connection. */
-const makeDefaultContext = (runtime: Runtime.Runtime, entry: Model.ContextEntry): UserContext.ObservedUserContext => {
+/** A context the connection observes, such as the default context: its pages, workers and end, and `control`. */
+const makeObservedContext = (
+  runtime: Runtime.Runtime,
+  entry: Model.ContextEntry,
+  control: Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Scope.Scope>
+): UserContext.ObservedUserContext => {
   const context: UserContext.ObservedUserContext = {
     [UserContextTypeId]: UserContextTypeId,
     id: entry.id,
-    pages: NotBuilt.watchable("Browser.defaultContext.pages"),
-    workers: NotBuilt.watchable("Browser.defaultContext.workers"),
+    pages: Watchable.make({
+      ref: entry.state,
+      project: (state) =>
+        Option.some(
+          state.pages.flatMap((id) =>
+            Option.toArray(Option.map(Option.fromNullishOr(runtime.model.pages.get(id)), runtime.observed))
+          )
+        ),
+      ended: (state) => state.closed,
+      target: { _tag: "UserContext" },
+      operation: "UserContext.pages.waitFor"
+    }),
+    workers: Watchable.make({
+      ref: entry.workers,
+      project: (workers) => Option.some(workers.map(runtime.worker)),
+      ended: () => Option.none(),
+      target: { _tag: "UserContext" },
+      operation: "UserContext.workers.waitFor"
+    }),
     closed: Deferred.await(entry.closed),
-    control: NotBuilt.effect("Browser.defaultContext.control"),
+    control,
     [Equal.symbol](that: unknown) {
       return UserContext.isUserContext(that) && that.id === entry.id
     },
@@ -201,7 +244,97 @@ const makeDefaultContext = (runtime: Runtime.Runtime, entry: Model.ContextEntry)
     ...objectMembers("UserContext", entry.id)
   }
   // Its events are data events, which modules that take an observed context read
-  Handles.registerContext(context, { runtime, entry })
+  Handles.registerContext(context, { runtime, entry, grant: Option.none() })
+  return context
+}
+
+/**
+ * The context of a page whose context the caller doesn't control: what needs control fails with `NotPermitted`
+ * (review 19, candidate 2), and `control` gains it.
+ */
+const makeDeniedContext = (
+  runtime: Runtime.Runtime,
+  entry: Model.ContextEntry,
+  control: Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Scope.Scope>
+): UserContext.UserContext => {
+  const id = () => Operation.operationId()
+  const notPermitted = (member: string) =>
+    new Reason.NotPermitted({
+      required: "control",
+      hint:
+        `${member} needs control of the page's context, which this page's access doesn't give; gain it with context.control`
+    })
+  const declaration = (member: string) =>
+    Effect.fail(
+      new Declaration.DeclarationError({
+        declaration: member,
+        reason: notPermitted(member),
+        diagnostics: Operation.diagnostics(id())
+      })
+    )
+  const cookie = (member: string) =>
+    Effect.fail(
+      new CookieJar.CookieJarError({
+        operation: member,
+        reason: notPermitted(member),
+        diagnostics: Operation.diagnostics(id())
+      })
+    )
+  const notInstalled = (member: string) =>
+    Effect.fail(
+      new PageClock.PageClockError({
+        operation: member,
+        reason: new PageClock.NotInstalled({ hint: "No clock can be installed without control of the context" }),
+        diagnostics: Operation.diagnostics(id())
+      })
+    )
+  const observed = makeObservedContext(runtime, entry, control)
+  const context = {
+    ...observed,
+    newPage: Effect.suspend(() =>
+      Effect.fail(
+        new Page.PageError({
+          operation: "UserContext.newPage",
+          reason: notPermitted("UserContext.newPage"),
+          diagnostics: Operation.diagnostics(id())
+        })
+      )
+    ),
+    cookies: {
+      list: Effect.suspend(() => cookie("CookieJar.list")),
+      listFor: () => cookie("CookieJar.listFor"),
+      set: () => cookie("CookieJar.set"),
+      remove: () => cookie("CookieJar.remove"),
+      clear: Effect.suspend(() => cookie("CookieJar.clear"))
+    },
+    exportStorageState: Effect.suspend(() =>
+      Effect.fail(
+        new UserContext.UserContextError({
+          operation: "UserContext.exportStorageState",
+          reason: notPermitted("UserContext.exportStorageState"),
+          diagnostics: Operation.diagnostics(id())
+        })
+      )
+    ),
+    clock: {
+      install: () => declaration("UserContext.clock"),
+      adjust: () => notInstalled("PageClock.adjust"),
+      setTime: () => notInstalled("PageClock.setTime"),
+      resume: Effect.suspend(() => notInstalled("PageClock.resume"))
+    },
+    route: (pattern: Url.Pattern | string) =>
+      Effect.fail(
+        new Route.RouteError({
+          pattern: Url.Pattern.make(String(pattern)),
+          reason: notPermitted("UserContext.route"),
+          diagnostics: Operation.diagnostics(id())
+        })
+      ),
+    addInitScript: () => declaration("UserContext.addInitScript"),
+    emulate: () => declaration("UserContext.emulate"),
+    grant: () => declaration("UserContext.grant")
+  } as unknown as UserContext.UserContext
+  Handles.registerContext(context, { runtime, entry, grant: Option.none() })
   return context
 }
 
@@ -220,20 +353,123 @@ const cached = <E extends object, H>(make: (entry: E) => H) => {
 
 export const make = Effect.fnUntraced(function*(model: Model.Model) {
   const adapter = model.adapter
-  // The contexts this connection created, whose pages get handles
+  // The contexts this connection created, controlled for their whole lives, with their pages
   const contexts = new Map<UserContext.Id, UserContext.UserContext>()
+  // The handle of each page controlled for its life, and of each page only observed (review 19, candidate 2)
   const handles = new WeakMap<Model.PageEntry, Page.Page>()
+  const observedHandles = new WeakMap<Model.PageEntry, Page.ObservedPage>()
+  const denied = new WeakMap<Model.ContextEntry, UserContext.UserContext>()
+
+  /** Whether the connection controls a page for its whole life: it created the page, or the page's context. */
+  const lifelong = (entry: Model.PageEntry) => contexts.has(entry.context) || Option.isSome(entry.owner)
+
+  /** A page's context handle: the context, when the connection created it; otherwise one that refuses control. */
+  const contextOf = (entry: Model.PageEntry): UserContext.UserContext => {
+    const created = contexts.get(entry.context)
+    if (created !== undefined) return created
+    const contextEntry = model.contexts.get(entry.context)!
+    const known = denied.get(contextEntry)
+    if (known !== undefined) return known
+    const context = makeDeniedContext(runtime, contextEntry, upgradeContext(contextEntry))
+    denied.set(contextEntry, context)
+    return context
+  }
+
+  /**
+   * `inspect` and `control` of a page: the page itself when it is controlled for life, or a handle under a grant
+   * for the caller's scope. `inspect` installs the isolated world first, and changes nothing the page shows.
+   */
+  const upgradePage = (entry: Model.PageEntry) => (level: "inspect" | "control") =>
+    Effect.gen(function*() {
+      const known = runtime.page(entry)
+      if (Option.isSome(known)) return known.value
+      const grant = yield* Access.acquire(level, { _tag: "Page", id: entry.id })
+      if (level === "inspect") {
+        const id = Operation.operationId()
+        const budget = yield* Operation.budget
+        yield* Evaluation.pageRealm(runtime, entry, Evaluation.isolatedWorld, id, budget.at).pipe(
+          Effect.mapError((failure) =>
+            new Page.PageError({
+              operation: "Page.inspect",
+              reason: new Page.InitializationFailed({
+                step: "install the isolated world",
+                hint: failure._tag === "Deadline"
+                  ? "The page had no document to install it in before the deadline; a page attached with a dialog open reports none until it closes (QUIRKS.md)"
+                  : failure._tag === "Gone"
+                  ? failure.error.message
+                  : failure.reason.message
+              }),
+              diagnostics: Operation.diagnostics(id)
+            })
+          )
+        )
+      }
+      return PageImpl.make({
+        runtime,
+        entry,
+        context: contextOf(entry),
+        grant: Option.some(grant),
+        upgrade: upgradePage(entry)
+      })
+    }).pipe(Effect.withSpan(`Page.${level}`, { attributes: { "browser.page.id": entry.id } }))
+
+  /** `control` of a context the connection didn't create: a handle under a grant for the caller's scope. */
+  const upgradeContext = (
+    entry: Model.ContextEntry
+  ): Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Scope.Scope> =>
+    Effect.gen(function*() {
+      const created = contexts.get(entry.id)
+      if (created !== undefined) return created
+      const grant = yield* Access.acquire("control", { _tag: "UserContext" })
+      const pages = new WeakMap<Model.PageEntry, Page.Page>()
+      const context: UserContext.UserContext = makeContext(runtime, entry, {
+        grant: Option.some(grant),
+        // Its pages are controlled under the same grant, unless the connection controls them for life
+        page: (pageEntry) => {
+          const lifelong = runtime.page(pageEntry)
+          if (Option.isSome(lifelong)) return lifelong.value
+          const known = pages.get(pageEntry)
+          if (known !== undefined) return known
+          const page = PageImpl.make({
+            runtime,
+            entry: pageEntry,
+            context,
+            grant: Option.some(grant),
+            upgrade: upgradePage(pageEntry)
+          })
+          pages.set(pageEntry, page)
+          return page
+        },
+        control: upgradeContext(entry)
+      })
+      return context
+    }).pipe(Effect.withSpan("UserContext.control", { attributes: { "browser.context.id": entry.id } }))
+
   const runtime: Runtime.Runtime = {
     model,
     backend: adapter.info.product,
     page: (entry) => {
       const known = handles.get(entry)
       if (known !== undefined) return Option.some(known)
-      const context = contexts.get(entry.context)
-      if (context === undefined) return Option.none()
-      const page = PageImpl.make({ runtime, entry, context })
+      if (!lifelong(entry)) return Option.none()
+      const page = PageImpl.make({
+        runtime,
+        entry,
+        context: contextOf(entry),
+        grant: Option.none(),
+        upgrade: upgradePage(entry)
+      })
       handles.set(entry, page)
       return Option.some(page)
+    },
+    observed: (entry) => {
+      const controlled = runtime.page(entry)
+      if (Option.isSome(controlled)) return controlled.value
+      const known = observedHandles.get(entry)
+      if (known !== undefined) return known
+      const page = PageImpl.observed({ runtime, entry, upgrade: upgradePage(entry) })
+      observedHandles.set(entry, page)
+      return page
     },
     download: cached((entry: Model.DownloadEntry) => DownloadImpl.make(runtime, entry)),
     worker: cached((entry: Model.WorkerEntry) => WorkerImpl.make(runtime, entry)),
@@ -329,7 +565,11 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           Effect.mapError((error) => contextError("Browser.newContext", asContextReason(error.reason), id))
         )
       }
-      const context = makeContext(runtime, entry)
+      const context: UserContext.UserContext = makeContext(runtime, entry, {
+        grant: Option.none(),
+        page: (pageEntry) => Option.getOrThrow(runtime.page(pageEntry)),
+        control: Effect.sync(() => context)
+      })
       contexts.set(created, context)
       // The saved storage, before the context's first page; a context it can't be written into isn't kept
       if (options?.storageState !== undefined) {
@@ -364,8 +604,17 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       ))
       return yield* context.newPage
     }),
-    pages: NotBuilt.watchable("Browser.pages"),
-    defaultContext: makeDefaultContext(runtime, defaultEntry)
+    pages: Watchable.make({
+      ref: model.pageList,
+      project: (ids) =>
+        Option.some(
+          ids.flatMap((id) => Option.toArray(Option.map(Option.fromNullishOr(model.pages.get(id)), runtime.observed)))
+        ),
+      ended: () => Option.none(),
+      target: { _tag: "Browser" },
+      operation: "Browser.pages.waitFor"
+    }),
+    defaultContext: makeObservedContext(runtime, defaultEntry, upgradeContext(defaultEntry))
   }
   return browser
 })

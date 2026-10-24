@@ -45,16 +45,16 @@ export interface Filter {
 
 type Behind = Handles.Behind<Model.PageEntry>
 
-// A popup is delivered as its handle, which a page in a context the connection didn't create has none of
 const accepts =
-  (behind: Behind, matches: Option.Option<(url: string) => boolean>) => (entry: Events.Entry<Model.PopupEvent>) =>
-    Option.isSome(behind.runtime.page(entry.value.page)) &&
-    (Option.isNone(matches) || (Option.isSome(entry.value.url) && matches.value(entry.value.url.value)))
+  (_behind: Behind, matches: Option.Option<(url: string) => boolean>) => (entry: Events.Entry<Model.PopupEvent>) =>
+    Option.isNone(matches) || (Option.isSome(entry.value.url) && matches.value(entry.value.url.value))
 
+// A popup is delivered as its handle: a `Page` when the connection controls it for life, as it does an owned page's
+// popups, and an observed page otherwise, `LeaveOpen` (review 19, candidate 3)
 const kind = (behind: Behind, operation: string): Events.Kind<Model.PopupEvent, Page.Page> => ({
   operation,
   noun: "a popup",
-  deliver: (event) => Option.getOrThrow(behind.runtime.page(event.page))
+  deliver: (event) => behind.runtime.observed(event.page) as Page.Page
 })
 
 /** Compiles the filter, failing with `InvalidInput` for a pattern that doesn't, then subscribes or reads. */

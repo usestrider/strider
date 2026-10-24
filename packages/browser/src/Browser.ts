@@ -123,7 +123,9 @@ export interface Browser {
    */
   newPage(options?: UserContext.Options | undefined): Effect.Effect<Page.Page, Page.PageError, Scope.Scope>
   /**
-   * When attached: the pages that exist, as they open and close.
+   * Every page of the browser, as they open and close: a `Page` for one this connection controls for its life, and
+   * an observed page for any other, such as a launched browser's own first tab or an attached browser's tabs, whose
+   * `inspect` and `control` gain access for a scope.
    */
   readonly pages: Watchable.Watchable<ReadonlyArray<Page.ObservedPage>>
   /**
