@@ -91,6 +91,27 @@ const routes: Record<string, Route> = {
     response.writeHead(200, { "content-type": "application/json", "x-test": "yes" })
     response.end(`{"hello":"world"}`)
   },
+  // The request as the site saw it: method, URL, headers and body (review 17)
+  "/echo": (request, response) => {
+    const chunks: Array<Buffer> = []
+    request.on("data", (chunk: Buffer) => chunks.push(chunk))
+    request.on("end", () => {
+      response.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" })
+      response.end(JSON.stringify({
+        method: request.method,
+        url: request.url,
+        headers: request.headers,
+        body: Buffer.concat(chunks).toString("utf8")
+      }))
+    })
+  },
+  // Basic authentication: "strider" and "secret" (review 17)
+  "/auth": (request, response) => {
+    const expected = `Basic ${Buffer.from("strider:secret").toString("base64")}`
+    if (request.headers.authorization === expected) return html(response, `<title>auth</title><p>signed in</p>`)
+    response.writeHead(401, { "www-authenticate": `Basic realm="strider"`, "content-type": "text/html" })
+    response.end(`<title>auth</title><p>who are you?</p>`)
+  },
   "/fetching": (_request, response) =>
     html(
       response,
