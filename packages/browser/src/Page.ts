@@ -13,8 +13,8 @@
  * @stability unstable
  * @since 0.1.0
  */
-import type * as Context from "effect/Context"
-import type * as Effect from "effect/Effect"
+import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
 import type * as Equal from "effect/Equal"
 import type * as Inspectable from "effect/Inspectable"
 import type * as Option from "effect/Option"
@@ -154,7 +154,12 @@ export interface FrameTreeEncoded {
  * @category schemas
  * @since 0.1.0
  */
-export declare const FrameTree: Schema.Codec<FrameTree, FrameTreeEncoded>
+export const FrameTree: Schema.Codec<FrameTree, FrameTreeEncoded> = Schema.Struct({
+  id: Target.NavigableId,
+  url: Url.Url,
+  name: Schema.Option(Schema.String),
+  children: Schema.Array(Schema.suspend((): Schema.Codec<FrameTree, FrameTreeEncoded> => FrameTree))
+})
 
 /**
  * Settings for `screenshot`.
@@ -651,7 +656,10 @@ export const isPage = (u: unknown): u is ObservedPage => Predicate.hasProperty(u
  * @category references
  * @since 0.1.0
  */
-export declare const UserGesture: Context.Reference<boolean>
+export const UserGesture: Context.Reference<boolean> = Context.Reference<boolean>(
+  "@usestrider/browser/Page/UserGesture",
+  { defaultValue: () => false }
+)
 
 /**
  * Runs main-world evaluation inside an effect with a user gesture, for pages that require one, such as to
@@ -663,7 +671,8 @@ export declare const UserGesture: Context.Reference<boolean>
  * @category combinators
  * @since 0.1.0
  */
-export declare const withUserGesture: <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
+export const withUserGesture = <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+  Effect.provideService(self, UserGesture, true)
 
 /**
  * Reason for a page that couldn't be set up for the access it was asked for.

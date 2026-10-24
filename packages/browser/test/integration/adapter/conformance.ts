@@ -13,6 +13,7 @@ import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as Schedule from "effect/Schedule"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import type * as PageNavigation from "../../../src/PageNavigation.ts"
@@ -569,6 +570,83 @@ export const conformance = (backend: Backend) =>
             ])
           }), timeout)
 
+        it.effect("names an iframe's frame, passes a node across worlds, and sends input into a frame", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            const fixture = (origin: string, html: string) =>
+              `${origin}/fixture?html=${encodeURIComponent(html)}`
+            const child =
+              `<body style="margin:0"><button style="position:absolute;left:10px;top:10px;width:60px;height:30px" onclick="parent.postMessage('clicked', '*')">x</button><script>parent.postMessage('loaded', '*')</script></body>`
+            yield* goto(
+              world,
+              page,
+              fixture(
+                world.site.origin,
+                `<body style="margin:0"><script>window.got = []; addEventListener('message', (e) => got.push(e.data))</script><iframe id="cross" src="${
+                  fixture(world.site.crossSite, child)
+                }" style="position:absolute;left:100px;top:50px;width:200px;height:100px;border:5px solid red;padding:3px"></iframe></body>`
+              )
+            )
+            const added = yield* world.facts.when("FrameAdded")
+            yield* world.facts.when("DocumentCommitted", (fact) =>
+              fact.navigable === added.frame)
+            const realm = yield* mainRealm(world, page)
+            const loaded = Effect.flatMap(
+              world.adapter.evaluate(realm, {
+                functionDeclaration: "() => window.got.includes('loaded')",
+                arguments: [],
+                awaitPromise: false,
+                result: "value",
+                userActivation: false
+              }),
+              (result) => result._tag === "Value" && json(result.value) === true ? Effect.void : Effect.fail("not yet")
+            )
+            yield* loaded.pipe(Effect.retry({ times: 50, schedule: Schedule.spaced("100 millis") }))
+            const iframe = yield* world.adapter.evaluate(realm, {
+              functionDeclaration: "() => document.getElementById('cross')",
+              arguments: [],
+              awaitPromise: false,
+              result: "value",
+              userActivation: false
+            })
+            assert(iframe._tag === "Value" && iframe.value.type === "node" && iframe.value.node !== undefined)
+            // Review 18, P3: every backend names the frame an iframe element holds
+            assert.deepStrictEqual(yield* world.adapter.contentFrame(iframe.value.node), Option.some(added.frame))
+            // A node returned from one world is an argument in another
+            const committed = world.facts.all("DocumentCommitted").filter((fact) => fact.navigable === page).at(-1)!
+            const isolated = yield* world.adapter.realm(committed.document, { _tag: "Isolated", name: "conformance" })
+            const id = yield* world.adapter.evaluate(isolated, {
+              functionDeclaration: "(element) => element.id",
+              arguments: [{ _tag: "Node", node: iframe.value.node }],
+              awaitPromise: false,
+              result: "value",
+              userActivation: false
+            })
+            assert.deepStrictEqual(id, { _tag: "Value", value: { type: "string", value: "cross" } })
+            // Review 18, P1 and P2: input aimed inside a cross-site frame reaches it, on every backend
+            const none = { alt: false, control: false, meta: false, shift: false }
+            const origin = { x: 100 + 5 + 3, y: 50 + 5 + 3 }
+            const x = origin.x + 40
+            const y = origin.y + 25
+            yield* world.adapter.dispatchInput(page, [
+              { _tag: "Mouse", type: "move", x, y, button: "none", clickCount: 0, modifiers: none, buttons: 0 },
+              { _tag: "Mouse", type: "down", x, y, button: "left", clickCount: 1, modifiers: none, buttons: 1 },
+              { _tag: "Mouse", type: "up", x, y, button: "left", clickCount: 1, modifiers: none, buttons: 0 }
+            ], { frame: added.frame, origin })
+            const clicked = Effect.flatMap(
+              world.adapter.evaluate(realm, {
+                functionDeclaration: "() => window.got.includes('clicked')",
+                arguments: [],
+                awaitPromise: false,
+                result: "value",
+                userActivation: false
+              }),
+              (result) => result._tag === "Value" && json(result.value) === true ? Effect.void : Effect.fail("not yet")
+            )
+            yield* clicked.pipe(Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") }))
+          }), timeout)
+
         it.effect("delivers a prompt as an obligation that takes one decision", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
@@ -582,7 +660,8 @@ export const conformance = (backend: Backend) =>
               result: "value",
               userActivation: false
             }).pipe(Effect.forkChild)
-            const opened = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "Prompt")
+            const opened = yield* world.facts.when("ObligationOpened", (fact) =>
+              fact.subject._tag === "Prompt")
             assert.deepInclude(opened.subject, { kind: "prompt", message: "Name?", defaultValue: "anon", page })
             yield* world.adapter.resolve(opened.obligation, { _tag: "Accept", promptText: Option.some("Strider") })
             const result = yield* Fiber.join(answer)
@@ -590,7 +669,8 @@ export const conformance = (backend: Backend) =>
             assert.deepStrictEqual(result.value, { type: "string", value: "Strider" })
             const closed = yield* world.facts.when("PromptClosed")
             assert.isTrue(closed.accepted)
-            yield* world.facts.when("ObligationEnded", (fact) => fact.obligation === opened.obligation)
+            yield* world.facts.when("ObligationEnded", (fact) =>
+              fact.obligation === opened.obligation)
           }), timeout)
 
         it.effect("intercepts requests: fulfill, fail, continue with new headers", () =>
@@ -916,7 +996,9 @@ export const conformance = (backend: Backend) =>
               format: "png",
               quality: Option.none(),
               clip: Option.none(),
-              fullPage: false
+              fullPage: false,
+              scale: "device",
+              omitBackground: false
             })
             assert.deepStrictEqual([...png.subarray(1, 4)], [0x50, 0x4e, 0x47])
             const capabilities = yield* SubscriptionRef.get(world.adapter.capabilities)
@@ -930,7 +1012,10 @@ export const conformance = (backend: Backend) =>
               paperWidth: 8.5,
               paperHeight: 11,
               margins: { top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 },
-              pageRanges: Option.none()
+              pageRanges: Option.none(),
+              header: Option.none(),
+              footer: Option.none(),
+              preferCssPageSize: false
             })
             assert.strictEqual(new TextDecoder().decode(pdf.subarray(0, 5)), "%PDF-")
           }), timeout)

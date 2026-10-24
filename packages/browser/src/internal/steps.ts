@@ -18,8 +18,18 @@ const quote = (matcher: Engine.TextMatcher) =>
 
 const exactly = (matcher: Engine.TextMatcher) => matcher._tag === "String" && matcher.exact ? ", { exact: true }" : ""
 
-/** How a step reads in code, for errors and traces. */
-export const describeSteps = (steps: ReadonlyArray<Engine.Step>): string =>
+/**
+ * How steps read in code, for errors and traces, after `page.`: a frame boundary reads as the `page.frame(…)` that
+ * made it.
+ */
+export const describeSteps = (steps: ReadonlyArray<Engine.Step>): string => {
+  const boundary = steps.findLastIndex((step) => step._tag === "Frame")
+  if (boundary < 0) return describePlain(steps)
+  const rest = describePlain(steps.slice(boundary + 1))
+  return `frame(page.${describeSteps(steps.slice(0, boundary))})${rest === "" ? "" : `.${rest}`}`
+}
+
+const describePlain = (steps: ReadonlyArray<Engine.Step>): string =>
   steps.map((step) => {
     switch (step._tag) {
       case "Role": {
@@ -60,6 +70,10 @@ export const describeSteps = (steps: ReadonlyArray<Engine.Step>): string =>
         return `and(page.${describeSteps(step.other)})`
       case "Or":
         return `or(page.${describeSteps(step.other)})`
+      case "Frame":
+        return "frame()"
+      case "Ref":
+        return `ref(${JSON.stringify(step.ref)})`
     }
   }).join(".")
 

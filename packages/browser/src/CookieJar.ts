@@ -9,11 +9,12 @@
  * @stability unstable
  * @since 0.1.0
  */
-import type * as DateTime from "effect/DateTime"
+import * as DateTime from "effect/DateTime"
 import type * as Effect from "effect/Effect"
-import type * as Cookies from "effect/http/Cookies"
+import * as Cookies from "effect/http/Cookies"
+import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
-import type * as Redacted from "effect/Redacted"
+import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Diagnostics from "./Diagnostics.ts"
 import * as Reason from "./Reason.ts"
@@ -98,9 +99,9 @@ export class Cookie extends Schema.Class<Cookie>("@usestrider/browser/CookieJar/
   expires: Schema.Option(Schema.DateTimeUtc),
   httpOnly: Schema.Boolean,
   secure: Schema.Boolean,
-  sameSite: Schema.Literals(["strict", "lax", "none"]),
+  sameSite: Schema.Option(Schema.Literals(["strict", "lax", "none"])),
   partitionKey: PartitionKey,
-  priority: Schema.Literals(["low", "medium", "high"])
+  priority: Schema.Option(Schema.Literals(["low", "medium", "high"]))
 }) {}
 
 /**
@@ -224,7 +225,17 @@ export interface CookieJar {
  * @category converting
  * @since 0.1.0
  */
-export declare const toCookie: (cookie: Cookie) => Cookies.Cookie
+export const toCookie = (cookie: Cookie): Cookies.Cookie =>
+  Cookies.makeCookieUnsafe(cookie.name, Redacted.value(cookie.value), {
+    domain: cookie.domain,
+    path: cookie.path,
+    httpOnly: cookie.httpOnly,
+    secure: cookie.secure,
+    partitioned: cookie.partitionKey._tag === "Partitioned",
+    ...(Option.isSome(cookie.expires) ? { expires: DateTime.toDateUtc(cookie.expires.value) } : {}),
+    ...(Option.isSome(cookie.sameSite) ? { sameSite: cookie.sameSite.value } : {}),
+    ...(Option.isSome(cookie.priority) ? { priority: cookie.priority.value } : {})
+  })
 
 /**
  * Schema for the reasons a cookie operation can fail.

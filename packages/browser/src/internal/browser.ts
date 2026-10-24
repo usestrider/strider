@@ -30,6 +30,7 @@ import type * as Diagnostics from "../Diagnostics.ts"
 import * as Page from "../Page.ts"
 import * as Reason from "../Reason.ts"
 import type * as Route from "../Route.ts"
+import * as StorageState from "../StorageState.ts"
 import type * as Url from "../Url.ts"
 import * as UserContext from "../UserContext.ts"
 import type * as Adapter from "./adapter.ts"
@@ -47,6 +48,8 @@ import * as Operation from "./operation.ts"
 import * as PageImpl from "./page.ts"
 import * as Routes from "./routes.ts"
 import type * as Runtime from "./runtime.ts"
+import * as Storage from "./storage.ts"
+import * as StorageStates from "./storageState.ts"
 import * as Watchable from "./watchable.ts"
 import * as WorkerImpl from "./worker.ts"
 
@@ -55,10 +58,6 @@ const UserContextTypeId = "~@usestrider/browser/UserContext"
 
 const contextError = (operation: string, reason: UserContext.UserContextErrorReason, id: Diagnostics.OperationId) =>
   new UserContext.UserContextError({ operation, reason, diagnostics: Operation.diagnostics(id) })
-
-/** The options a context can be created with so far; the others aren't built. */
-const unbuiltOption = (options: UserContext.Options | undefined): Option.Option<string> =>
-  options?.storageState !== undefined ? Option.some("UserContext.Options.storageState") : Option.none()
 
 /** A declaration's failure, as a context's: the reasons a context has, else a backend failure. */
 const asContextReason = (reason: Declaration.DeclarationErrorReason): UserContext.UserContextErrorReason =>
@@ -138,14 +137,8 @@ const makeContext = (runtime: Runtime.Runtime, entry: Model.ContextEntry): UserC
       pageEntry.owner = Option.some(scope)
       return Option.getOrThrow(runtime.page(pageEntry))
     }).pipe(Effect.withSpan("UserContext.newPage", { attributes: { "browser.context.id": entry.id } })),
-    cookies: {
-      list: NotBuilt.effect("UserContext.cookies"),
-      listFor: NotBuilt.fn("UserContext.cookies"),
-      set: NotBuilt.fn("UserContext.cookies"),
-      remove: NotBuilt.fn("UserContext.cookies"),
-      clear: NotBuilt.effect("UserContext.cookies")
-    },
-    exportStorageState: NotBuilt.effect("UserContext.exportStorageState"),
+    cookies: Storage.cookieJar(runtime, entry.id),
+    exportStorageState: StorageStates.exportState(runtime, entry.id),
     clock: Clock.make({
       runtime,
       scope: declared,
@@ -256,9 +249,21 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
     options?: UserContext.Options
   ): Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Scope.Scope> =>
     Effect.gen(function*() {
-      const unbuilt = unbuiltOption(options)
-      if (Option.isSome(unbuilt)) return yield* NotBuilt.effect(unbuilt.value)
       const id = Operation.operationId()
+      // A partition the backend can't set fails the context before it exists: nothing is applied partly
+      if (options?.storageState !== undefined) {
+        const partitions = yield* StorageStates.unsupportedPartitions(runtime, options.storageState)
+        if (partitions.length > 0) {
+          return yield* Effect.fail(contextError(
+            "Browser.newContext",
+            new StorageState.Incompatible({
+              partitions,
+              hint: `${runtime.backend} can't set a partitioned cookie (cookies.partitioned)`
+            }),
+            id
+          ))
+        }
+      }
       const failed = (error: Adapter.AdapterError) => {
         const mapped = Operation.fromAdapter(error, id, runtime.backend)
         // The browser itself ended: every operation on it ends with the connection, a defect here
@@ -326,6 +331,12 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       }
       const context = makeContext(runtime, entry)
       contexts.set(created, context)
+      // The saved storage, before the context's first page; a context it can't be written into isn't kept
+      if (options?.storageState !== undefined) {
+        yield* StorageStates.applyState(runtime, context, options.storageState, id).pipe(
+          Effect.onError(() => adapter.removeUserContext(created).pipe(Effect.ignore))
+        )
+      }
       return context
     }).pipe(Effect.withSpan("Browser.newContext"))
 

@@ -267,6 +267,11 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *We:* report what each says.
 - *Reconsider:* correlating by URL, which would be a guess.
 
+**Q121. Chromium's exception text ends with the stack** (Browser). An evaluation that throws `TypeError("boom")` is described as `TypeError: boom\n    at <anonymous>:2:12`; Firefox and WebKit give the message alone.
+- *Seen:* review 18's revision.
+- *We:* `EvaluationThrown`'s message drops the trailing `at` lines, which `stack` has.
+- *Reconsider:* nothing.
+
 ## Browsers: network
 
 **Q39. A redirect hop's body is asked for with an id the adapters never minted** (Ours, found in the adapters). Asking any adapter for a 302 hop's body failed as `Foreign`.
@@ -407,6 +412,58 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *We:* document both; a BiDi preload keeps which scripts ran under a `Symbol.for` key a page could find.
 - *Reconsider:* evaluating a Firefox script's source at global scope, if the page's CSP allows it.
 
+## Browsers: frames, captures and storage
+
+**Q110. Chromium renders nothing in a cross-site frame outside the viewport** (Browser). No animation frame runs in an out-of-process iframe that is scrolled out of view, so an action in it saw no rendering opportunity and timed out with `NoRenderingOpportunity`.
+- *Seen:* review 18's revision: an iframe 2000 px down a page.
+- *We:* an action scrolls each iframe on its way into view in its parent before its checks run (the engine's `element` with `scroll`), as the review planned for coordinates.
+- *Reconsider:* whether Firefox and WebKit throttle the same way under other conditions, and whether an expectation in such a frame needs the scroll too (it waits on mutations, so it hasn't).
+
+**Q111. Firefox doesn't deliver page coordinates into a cross-site frame** (Browser). A click at page coordinates over a cross-site iframe reaches nothing in it, not even `pointerdown`, though the page's hit test at the point is the iframe; the same click sent to the frame's own browsing context, in the frame's coordinates, lands. Chromium and WebKit deliver page coordinates into every frame.
+- *Seen:* review 18, P1 and P2.
+- *We:* input names the frame and its origin; the BiDi adapter subtracts the origin and sends to the frame's context, and keyboard input goes there too.
+- *Reconsider:* a drag between documents on Firefox, which is sent to the source's frame.
+
+**Q112. No backend reports a frame's name** (Browser). The frame tree each protocol gives has ids and URLs; a frame's `name` is its document's `window.name`, which only its document can read.
+- *Seen:* review 18.
+- *We:* `FrameTree.name` is `None`.
+- *Reconsider:* reading `window.name` in each frame's document when `page.frames` is read, if anyone needs it.
+
+**Q113. Firefox's full-page screenshot is narrower by the scrollbar** (Browser). A 400 px viewport captures 776 px wide at 2×, where Chromium and WebKit capture 800.
+- *Seen:* review 18, P4.
+- *We:* nothing; the test checks the height only.
+- *Reconsider:* nothing.
+
+**Q114. Firefox refuses a clip beyond the root element's box** (Browser). BiDi's `document` origin is the root element's box, which on a short page in quirks mode is its content's height, so a clip in the viewport's empty part fails ("The dimensions of requested screenshot are incorrect, got … height: 0"). Chromium and WebKit capture it.
+- *Seen:* review 18's revision, a page without a doctype.
+- *We:* nothing; the browser's error is the capture's `BackendFailure`.
+- *Reconsider:* capturing with BiDi's `viewport` origin, translated by the scroll offset, when the clip is inside the viewport.
+
+**Q115. WebDriver BiDi captures device pixels only, with no background override, and prints no header or footer** (Browser). Nor a page's CSS size; Chromium's and WebKit's protocols have all of it (WebKit no PDF at all, Q52).
+- *Seen:* review 18.
+- *We:* `screenshot.cssScale`, `screenshot.omitBackground`, `pdf.headerFooter` and `pdf.preferCssPageSize` are `Unsupported` on Firefox.
+- *Reconsider:* scaling a device-pixel capture down ourselves, which would need an image codec.
+
+**Q116. WebKit reports an unspecified `SameSite` as `Lax`, and drops `Secure` cookies an `http://127.0.0.1` page set** (Browser). Chromium and Firefox leave an unspecified `SameSite` absent, and keep a `Secure` cookie a local page set.
+- *Seen:* review 18, P5.
+- *We:* `Cookie.sameSite` is an `Option`, `None` where the backend didn't say; WebKit's `Lax` comes through as said.
+- *Reconsider:* nothing.
+
+**Q117. Only Chromium reports a cookie's partition and priority** (Browser). CDP gives a partitioned (CHIPS) cookie's top-level site and whether a cross-site ancestor set it, and every cookie's priority; Firefox and WebKit report neither, and can't set a partitioned cookie through their protocols.
+- *Seen:* review 18, P5.
+- *We:* `priority` is an `Option`; a partitioned cookie is `Unsupported` there (`cookies.partitioned`), and a storage state with one fails a new context with `Incompatible`.
+- *Reconsider:* when the protocols gain partitions.
+
+**Q118. Firefox gives the isolated world the page's objects, behind Xrays** (Browser). IndexedDB records read in the isolated world aren't `instanceof` the sandbox's classes, a `Map` or `Set` can't be iterated through its Xray ("usingIterator().next is not a function"), and a typed array's data can't be read over one ("Accessing TypedArray data over Xrays is slow, and forbidden").
+- *Seen:* review 18, P7, and its revision.
+- *We:* `readOrigin` tells types by their tag, waives the Xrays of each record (`wrappedJSObject`), and copies bytes through the page's own `Uint8Array` (Q129).
+- *Reconsider:* `Cu.cloneInto`, if the sandbox ever exposes it.
+
+**Q119. Firefox fails a tab created in a user context while its only tab closes** (Browser). `browsingContext.create` right after `browsingContext.close` of the context's last tab failed with `NoSuchFrame` ("DiscardedBrowsingContextError: BrowsingContext does no longer exist").
+- *Seen:* review 18's revision: the page that writes a storage state was released by its scope, whose close isn't awaited, and the caller's first page followed at once.
+- *We:* the storage state's page is closed with `page.close()`, which waits for the close, before the context is returned.
+- *Reconsider:* waiting for the close in a page's scope finalizer too (Q135).
+
 ## Browsers: protocols and transports
 
 **Q53. Firefox deviates from the BiDi spec in two events** (Browser). `contextCreated` has no `hasPlannedNavigation`, which the spec requires, and `navigationStarted` has no `url` for the navigation that `close({ promptUnload: true })` starts.
@@ -437,6 +494,11 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 **Q102. WebKit reports a page's existing user world for a new document after it commits** (Browser). An engine request right after a second `goto` found no realm in the world and asked to create it, which WebKit refuses ("World with the given name already exists"), so every read after a second `goto` failed.
 - *Seen:* review 17's revision; the suites had navigated a page twice only by clicking links before.
 - *We:* when the page already has the world, the WebKit adapter waits for its report for the document, or the document's end.
+- *Reconsider:* nothing.
+
+**Q120. CDP and WebKit report a document's main-world realm a moment after it commits** (Browser). Asking for it right after `goto` returned found none, and the adapters answered `Unsupported{mainWorld}`, so `evaluateInMainWorld` failed on a page just loaded.
+- *Seen:* review 18's revision, on Chromium.
+- *We:* `realm` waits for the main world's report, or the document's end, as it does for an existing user world on WebKit (Q102).
 - *Reconsider:* nothing.
 
 ## Ours: workarounds and odd shapes
@@ -564,3 +626,73 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *Seen:* review 17's revision.
 - *We:* as above.
 - *Reconsider:* letting a page's clock override its context's, as overrides do.
+
+**Q122. A frame that isn't there yet is a request that matches nothing** (Ours). Its steps become `:not(*)`, so every operation handles it as it handles no match, in a round of at most 100 ms, so the next round looks for the frame again.
+- *Seen:* review 18's revision.
+- *We:* as above; a read in a missing frame is `NoMatch` at once.
+- *Reconsider:* waiting in the parent document for the iframe, which would save the short rounds.
+
+**Q123. A round the deadline cut short reported what it never saw** (Ours). A round cut before its first frame noted `NoRenderingOpportunity`, or answered its default `NoMatch`, and one cut while a rect was still settling answered `NotStable`; under a short deadline that buried the real reason, a covered iframe.
+- *Seen:* review 18's revision, `Deadline.within("1 second")` on a covered frame.
+- *We:* `NotReady` says whether the round noted anything (`checked`), and L1 adds the reason only then; a round under 100 ms doesn't note `NoRenderingOpportunity`.
+- *Reconsider:* rounds that keep a stable check's frames across rounds.
+
+**Q124. A snapshot's text and iframe nodes have roles that aren't ARIA's** (Ours). Text is `{ _tag: "Aria", role: "text" }`, its text the name, and an iframe is `iframe`; `Snapshot.Node` has no other kind.
+- *Seen:* review 18's revision.
+- *We:* as above, as Playwright's aria snapshots write them.
+- *Reconsider:* a node kind for text in the schema.
+
+**Q125. A snapshot's generation names a table, and `Suspended` never happens** (Ours). The review's generation was to advance when refs went stale; refs live as long as their document, so the generation is a random number the engine picks when installed, and a ref from another table is `BindingLost`. Nothing tells a document in the back/forward cache from one replaced, so `StaleRef{Suspended}` is never given.
+- *Seen:* review 18's revision.
+- *We:* as above.
+- *Reconsider:* `Suspended` from the document's lifecycle, when the model folds it.
+
+**Q126. An element screenshot of no element is `InvalidInput`** (Ours). `PageError` has no `NoMatch` or `StrictViolation`, so a capture's locator that doesn't match one element is `InvalidInput{input: "area"}`, the locator and what it matched in the hint.
+- *Seen:* review 18's revision.
+- *We:* as above; a capture never waits.
+- *Reconsider:* the locator reasons in `PageError`.
+
+**Q127. Sites are approximated without the public suffix list** (Ours). A storage partition's top-level site is the URL's scheme and its host's last two labels, or the host itself for an IP address or a one-label name; `example.co.uk`'s is `co.uk`.
+- *Seen:* review 18's revision.
+- *We:* as above, for storage state's partitions.
+- *Reconsider:* the public suffix list, if a partitioned origin is ever mislabelled.
+
+**Q128. The CDP adapter reads the device pixel ratio from the page** (Ours). `scale: "css"` clips at a scale of one over the ratio; `Page.getLayoutMetrics` as the protocol types it has no scale for the visual viewport, so the ratio is `devicePixelRatio`, evaluated.
+- *Seen:* review 18's L0 build.
+- *We:* as above.
+- *Reconsider:* `Emulation`'s device metrics, when an override is in force.
+
+**Q129. Firefox's Xrays are waived to read IndexedDB records** (Ours). Q118 leaves no other way to iterate a page's `Map` or `Set`, so a page that patched `Map.prototype` or `Set.prototype` could change what an export reads.
+- *Seen:* review 18's revision.
+- *We:* waive each record's Xray; the records are the page's own structured clones.
+- *Reconsider:* with Q118.
+
+**Q130. The page that writes a storage state is in the new context's history** (Ours). Its navigations and requests are the context's events, which `history` keeps, though the caller never had the page.
+- *Seen:* review 18's revision.
+- *We:* nothing.
+- *Reconsider:* writing from a page the model doesn't publish, or clearing the history it left.
+
+**Q131. Some storage errors have no `Timeout` or `TargetGone`** (Ours). `CookieJarError` operations declare neither, and origin storage declares no `Timeout`, so a context that ended is a cookie jar's `BackendFailure`, and origin storage's deadline is one too; an origin with no storage (an opaque one) is `BackendFailure`, and a value over the quota `InvalidInput`.
+- *Seen:* review 18's revision.
+- *We:* as above.
+- *Reconsider:* the error channels, with the next API revision.
+
+**Q132. Handles are released one at a time** (Ours). The review's batches aren't built: each handle's scope finalizer releases it alone.
+- *Seen:* review 18's revision.
+- *We:* as above.
+- *Reconsider:* releasing a scope's handles in one command per realm.
+
+**Q133. `page.readHtml` reads from the engine's world** (Ours). The review said the isolated world; the document's HTML is the same from either, and the engine is already there.
+- *Seen:* review 18's revision.
+- *We:* as above.
+- *Reconsider:* nothing.
+
+**Q134. A storage state's records are in the library's encoding in memory too** (Ours). A record's key and value in a `StorageState` are the JSON-safe encoding (`$date`, `$map`, `$bytes` and the rest), not the values themselves, so the same state round-trips through `StorageState.Json` unchanged.
+- *Seen:* review 18's revision.
+- *We:* as above; the schema's `Unknown` says so.
+- *Reconsider:* a schema for the encoding, if anyone reads records.
+
+**Q135. A page released by its scope isn't closed by the time the scope is** (Ours). The finalizer asks the adapter to close it, and the BiDi adapter doesn't wait for the browser, so a new page right after can meet Q119.
+- *Seen:* review 18's revision.
+- *We:* nothing yet, beyond the storage state's page (Q119).
+- *Reconsider:* waiting for the close in the finalizer, under a short deadline.

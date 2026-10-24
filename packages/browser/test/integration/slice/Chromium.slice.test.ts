@@ -6,6 +6,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { Chromium } from "@usestrider/browser/chromium"
 import * as Layer from "effect/Layer"
 import { assertPinned, chromium } from "../browsers.ts"
+import { contents } from "./contents.ts"
 import { declarations } from "./declarations.ts"
 import { events } from "./events.ts"
 import { interaction } from "./interaction.ts"
@@ -19,3 +20,4 @@ events("Chromium", backend)
 modules("Chromium", backend)
 interaction("Chromium", backend)
 declarations("Chromium", backend)
+contents("Chromium", backend)

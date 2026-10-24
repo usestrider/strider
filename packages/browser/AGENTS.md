@@ -4,16 +4,20 @@ Instructions for agents writing code that uses Strider. `INDEX.md` in this packa
 The design and its reasons are in the repository: https://github.com/usestrider/strider.
 
 Strider is pre-release: the API is designed and type-checked, and the implementation is in progress. Launching,
-`Browser.newPage`, navigation, the queries, every locator action (`click`, `dblclick`, `tap`, `hover`, `check`,
-`uncheck`, `focus`, `clear`, `fill`, `press`, `pressSequentially`, `selectOption`, `setInputFiles`, `dragTo`,
-`scrollIntoView`), the one-shot reads, `page.keyboard` and `page.mouse`, every `Expect` matcher but `toMatchAria`,
-`Condition`, `Deadline`, every event module (`Popup`, `Dialog`, `FileChooser`, `Download`, `ConsoleMessage`,
+`Browser.newPage`, navigation, the queries, frames (`page.frame`, `locator.frame`, `page.frames`), every locator
+action (`click`, `dblclick`, `tap`, `hover`, `check`, `uncheck`, `focus`, `clear`, `fill`, `press`,
+`pressSequentially`, `selectOption`, `setInputFiles`, `dragTo`, `scrollIntoView`), the one-shot reads,
+`page.keyboard` and `page.mouse`, every `Expect` matcher, `Condition`, `Deadline`, evaluation (`page.evaluate`,
+`evaluateInMainWorld`, `evaluateHandle`, `JSHandle`, `Locator.evaluate`), snapshots with refs and `AriaPattern`,
+`screenshot`, `pdf` and `readHtml`, cookies, `localStorage` and `sessionStorage`, storage state with IndexedDB
+(`exportStorageState`, the context option `storageState`), every event module (`Popup`, `Dialog`, `FileChooser`, `Download`, `ConsoleMessage`,
 `UncaughtException`, `PageNavigation`, `NetworkRequest`, `NetworkResponse`, `BrowserWorker`, `NetworkConnection`,
 `AutoResolution`), `Dialog.handle` and `FileChooser.handle`, and the declarations (`route`, `addInitScript`,
 `emulate`, `grant`, `clock`, and the context options `emulation`, `permissions` and `focus`) work on every backend. What a backend can't do or report
-fails with `Unsupported`, naming the capability: modifiers on WebKit's pointer, and an HTML drag anywhere but
-Chromium. A member that isn't built yet fails as the defect `NotBuilt`, naming itself (`Locator.evaluate`,
-`Locator.snapshot` and `page.evaluate` among them).
+fails with `Unsupported`, naming the capability: modifiers on WebKit's pointer, an HTML drag anywhere but
+Chromium, a CSS-pixel or transparent screenshot and a PDF's header on Firefox, a PDF on WebKit, and a partitioned
+cookie anywhere but Chromium. A member that isn't built yet fails as the defect `NotBuilt`, naming itself
+(`Page.inspect`, `Page.control` and `Page.capability` among them).
 
 ## Shape
 

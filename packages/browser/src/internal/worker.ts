@@ -13,6 +13,7 @@ import type * as JSHandle from "../JSHandle.ts"
 import * as Reason from "../Reason.ts"
 import type * as Url from "../Url.ts"
 import type * as Adapter from "./adapter.ts"
+import { exception } from "./evaluation.ts"
 import * as Filters from "./filters.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
@@ -20,18 +21,6 @@ import type * as Runtime from "./runtime.ts"
 import * as Serialization from "./serialization.ts"
 
 const TypeId = "~@usestrider/browser/BrowserWorker"
-
-/** An exception's name and message, from the text the browser gives (`Uncaught TypeError: boom`). */
-export const exception = (result: Extract<Adapter.RemoteResult, { readonly _tag: "Exception" }>) => {
-  const text = result.text.replace(/^Uncaught (\(in promise\) )?/, "")
-  const colon = text.indexOf(": ")
-  const named = colon > 0 && /^[A-Za-z_$][\w$]*$/.test(text.slice(0, colon))
-  return {
-    name: named ? text.slice(0, colon) : "Error",
-    message: named ? text.slice(colon + 2) : text,
-    stack: result.stack
-  }
-}
 
 export const make = (runtime: Runtime.Runtime, entry: Model.WorkerEntry): BrowserWorker.BrowserWorker => {
   const failure = (reason: BrowserWorker.BrowserWorkerErrorReason, id = Operation.operationId()) =>

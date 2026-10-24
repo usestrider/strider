@@ -1,7 +1,12 @@
 /**
- * Locators (API.md, Locators, actions and actionability; reviews 12 and 16). A locator is data: the engine's
- * steps, resolved again on every attempt. Built: the queries and chainers, every read, and every action. Frames,
- * `snapshot` and `evaluate` fail as `NotBuilt`.
+ * Locators (API.md, Locators, actions and actionability; reviews 12, 16 and 18). A locator is data: the engine's
+ * steps, resolved again on every attempt. Built: the queries and chainers, frames, every read, every action,
+ * `evaluate` and `snapshot`.
+ *
+ * A frame locator is a boundary in the steps (review 18, candidate 2): the runtime resolves each document's part
+ * with that document's engine. An action in a frame answers its point in the frame's viewport; the origin of each
+ * iframe on the way is added to it, outermost last, and the pointer must reach the iframe at that point in each
+ * parent document as well as the element in its own.
  *
  * An action checks in rounds in the page, at each frame, until its checks pass; then it takes the page's input
  * permit, checks once more and does its part in the page (focus, select, scroll), and sends its input, built from
@@ -21,20 +26,23 @@ import type * as AriaRole from "../AriaRole.ts"
 import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as FileInput from "../FileInput.ts"
+import type * as JSHandle from "../JSHandle.ts"
 import type * as Keyboard from "../Keyboard.ts"
 import * as Locator from "../Locator.ts"
 import type * as Mouse from "../Mouse.ts"
 import * as Reason from "../Reason.ts"
+import type * as Snapshot from "../Snapshot.ts"
 import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
 import type * as Engine from "./engine.ts"
+import * as Evaluation from "./evaluation.ts"
 import * as FileInputImpl from "./fileInput.ts"
 import * as Input from "./input.ts"
 import * as Keys from "./keys.ts"
 import type * as Model from "./model.ts"
-import * as NotBuilt from "./notBuilt.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
+import * as Snapshots from "./snapshot.ts"
 import { describeSteps, matcher, queries, type Relative, roleStep } from "./steps.ts"
 
 // ── Locators ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -43,6 +51,13 @@ import { describeSteps, matcher, queries, type Relative, roleStep } from "./step
 const defaultFrames = 2
 
 type CheckSet = Omit<Engine.Checks, "stable"> & { readonly stable: boolean }
+
+/** A round that passed: the engine's answer with its point in the page's viewport, where it ran, and its frame's origin. */
+interface Ready {
+  readonly response: Extract<Engine.Response, { _tag: "Ready" }>
+  readonly routed: Runtime.Routed
+  readonly origin: { readonly x: number; readonly y: number }
+}
 
 /** The checks each action documents (API.md, Locators, actions and actionability). */
 const pointerChecks: CheckSet = {
@@ -112,6 +127,21 @@ const explain = (reason: Engine.NotReady, frames: number): string => {
   }
 }
 
+/** A ref that no longer points at its node, and what to do about it (review 18, candidate 3). */
+export const staleRef = (why: Engine.Stale): Locator.StaleRef =>
+  new Locator.StaleRef({
+    why,
+    hint: why === "Replaced"
+      ? "The ref's document was replaced; take a new snapshot"
+      : why === "Detached"
+      ? "The ref's node was removed from its document; take a new snapshot"
+      : why === "Suspended"
+      ? "The ref's document is in the back/forward cache; take a new snapshot"
+      : why === "BindingLost"
+      ? "The page's engine was installed again, and its refs went with it; take a new snapshot"
+      : "No snapshot of this document gave this ref; use one of a snapshot's refs"
+  })
+
 const LocatorTypeId = "~@usestrider/browser/Locator"
 
 /** The page a locator belongs to. */
@@ -167,7 +197,17 @@ export class LocatorImpl implements Locator.Locator {
   }
 
   // Chainers
-  frame = NotBuilt.sync("Locator.frame") as Locator.Locator["frame"]
+  frame(iframe: Locator.ReadonlyLocator): Locator.FrameLocator {
+    const other = this.samePageLocator(iframe, "frame")
+    const mine = Runtime.split(this.steps)
+    const theirs = Runtime.split(other.steps)
+    if (JSON.stringify(mine.frames) !== JSON.stringify(theirs.frames)) {
+      throw new Error("Locator.frame: the iframe's locator is in another frame than this one")
+    }
+    // The iframe under this locator: its own steps when it was built from this one, or its query applied here
+    const steps = startsWith(other.steps, this.steps) ? other.steps : [...this.steps, ...theirs.last]
+    return frameLocator(this.owner, steps)
+  }
   filter(options: Locator.FilterOptions) {
     return this.with([...this.steps, {
       _tag: "Filter",
@@ -179,10 +219,10 @@ export class LocatorImpl implements Locator.Locator {
     }])
   }
   and(other: Locator.ReadonlyLocator) {
-    return this.with([...this.steps, { _tag: "And", other: this.samePage(other, "and") }])
+    return this.with([...this.steps, { _tag: "And", other: this.sameDocument(other, "and") }])
   }
   or(other: Locator.ReadonlyLocator) {
-    return this.with([...this.steps, { _tag: "Or", other: this.samePage(other, "or") }])
+    return this.with([...this.steps, { _tag: "Or", other: this.sameDocument(other, "or") }])
   }
   nth(index: number) {
     return this.with([...this.steps, { _tag: "Nth", index }])
@@ -197,12 +237,18 @@ export class LocatorImpl implements Locator.Locator {
     return new LocatorImpl(this.owner, this.steps, Option.some(label))
   }
 
-  // The other locator's steps; one from another page is a mistake in the code, a defect
-  private samePage(other: Locator.ReadonlyLocator, member: string): ReadonlyArray<Engine.Step> {
+  // The other locator's steps in this one's document; one from another page or frame is a mistake in the code, a
+  // defect
+  private sameDocument(other: Locator.ReadonlyLocator, member: string): ReadonlyArray<Engine.Step> {
     if (!(other instanceof LocatorImpl) || other.owner.page.id !== this.owner.page.id) {
       throw new Error(`Locator.${member}: the other locator belongs to another page`)
     }
-    return other.steps
+    const mine = Runtime.split(this.steps)
+    const theirs = Runtime.split(other.steps)
+    if (JSON.stringify(mine.frames) !== JSON.stringify(theirs.frames)) {
+      throw new Error(`Locator.${member}: the other locator is in another frame`)
+    }
+    return theirs.last
   }
 
   // ── Reads ──
@@ -211,7 +257,10 @@ export class LocatorImpl implements Locator.Locator {
     return this.read(
       "Locator.count",
       { op: "count", steps: this.steps },
-      (response) => response._tag === "Count" ? Effect.succeed(response.count) : this.unexpected(response)
+      (response, id) =>
+        response._tag === "Count"
+          ? Effect.succeed(response.count)
+          : this.unmatched("Locator.count", response, id)
     )
   }
 
@@ -222,9 +271,7 @@ export class LocatorImpl implements Locator.Locator {
       (response, id) =>
         response._tag === "Visible"
           ? Effect.succeed(response.visible)
-          : response._tag === "Strict"
-          ? Effect.fail(this.strict("Locator.isVisible", response, id))
-          : this.unexpected(response)
+          : this.unmatched("Locator.isVisible", response, id)
     )
   }
 
@@ -254,8 +301,96 @@ export class LocatorImpl implements Locator.Locator {
   get isChecked() {
     return this.readOne("Locator.isChecked", { _tag: "Checked" }, (value) => value as boolean)
   }
-  snapshot = NotBuilt.fn("Locator.snapshot") as Locator.Locator["snapshot"]
-  evaluate = NotBuilt.fn("Locator.evaluate") as Locator.Locator["evaluate"]
+  /** A snapshot of the one match's subtree, now (review 18, candidate 3): a read, so it never waits. */
+  snapshot(options?: Snapshot.Options) {
+    const operation = "Locator.snapshot"
+    return Effect.gen({ self: this }, function*() {
+      const id = Operation.operationId()
+      const budget = yield* Operation.budget
+      const taken = yield* Snapshots.take(this.owner, this.steps, options, id, budget.at).pipe(
+        Effect.mapError((failure) => this.sendFailure(operation, failure, id, budget))
+      )
+      if (taken._tag === "Taken") return taken.snapshot as Snapshot.Snapshot<Locator.Locator>
+      if (taken.response._tag === "NoMatch") {
+        return yield* Effect.fail(this.error(
+          operation,
+          new Locator.NoMatch({ hint: "A snapshot never waits; Expect waits for what it expects" }),
+          id
+        ))
+      }
+      return yield* this.unmatched(operation, taken.response, id)
+    }).pipe(Effect.withSpan(operation, { attributes: { "browser.locator": this.description } }))
+  }
+
+  /**
+   * Calls `fn` in the caller's isolated world of the one match's document, with the match first (review 18,
+   * candidate 1): resolved now, as a read is, and passed by its node binding, since the engine's world isn't the
+   * caller's.
+   */
+  evaluate<Args extends ReadonlyArray<unknown>, B>(
+    fn: (element: Element, ...args: Args) => B | Promise<B>,
+    ...args: Args
+  ): Effect.Effect<JSHandle.Serialized<B>, Locator.LocatorError | Target.TargetGone | Deadline.Timeout> {
+    const operation = "Locator.evaluate"
+    const owner = this.owner
+    return Effect.gen({ self: this }, function*() {
+      const id = Operation.operationId()
+      const budget = yield* Operation.budget
+      const found = yield* Runtime.element(owner.runtime, owner.page, this.steps, id, budget.at).pipe(
+        Effect.mapError((failure) => this.sendFailure(operation, failure, id, budget))
+      )
+      if (found._tag === "Response") {
+        const response = found.response
+        switch (response._tag) {
+          case "NoMatch":
+            return yield* Effect.fail(this.error(
+              operation,
+              new Locator.NoMatch({ hint: "evaluate resolves the match now and never waits; Expect waits for it" }),
+              id
+            ))
+          case "InvalidSelector":
+            return yield* Effect.fail(this.invalidSelector(operation, response, id))
+          default:
+            return yield* this.unmatched(operation, response, id)
+        }
+      }
+      const value = yield* Effect.gen(function*() {
+        const realm = yield* Evaluation.documentRealm(
+          owner.runtime,
+          found.routed.document,
+          Evaluation.isolatedWorld,
+          id
+        )
+        const rest = yield* Evaluation.toLocal(args, realm, 1)
+        const result = yield* Evaluation.call(owner.runtime, {
+          realm,
+          functionDeclaration: fn.toString(),
+          arguments: [{ _tag: "Node", node: found.node }, ...rest],
+          result: "value",
+          userActivation: false,
+          page: Option.some(owner.page),
+          at: budget.at,
+          id
+        })
+        return yield* Evaluation.fromRemote(result)
+      }).pipe(Effect.mapError((failure) =>
+        failure._tag === "Gone"
+          ? failure.error
+          : failure._tag === "Deadline"
+          ? Operation.timeout({
+            operation,
+            id,
+            phase: "dispatchedUnconfirmed",
+            budget: budget.budget,
+            history: [],
+            hint: Option.some("The page didn't answer before the deadline; the function may still be running"),
+            dispatch: { _tag: "MayHaveBeenSent" }
+          })
+          : this.error(operation, failure.reason, id)
+      ))
+      return value as JSHandle.Serialized<B>
+    }).pipe(Effect.withSpan(operation, { attributes: { "browser.locator": this.description } }))
+  }
 
   /** A one-shot read of the one match (review 16, candidate 6): strict, and immediate. */
   private readOne<A>(operation: string, what: Engine.Read, value: (read: unknown) => A) {
@@ -274,7 +409,7 @@ export class LocatorImpl implements Locator.Locator {
         case "Final":
           return Effect.fail(this.final(operation, response.final, id))
         default:
-          return this.unexpected(response)
+          return this.unmatched(operation, response, id)
       }
     })
   }
@@ -339,9 +474,9 @@ export class LocatorImpl implements Locator.Locator {
         options,
         focusChecks,
         { _tag: "Focus" },
-        (_ready, send) =>
+        (_ready, io) =>
           Effect.as(
-            send(Input.press(this.owner.page.inputState, definition, options?.modifiers ?? [])),
+            io.send(Input.press(this.owner.page.inputState, definition, options?.modifiers ?? [])),
             "done" as const
           )
       )
@@ -355,12 +490,12 @@ export class LocatorImpl implements Locator.Locator {
       options,
       focusChecks,
       { _tag: "Focus" },
-      (_ready, send) =>
+      (_ready, io) =>
         Effect.as(
           Effect.forEach(characters, (character, index) =>
             Effect.andThen(
               index > 0 && Duration.isGreaterThan(delay, Duration.zero) ? Effect.sleep(delay) : Effect.void,
-              send(Input.press(this.owner.page.inputState, Keys.forCharacter(character)))
+              io.send(Input.press(this.owner.page.inputState, Keys.forCharacter(character)))
             ), { discard: true }),
           "done" as const
         ),
@@ -387,7 +522,7 @@ export class LocatorImpl implements Locator.Locator {
       options,
       noChecks,
       { _tag: "FileInput" },
-      (_ready, _send, id) =>
+      (_ready, _io, id) =>
         Effect.gen({ self: this }, function*() {
           const paths: Array<string> = []
           for (const file of list) {
@@ -407,13 +542,13 @@ export class LocatorImpl implements Locator.Locator {
             }
             paths.push(path)
           }
-          const binding = yield* Runtime.element(owner.runtime, owner.page, this.steps, id).pipe(
-            Effect.mapError((failure) => this.sendFailure("Locator.setInputFiles", failure, id, undefined))
+          const budget = yield* Operation.budget
+          const found = yield* Runtime.element(owner.runtime, owner.page, this.steps, id, budget.at).pipe(
+            Effect.mapError((failure) => this.sendFailure("Locator.setInputFiles", failure, id, budget))
           )
-          if (Option.isNone(binding)) {
-            return yield* Effect.die(new Error("Locator.setInputFiles: the browser gave no binding for the file input"))
-          }
-          yield* owner.runtime.model.adapter.setInputFiles(binding.value, paths).pipe(
+          // The input went between the checks and now: check again
+          if (found._tag !== "Found") return { retry: { _tag: "NoMatch" } } as const
+          yield* owner.runtime.model.adapter.setInputFiles(found.node, paths).pipe(
             Effect.mapError((error) => this.adapterFailure("Locator.setInputFiles", error, id))
           )
           return "done" as const
@@ -518,6 +653,29 @@ export class LocatorImpl implements Locator.Locator {
     return Effect.die(new Error(`The engine answered ${response._tag} unexpectedly`))
   }
 
+  /**
+   * An answer that isn't the one asked for: several matches, an iframe on the way that isn't one, a selector that
+   * doesn't parse, a ref that went stale, or a bug.
+   */
+  unmatched(
+    operation: string,
+    response: Engine.Response,
+    id: Diagnostics.OperationId
+  ): Effect.Effect<never, Locator.LocatorError> {
+    switch (response._tag) {
+      case "Strict":
+        return Effect.fail(this.strict(operation, response, id))
+      case "Final":
+        return Effect.fail(this.final(operation, response.final, id))
+      case "InvalidSelector":
+        return Effect.fail(this.invalidSelector(operation, response, id))
+      case "StaleRef":
+        return Effect.fail(this.error(operation, staleRef(response.why), id))
+      default:
+        return this.unexpected(response)
+    }
+  }
+
   /** Maps a failure to send a request onto the operation's errors. */
   sendFailure(
     operation: string,
@@ -611,7 +769,7 @@ export class LocatorImpl implements Locator.Locator {
     return Effect.gen({ self: this }, function*() {
       const id = Operation.operationId()
       const budget = yield* Operation.budget
-      const response = yield* Runtime.send(
+      const answer = yield* Runtime.sendRouted(
         this.owner.runtime,
         this.owner.page,
         {
@@ -631,7 +789,18 @@ export class LocatorImpl implements Locator.Locator {
       ).pipe(
         Effect.mapError((failure) => this.sendFailure("Locator.dragTo", failure, id, budget, "waitingForCondition"))
       )
-      return response._tag === "Ready" && response.point !== null ? Option.some(response.point) : Option.none()
+      const response = answer.response
+      if (response._tag !== "Ready" || response.point === null) return Option.none()
+      if (answer.routed.hops.length === 0) return Option.some(response.point)
+      const translated = yield* this.translate(
+        answer.routed,
+        response.point,
+        { inViewport: true, receivesPointer: false },
+        id
+      ).pipe(
+        Effect.mapError((failure) => this.sendFailure("Locator.dragTo", failure, id, budget, "waitingForCondition"))
+      )
+      return translated._tag === "Point" ? Option.some(translated.point) : Option.none()
     })
   }
 
@@ -678,11 +847,11 @@ export class LocatorImpl implements Locator.Locator {
       options,
       editChecks,
       { _tag: "Fill", value: text },
-      (ready, send) =>
+      (ready, io) =>
         ready.fill === "set"
           ? Effect.succeed("done" as const)
           : Effect.as(
-            send(
+            io.send(
               text === ""
                 ? Input.press(this.owner.page.inputState, Keys.definition("Delete")!)
                 : [{ _tag: "InsertText", text }]
@@ -721,7 +890,7 @@ export class LocatorImpl implements Locator.Locator {
       options,
       pointerChecks,
       { _tag: "Point", position, guard },
-      (ready, send, id) =>
+      (ready, io, id) =>
         Effect.gen({ self: this }, function*() {
           const state = owner.page.inputState
           if (Input.anyModifier(state, options?.modifiers ?? [])) {
@@ -732,47 +901,90 @@ export class LocatorImpl implements Locator.Locator {
           if (extra.target !== undefined) {
             const point = yield* extra.target.pipe(Effect.orElseSucceed(() => Option.none()))
             if (Option.isNone(point)) {
-              if (guard) yield* this.disarm(id)
+              if (guard) yield* io.disarm
               return { retry: { _tag: "NoMatch" } } as const
             }
             target = point.value
           }
           const events = gesture(state, ready.point!, target)
-          yield* send(events)
+          yield* io.send(events)
           const last = events.filter((event): event is Extract<Adapter.InputEvent, { _tag: "Mouse" }> =>
             event._tag === "Mouse"
           ).at(-1)
           if (last !== undefined) state.position = { x: last.x, y: last.y }
           if (!guard) return "done" as const
-          const blocked = yield* this.disarm(id)
+          const blocked = yield* io.disarm
           return Option.isSome(blocked)
             ? { retry: { _tag: "Intercepted", by: blocked.value } as Engine.NotReady }
             : "done" as const
         }).pipe(
           // A guard left armed would stop the page's next gesture: any failure after arming it removes it
-          Effect.onError(() => guard ? Effect.ignore(this.disarm(id)) : Effect.void)
+          Effect.onError(() => guard ? Effect.ignore(io.disarm) : Effect.void)
         )
     )
   }
 
-  /** Removes the guard an action armed: the element that stopped the gesture, if one did. */
-  private disarm(id: Diagnostics.OperationId) {
-    return Effect.gen({ self: this }, function*() {
-      const budget = yield* Operation.budget
-      const response = yield* Runtime.send(this.owner.runtime, this.owner.page, { op: "disarm" }, id, budget.at).pipe(
-        Effect.option
-      )
+  /** Removes the guard an action armed in a document: the element that stopped the gesture, if one did. */
+  private disarm(document: Target.DocumentId, id: Diagnostics.OperationId) {
+    return Runtime.sendToDocument(this.owner.runtime, this.owner.page, document, { op: "disarm" }, id).pipe(
+      Effect.option,
       // A document that went with the gesture took its guard with it: nothing stopped it
-      return Option.isSome(response) && response.value._tag === "Guarded" && response.value.blocked !== null
-        ? Option.some(response.value.blocked)
-        : Option.none<string>()
+      Effect.map((response) =>
+        Option.isSome(response) && Option.isSome(response.value) && response.value.value._tag === "Guarded" &&
+          response.value.value.blocked !== null
+          ? Option.some(response.value.value.blocked)
+          : Option.none<string>()
+      )
+    )
+  }
+
+  /**
+   * An action point in a frame, in the page's viewport (review 18, candidate 2): each iframe's content-box origin
+   * added, innermost first, each iframe scrolled into view in its parent when the checks ask for the viewport, and,
+   * when they ask for the pointer, the iframe hit at the point in its parent. `NotReady` when one isn't.
+   */
+  translate(
+    routed: Runtime.Routed,
+    point: { readonly x: number; readonly y: number },
+    checks: { readonly inViewport: boolean; readonly receivesPointer: boolean },
+    id: Diagnostics.OperationId
+  ): Effect.Effect<
+    | { readonly _tag: "Point"; readonly point: { x: number; y: number }; readonly origin: { x: number; y: number } }
+    | { readonly _tag: "NotReady"; readonly reason: Engine.NotReady },
+    Runtime.SendFailure
+  > {
+    const runtime = this.owner.runtime
+    const page = this.owner.page
+    return Effect.gen(function*() {
+      let at = { ...point }
+      const origin = { x: 0, y: 0 }
+      for (const hop of [...routed.hops].reverse()) {
+        const answer = yield* Runtime.sendToDocument(runtime, page, hop.document, {
+          op: "frame",
+          steps: hop.steps,
+          scroll: checks.inViewport,
+          point: checks.receivesPointer ? at : null
+        }, id)
+        if (Option.isNone(answer) || answer.value._tag !== "Frame") {
+          return { _tag: "NotReady", reason: { _tag: "NoMatch" } } as const
+        }
+        const frame = answer.value
+        // The iframe moved into view: the point inside it is right, but the next round reads it again
+        if (frame.scrolled) return { _tag: "NotReady", reason: { _tag: "OutsideViewport" } } as const
+        if (frame.covered !== null) return { _tag: "NotReady", reason: { _tag: "Covered", by: frame.covered } } as const
+        at = { x: at.x + frame.origin.x, y: at.y + frame.origin.y }
+        origin.x += frame.origin.x
+        origin.y += frame.origin.y
+      }
+      return { _tag: "Point", point: at, origin } as const
     })
   }
 
   /**
-   * An action (reviews 12 and 16): rounds of checks in the page at each frame until they pass, then the page's
+   * An action (reviews 12, 16 and 18): rounds of checks in the page at each frame until they pass, then the page's
    * input permit, the checks once more with the action's part done in the page, and `perform`, which sends the
-   * input once. `perform` may ask for another round, only when a guard proved the page never saw the input.
+   * input once. `perform` may ask for another round, only when a guard proved the page never saw the input. In a
+   * frame, each round's point is translated into the page's viewport (`translate`), and input names the frame.
    */
   private act(
     operation: string,
@@ -781,9 +993,14 @@ export class LocatorImpl implements Locator.Locator {
     action: Engine.Action,
     perform: (
       ready: Extract<Engine.Response, { _tag: "Ready" }>,
-      send: (
-        events: ReadonlyArray<Adapter.InputEvent>
-      ) => Effect.Effect<void, Locator.LocatorError | Target.TargetGone>,
+      io: {
+        /** Sends input to the page, into the frame the element is in. */
+        readonly send: (
+          events: ReadonlyArray<Adapter.InputEvent>
+        ) => Effect.Effect<void, Locator.LocatorError | Target.TargetGone>
+        /** Removes the guard the round armed: what stopped the gesture, if anything did. */
+        readonly disarm: Effect.Effect<Option.Option<string>>
+      },
       id: Diagnostics.OperationId
     ) => Effect.Effect<
       "done" | { readonly retry: Engine.NotReady },
@@ -798,7 +1015,7 @@ export class LocatorImpl implements Locator.Locator {
       const checks = checksFor(defaults, options?.checks)
       const history: Array<Diagnostics.ObservedValue> = []
       const round = (cap: number, apply: boolean) =>
-        Runtime.send(
+        Runtime.sendRouted(
           owner.runtime,
           owner.page,
           { op: "act", steps: this.steps, checks, cap, action, apply },
@@ -845,26 +1062,49 @@ export class LocatorImpl implements Locator.Locator {
           )
         })
       }
-      const settle = (response: Engine.Response) => {
-        switch (response._tag) {
-          case "Strict":
-            return Effect.fail(this.strict(operation, response, id))
-          case "InvalidSelector":
-            return Effect.fail(this.invalidSelector(operation, response, id))
-          case "Final":
-            return Effect.fail(this.final(operation, response.final, id))
-          case "NotReady":
-            for (const reason of response.history) Operation.appendObservation(history, reason)
-            Operation.appendObservation(history, response.reason)
-            return Effect.succeed(Option.none<Extract<Engine.Response, { _tag: "Ready" }>>())
-          case "Ready":
-            return Effect.succeed(Option.some(response))
-          default:
-            return this.unexpected(response)
-        }
+      const notReady = (reason: Engine.NotReady) => {
+        Operation.appendObservation(history, reason)
+        return Option.none<Ready>()
       }
+      /** A round's answer: ready, with its point in the page's viewport, or not yet. */
+      const settle = (answer: Runtime.Answer) =>
+        Effect.gen({ self: this }, function*() {
+          const response = answer.response
+          switch (response._tag) {
+            case "Strict":
+              return yield* Effect.fail(this.strict(operation, response, id))
+            case "InvalidSelector":
+              return yield* Effect.fail(this.invalidSelector(operation, response, id))
+            case "Final":
+              return yield* Effect.fail(this.final(operation, response.final, id))
+            case "NotReady":
+              for (const reason of response.history) Operation.appendObservation(history, reason)
+              // A round cut short before it checked anything adds nothing to what was seen
+              return response.checked ? notReady(response.reason) : Option.none<Ready>()
+            case "Ready": {
+              if (answer.routed.hops.length === 0 || response.point === null) {
+                return Option.some<Ready>({ response, routed: answer.routed, origin: { x: 0, y: 0 } })
+              }
+              const translated = yield* this.translate(answer.routed, response.point, checks, id).pipe(
+                Effect.mapError((failure) =>
+                  failure._tag === "Deadline"
+                    ? failure
+                    : this.sendFailure(operation, failure, id, budget, "waitingForCondition")
+                )
+              )
+              if (translated._tag === "NotReady") return notReady(translated.reason)
+              return Option.some<Ready>({
+                response: { ...response, point: translated.point },
+                routed: answer.routed,
+                origin: translated.origin
+              })
+            }
+            default:
+              return yield* this.unmatched(operation, response, id)
+          }
+        })
       // Input reaches the page from here: a dialog it opens may block it, and a dialog nothing will decide fails it
-      const send = (events: ReadonlyArray<Adapter.InputEvent>) =>
+      const send = (ready: Ready) => (events: ReadonlyArray<Adapter.InputEvent>) =>
         Effect.suspend(() => {
           if (Option.isSome(owner.page.inputState.broken)) {
             return Effect.fail(this.error(
@@ -880,7 +1120,12 @@ export class LocatorImpl implements Locator.Locator {
             ))
           }
           sent = true
-          return owner.runtime.model.adapter.dispatchInput(owner.page.id, events).pipe(
+          const frame = ready.routed.hops.at(-1)
+          return owner.runtime.model.adapter.dispatchInput(
+            owner.page.id,
+            events,
+            frame === undefined ? undefined : { frame: frame.frame, origin: ready.origin }
+          ).pipe(
             Effect.mapError((error): Runtime.SendFailure => Operation.fromAdapter(error, id, owner.runtime.backend)),
             Effect.raceFirst(Runtime.promptBlocked(owner.page, true)),
             Effect.mapError((failure) =>
@@ -902,20 +1147,28 @@ export class LocatorImpl implements Locator.Locator {
         const left = Operation.millisLeft(budget.at)
         if (left <= 0) return yield* Effect.fail(timedOut())
         const first = yield* round(Math.min(1000, left), false).pipe(
-          Effect.catch((failure) => failure._tag === "Deadline" ? Effect.fail(timedOut()) : Effect.fail(failure)),
-          Effect.flatMap(settle)
+          Effect.flatMap(settle),
+          Effect.catch((failure) => failure._tag === "Deadline" ? Effect.fail(timedOut()) : Effect.fail(failure))
         )
         if (Option.isNone(first)) continue
         // Input to a page is serialized; acquiring the permit takes from the deadline, and the checks run again
         const outcome = yield* owner.page.input.withPermit(Effect.gen({ self: this }, function*() {
-          const again = yield* round(Math.min(1000, Operation.millisLeft(budget.at)), options?.trial !== true).pipe(
+          const apply = options?.trial !== true
+          const answer = yield* round(Math.min(1000, Operation.millisLeft(budget.at)), apply).pipe(
+            Effect.catch((failure) => failure._tag === "Deadline" ? Effect.fail(timedOut()) : Effect.fail(failure))
+          )
+          const disarm = this.disarm(answer.routed.document, id)
+          const again = yield* settle(answer).pipe(
             Effect.catch((failure) => failure._tag === "Deadline" ? Effect.fail(timedOut()) : Effect.fail(failure)),
-            Effect.flatMap(settle)
+            // A guard the round armed comes off when the point outside its frame wasn't ready
+            Effect.tap((ready) =>
+              Option.isNone(ready) && apply && answer.response._tag === "Ready" ? Effect.ignore(disarm) : Effect.void
+            )
           )
           if (Option.isNone(again)) return "again" as const
           // A trial stops at the last check, holding the permit as the action would
           if (options?.trial === true) return "done" as const
-          const done = yield* perform(again.value, send, id)
+          const done = yield* perform(again.value.response, { send: send(again.value), disarm }, id)
           if (done === "done") return "done" as const
           // The guard stopped the gesture before the page saw it: nothing happened, so check again
           sent = false
@@ -966,3 +1219,43 @@ export class LocatorImpl implements Locator.Locator {
 /** A page's root locator queries. */
 export const pageQueries = (owner: Owner): Locator.Queries<Locator.Locator> =>
   queries([], (steps) => new LocatorImpl(owner, steps))
+
+/** Whether `steps` begins with `prefix`. */
+const startsWith = (steps: ReadonlyArray<Engine.Step>, prefix: ReadonlyArray<Engine.Step>) =>
+  prefix.length <= steps.length && JSON.stringify(steps.slice(0, prefix.length)) === JSON.stringify(prefix)
+
+/**
+ * An iframe's document, entered by its element (review 18, candidate 2): the iframe's steps and a boundary, which
+ * every locator it makes begins with.
+ */
+export const frameLocator = (owner: Owner, steps: ReadonlyArray<Engine.Step>): Locator.FrameLocator => {
+  const inside: ReadonlyArray<Engine.Step> = [...steps, { _tag: "Frame" }]
+  const make = (each: ReadonlyArray<Engine.Step>) => new LocatorImpl(owner, each)
+  return {
+    ...queries(inside, make),
+    owner: make(steps),
+    frame: (iframe) => {
+      if (!(iframe instanceof LocatorImpl) || iframe.owner.page.id !== owner.page.id) {
+        throw new Error("FrameLocator.frame: the iframe's locator belongs to another page")
+      }
+      if (
+        !startsWith(iframe.steps, inside) ||
+        Runtime.split(iframe.steps).frames.length !== Runtime.split(inside).frames.length
+      ) {
+        throw new Error(
+          "FrameLocator.frame: the iframe's locator isn't in this frame; build it from this frame locator"
+        )
+      }
+      return frameLocator(owner, iframe.steps)
+    },
+    toString: () => `FrameLocator(page.frame(page.${describeSteps(steps)}))`
+  } as Locator.FrameLocator
+}
+
+/** `page.frame(iframe)`: the iframe may be any locator of the page's, one in a frame included. */
+export const pageFrame = (owner: Owner, iframe: Locator.ReadonlyLocator): Locator.FrameLocator => {
+  if (!(iframe instanceof LocatorImpl) || iframe.owner.page.id !== owner.page.id) {
+    throw new Error("Page.frame: the iframe's locator belongs to another page")
+  }
+  return frameLocator(owner, iframe.steps)
+}

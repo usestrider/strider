@@ -63,9 +63,9 @@ describe("StorageState.Json", () => {
             expires: Option.none(),
             httpOnly: true,
             secure: true,
-            sameSite: "lax",
+            sameSite: Option.some("lax"),
             partitionKey: { _tag: "Unpartitioned" },
-            priority: "medium"
+            priority: Option.some("medium")
           })
         ],
         origins: [{

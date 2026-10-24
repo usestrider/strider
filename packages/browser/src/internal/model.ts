@@ -5,8 +5,9 @@
  * for its end.
  *
  * It folds what the built operations read: contexts, pages, their active documents and readiness, navigations,
- * the realms the engine is installed in, and the responses of navigation requests. Frames are folded only as
- * far as attribution needs: which page each belongs to.
+ * the realms the engine is installed in, and the responses of navigation requests. Frames are folded as far
+ * as attribution and frame locators need: which page each belongs to, its parent, and its current document
+ * (review 18, candidate 2).
  *
  * Events (reviews 13 and 14): the fold publishes every event kind to channels on its page and its context
  * (`events.ts`), so it keeps which page and context each navigable, realm and request belongs to (review 14,
@@ -234,6 +235,24 @@ export interface PageEntry {
   readonly routes: Array<RouteEntry>
   /** Its dedicated workers. */
   readonly workers: SubscriptionRef.SubscriptionRef<ReadonlyArray<WorkerEntry>>
+  /** Its frame tree: its URL, its frames in the order they were added, and its end (review 18, candidate 2). */
+  readonly tree: SubscriptionRef.SubscriptionRef<FrameTreeState>
+}
+
+/** A page's frame tree, as `page.frames` shows it. */
+export interface FrameTreeState {
+  /** The page's own URL, as its status says. */
+  readonly url: string
+  readonly frames: ReadonlyArray<FrameEntry>
+  readonly closed: Option.Option<Target.CloseReason>
+}
+
+/** A frame of a page: where it is in the tree, and its current document, once one has committed. */
+export interface FrameEntry {
+  readonly id: Target.NavigableId
+  readonly parent: Target.NavigableId
+  readonly document: Option.Option<Target.DocumentId>
+  readonly url: string
 }
 
 /** A context's state: its pages, until it ends. */
@@ -295,6 +314,8 @@ export interface Model {
   readonly engineRealms: Map<Target.DocumentId, Target.RealmId>
   /** The page a navigable belongs to: itself, or the page whose frame it is. */
   readonly pageOf: (navigable: Target.NavigableId) => Option.Option<PageEntry>
+  /** A page's or a frame's current document; `None` until one commits, and once it is gone. */
+  readonly documentOf: (navigable: Target.NavigableId) => Effect.Effect<Option.Option<Target.DocumentId>>
   /** Ends when the connection does. */
   readonly lost: Deferred.Deferred<void>
 }
@@ -379,6 +400,44 @@ export const make = Effect.fnUntraced(function*() {
   const pageOf = (navigable: Target.NavigableId): Option.Option<PageEntry> =>
     Option.fromNullishOr(pages.get(navigable) ?? frames.get(navigable))
 
+  /** Removes a frame and the frames inside it, and ends their documents. */
+  const removeFrame = Effect.fnUntraced(function*(page: PageEntry, id: Target.NavigableId) {
+    const list = (yield* SubscriptionRef.get(page.tree)).frames
+    const gone = new Set([id])
+    for (let grew = true; grew;) {
+      grew = false
+      for (const frame of list) {
+        if (!gone.has(frame.id) && gone.has(frame.parent)) {
+          gone.add(frame.id)
+          grew = true
+        }
+      }
+    }
+    for (const frame of gone) frames.delete(frame)
+    yield* SubscriptionRef.update(page.tree, (tree) => ({
+      ...tree,
+      frames: tree.frames.filter((frame) => !gone.has(frame.id))
+    }))
+    for (const document of Array.from(documents.values())) {
+      if (gone.has(document.navigable)) yield* endDocument(document.id, { _tag: "FrameDetached" })
+    }
+  })
+
+  const documentOf = (navigable: Target.NavigableId): Effect.Effect<Option.Option<Target.DocumentId>> =>
+    Effect.gen(function*() {
+      const page = pages.get(navigable)
+      if (page !== undefined) {
+        const state = yield* SubscriptionRef.get(page.state)
+        return state._tag === "Open" ? Option.some(state.document.id) : Option.none()
+      }
+      const owner = frames.get(navigable)
+      if (owner === undefined) return Option.none()
+      const frame = (yield* SubscriptionRef.get(owner.tree)).frames.find((each) => each.id === navigable)
+      return Option.flatMap(Option.fromNullishOr(frame), (each) => each.document).pipe(
+        Option.filter((document) => documents.has(document))
+      )
+    })
+
   const ownerOfPage = (page: Option.Option<PageEntry>): Owner =>
     Option.isNone(page)
       ? nobody
@@ -436,6 +495,7 @@ export const make = Effect.fnUntraced(function*() {
       page.state,
       (state): PageState => state._tag === "Closed" ? state : { _tag: "Closed", reason, url: state.url }
     )
+    yield* SubscriptionRef.update(page.tree, (tree) => ({ ...tree, frames: [], closed: Option.some(reason) }))
     yield* Deferred.succeed(page.closed, reason)
     const context = contexts.get(page.context)
     if (context !== undefined) {
@@ -710,7 +770,8 @@ export const make = Effect.fnUntraced(function*() {
             promptHandlers: [],
             chooserHandlers: [],
             routes: [],
-            workers: yield* SubscriptionRef.make<ReadonlyArray<WorkerEntry>>([])
+            workers: yield* SubscriptionRef.make<ReadonlyArray<WorkerEntry>>([]),
+            tree: yield* SubscriptionRef.make<FrameTreeState>({ url: fact.url, frames: [], closed: Option.none() })
           }
           pages.set(fact.page, entry)
           // A popup is reported to its opener, when the backend names one (review 13, candidate 4); before the
@@ -740,7 +801,13 @@ export const make = Effect.fnUntraced(function*() {
         }
         case "FrameAdded": {
           const page = pageOf(fact.page)
-          if (Option.isSome(page)) frames.set(fact.frame, page.value)
+          if (Option.isNone(page)) return
+          frames.set(fact.frame, page.value)
+          const frame: FrameEntry = { id: fact.frame, parent: fact.parent, document: Option.none(), url: "about:blank" }
+          yield* SubscriptionRef.update(page.value.tree, (tree) => ({
+            ...tree,
+            frames: [...tree.frames.filter((each) => each.id !== fact.frame), frame]
+          }))
           return
         }
         case "NavigationStarted": {
@@ -760,7 +827,8 @@ export const make = Effect.fnUntraced(function*() {
           return
         }
         case "NavigableRemoved": {
-          frames.delete(fact.navigable)
+          const owner = frames.get(fact.navigable)
+          if (owner !== undefined) yield* removeFrame(owner, fact.navigable)
           const page = pages.get(fact.navigable)
           if (page !== undefined) {
             yield* endPage(page, fact.reason)
@@ -770,7 +838,24 @@ export const make = Effect.fnUntraced(function*() {
         case "DocumentCommitted": {
           if (Option.isSome(fact.replaced)) yield* endDocument(fact.replaced.value, { _tag: "DocumentReplaced" })
           const page = pages.get(fact.navigable)
-          // A frame's document: frames aren't folded yet
+          const owner = frames.get(fact.navigable)
+          if (page === undefined && owner !== undefined) {
+            // A frame's document (review 18, candidate 2): the frame's entry follows it
+            documents.set(fact.document, {
+              id: fact.document,
+              navigable: fact.navigable,
+              readiness: yield* SubscriptionRef.make<"loading" | "interactive" | "complete">("loading"),
+              ended: yield* Deferred.make<Target.CloseReason>(),
+              url: fact.url
+            })
+            yield* SubscriptionRef.update(owner.tree, (tree) => ({
+              ...tree,
+              frames: tree.frames.map((frame) =>
+                frame.id === fact.navigable ? { ...frame, document: Option.some(fact.document), url: fact.url } : frame
+              )
+            }))
+            return
+          }
           if (page === undefined) return
           documents.set(fact.document, {
             id: fact.document,
@@ -787,14 +872,28 @@ export const make = Effect.fnUntraced(function*() {
               prompt: state._tag === "Open" ? state.prompt : Option.none(),
               undecided: state._tag === "Open" ? state.undecided : Option.none()
             })
+          yield* SubscriptionRef.update(page.tree, (tree) => ({ ...tree, url: fact.url }))
           return
         }
         case "DocumentUrlChanged": {
           const document = documents.get(fact.document)
           if (document !== undefined) document.url = fact.url
+          const owner = document === undefined ? undefined : frames.get(document.navigable)
+          if (owner !== undefined) {
+            yield* SubscriptionRef.update(owner.tree, (tree) => ({
+              ...tree,
+              frames: tree.frames.map((frame) =>
+                Option.contains(frame.document, fact.document) ? { ...frame, url: fact.url } : frame
+              )
+            }))
+          }
           const page = document === undefined ? undefined : pages.get(document.navigable)
           if (page !== undefined) {
             yield* setOpen(page, (open) => open.document.id === fact.document ? { ...open, url: fact.url } : open)
+            const state = yield* SubscriptionRef.get(page.state)
+            if (state._tag === "Open" && state.document.id === fact.document) {
+              yield* SubscriptionRef.update(page.tree, (tree) => ({ ...tree, url: fact.url }))
+            }
           }
           return
         }
@@ -1092,6 +1191,7 @@ export const make = Effect.fnUntraced(function*() {
         response: (hop) => Option.fromNullishOr(responses.get(hop)),
         engineRealms,
         pageOf,
+        documentOf,
         lost
       }
     })

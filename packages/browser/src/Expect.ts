@@ -28,6 +28,7 @@ import type * as Condition from "./Condition.ts"
 import * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import { now } from "./internal/adapter.ts"
+import * as AriaPatterns from "./internal/ariaPattern.ts"
 import * as ConditionImpl from "./internal/condition.ts"
 import type * as Engine from "./internal/engine.ts"
 import * as Handles from "./internal/handles.ts"
@@ -35,7 +36,9 @@ import { LocatorImpl } from "./internal/locator.ts"
 import type * as Model from "./internal/model.ts"
 import * as Operation from "./internal/operation.ts"
 import * as Runtime from "./internal/runtime.ts"
+import { describeSteps } from "./internal/steps.ts"
 import type * as Locator from "./Locator.ts"
+import type * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Page from "./Page.ts"
 import type * as Target from "./Target.ts"
 import type * as Watchable from "./Watchable.ts"
@@ -258,7 +261,18 @@ export const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]> 
  * @category matchers
  * @since 0.1.0
  */
-export declare const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPattern.AriaPattern]>
+export const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPattern.AriaPattern]> = dual(
+  2,
+  (locator: Locator.ReadonlyLocator, pattern: AriaPattern.AriaPattern) => {
+    const data = AriaPatterns.pattern(pattern)
+    return expectLocator(
+      locator,
+      { _tag: "Aria", pattern: data },
+      "toMatchAria",
+      `to match ${AriaPatterns.describe(data)}`
+    )
+  }
+)
 
 /**
  * Expects the page's URL to match.
@@ -433,7 +447,8 @@ const failure = (
   started: number,
   history: ReadonlyArray<Diagnostics.ObservedValue>,
   checks: number,
-  triggers: ReadonlySet<"initial" | "change" | "interval">
+  triggers: ReadonlySet<"initial" | "change" | "interval">,
+  explained: Explained = { nearest: Option.none(), suggestions: [] }
 ) =>
   new ExpectationFailed({
     subject,
@@ -442,10 +457,51 @@ const failure = (
     history: [...history],
     elapsed: Duration.millis((now() - started) / 1e6),
     checks: { count: checks, triggeredBy: Array.from(triggers) },
-    nearest: Option.none(),
-    suggestions: [],
+    nearest: explained.nearest,
+    suggestions: explained.suggestions,
     diagnostics: Operation.diagnostics(id, { last: Option.fromNullishOr(history.at(-1)) })
   })
+
+/** What a failed expectation says when nothing matched its locator (review 18, candidate 4). */
+interface Explained {
+  readonly nearest: Option.Option<string>
+  readonly suggestions: ReadonlyArray<string>
+}
+
+/** How long explaining a failure may take, past the expectation's deadline. */
+const explainBudget = 1000
+
+/**
+ * Why a locator matched nothing: the accessibility text of what the longest matching prefix of its steps found,
+ * and locators for elements near it with the role it asked for and a close name. Nothing when it matches now.
+ */
+const explain = (subject: InPage, id: Diagnostics.OperationId): Effect.Effect<Explained> => {
+  const none: Explained = { nearest: Option.none(), suggestions: [] }
+  if (subject.steps.length === 0) return Effect.succeed(none)
+  const at = (now() + explainBudget * 1e6) as MonotonicInstant.MonotonicInstant
+  return Runtime.send(subject.runtime, subject.page, { op: "explain", steps: subject.steps }, id, at).pipe(
+    Effect.map((response): Explained => {
+      if (response._tag !== "Explained" || response.matched) return none
+      const boundary = subject.steps.findLastIndex((step) => step._tag === "Frame")
+      const frames = subject.steps.slice(0, boundary + 1)
+      const last = subject.steps.slice(boundary + 1)
+      return {
+        nearest: Option.fromNullishOr(response.nearest),
+        suggestions: response.suggestions.map((suggestion) =>
+          `page.${
+            describeSteps([...frames, ...last.slice(0, response.prefix), {
+              _tag: "Role",
+              role: suggestion.role,
+              name: { _tag: "String", value: suggestion.name, exact: true },
+              includeHidden: false
+            }])
+          }`
+        )
+      }
+    }),
+    Effect.orElseSucceed(() => none)
+  )
+}
 
 interface InPage {
   readonly runtime: Runtime.Runtime
@@ -487,10 +543,18 @@ const expectIn = (subject: InPage, expectation: Engine.Expectation, matcherName:
     const history: Array<Diagnostics.ObservedValue> = []
     const triggers = new Set<"initial" | "change" | "interval">(["initial"])
     let checks = 0
-    const failed = () => failure(id, subject.description, condition, started, history, checks, triggers)
+    const failed = () =>
+      Effect.flatMap(
+        // A count or absence is about matching nothing, and a title has no locator: nothing to explain
+        expectation._tag === "Count" || expectation._tag === "Hidden" || expectation._tag === "Title"
+          ? Effect.succeed<Explained>({ nearest: Option.none(), suggestions: [] })
+          : explain(subject, id),
+        (explained) =>
+          Effect.fail(failure(id, subject.description, condition, started, history, checks, triggers, explained))
+      )
     while (true) {
       const left = Operation.millisLeft(budget.at)
-      if (left <= 0 && checks > 0) return yield* Effect.fail(failed())
+      if (left <= 0 && checks > 0) return yield* failed()
       checks++
       const response = yield* Runtime.send(
         subject.runtime,
@@ -511,10 +575,10 @@ const expectIn = (subject: InPage, expectation: Engine.Expectation, matcherName:
             : Effect.succeed({ error: failure.reason.message, final: failure.reason._tag === "PromptBlocking" })
         )
       )
-      if (response === null) return yield* Effect.fail(failed())
+      if (response === null) return yield* failed()
       if ("error" in response) {
         Operation.appendObservation(history, { error: response.error })
-        if (response.final) return yield* Effect.fail(failed())
+        if (response.final) return yield* failed()
         continue
       }
       switch (response._tag) {
@@ -528,7 +592,19 @@ const expectIn = (subject: InPage, expectation: Engine.Expectation, matcherName:
           Operation.appendObservation(history, {
             error: `invalid selector ${JSON.stringify(response.selector)}: ${response.message}`
           })
-          return yield* Effect.fail(failed())
+          return yield* failed()
+        case "Strict":
+          // An iframe on the way matches more than one element (review 18, candidate 2): waiting may narrow it
+          Operation.appendObservation(history, { error: `an iframe on the way matches ${response.count} elements` })
+          break
+        case "StaleRef":
+          // A ref never rebinds, so waiting can't mend it (review 18, candidate 3)
+          Operation.appendObservation(history, { error: `stale ref (${response.why})` })
+          return yield* failed()
+        case "Final":
+          // An iframe on the way that isn't one never will be
+          Operation.appendObservation(history, { error: `${response.final.element} on the way isn't an iframe` })
+          return yield* failed()
         default:
           Operation.appendObservation(history, { error: `unexpected answer ${response._tag}` })
       }

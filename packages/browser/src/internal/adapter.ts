@@ -394,10 +394,14 @@ export type RemoteValue =
     readonly handle?: HandleId | undefined
   }
 
-/** An argument for an evaluation: a value to serialize, or a handle the caller holds. */
+/**
+ * An argument for an evaluation: a value to serialize, a handle the caller holds, or a node by its binding,
+ * resolved in the realm called, whichever world it came from (review 18, candidate 1).
+ */
 export type LocalValue =
   | { readonly _tag: "Value"; readonly value: RemoteValue }
   | { readonly _tag: "Handle"; readonly handle: HandleId }
+  | { readonly _tag: "Node"; readonly node: NodeBinding }
 
 /** A function to call in a realm. */
 export interface EvaluationCall {
@@ -599,6 +603,10 @@ export interface ScreenshotOptions {
   >
   /** The whole page, beyond the viewport. */
   readonly fullPage: boolean
+  /** One image pixel per CSS pixel, or per device pixel (`screenshot.cssScale`; review 18, candidate 5). */
+  readonly scale: "css" | "device"
+  /** The default white background made transparent (`screenshot.omitBackground`). */
+  readonly omitBackground: boolean
 }
 
 /** Settings for printing a page to PDF. */
@@ -611,6 +619,11 @@ export interface PdfOptions {
   readonly paperHeight: number
   readonly margins: { readonly top: number; readonly bottom: number; readonly left: number; readonly right: number }
   readonly pageRanges: Option.Option<string>
+  /** HTML templates for each page's header and footer (`pdf.headerFooter`; review 18, candidate 5). */
+  readonly header: Option.Option<string>
+  readonly footer: Option.Option<string>
+  /** The page's CSS `@page` size over `paperWidth` and `paperHeight` (`pdf.preferCssPageSize`). */
+  readonly preferCssPageSize: boolean
 }
 
 /** A cookie, as every backend can read and write it. */
@@ -624,8 +637,16 @@ export interface Cookie {
   readonly httpOnly: boolean
   readonly secure: boolean
   readonly sameSite: Option.Option<"Strict" | "Lax" | "None">
-  /** The top-level site of a partitioned cookie. */
-  readonly partitionKey: Option.Option<string>
+  /**
+   * A partitioned cookie's partition: its top-level site, and whether a cross-site frame set it where the backend
+   * says (`cookies.partitioned`; review 18, candidate 6).
+   */
+  readonly partitionKey: Option.Option<{
+    readonly topLevelSite: string
+    readonly crossSiteAncestor: Option.Option<boolean>
+  }>
+  /** Chromium's priority; `None` elsewhere. */
+  readonly priority: Option.Option<"Low" | "Medium" | "High">
 }
 
 /** Settings for a new user context. */
@@ -735,16 +756,27 @@ export interface AdapterConnection {
   ) => Effect.Effect<Option.Option<PageNavigation.Id>, AdapterError>
 
   // Realms
-  /** The realm of a document's world, created for an isolated world that doesn't exist yet. */
+  /**
+   * The realm of a document's world, created for an isolated world that doesn't exist yet. The main world's is
+   * waited for, since a backend reports it a moment after the document commits, until the document ends.
+   */
   readonly realm: (document: Target.DocumentId, world: World) => Effect.Effect<Target.RealmId, AdapterError>
   readonly evaluate: (realm: Target.RealmId, call: EvaluationCall) => Effect.Effect<RemoteResult, AdapterError>
   readonly releaseHandles: (handles: ReadonlyArray<HandleId>) => Effect.Effect<void>
 
   // Input
+  /**
+   * Sends input to a page, in its viewport's coordinates. Input aimed inside a frame names it, with the frame's
+   * viewport origin in the page's coordinates: a backend that can't deliver page coordinates into a frame sends
+   * the frame's own (BiDi, review 18, P1 and P2).
+   */
   readonly dispatchInput: (
     page: Target.NavigableId,
-    events: ReadonlyArray<InputEvent>
+    events: ReadonlyArray<InputEvent>,
+    frame?: { readonly frame: Target.NavigableId; readonly origin: { readonly x: number; readonly y: number } }
   ) => Effect.Effect<void, AdapterError>
+  /** The frame an iframe element holds, by the element's binding; `None` while it holds none (review 18, P3). */
+  readonly contentFrame: (node: NodeBinding) => Effect.Effect<Option.Option<Target.NavigableId>, AdapterError>
 
   // Obligations and declarations
   readonly resolve: (obligation: ObligationId, decision: Decision) => Effect.Effect<void, AdapterError>

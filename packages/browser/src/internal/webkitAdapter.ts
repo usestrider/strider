@@ -564,7 +564,14 @@ const capabilities = (info: Browser.Info) => {
       entry("emulation.cpuSlowdown", "unsupported", ["Playwright's WebKit has no CPU throttling"]),
       entry("emulation.javaScript", "supported", ["a document already loaded keeps running its scripts"]),
       entry("emulation.touch", "unsupported", ["WebKit's touch override changes nothing a page sees"]),
-      entry("emulation.focus", "supported")
+      entry("emulation.focus", "supported"),
+      // Review 18
+      entry("screenshot.cssScale", "supported"),
+      entry("screenshot.omitBackground", "supported"),
+      entry("pdf.headerFooter", "unsupported", ["Playwright's WebKit has no print-to-PDF"]),
+      entry("pdf.preferCssPageSize", "unsupported", ["Playwright's WebKit has no print-to-PDF"]),
+      entry("cookies.partitioned", "unsupported", ["Playwright's WebKit doesn't report partitioned cookies"]),
+      entry("snapshot.clickListeners", "unsupported", ["Playwright's WebKit can't list event listeners"])
     ]
   })
 }
@@ -2455,13 +2462,10 @@ export const connect: (
         )
       const existing = find()
       if (existing !== undefined) return existing.id
-      if (world._tag === "Main") {
-        return yield* Effect.fail(unsupported("mainWorld", "The document has no main-world realm yet"))
-      }
-      // A world the page has already comes to each new document, reported a moment after it commits; creating
-      // it again fails (review 17's build), so wait for its report, or the document's end
+      // The main world, and a world the page has already, come to each new document, reported a moment after it
+      // commits; creating a world again fails (review 17's build), so wait for its report, or the document's end
       const page = document.frame.page
-      if (page.worlds.has(world.name)) {
+      if (world._tag === "Main" || page.worlds.has(world.name)) {
         yield* Effect.callback<void>((resume) => {
           const check = () => {
             if (find() !== undefined || !documents.has(id)) {
@@ -2531,13 +2535,34 @@ export const connect: (
         realm.ended || error.reason._tag === "SessionEnded"
           ? gone({ _tag: "Realm", id }, { _tag: "RealmDestroyed" })
           : protocolError(error)
+      // A node crosses into this realm by its binding, an object of whichever world returned it (review 18,
+      // candidate 1)
+      const nodes = new Map<string, string>()
+      for (const argument of call.arguments) {
+        if (argument._tag !== "Node" || nodes.has(argument.node.binding)) continue
+        const { object } = yield* DOM.resolveNode({
+          objectId: argument.node.binding as Runtime.RemoteObjectId,
+          ...(realm.contextId === undefined
+            ? {}
+            : { executionContextId: realm.contextId as Runtime.ExecutionContextId })
+        }).pipe(on, Effect.mapError(realmGone))
+        if (object.objectId !== undefined) nodes.set(argument.node.binding, object.objectId)
+      }
+      const released = Effect.forEach(
+        nodes.values(),
+        (objectId) => Runtime.releaseObject({ objectId: objectId as Runtime.RemoteObjectId }).pipe(on, Effect.ignore),
+        { discard: true }
+      )
       const reply = yield* Runtime.callFunctionOn({
         objectId: helper as Runtime.RemoteObjectId,
         functionDeclaration: Utility.call(call.functionDeclaration, call.result, call.awaitPromise),
         arguments: [
-          { value: call.arguments.map((argument) => argument._tag === "Handle" ? "h" : "v") },
+          { value: call.arguments.map((argument) => argument._tag === "Value" ? "v" : "h") },
           ...call.arguments.map((argument): Runtime.CallArgument => {
             if (argument._tag === "Value") return { value: argument.value }
+            if (argument._tag === "Node") {
+              return { objectId: (nodes.get(argument.node.binding) ?? "") as Runtime.RemoteObjectId }
+            }
             const handle = handles.get(argument.handle)
             return { objectId: (handle?.objectId ?? "") as Runtime.RemoteObjectId }
           })
@@ -2545,7 +2570,7 @@ export const connect: (
         awaitPromise: call.awaitPromise,
         returnByValue: false,
         emulateUserGesture: call.userActivation
-      }).pipe(on, Effect.mapError(realmGone))
+      }).pipe(on, Effect.mapError(realmGone), Effect.ensuring(released))
       const document = realm.document
       const handleOf = (object: Runtime.RemoteObject): Adapter.RemoteValue => {
         const type = remoteType(object)
@@ -2618,8 +2643,9 @@ export const connect: (
           )
       }, { concurrency: "unbounded", discard: true })
 
+    // Page coordinates reach every frame (review 18, P1), so a frame changes nothing here
     const dispatchInput = Effect.fnUntraced(
-      function*(id: L1Target.NavigableId, events: ReadonlyArray<Adapter.InputEvent>) {
+      function*(id: L1Target.NavigableId, events: ReadonlyArray<Adapter.InputEvent>, _frame?: unknown) {
         const page = yield* pageOf(id)
         const on = Protocol.on(page.session)
         for (const event of events) {
@@ -2893,6 +2919,10 @@ export const connect: (
       const region = clip ?? (yield* protocol(pageSize(target, options.fullPage)).pipe(
         Effect.map(([width, height]) => ({ x: 0, y: 0, width, height }))
       ))
+      const on = Protocol.on(target.session)
+      if (options.omitBackground) {
+        yield* protocol(Page.setDefaultBackgroundColorOverride({ color: { r: 0, g: 0, b: 0, a: 0 } }).pipe(on))
+      }
       const { dataURL } = yield* protocol(
         Page.snapshotRect({
           x: Math.round(region.x),
@@ -2901,8 +2931,14 @@ export const connect: (
           height: Math.max(1, Math.round(region.height)),
           coordinateSystem: clip !== undefined || options.fullPage ? "Page" : "Viewport",
           format: options.format,
+          // A CSS pixel each (review 18, candidate 5)
+          ...(options.scale === "css" ? { omitDeviceScaleFactor: true } : {}),
           ...(Option.isSome(options.quality) ? { quality: options.quality.value } : {})
-        }).pipe(Protocol.on(target.session))
+        }).pipe(on)
+      ).pipe(
+        Effect.ensuring(
+          options.omitBackground ? Page.setDefaultBackgroundColorOverride({}).pipe(on, Effect.ignore) : Effect.void
+        )
       )
       return fromDataUrl(dataURL)
     })
@@ -2921,7 +2957,10 @@ export const connect: (
         httpOnly: cookie.httpOnly,
         secure: cookie.secure,
         sameSite: Option.some(cookie.sameSite as "Strict" | "Lax" | "None"),
-        partitionKey: Option.fromUndefinedOr(cookie.partitionKey === "" ? undefined : cookie.partitionKey)
+        partitionKey: cookie.partitionKey === undefined || cookie.partitionKey === ""
+          ? Option.none()
+          : Option.some({ topLevelSite: cookie.partitionKey, crossSiteAncestor: Option.none() }),
+        priority: Option.none()
       }))
     })
 
@@ -2940,7 +2979,7 @@ export const connect: (
             session: Option.isNone(cookie.expires),
             ...(Option.isSome(cookie.expires) ? { expires: cookie.expires.value } : {}),
             ...(Option.isSome(cookie.sameSite) ? { sameSite: cookie.sameSite.value } : {}),
-            ...(Option.isSome(cookie.partitionKey) ? { partitionKey: cookie.partitionKey.value } : {})
+            ...(Option.isSome(cookie.partitionKey) ? { partitionKey: cookie.partitionKey.value.topLevelSite } : {})
           }))
         }).pipe(Protocol.on(client.root))
       )
@@ -3007,6 +3046,20 @@ export const connect: (
       return base64Encoded ? fromBase64(body) : new TextEncoder().encode(body)
     })
 
+    // WebKit's description of an iframe names the frame it holds (review 18, P3)
+    const contentFrame = Effect.fnUntraced(function*(node: Adapter.NodeBinding) {
+      const document = documents.get(node.document)
+      if (document === undefined) {
+        return yield* Effect.fail(gone({ _tag: "Document", id: node.document }, { _tag: "DocumentReplaced" }))
+      }
+      const target = yield* targetOf(document.frame.page)
+      const described = yield* protocol(
+        DOM.describeNode({ objectId: node.binding as Runtime.RemoteObjectId }).pipe(Protocol.on(target.session))
+      )
+      const frame = described.contentFrameId === undefined ? undefined : frames.get(described.contentFrameId)
+      return Option.fromUndefinedOr(frame?.id)
+    })
+
     const setInputFiles = Effect.fnUntraced(function*(node: Adapter.NodeBinding, files: ReadonlyArray<string>) {
       const document = documents.get(node.document)
       if (document === undefined) {
@@ -3063,6 +3116,7 @@ export const connect: (
       grantPermissions,
       resetPermissions,
       responseBody,
+      contentFrame,
       requestBody,
       pausedResponseBody,
       setInputFiles,

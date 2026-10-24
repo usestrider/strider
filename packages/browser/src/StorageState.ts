@@ -25,6 +25,19 @@ export const IndexedDbDatabase = Schema.Struct({
   version: Schema.Int,
   stores: Schema.Array(Schema.Struct({
     name: Schema.String,
+    /** The store's key path; `None` for out-of-line keys. */
+    keyPath: Schema.Option(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
+    autoIncrement: Schema.Boolean,
+    indexes: Schema.Array(Schema.Struct({
+      name: Schema.String,
+      keyPath: Schema.Union([Schema.String, Schema.Array(Schema.String)]),
+      unique: Schema.Boolean,
+      multiEntry: Schema.Boolean
+    })),
+    /**
+     * Each record's key and value in the library's JSON-safe encoding, which keeps a `Date`, `RegExp`, `Map`,
+     * `Set`, `ArrayBuffer`, typed array, `bigint`, `undefined` and the numbers JSON can't write.
+     */
     records: Schema.Array(Schema.Struct({
       key: Schema.Unknown,
       value: Schema.Redacted(Schema.Unknown)

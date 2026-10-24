@@ -1,7 +1,8 @@
 /**
- * Pages (API.md, Pages; review 12, candidate 7). Built: the state (`status`, `url`, `workers`, `closed`), the
- * queries, `goto`, `reload`, `back` and `forward`, `title`, `activate`, `close`, and the keyboard and mouse. The other members fail as
- * `NotBuilt`.
+ * Pages (API.md, Pages; review 12, candidate 7). Built: the state (`status`, `url`, `frames`, `workers`, `closed`), the
+ * queries and `frame`, `goto`, `reload`, `back` and `forward`, `title`, `readHtml`, `snapshot`, `screenshot`, `pdf`,
+ * origin storage, evaluation (review 18), the declarations (review 17), `activate`, `close`, and the keyboard and
+ * mouse. The other members (`inspect`, `control`, `capability`) fail as `NotBuilt`.
  *
  * A navigation resolves at commit, with the outcome the adapter reports for the navigation it started, or with
  * the readiness `waitUntil` asks for of the document it committed, all under one deadline; a navigation with
@@ -14,18 +15,24 @@ import * as Hash from "effect/Hash"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import { pipeArguments } from "effect/Pipeable"
+import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
+import type * as JSHandle from "../JSHandle.ts"
+import type * as Locator from "../Locator.ts"
 import * as Page from "../Page.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Reason from "../Reason.ts"
 import type * as Route from "../Route.ts"
+import type * as Snapshot from "../Snapshot.ts"
 import type * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import type * as Adapter from "./adapter.ts"
+import * as Captures from "./captures.ts"
 import * as Clock from "./clock.ts"
 import * as Devices from "./devices.ts"
 import * as Emulation from "./emulation.ts"
+import * as Evaluation from "./evaluation.ts"
 import * as Handles from "./handles.ts"
 import * as InitScripts from "./initScripts.ts"
 import * as LocatorImpl from "./locator.ts"
@@ -36,6 +43,8 @@ import * as NotBuilt from "./notBuilt.ts"
 import * as Operation from "./operation.ts"
 import * as Routes from "./routes.ts"
 import * as Runtime from "./runtime.ts"
+import * as Snapshots from "./snapshot.ts"
+import * as Storage from "./storage.ts"
 import * as Watchable from "./watchable.ts"
 
 const PageTypeId = "~@usestrider/browser/Page"
@@ -51,6 +60,19 @@ const opened = (state: Model.PageState): Option.Option<Page.Status> =>
 
 const pageEnded = (state: Model.PageState): Option.Option<Target.CloseReason> =>
   state._tag === "Closed" ? Option.some(state.reason) : Option.none()
+
+/** A page's frame tree, from the model's: each frame under its parent, in the order they were added. */
+const frameTree = (page: Target.NavigableId, state: Model.FrameTreeState): Page.FrameTree => {
+  const children = (parent: Target.NavigableId): ReadonlyArray<Page.FrameTree> =>
+    state.frames.filter((frame) => frame.parent === parent).map((frame) => ({
+      id: frame.id,
+      url: frame.url as Url.Url,
+      // No backend reports a frame's name, and `window.name` is its document's to read (review 18, candidate 2)
+      name: Option.none(),
+      children: children(frame.id)
+    }))
+  return { id: page, url: state.url as Url.Url, name: Option.none(), children: children(page) }
+}
 
 const pageError = (operation: string, reason: Page.PageErrorReason, id: Diagnostics.OperationId) =>
   new Page.PageError({ operation, reason, diagnostics: Operation.diagnostics(id) })
@@ -76,6 +98,24 @@ export const make = (owner: PageOwner): Page.Page => {
     target: { _tag: "Page", id: entry.id },
     operation: "Page.status.waitFor"
   })
+
+  /** A request to the engine that got no answer, as the page's errors say it. */
+  const fromSend = (operation: string, id: Diagnostics.OperationId, budget: Operation.Budget) =>
+  (
+    failure: Runtime.SendFailure
+  ) =>
+    failure._tag === "Gone"
+      ? failure.error
+      : failure._tag === "Reason"
+      ? pageError(operation, failure.reason, id)
+      : Operation.timeout({
+        operation,
+        id,
+        phase: "resolving",
+        budget: budget.budget,
+        history: [],
+        hint: Option.none()
+      })
 
   const failure = (operation: string, id: Diagnostics.OperationId, error: Adapter.AdapterError) => {
     const mapped = Operation.fromAdapter(error, id, runtime.backend)
@@ -121,6 +161,70 @@ export const make = (owner: PageOwner): Page.Page => {
       })
     )
 
+  /**
+   * Calls a function in a world of the page's current document (review 18, candidate 1): the caller's isolated
+   * world, or the main world with user activation inside `Page.withUserGesture`.
+   */
+  const evaluation = <B, R>(
+    operation: string,
+    world: Adapter.World,
+    fn: Function,
+    args: ReadonlyArray<unknown>,
+    result: "value" | "handle",
+    then: (realm: Target.RealmId, value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>
+  ): Effect.Effect<B, Page.PageError | Target.TargetGone | Deadline.Timeout, R> =>
+    Effect.gen(function*() {
+      const id = Operation.operationId()
+      const budget = yield* Operation.budget
+      const gesture = world._tag === "Main" && (yield* Effect.service(Page.UserGesture))
+      // Set once the call is on its way: a deadline after it can't say the function didn't run
+      let called = false
+      return yield* Effect.gen(function*() {
+        const realm = yield* Evaluation.pageRealm(runtime, entry, world, id, budget.at)
+        const values = yield* Evaluation.toLocal(args, realm)
+        called = true
+        const value = yield* Evaluation.call(runtime, {
+          realm,
+          functionDeclaration: fn.toString(),
+          arguments: values,
+          result,
+          userActivation: gesture,
+          page: Option.some(entry),
+          at: budget.at,
+          id
+        })
+        return yield* then(realm, value)
+      }).pipe(
+        Effect.mapError((failure) =>
+          failure._tag === "Gone"
+            ? failure.error
+            : failure._tag === "Deadline"
+            ? Operation.timeout({
+              operation,
+              id,
+              phase: called ? "dispatchedUnconfirmed" : "resolving",
+              budget: budget.budget,
+              history: [],
+              hint: Option.some(
+                called
+                  ? "The page didn't answer before the deadline; the function may still be running"
+                  : "The page had no document to evaluate in before the deadline"
+              ),
+              dispatch: called ? { _tag: "MayHaveBeenSent" } : { _tag: "NotSent" }
+            })
+            : pageError(operation, failure.reason, id)
+        ),
+        Effect.annotateSpans({ "browser.evaluation.user_gesture": gesture })
+      )
+    }).pipe(
+      Effect.withSpan(operation, {
+        attributes: {
+          "browser.page.id": entry.id,
+          "browser.evaluation.world": world._tag === "Main" ? "main" : world.name
+        }
+      })
+    )
+
   const page: Page.Page = {
     [PageTypeId]: PageTypeId,
     id: entry.id,
@@ -132,7 +236,13 @@ export const make = (owner: PageOwner): Page.Page => {
       target: { _tag: "Page", id: entry.id },
       operation: "Page.url.waitFor"
     }),
-    frames: NotBuilt.watchable("Page.frames"),
+    frames: Watchable.make({
+      ref: entry.tree,
+      project: (state) => Option.some(frameTree(entry.id, state)),
+      ended: (state) => state.closed,
+      target: { _tag: "Page", id: entry.id },
+      operation: "Page.frames.waitFor"
+    }),
     workers: Watchable.make({
       ref: entry.workers,
       project: (workers) => Option.some(workers.map(runtime.worker)),
@@ -144,7 +254,7 @@ export const make = (owner: PageOwner): Page.Page => {
     inspect: NotBuilt.effect("Page.inspect"),
     control: NotBuilt.effect("Page.control"),
     ...queries,
-    frame: NotBuilt.sync("Page.frame") as Page.Page["frame"],
+    frame: (iframe) => LocatorImpl.pageFrame({ runtime, page: entry }, iframe),
     get title() {
       return Effect.gen(function*() {
         const id = Operation.operationId()
@@ -168,25 +278,52 @@ export const make = (owner: PageOwner): Page.Page => {
         return response._tag === "Title" ? response.title : yield* Effect.die(new Error(`Page.title: ${response._tag}`))
       }).pipe(Effect.withSpan("Page.title", { attributes: { "browser.page.id": entry.id } }))
     },
-    readHtml: NotBuilt.effect("Page.readHtml"),
-    snapshot: NotBuilt.fn("Page.snapshot") as Page.Page["snapshot"],
-    screenshot: NotBuilt.fn("Page.screenshot") as Page.Page["screenshot"],
-    pdf: NotBuilt.fn("Page.pdf") as Page.Page["pdf"],
-    localStorage: {
-      entries: NotBuilt.effect("Page.localStorage"),
-      get: NotBuilt.fn("Page.localStorage"),
-      set: NotBuilt.fn("Page.localStorage"),
-      remove: NotBuilt.fn("Page.localStorage"),
-      clear: NotBuilt.effect("Page.localStorage")
+    get readHtml() {
+      return Effect.gen(function*() {
+        const id = Operation.operationId()
+        const budget = yield* Operation.budget
+        const response = yield* Runtime.send(runtime, entry, { op: "html" }, id, budget.at).pipe(
+          Effect.mapError(fromSend("Page.readHtml", id, budget))
+        )
+        return response._tag === "Read" && typeof response.value === "string"
+          ? response.value
+          : yield* Effect.die(new Error(`Page.readHtml: ${response._tag}`))
+      }).pipe(Effect.withSpan("Page.readHtml", { attributes: { "browser.page.id": entry.id } }))
     },
-    sessionStorage: {
-      entries: NotBuilt.effect("Page.sessionStorage"),
-      get: NotBuilt.fn("Page.sessionStorage"),
-      set: NotBuilt.fn("Page.sessionStorage"),
-      remove: NotBuilt.fn("Page.sessionStorage"),
-      clear: NotBuilt.effect("Page.sessionStorage")
-    },
-    evaluate: NotBuilt.fn("Page.evaluate") as Page.Page["evaluate"],
+    snapshot: (options) =>
+      Effect.gen(function*() {
+        const id = Operation.operationId()
+        const budget = yield* Operation.budget
+        const taken = yield* Snapshots.take({ runtime, page: entry }, null, options, id, budget.at).pipe(
+          Effect.mapError(fromSend("Page.snapshot", id, budget))
+        )
+        return taken._tag === "Taken"
+          ? taken.snapshot as Snapshot.Snapshot<Locator.Locator>
+          : yield* Effect.die(new Error(`Page.snapshot: ${taken.response._tag}`))
+      }).pipe(
+        Effect.withSpan("Page.snapshot", {
+          attributes: {
+            "browser.page.id": entry.id,
+            "browser.snapshot.sources": options?.sources ?? "aria+interactivity"
+          }
+        })
+      ),
+    screenshot: (options) => Captures.screenshot(runtime, entry, options),
+    pdf: (options) => Captures.pdf(runtime, entry, options),
+    localStorage: Storage.originStorage(runtime, entry, "local"),
+    sessionStorage: Storage.originStorage(runtime, entry, "session"),
+    evaluate: <Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args) =>
+      evaluation(
+        "Page.evaluate",
+        Evaluation.isolatedWorld,
+        fn,
+        args,
+        "value",
+        (_realm, value) => Evaluation.fromRemote(value)
+      ) as Effect.Effect<
+        JSHandle.Serialized<A>,
+        Page.PageError | Target.TargetGone | Deadline.Timeout
+      >,
     capability: NotBuilt.fn("Page.capability") as Page.Page["capability"],
     context: owner.context,
     goto: (url, options) => {
@@ -239,8 +376,30 @@ export const make = (owner: PageOwner): Page.Page => {
         (id) => adapter.traverse(entry.id, 1).pipe(Effect.mapError((error) => failure("Page.forward", id, error))),
         options?.waitUntil ?? "commit"
       ),
-    evaluateInMainWorld: NotBuilt.fn("Page.evaluateInMainWorld") as Page.Page["evaluateInMainWorld"],
-    evaluateHandle: NotBuilt.fn("Page.evaluateHandle") as Page.Page["evaluateHandle"],
+    evaluateInMainWorld: <Args extends ReadonlyArray<unknown>, A>(
+      fn: (...args: Args) => A | Promise<A>,
+      ...args: Args
+    ) =>
+      evaluation(
+        "Page.evaluateInMainWorld",
+        { _tag: "Main" },
+        fn,
+        args,
+        "value",
+        (_realm, value) => Evaluation.fromRemote(value)
+      ) as Effect.Effect<
+        JSHandle.Serialized<A>,
+        Page.PageError | Target.TargetGone | Deadline.Timeout
+      >,
+    evaluateHandle: <Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args) =>
+      evaluation(
+        "Page.evaluateHandle",
+        Evaluation.isolatedWorld,
+        fn,
+        args,
+        "handle",
+        (realm, value) => Evaluation.own<Awaited<A>>(runtime, realm, value, Option.some(entry))
+      ),
     keyboard: Devices.keyboard({ runtime, page: entry }),
     mouse: Devices.mouse({ runtime, page: entry }),
     clock: Clock.make({

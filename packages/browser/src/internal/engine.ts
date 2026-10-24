@@ -8,7 +8,8 @@
  *
  * - **The tree** is the document's elements and those of every open shadow root, in tree order, a shadow
  *   root's elements right after its host. Closed shadow roots are invisible to scripts, so to the engine too;
- *   iframes are entered only through `frame()`, which isn't built.
+ *   iframes are entered only through `frame()`, whose steps L1 resolves with the engine of each document on the
+ *   way (review 18, candidate 2).
  * - **Text** is an element's text content in the flat tree (a shadow host's shadow tree, a slot's assigned
  *   nodes), skipping `script`, `style`, `noscript` and `template`, with a button-like `input`'s value, and
  *   whitespace collapsed and trimmed. Not `innerText`, which depends on layout and differs between engines.
@@ -52,6 +53,16 @@ export type Step =
   }
   | { readonly _tag: "And"; readonly other: ReadonlyArray<Step> }
   | { readonly _tag: "Or"; readonly other: ReadonlyArray<Step> }
+  /**
+   * A frame boundary (review 18, candidate 2): the steps before it find an iframe, and those after it resolve in
+   * the iframe's document. L1 splits a locator's steps at each one, so the engine never sees it.
+   */
+  | { readonly _tag: "Frame" }
+  /**
+   * A snapshot's ref (review 18, candidate 3): the one node it was given to, in the document and engine that gave
+   * it, never another. L1 checks the document; the engine its generation and the node.
+   */
+  | { readonly _tag: "Ref"; readonly document: string; readonly generation: number; readonly ref: string }
 
 /** Which actionability checks an action runs. */
 export interface Checks {
@@ -130,6 +141,42 @@ export type Expectation =
   | { readonly _tag: "Attribute"; readonly name: string; readonly expected: TextMatcher | null }
   | { readonly _tag: "Count"; readonly count: number }
   | { readonly _tag: "Title"; readonly expected: TextMatcher }
+  /** The one match's accessibility tree matches a pattern (review 18, candidate 4). */
+  | { readonly _tag: "Aria"; readonly pattern: Pattern }
+
+/** A pattern over the accessibility tree, as `AriaPattern` builds it. */
+export type Pattern =
+  | { readonly _tag: "Node"; readonly role: string; readonly name: TextMatcher; readonly children: PatternChildren }
+  | { readonly _tag: "Text"; readonly value: TextMatcher }
+
+/** How a pattern's children are matched. */
+export type PatternChildren =
+  | { readonly _tag: "Exactly"; readonly patterns: ReadonlyArray<Pattern> }
+  | { readonly _tag: "Including"; readonly patterns: ReadonlyArray<Pattern> }
+  | { readonly _tag: "Unchecked" }
+
+/** Why a ref no longer points at its node (`Locator.StaleRef`). */
+export type Stale = "Replaced" | "Detached" | "Suspended" | "BindingLost" | "OtherSnapshot"
+
+/** A node of a document's accessibility tree (review 18, candidate 3). */
+export interface SnapNode {
+  readonly ref: string | null
+  readonly role:
+    | { readonly _tag: "Aria"; readonly role: string }
+    | {
+      readonly _tag: "Inferred"
+      readonly role: "clickable" | "editable" | "focusable"
+      readonly evidence: ReadonlyArray<string>
+    }
+  readonly name:
+    | { readonly _tag: "Accessible"; readonly value: string }
+    | { readonly _tag: "Inferred"; readonly value: string; readonly from: string }
+    | { readonly _tag: "None" }
+  readonly states: ReadonlyArray<string>
+  readonly children: ReadonlyArray<SnapNode>
+  /** An iframe, whose frame's tree L1 stitches in. */
+  readonly frame: boolean
+}
 
 /** A failure no waiting can mend: the one match isn't the kind of element the operation needs. */
 export type Final =
@@ -166,6 +213,33 @@ export type Request =
   }
   | { readonly op: "title" }
   | { readonly op: "role"; readonly steps: ReadonlyArray<Step> }
+  /**
+   * An iframe on the way to a frame's element (review 18, candidate 2): its content box's origin in this
+   * document's viewport, after scrolling it into view when asked and it isn't; and, given a point in the
+   * frame's viewport, what the pointer would hit there in this document.
+   */
+  | {
+    readonly op: "frame"
+    readonly steps: ReadonlyArray<Step>
+    readonly scroll: boolean
+    readonly point: { readonly x: number; readonly y: number } | null
+  }
+  /**
+   * The accessibility tree of the document, or of the one match's subtree (review 18, candidate 3), with inferred
+   * interactivity when asked, down to `depth` levels below the root.
+   */
+  | {
+    readonly op: "snapshot"
+    readonly steps: ReadonlyArray<Step> | null
+    readonly interactivity: boolean
+    readonly depth: number | null
+  }
+  /** Why a locator matches nothing (review 18, candidate 4): the nearest match of its steps, and close names. */
+  | { readonly op: "explain"; readonly steps: ReadonlyArray<Step> }
+  /** The one match's box in its viewport, and its document's scroll offset. */
+  | { readonly op: "rect"; readonly steps: ReadonlyArray<Step> }
+  /** The document's doctype and HTML. */
+  | { readonly op: "html" }
 
 /** A candidate of an ambiguous match. */
 export interface Candidate {
@@ -196,6 +270,11 @@ export type Response =
     /** Each reason seen this round, de-duplicated in order. */
     readonly history: ReadonlyArray<NotReady>
     readonly scrolled: boolean
+    /**
+     * Whether the round saw a reason worth reporting: one the deadline cut before its first frame, or while a rect
+     * was still settling, saw nothing wrong, `reason` included.
+     */
+    readonly checked: boolean
   }
   | { readonly _tag: "Final"; readonly final: Final }
   | { readonly _tag: "Guarded"; readonly blocked: string | null }
@@ -216,9 +295,62 @@ export type Response =
     readonly _tag: "Roles"
     readonly roles: ReadonlyArray<{ readonly role: string | null; readonly name: string }>
   }
+  | {
+    readonly _tag: "Frame"
+    /** The iframe's content box, in this document's viewport. */
+    readonly origin: { readonly x: number; readonly y: number }
+    /** Whether it was scrolled into view. */
+    readonly scrolled: boolean
+    /** What covers the iframe at the point given, or `null` when the iframe itself is hit there. */
+    readonly covered: string | null
+    /** This document's scroll offset. */
+    readonly scroll: { readonly x: number; readonly y: number }
+  }
+  | { readonly _tag: "Snapshot"; readonly root: SnapNode; readonly generation: number }
+  | {
+    readonly _tag: "Explained"
+    /** Whether the steps match something now, so there is nothing to explain. */
+    readonly matched: boolean
+    /** The text of the longest matching prefix's first match, two levels deep. */
+    readonly nearest: string | null
+    /** Elements under it whose role is the last step's and whose name is close to its name. */
+    readonly suggestions: ReadonlyArray<{ readonly role: string; readonly name: string }>
+    /** How many of the steps matched. */
+    readonly prefix: number
+  }
+  | {
+    readonly _tag: "Rect"
+    readonly rect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+    readonly scroll: { readonly x: number; readonly y: number }
+  }
+  | { readonly _tag: "StaleRef"; readonly why: Stale }
 
-/** The engine. Self-contained: its source is evaluated in the page. */
-export function engine() {
+/**
+ * A snapshot tree as text: indented YAML, one line per node (review 18, candidate 3). Self-contained, so the engine
+ * takes its source too.
+ */
+export function renderText(root: SnapNode): string {
+  const lines: Array<string> = []
+  const line = (node: SnapNode, indent: string) => {
+    if (node.role._tag === "Aria" && node.role.role === "text") {
+      lines.push(`${indent}- text: ${JSON.stringify(node.name._tag === "None" ? "" : node.name.value)}`)
+      return
+    }
+    let out = `${indent}- ${node.role.role}`
+    if (node.name._tag !== "None") out += ` ${JSON.stringify(node.name.value)}`
+    for (const state of node.states) out += ` [${state}]`
+    if (node.ref !== null) out += ` [ref=${node.ref}]`
+    if (node.role._tag === "Inferred") out += ` [inferred: ${node.role.evidence.join(", ")}]`
+    if (node.name._tag === "Inferred") out += ` [name from: ${node.name.from}]`
+    lines.push(node.children.length > 0 ? `${out}:` : out)
+    for (const child of node.children) line(child, `${indent}  `)
+  }
+  line(root, "")
+  return lines.join("\n")
+}
+
+/** The engine. Self-contained: its source is evaluated in the page, with `renderText`'s. */
+export function engine(render: (root: SnapNode) => string) {
   // ── The tree ──────────────────────────────────────────────────────────────────────────────────────────
 
   const SKIPPED = new Set(["script", "style", "noscript", "template"])
@@ -797,6 +929,45 @@ export function engine() {
   const isInvalidSelector = (error: unknown): error is InvalidSelector =>
     typeof error === "object" && error !== null && "invalidSelector" in error
 
+  interface StaleMarker {
+    readonly staleRef: true
+    readonly why: Stale
+  }
+  const isStale = (error: unknown): error is StaleMarker =>
+    typeof error === "object" && error !== null && "staleRef" in error
+
+  // ── Refs (review 18, candidate 3) ─────────────────────────────────────────────────────────────────────
+
+  /** This engine's ref table: a ref names one node while the document lives, and this number names the table. */
+  const generation = Math.floor(Math.random() * 2 ** 31)
+  let refCount = 0
+  const refs = new WeakMap<Element, string>()
+  const nodesByRef = new Map<string, WeakRef<Element>>()
+
+  const refFor = (element: Element): string => {
+    let ref = refs.get(element)
+    if (ref === undefined) {
+      ref = `e${++refCount}`
+      refs.set(element, ref)
+      nodesByRef.set(ref, new WeakRef(element))
+    }
+    return ref
+  }
+
+  /** The node a ref names, or why it names none. */
+  const byRef = (step: Extract<Step, { _tag: "Ref" }>): Element => {
+    const stale = (why: Stale): never => {
+      throw { staleRef: true, why } satisfies StaleMarker
+    }
+    // Another engine's table: this realm's engine was installed again
+    if (step.generation !== generation) return stale("BindingLost")
+    const held = nodesByRef.get(step.ref)
+    if (held === undefined) return stale("OtherSnapshot")
+    const element = held.deref()
+    if (element === undefined || !element.isConnected) return stale("Detached")
+    return element
+  }
+
   const labelable = (element: Element): boolean =>
     (element instanceof HTMLInputElement && element.type !== "hidden") || element instanceof HTMLSelectElement ||
     element instanceof HTMLTextAreaElement || element instanceof HTMLButtonElement ||
@@ -916,6 +1087,9 @@ export function engine() {
             ...current.filter((scope): scope is Element => scope instanceof Element),
             ...resolve(step.other)
           ])
+          break
+        case "Ref":
+          current = [byRef(step)]
           break
         default: {
           const found = new Set<Element>()
@@ -1164,10 +1338,11 @@ export function engine() {
     const action = request.action
     while (true) {
       const left = end - performance.now()
-      if (left <= 0) return { _tag: "NotReady", reason: last, history, scrolled }
+      if (left <= 0) return { _tag: "NotReady", reason: last, history, scrolled, checked: history.length > 0 }
       if (!(await nextFrame(left))) {
-        if (frames === 0) note({ _tag: "NoRenderingOpportunity" })
-        return { _tag: "NotReady", reason: last, history, scrolled }
+        // A round the deadline cut too short for any page to render says nothing about rendering
+        if (frames === 0 && request.cap >= 100) note({ _tag: "NoRenderingOpportunity" })
+        return { _tag: "NotReady", reason: last, history, scrolled, checked: history.length > 0 }
       }
       frames++
       rawText.clear()
@@ -1429,6 +1604,10 @@ export function engine() {
           observed: value === null ? "not a form control" : value
         }
       }
+      case "Aria": {
+        const root = rootNode(element, { interactivity: false, depth: null })
+        return { passed: matchPattern(expectation.pattern, root), observed: render(root) }
+      }
       case "Attribute": {
         const value = element.getAttribute(expectation.name)
         const matcher = expectation.expected
@@ -1489,20 +1668,384 @@ export function engine() {
     })
   }
 
+  // ── Snapshots (review 18, candidates 3 and 4) ─────────────────────────────────────────────────────────
+
+  const INTERACTIVE = new Set([
+    "button",
+    "checkbox",
+    "combobox",
+    "link",
+    "listbox",
+    "menuitem",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "option",
+    "radio",
+    "searchbox",
+    "slider",
+    "spinbutton",
+    "switch",
+    "tab",
+    "textbox",
+    "treeitem"
+  ])
+
+  interface Walk {
+    readonly interactivity: boolean
+    readonly depth: number | null
+  }
+
+  const statesOf = (element: Element, role: string | null): Array<string> => {
+    const states: Array<string> = []
+    const selectable = role === "option" || role === "treeitem" || role === "tab" || role === "gridcell" ||
+      role === "row"
+    if (!selectable && checkedOf(element) === true) states.push("checked")
+    if (element.getAttribute("aria-expanded") === "true") states.push("expanded")
+    if (
+      element.getAttribute("aria-selected") === "true" ||
+      (element instanceof HTMLOptionElement && element.selected)
+    ) states.push("selected")
+    if ((INTERACTIVE.has(role ?? "") || element.matches(":disabled")) && !enabled(element)) states.push("disabled")
+    if (deepActive() === element) states.push("focused")
+    if (element.getAttribute("aria-pressed") === "true") states.push("pressed")
+    return states
+  }
+
+  /** What makes an element with no role look interactive. */
+  const evidenceOf = (element: Element): Array<string> => {
+    const evidence: Array<string> = []
+    const parent = composedParent(element)
+    // `cursor` is inherited: only the element that sets it counts
+    if (
+      getComputedStyle(element).cursor === "pointer" &&
+      (parent === null || getComputedStyle(parent).cursor !== "pointer")
+    ) evidence.push("cursorPointer")
+    if (element.hasAttribute("tabindex") && (element as HTMLElement).tabIndex >= 0) evidence.push("tabindex")
+    if (
+      element instanceof HTMLElement && element.isContentEditable &&
+      !(parent instanceof HTMLElement && parent.isContentEditable)
+    ) evidence.push("contentEditable")
+    if (element.hasAttribute("onclick")) evidence.push("onclickAttribute")
+    return evidence
+  }
+
+  const clip = (text: string) => text.length > 80 ? `${text.slice(0, 80)}…` : text
+
+  /** An inferred node's name: its accessible name, or where one can be read from. */
+  const inferredName = (element: Element): SnapNode["name"] => {
+    const accessible = accessibleName(element, false)
+    if (accessible !== "") return { _tag: "Accessible", value: accessible }
+    const text = textOf(element)
+    if (text !== "") return { _tag: "Inferred", value: clip(text), from: "text" }
+    const title = collapse(element.getAttribute("title") ?? "")
+    if (title !== "") return { _tag: "Inferred", value: title, from: "title" }
+    const placeholder = collapse(
+      element.getAttribute("placeholder") ?? element.getAttribute("aria-placeholder") ??
+        element.getAttribute("data-placeholder") ?? ""
+    )
+    if (placeholder !== "") return { _tag: "Inferred", value: placeholder, from: "placeholder" }
+    const image = element.querySelector("img[alt]")
+    const alt = collapse(image?.getAttribute("alt") ?? "")
+    if (alt !== "") return { _tag: "Inferred", value: alt, from: "alt" }
+    const previous = element.previousElementSibling
+    const nearby = previous === null ? "" : textOf(previous)
+    if (nearby !== "" && nearby.length <= 40) return { _tag: "Inferred", value: nearby, from: "nearbyLabel" }
+    return { _tag: "None" }
+  }
+
+  const textNode = (value: string): SnapNode => ({
+    ref: null,
+    role: { _tag: "Aria", role: "text" },
+    name: { _tag: "Accessible", value },
+    states: [],
+    children: [],
+    frame: false
+  })
+
+  /** The nodes under `parent`: text runs merged, elements without a role giving theirs to the parent. */
+  const childrenOf = (parent: Node, level: number, walk: Walk): Array<SnapNode> => {
+    const out: Array<SnapNode> = []
+    let pending = ""
+    const flush = () => {
+      const text = collapse(pending)
+      pending = ""
+      if (text !== "") out.push(textNode(text))
+    }
+    const visit = (node: Node, textShown: boolean) => {
+      if (node.nodeType === 3) {
+        if (textShown) pending += node.textContent ?? ""
+        return
+      }
+      if (!(node instanceof Element) || SKIPPED.has(node.localName)) return
+      if (node.getAttribute("aria-hidden") === "true") return
+      const display = getComputedStyle(node).display
+      if (display === "none") return
+      if (display !== "contents" && !node.checkVisibility()) return
+      const shown = display === "contents" || node.checkVisibility({ visibilityProperty: true })
+      const made = shown ? elementNode(node, level, walk) : null
+      if (made === null) {
+        for (const child of flatChildNodes(node)) visit(child, shown)
+        return
+      }
+      flush()
+      out.push(made)
+    }
+    for (const child of flatChildNodes(parent)) visit(child, true)
+    flush()
+    return out
+  }
+
+  /** An element's own node, or `null` when it has no role and shows no interactivity. */
+  const elementNode = (element: Element, level: number, walk: Walk): SnapNode | null => {
+    const frame = element instanceof HTMLIFrameElement || element instanceof HTMLFrameElement
+    const role = frame ? "iframe" : roleOf(element)
+    const plain = role === null || role === "generic" || role === "none" || role === "presentation"
+    let inferred: Extract<SnapNode["role"], { _tag: "Inferred" }> | null = null
+    if (plain && walk.interactivity) {
+      const evidence = evidenceOf(element)
+      if (evidence.length > 0) {
+        inferred = {
+          _tag: "Inferred",
+          role: evidence.includes("contentEditable")
+            ? "editable"
+            : evidence.includes("cursorPointer") || evidence.includes("onclickAttribute")
+            ? "clickable"
+            : "focusable",
+          evidence
+        }
+      }
+    }
+    if (plain && inferred === null) return null
+    return made(element, inferred ?? { _tag: "Aria", role: role! }, level, walk, frame)
+  }
+
+  const made = (
+    element: Element,
+    role: SnapNode["role"],
+    level: number,
+    walk: Walk,
+    frame: boolean
+  ): SnapNode => {
+    const accessible = accessibleName(element, false)
+    const name: SnapNode["name"] = role._tag === "Inferred"
+      ? inferredName(element)
+      : accessible === ""
+      ? { _tag: "None" }
+      : { _tag: "Accessible", value: accessible }
+    let children = frame || (walk.depth !== null && level >= walk.depth) ? [] : childrenOf(element, level + 1, walk)
+    // Text that only repeats the node's name isn't a node of its own
+    if (
+      name._tag !== "None" && children.length === 1 && children[0]!.role._tag === "Aria" &&
+      children[0]!.role.role === "text" && children[0]!.name._tag !== "None" && children[0]!.name.value === name.value
+    ) children = []
+    return {
+      ref: refFor(element),
+      role,
+      name,
+      states: statesOf(element, role._tag === "Aria" ? role.role : null),
+      children,
+      frame
+    }
+  }
+
+  /** A subtree's root: the element's node, or a generic one when it has no role of its own. */
+  const rootNode = (element: Element, walk: Walk): SnapNode =>
+    elementNode(element, 0, walk) ?? made(element, { _tag: "Aria", role: "generic" }, 0, walk, false)
+
+  /** The document's root. */
+  const documentNode = (walk: Walk): SnapNode => {
+    const title = collapse(document.title)
+    return {
+      ref: null,
+      role: { _tag: "Aria", role: "document" },
+      name: title === "" ? { _tag: "None" } : { _tag: "Accessible", value: title },
+      states: [],
+      children: document.documentElement === null || (walk.depth !== null && walk.depth < 1)
+        ? []
+        : childrenOf(document.documentElement, 1, walk),
+      frame: false
+    }
+  }
+
+  const snapshot = (request: Extract<Request, { op: "snapshot" }>): Response => {
+    const walk: Walk = { interactivity: request.interactivity, depth: request.depth }
+    if (request.steps === null) return { _tag: "Snapshot", root: documentNode(walk), generation }
+    const found = resolve(request.steps)
+    if (found.length > 1) return strict(found)
+    if (found.length === 0) return { _tag: "NoMatch" }
+    return { _tag: "Snapshot", root: rootNode(found[0]!, walk), generation }
+  }
+
+  const nameMatches = (matcher: TextMatcher, name: SnapNode["name"]): boolean => {
+    const value = name._tag === "None" ? "" : name.value
+    return matcher._tag === "RegExp"
+      ? new RegExp(matcher.source, matcher.flags).test(value)
+      : value === collapse(matcher.value)
+  }
+
+  /** Whether a node matches a pattern: its role and name, and its children as the pattern states. */
+  const matchPattern = (pattern: Pattern, node: SnapNode): boolean => {
+    if (pattern._tag === "Text") {
+      return node.role._tag === "Aria" && node.role.role === "text" && nameMatches(pattern.value, node.name)
+    }
+    if (node.role._tag !== "Aria" || node.role.role !== pattern.role || !nameMatches(pattern.name, node.name)) {
+      return false
+    }
+    const children = pattern.children
+    switch (children._tag) {
+      case "Unchecked":
+        return true
+      case "Exactly":
+        return children.patterns.length === node.children.length &&
+          children.patterns.every((each, index) => matchPattern(each, node.children[index]!))
+      case "Including": {
+        let at = 0
+        for (const each of children.patterns) {
+          while (at < node.children.length && !matchPattern(each, node.children[at]!)) at++
+          if (at === node.children.length) return false
+          at++
+        }
+        return true
+      }
+    }
+  }
+
+  /** Edits between two short strings (Levenshtein). */
+  const distance = (a: string, b: string): number => {
+    if (Math.abs(a.length - b.length) > 2) return 3
+    let previous = Array.from({ length: b.length + 1 }, (_, index) => index)
+    for (let i = 1; i <= a.length; i++) {
+      const row = [i]
+      for (let j = 1; j <= b.length; j++) {
+        row.push(Math.min(row[j - 1]! + 1, previous[j]! + 1, previous[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1)))
+      }
+      previous = row
+    }
+    return previous[b.length]!
+  }
+
+  const explain = (steps: ReadonlyArray<Step>): Response => {
+    if (resolve(steps).length > 0) {
+      return { _tag: "Explained", matched: true, nearest: null, suggestions: [], prefix: steps.length }
+    }
+    let prefix = steps.length - 1
+    let anchor: Element | null = null
+    for (; prefix > 0; prefix--) {
+      const found = resolve(steps.slice(0, prefix))
+      if (found.length > 0) {
+        anchor = found[0]!
+        break
+      }
+    }
+    const nearest = anchor === null ? null : render(rootNode(anchor, { interactivity: false, depth: 2 }))
+    const suggestions: Array<{ role: string; name: string }> = []
+    const last = steps.at(-1)
+    if (last !== undefined && last._tag === "Role" && last.name !== null && last.name._tag === "String") {
+      const wanted = collapse(last.name.value).toLowerCase()
+      for (const element of elementsUnder(anchor ?? document)) {
+        if (roleOf(element) !== last.role || hiddenFromAccessibility(element)) continue
+        const name = accessibleName(element, false)
+        const lower = name.toLowerCase()
+        if (name === "" || suggestions.some((each) => each.name === name)) continue
+        if (lower.includes(wanted) || wanted.includes(lower) || distance(lower, wanted) <= 2) {
+          suggestions.push({ role: last.role, name })
+        }
+        if (suggestions.length === 5) break
+      }
+    }
+    return { _tag: "Explained", matched: false, nearest, suggestions, prefix }
+  }
+
+  const rect = (steps: ReadonlyArray<Step>): Response => {
+    const found = resolve(steps)
+    if (found.length > 1) return strict(found)
+    if (found.length === 0) return { _tag: "NoMatch" }
+    const box = found[0]!.getBoundingClientRect()
+    return {
+      _tag: "Rect",
+      rect: { x: box.x, y: box.y, width: box.width, height: box.height },
+      scroll: { x: scrollX, y: scrollY }
+    }
+  }
+
+  const html = (): Response => {
+    const doctype = document.doctype === null ? "" : new XMLSerializer().serializeToString(document.doctype)
+    return { _tag: "Read", value: doctype + (document.documentElement?.outerHTML ?? "") }
+  }
+
   const strict = (found: ReadonlyArray<Element>): Response => ({
     _tag: "Strict",
     count: found.length,
     candidates: found.slice(0, 10).map((element) => ({ description: describe(element), visible: visible(element) }))
   })
 
-  /** The one match itself, for an evaluation that returns it by value with its node binding (`setInputFiles`). */
+  /**
+   * The one match itself, for an evaluation that returns it by value with its node binding: what
+   * `setInputFiles`, `Locator.evaluate` and a frame's iframe need. Otherwise a `Response` as JSON text: no match,
+   * several, an invalid selector, or, for an iframe, an element that isn't one.
+   */
   const element = (text: string): Element | string => {
-    const request = JSON.parse(text) as { readonly steps: ReadonlyArray<Step> }
+    const request = JSON.parse(text) as {
+      readonly steps: ReadonlyArray<Step>
+      readonly frame?: boolean
+      /** For an iframe on an action's way: scrolled into view, so its frame renders (QUIRKS.md, Q110). */
+      readonly scroll?: boolean
+    }
     rawText.clear()
     roleCache.clear()
     nameCache.clear()
+    let found: Array<Element>
+    try {
+      found = resolve(request.steps)
+    } catch (error) {
+      if (isInvalidSelector(error)) {
+        return JSON.stringify(
+          { _tag: "InvalidSelector", selector: error.selector, message: error.message } satisfies Response
+        )
+      }
+      if (isStale(error)) return JSON.stringify({ _tag: "StaleRef", why: error.why } satisfies Response)
+      throw error
+    }
+    if (found.length === 0) return JSON.stringify({ _tag: "NoMatch" } satisfies Response)
+    if (found.length > 1) return JSON.stringify(strict(found))
+    const one = found[0]!
+    if (request.frame === true && !(one instanceof HTMLIFrameElement || one instanceof HTMLFrameElement)) {
+      return JSON.stringify(
+        {
+          _tag: "Final",
+          final: { _tag: "WrongElement", expected: "an iframe", element: describe(one) }
+        } satisfies Response
+      )
+    }
+    if (request.scroll === true && !inViewport(one)) {
+      one.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
+    }
+    return one
+  }
+
+  /** An iframe's content box origin, scrolled into view when asked, and what the pointer would hit at a point. */
+  const frame = (request: Extract<Request, { op: "frame" }>): Response => {
     const found = resolve(request.steps)
-    return found.length === 1 ? found[0]! : `${found.length} matches`
+    if (found.length > 1) return strict(found)
+    const iframe = found[0]
+    if (iframe === undefined) return { _tag: "NoMatch" }
+    let scrolled = false
+    if (request.scroll && !inViewport(iframe)) {
+      iframe.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
+      scrolled = true
+    }
+    const rect = iframe.getBoundingClientRect()
+    const style = getComputedStyle(iframe)
+    const origin = {
+      x: rect.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
+      y: rect.top + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop)
+    }
+    let covered: string | null = null
+    if (request.point !== null) {
+      const hit = hitTarget(origin.x + request.point.x, origin.y + request.point.y)
+      if (hit !== iframe) covered = hit === null ? "nothing at that point" : describe(hit)
+    }
+    return { _tag: "Frame", origin, scrolled, covered, scroll: { x: scrollX, y: scrollY } }
   }
 
   const run = async (text: string): Promise<string> => {
@@ -1535,6 +2078,16 @@ export function engine() {
           return JSON.stringify(await expect(request))
         case "title":
           return JSON.stringify({ _tag: "Title", title: document.title } satisfies Response)
+        case "frame":
+          return JSON.stringify(frame(request))
+        case "snapshot":
+          return JSON.stringify(snapshot(request))
+        case "explain":
+          return JSON.stringify(explain(request.steps))
+        case "rect":
+          return JSON.stringify(rect(request.steps))
+        case "html":
+          return JSON.stringify(html())
         case "role":
           return JSON.stringify(
             {
@@ -1552,6 +2105,7 @@ export function engine() {
           { _tag: "InvalidSelector", selector: error.selector, message: error.message } satisfies Response
         )
       }
+      if (isStale(error)) return JSON.stringify({ _tag: "StaleRef", why: error.why } satisfies Response)
       throw error
     }
   }
@@ -1566,7 +2120,7 @@ export const installKey = "@usestrider/browser/engine/1"
 export const install = `function() {
   const key = Symbol.for(${JSON.stringify(installKey)});
   if (globalThis[key] === undefined) {
-    Object.defineProperty(globalThis, key, { value: (${engine.toString()})(), enumerable: false });
+    Object.defineProperty(globalThis, key, { value: (${engine.toString()})(${renderText.toString()}), enumerable: false });
   }
   return "installed";
 }`

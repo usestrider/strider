@@ -9,6 +9,8 @@
  */
 import * as Predicate from "effect/Predicate"
 import type * as AriaRole from "./AriaRole.ts"
+import * as Data from "./internal/ariaPattern.ts"
+import type * as Engine from "./internal/engine.ts"
 
 const TypeId = "~@usestrider/browser/AriaPattern"
 
@@ -36,6 +38,12 @@ export interface Children {
   readonly [ChildrenTypeId]: typeof ChildrenTypeId
 }
 
+/** A name or text: a string matched whole after collapsing whitespace, or a `RegExp`. */
+const matcher = (value: string | RegExp): Engine.TextMatcher =>
+  typeof value === "string"
+    ? { _tag: "String", value, exact: true }
+    : { _tag: "RegExp", source: value.source, flags: value.flags.replace("g", "") }
+
 /**
  * Checks whether a value is an `AriaPattern`.
  *
@@ -53,7 +61,13 @@ export const isAriaPattern = (u: unknown): u is AriaPattern => Predicate.hasProp
  * @category constructors
  * @since 0.1.0
  */
-export declare const node: (role: AriaRole.AriaRole, name: string | RegExp, children: Children) => AriaPattern
+export const node = (role: AriaRole.AriaRole, name: string | RegExp, children: Children): AriaPattern =>
+  Data.registerPattern({ [TypeId]: TypeId }, {
+    _tag: "Node",
+    role,
+    name: matcher(name),
+    children: Data.childrenOf(children)
+  })
 
 /**
  * A text node.
@@ -62,7 +76,8 @@ export declare const node: (role: AriaRole.AriaRole, name: string | RegExp, chil
  * @category constructors
  * @since 0.1.0
  */
-export declare const text: (value: string | RegExp) => AriaPattern
+export const text = (value: string | RegExp): AriaPattern =>
+  Data.registerPattern({ [TypeId]: TypeId }, { _tag: "Text", value: matcher(value) })
 
 /**
  * These children, in this order, and no others.
@@ -71,7 +86,8 @@ export declare const text: (value: string | RegExp) => AriaPattern
  * @category constructors
  * @since 0.1.0
  */
-export declare const exactly: (...children: ReadonlyArray<AriaPattern>) => Children
+export const exactly = (...children: ReadonlyArray<AriaPattern>): Children =>
+  Data.registerChildren({ [ChildrenTypeId]: ChildrenTypeId }, { _tag: "Exactly", patterns: children.map(Data.pattern) })
 
 /**
  * These children in this order; others may come between.
@@ -80,7 +96,11 @@ export declare const exactly: (...children: ReadonlyArray<AriaPattern>) => Child
  * @category constructors
  * @since 0.1.0
  */
-export declare const including: (...children: ReadonlyArray<AriaPattern>) => Children
+export const including = (...children: ReadonlyArray<AriaPattern>): Children =>
+  Data.registerChildren({ [ChildrenTypeId]: ChildrenTypeId }, {
+    _tag: "Including",
+    patterns: children.map(Data.pattern)
+  })
 
 /**
  * Children are not compared.
@@ -89,4 +109,4 @@ export declare const including: (...children: ReadonlyArray<AriaPattern>) => Chi
  * @category constants
  * @since 0.1.0
  */
-export declare const unchecked: Children
+export const unchecked: Children = Data.registerChildren({ [ChildrenTypeId]: ChildrenTypeId }, { _tag: "Unchecked" })

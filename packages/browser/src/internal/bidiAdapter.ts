@@ -345,6 +345,8 @@ const toLocalValue = (
   handles: ReadonlyMap<Adapter.HandleId, { readonly handle: string }>
 ): Script.LocalValue => {
   if (local._tag === "Handle") return { handle: handles.get(local.handle)?.handle ?? "" } as Script.LocalValue
+  // A shared id names a node in every realm of its document (review 18, candidate 1)
+  if (local._tag === "Node") return { sharedId: local.node.binding } as Script.LocalValue
   return localOf(local.value)
 }
 
@@ -458,7 +460,14 @@ const capabilities = (info: Browser.Info) => {
       entry("emulation.cpuSlowdown", "unsupported", ["WebDriver BiDi has no CPU throttling"]),
       entry("emulation.javaScript", "unsupported", ["Firefox doesn't implement emulation.setScriptingEnabled"]),
       entry("emulation.touch", "unsupported", ["Firefox doesn't implement emulation.setTouchOverride"]),
-      entry("emulation.focus", "unsupported", ["WebDriver BiDi has no focus emulation"])
+      entry("emulation.focus", "unsupported", ["WebDriver BiDi has no focus emulation"]),
+      // Review 18
+      entry("screenshot.cssScale", "unsupported", ["WebDriver BiDi captures device pixels only"]),
+      entry("screenshot.omitBackground", "unsupported", ["WebDriver BiDi has no background override"]),
+      entry("pdf.headerFooter", "unsupported", ["WebDriver BiDi prints no header or footer"]),
+      entry("pdf.preferCssPageSize", "unsupported", ["WebDriver BiDi prints at the size it is given"]),
+      entry("cookies.partitioned", "unsupported", ["Firefox doesn't say which partition a cookie is in"]),
+      entry("snapshot.clickListeners", "unsupported", ["WebDriver BiDi can't list event listeners"])
     ]
   })
 }
@@ -1845,9 +1854,18 @@ export const connect: (
       }, { concurrency: "unbounded", discard: true })
 
     const dispatchInput = Effect.fnUntraced(
-      function*(id: L1Target.NavigableId, events: ReadonlyArray<Adapter.InputEvent>) {
+      function*(
+        id: L1Target.NavigableId,
+        events: ReadonlyArray<Adapter.InputEvent>,
+        frame?: { readonly frame: L1Target.NavigableId; readonly origin: { readonly x: number; readonly y: number } }
+      ) {
         const navigable = yield* navigableById(id)
-        const context = navigable.page.bidi as BrowsingContext.BrowsingContext
+        // Firefox doesn't deliver page coordinates into a cross-site frame, so input aimed inside a frame goes to
+        // the frame's own context, in its own coordinates (review 18, P1 and P2)
+        const target = frame === undefined ? undefined : navigablesById.get(frame.frame)
+        const context = (target ?? navigable.page).bidi as BrowsingContext.BrowsingContext
+        const dx = target === undefined || frame === undefined ? 0 : frame.origin.x
+        const dy = target === undefined || frame === undefined ? 0 : frame.origin.y
         // Consecutive events of one kind go in one batch of actions, in order
         const batches: Array<{ kind: "pointer" | "key" | "wheel" | "touch"; actions: Array<unknown> }> = []
         const batch = (kind: "pointer" | "key" | "wheel" | "touch") => {
@@ -1863,9 +1881,9 @@ export const connect: (
               const actions = batch("pointer")
               const button = buttons[event.button] ?? 0
               if (event.type === "move") {
-                actions.push({ type: "pointerMove", x: Math.round(event.x), y: Math.round(event.y) })
+                actions.push({ type: "pointerMove", x: Math.round(event.x - dx), y: Math.round(event.y - dy) })
               } else {
-                actions.push({ type: "pointerMove", x: Math.round(event.x), y: Math.round(event.y) })
+                actions.push({ type: "pointerMove", x: Math.round(event.x - dx), y: Math.round(event.y - dy) })
                 actions.push({ type: event.type === "down" ? "pointerDown" : "pointerUp", button })
               }
               break
@@ -1873,8 +1891,8 @@ export const connect: (
             case "Wheel":
               batch("wheel").push({
                 type: "scroll",
-                x: Math.round(event.x),
-                y: Math.round(event.y),
+                x: Math.round(event.x - dx),
+                y: Math.round(event.y - dy),
                 deltaX: Math.round(event.deltaX),
                 deltaY: Math.round(event.deltaY)
               })
@@ -1897,7 +1915,7 @@ export const connect: (
               const actions = batch("touch")
               for (const point of event.points) {
                 if (event.type === "move" || event.type === "start") {
-                  actions.push({ type: "pointerMove", x: Math.round(point.x), y: Math.round(point.y) })
+                  actions.push({ type: "pointerMove", x: Math.round(point.x - dx), y: Math.round(point.y - dy) })
                 }
                 if (event.type === "start") actions.push({ type: "pointerDown", button: 0 })
                 if (event.type === "end" || event.type === "cancel") actions.push({ type: "pointerUp", button: 0 })
@@ -2376,6 +2394,29 @@ export const connect: (
       return id
     })
 
+    // An iframe's window proxy names its browsing context, which is the frame (review 18, P3)
+    const contentFrame = Effect.fnUntraced(function*(node: Adapter.NodeBinding) {
+      const document = [...navigablesById.values()].find((each) => each.document?.id === node.document)
+      if (document === undefined) {
+        return yield* Effect.fail(gone({ _tag: "Document", id: node.document }, { _tag: "DocumentReplaced" }))
+      }
+      const reply = yield* protocol(
+        Script.callFunction({
+          functionDeclaration: "(element) => element.contentWindow",
+          target: { context: document.bidi, sandbox: "__strider_utility__" },
+          arguments: [{ sharedId: node.binding }],
+          awaitPromise: false,
+          resultOwnership: "none"
+        } as unknown as Script.CallFunctionParameters).pipe(on)
+      )
+      const result = reply as unknown as { type: string; result?: { type: string; value?: { context?: string } } }
+      const context = result.type === "success" && result.result?.type === "window"
+        ? result.result.value?.context
+        : undefined
+      const frame = context === undefined ? undefined : navigableOf(context)
+      return Option.fromUndefinedOr(frame?.id)
+    })
+
     const requestBody = Effect.fnUntraced(function*(id: Adapter.ObligationId) {
       const obligation = obligations.get(id)
       if (obligation?._tag !== "PausedRequest") return yield* Effect.fail(foreign(id))
@@ -2420,6 +2461,12 @@ export const connect: (
 
     const screenshot = Effect.fnUntraced(function*(id: L1Target.NavigableId, options: Adapter.ScreenshotOptions) {
       const navigable = yield* navigableById(id)
+      if (options.scale === "css") {
+        return yield* Effect.fail(unsupported("screenshot.cssScale", "WebDriver BiDi captures device pixels only"))
+      }
+      if (options.omitBackground) {
+        return yield* Effect.fail(unsupported("screenshot.omitBackground", "WebDriver BiDi has no background override"))
+      }
       const clip = Option.getOrUndefined(options.clip)
       const { data } = yield* protocol(
         BrowsingContext.captureScreenshot({
@@ -2437,6 +2484,12 @@ export const connect: (
 
     const pdf = Effect.fnUntraced(function*(id: L1Target.NavigableId, options: Adapter.PdfOptions) {
       const navigable = yield* navigableById(id)
+      if (Option.isSome(options.header) || Option.isSome(options.footer)) {
+        return yield* Effect.fail(unsupported("pdf.headerFooter", "WebDriver BiDi prints no header or footer"))
+      }
+      if (options.preferCssPageSize) {
+        return yield* Effect.fail(unsupported("pdf.preferCssPageSize", "WebDriver BiDi prints at the size it is given"))
+      }
       const cm = (inches: number) => inches * 2.54
       const { data } = yield* protocol(
         BrowsingContext.print({
@@ -2479,12 +2532,18 @@ export const connect: (
           : cookie.sameSite === "none"
           ? Option.some("None" as const)
           : Option.none(),
-        partitionKey: Option.none()
+        partitionKey: Option.none(),
+        priority: Option.none()
       }))
     })
 
     const setCookies = Effect.fnUntraced(function*(id: UserContext.Id, list: ReadonlyArray<Adapter.Cookie>) {
       const context = yield* contextOf(id)
+      if (list.some((cookie) => Option.isSome(cookie.partitionKey))) {
+        return yield* Effect.fail(
+          unsupported("cookies.partitioned", "Firefox doesn't say which partition a cookie is in")
+        )
+      }
       yield* protocol(Effect.forEach(list, (cookie) =>
         Storage.setCookie({
           cookie: {
@@ -2614,6 +2673,7 @@ export const connect: (
       grantPermissions,
       resetPermissions,
       responseBody,
+      contentFrame,
       requestBody,
       pausedResponseBody,
       setInputFiles,

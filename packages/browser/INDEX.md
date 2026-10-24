@@ -1576,7 +1576,7 @@ A context's saved storage: cookies, `localStorage` and IndexedDB, per partition.
 
 *schemas*
 
-- `const IndexedDbDatabase = Schema.Struct({ name: Schema.String, version: Schema.Int, stores: Schema.Array(Schema.Struct({ name: Schema.String, records: Schema.Array(Schema.Struct({ key: Schema.Unknown, value: Schema.Redacted(S…`
+- `const IndexedDbDatabase = Schema.Struct({ name: Schema.String, version: Schema.Int, stores: Schema.Array(Schema.Struct({ name: Schema.String, keyPath: Schema.Option(Schema.Union([Schema.String, Schema.Array(Schema.String)])),…`
 - `const OriginState = Schema.Struct({ origin: Url.Origin, partition: CookieJar.PartitionKey, localStorage: Schema.Array(Schema.Tuple([Schema.String, Schema.Redacted(Schema.String)])), indexedDb: Schema.Array(IndexedDbData…`
 - `const Json = Schema.fromJsonString(Schema.toCodecJson(StorageState))`
 
