@@ -562,14 +562,33 @@ export interface Page extends ReadonlyPage {
    */
   readonly clock: PageClock.PageClock
   /**
-   * Intercepts requests matching `pattern` while the registration lives.
+   * Intercepts the page's requests matching `pattern` at one phase while the registration lives.
+   *
+   * **Details**
+   *
+   * The page's routes are asked before its context's, the most recent first; one that falls through passes
+   * the request on. Each handler runs in a fiber of the registration's scope, with `Deadline.DefaultBudget`
+   * as read here, per request. The phase is `"request"` unless `options.phase` says `"response"` or
+   * `"auth"`, and decides what the handler is given and may decide.
+   *
+   * **Gotchas**
+   *
+   * On Chromium, a route that matches a cross-origin request also sees its CORS preflight, an `OPTIONS`
+   * request, which Firefox and WebKit don't show. WebKit pauses only a redirect's first hop.
    */
-  route<E, R>(
+  route<E, R, P extends Route.Phase = "request">(
     pattern: Url.Pattern | string,
-    handler: Route.Handler<E, R>
+    handler: Route.Handler<E, R, P>,
+    options?: Route.Options<P> | undefined
   ): Effect.Effect<Route.Registration, Route.RouteError, Scope.Scope | R>
   /**
-   * Runs a script in every new document of this page while the registration lives.
+   * Runs a script in every new document of this page, before its own scripts, while the registration lives.
+   *
+   * **Details**
+   *
+   * The context's scripts run first, then the page's, in the order they were added; `after` makes a script
+   * depend on others, which it runs only after. Added to a loaded page, a script runs from the next document.
+   * See `InitScript` for the rest.
    *
    * **Example** (Ordered setup scripts)
    *
@@ -588,7 +607,8 @@ export interface Page extends ReadonlyPage {
     options?: InitScript.Options | undefined
   ): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError, Scope.Scope>
   /**
-   * Overrides the given settings while the registration lives; page overrides beat context ones.
+   * Overrides the given settings while the registration lives; page overrides beat context ones. One call is
+   * one registration, and a field the backend can't apply fails it before anything is applied (`Emulation`).
    */
   emulate(
     settings: Emulation.Emulation

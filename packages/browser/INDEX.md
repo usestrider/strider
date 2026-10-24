@@ -1284,7 +1284,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
   - `readonly keyboard: Keyboard.Keyboard`
   - `readonly mouse: Mouse.Mouse`
   - `readonly clock: PageClock.PageClock`
-  - `route<E, R>(pattern: Url.Pattern | string, handler: Route.Handler<E, R>): Effect.Effect<Route.Registration, Route.RouteError, Scope.Scope | R>`
+  - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect.…`
   - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError, Scope.Sc…`
   - `emulate(settings: Emulation.Emulation): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope>`
   - `readonly activate: Effect.Effect<void, Target.TargetGone>`
@@ -1338,7 +1338,7 @@ Page time: the clock a page's scripts see, under your control.
 
 *schemas*
 
-- `const PageClockErrorReason = Schema.Union([NotInstalled, WrongMode, Reason.BackendFailure])`
+- `const PageClockErrorReason = Schema.Union([NotInstalled, WrongMode, Reason.InvalidInput, Reason.BackendFailure])`
 
 *guards*
 
@@ -1463,14 +1463,29 @@ Routes intercept requests, and their handlers decide what happens to each one.
 
 *models*
 
-- `interface Decision`
-  - `readonly [DecisionTypeId]: typeof DecisionTypeId`
-- `interface Intercepted`
+- `type Phase = "request" | "response" | "auth"`
+- `interface Decision<in P extends Phase = Phase>`
+  - `readonly [DecisionTypeId]: (phase: P) => void`
+- `interface Challenge`
+  - `readonly origin: string`
+  - `readonly scheme: string`
+  - `readonly realm: string`
+- `interface Paused`
   - `readonly request: NetworkRequest.NetworkRequest`
-  - `readonly phase: "request" | "response" | "auth"`
-  - `readonly fetch: Effect.Effect<HttpClientResponse.HttpClientResponse, RouteError>`
-  - `fetchWith(change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest): Effect.Effect<HttpClientResponse.HttpClientResponse, …`
-- `type Handler<E, R> = (intercepted: Intercepted) => Effect.Effect<Decision, E, R>`
+  - `readonly requestBody: Effect.Effect<Option.Option<Uint8Array>, RouteError | Target.TargetGone>`
+- `interface RequestPhase extends Paused`
+  - `readonly phase: "request"`
+- `interface ResponsePhase extends Paused`
+  - `readonly phase: "response"`
+  - `readonly response: NetworkResponse.NetworkResponse`
+  - `readonly responseBody: Effect.Effect<Uint8Array, RouteError | Target.TargetGone>`
+- `interface AuthPhase extends Paused`
+  - `readonly phase: "auth"`
+  - `readonly challenge: Challenge`
+- `type Intercepted<P extends Phase = Phase> = Extract<RequestPhase | ResponsePhase | AuthPhase, { phase: P }>`
+- `type Handler<E, R, P extends Phase = "request"> = (intercepted: Intercepted<P>) => Effect.Effect<Decision<P>, E, R>`
+- `interface Options<P extends Phase = "request">`
+  - `readonly phase?: P | undefined`
 - `type AbortReason = | "failed" | "aborted" | "timedOut" | "accessDenied" | "connectionClosed" | "connectionReset" | "connectionRefused" | "connectionAborted" | "connectionFailed" | "nameNotResolved" | "internetDisconnec…`
 - `interface Registration extends Declaration.Registration`
   - `readonly hits: Watchable.Watchable<number>`
@@ -1482,16 +1497,16 @@ Routes intercept requests, and their handlers decide what happens to each one.
 
 *constructors*
 
-- `const continue: Decision`
-- `const continueWith: (change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest) => Decision`
-- `const fulfill: (response: HttpServerResponse.HttpServerResponse) => Decision`
-- `const abort: (reason?: AbortReason | undefined) => Decision`
-- `const fallthrough: Decision`
-- `const provideCredentials: (credentials: { readonly username: string readonly password: Redacted.Redacted<string> }) => Decision`
+- `const continue: Decision<Phase>`
+- `const continueWith: (change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest) => Decision<"request">`
+- `const fulfill: (response: HttpServerResponse.HttpServerResponse) => Decision<"request" | "response">`
+- `const abort: (reason?: AbortReason | undefined) => Decision<"request" | "response">`
+- `const fallthrough: Decision<Phase>`
+- `const provideCredentials: (credentials: { readonly username: string readonly password: Redacted.Redacted<string> }) => Decision<"auth">`
 
 *guards*
 
-- `const isDecision: (u: unknown) => u is Decision`
+- `const isDecision: (u: unknown) => u is Decision<never>`
 - `const isRouteError: (u: unknown) => u is RouteError`
 
 *errors*
@@ -1732,7 +1747,7 @@ User contexts (the spec's term; Playwright calls them browser contexts), at two 
   - `readonly cookies: CookieJar.CookieJar`
   - `readonly exportStorageState: Effect.Effect<StorageState.StorageState, UserContextError>`
   - `readonly clock: PageClock.PageClock`
-  - `route<E, R>(pattern: Url.Pattern | string, handler: Route.Handler<E, R>): Effect.Effect<Route.Registration, Route.RouteError, Scope.Scope | R>`
+  - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect.…`
   - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError, Scope.Sc…`
   - `emulate(settings: Emulation.Emulation): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope>`
   - `grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.…`

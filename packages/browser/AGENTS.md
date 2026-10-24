@@ -9,7 +9,8 @@ Strider is pre-release: the API is designed and type-checked, and the implementa
 `scrollIntoView`), the one-shot reads, `page.keyboard` and `page.mouse`, every `Expect` matcher but `toMatchAria`,
 `Condition`, `Deadline`, every event module (`Popup`, `Dialog`, `FileChooser`, `Download`, `ConsoleMessage`,
 `UncaughtException`, `PageNavigation`, `NetworkRequest`, `NetworkResponse`, `BrowserWorker`, `NetworkConnection`,
-`AutoResolution`), `Dialog.handle` and `FileChooser.handle` work on every backend. What a backend can't do or report
+`AutoResolution`), `Dialog.handle` and `FileChooser.handle`, and the declarations (`route`, `addInitScript`,
+`emulate`, `grant`, `clock`, and the context options `emulation`, `permissions` and `focus`) work on every backend. What a backend can't do or report
 fails with `Unsupported`, naming the capability: modifiers on WebKit's pointer, and an HTML drag anywhere but
 Chromium. A member that isn't built yet fails as the defect `NotBuilt`, naming itself (`Locator.evaluate`,
 `Locator.snapshot` and `page.evaluate` among them).
@@ -54,3 +55,9 @@ Chromium. A member that isn't built yet fails as the defect `NotBuilt`, naming i
 - **Held input is scoped.** `yield* page.keyboard.hold("Shift")` inside `Effect.scoped`; the scope releases it.
 - **A page in the background of a Firefox context barely renders,** so actions there time out; call
   `page.activate` on it first.
+- **A route has one phase.** `page.route(pattern, handler)` sees requests before they are sent; pass
+  `{ phase: "response" }` or `{ phase: "auth" }` for the others. Return a `Route` decision valid for it
+  (`Route.fulfill`, `Route.continueWith`, `Route.abort()`, `Route.fallthrough`, `Route.continue`); there is no
+  `fetch` on the request. A failing handler lets the request continue, logged.
+- **Emulation is checked, not best-effort.** `page.emulate({...})` fails with `Unsupported` naming a field the
+  backend can't apply; read `browser.capabilities` (`emulation.*`) to branch.

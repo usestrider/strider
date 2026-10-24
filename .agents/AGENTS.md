@@ -2,8 +2,8 @@
 
 This repository is Strider (`@usestrider/browser` on npm): Effect-native browser automation that speaks CDP, WebDriver
 BiDi and the WebKit inspector protocol directly. It is at the design stage. L0, the protocol layer, is built, and
-four slices run through L1 and L2 on every backend (reviews 12, 13, 14 and 16: actions, events, every event module,
-and interacting and asserting);
+five slices run through L1 and L2 on every backend (reviews 12, 13, 14, 16 and 17: actions, events, every event
+module, interacting and asserting, and declarations);
 the rest of the package's modules are declarations,
 type-checked and documented, which the implementation replaces module by module. A member of an object that isn't
 built yet fails as the defect `NotBuilt`, naming itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm`

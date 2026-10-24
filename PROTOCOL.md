@@ -472,7 +472,7 @@ Adapter responsibilities:
   - the guard on the first trusted event (CONCEPTS.md §8, ReceivesPointer), modifiers, and the actions besides `click` (since built: review 16, below);
   - the one-shot reads besides `count`, `isVisible` and `all` (`readText`, `readValue`, `readHtml`, `readAttribute`, `isEnabled`, `isChecked`), and a reason in `LocatorError` for a read with nothing to read (since built: review 16, below);
   - the other expectations, and re-checks on the model's change signals (`Reactivity`) (since built, with re-checks in the page: review 16, below);
-  - the event modules (since built in part: review 13, below), evaluation, snapshots, screenshots, storage, cookies, routes, init scripts, emulation, permissions and page time;
+  - the event modules (since built in part: review 13, below), evaluation, snapshots, screenshots, storage, cookies, routes, init scripts, emulation, permissions and page time (routes, init scripts, emulation, permissions and page time since built: review 17, below);
   - `Browser.pages`, and the default context's `pages` and `control`.
 
 **Built** (2026-10-23, after [review 13](reviews/13-events-slice.md)): events, through `Popup` and `Dialog`. Call site 3 of API.md runs on Chromium, Firefox and WebKit: `Popup.next` subscribes before the click, `Deferred.await` gives the popup's `Page` (since review 15, running the wait `next` hands out does), `Dialog.handle` registers before the click that opens a `confirm` in it, and the confirm is accepted.
@@ -525,10 +525,10 @@ Adapter responsibilities:
 - **Not built yet:**
   - `FileInput.bytes`, which needs `setInputFiles`'s mechanism to keep its MIME type;
   - downloads and `FileInput.local` paths for a browser the layer doesn't launch, which has no `FileSystem` shared with it;
-  - routes, and automatic decisions for paused requests; recording an automatic decision on the operation that was running;
+  - routes, and automatic decisions for paused requests (since built: review 17, below); recording an automatic decision on the operation that was running;
   - observed pages and contexts as access levels, and frames' own navigations as `PageNavigation` events;
   - shared and service workers' contexts on BiDi, and their console;
-  - a flake seen in the conformance suite under full load, before and after this revision: Chromium's interception tests, where a request occasionally isn't paused or isn't marked as routed. It needs a look when routes are built.
+  - a flake seen in the conformance suite under full load, before and after this revision: Chromium's interception tests, where a request occasionally isn't paused or isn't marked as routed. It needs a look when routes are built (since traced and fixed: review 17, below).
 
 **Built** (2026-10-23, after [review 16](reviews/16-interaction-and-assertions.md)): interacting and asserting. Call site 1 of API.md runs up to its storage state on Chromium, Firefox and WebKit: `fill` with a `Redacted` password, the click, and `toBeVisible`. Around it, every action, the one-shot reads, `page.keyboard` and `page.mouse`, every expectation but `toMatchAria`, and `Condition`.
 
@@ -559,6 +559,37 @@ Adapter responsibilities:
   - HTML drag on Firefox, which starts one and never drops it, and on WebKit, whose protocol has none;
   - keyboard layouts besides US;
   - resetting a page's input state after a release failed.
+
+**Built** (2026-10-23, after [review 17](reviews/17-declarations.md)): declarations. Call sites 6, 10 and 11 of API.md run on Chromium, Firefox and WebKit, and call site 7's route on a page of the library's own: routes at each phase, init scripts and their order, emulation, permission grants and the page clock.
+
+- **Routes** (`src/Route.ts`, `src/internal/routes.ts`, `routeDecision.ts`; the model's `decideRequest`). A route declares an intercept covering its pattern (the glob itself, the URL, or everything for a `URLPattern`) and matches precisely with `Url.Pattern`'s rules; the model asks a paused request's page's routes, then its context's, the most recent first. Each handler runs in a fiber of its registration's scope with `Deadline.DefaultBudget` as read at `route`. Decisions are typed by phase (`Decision<in P>`) and turned into the adapter's: `continueWith` compares the changed `HttpClientRequest` with the original and sends only what changed, `fulfill` reads the `HttpServerResponse` through `toWeb`, with its cookies as `Set-Cookie` lines the adapters send as separate headers. The default decision is published as `AutoResolution{PausedRequest}` with `policy: 'routes: "continue"'`. `Intercepted.fetch` and `fetchWith` are removed; the response phase replaces them.
+- **Init scripts** (`src/internal/initScripts.ts`; `declarations.ts`). L0's `InitScript` declaration gained `after`. A bundle is one block statement that records which scripts ran and runs a script only after its dependencies did, reporting a throw with `reportError`. The BiDi adapter, whose preload scripts are one per registration, keeps the record under a `Symbol.for` key. The isolated world for the caller's scripts is `__strider_isolated__`.
+- **Emulation and grants** (`src/internal/emulation.ts`, `grants.ts`). An `emulate` call is one registration in a scope of its own; capability entries named for each field are checked before anything is declared. L0 gained `NetworkConditions` and `CpuThrottling` overrides (CDP, applied with offline through `Network.emulateNetworkConditionsByRule` and `overrideNetworkState`, and `Emulation.setCPUThrottlingRate`). Grants are kept per context, each name granted on its own, and recomputed by reset and grant on removal. `UserContext.Options.emulation`, `permissions` and `focus: "emulated"` are built.
+- **The page clock** (`src/internal/clock.ts`). A shim installed by an environment-phase init script and by evaluation in the current documents' main worlds, keyed by a random token under `Symbol.for`; each operation is broadcast, then the script is declared again with the timeline's state and a higher version.
+- **Adapters.**
+  - The contract gained `requestBody(obligation)` (CDP's `postDataEntries`, or `Network.getRequestPostData` for a large one; WebKit's `postData`; BiDi's `network.getData` from a request data collector declared with each request-phase intercept) and `pausedResponseBody(obligation)` (CDP's `Fetch.getResponseBody`; `Unsupported` elsewhere). A `Fail` decision carries any `Route.AbortReason`.
+  - The CDP adapter's auth intercept is fixed (P6): the registry kept an auth intercept's patterns as response-stage ones, so Chromium paused the `401` as a response and never asked; auth patterns now pause at the request stage, where a request no request-phase intercept wants continues at once, and `Fetch.authRequired` is the obligation. A navigation a route failed with `aborted` ends (P4). A paused request takes the resource type its network events gave it (P11).
+  - The BiDi adapter refuses a continue with a URL, a response-phase fulfill, an abort reason, a mobile viewport, an unavailable position, media, touch, disabled JavaScript, focus emulation, throttling and a CPU slowdown, as `Unsupported` under the capability that names each; a new body is sent with its own `Content-Length` (P3).
+  - The WebKit adapter refuses touch, an unavailable position, an abort reason, throttling and a CPU slowdown.
+  - New capability entries: `interception.responseBody`, `interception.responseFulfill`, `interception.continueUrl`, `interception.abortReason`, `interception.redirects`, `permissions.anyOrigin`, and one per emulated field (`emulation.viewport` and the rest).
+- **Where the build differs from the review.**
+  - **Q46 is traced and fixed.** A stress test of an intercept declared on a live Chromium page, under the suite's load, paused one request in 40 too few: `Fetch.enable` with the route's pattern replied, and the page's fetch 9 ms later went past it. Every such case came right after an enable with no patterns, apparently while the interceptor was installed again. The CDP adapter now enables `Fetch` for every page from its start, with a pattern no request matches while nothing intercepts, and never disables it; 160 runs under the same load paused every request.
+  - **Chromium refuses a `Content-Length` header** in a continued request ("Unsafe header"), and the model left a request paused when the backend refused a decision for any reason but `Unsupported`. Routes no longer send it, the browser computing it, and a refused decision gets the default unless the request is gone.
+  - **Effect's `bodyText` drops a request's `Content-Type`**, its body carrying its own: `continueWith` sends the body's type when the change didn't set the header, and so sends headers.
+  - **WebKit reports a page's existing user world for a new document a moment after it commits**, so the engine asked to create the world again, which WebKit refuses: every engine request after a second `goto` failed. The adapter now waits for the world's report, or the document's end.
+  - **Firefox's preload scripts are separate functions**, so the bundle's gating had to be the adapter's own, and a script's top-level `var` isn't global there.
+  - **A challenge's scheme is lowercased**: Chromium says `basic`, Firefox `Basic`.
+  - **The batch-1 background-page hint**: a timeout whose rounds saw no frame and then one names `page.activate` too, since what moved was the frame rate (Q71).
+  - **A dependency's removal** stops its dependents by the gate, not by removing them: they stay registered and don't run.
+- **Probes** (review 17, What the browsers do): routes at each phase, redirects, overrides, abort reasons, authentication, workers and CORS; init scripts' order, worlds and frames; every emulated field, live and later; permission names; and main-world patches against the isolated world, on the three pinned builds, and request bodies through raw BiDi.
+- **Tests.** `test/integration/slice/declarations.ts` runs 20 tests on each backend: call site 7's route and its `hits`; fulfill, `continueWith` and fallthrough between a page's route and its context's; request bodies; a failing handler's `AutoResolution`; the response phase; authentication, and the challenge's response without a route; abort reasons; an invalid pattern; call site 11 with `after`, a throwing script, a path and frames; a dependency removed and refused; the isolated world; call site 6; every emulated field or its `Unsupported`, offline included; a position with its permission; grants and every origin; creation options; call site 10; fixed, offset and resumed clocks with `NotInstalled`, `WrongMode` and `Conflict`; and a context's clock across two pages. The conformance suite adds request bodies and a longer body, response bodies, authentication, a failed navigation's end, every refusal against its capability entry, and init-script gating. Integration tests: 339.
+- **Not built yet:**
+  - `Route.fulfill` of a file (`HttpServerResponse.file`) without the layer's platform services, and a streamed body, which is read whole;
+  - a response-phase decision that changes headers or status only;
+  - routes for a page's service worker, which WebKit doesn't intercept at all;
+  - page time in workers, and restoring a document's clock when it is removed;
+  - init scripts in workers;
+  - storage state, cookies and origin storage (batch 3), and attaching (batch 4).
 
 ### Pause-on-start granularity
 

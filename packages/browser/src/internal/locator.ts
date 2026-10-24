@@ -830,13 +830,19 @@ export class LocatorImpl implements Locator.Locator {
         }
         const reasons = history.map((each) => each.value as Engine.NotReady)
         const last = reasons.at(-1)
+        // A page that rendered no frame in some rounds and one in others renders too seldom to tell the element
+        // is still: what moved is the page's frame rate, which page.activate mends (QUIRKS.md, Q71)
+        const starved = last?._tag === "NotStable" && reasons.some((reason) => reason._tag === "NoRenderingOpportunity")
         return Operation.timeout({
           operation,
           id,
           phase: reasons.every((reason) => reason._tag === "NoMatch") ? "resolving" : "waitingForCondition",
           budget: budget.budget,
           history,
-          hint: Option.map(Option.fromNullishOr(last), (reason) => explain(reason, checks.stable))
+          hint: Option.map(
+            Option.fromNullishOr(starved ? { _tag: "NoRenderingOpportunity" } as const : last),
+            (reason) => explain(reason, checks.stable)
+          )
         })
       }
       const settle = (response: Engine.Response) => {

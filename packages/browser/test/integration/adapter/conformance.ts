@@ -6,7 +6,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -359,7 +361,8 @@ export const conformance = (backend: Backend) =>
               source: "window.fromInit = 'yes'",
               world: { _tag: "Main" },
               phase: "user",
-              timing: "beforeAuthorScript"
+              timing: "beforeAuthorScript",
+              after: []
             })
             yield* goto(world, page, `${world.site.origin}/init`)
             assert.strictEqual(yield* evaluate(world, page, "() => window.seenByAuthor"), "string")
@@ -635,6 +638,178 @@ export const conformance = (backend: Backend) =>
             assert.deepInclude(headers as object, { "x-strider": "continued" })
           }), timeout)
 
+        it.effect("gives a paused request's body, a paused response's where it can, and asks about a challenge", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { context, page } = yield* newPage(world)
+            const origin = world.site.origin
+            yield* goto(world, page, `${origin}/hello`)
+            const capabilities = yield* SubscriptionRef.get(world.adapter.capabilities)
+            const decode = (bytes: Uint8Array) =>
+              new TextDecoder().decode(bytes)
+            // Review 17, P10: every backend has the body as it was sent; P3: a new body sends its own length
+            yield* Effect.scoped(Effect.gen(function*() {
+              yield* world.adapter.declare({ _tag: "UserContext", context }, {
+                _tag: "Intercept",
+                patterns: [`${origin}/echo*`],
+                phases: ["request"]
+              })
+              const posted = yield* evaluate(
+                world,
+                page,
+                "() => fetch('/echo', { method: 'POST', body: 'hello' }).then((r) => r.json()).then((j) => j.body)"
+              ).pipe(Effect.forkChild)
+              const opened = yield* world.facts.when("ObligationOpened", (fact) =>
+                fact.subject._tag === "PausedRequest" && fact.subject.request.url.endsWith("/echo"))
+              const body = yield* world.adapter.requestBody(opened.obligation)
+              assert.strictEqual(Option.getOrUndefined(Option.map(body, decode)), "hello")
+              yield* world.adapter.resolve(opened.obligation, {
+                _tag: "Continue",
+                overrides: Option.some({ body: new TextEncoder().encode("a longer body") })
+              })
+              assert.strictEqual(yield* Fiber.join(posted), "a longer body")
+            }))
+            // A response's body at the response phase is CDP's alone
+            yield* Effect.scoped(Effect.gen(function*() {
+              yield* world.adapter.declare({ _tag: "UserContext", context }, {
+                _tag: "Intercept",
+                patterns: [`${origin}/json*`],
+                phases: ["response"]
+              })
+              const fetched = yield* evaluate(world, page, "() => fetch('/json').then((r) => r.text())").pipe(
+                Effect.forkChild
+              )
+              const opened = yield* world.facts.when("ObligationOpened", (fact) =>
+                fact.subject._tag === "PausedRequest" && fact.subject.phase === "response")
+              const body = yield* Effect.exit(world.adapter.pausedResponseBody(opened.obligation))
+              if (capabilities.has("interception.responseBody")) {
+                assert(Exit.isSuccess(body), String(body))
+                assert.strictEqual(decode(body.value), `{"hello":"world"}`)
+              } else {
+                assert(Exit.isFailure(body))
+                assert.deepInclude((Cause.squash(body.cause) as Adapter.AdapterError).reason, {
+                  _tag: "Unsupported",
+                  capability: "interception.responseBody"
+                })
+              }
+              yield* world.adapter.resolve(opened.obligation, { _tag: "Continue", overrides: Option.none() })
+              assert.strictEqual(yield* Fiber.join(fetched), `{"hello":"world"}`)
+            }))
+            if (!capabilities.has("interception.auth")) {
+              return
+            }
+            // Review 17, P6: a challenge is asked about, once the request it came for is intercepted as it starts
+            yield* Effect.scoped(Effect.gen(function*() {
+              yield* world.adapter.declare({ _tag: "UserContext", context }, {
+                _tag: "Intercept",
+                patterns: [`${origin}/auth*`],
+                phases: ["auth"]
+              })
+              const navigating = yield* world.adapter.navigate(page, `${origin}/auth`, { referrer: Option.none() })
+                .pipe(
+                  Effect.forkChild
+                )
+              const opened = yield* world.facts.when("ObligationOpened", (fact) =>
+                fact.subject._tag === "PausedRequest" && fact.subject.phase === "auth")
+              assert(opened.subject._tag === "PausedRequest")
+              assert.strictEqual(Option.getOrThrow(opened.subject.challenge).realm, "strider")
+              yield* world.adapter.resolve(opened.obligation, {
+                _tag: "ProvideCredentials",
+                username: "strider",
+                password: "secret"
+              })
+              const navigation = yield* Fiber.join(navigating)
+              const ended = yield* world.facts.when("NavigationEnded", (fact) =>
+                fact.navigation === navigation)
+              assert.strictEqual(ended.outcome._tag, "Committed")
+              assert.strictEqual(yield* evaluate(world, page, "() => document.body.innerText"), "signed in")
+            }))
+          }), timeout)
+
+        it.effect("ends a navigation a route fails, and refuses what the backend can't do", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { context, page } = yield* newPage(world)
+            const origin = world.site.origin
+            const capabilities = yield* SubscriptionRef.get(world.adapter.capabilities)
+            // Review 17, P4: CDP left a navigation failed with "aborted" without an end
+            yield* Effect.scoped(Effect.gen(function*() {
+              yield* world.adapter.declare({ _tag: "UserContext", context }, {
+                _tag: "Intercept",
+                patterns: [`${origin}/blocked*`],
+                phases: ["request"]
+              })
+              const navigating = yield* world.adapter.navigate(page, `${origin}/blocked`, { referrer: Option.none() })
+                .pipe(
+                  Effect.forkChild
+                )
+              const opened = yield* world.facts.when("ObligationOpened", (fact) =>
+                fact.subject._tag === "PausedRequest" && fact.subject.request.url.endsWith("/blocked"))
+              const reason = capabilities.has("interception.abortReason") ? "aborted" : "failed"
+              yield* world.adapter.resolve(opened.obligation, { _tag: "Fail", error: reason })
+              const navigation = yield* Fiber.join(navigating)
+              const ended = yield* world.facts.when("NavigationEnded", (fact) =>
+                fact.navigation === navigation)
+              assert.strictEqual(ended.outcome._tag, "Failed")
+            }))
+            // Each override a backend can't apply is refused under the capability that says so, never ignored
+            const overrides: ReadonlyArray<readonly [string, Adapter.Override]> = [
+              ["emulation.touch", { _tag: "Touch", enabled: true, maxTouchPoints: 5 }],
+              ["emulation.viewport.mobile", {
+                _tag: "Viewport",
+                width: 400,
+                height: 700,
+                deviceScaleFactor: 2,
+                mobile: true
+              }],
+              ["emulation.geolocation.unavailable", { _tag: "Geolocation", position: Option.none() }],
+              ["emulation.network.throttling", { _tag: "NetworkConditions", download: 1e6, upload: 1e6, latency: 10 }],
+              ["emulation.cpuSlowdown", { _tag: "CpuThrottling", rate: 2 }]
+            ]
+            for (const [capability, override] of overrides) {
+              const declared = yield* Effect.exit(Effect.scoped(
+                world.adapter.declare({ _tag: "UserContext", context }, { _tag: "Override", override })
+              ))
+              const entry = capabilities.entries.find((each) =>
+                each.name === capability
+              )
+              assert.isDefined(entry, capability)
+              if (entry.status === "unsupported") {
+                assert(Exit.isFailure(declared), capability)
+                assert.deepInclude((Cause.squash(declared.cause) as Adapter.AdapterError).reason, {
+                  _tag: "Unsupported",
+                  capability
+                })
+              } else {
+                assert(Exit.isSuccess(declared), `${capability}: ${String(declared)}`)
+              }
+            }
+          }), timeout)
+
+        it.effect("runs an init script only after what it comes after ran, and reports one that throws", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { context, page } = yield* newPage(world)
+            const script = (source: string, after: ReadonlyArray<Adapter.RegistrationId> = []) =>
+              world.adapter.declare({ _tag: "UserContext", context }, {
+                _tag: "InitScript",
+                source,
+                world: { _tag: "Main" },
+                phase: "user",
+                timing: "beforeAuthorScript",
+                after
+              })
+            const helper = yield* script("window.order = ['helper']")
+            const broken = yield* script("throw new Error('init threw')")
+            yield* script("window.order.push('after helper')", [helper])
+            yield* script("window.order.push('after broken')", [broken])
+            yield* goto(world, page, `${world.site.origin}/hello`)
+            assert.deepStrictEqual(yield* evaluate(world, page, "() => window.order"), ["helper", "after helper"])
+            const thrown = yield* world.facts.when("UncaughtException", (fact) =>
+              fact.exception.message === "init threw")
+            assert.strictEqual(thrown.exception.name, "Error")
+          }), timeout)
+
         it.effect("applies overrides to pages in scope, and restores them when released", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
@@ -651,11 +826,15 @@ export const conformance = (backend: Backend) =>
               const declared = yield* world.adapter.declare(where, { _tag: "Override", override }).pipe(
                 Effect.as(true),
                 Effect.catchIf(
-                  (error) => error.reason._tag === "Unsupported",
-                  () => Effect.succeed(false)
+                  (error) =>
+                    error.reason._tag === "Unsupported",
+                  () =>
+                    Effect.succeed(false)
                 )
               )
-              if (declared) assert.deepStrictEqual(yield* evaluate(world, page, read), expected, override._tag)
+              if (declared) {
+                assert.deepStrictEqual(yield* evaluate(world, page, read), expected, override._tag)
+              }
               return declared
             })
             const width = yield* evaluate(world, page, "() => innerWidth")
@@ -692,7 +871,9 @@ export const conformance = (backend: Backend) =>
                 [false, "failed"],
                 { _tag: "Page", page }
               )
-              if (offline) yield* Effect.void
+              if (offline) {
+                yield* Effect.void
+              }
             }))
             assert.strictEqual(yield* evaluate(world, page, "() => innerWidth"), width, "the viewport it had before")
             assert.isTrue(yield* evaluate(world, page, "() => navigator.onLine"))
@@ -703,19 +884,22 @@ export const conformance = (backend: Backend) =>
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
             yield* goto(world, page, `${world.site.origin}/console`)
-            const hello = yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text === "hello 42")
+            const hello = yield* world.facts.when("ConsoleMessage", (fact) =>
+              fact.message.text === "hello 42")
             assert.strictEqual(hello.message.level, "log")
             assert.deepStrictEqual(hello.message.origin, { _tag: "Page", page })
             // 1-based, as stack traces print it: the page is one line (review 14, P9)
             assert.strictEqual(Option.getOrThrow(hello.message.location).line, 1)
-            const bad = yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text === "bad")
+            const bad = yield* world.facts.when("ConsoleMessage", (fact) =>
+              fact.message.text === "bad")
             assert.strictEqual(bad.message.level, "error")
             const thrown = yield* world.facts.when("UncaughtException")
             assert.strictEqual(thrown.exception.name, "TypeError")
             assert.strictEqual(thrown.exception.message, "thrown here")
             // A thrown value that isn't an Error reads as an Error whose message is the value (review 14, P10)
             yield* evaluate(world, page, "() => { setTimeout(() => { throw 'a string' }) }")
-            const raw = yield* world.facts.when("UncaughtException", (fact) => fact.exception.message === "a string")
+            const raw = yield* world.facts.when("UncaughtException", (fact) =>
+              fact.exception.message === "a string")
             assert.strictEqual(raw.exception.name, "Error")
           }), timeout)
 
@@ -736,7 +920,9 @@ export const conformance = (backend: Backend) =>
             })
             assert.deepStrictEqual([...png.subarray(1, 4)], [0x50, 0x4e, 0x47])
             const capabilities = yield* SubscriptionRef.get(world.adapter.capabilities)
-            if (!capabilities.has("pdf")) return
+            if (!capabilities.has("pdf")) {
+              return
+            }
             const pdf = yield* world.adapter.pdf(page, {
               landscape: false,
               printBackground: false,
@@ -755,7 +941,9 @@ export const conformance = (backend: Backend) =>
             const { context, page } = yield* newPage(world)
             yield* goto(world, page, `${world.site.origin}/cookie`)
             const cookies = yield* world.adapter.cookies(context)
-            const flavor = cookies.find((cookie) => cookie.name === "flavor")
+            const flavor = cookies.find((cookie) =>
+              cookie.name === "flavor"
+            )
             assert.isDefined(flavor)
             assert.strictEqual(Redacted.value(flavor.value), "oat")
             yield* world.adapter.setCookies(context, [{
@@ -793,7 +981,8 @@ export const conformance = (backend: Backend) =>
             yield* world.adapter.declare({ _tag: "Page", page }, { _tag: "FileChooser" })
             yield* goto(world, page, `${world.site.origin}/form`)
             yield* evaluate(world, page, "() => document.querySelector('#f').click()", true)
-            const opened = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "FileChooser")
+            const opened = yield* world.facts.when("ObligationOpened", (fact) =>
+              fact.subject._tag === "FileChooser")
             assert(opened.subject._tag === "FileChooser")
             assert.isTrue(opened.subject.multiple)
             yield* world.adapter.resolve(opened.obligation, { _tag: "SetFiles", files: [import.meta.filename] })
@@ -807,7 +996,9 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { context, page } = yield* newPage(world)
-            const directory = (yield* Effect.promise(() => import("node:os"))).tmpdir() +
+            const directory = (yield* Effect.promise(() =>
+              import("node:os")
+            )).tmpdir() +
               `/strider-downloads-${process.pid}`
             yield* world.adapter.declare({ _tag: "UserContext", context }, {
               _tag: "Downloads",

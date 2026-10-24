@@ -7,6 +7,7 @@ import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { Firefox } from "@usestrider/browser/firefox"
 import * as Layer from "effect/Layer"
 import { assertPinned, firefox } from "../browsers.ts"
+import { declarations } from "./declarations.ts"
 import { events } from "./events.ts"
 import { interaction } from "./interaction.ts"
 import { modules } from "./modules.ts"
@@ -20,3 +21,4 @@ slice("Firefox", backend, (info) => assertPinned("Firefox", info.version, firefo
 events("Firefox", backend)
 modules("Firefox", backend)
 interaction("Firefox", backend)
+declarations("Firefox", backend)

@@ -2,10 +2,22 @@
  * Page time: the clock a page's scripts see, under your control.
  *
  * One timeline per scope, a page or a whole context, covers every document and frame across navigations,
- * because a test's time must not reset when the page navigates. Each operation is appended to a log that new
- * documents replay. Readiness checks use native rendering, so a paused clock never stalls `click`, and nothing
- * advances page time implicitly. Page time never touches library deadlines, and `TestClock` never touches the
- * page. `adjust` and `setTime` mean what they mean on `TestClock`.
+ * because a test's time must not reset when the page navigates: each operation reaches every current document,
+ * and a new one starts where the timeline is. Readiness checks use native rendering, so a paused clock never
+ * stalls `click`, and nothing advances page time implicitly. Page time never touches library deadlines, and
+ * `TestClock` never touches the page. `adjust` and `setTime` mean what they mean on `TestClock`.
+ *
+ * **Details**
+ *
+ * No backend has a clock to drive, so this one is the library's: a script in each document's main world, before
+ * the page's own, that replaces `Date`, `performance.now`, and in controlled mode the timers and animation
+ * frames. Its controls are on a symbol a page that enumerates the window's symbols can find.
+ *
+ * **Gotchas**
+ *
+ * - Workers, CSS animations and `document.timeline` keep real time.
+ * - A document loaded before `install` gets the clock then; what its scripts captured before keeps real time.
+ * - A page's clock and its context's can't both be installed: one timeline covers a page.
  *
  * @stability unstable
  * @since 0.1.0
@@ -62,11 +74,13 @@ export type Mode =
  */
 export interface PageClock {
   /**
-   * Installs the clock while the registration lives. Needs before-author-script timing.
+   * Installs the clock while the registration lives, in every current document of the scope and every later one.
+   * Removing it affects later documents only. A clock already installed on the page or its context is a
+   * `Conflict`.
    */
   install(mode: Mode): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope>
   /**
-   * Advances a controlled clock, firing every due timer in order.
+   * Advances a controlled clock, firing every due timer in order, an interval as often as it falls due.
    */
   adjust(duration: Duration.Input): Effect.Effect<void, PageClockError>
   /**
@@ -74,7 +88,8 @@ export interface PageClock {
    */
   setTime(at: DateTime.DateTime.Input): Effect.Effect<void, PageClockError>
   /**
-   * Returns to real time, from now.
+   * Returns to real time, from the time the clock shows now: the clock becomes an offset, and the timers waiting
+   * on a controlled clock move to real ones.
    */
   readonly resume: Effect.Effect<void, PageClockError>
 }
@@ -119,7 +134,7 @@ export class WrongMode extends Schema.Error<WrongMode>("@usestrider/browser/Page
  * @category schemas
  * @since 0.1.0
  */
-export const PageClockErrorReason = Schema.Union([NotInstalled, WrongMode, Reason.BackendFailure])
+export const PageClockErrorReason = Schema.Union([NotInstalled, WrongMode, Reason.InvalidInput, Reason.BackendFailure])
 
 /**
  * The reasons a clock operation can fail.

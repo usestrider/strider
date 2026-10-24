@@ -169,6 +169,8 @@ interface RequestEntry {
   servedFromCache: boolean
   /** A route fulfilled it, which the browser reports as an ordinary response. */
   fulfilled: boolean
+  /** What the `Network` domain calls it: `Fetch` calls a `fetch()` an `XHR` (review 17, P11). */
+  readonly resourceType: NetworkRequest.ResourceType
 }
 
 type ObligationEntry =
@@ -180,6 +182,11 @@ type ObligationEntry =
     readonly phase: "request" | "response" | "auth"
     /** The request the `Network` domain knows it as, when `Fetch` names it. */
     readonly request: RequestEntry | undefined
+    /** The request's body, as `Fetch.requestPaused` carried it (review 17, P10). */
+    readonly body: Option.Option<Uint8Array>
+    /** The `Network` domain's id for it, which a body too large to carry is read by. */
+    readonly networkId: string | undefined
+    readonly hasBody: boolean
   }
   | {
     readonly _tag: "Prompt"
@@ -322,16 +329,29 @@ const keyCode = (key: string): number | undefined => {
 const modifierBits = (modifiers: Adapter.Modifiers): number =>
   (modifiers.alt ? 1 : 0) | (modifiers.control ? 2 : 0) | (modifiers.meta ? 4 : 0) | (modifiers.shift ? 8 : 0)
 
+/** A URL pattern no request matches: a scheme nothing uses. */
+const nothing = "strider-intercepts-nothing:"
+
 /** The first button `MouseEvent.buttons` says is held, or none. */
 const heldButton = (buttons: number): "none" | "left" | "right" | "middle" =>
   buttons & 1 ? "left" : buttons & 2 ? "right" : buttons & 4 ? "middle" : "none"
 
-const failReasons: Readonly<Record<Extract<Adapter.Decision, { _tag: "Fail" }>["error"], string>> = {
-  aborted: "Aborted",
+/** Each reason a request can fail with, as `Network.ErrorReason` names it: CDP's are the full list. */
+const failReasons: Readonly<Record<Extract<Adapter.Decision, { _tag: "Fail" }>["error"], Network.ErrorReason>> = {
   failed: "Failed",
+  aborted: "Aborted",
   timedOut: "TimedOut",
   accessDenied: "AccessDenied",
-  connectionRefused: "ConnectionRefused"
+  connectionClosed: "ConnectionClosed",
+  connectionReset: "ConnectionReset",
+  connectionRefused: "ConnectionRefused",
+  connectionAborted: "ConnectionAborted",
+  connectionFailed: "ConnectionFailed",
+  nameNotResolved: "NameNotResolved",
+  internetDisconnected: "InternetDisconnected",
+  addressUnreachable: "AddressUnreachable",
+  blockedByClient: "BlockedByClient",
+  blockedByResponse: "BlockedByResponse"
 }
 
 /** The events the fold needs. */
@@ -376,6 +396,23 @@ const base64 = (bytes: Uint8Array): string => Encoding.encode(bytes)
 const fromBase64 = (text: string): Uint8Array => {
   const decoded = Encoding.decode(text)
   return decoded._tag === "Success" ? decoded.success : new Uint8Array()
+}
+
+/** A request's body as `Fetch` carries it: its entries' bytes, else its text (review 17, P10). */
+const postData = (request: Network.Request): Option.Option<Uint8Array> => {
+  if (request.postDataEntries !== undefined && request.postDataEntries.length > 0) {
+    const parts = request.postDataEntries.map((entry) =>
+      entry.bytes === undefined ? new Uint8Array() : fromBase64(entry.bytes)
+    )
+    const bytes = new Uint8Array(parts.reduce((total, part) => total + part.length, 0))
+    let offset = 0
+    for (const part of parts) {
+      bytes.set(part, offset)
+      offset += part.length
+    }
+    return Option.some(bytes)
+  }
+  return Option.none()
 }
 
 // ── Remote values ─────────────────────────────────────────────────────────────────────────────────────────
@@ -550,7 +587,28 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
         "a script or stylesheet reused from the memory cache within one document produces no request"
       ]),
       entry("cookies", "supported"),
-      entry("permissions", "supported")
+      entry("permissions", "supported"),
+      entry("permissions.anyOrigin", "supported"),
+      // Review 17
+      entry("interception.responseBody", "supported"),
+      entry("interception.responseFulfill", "supported"),
+      entry("interception.continueUrl", "supported"),
+      entry("interception.abortReason", "supported"),
+      entry("interception.redirects", "supported"),
+      entry("emulation.viewport", "supported"),
+      entry("emulation.viewport.mobile", "supported"),
+      entry("emulation.userAgent", "supported"),
+      entry("emulation.locale", "supported"),
+      entry("emulation.timezone", "supported"),
+      entry("emulation.geolocation", "supported"),
+      entry("emulation.geolocation.unavailable", "supported"),
+      entry("emulation.media", "supported"),
+      entry("emulation.network.offline", "supported"),
+      entry("emulation.network.throttling", "supported"),
+      entry("emulation.cpuSlowdown", "supported"),
+      entry("emulation.javaScript", "supported", ["a document already loaded keeps running its scripts"]),
+      entry("emulation.touch", "supported", ["touch event handlers appear at the next document"]),
+      entry("emulation.focus", "supported")
     ]
   })
 }
@@ -604,7 +662,6 @@ export const connect: (
     const interceptingDrags = new Set<L1Target.NavigableId>()
     // A worker no page owns belongs to the context its target names
     const workerContexts = new Map<TargetEntry, ContextEntry>()
-    const pausedRequests = new Map<string, number>()
     let attachedAtConnect = true
     let defaultUserAgent = ""
 
@@ -618,8 +675,19 @@ export const connect: (
       return Effect.forEach(facts, options.sink, { discard: true })
     })
 
+    // Commands a handler sends that the fold can't wait for: sent after its facts are flushed, detached
+    let detached: Array<Effect.Effect<void>> = []
+    const detach = (effect: Effect.Effect<void>) => void detached.push(effect)
+    const sendDetached = Effect.suspend(() => {
+      const list = detached
+      detached = []
+      return Effect.forEach(list, (effect) => Effect.forkDetach(effect), { discard: true })
+    })
+
     const contextKey = (target: TargetEntry, contextId: number) => `${target.session.key ?? ""}|${contextId}`
     const requestKey = (target: TargetEntry, requestId: string) => `${target.session.key ?? ""}|${requestId}`
+    /** Requests a route failed, by their `Network` key: an abort a route made has nothing after it to end it. */
+    const routeFailed = new Set<string>()
 
     // ── Ending things ──
 
@@ -1437,7 +1505,8 @@ export const connect: (
             navigation,
             finished: Deferred.makeUnsafe(),
             servedFromCache: false,
-            fulfilled: false
+            fulfilled: false,
+            resourceType: resourceTypes[params.type ?? "Other"] ?? "other"
           }
           requests.set(key, request)
           hops.set(request.hop, request)
@@ -1489,6 +1558,7 @@ export const connect: (
       },
       [Network.loadingFailed.method]: (target, params: Network.LoadingFailedParams) => {
         if (target === undefined) return
+        const routed = routeFailed.delete(requestKey(target, params.requestId))
         const request = requests.get(requestKey(target, params.requestId))
         if (request === undefined) return
         emit({
@@ -1504,7 +1574,7 @@ export const connect: (
         navigation.failed = params.errorText
         if (navigation.status === 204 || navigation.status === 205) {
           endNavigation(navigation, { _tag: "NoContent", status: navigation.status }, "cdp:Network.loadingFailed")
-        } else if (params.errorText !== "net::ERR_ABORTED") {
+        } else if (params.errorText !== "net::ERR_ABORTED" || routed) {
           // An error page may still commit under this loader; it is reported as the document it created
           navigation.frame.failed.set(navigation.loaderId, navigation)
           endNavigation(
@@ -1572,7 +1642,22 @@ export const connect: (
         const phase = params.responseStatusCode !== undefined || params.responseErrorReason !== undefined
           ? "response"
           : "request"
-        pausedRequests.set(requestKey(target, ""), (pausedRequests.get(requestKey(target, "")) ?? 0) + 1)
+        // Authentication intercepts every request so the browser asks about its challenges; a request no
+        // intercept of this phase wants goes on at once (review 17, P6)
+        const intercepts = target.page === undefined ? undefined : registry.intercepts(placement(target.page))
+        const wanted = intercepts === undefined ||
+          (phase === "request" ? intercepts.request : intercepts.response).some((pattern) =>
+            Declarations.glob(pattern).test(params.request.url)
+          )
+        if (!wanted) {
+          const on = Protocol.on(target.session)
+          detach(
+            (phase === "request"
+              ? Fetch.continueRequest({ requestId: params.requestId })
+              : Fetch.continueResponse({ requestId: params.requestId })).pipe(on, Effect.ignore)
+          )
+          return
+        }
         const obligation = ids.obligation()
         obligations.set(obligation, {
           _tag: "PausedRequest",
@@ -1580,7 +1665,10 @@ export const connect: (
           target,
           requestId: params.requestId,
           phase,
-          request
+          request,
+          body: postData(params.request),
+          networkId: params.networkId,
+          hasBody: params.request.hasPostData === true
         })
         const hop = request?.hop ?? ids.hop(ids.request(), 0)
         emit({
@@ -1617,7 +1705,10 @@ export const connect: (
           target,
           requestId: params.requestId,
           phase: "auth",
-          request: undefined
+          request: undefined,
+          body: postData(params.request),
+          networkId: undefined,
+          hasBody: params.request.hasPostData === true
         })
         const hop = ids.hop(ids.request(), 0)
         emit({
@@ -1700,7 +1791,7 @@ export const connect: (
         method: (methods.has(request.method) ? request.method : "GET") as NetworkRequest.NetworkRequest["method"],
         url: request.url as Url.Url,
         headers: headersOf(request.headers),
-        resourceType: resourceTypes[resourceType] ?? "other",
+        resourceType: entry?.resourceType ?? resourceTypes[resourceType] ?? "other",
         initiator: entry?.frame !== undefined
           ? { _tag: "Document", navigable: entry.frame.id, navigation: Option.fromUndefinedOr(entry.navigation?.id) }
           : target.page !== undefined
@@ -1715,7 +1806,7 @@ export const connect: (
         Effect.suspend(() => {
           const target = session.key === undefined ? undefined : targets.get(session)
           handlers[method]?.(target, params, session)
-          return flush
+          return Effect.andThen(flush, sendDetached)
         }),
       lost: (session) =>
         Effect.suspend(() => {
@@ -1852,29 +1943,43 @@ export const connect: (
       return behavior?._tag === "Allow" ? behavior.directory : undefined
     }
 
-    // Requests fail offline, and `navigator.onLine` says so
-    const offline = (session: ProtocolClient.Session, offline: boolean) =>
-      Effect.all([
-        Network.emulateNetworkConditionsByRule({
-          matchedNetworkConditions: [{
-            urlPattern: "",
-            latency: 0,
-            downloadThroughput: -1,
-            uploadThroughput: -1,
-            offline
-          }]
-        }).pipe(Protocol.on(session)),
-        Network.overrideNetworkState({ offline, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }).pipe(
+    // Requests fail offline, and `navigator.onLine` says so. Throttling is the same command, so the two are
+    // applied together (review 17)
+    const network = (
+      session: ProtocolClient.Session,
+      offline: boolean,
+      conditions: Extract<Adapter.Override, { _tag: "NetworkConditions" }> | undefined
+    ) => {
+      const state = {
+        offline,
+        latency: conditions?.latency ?? 0,
+        downloadThroughput: conditions?.download ?? -1,
+        uploadThroughput: conditions?.upload ?? -1
+      }
+      return Effect.all([
+        Network.emulateNetworkConditionsByRule({ matchedNetworkConditions: [{ urlPattern: "", ...state }] }).pipe(
           Protocol.on(session)
-        )
+        ),
+        Network.overrideNetworkState(state).pipe(Protocol.on(session))
       ], { discard: true })
+    }
 
     const applyOverride = (
       session: ProtocolClient.Session,
       kind: Adapter.Override["_tag"],
-      override: Adapter.Override | undefined
+      effective: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
     ): Effect.Effect<void, Protocol.ProtocolError> => {
       const on = Protocol.on(session)
+      const override = effective.get(kind)
+      if (kind === "Offline" || kind === "NetworkConditions") {
+        const offline = effective.get("Offline")
+        const conditions = effective.get("NetworkConditions")
+        return network(
+          session,
+          offline?._tag === "Offline" && offline.offline,
+          conditions?._tag === "NetworkConditions" ? conditions : undefined
+        )
+      }
       if (override === undefined) {
         switch (kind) {
           case "Viewport":
@@ -1891,8 +1996,8 @@ export const connect: (
             return Emulation.clearGeolocationOverride().pipe(on)
           case "Media":
             return Emulation.setEmulatedMedia({ media: "", features: [] }).pipe(on)
-          case "Offline":
-            return offline(session, false)
+          case "CpuThrottling":
+            return Emulation.setCPUThrottlingRate({ rate: 1 }).pipe(on)
           case "ExtraHeaders":
             return Network.setExtraHTTPHeaders({ headers: {} }).pipe(on)
           case "JavaScriptEnabled":
@@ -1940,7 +2045,11 @@ export const connect: (
             features: Object.entries(override.features).map(([name, value]) => ({ name, value }))
           }).pipe(on)
         case "Offline":
-          return offline(session, override.offline)
+        case "NetworkConditions":
+          // Applied together, above
+          return Effect.void
+        case "CpuThrottling":
+          return Emulation.setCPUThrottlingRate({ rate: override.rate }).pipe(on)
         case "ExtraHeaders":
           return Network.setExtraHTTPHeaders({ headers: override.headers }).pipe(on)
         case "JavaScriptEnabled":
@@ -1986,25 +2095,27 @@ export const connect: (
       const key = JSON.stringify(intercepts)
       if (key === target.intercepts) return
       const on = Protocol.on(target.session)
+      // A challenge is asked about only for a request intercepted as it starts: an auth pattern pauses there too,
+      // and the request goes on at once unless a request-phase intercept wants it (review 17, P6)
       const patterns = [
-        ...intercepts.request.map((urlPattern) => ({ urlPattern, requestStage: "Request" as const })),
+        ...[...new Set([...intercepts.request, ...intercepts.auth])].map((urlPattern) => ({
+          urlPattern,
+          requestStage: "Request" as const
+        })),
         ...intercepts.response.map((urlPattern) => ({ urlPattern, requestStage: "Response" as const }))
       ]
-      if (patterns.length === 0 && !intercepts.auth) {
-        // Never disabled while a request is paused: its decision would have nowhere to go
-        if ((pausedRequests.get(requestKey(target, "")) ?? 0) === 0) yield* Fetch.disable().pipe(on)
-      } else {
-        yield* Fetch.enable({
-          patterns: patterns.length === 0 && intercepts.auth ? [{ urlPattern: "*" }] : patterns,
-          handleAuthRequests: intercepts.auth
-        }).pipe(on)
-      }
+      // Enabled from the target's start and never disabled, with a pattern no request matches while nothing
+      // intercepts. Enabled with no patterns, a page's first request after a route's Fetch.enable replied could go
+      // past the route, about once in forty under load, apparently while the interceptor was installed again;
+      // with the pattern kept, never in 160 (QUIRKS.md, Q46 and Q103). A request paused still has its decision to come.
+      const effective = patterns.length > 0 ? patterns : [{ urlPattern: nothing, requestStage: "Request" as const }]
+      yield* Fetch.enable({ patterns: effective, handleAuthRequests: intercepts.auth.length > 0 }).pipe(on)
       target.intercepts = key
     })
 
     const configureTarget = Effect.fnUntraced(function*(target: TargetEntry, page: PageEntry) {
       const overrides = registry.overrides(placement(page))
-      yield* Effect.forEach(overrides, ([kind, override]) => applyOverride(target.session, kind, override), {
+      yield* Effect.forEach(overrides, ([kind]) => applyOverride(target.session, kind, overrides), {
         concurrency: "unbounded",
         discard: true
       })
@@ -2030,11 +2141,7 @@ export const connect: (
           case "Intercept":
             return applyIntercepts(target, page)
           case "Override":
-            return applyOverride(
-              target.session,
-              declaration.override._tag,
-              registry.overrides(placement(page)).get(declaration.override._tag)
-            )
+            return applyOverride(target.session, declaration.override._tag, registry.overrides(placement(page)))
           case "FileChooser":
             return target.kind === "page"
               ? Page.setInterceptFileChooserDialog({ enabled: registry.fileChooser(placement(page)) }).pipe(
@@ -2521,12 +2628,20 @@ export const connect: (
                 return Fetch.fulfillRequest({
                   requestId,
                   responseCode: decision.status,
-                  responseHeaders: Object.entries(decision.headers).map(([name, value]) => ({ name, value })),
+                  // Several cookies come as one value, a line each (routes.ts)
+                  responseHeaders: Object.entries(decision.headers).flatMap(([name, value]) =>
+                    name.toLowerCase() === "set-cookie"
+                      ? value.split("\n").map((cookie) => ({ name, value: cookie }))
+                      : [{ name, value }]
+                  ),
                   body: base64(decision.body)
                 }).pipe(on)
               case "Fail":
-                return Fetch.failRequest({ requestId, errorReason: failReasons[decision.error] as Network.ErrorReason })
-                  .pipe(on)
+                // An abort is ended by what follows it, which a route's abort lacks (review 17, P4)
+                if (obligation.networkId !== undefined) {
+                  routeFailed.add(requestKey(obligation.target, obligation.networkId))
+                }
+                return Fetch.failRequest({ requestId, errorReason: failReasons[decision.error] }).pipe(on)
               case "ProvideCredentials":
                 return Fetch.continueWithAuth({
                   requestId,
@@ -2551,8 +2666,6 @@ export const connect: (
             }
           })()
           yield* protocol(send)
-          const key = requestKey(obligation.target, "")
-          pausedRequests.set(key, Math.max(0, (pausedRequests.get(key) ?? 1) - 1))
           obligations.delete(id)
           yield* run(() => emit({ _tag: "ObligationEnded", obligation: id, reason: "resolved", evidence: "cdp:Fetch" }))
           return
@@ -2744,6 +2857,40 @@ export const connect: (
       return base64Encoded ? fromBase64(body) : new TextEncoder().encode(body)
     })
 
+    const pausedObligation = (id: Adapter.ObligationId) => {
+      const obligation = obligations.get(id)
+      return obligation?._tag === "PausedRequest" ? Effect.succeed(obligation) : Effect.fail(foreign(id))
+    }
+
+    const requestBody = Effect.fnUntraced(function*(id: Adapter.ObligationId) {
+      const obligation = yield* pausedObligation(id)
+      if (Option.isSome(obligation.body) || !obligation.hasBody || obligation.networkId === undefined) {
+        return obligation.body
+      }
+      // A body too large for the pause's event is read by the request's network id
+      const { base64Encoded, postData } = yield* protocol(
+        Network.getRequestPostData({ requestId: obligation.networkId as Network.RequestId }).pipe(
+          Protocol.on(obligation.target.session)
+        )
+      )
+      return Option.some(base64Encoded === true ? fromBase64(postData) : new TextEncoder().encode(postData))
+    })
+
+    const pausedResponseBody = Effect.fnUntraced(function*(id: Adapter.ObligationId) {
+      const obligation = yield* pausedObligation(id)
+      if (obligation.phase !== "response") {
+        return yield* Effect.fail(
+          unsupported("interception.responseBody", "A request has a response only at the response phase")
+        )
+      }
+      const { body, base64Encoded } = yield* protocol(
+        Fetch.getResponseBody({ requestId: obligation.requestId as Fetch.RequestId }).pipe(
+          Protocol.on(obligation.target.session)
+        )
+      )
+      return base64Encoded ? fromBase64(body) : new TextEncoder().encode(body)
+    })
+
     const setInputFiles = Effect.fnUntraced(function*(node: Adapter.NodeBinding, files: ReadonlyArray<string>) {
       const document = documents.get(node.document)
       if (document === undefined) {
@@ -2812,6 +2959,8 @@ export const connect: (
       grantPermissions,
       resetPermissions,
       responseBody,
+      requestBody,
+      pausedResponseBody,
       setInputFiles,
       downloadPath,
       cancelDownload

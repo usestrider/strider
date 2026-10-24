@@ -92,7 +92,7 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *Reconsider:* whether the viewer's realm should be hidden from callers.
 
 **Q69. Firefox's traversal back from its JSON viewer went unreported under full load** (Browser). In one full integration run after review 16, the conformance test's `traverse(-1)` from `/json` removed the viewer's realm and fetched the page again, but no new realm and no end came within 10 s. Three runs of that test alone passed.
-- *Seen:* review 16's revision, one full run of three.
+- *Seen:* review 16's revision, one full run of three; review 17's revision, two full runs of four.
 - *We:* nothing yet; the restore inference (Q4) waits for a realm that didn't come.
 - *Reconsider:* with Q4 and Q5, an end Firefox reports for every traversal.
 
@@ -305,9 +305,60 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *Reconsider:* when BiDi adds the scope.
 
 **Q46. Chromium's interception tests flake under full load** (Ours, a test flake). Occasionally a request isn't paused, or a fulfilled one reads as served by the network, when the whole integration suite runs at once; seen before and after review 14.
-- *Seen:* review 14's revision runs.
+- *Seen:* review 14's revision runs; traced in review 17's revision (Q103).
 - *We:* nothing yet; listed in PROTOCOL.md.
 - *Reconsider:* find whether an intercept declaration is acknowledged before it is in force (CONCEPTS.md §7, Installation), when routes are built.
+- **Resolved** in review 17's revision: the declaration was acknowledged before it was in force, apparently because `Fetch` enabled with no patterns gave up its interceptor. Q103 says what we do now.
+
+**Q89. Only Chromium shows a route the CORS preflight** (Browser). A cross-origin `PUT` with a custom header pauses first as an `OPTIONS` request on Chromium; Firefox and WebKit pause only the `PUT`. A fulfilled cross-origin response needs CORS headers on all three.
+- *Seen:* review 17, P9.
+- *We:* show what Chromium shows: a route matching cross-origin requests on Chromium answers their preflights, or lets them continue to the server.
+- *Reconsider:* answering a preflight for a route that fulfills its request, as Playwright does, which would hide a request the page made.
+
+**Q90. WebKit pauses a redirect's first hop only, and won't follow a redirect a route fulfills** (Browser). A fetch fulfilled with `302` and `Location` gets the `302` itself, while Chromium and Firefox follow it and pause the target as the next hop.
+- *Seen:* review 17, P2 and P7.
+- *We:* `interception.redirects` is `partial` on WebKit.
+- *Reconsider:* when the build is rolled.
+
+**Q91. Only CDP fails a request with the reason asked for** (Browser). Firefox reports `NS_ERROR_ABORT` for every reason, and WebKit "Blocked by Web Inspector".
+- *Seen:* review 17, P4.
+- *We:* `Route.abort()` is `failed` everywhere; another reason is `interception.abortReason`, CDP's alone.
+- *Reconsider:* nothing.
+
+**Q92. Firefox aborts a request continued with a new URL, and keeps the old length with a new body** (Browser). The body arrives broken unless its `Content-Length` is sent too.
+- *Seen:* review 17, P3, through the adapter and raw BiDi.
+- *We:* a new URL is `Unsupported` (`interception.continueUrl`); the BiDi adapter sends a new body's length.
+- *Reconsider:* when Firefox implements `url`.
+
+**Q93. Firefox can't fulfill at the response phase, and leaves a request it refused paused** (Browser). `network.provideResponse` there answers `unsupported operation`; a continue with new headers replaces the response's.
+- *Seen:* review 17, P5.
+- *We:* refuse it up front (`interception.responseFulfill`), so the default continues the request.
+- *Reconsider:* a response-phase decision that changes headers only, which Firefox and CDP can do.
+
+**Q94. Only CDP can read a response paused at the response phase** (Browser). WebDriver BiDi has no body as a response starts, and Playwright's WebKit no command for it.
+- *Seen:* review 17, P5.
+- *We:* `interception.responseBody` is CDP's alone; patching a response's body works on Chromium only.
+- *Reconsider:* when either protocol adds one.
+
+**Q95. Firefox's default answer to a challenge waits forever, headless** (Browser). `continueWithAuth{action: "default"}` shows its prompt, which nothing answers.
+- *Seen:* review 17, P6.
+- *We:* the default at a challenge is the challenge's response (`CancelAuth`), never the browser's prompt.
+- *Reconsider:* nothing.
+
+**Q96. Chromium asks about a challenge only for a request intercepted as it starts, and lowercases its scheme** (Browser). With a response-stage pattern it pauses the `401` as a response and refuses credentials for it.
+- *Seen:* review 17, P6, and its revision, where the registry had kept auth patterns as response-stage ones.
+- *We:* auth patterns pause at the request stage, where a request nothing else wants continues at once; schemes are lowercased on every backend.
+- *Reconsider:* nothing.
+
+**Q97. Chromium refuses a `Content-Length` header in a continued request** (Browser). `Fetch.continueRequest` answers "Unsafe header: content-length", and computes the length itself.
+- *Seen:* review 17's revision.
+- *We:* routes never send it; the BiDi adapter sends it, since Firefox doesn't compute it (Q92).
+- *Reconsider:* nothing.
+
+**Q98. A paused request's resource type differs from its events'** (Browser). Chromium's `Fetch` calls a `fetch()` an `XHR`, where its `Network` events say `Fetch`; WebKit's pause carries no type.
+- *Seen:* review 17, P11.
+- *We:* a paused request takes the type its network events gave it, where they came first.
+- *Reconsider:* nothing.
 
 ## Browsers: emulation, permissions and declarations
 
@@ -341,6 +392,21 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *We:* `pdf` is `unknown` for headful Chrome and `unsupported` on WebKit.
 - *Reconsider:* nothing.
 
+**Q99. Firefox 158 lacks most of `emulation`** (Browser). Media features, touch, scripting and focus emulation answer `unknown command`; a mobile viewport has no flag; an unavailable position is rejected; and every-origin grants and four of the common permission names (`clipboard-read`, `clipboard-write`, `background-sync`, `local-fonts`) aren't WebDriver BiDi's or Firefox's.
+- *Seen:* review 17, P13 to P15.
+- *We:* each is refused up front under the capability named for its field, and a name Firefox rejects fails with `InvalidInput`.
+- *Reconsider:* when Firefox implements them.
+
+**Q100. WebKit's emulation is uneven** (Browser). Its touch override changes nothing a page sees (no touch points, `ontouchstart` always there), it ignores an unavailable position, it sets locale and position per context, the locale only before the context's pages exist, a mobile viewport reloads at 979 CSS px and a device pixel ratio of 0.82, `navigator.userAgent` changes only at the next document, a page reports `hasFocus()` false and `prefers-reduced-motion: reduce` without emulation, and every permission name is accepted though its Permissions API can query few.
+- *Seen:* review 17, P13 to P15.
+- *We:* refuse touch and an unavailable position; say the rest in the capability entries' limitations.
+- *Reconsider:* when the build is rolled.
+
+**Q101. An init script runs before the document has an element, and on Firefox inside a function** (Browser). `document.documentElement` is null on every backend; WebDriver BiDi's preload scripts are functions, so a script's top-level `var` and function declarations aren't globals there, as they are on CDP and WebKit.
+- *Seen:* review 17, P12, and its revision.
+- *We:* document both; a BiDi preload keeps which scripts ran under a `Symbol.for` key a page could find.
+- *Reconsider:* evaluating a Firefox script's source at global scope, if the page's CSP allows it.
+
 ## Browsers: protocols and transports
 
 **Q53. Firefox deviates from the BiDi spec in two events** (Browser). `contextCreated` has no `hasPlannedNavigation`, which the spec requires, and `navigationStarted` has no `url` for the navigation that `close({ promptUnload: true })` starts.
@@ -366,6 +432,11 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 **Q57. WebKit needs `getResourceTree` before `Runtime.enable`** (Browser). Otherwise its snapshot doesn't precede the contexts `Runtime.enable` replays. Execution context ids on CDP restart after a process swap, while `uniqueId` doesn't.
 - *Seen:* WebKit and CDP probe findings.
 - *We:* order the gate accordingly; key CDP realms by `uniqueId`.
+- *Reconsider:* nothing.
+
+**Q102. WebKit reports a page's existing user world for a new document after it commits** (Browser). An engine request right after a second `goto` found no realm in the world and asked to create it, which WebKit refuses ("World with the given name already exists"), so every read after a second `goto` failed.
+- *Seen:* review 17's revision; the suites had navigated a page twice only by clicking links before.
+- *We:* when the page already has the world, the WebKit adapter waits for its report for the document, or the document's end.
 - *Reconsider:* nothing.
 
 ## Ours: workarounds and odd shapes
@@ -458,3 +529,38 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *Seen:* review 16's revision; it held in every run.
 - *We:* nothing yet.
 - *Reconsider:* waiting for the page's `dragstart` after the first held move, as Playwright does, and clearing a drag the release didn't end.
+
+**Q103. Chromium's `Fetch` stays enabled for every page, with a pattern nothing matches** (Ours). It keeps the interceptor installed, so a route declared on a live page is in force when its declaration returns (Q46).
+- *Seen:* review 17's revision: one request in 40 went past a route under load before; none in 160 after.
+- *We:* `Fetch.enable` from each page target's start, never disabled.
+- *Reconsider:* whether an interceptor always installed costs anything measurable; and whether Chromium can say when its interceptor is in force.
+
+**Q104. A decision a backend can't apply lets the request through** (Ours). `Route.abort("timedOut")` on Firefox, or a fulfill at the response phase there, is a handler failure, so the default, continue, applies, logged and published as an `AutoResolution`: the route fails open.
+- *Seen:* review 17's revision.
+- *We:* as above, for one rule with handler failures.
+- *Reconsider:* failing closed for an abort, which would be a decision nobody made.
+
+**Q105. Routes' automatic decisions name a setting that doesn't exist** (Ours). `policy: 'routes: "continue"'`, as file choosers' do (Q63).
+- *Seen:* review 17's revision.
+- *We:* nothing.
+- *Reconsider:* with Q63.
+
+**Q106. A route with a `URLPattern` pauses every request** (Ours). L0 can't read a `URLPattern`, so the intercept covers everything and the route matches itself; requests it doesn't match continue at once, a round trip each.
+- *Seen:* review 17's revision.
+- *We:* a glob or an exact URL is passed to L0 as it is.
+- *Reconsider:* translating a `URLPattern`'s fixed parts into a glob.
+
+**Q107. A removed init script's dependents stay registered** (Ours). They don't run once their dependency is gone, since L0 runs a script only after what it comes after ran, but they are still declared until their own scope closes.
+- *Seen:* review 17's revision; the review said they would be removed.
+- *We:* as above.
+- *Reconsider:* removing them, which would need L1 to own their scopes.
+
+**Q108. The page clock's controls are on a symbol the page can find** (Ours). `Symbol.for` with a random token keeps page script from stumbling on them, not from looking.
+- *Seen:* review 17.
+- *We:* as above.
+- *Reconsider:* driving the clock from the isolated world through the DOM, if pages turn out to touch it.
+
+**Q109. A page's clock and its context's can't both be installed** (Ours). One timeline covers a page, so the second `install` is a `Conflict`.
+- *Seen:* review 17's revision.
+- *We:* as above.
+- *Reconsider:* letting a page's clock override its context's, as overrides do.

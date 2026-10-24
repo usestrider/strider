@@ -124,7 +124,7 @@ export type Permission =
  */
 export interface GrantOptions {
   /**
-   * The origin the permissions apply to.
+   * The origin the permissions apply to; every origin is `Unsupported` on Firefox (`permissions.anyOrigin`).
    *
    * @default every origin
    */
@@ -158,11 +158,13 @@ export interface UserContext extends ObservedUserContext {
    */
   readonly clock: PageClock.PageClock
   /**
-   * Intercepts requests from every page of the context while the registration lives.
+   * Intercepts requests matching `pattern` from every page of the context, its workers included, at one
+   * phase while the registration lives; a page's own routes are asked first. As `Page.route` otherwise.
    */
-  route<E, R>(
+  route<E, R, P extends Route.Phase = "request">(
     pattern: Url.Pattern | string,
-    handler: Route.Handler<E, R>
+    handler: Route.Handler<E, R, P>,
+    options?: Route.Options<P> | undefined
   ): Effect.Effect<Route.Registration, Route.RouteError, Scope.Scope | R>
   /**
    * Runs a script in every new document of every page while the registration lives.
@@ -179,6 +181,11 @@ export interface UserContext extends ObservedUserContext {
   ): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope>
   /**
    * Grants permissions while the registration lives. Grants are combined (AND) with Permissions Policy.
+   *
+   * **Details**
+   *
+   * Removing one leaves the others in force. A name the browser doesn't know fails with `InvalidInput`
+   * naming it: Firefox's list is shorter than Chromium's, and WebKit accepts any name.
    *
    * **Example** (Geolocation for one origin)
    *
@@ -231,7 +238,8 @@ export interface Options {
    */
   readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined
   /**
-   * `"emulated"` makes every page report focus, so many pages can run at once.
+   * `"emulated"` makes every page report focus, so many pages can run at once. `Unsupported` on Firefox
+   * (`emulation.focus`).
    *
    * @default "system"
    */
@@ -243,13 +251,15 @@ export interface Options {
    */
   readonly eventLog?: number | undefined
   /**
-   * Settings held for the context's life: `emulate(…)` without a scope.
+   * Settings held for the context's life, declared before its first page: `emulate(…)` without a scope. A
+   * field the backend can't apply fails the context with `Unsupported`.
    *
    * @default none
    */
   readonly emulation?: Emulation.Emulation | undefined
   /**
-   * Permissions granted for the context's life, for every origin: `grant(…)` without a scope.
+   * Permissions granted for the context's life, for every origin: `grant(…)` without a scope. `Unsupported`
+   * on Firefox, which grants to one origin at a time (`permissions.anyOrigin`).
    *
    * @default none
    */

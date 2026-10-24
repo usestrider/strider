@@ -1,6 +1,6 @@
 # API: the ergonomic layer (L2)
 
-*Revision 5.25, 2026-10-19. The first slice is built (2026-10-22, after [review 12](reviews/12-l1-first-slice.md)): each backend's `layer`, `Browser.newPage` and `newContext`, `goto`, `reload`, `back`, `forward` and `close`, the queries, `click`, `Expect.toBeVisible` and `toBeHidden`, and `Deadline`; and events (2026-10-23, after [review 13](reviews/13-events-slice.md)): `Popup`, `Dialog` with `Dialog.handle`, `AutoResolution` and `Subscription.Capacity`; and every other event module (2026-10-23, after [review 14](reviews/14-event-modules.md)), whose `next` hands out the wait as an `Effect` (review 15); and interacting and asserting (2026-10-23, after [review 16](reviews/16-interaction-and-assertions.md)): every action, the one-shot reads, `page.keyboard` and `page.mouse`, every expectation but `toMatchAria`, and `Condition`. A member that isn't built yet fails as the defect `NotBuilt`, and [PROTOCOL.md](PROTOCOL.md) (Status) lists what is. The full signatures live in the package's source, [packages/browser/src/](packages/browser/src/), declarations where nothing is built yet (the sketch), with each declaration's own contract in its JSDoc. It type-checks against Effect 4.0.6 and passes Effect's own JSDoc checker, and the API reference is generated from it ([packages/browser/INDEX.md](packages/browser/INDEX.md) lists every declaration and member). This document keeps the design: the contracts that span declarations, and the excerpts that explain them. Where an excerpt and the sketch differ, the sketch is right. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
+*Revision 5.25, 2026-10-19. The first slice is built (2026-10-22, after [review 12](reviews/12-l1-first-slice.md)): each backend's `layer`, `Browser.newPage` and `newContext`, `goto`, `reload`, `back`, `forward` and `close`, the queries, `click`, `Expect.toBeVisible` and `toBeHidden`, and `Deadline`; and events (2026-10-23, after [review 13](reviews/13-events-slice.md)): `Popup`, `Dialog` with `Dialog.handle`, `AutoResolution` and `Subscription.Capacity`; and every other event module (2026-10-23, after [review 14](reviews/14-event-modules.md)), whose `next` hands out the wait as an `Effect` (review 15); and interacting and asserting (2026-10-23, after [review 16](reviews/16-interaction-and-assertions.md)): every action, the one-shot reads, `page.keyboard` and `page.mouse`, every expectation but `toMatchAria`, and `Condition`; and declarations (2026-10-23, after [review 17](reviews/17-declarations.md)): routes, init scripts, emulation, permission grants and the page clock. A member that isn't built yet fails as the defect `NotBuilt`, and [PROTOCOL.md](PROTOCOL.md) (Status) lists what is. The full signatures live in the package's source, [packages/browser/src/](packages/browser/src/), declarations where nothing is built yet (the sketch), with each declaration's own contract in its JSDoc. It type-checks against Effect 4.0.6 and passes Effect's own JSDoc checker, and the API reference is generated from it ([packages/browser/INDEX.md](packages/browser/INDEX.md) lists every declaration and member). This document keeps the design: the contracts that span declarations, and the excerpts that explain them. Where an excerpt and the sketch differ, the sketch is right. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
 
 ## Purpose
 
@@ -26,7 +26,7 @@ The README's principles, as they apply to this layer, written the way Effect's o
 - **If it doesn't have to be a function, it isn't one** (principle 12).
   - Nothing to configure: a value. That is an `Effect` for operations (`page.title`, `locator.count`, `tab.inspect`, `context.newPage`) or a plain property for pure derivations (`locator.first`).
   - Settings: a trailing `options?: … | undefined`, as Effect's `handle.kill(options?)` and `client.get(url, options?)` take them. Every action has checks you can adjust, so actions are calls: `button.click()`, `button.click({ button: "right" })`, `page.goto(url, { waitUntil: "load" })`. Reads stay values.
-- **`With` means "with a function",** as in Effect's `zipWith(that, f)` and `scopedWith(f)`: `Route.continueWith(change)`, `intercepted.fetchWith(change)`. It never means "with options".
+- **`With` means "with a function",** as in Effect's `zipWith(that, f)` and `scopedWith(f)`: `Route.continueWith(change)`. It never means "with options".
 - **Handles get members; cross-cutting settings are dual combinators** that work data-first and in `pipe`, each backed by a `Context.Reference`: `Deadline.within`, `Deadline.withDefaultBudget`, `Diagnostics.withPreset`, `Expect.withCheckInterval` and `Page.withUserGesture`, as in `button.click().pipe(Deadline.within("5 seconds"))`. Option bags hold only what is specific to one operation.
 - **Services have module-level accessors,** as `HttpClient.get` uses the `HttpClient` in context: `Browser.newPage(options?)` and `Browser.newContext(options?)` use the `Browser` in context. Code that already holds a `Browser` uses its members, which do the same.
 - **Layers are named `layer…`:** `Chromium.layer(options)`, `Chromium.layerConfig(config)`, `Chromium.layerConnect(endpoint, options?)`, `WebKit.layerAttach(endpoint)`, `Bidi.layerConnect(endpoint)` and `Browser.layerTest(timeline)`.
@@ -72,7 +72,7 @@ The README's principles, as they apply to this layer, written the way Effect's o
   | `next`, `stream` | subscribe to an event type from now on | `Download.next(page)`, `NetworkRequest.stream(page)` |
   | `handle` | a scoped handler that decides an obligation | `Dialog.handle(page, Dialog.acceptAll)` |
   | `new*` | creates an owned resource | `Browser.newPage()`, `context.newPage`, `Browser.newContext()` |
-  | `*With(f)` | the same operation, with a function | `Route.continueWith(change)`, `fetchWith(change)` |
+  | `*With(f)` | the same operation, with a function | `Route.continueWith(change)` |
   | `with*`, `within` (dual) | a cross-cutting setting over any effect | `Deadline.within`, `Diagnostics.withPreset`, `Page.withUserGesture` |
   | `layer*` | a layer that provides a service | `Chromium.layer({ executablePath })`, `Browser.layerTest(timeline)` |
   | `export*`, `Json` | crosses a persistence boundary; carries secrets | `exportStorageState`, `StorageState.Json`, `exportTrace` |
@@ -266,10 +266,10 @@ interface UserContext extends ObservedUserContext {     // two levels only: read
   readonly cookies: CookieJar.CookieJar                 // a sub-handle bound to the context (Storage, below)
   readonly exportStorageState: Effect<StorageState.StorageState, UserContextError>   // values Redacted in memory
   readonly clock: PageClock.PageClock                   // context-wide timeline (opt-in)
-  route<E, R>(pattern: Url.Pattern | string, handler: Route.Handler<E, R>): Effect<Route.Registration, Route.RouteError, Scope | R>
+  route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError, Scope | R>   // asked after the page's own
   addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, DeclarationError, Scope>
   emulate(settings: Emulation.Emulation): Effect<Registration, DeclarationError, Scope>
-  grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect<Registration, DeclarationError, Scope>   // default every origin; ANDed with Permissions Policy
+  grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect<Registration, DeclarationError, Scope>   // default every origin (not on Firefox); ANDed with Permissions Policy
 }
 
 interface Options {                                      // UserContext.Options; an unset option keeps the browser's own value unless a default is stated
@@ -296,8 +296,10 @@ interface Emulation {
 }
 ```
 
-- **One concept, two lifetimes.** Creation options are declarations held for the context's whole life; `emulate` and `grant` are the same declarations, scoped. So viewport, locale and timezone live in `Emulation`, not as separate options.
+- **One concept, two lifetimes.** Creation options are declarations held for the context's whole life, made before its first page; `emulate` and `grant` are the same declarations, scoped. So viewport, locale and timezone live in `Emulation`, not as separate options. `focus: "emulated"` is the focus override, which Firefox lacks.
 - **Overrides restore only what they know.** Removing one restores the previous value when it is known and access permits; precedence is page over context (CONCEPTS.md §7). A field the backend can't apply fails with `Unsupported` naming it.
+- **One `emulate` call is one registration** (review 17, candidate 5). Removing it, or closing its scope, removes every field it set. Each field is a capability named for it: `emulation.viewport`, `emulation.viewport.mobile`, `emulation.userAgent`, `emulation.locale`, `emulation.timezone`, `emulation.geolocation`, `emulation.geolocation.unavailable`, `emulation.media`, `emulation.network.offline`, `emulation.network.throttling`, `emulation.cpuSlowdown`, `emulation.javaScript`, `emulation.touch` and `emulation.focus`. The call fails with `Unsupported` naming the first the backend can't apply, before anything is applied. Chromium applies every field. Firefox can't emulate media, touch, JavaScript, a mobile viewport, throttling, a CPU slowdown or an unavailable position. WebKit sets the locale and position per context, the locale only before the context's pages exist (which `UserContext.Options.emulation` is), and can't emulate touch, throttling, a CPU slowdown or an unavailable position. Most fields reach a loaded page at once; JavaScript, touch handlers and WebKit's `navigator.userAgent` wait for its next document.
+- **Grants are recomputed** (review 17, candidate 6). Removing one leaves the others in force: the browser can only reset a context's grants together, so the library resets them and grants what remains. A name the browser doesn't know fails with `InvalidInput` naming it, and every origin is `permissions.anyOrigin`, which Firefox lacks.
 - **Context failures are `UserContext.UserContextError`,** with reasons `StorageState.Incompatible{partitions}` (a saved state the new context can't apply in full: nothing is applied partly), `InvalidInput`, `NotPermitted`, `Unsupported` and `BackendFailure`.
 
 ## Pages
@@ -342,7 +344,7 @@ interface Page extends ReadonlyPage {
   readonly keyboard: Keyboard.Keyboard
   readonly mouse: Mouse.Mouse
   readonly clock: PageClock.PageClock
-  route<E, R>(pattern: Url.Pattern | string, handler: Route.Handler<E, R>): Effect<Route.Registration, Route.RouteError, Scope | R>
+  route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError, Scope | R>
   addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, Declaration.DeclarationError, Scope>
   emulate(settings: Emulation.Emulation): Effect<Declaration.Registration, Declaration.DeclarationError, Scope>
   readonly activate: Effect<void, TargetGone>            // bring to front; rendering-based waits need it
@@ -405,6 +407,7 @@ Notes:
 - **Navigation resolves at commit.** That is when a navigation has succeeded. Waiting for `domContentLoaded` or `load` is an extra wait you ask for with `waitUntil`, and the span records which state was waited for.
 - **Page failures are `Page.PageError`.** It covers navigation (`NavigationFailed{netError}`, `NavigationCanceled{why}`, `NavigationSuperseded{by}`, `BecameDownload`, `NoContent`, all declared in `PageNavigation`), evaluation (`EvaluationThrown`, `NotSerializable`), reads and captures, setup (`InitializationFailed{step}`), a refused close (`CloseCanceled`), and the shared `InvalidInput`, `NotPermitted`, `Unsupported` and `BackendFailure`. `operation` names the call.
 - **Declarations are scoped registrations.** `route`, `addInitScript`, `emulate`, `grant`, `Dialog.handle`, `FileChooser.handle` and `clock.install` are removed when the caller's scope closes, and fail with `Declaration.DeclarationError` (`TimingUnsupported`, `Conflict{with}`, `DependencyReleased`, and the shared reasons). In `@effect/vitest`'s `it.effect` that scope is already present; elsewhere, use `Effect.scoped`.
+- **Init scripts keep one order everywhere** (review 17, candidate 4): the context's before the page's, then the order they were added in. `after` states a dependency, in force and of equal or broader scope, and a script runs only if each one it comes after ran in that document without throwing; a dependency removed stops its dependents. A script runs as its document starts, before `document.documentElement` exists, in every frame, cross-site ones included; added to a loaded page, it runs from the next document. One that throws is the page's `UncaughtException`. `world: "isolated"` is one isolated world of the caller's, apart from the engine's and the page's, where `page.evaluate` will run; WebKit has none for init scripts. On Firefox a script runs inside a function, so its top-level declarations aren't globals.
 
 ## Locators, actions and actionability
 
@@ -677,23 +680,35 @@ Each module has the most specific accurate name, with a prefix only where a bare
 
 ```ts
 // Route
-type Handler<E, R> = (intercepted: Intercepted) => Effect<Decision, E, R>   // E is logged; the default decision applies
-interface Intercepted {
-  readonly request: NetworkRequest.NetworkRequest        // fixed: the request as paused at this phase; NetworkRequest.toHttpClientRequest for HttpClient
-  readonly phase: "request" | "response" | "auth"        // fixed
-  readonly fetch: Effect<HttpClientResponse, RouteError> // let the browser perform it, then fulfil with a patched response
-  fetchWith(change: (request: HttpClientRequest) => HttpClientRequest): Effect<HttpClientResponse, RouteError>
+type Phase = "request" | "response" | "auth"
+type Handler<E, R, P extends Phase = "request"> = (intercepted: Intercepted<P>) => Effect<Decision<P>, E, R>   // E is logged; the default applies
+interface Decision<in P extends Phase> {}                // valid at the phases P: one valid at more is accepted where fewer are asked for
+type Intercepted<P> = Extract<RequestPhase | ResponsePhase | AuthPhase, { phase: P }>
+interface Paused {
+  readonly request: NetworkRequest.NetworkRequest        // fixed: the request as paused; NetworkRequest.toHttpClientRequest for HttpClient
+  readonly requestBody: Effect<Option<Uint8Array>, RouteError | TargetGone>   // the body as sent, on every backend
 }
-declare const continue: Decision
-declare const continueWith: (change: (request: HttpClientRequest) => HttpClientRequest) => Decision   // a change the backend can't apply fails with Unsupported
-declare const fulfill: (response: HttpServerResponse) => Decision   // HttpServerResponse.json, .text, .uint8Array, .stream, .file, .fromClientResponse
-declare const abort: (reason?: AbortReason | undefined) => Decision   // default "failed"
-declare const fallthrough: Decision                      // next matching handler
-declare const provideCredentials: (credentials: { username: string; password: Redacted<string> }) => Decision   // the auth phase only
+interface RequestPhase extends Paused { readonly phase: "request" }
+interface ResponsePhase extends Paused {
+  readonly phase: "response"
+  readonly response: NetworkResponse.NetworkResponse     // fixed: status and headers
+  readonly responseBody: Effect<Uint8Array, RouteError | TargetGone>   // interception.responseBody: CDP only
+}
+interface AuthPhase extends Paused { readonly phase: "auth"; readonly challenge: { origin: string; scheme: string; realm: string } }
+declare const continue: Decision<Phase>                  // at auth: the page gets the challenge's response
+declare const fallthrough: Decision<Phase>               // the next matching route, or the default
+declare const continueWith: (change: (request: HttpClientRequest) => HttpClientRequest) => Decision<"request">   // only what changed is sent
+declare const fulfill: (response: HttpServerResponse) => Decision<"request" | "response">   // HttpServerResponse.json, .text, .uint8Array, .stream, .file
+declare const abort: (reason?: AbortReason | undefined) => Decision<"request" | "response">   // default "failed"; another reason is CDP's
+declare const provideCredentials: (credentials: { username: string; password: Redacted<string> }) => Decision<"auth">
 // HAR recording: Recordings, below
 
 yield* page.route("https://app.example.com/api/user", () => Effect.succeed(Route.fulfill(HttpServerResponse.jsonUnsafe({ name: "Ada" }))))
 yield* page.route("https://app.example.com/api/**", () => Effect.succeed(Route.continueWith(HttpClientRequest.setHeader("x-test", "1"))))
+yield* page.route("https://app.example.com/api/slow", (intercepted) =>   // what the server sent, patched (CDP)
+  Effect.map(intercepted.responseBody, (body) =>
+    Route.fulfill(HttpServerResponse.uint8Array(body, { status: intercepted.response.status, headers: intercepted.response.headers }))),
+  { phase: "response" })
 ```
 
 - **Requests and responses are events of their page and context** (review 14). A request is published per hop when it is sent, and a response when it arrives; `NetworkRequest.toHttpClientRequest` turns a captured request into Effect's `HttpClientRequest`, redacted headers still redacted.
@@ -710,8 +725,11 @@ interface Registration extends Declaration.Registration { readonly hits: Watchab
 interface InitScript extends Declaration.Registration { readonly id: Id }   // also usable in { after: [...] }
 ```
 
-- **The handler's return type is the obligation.** A handler that fails, is interrupted, or leaves its scope gets the default decision (continue). A paused request is never left hanging.
-- **Order.** Handlers compose by precedence: most specific scope first, then priority, then recency.
+- **The handler's return type is the obligation.** A handler that fails, is interrupted, runs out of its `Deadline.DefaultBudget` (as read at `route`), or returns a decision the backend can't apply gets the default decision, `continue`; its failure is logged at Effect's `References.UnhandledLogLevel`, and the decision is published as an `AutoResolution{PausedRequest}` (`policy: 'routes: "continue"'`) on the page and its context, as it is when every matching route falls through. A paused request is never left hanging, and one no route matches continues at once. At an authentication challenge the default is the challenge's response, never the browser's own prompt, which waits forever on headless Firefox (review 17, P6).
+- **Order.** Routes compose by precedence: the page's before its context's, then the most recent first; `fallthrough` asks the next. `hits` counts the requests a route was asked about. A route matches its pattern itself, with `Url.Pattern`'s rules; the browser is asked to pause what covers it.
+- **A route has one phase** (review 17, candidates 1 and 2). `"request"` unless `options.phase` says `"response"`, when the server's status and headers are in (and on Chromium its body), or `"auth"`, at a challenge. The phase types what the handler is given and may return: `provideCredentials` is no decision for a request-phase route.
+- **What the backends do differs, and is said** (review 17, candidate 3). Chromium shows a route the CORS preflight of a cross-origin request, an `OPTIONS` request, which Firefox and WebKit don't; a fulfilled cross-origin response needs CORS headers on all three. WebKit pauses only a redirect's first hop and doesn't follow a redirect a route fulfills; it has no authentication phase. Firefox can't fulfill at the response phase or send a request to a new URL, and reports one failure for every abort reason, as WebKit does. Capability entries name each: `interception.responseBody`, `interception.responseFulfill`, `interception.continueUrl`, `interception.abortReason` and `interception.redirects`.
+- **No second HTTP client.** A route has no `fetch` that performs the request outside the browser, as Playwright's `route.fetch` does: its cookies, proxy, TLS, cache and service workers wouldn't be the browser's. A handler that wants that says so with `NetworkRequest.toHttpClientRequest(intercepted.request)`, its own `HttpClient`, and `Route.fulfill(HttpServerResponse.fromClientResponse(response))`.
 
 ## Dialogs, downloads, storage, permissions
 
@@ -820,7 +838,8 @@ type Mode =
 - **One timeline per scope.** `page.clock` covers every document and frame of the page, because a test's time must not reset when the page navigates. Each operation is appended to a log that new documents replay. `context.clock` is the same thing, context-wide.
 - **Actionability keeps working.** Readiness sampling uses native rendering, not the page's clock, so a paused clock does not stall `click`. Nothing advances page time implicitly.
 - **Separate clocks.** Page time never touches library deadlines, and `TestClock` never touches the page.
-- **Clock failures are `PageClock.PageClockError`:** `NotInstalled`, `WrongMode{mode}` and `BackendFailure`.
+- **Clock failures are `PageClock.PageClockError`:** `NotInstalled`, `WrongMode{mode}`, `InvalidInput` (a time or duration that doesn't parse) and `BackendFailure`.
+- **The clock is the library's** (review 17, candidate 7). No backend has an application clock to drive, so `install` adds a script of ours to each document's main world, before the page's own, which replaces `Date`, `performance.now`, and on a controlled clock the timers and animation frames; operations reach every current document of the scope by evaluation there, and a new document starts where the timeline is. `resume` turns any mode into an offset from the time the clock shows, and moves a controlled clock's waiting timers to real ones. A document loaded before `install` gets the clock then; what its scripts captured before keeps real time. Workers, CSS animations and `document.timeline` keep real time. A page's clock and its context's can't both be installed (`Conflict`). The shim's controls are on a symbol a page that enumerates the window's symbols can find.
 
 ## Capabilities
 

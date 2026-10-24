@@ -25,19 +25,27 @@ import * as Path from "effect/Path"
 import { pipeArguments } from "effect/Pipeable"
 import type * as Scope from "effect/Scope"
 import * as Browser from "../Browser.ts"
+import type * as Declaration from "../Declaration.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import * as Page from "../Page.ts"
 import * as Reason from "../Reason.ts"
+import type * as Route from "../Route.ts"
+import type * as Url from "../Url.ts"
 import * as UserContext from "../UserContext.ts"
 import type * as Adapter from "./adapter.ts"
+import * as Clock from "./clock.ts"
 import * as ConnectionImpl from "./connection.ts"
 import * as DownloadImpl from "./download.ts"
+import * as Emulation from "./emulation.ts"
+import * as Grants from "./grants.ts"
 import * as Handles from "./handles.ts"
+import * as InitScripts from "./initScripts.ts"
 import * as Model from "./model.ts"
 import * as Navigation from "./navigation.ts"
 import * as NotBuilt from "./notBuilt.ts"
 import * as Operation from "./operation.ts"
 import * as PageImpl from "./page.ts"
+import * as Routes from "./routes.ts"
 import type * as Runtime from "./runtime.ts"
 import * as Watchable from "./watchable.ts"
 import * as WorkerImpl from "./worker.ts"
@@ -49,14 +57,15 @@ const contextError = (operation: string, reason: UserContext.UserContextErrorRea
   new UserContext.UserContextError({ operation, reason, diagnostics: Operation.diagnostics(id) })
 
 /** The options a context can be created with so far; the others aren't built. */
-const unbuiltOption = (options: UserContext.Options | undefined): Option.Option<string> => {
-  if (options === undefined) return Option.none()
-  if (options.storageState !== undefined) return Option.some("UserContext.Options.storageState")
-  if (options.emulation !== undefined) return Option.some("UserContext.Options.emulation")
-  if (options.permissions !== undefined) return Option.some("UserContext.Options.permissions")
-  if (options.focus === "emulated") return Option.some("UserContext.Options.focus: emulated")
-  return Option.none()
-}
+const unbuiltOption = (options: UserContext.Options | undefined): Option.Option<string> =>
+  options?.storageState !== undefined ? Option.some("UserContext.Options.storageState") : Option.none()
+
+/** A declaration's failure, as a context's: the reasons a context has, else a backend failure. */
+const asContextReason = (reason: Declaration.DeclarationErrorReason): UserContext.UserContextErrorReason =>
+  reason._tag === "InvalidInput" || reason._tag === "NotPermitted" || reason._tag === "Unsupported" ||
+    reason._tag === "BackendFailure"
+    ? reason
+    : new Reason.BackendFailure({ kind: "Rejected", method: "Browser.newContext", metadata: {}, hint: reason.message })
 
 const objectMembers = (name: string, id: string) => ({
   pipe() {
@@ -76,6 +85,8 @@ const objectMembers = (name: string, id: string) => ({
 /** A context the caller owns. */
 const makeContext = (runtime: Runtime.Runtime, entry: Model.ContextEntry): UserContext.UserContext => {
   const adapter = runtime.model.adapter
+  /** Where the context's declarations apply (review 17). */
+  const declared: Adapter.DeclarationScope = { _tag: "UserContext", context: entry.id }
   const context: UserContext.UserContext = {
     [UserContextTypeId]: UserContextTypeId,
     id: entry.id,
@@ -135,16 +146,38 @@ const makeContext = (runtime: Runtime.Runtime, entry: Model.ContextEntry): UserC
       clear: NotBuilt.effect("UserContext.cookies")
     },
     exportStorageState: NotBuilt.effect("UserContext.exportStorageState"),
-    clock: {
-      install: NotBuilt.fn("UserContext.clock.install"),
-      adjust: NotBuilt.fn("UserContext.clock.adjust"),
-      setTime: NotBuilt.fn("UserContext.clock.setTime"),
-      resume: NotBuilt.effect("UserContext.clock.resume")
-    },
-    route: NotBuilt.fn("UserContext.route") as UserContext.UserContext["route"],
-    addInitScript: NotBuilt.fn("UserContext.addInitScript"),
-    emulate: NotBuilt.fn("UserContext.emulate"),
-    grant: NotBuilt.fn("UserContext.grant"),
+    clock: Clock.make({
+      runtime,
+      scope: declared,
+      pages: () => [...runtime.model.pages.values()].filter((page) => page.context === entry.id),
+      name: "UserContext.clock",
+      // One timeline covers a page (review 17, candidate 7)
+      conflicting: () =>
+        [...runtime.model.pages.values()].some((page) => page.context === entry.id && Clock.isInstalled(page))
+          ? Option.some("Page.clock")
+          : Option.none()
+    }, entry),
+    route: <E, R, P extends Route.Phase = "request">(
+      pattern: Url.Pattern | string,
+      handler: Route.Handler<E, R, P>,
+      options?: Route.Options<P>
+    ) =>
+      Routes.register(
+        {
+          runtime,
+          scope: declared,
+          routes: entry.routes,
+          target: { _tag: "UserContext" },
+          operation: "UserContext.route"
+        },
+        pattern,
+        handler,
+        (options?.phase ?? "request") as P
+      ),
+    addInitScript: (script, options) =>
+      InitScripts.add({ runtime, scope: declared, operation: "UserContext.addInitScript" }, entry.id, script, options),
+    emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "UserContext.emulate" }, settings),
+    grant: (permissions, options) => Grants.grant(runtime, entry.id, "UserContext.grant", permissions, options),
     [Equal.symbol](that: unknown) {
       return UserContext.isUserContext(that) && that.id === entry.id
     },
@@ -271,6 +304,25 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         yield* adapter.declare(scope, { _tag: "Downloads", behavior: { _tag: "Allow", directory: downloads.value } })
           .pipe(Effect.catch(failed))
         yield* Effect.annotateCurrentSpan("browser.context.downloads", downloads.value)
+      }
+      // The options that are declarations, held for the context's life, before its first page (review 17)
+      if (options?.emulation !== undefined || options?.focus === "emulated") {
+        const fields = Emulation.fields(options.emulation ?? {})
+        if (!Array.isArray(fields)) {
+          return yield* Effect.fail(contextError("Browser.newContext", fields as Reason.InvalidInput, id))
+        }
+        yield* Emulation.declare(
+          { runtime, scope, operation: "Browser.newContext" },
+          options.focus === "emulated"
+            ? [...fields, { capability: "emulation.focus", override: { _tag: "FocusEmulation", enabled: true } }]
+            : fields,
+          id
+        ).pipe(Effect.mapError((error) => contextError("Browser.newContext", asContextReason(error.reason), id)))
+      }
+      if (options?.permissions !== undefined) {
+        yield* Grants.grant(runtime, created, "Browser.newContext", options.permissions, undefined).pipe(
+          Effect.mapError((error) => contextError("Browser.newContext", asContextReason(error.reason), id))
+        )
       }
       const context = makeContext(runtime, entry)
       contexts.set(created, context)

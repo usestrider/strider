@@ -141,6 +141,8 @@ type ObligationEntry =
     readonly id: Adapter.ObligationId
     readonly request: string
     readonly phase: "request" | "response" | "auth"
+    /** The headers it was sent with, which a new body's `Content-Length` replaces one of (review 17, P3). */
+    readonly headers: ReadonlyArray<Network.Header>
   }
   | {
     readonly _tag: "Prompt"
@@ -205,8 +207,14 @@ const bytesText = (value: Network.BytesValue): string =>
 const headersOf = (headers: ReadonlyArray<Network.Header>): Headers.Headers =>
   Headers.fromInput(Object.fromEntries(headers.map((header) => [header.name, bytesText(header.value)])))
 
+// Several cookies come as one value, a line each (routes.ts)
 const bidiHeaders = (headers: Readonly<Record<string, string>>): Array<Network.Header> =>
-  Object.entries(headers).map(([name, value]) => ({ name, value: { type: "string", value } }))
+  Object.entries(headers).flatMap(([name, value]) =>
+    (name.toLowerCase() === "set-cookie" ? value.split("\n") : [value]).map((each) => ({
+      name,
+      value: { type: "string", value: each }
+    }))
+  )
 
 const base64 = (bytes: Uint8Array): string => Encoding.encode(bytes)
 const fromBase64 = (text: string): Uint8Array => {
@@ -427,7 +435,30 @@ const capabilities = (info: Browser.Info) => {
         "a cache and a service worker look alike: both are cacheOrServiceWorker (Firefox's fromCache)"
       ]),
       entry("cookies", "supported"),
-      entry("permissions", "supported", ["granted per origin; reset sets the ones granted here back to prompt"])
+      entry("permissions", "supported", ["granted per origin; reset sets the ones granted here back to prompt"]),
+      entry("permissions.anyOrigin", "unsupported", ["WebDriver BiDi grants a permission to one origin"]),
+      // Review 17
+      entry("interception.responseBody", "unsupported", [
+        "WebDriver BiDi has no body for a response paused as it starts"
+      ]),
+      entry("interception.responseFulfill", "unsupported", ["Firefox doesn't implement network.provideResponse there"]),
+      entry("interception.continueUrl", "unsupported", ["Firefox aborts a request continued with a new URL"]),
+      entry("interception.abortReason", "unsupported", ["WebDriver BiDi has one failure for every reason"]),
+      entry("interception.redirects", "supported"),
+      entry("emulation.viewport", "supported"),
+      entry("emulation.viewport.mobile", "unsupported", ["WebDriver BiDi has no mobile viewport"]),
+      entry("emulation.userAgent", "supported"),
+      entry("emulation.locale", "supported"),
+      entry("emulation.timezone", "supported"),
+      entry("emulation.geolocation", "supported"),
+      entry("emulation.geolocation.unavailable", "unsupported", ["Firefox rejects an unavailable position"]),
+      entry("emulation.media", "unsupported", ["Firefox doesn't implement emulation.setMediaFeaturesOverride"]),
+      entry("emulation.network.offline", "supported"),
+      entry("emulation.network.throttling", "unsupported", ["WebDriver BiDi can only take a page offline"]),
+      entry("emulation.cpuSlowdown", "unsupported", ["WebDriver BiDi has no CPU throttling"]),
+      entry("emulation.javaScript", "unsupported", ["Firefox doesn't implement emulation.setScriptingEnabled"]),
+      entry("emulation.touch", "unsupported", ["Firefox doesn't implement emulation.setTouchOverride"]),
+      entry("emulation.focus", "unsupported", ["WebDriver BiDi has no focus emulation"])
     ]
   })
 }
@@ -1263,7 +1294,13 @@ export const connect: (
         return
       }
       const obligation = ids.obligation()
-      obligations.set(obligation, { _tag: "PausedRequest", id: obligation, request: params.request.request, phase })
+      obligations.set(obligation, {
+        _tag: "PausedRequest",
+        id: obligation,
+        request: params.request.request,
+        phase,
+        headers: params.request.headers
+      })
       emit({
         _tag: "ObligationOpened",
         obligation,
@@ -1902,15 +1939,39 @@ export const connect: (
                       ...(overrides.headers === undefined ? {} : { headers: bidiHeaders(overrides.headers) })
                     }).pipe(on)
                 }
+                // Firefox aborts a request continued with a new URL (review 17, P3)
+                if (overrides?.url !== undefined) {
+                  return Effect.fail(
+                    new Protocol.ProtocolError({
+                      reason: new Protocol.Unsupported({ method: "interception.continueUrl" })
+                    })
+                  )
+                }
+                // Firefox keeps the old Content-Length with a new body, which breaks the request (review 17, P3)
+                const headers = overrides?.body === undefined
+                  ? overrides?.headers === undefined ? undefined : bidiHeaders(overrides.headers)
+                  : [
+                    ...(overrides.headers === undefined ? obligation.headers : bidiHeaders(overrides.headers)).filter((
+                      header
+                    ) => header.name.toLowerCase() !== "content-length"),
+                    { name: "content-length", value: { type: "string", value: String(overrides.body.length) } }
+                  ]
                 return Network.continueRequest({
                   request,
-                  ...(overrides?.url === undefined ? {} : { url: overrides.url }),
                   ...(overrides?.method === undefined ? {} : { method: overrides.method }),
-                  ...(overrides?.headers === undefined ? {} : { headers: bidiHeaders(overrides.headers) }),
+                  ...(headers === undefined ? {} : { headers }),
                   ...(overrides?.body === undefined ? {} : { body: { type: "base64", value: base64(overrides.body) } })
                 } as Network.ContinueRequestParameters).pipe(on)
               }
               case "Fulfill": {
+                // Firefox has no fulfill at the response phase, and leaves a refused one paused (review 17, P5)
+                if (obligation.phase === "response") {
+                  return Effect.fail(
+                    new Protocol.ProtocolError({
+                      reason: new Protocol.Unsupported({ method: "interception.responseFulfill" })
+                    })
+                  )
+                }
                 // Firefox reports what a route made as an ordinary response
                 const entry = requests.get(obligation.request)
                 if (entry !== undefined) entry.fulfilled = true
@@ -1922,7 +1983,14 @@ export const connect: (
                 } as Network.ProvideResponseParameters).pipe(on)
               }
               case "Fail":
-                return Network.failRequest({ request }).pipe(on)
+                // WebDriver BiDi has one failure for every reason (review 17, P4)
+                return decision.error === "failed"
+                  ? Network.failRequest({ request }).pipe(on)
+                  : Effect.fail(
+                    new Protocol.ProtocolError({
+                      reason: new Protocol.Unsupported({ method: "interception.abortReason" })
+                    })
+                  )
               case "ProvideCredentials":
                 return Network.continueWithAuth({
                   request,
@@ -1949,6 +2017,14 @@ export const connect: (
           })()
           yield* protocol(send)
           obligations.delete(id)
+          // A request's collected body is kept until it is given up
+          for (const collector of requestCollectors.values()) {
+            yield* Network.disownData({ dataType: "request", collector, request } as Network.DisownDataParameters).pipe(
+              on,
+              Effect.ignore,
+              Effect.forkDetach
+            )
+          }
           yield* run(() =>
             emit({ _tag: "ObligationEnded", obligation: id, reason: "resolved", evidence: "bidi:network" })
           )
@@ -1993,6 +2069,9 @@ export const connect: (
     // Preload scripts are registered for the scopes in order, environment phase first and broader scopes first;
     // any change registers them all again, which only affects documents created after it.
     let preloads: Array<string> = []
+    /** Where a document's preload scripts keep which of them ran. */
+    const ranKey = "@usestrider/browser/initScripts/ran"
+
     const applyScripts = Effect.fnUntraced(function*() {
       const entries = registry.all()
         .filter((
@@ -2016,8 +2095,16 @@ export const connect: (
       const previous = preloads
       const next: Array<string> = []
       for (const entry of entries) {
+        // Each script is a preload of its own, so what ran is kept where the next can look: a script runs only
+        // after what it comes after ran without throwing (review 17, candidate 4)
+        const ran = `(globalThis[Symbol.for(${JSON.stringify(ranKey)})] ??= new Set())`
+        const body = `try { ${entry.declaration.source}\n;${ran}.add(${JSON.stringify(entry.id)}) } catch (error) { ` +
+          `typeof reportError === "function" ? reportError(error) : console.error(error) }`
+        const gated = entry.declaration.after.length === 0
+          ? body
+          : `if (${JSON.stringify(entry.declaration.after)}.every((id) => ${ran}.has(id))) { ${body} }`
         const { script } = yield* Script.addPreloadScript({
-          functionDeclaration: `() => { try { ${entry.declaration.source}\n} catch (error) { console.error(error) } }`,
+          functionDeclaration: `() => { ${gated} }`,
           ...(entry.declaration.world._tag === "Isolated" ? { sandbox: entry.declaration.world.name } : {}),
           ...scopeParams(entry.scope)
         } as Script.AddPreloadScriptParameters).pipe(on)
@@ -2139,6 +2226,10 @@ export const connect: (
             : Effect.fail(
               new Protocol.ProtocolError({ reason: new Protocol.Unsupported({ method: "FocusEmulation" }) })
             )
+        case "NetworkConditions":
+        case "CpuThrottling":
+          // Refused when declared
+          return Effect.void
       }
     }
 
@@ -2165,8 +2256,45 @@ export const connect: (
     })
 
     const collectors = new Map<Adapter.RegistrationId, string>()
+    /** A request data collector for each intercept with a request phase, so a route can read a body (P10). */
+    const requestCollectors = new Map<Adapter.RegistrationId, Network.Collector>()
+
+    /** What Firefox can't do, refused before anything is declared (review 17). */
+    const refusal = (declaration: Adapter.Declaration): Adapter.AdapterError | undefined => {
+      if (declaration._tag !== "Override") return undefined
+      const override = declaration.override
+      switch (override._tag) {
+        case "Viewport":
+          return override.mobile
+            ? unsupported("emulation.viewport.mobile", "WebDriver BiDi has no mobile viewport")
+            : undefined
+        case "Geolocation":
+          return Option.isNone(override.position)
+            ? unsupported("emulation.geolocation.unavailable", "Firefox rejects an unavailable position")
+            : undefined
+        // Firefox 158 doesn't implement these commands: refused under the capability that says so
+        case "Media":
+          return unsupported("emulation.media", "Firefox doesn't implement emulation.setMediaFeaturesOverride")
+        case "Touch":
+          return unsupported("emulation.touch", "Firefox doesn't implement emulation.setTouchOverride")
+        case "JavaScriptEnabled":
+          return override.enabled
+            ? undefined
+            : unsupported("emulation.javaScript", "Firefox doesn't implement emulation.setScriptingEnabled")
+        case "FocusEmulation":
+          return unsupported("emulation.focus", "WebDriver BiDi has no focus emulation")
+        case "NetworkConditions":
+          return unsupported("emulation.network.throttling", "WebDriver BiDi can only take a page offline")
+        case "CpuThrottling":
+          return unsupported("emulation.cpuSlowdown", "WebDriver BiDi has no CPU throttling")
+        default:
+          return undefined
+      }
+    }
 
     const declare = Effect.fnUntraced(function*(scope: Adapter.DeclarationScope, declaration: Adapter.Declaration) {
+      const refused = refusal(declaration)
+      if (refused !== undefined) return yield* Effect.fail(refused)
       const id = ids.registration()
       registry.add(scope, declaration, id)
       yield* Effect.addFinalizer(() =>
@@ -2180,9 +2308,16 @@ export const connect: (
             case "Intercept": {
               const intercept = intercepts.get(id)
               intercepts.delete(id)
-              return intercept === undefined
-                ? Effect.void
-                : Network.removeIntercept({ intercept: intercept.bidi as Network.Intercept }).pipe(on, Effect.ignore)
+              const collector = requestCollectors.get(id)
+              requestCollectors.delete(id)
+              return Effect.all([
+                intercept === undefined
+                  ? Effect.void
+                  : Network.removeIntercept({ intercept: intercept.bidi as Network.Intercept }).pipe(on, Effect.ignore),
+                collector === undefined
+                  ? Effect.void
+                  : Network.removeDataCollector({ collector }).pipe(on, Effect.ignore)
+              ], { discard: true })
             }
             case "BodyCollection": {
               const collector = collectors.get(id)
@@ -2206,6 +2341,16 @@ export const connect: (
           yield* protocol(applyKind(declaration.override._tag, scope))
           break
         case "Intercept":
+          if (declaration.phases.includes("request")) {
+            const { collector } = yield* protocol(
+              Network.addDataCollector({
+                dataTypes: ["request"],
+                maxEncodedDataSize: 10 * 1024 * 1024,
+                ...scopeParams(scope)
+              } as Network.AddDataCollectorParameters).pipe(on)
+            )
+            requestCollectors.set(id, collector)
+          }
           yield* protocol(addIntercept(id, scope, declaration))
           break
         case "BodyCollection": {
@@ -2230,6 +2375,35 @@ export const connect: (
       }
       return id
     })
+
+    const requestBody = Effect.fnUntraced(function*(id: Adapter.ObligationId) {
+      const obligation = obligations.get(id)
+      if (obligation?._tag !== "PausedRequest") return yield* Effect.fail(foreign(id))
+      const data = yield* Network.getData(
+        { dataType: "request", request: obligation.request } as Network.GetDataParameters
+      )
+        .pipe(
+          on,
+          Effect.map((result) => Option.some(result.bytes)),
+          // A request without a body has no data to give
+          Effect.catchIf(
+            (error) =>
+              error.reason._tag === "Rejected" &&
+              /(no such|unavailable) network data|network data .* not found/i.test(error.message),
+            () => Effect.succeedNone
+          ),
+          Effect.mapError(Adapter.protocolError)
+        )
+      return Option.map(
+        data,
+        (bytes) => bytes.type === "base64" ? fromBase64(bytes.value) : new TextEncoder().encode(bytes.value)
+      )
+    })
+
+    const pausedResponseBody = (_id: Adapter.ObligationId) =>
+      Effect.fail(
+        unsupported("interception.responseBody", "WebDriver BiDi has no body for a response paused as it starts")
+      )
 
     const applyDownloads = (scope: Adapter.DeclarationScope) => {
       const context = scope._tag === "UserContext" ? scope.context : defaultContext
@@ -2440,6 +2614,8 @@ export const connect: (
       grantPermissions,
       resetPermissions,
       responseBody,
+      requestBody,
+      pausedResponseBody,
       setInputFiles,
       downloadPath: (id) =>
         Effect.suspend(() => {

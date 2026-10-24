@@ -29,6 +29,7 @@ import type * as NetworkResponse from "../NetworkResponse.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import type * as Protocol from "../protocol/Protocol.ts"
 import type * as Transport from "../protocol/Transport.ts"
+import type * as Route from "../Route.ts"
 import type * as Target from "../Target.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
 import type * as UserContext from "../UserContext.ts"
@@ -453,6 +454,15 @@ export type Override =
     readonly features: Readonly<Record<string, string>>
   }
   | { readonly _tag: "Offline"; readonly offline: boolean }
+  /** Throughput in bytes per second and latency in milliseconds; CDP's alone (review 17). */
+  | {
+    readonly _tag: "NetworkConditions"
+    readonly download: number
+    readonly upload: number
+    readonly latency: number
+  }
+  /** A slowdown factor for the page's CPU, 1 for none; CDP's alone (review 17). */
+  | { readonly _tag: "CpuThrottling"; readonly rate: number }
   | { readonly _tag: "ExtraHeaders"; readonly headers: Readonly<Record<string, string>> }
   | { readonly _tag: "JavaScriptEnabled"; readonly enabled: boolean }
   | { readonly _tag: "BypassCsp"; readonly enabled: boolean }
@@ -469,6 +479,11 @@ export type Declaration =
     /** `environment` scripts (library shims such as the page clock) run before `user` scripts. */
     readonly phase: "environment" | "user"
     readonly timing: "beforeAuthorScript" | "bestEffort"
+    /**
+     * Scripts this one depends on, by registration: it runs in a document only if each of them ran there
+     * without throwing (review 17, candidate 4).
+     */
+    readonly after: ReadonlyArray<RegistrationId>
   }
   | {
     readonly _tag: "Intercept"
@@ -505,7 +520,11 @@ export type Decision =
     readonly headers: Readonly<Record<string, string>>
     readonly body: Uint8Array
   }
-  | { readonly _tag: "Fail"; readonly error: "aborted" | "failed" | "timedOut" | "accessDenied" | "connectionRefused" }
+  /**
+   * The request fails. `failed` is what every backend can say; the other reasons are CDP's alone
+   * (`interception.abortReason`, review 17).
+   */
+  | { readonly _tag: "Fail"; readonly error: Route.AbortReason }
   | { readonly _tag: "ProvideCredentials"; readonly username: string; readonly password: string }
   | { readonly _tag: "DefaultAuth" }
   | { readonly _tag: "CancelAuth" }
@@ -751,6 +770,13 @@ export interface AdapterConnection {
   ) => Effect.Effect<void, AdapterError>
   readonly resetPermissions: (context: UserContext.Id) => Effect.Effect<void, AdapterError>
   readonly responseBody: (hop: NetworkRequest.HopId) => Effect.Effect<Uint8Array, AdapterError>
+  /** The body of a paused request, as it was sent; `None` without one (review 17). */
+  readonly requestBody: (obligation: ObligationId) => Effect.Effect<Option.Option<Uint8Array>, AdapterError>
+  /**
+   * The body of a response paused at the response phase; `Unsupported` where the protocol can't read it
+   * (`interception.responseBody`, review 17).
+   */
+  readonly pausedResponseBody: (obligation: ObligationId) => Effect.Effect<Uint8Array, AdapterError>
   readonly setInputFiles: (
     node: NodeBinding,
     files: ReadonlyArray<string>

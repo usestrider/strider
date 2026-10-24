@@ -24,7 +24,7 @@ import type * as Model from "./model.ts"
 import * as Watchable from "./watchable.ts"
 
 /** Logs a handler that didn't decide, at Effect's level for unhandled failures, unless it was interrupted. */
-const report = (message: string, cause: Cause.Cause<unknown>) =>
+export const report = (message: string, cause: Cause.Cause<unknown>) =>
   Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.gen(function*() {
     const level = yield* References.UnhandledLogLevel
     if (level !== undefined) yield* Effect.logWithLevel(level)(message, cause)

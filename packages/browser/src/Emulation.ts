@@ -121,9 +121,19 @@ export interface Geolocation {
 /**
  * Settings to emulate; unset fields are untouched.
  *
- * **Gotchas**
+ * **Details**
  *
- * A field the backend can't apply fails with `Unsupported` naming it, rather than being skipped.
+ * One call is one registration: removing it, or closing its scope, removes every field it set. Each field is
+ * a capability named for it (`emulation.viewport`, `emulation.media`, …), and the call fails with `Unsupported`
+ * naming the first the backend can't apply, before anything is applied. Most fields apply to a loaded page at
+ * once; JavaScript, touch handlers and WebKit's `navigator.userAgent` apply at its next document.
+ *
+ * - Firefox can't emulate `media`, `touch`, `javaScript`, a mobile `viewport`, network throttling, a CPU
+ *   slowdown or an unavailable position.
+ * - WebKit sets `locale` and `geolocation` per context, and its `locale` only before the context's pages exist,
+ *   as `UserContext.Options.emulation` does; it can't emulate `touch`, throttling, a CPU slowdown or an
+ *   unavailable position.
+ * - Chromium can emulate every field.
  *
  * **Example** (Dark mode, offline, for one test step)
  *
@@ -147,15 +157,22 @@ export interface Emulation {
   readonly locale?: Locale | string | undefined
   readonly timezone?: TimeZoneId | string | undefined
   /**
-   * A position, or `"unavailable"` to make position requests fail.
+   * A position, or `"unavailable"` to make position requests fail. A page still needs the `geolocation`
+   * permission to ask (`UserContext.grant`).
    */
   readonly geolocation?: Geolocation | "unavailable" | undefined
   readonly media?: Media | undefined
   readonly network?: NetworkConditions | "offline" | undefined
   /**
-   * A CPU slowdown factor; CDP only.
+   * A CPU slowdown factor, 1 or more; CDP only.
    */
   readonly cpuSlowdown?: number | undefined
+  /**
+   * Whether the page's scripts run, from its next document.
+   */
   readonly javaScript?: "enabled" | "disabled" | undefined
+  /**
+   * Whether the page is told it has a touch screen (five touch points); CDP only.
+   */
   readonly touch?: boolean | undefined
 }

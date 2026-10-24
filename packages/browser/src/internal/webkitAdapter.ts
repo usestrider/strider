@@ -183,6 +183,10 @@ interface RequestEntry {
   readonly finished: Deferred.Deferred<void, string>
   /** A route fulfilled it. */
   fulfilled: boolean
+  /** What its events called it: a pause doesn't say (review 17, P11). */
+  readonly resourceType: NetworkRequest.ResourceType
+  /** Its body, base64, as `Network.requestWillBeSent` carried it (review 17, P10). */
+  readonly postData: string | undefined
 }
 
 type ObligationEntry =
@@ -192,6 +196,8 @@ type ObligationEntry =
     readonly target: TargetEntry
     readonly requestId: string
     readonly phase: "request" | "response"
+    /** The request's body, base64, as WebKit sends it (review 17, P10). */
+    readonly postData: string | undefined
   }
   | {
     readonly _tag: "Prompt"
@@ -309,16 +315,6 @@ const keyCode = (key: string): number | undefined => {
 
 const modifierBits = (modifiers: Adapter.Modifiers): number =>
   (modifiers.alt ? 1 : 0) | (modifiers.control ? 2 : 0) | (modifiers.meta ? 4 : 0) | (modifiers.shift ? 8 : 0)
-
-const failTypes: Readonly<
-  Record<Extract<Adapter.Decision, { _tag: "Fail" }>["error"], Network.ResourceErrorType>
-> = {
-  aborted: "Cancellation",
-  failed: "General",
-  timedOut: "Timeout",
-  accessDenied: "AccessControl",
-  connectionRefused: "General"
-}
 
 // Media features WebKit emulates, as user preferences, and the values each takes.
 const preferences: Readonly<
@@ -545,7 +541,30 @@ const capabilities = (info: Browser.Info) => {
         "a script or stylesheet reused from the memory cache within one document produces no request"
       ]),
       entry("cookies", "supported"),
-      entry("permissions", "supported", ["granted per page; reset clears every grant in the context"])
+      entry("permissions", "supported", ["granted per page; reset clears every grant in the context"]),
+      entry("permissions.anyOrigin", "supported"),
+      // Review 17
+      entry("interception.responseBody", "unsupported", ["Playwright's WebKit can't read a response paused there"]),
+      entry("interception.responseFulfill", "supported"),
+      entry("interception.continueUrl", "supported"),
+      entry("interception.abortReason", "unsupported", ["WebKit reports every reason as \"Blocked by Web Inspector\""]),
+      entry("interception.redirects", "partial", ["only a redirect's first hop pauses"]),
+      entry("emulation.viewport", "supported"),
+      entry("emulation.viewport.mobile", "supported"),
+      entry("emulation.userAgent", "supported", [
+        "a document reads navigator.userAgent once; requests carry it at once"
+      ]),
+      entry("emulation.locale", "partial", ["per context, and only before its pages exist"]),
+      entry("emulation.timezone", "supported"),
+      entry("emulation.geolocation", "partial", ["per context"]),
+      entry("emulation.geolocation.unavailable", "unsupported", ["WebKit ignores an unavailable position"]),
+      entry("emulation.media", "supported"),
+      entry("emulation.network.offline", "supported"),
+      entry("emulation.network.throttling", "unsupported", ["Playwright's WebKit can only take a page offline"]),
+      entry("emulation.cpuSlowdown", "unsupported", ["Playwright's WebKit has no CPU throttling"]),
+      entry("emulation.javaScript", "supported", ["a document already loaded keeps running its scripts"]),
+      entry("emulation.touch", "unsupported", ["WebKit's touch override changes nothing a page sees"]),
+      entry("emulation.focus", "supported")
     ]
   })
 }
@@ -638,6 +657,7 @@ export const connect: (
     const dropDocument = (document: DocumentEntry, reason: L1Target.CloseReason) => {
       for (const realm of Array.from(document.realms)) removeRealm(realm, reason)
       documents.delete(document.id)
+      wakeRealmWaiters(document.id)
     }
 
     // Ends a frame and everything below it, deepest first.
@@ -1285,6 +1305,7 @@ export const connect: (
         realms.set(realm.id, realm)
         realmsByContext.set(contextKey(target, realm.contextId!), realm)
         document.realms.add(realm)
+        wakeRealmWaiters(document.id)
         emit({
           _tag: "RealmAdded",
           realm: realm.id,
@@ -1385,7 +1406,9 @@ export const connect: (
             navigation: navigation !== undefined && navigation.documentHop === undefined ? navigation : undefined,
             worker,
             finished: Deferred.makeUnsafe(),
-            fulfilled: false
+            fulfilled: false,
+            resourceType: resourceTypes[params.type ?? "Other"] ?? "other",
+            postData: params.request.postData
           }
           requests.set(key, request)
           hops.set(request.hop, request)
@@ -1451,7 +1474,9 @@ export const connect: (
           navigation: undefined,
           worker: undefined,
           finished: Deferred.makeUnsafe(),
-          fulfilled: false
+          fulfilled: false,
+          resourceType: resourceTypes[resource.type] ?? "other",
+          postData: undefined
         }
         requests.set(requestKey(where.session, params.requestId), request)
         hops.set(request.hop, request)
@@ -1512,7 +1537,8 @@ export const connect: (
           id: obligation,
           target,
           requestId: params.requestId,
-          phase: "request"
+          phase: "request",
+          postData: params.request.postData ?? request?.postData
         })
         emit({
           _tag: "ObligationOpened",
@@ -1537,7 +1563,8 @@ export const connect: (
           id: obligation,
           target,
           requestId: params.requestId,
-          phase: "response"
+          phase: "response",
+          postData: request?.postData
         })
         const hop = request?.hop ?? ids.hop(ids.request(), 0)
         emit({
@@ -1660,7 +1687,7 @@ export const connect: (
         method: (methods.has(request.method) ? request.method : "GET") as NetworkRequest.NetworkRequest["method"],
         url: request.url as Url.Url,
         headers: headersOf(request.headers),
-        resourceType: "other",
+        resourceType: entry?.resourceType ?? "other",
         initiator: entry?.frame !== undefined
           ? { _tag: "Document", navigable: entry.frame.id, navigation: Option.fromUndefinedOr(entry.navigation?.id) }
           : { _tag: "Document", navigable: target.page.id, navigation: Option.none() },
@@ -2402,6 +2429,22 @@ export const connect: (
       return Option.some(navigation)
     })
 
+    /** Who waits for a document's next realm, or its end. */
+    const realmWaiters = new Map<L1Target.DocumentId, Set<() => void>>()
+    const addRealmWaiter = (id: L1Target.DocumentId, waiter: () => void) => {
+      const set = realmWaiters.get(id) ?? new Set()
+      set.add(waiter)
+      realmWaiters.set(id, set)
+    }
+    const removeRealmWaiter = (id: L1Target.DocumentId, waiter: () => void) => {
+      const set = realmWaiters.get(id)
+      set?.delete(waiter)
+      if (set?.size === 0) realmWaiters.delete(id)
+    }
+    function wakeRealmWaiters(id: L1Target.DocumentId) {
+      for (const waiter of Array.from(realmWaiters.get(id) ?? [])) waiter()
+    }
+
     const realmFor = Effect.fnUntraced(function*(id: L1Target.DocumentId, world: Adapter.World) {
       const document = documents.get(id)
       if (document === undefined) return yield* Effect.fail(foreign(id))
@@ -2415,8 +2458,26 @@ export const connect: (
       if (world._tag === "Main") {
         return yield* Effect.fail(unsupported("mainWorld", "The document has no main-world realm yet"))
       }
-      // A world is created in every frame of the page, now and in every target it gets
+      // A world the page has already comes to each new document, reported a moment after it commits; creating
+      // it again fails (review 17's build), so wait for its report, or the document's end
       const page = document.frame.page
+      if (page.worlds.has(world.name)) {
+        yield* Effect.callback<void>((resume) => {
+          const check = () => {
+            if (find() !== undefined || !documents.has(id)) {
+              removeRealmWaiter(id, check)
+              resume(Effect.void)
+            }
+          }
+          addRealmWaiter(id, check)
+          check()
+          return Effect.sync(() => removeRealmWaiter(id, check))
+        })
+        const arrived = find()
+        if (arrived !== undefined) return arrived.id
+        return yield* Effect.fail(gone({ _tag: "Document", id }, { _tag: "DocumentReplaced" }))
+      }
+      // A world is created in every frame of the page, now and in every target it gets
       page.worlds.add(world.name)
       const target = yield* targetOf(page)
       yield* protocol(Page.createUserWorld({ name: world.name }).pipe(Protocol.on(target.session)))
@@ -2676,7 +2737,14 @@ export const connect: (
               }
               case "Fail":
                 return obligation.phase === "request"
-                  ? Network.interceptRequestWithError({ requestId, errorType: failTypes[decision.error] }).pipe(on)
+                  ? decision.error === "failed"
+                    ? Network.interceptRequestWithError({ requestId, errorType: "General" }).pipe(on)
+                    // WebKit reports every reason as "Blocked by Web Inspector" (review 17, P4)
+                    : Effect.fail(
+                      new Protocol.ProtocolError({
+                        reason: new Protocol.Unsupported({ method: "interception.abortReason" })
+                      })
+                    )
                   : Effect.fail(
                     new Protocol.ProtocolError({
                       reason: new Protocol.Unsupported({ method: "resolve Fail at the response stage" })
@@ -2747,6 +2815,20 @@ export const connect: (
       )
 
     const declare = Effect.fnUntraced(function*(scope: Adapter.DeclarationScope, declaration: Adapter.Declaration) {
+      if (declaration._tag === "Override") {
+        // What WebKit can't do, refused before anything is declared (review 17)
+        const override = declaration.override
+        const refused = override._tag === "Touch"
+          ? unsupported("emulation.touch", "WebKit's touch override changes nothing a page sees")
+          : override._tag === "Geolocation" && Option.isNone(override.position)
+          ? unsupported("emulation.geolocation.unavailable", "WebKit ignores an unavailable position")
+          : override._tag === "NetworkConditions"
+          ? unsupported("emulation.network.throttling", "Playwright's WebKit can only take a page offline")
+          : override._tag === "CpuThrottling"
+          ? unsupported("emulation.cpuSlowdown", "Playwright's WebKit has no CPU throttling")
+          : undefined
+        if (refused !== undefined) return yield* Effect.fail(refused)
+      }
       if (declaration._tag === "InitScript" && declaration.world._tag === "Isolated") {
         return yield* Effect.fail(
           unsupported("initScript.isolatedWorld", "WebKit runs init scripts in the main world only")
@@ -2896,6 +2978,17 @@ export const connect: (
       ))
     })
 
+    const requestBody = (id: Adapter.ObligationId) => {
+      const obligation = obligations.get(id)
+      if (obligation?._tag !== "PausedRequest") return Effect.fail(foreign(id))
+      return Effect.succeed(
+        obligation.postData === undefined ? Option.none<Uint8Array>() : Option.some(fromBase64(obligation.postData))
+      )
+    }
+
+    const pausedResponseBody = (_id: Adapter.ObligationId) =>
+      Effect.fail(unsupported("interception.responseBody", "Playwright's WebKit can't read a response paused there"))
+
     const responseBody = Effect.fnUntraced(function*(hop: NetworkRequest.HopId) {
       const request = hops.get(hop)
       if (request === undefined) return yield* Effect.fail(foreign(hop))
@@ -2970,6 +3063,8 @@ export const connect: (
       grantPermissions,
       resetPermissions,
       responseBody,
+      requestBody,
+      pausedResponseBody,
       setInputFiles,
       downloadPath,
       cancelDownload: (id: Download.Id) =>

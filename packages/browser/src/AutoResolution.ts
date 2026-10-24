@@ -88,21 +88,32 @@ export interface Filter {
 
 const kinds = { alert: "Alert", confirm: "Confirm", prompt: "Prompt", beforeunload: "BeforeUnload" } as const
 
-// Paused requests are decided by a policy once routes are built
-const deliver = (event: Model.AutoResolutionEvent): AutoResolution =>
-  event._tag === "Dialog"
-    ? new AutoResolution({
-      subject: { _tag: "Dialog", kind: kinds[event.prompt.kind], message: event.prompt.message },
-      decision: event.decision,
-      policy: `dialogs: "${event.policy}"`,
-      at: event.at
-    })
-    : new AutoResolution({
-      subject: { _tag: "FileChooser" },
-      decision: event.decision,
-      policy: `fileChoosers: "cancel"`,
-      at: event.at
-    })
+const deliver = (event: Model.AutoResolutionEvent): AutoResolution => {
+  switch (event._tag) {
+    case "Dialog":
+      return new AutoResolution({
+        subject: { _tag: "Dialog", kind: kinds[event.prompt.kind], message: event.prompt.message },
+        decision: event.decision,
+        policy: `dialogs: "${event.policy}"`,
+        at: event.at
+      })
+    case "FileChooser":
+      return new AutoResolution({
+        subject: { _tag: "FileChooser" },
+        decision: event.decision,
+        policy: `fileChoosers: "cancel"`,
+        at: event.at
+      })
+    case "PausedRequest":
+      // No route decided a request one matched (review 17, candidate 1)
+      return new AutoResolution({
+        subject: { _tag: "PausedRequest", request: event.request },
+        decision: event.decision,
+        policy: `routes: "continue"`,
+        at: event.at
+      })
+  }
+}
 
 const kind = (operation: string): Events.Kind<Model.AutoResolutionEvent, AutoResolution> => ({
   operation,

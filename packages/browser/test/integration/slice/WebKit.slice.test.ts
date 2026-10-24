@@ -6,6 +6,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { WebKit } from "@usestrider/browser/webkit"
 import * as Layer from "effect/Layer"
 import { webkit } from "../browsers.ts"
+import { declarations } from "./declarations.ts"
 import { events } from "./events.ts"
 import { interaction } from "./interaction.ts"
 import { modules } from "./modules.ts"
@@ -17,3 +18,4 @@ slice("WebKit", backend, () => {})
 events("WebKit", backend)
 modules("WebKit", backend)
 interaction("WebKit", backend)
+declarations("WebKit", backend)

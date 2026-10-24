@@ -17,7 +17,9 @@
 import * as DateTime from "effect/DateTime"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
+import * as References from "effect/References"
 import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -87,6 +89,12 @@ export type AutoResolutionEvent =
     readonly decision: "cancel"
     readonly at: MonotonicInstant.MonotonicInstant
   }
+  | {
+    readonly _tag: "PausedRequest"
+    readonly request: NetworkRequest.NetworkRequest
+    readonly decision: "continue"
+    readonly at: MonotonicInstant.MonotonicInstant
+  }
 
 /** A registered handler, as the model asks it: `Dialog.handle` or `FileChooser.handle`. */
 export interface Handler<A> {
@@ -95,6 +103,24 @@ export interface Handler<A> {
    * out of time, so the policy decides.
    */
   readonly decide: (subject: A) => Effect.Effect<Option.Option<Adapter.Decision>>
+}
+
+/** A request paused for a decision (review 17). */
+export type PausedRequestEvent = Extract<Adapter.ObligationSubject, { readonly _tag: "PausedRequest" }>
+
+/** What a route said about a paused request. */
+export type RouteAnswer =
+  | { readonly _tag: "Decided"; readonly decision: Adapter.Decision }
+  | { readonly _tag: "Fallthrough" }
+  /** It failed, was interrupted, ran out of time or returned what isn't a decision; it logged why. */
+  | { readonly _tag: "Failed" }
+
+/** A route, as the model asks it (review 17, candidate 1). */
+export interface RouteEntry {
+  readonly phase: "request" | "response" | "auth"
+  readonly matches: (url: string) => boolean
+  /** Asks the route, in its own scope, with its own budget. */
+  readonly ask: (obligation: Adapter.ObligationId, paused: PausedRequestEvent) => Effect.Effect<RouteAnswer>
 }
 
 /** A navigation of a page, when it ended (review 14, candidate 6). */
@@ -204,6 +230,8 @@ export interface PageEntry {
   readonly promptHandlers: Array<Handler<PromptEvent>>
   /** `FileChooser.handle` registrations, oldest first: the latest decides. */
   readonly chooserHandlers: Array<Handler<FileChooserEvent>>
+  /** Its routes, oldest first: the most recent is asked first (review 17). */
+  readonly routes: Array<RouteEntry>
   /** Its dedicated workers. */
   readonly workers: SubscriptionRef.SubscriptionRef<ReadonlyArray<WorkerEntry>>
 }
@@ -231,6 +259,8 @@ export interface ContextEntry {
   readonly events: ContextEvents
   /** Its workers: its pages' dedicated workers, and its shared and service workers. */
   readonly workers: SubscriptionRef.SubscriptionRef<ReadonlyArray<WorkerEntry>>
+  /** Its routes, oldest first: asked after a page's own (review 17). */
+  readonly routes: Array<RouteEntry>
 }
 
 export interface DocumentEntry {
@@ -263,6 +293,8 @@ export interface Model {
   readonly response: (hop: NetworkRequest.HopId) => Option.Option<NetworkResponse.NetworkResponse>
   /** The realm the engine is installed in, per document, until the realm or the document ends. */
   readonly engineRealms: Map<Target.DocumentId, Target.RealmId>
+  /** The page a navigable belongs to: itself, or the page whose frame it is. */
+  readonly pageOf: (navigable: Target.NavigableId) => Option.Option<PageEntry>
   /** Ends when the connection does. */
   readonly lost: Deferred.Deferred<void>
 }
@@ -446,7 +478,8 @@ export const make = Effect.fnUntraced(function*() {
         worker: Events.make(target, cap),
         connection: Events.make(target, cap)
       },
-      workers: yield* SubscriptionRef.make<ReadonlyArray<WorkerEntry>>([])
+      workers: yield* SubscriptionRef.make<ReadonlyArray<WorkerEntry>>([]),
+      routes: []
     }
     contexts.set(id, entry)
     return entry
@@ -530,6 +563,63 @@ export const make = Effect.fnUntraced(function*() {
     Events.publish(page.value.events.autoResolution, resolution)
     Events.publish(context.events.autoResolution, resolution)
     yield* resolve(obligation, { _tag: "Cancel" })
+  })
+
+  /**
+   * Decides a paused request (review 17, candidate 1): its page's routes, then its context's, the most recent
+   * first, until one decides. The default, continue, applies when none matches; when every one that matched
+   * fell through or failed, or the backend refused a decision, it is also published as an `AutoResolution`.
+   */
+  const decideRequest = Effect.fnUntraced(function*(
+    obligation: Adapter.ObligationId,
+    paused: PausedRequestEvent,
+    owner: Owner
+  ) {
+    const url = paused.request.url
+    const routes = [
+      ...(Option.isSome(owner.page) ? [...owner.page.value.routes].reverse() : []),
+      ...(Option.isSome(owner.context) ? [...owner.context.value.routes].reverse() : [])
+    ].filter((route) => route.phase === paused.phase && route.matches(url))
+    // Never the browser's own prompt at a challenge: headless, it waits forever (review 17, P6)
+    const fallback: Adapter.Decision = paused.phase === "auth"
+      ? { _tag: "CancelAuth" }
+      : { _tag: "Continue", overrides: Option.none() }
+    if (routes.length === 0) return yield* resolve(obligation, fallback)
+    for (const route of routes) {
+      const answer = yield* route.ask(obligation, paused)
+      if (answer._tag === "Fallthrough") continue
+      if (answer._tag === "Decided") {
+        const sent = yield* Effect.exit(
+          adapter === undefined ? Effect.void : adapter.resolve(obligation, answer.decision)
+        )
+        if (Exit.isSuccess(sent)) return
+        const failure = sent.cause.reasons.find((reason) => reason._tag === "Fail")
+        // A request that ended has nothing left to decide; one the backend refused a decision for still waits
+        // for one, so it gets the default (review 17's build)
+        if (failure === undefined || failure.error.reason._tag === "Gone" || failure.error.reason._tag === "Foreign") {
+          return
+        }
+        const level = yield* References.UnhandledLogLevel
+        if (level !== undefined) {
+          yield* Effect.logWithLevel(level)(
+            `A route's decision for ${url} couldn't be applied, so it continues: ${failure.error.message}`
+          )
+        }
+      }
+      break
+    }
+    publish(
+      owner,
+      {
+        _tag: "PausedRequest",
+        request: paused.request,
+        decision: "continue",
+        at: Adapter.now()
+      } as AutoResolutionEvent,
+      (events) => events.autoResolution,
+      (events) => events.autoResolution
+    )
+    yield* resolve(obligation, fallback)
   })
 
   /** Closes a popup its opener's scope released, unless it already closed. */
@@ -619,6 +709,7 @@ export const make = Effect.fnUntraced(function*() {
             },
             promptHandlers: [],
             chooserHandlers: [],
+            routes: [],
             workers: yield* SubscriptionRef.make<ReadonlyArray<WorkerEntry>>([])
           }
           pages.set(fact.page, entry)
@@ -922,6 +1013,16 @@ export const make = Effect.fnUntraced(function*() {
           return
         }
         case "ObligationOpened": {
+          if (fact.subject._tag === "PausedRequest") {
+            const initiator = fact.subject.request.initiator
+            const owner = initiator._tag === "Document"
+              ? ownerOfPage(pageOf(initiator.navigable))
+              : initiator._tag === "Worker"
+              ? realmOwners.get(initiator.realm) ?? nobody
+              : nobody
+            yield* decideRequest(fact.obligation, fact.subject, owner).pipe(Effect.forkIn(modelScope))
+            return
+          }
           if (fact.subject._tag === "FileChooser") {
             const chooser = fact.subject
             const page = pageOf(chooser.navigable)
@@ -990,6 +1091,7 @@ export const make = Effect.fnUntraced(function*() {
         forget: (id) => void navigations.delete(id),
         response: (hop) => Option.fromNullishOr(responses.get(hop)),
         engineRealms,
+        pageOf,
         lost
       }
     })

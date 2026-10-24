@@ -7,7 +7,9 @@
  *   recent registration. Releasing one recomputes the effective value, whatever order releases come in.
  * - **Init scripts** form one bundle per world: the environment phase first, then user scripts; within a
  *   phase, broader scopes first, then registration order. Each script runs in its own `try`, so one that
- *   throws doesn't stop the rest.
+ *   throws doesn't stop the rest, and is reported with `reportError`, as the page's uncaught exception. A
+ *   script runs only if each script it comes `after` ran in this document without throwing, so one whose
+ *   dependency is gone, or threw, doesn't run (review 17, candidate 4).
  * - **Intercepts** are the union of every pattern in scope, per phase.
  */
 import type * as Target from "../Target.ts"
@@ -43,6 +45,10 @@ export const covers = (scope: Adapter.DeclarationScope, placement: Placement): b
   }
 }
 
+/** A `*` glob over a whole URL, as L0's intercepts mean it: `*` matches anything, `/` included. */
+export const glob = (pattern: string): RegExp =>
+  new RegExp(`^${pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`)
+
 /** A world's key, for bundles. */
 export const worldKey = (world: Adapter.World): string => world._tag === "Main" ? "" : world.name
 
@@ -65,7 +71,7 @@ export interface Registry {
   readonly intercepts: (placement: Placement) => {
     readonly request: ReadonlyArray<string>
     readonly response: ReadonlyArray<string>
-    readonly auth: boolean
+    readonly auth: ReadonlyArray<string>
   }
   /** The download behavior of a context: the most specific, then most recent. */
   readonly downloads: (
@@ -119,24 +125,21 @@ export const make = (): Registry => {
           bundle = { world: entry.declaration.world, sources: [] }
           bundles.set(key, bundle)
         }
-        bundle.sources.push(entry.declaration.source)
+        bundle.sources.push(wrap(entry.id, entry.declaration.source, entry.declaration.after))
       }
       return new Map(
-        [...bundles].map(([key, bundle]) => [key, { world: bundle.world, source: bundle.sources.map(wrap).join("\n") }])
+        [...bundles].map(([key, bundle]) => [key, { world: bundle.world, source: block(bundle.sources) }])
       )
     },
     intercepts: (placement) => {
-      const request = new Set<string>()
-      const response = new Set<string>()
-      let auth = false
+      const phases = { request: new Set<string>(), response: new Set<string>(), auth: new Set<string>() }
       for (const entry of inScope(placement)) {
         if (entry.declaration._tag !== "Intercept") continue
         for (const phase of entry.declaration.phases) {
-          if (phase === "auth") auth = true
-          for (const pattern of entry.declaration.patterns) (phase === "request" ? request : response).add(pattern)
+          for (const pattern of entry.declaration.patterns) phases[phase].add(pattern)
         }
       }
-      return { request: [...request], response: [...response], auth }
+      return { request: [...phases.request], response: [...phases.response], auth: [...phases.auth] }
     },
     downloads: (context) => {
       let winner: Registered | undefined
@@ -152,5 +155,17 @@ export const make = (): Registry => {
   }
 }
 
-// One script, isolated from the others: it runs once per document, and a throw doesn't stop the bundle.
-const wrap = (source: string): string => `try { ${source}\n} catch (error) { console.error(error) }`
+/** Which scripts of a bundle ran without throwing in this document; a name no script will use. */
+const ran = "__strider_ran__"
+
+// One script, isolated from the others: it runs once per document, only if what it comes after ran, and a
+// throw is reported without stopping the bundle. The newline ends a script whose last line is a comment.
+const wrap = (id: Adapter.RegistrationId, source: string, after: ReadonlyArray<Adapter.RegistrationId>): string => {
+  const script = `try { ${source}\n;${ran}.add(${JSON.stringify(id)}) } catch (error) { ` +
+    `typeof reportError === "function" ? reportError(error) : console.error(error) }`
+  return after.length === 0 ? script : `if (${JSON.stringify(after)}.every((id) => ${ran}.has(id))) { ${script} }`
+}
+
+// One block, so its bookkeeping is invisible to the page, while a script's top-level `var` and functions stay
+// global, as they would be on their own.
+const block = (scripts: ReadonlyArray<string>): string => `{ const ${ran} = new Set()\n${scripts.join("\n")}\n}`

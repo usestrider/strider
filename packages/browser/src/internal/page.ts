@@ -18,18 +18,23 @@ import type * as Diagnostics from "../Diagnostics.ts"
 import * as Page from "../Page.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Reason from "../Reason.ts"
+import type * as Route from "../Route.ts"
 import type * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import type * as Adapter from "./adapter.ts"
+import * as Clock from "./clock.ts"
 import * as Devices from "./devices.ts"
+import * as Emulation from "./emulation.ts"
 import * as Handles from "./handles.ts"
+import * as InitScripts from "./initScripts.ts"
 import * as LocatorImpl from "./locator.ts"
 import type * as Model from "./model.ts"
 import * as Navigated from "./navigated.ts"
 import * as Navigation from "./navigation.ts"
 import * as NotBuilt from "./notBuilt.ts"
 import * as Operation from "./operation.ts"
+import * as Routes from "./routes.ts"
 import * as Runtime from "./runtime.ts"
 import * as Watchable from "./watchable.ts"
 
@@ -61,6 +66,8 @@ export const make = (owner: PageOwner): Page.Page => {
   const model = runtime.model
   const adapter = model.adapter
   const queries = LocatorImpl.pageQueries({ runtime, page: entry })
+  /** Where the page's declarations apply (review 17). */
+  const declared: Adapter.DeclarationScope = { _tag: "Page", page: entry.id }
 
   const status = Watchable.make({
     ref: entry.state,
@@ -236,15 +243,37 @@ export const make = (owner: PageOwner): Page.Page => {
     evaluateHandle: NotBuilt.fn("Page.evaluateHandle") as Page.Page["evaluateHandle"],
     keyboard: Devices.keyboard({ runtime, page: entry }),
     mouse: Devices.mouse({ runtime, page: entry }),
-    clock: {
-      install: NotBuilt.fn("Page.clock.install"),
-      adjust: NotBuilt.fn("Page.clock.adjust"),
-      setTime: NotBuilt.fn("Page.clock.setTime"),
-      resume: NotBuilt.effect("Page.clock.resume")
-    },
-    route: NotBuilt.fn("Page.route") as Page.Page["route"],
-    addInitScript: NotBuilt.fn("Page.addInitScript"),
-    emulate: NotBuilt.fn("Page.emulate"),
+    clock: Clock.make({
+      runtime,
+      scope: declared,
+      pages: () => [entry],
+      name: "Page.clock",
+      // One timeline covers a page (review 17, candidate 7)
+      conflicting: () => {
+        const context = runtime.model.contexts.get(entry.context)
+        return context !== undefined && Clock.isInstalled(context) ? Option.some("UserContext.clock") : Option.none()
+      }
+    }, entry),
+    route: <E, R, P extends Route.Phase = "request">(
+      pattern: Url.Pattern | string,
+      handler: Route.Handler<E, R, P>,
+      options?: Route.Options<P>
+    ) =>
+      Routes.register(
+        {
+          runtime,
+          scope: declared,
+          routes: entry.routes,
+          target: { _tag: "Page", id: entry.id },
+          operation: "Page.route"
+        },
+        pattern,
+        handler,
+        (options?.phase ?? "request") as P
+      ),
+    addInitScript: (script, options) =>
+      InitScripts.add({ runtime, scope: declared, operation: "Page.addInitScript" }, entry.context, script, options),
+    emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "Page.emulate" }, settings),
     activate: Effect.gen(function*() {
       const id = Operation.operationId()
       yield* adapter.activatePage(entry.id).pipe(Effect.catch((error) => {

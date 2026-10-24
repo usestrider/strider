@@ -119,13 +119,17 @@ export const routes = Effect.fn("routes")(function*(page: Page.Page) {
     "https://app.example.com/api/**",
     () => Effect.succeed(Route.continueWith(HttpClientRequest.setHeader("x-test", "1")))
   )
+  // What the server sent, patched: a route at the response phase (the body is CDP's alone)
   yield* page.route("https://app.example.com/api/slow", (intercepted) =>
     Effect.gen(function*() {
-      const original = yield* intercepted.fetch
+      const body = yield* intercepted.responseBody
       return Route.fulfill(
-        HttpServerResponse.fromClientResponse(original).pipe(HttpServerResponse.setHeader("x-patched", "1"))
+        HttpServerResponse.uint8Array(body, {
+          status: intercepted.response.status,
+          headers: intercepted.response.headers
+        }).pipe(HttpServerResponse.setHeader("x-patched", "1"))
       )
-    }))
+    }), { phase: "response" })
 })
 
 // 10. Paused application time
