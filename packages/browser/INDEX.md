@@ -1801,7 +1801,9 @@ The agent toolkit (`@usestrider/browser/ai`): one definition that serves an in-p
 
 - `type SecretName = typeof SecretName.Type` (experimental)
 - `type ToolName = | "pages" | "newPage" | "goto" | "back" | "snapshot" | "screenshot" | "click" | "fill" | "press" | "select" | "scroll" | "next" | "await" | "expect" | "history" | "route" | "dialog"` (experimental)
-- `type Tools = { readonly [K in ToolName]: Tool.Any }` (experimental)
+- `type Tools = ToolsImpl.Tools` (experimental)
+- `const ToolFailure = ToolsImpl.ToolFailure` (experimental)
+- `type ToolFailure = ToolsImpl.ToolFailure` (experimental)
 - `interface MakeOptions` (experimental)
   - `readonly context: UserContext.UserContext`
   - `readonly secrets: Readonly<Record<SecretName | string, Redacted.Redacted<string>>>`

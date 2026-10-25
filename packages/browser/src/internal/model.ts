@@ -144,7 +144,13 @@ export type HopEnd =
     /** The protocol, where the backend says it only now (WebKit). */
     readonly httpVersion: Option.Option<string>
   }
-  | { readonly _tag: "Failed"; readonly error: string; readonly at: MonotonicInstant.MonotonicInstant }
+  | {
+    readonly _tag: "Failed"
+    readonly error: string
+    /** Canceled by a navigation or the page, which isn't a failure of the network (CLI.md, the digest). */
+    readonly canceled: boolean
+    readonly at: MonotonicInstant.MonotonicInstant
+  }
   /** Dropped from the model while still in flight, past `maxHops`. */
   | { readonly _tag: "Forgotten" }
 
@@ -1064,7 +1070,7 @@ export const make = Effect.fnUntraced(function*() {
           return
         }
         case "RequestFailed": {
-          endHop(fact.hop, { _tag: "Failed", error: fact.error, at: fact.at })
+          endHop(fact.hop, { _tag: "Failed", error: fact.error, canceled: fact.canceled, at: fact.at })
           return
         }
         case "ConsoleMessage": {
@@ -1216,7 +1222,10 @@ export const make = Effect.fnUntraced(function*() {
       yield* Deferred.succeed(entry.outcome, { _tag: "Failed", error: "connection lost", errorDocument: Option.none() })
     }
     for (const hop of hops.values()) {
-      Deferred.doneUnsafe(hop.end, Effect.succeed({ _tag: "Failed", error: "connection lost", at: Adapter.now() }))
+      Deferred.doneUnsafe(
+        hop.end,
+        Effect.succeed({ _tag: "Failed", error: "connection lost", canceled: false, at: Adapter.now() })
+      )
     }
     yield* Deferred.succeed(lost, undefined)
   })

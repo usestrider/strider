@@ -11,12 +11,13 @@
  * @stability experimental
  * @since 0.1.0
  */
-import type * as Tool from "effect/ai/Tool"
 import type * as Toolkit from "effect/ai/Toolkit"
 import type * as Effect from "effect/Effect"
 import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
+import * as ToolkitImpl from "../internal/toolkit.ts"
+import * as ToolsImpl from "../internal/tools.ts"
 import type * as UserContext from "../UserContext.ts"
 import type * as CapturePolicy from "./CapturePolicy.ts"
 
@@ -71,7 +72,26 @@ export type ToolName =
  * @category models
  * @since 0.1.0
  */
-export type Tools = { readonly [K in ToolName]: Tool.Any }
+export type Tools = ToolsImpl.Tools
+
+/**
+ * Why a tool call failed, as the model sees it: the library error's tag, its reason's, and its message, hint
+ * included. A tool's failure mode is `"return"`, so it reaches the model as a result.
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export const ToolFailure = ToolsImpl.ToolFailure
+
+/**
+ * Why a tool call failed, as the model sees it.
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export type ToolFailure = ToolsImpl.ToolFailure
 
 /**
  * The tool definitions alone, for the CLI and MCP surfaces to serve.
@@ -80,7 +100,7 @@ export type Tools = { readonly [K in ToolName]: Tool.Any }
  * @category constants
  * @since 0.1.0
  */
-export declare const toolkit: Toolkit.Toolkit<Tools>
+export const toolkit: Toolkit.Toolkit<Tools> = ToolsImpl.toolkit
 
 /**
  * Settings for a toolkit bound to a context.
@@ -107,6 +127,15 @@ export interface MakeOptions {
 /**
  * Binds the toolkit to a context, with handlers, for an in-process model.
  *
+ * **Details**
+ *
+ * Pages are named as they are created (`newPage`'s `name`, or `p1`, `p2`…) or first seen, as a popup is. A
+ * target is a ref from the page's latest snapshot (`e12`), or `role=button[name="Save"]`, `text="Add to cart"`,
+ * `label=Email`, `testid=cart` or `css=…`; a bad one fails at once. Each result is the call's outcome and
+ * `sinceLast`: navigations, popups, dialogs and who decided them, downloads, uncaught exceptions, console
+ * errors and failed requests since the previous call. A `%name%` in a parameter is the secret's value at
+ * dispatch, and results carry it back as `%name%`. Waits, routes and dialog handlers end with the scope.
+ *
  * **Example** (A toolkit for one context)
  *
  * ```ts import.meta.vitest
@@ -127,4 +156,5 @@ export interface MakeOptions {
  * @category constructors
  * @since 0.1.0
  */
-export declare const make: (options: MakeOptions) => Effect.Effect<Toolkit.WithHandler<Tools>, never, Scope.Scope>
+export const make = (options: MakeOptions): Effect.Effect<Toolkit.WithHandler<Tools>, never, Scope.Scope> =>
+  ToolkitImpl.make(options)

@@ -8,7 +8,7 @@
  * @stability experimental
  * @since 0.1.0
  */
-import type * as Context from "effect/Context"
+import * as Context from "effect/Context"
 import type * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
@@ -76,7 +76,9 @@ export interface CurrentSession {
  * @category tags
  * @since 0.1.0
  */
-export declare const CurrentSession: Context.Service<CurrentSession, CurrentSession>
+export const CurrentSession: Context.Service<CurrentSession, CurrentSession> = Context.Service<CurrentSession>(
+  "@usestrider/browser/cli/CurrentSession"
+)
 
 const PageNotFoundTypeId = "~@usestrider/browser/cli/CurrentSession/PageNotFound"
 

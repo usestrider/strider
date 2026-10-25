@@ -92,7 +92,7 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *Reconsider:* whether the viewer's realm should be hidden from callers.
 
 **Q69. Firefox's traversal back from its JSON viewer went unreported under full load** (Browser). In one full integration run after review 16, the conformance test's `traverse(-1)` from `/json` removed the viewer's realm and fetched the page again, but no new realm and no end came within 10 s. Three runs of that test alone passed.
-- *Seen:* review 16's revision, one full run of three; review 17's revision, two full runs of four; review 20's second step, one full run, which three runs of the test alone passed.
+- *Seen:* review 16's revision, one full run of three; review 17's revision, two full runs of four; review 20's second step, one full run, which three runs of the test alone passed; review 20's third step, one of two full runs.
 - *We:* nothing yet; the restore inference (Q4) waits for a realm that didn't come.
 - *Reconsider:* with Q4 and Q5, an end Firefox reports for every traversal.
 
@@ -852,4 +852,54 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 **Q165. A caller's span in a trace spans the operations inside it** (Ours). Its own start and end are on Effect's clock, which `TestClock` freezes, so its step runs from its first recorded operation's start to its last one's end.
 - *Seen:* review 20's build.
 - *We:* as above.
+- *Reconsider:* nothing.
+
+**Q167. The toolkit brings a page to the front before acting on it** (Ours). Its tools name pages and have no `activate`; a Firefox page behind another renders about once a second (Q71), so a click there timed out once a popup opened. `screenshot`, `click`, `fill`, `press`, `select`, `scroll` and `expect` activate their page first, and their descriptions say so.
+- *Seen:* review 20's build, the toolkit's popup test on Firefox.
+- *We:* as above.
+- *Reconsider:* with Q71: whether every page could render in the background.
+
+**Q168. `--attach` reads its backend from the endpoint** (Ours). An HTTP endpoint, or a WebSocket to `/devtools/`, is Chromium's; any other WebSocket WebDriver BiDi's. CLI.md names one `--attach` flag.
+- *Seen:* review 20's build.
+- *We:* the rule is in the session's start, and the spec it prints names the backend.
+- *Reconsider:* a flag per protocol, if an endpoint is ever ambiguous.
+
+**Q169. A session's context is its own, also when it attaches** (Ours). The daemon creates the session's one context, so its pages are controlled from the start; the attached browser's own tabs aren't in it, and `strider control`, which would take one, isn't built.
+- *Seen:* review 20's build.
+- *We:* `control` fails, saying so.
+- *Reconsider:* the default context as an attached session's, observed, with `control` acquiring for the session's scope.
+
+**Q170. The client learns a session started from one line** (Ours). `strider start` runs the daemon detached, with its standard output piped; the daemon writes one JSON line, ready or why not, and from then on writes its own output to `daemon.log` in the session's directory, since nothing reads the pipe.
+- *Seen:* review 20's build.
+- *We:* as above.
+- *Reconsider:* nothing.
+
+**Q171. The CLI's socket carries JSON lines, not `effect/rpc`** (Ours). CLI.md had the daemon serve the tools as an `effect/rpc` group; the client must forward a command without loading Effect, so it sends the command's arguments as one line, the daemon parses them with `effect/cli`, and the answer is lines of output and an exit code. An `Interrupt` line interrupts the command.
+- *Seen:* review 20's build.
+- *We:* as above; `--json` prints a command's result as one JSON line.
+- *Reconsider:* an `effect/rpc` surface beside it, for programs that drive a session.
+
+**Q172. The package compiles without Node's types** (Ours). The CLI is Node's alone, and uses its built-ins through a small interface of its own (`cli/node.ts`) over dynamic imports, so nothing else in the package can come to rely on Node.
+- *Seen:* review 20's build.
+- *We:* as above.
+- *Reconsider:* nothing.
+
+**Q173. A page a segment opens with `newPage` ends with the segment** (Ours). A segment runs in a scope of its own, which a page it opens belongs to; a page it returns is named into the session, but only one that outlives the segment, such as a popup of a session's page, stays open.
+- *Seen:* review 20's build.
+- *We:* as above; `strider page new` opens a page for the session.
+- *Reconsider:* transferring a returned page's ownership to the session, which CONCEPTS.md §3 allows.
+
+**Q174. A popup collected by `await` is usually still blank** (Browser). The popup event comes before its first navigation, so the URL `await` can report is `about:blank`; the toolkit says "so far".
+- *Seen:* review 20's build, on every backend.
+- *We:* as above.
+- *Reconsider:* waiting for the popup's first commit, which would be a wait the tool adds.
+
+**Q175. A segment is imported afresh on every run** (Ours). Its URL gets a query of its own, so an edited file runs as edited; module state doesn't carry from one run to the next.
+- *Seen:* review 20's build.
+- *We:* as above.
+- *Reconsider:* nothing.
+
+**Q176. The digest has what arrived before the call returned** (Ours). An event that arrives just after a tool's result, such as a 404 a click's page fetches, is in the next call's `sinceLast`.
+- *Seen:* review 20's build, the toolkit's tests.
+- *We:* as above; no tool waits after it acts.
 - *Reconsider:* nothing.

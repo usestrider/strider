@@ -18,6 +18,7 @@ import {
   Popup,
   Trace
 } from "@usestrider/browser"
+import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
 import { TestRun } from "@usestrider/browser/test"
 import { VitestBrowser } from "@usestrider/browser/test/vitest"
 import * as Effect from "effect/Effect"
@@ -31,9 +32,12 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { TestRunner } from "vitest"
 import * as Chromium from "../src/internal/chromiumLauncher.ts"
+import * as ExportTest from "../src/internal/cli/exportTest.ts"
+import * as CliSession from "../src/internal/cli/session.ts"
 import * as Fake from "../src/internal/fake.ts"
 import * as Firefox from "../src/internal/firefoxLauncher.ts"
 import * as Spans from "../src/internal/spans.ts"
+import * as ToolkitImpl from "../src/internal/toolkit.ts"
 
 /** A tracer that keeps every span it makes. */
 const recording = () => {
@@ -281,4 +285,70 @@ describe("Recordings", () => {
       const groupEnd = events.find((event) => event.type === "after" && event.callId === group.callId)
       assert.isAtLeast(groupEnd.endTime, group.startTime)
     }).pipe(Effect.provide(NodeServices.layer)))
+})
+
+describe("BrowserToolkit", () => {
+  it("defines its tools, each returning failures as data", () => {
+    const names = Object.keys(BrowserToolkit.toolkit.tools).sort()
+    assert.deepStrictEqual(names, [
+      "await",
+      "back",
+      "click",
+      "dialog",
+      "expect",
+      "fill",
+      "goto",
+      "history",
+      "newPage",
+      "next",
+      "pages",
+      "press",
+      "route",
+      "screenshot",
+      "scroll",
+      "select",
+      "snapshot"
+    ])
+    for (const tool of Object.values(BrowserToolkit.toolkit.tools)) assert.strictEqual(tool.failureMode, "return")
+  })
+
+  it("masks an editable field's text under the strict capture policy", () => {
+    assert.deepStrictEqual(
+      CapturePolicy.strict,
+      new CapturePolicy.CapturePolicy({ screenshots: "denied", snapshotText: "redacted", consoleText: "omitted" })
+    )
+    assert.strictEqual(CapturePolicy.local.screenshots, "allowed")
+    const text = `- form:\n  - textbox "Card" [ref=e1]:\n    - text: "4242 4242"\n  - text: "Total"`
+    assert.strictEqual(
+      ToolkitImpl.masked(text),
+      `- form:\n  - textbox "Card" [ref=e1]:\n    - text: "•••"\n  - text: "Total"`
+    )
+  })
+})
+
+describe("strider", () => {
+  it("reads the session and the command without parsing the rest", () => {
+    assert.deepStrictEqual(CliSession.scan(["-s", "shop", "-p", "home", "click", "e1"]), {
+      session: "shop",
+      command: "click"
+    })
+    assert.deepStrictEqual(CliSession.scan(["--session=shop", "--json", "pages"]), {
+      session: "shop",
+      command: "pages"
+    })
+    assert.deepStrictEqual(CliSession.scan(["start", "--name", "x"]), { session: undefined, command: "start" })
+    assert.isTrue(CliSession.nameRule.test("checkout-2"))
+    assert.isFalse(CliSession.nameRule.test("Checkout"))
+  })
+
+  it("exports a target as the locator it means", () => {
+    assert.strictEqual(
+      ExportTest.locatorOf("shop", `role=button[name="Pay"]`, undefined),
+      `shop.getByRole("button", { name: "Pay", exact: true })`
+    )
+    assert.strictEqual(ExportTest.locatorOf("shop", `text="Add"`, undefined), `shop.getByText("Add", { exact: true })`)
+    assert.strictEqual(ExportTest.locatorOf("shop", "label=Email", undefined), `shop.getByLabel("Email")`)
+    assert.strictEqual(ExportTest.locatorOf("shop", "testid=cart", undefined), `shop.getByTestId("cart")`)
+    assert.strictEqual(ExportTest.locatorOf("shop", "css=#out", undefined), `shop.locator("#out")`)
+  })
 })

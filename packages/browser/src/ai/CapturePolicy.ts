@@ -15,7 +15,8 @@ import * as Schema from "effect/Schema"
  * **Details**
  *
  * - `screenshots`: whether images may be sent at all.
- * - `snapshotText`: `"redacted"` masks input values and classified text.
+ * - `snapshotText`: `"redacted"` masks the text inside an editable field (a textbox, searchbox, combobox or
+ *   spinbutton) as `•••`.
  * - `consoleText`: console messages in full, masked, or left out.
  *
  * @stability experimental
@@ -35,7 +36,11 @@ export class CapturePolicy extends Schema.Class<CapturePolicy>("@usestrider/brow
  * @category constants
  * @since 0.1.0
  */
-export declare const strict: CapturePolicy
+export const strict: CapturePolicy = new CapturePolicy({
+  screenshots: "denied",
+  snapshotText: "redacted",
+  consoleText: "omitted"
+})
 
 /**
  * Everything allowed: for local development against pages you trust.
@@ -44,4 +49,8 @@ export declare const strict: CapturePolicy
  * @category constants
  * @since 0.1.0
  */
-export declare const local: CapturePolicy
+export const local: CapturePolicy = new CapturePolicy({
+  screenshots: "allowed",
+  snapshotText: "full",
+  consoleText: "full"
+})

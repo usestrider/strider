@@ -18,13 +18,13 @@ every event module (`Popup`, `Dialog`, `FileChooser`, `Download`, `ConsoleMessag
 `emulate`, `grant`, `clock`, and the context options `emulation`, `permissions` and `focus`), `FileInput.bytes`,
 `goto({ accept })`, `close({ runBeforeUnload: true })`, `Page.capability`, the span references
 (`Browser.SpanNameGenerator`, `TracerDisabledWhen`, `TraceProtocolCommands`) and `Diagnostics.withPreset`, and the
-test layers (`Browser.layerTest`, `VitestBrowser.layer`), and recordings (`Har.record`, `Trace.record`) work on every
-backend. What a backend can't do or report
+test layers (`Browser.layerTest`, `VitestBrowser.layer`), recordings (`Har.record`, `Trace.record`), the agent toolkit
+(`BrowserToolkit`, `CapturePolicy`) and the `strider` command (CLI.md) work on every backend. What a backend can't do or report
 fails with `Unsupported`, naming the capability: modifiers on WebKit's pointer, an HTML drag anywhere but
 Chromium, a CSS-pixel or transparent screenshot and a PDF's header on Firefox, a PDF on WebKit, a partitioned
 cookie anywhere but Chromium, `Capability.AxTree` anywhere but Chromium, and `Capability.Screencast` on Firefox. A
-member that isn't built yet fails as the defect `NotBuilt`, naming itself (a trace's `domSnapshots`, the agent
-toolkit and `WebKit.layerAttach` among them).
+member that isn't built yet fails as the defect `NotBuilt`, naming itself (a trace's `domSnapshots` and
+`WebKit.layerAttach` among them).
 
 ## Shape
 
@@ -79,6 +79,9 @@ toolkit and `WebKit.layerAttach` among them).
 - **Record, then export.** `const har = yield* Har.record(page, { content: "embed" })`, act, then
   `har.exportHar("run.har")`; `Trace.record(page, { screenshots: "perAction" })` and `exportTrace("trace.zip")`
   write a trace trace.playwright.dev opens. Exports are redacted unless `include` names a class of secret.
+- **Drive a browser from a shell with `strider`.** `strider start --name s --chromium <path>`, then
+  `strider -s s page new --name shop <url>`, `strider -s s -p shop snapshot`, `strider -s s -p shop click e9`; every
+  command names its session and page. `strider -s s stop` ends it.
 - **Test events without a browser.** `Effect.provide(Browser.layerTest("--resp(cart)--commit--load--|"))` gives a
   fake whose first page plays the timeline under `TestClock`, with `-` as 10 ms; it has no DOM.
 - **Emulation is checked, not best-effort.** `page.emulate({...})` fails with `Unsupported` naming a field the

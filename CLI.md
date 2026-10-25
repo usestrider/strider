@@ -1,6 +1,6 @@
 # CLI: driving a live session from the command line
 
-*Revision 5.25, 2026-10-19. These are sketches, like API.md: names are provisional, and `@usestrider/browser/cli` is declared in [packages/browser/src/cli/](packages/browser/src/cli/). The command is `strider`, the project's name. Strider CD, a continuous-deployment server abandoned in 2022, also installed a `strider` command; few machines will have both.*
+*Revision 5.25, 2026-10-19; built 2026-10-24, after [review 20](reviews/20-tooling.md) (Built, below, says where the build differs). These are sketches, like API.md: names are provisional, and `@usestrider/browser/cli` is declared in [packages/browser/src/cli/](packages/browser/src/cli/). The command is `strider`, the project's name. Strider CD, a continuous-deployment server abandoned in 2022, also installed a `strider` command; few machines will have both.*
 
 ## Purpose
 
@@ -106,7 +106,7 @@ export default Effect.gen(function*() {
 - **Names are the ids.** They are unique, and starting a name that is taken fails instead of attaching. Handles belong to their session, so `p1` in one session has nothing to do with `p1` in another.
 - **Every page command names its page** with `--page`/`-p`. There is no current page and no fallback, even when the session has one page, for the same reason as sessions: an implicit selection is how agents act on the wrong tab (Stagehand followed focus; Chrome DevTools MCP raced on a global selected page). Pages take an optional `--name` when created, and the handle is that name or else `p1`. A page opened without one, such as a popup, is named later with `strider -s checkout -p p2 page name consent`.
 - **`start` names its browser** ([review 11](reviews/11-executable-paths.md)): exactly one of `--chromium <path>`, `--firefox <path>` and `--webkit <path>`, absolute, or `--attach <endpoint>`. There is no default browser and nothing is looked up; the session's spec prints the path back, with the version the browser reports.
-- **`strider browsers` finds a path.** It lists the browsers on the machine, by backend, with their versions and where each path leads, and `--json` prints the same as data. It is the one command that needs no session and no daemon, and the only one built (PROTOCOL.md, Not built).
+- **`strider browsers` finds a path.** It lists the browsers on the machine, by backend, with their versions and where each path leads, and `--json` prints the same as data. It is one of the commands that need no session and no daemon, with `sessions` and `prune`.
 - **One context per session.** `--state` and `--fork` apply to it. Two logins at once, such as two users of a chat, are two sessions.
 - **One daemon and one browser per session.** Contexts share launch flags, the downloads directory and OS focus (API.md, Testing), so separate browsers keep concurrent agents apart, and a crash ends one session.
 - **Lifetime.** A session ends at `strider stop`, after its idle timeout, or when `--owner-pid` exits. Whichever applies is printed at start. `strider sessions` lists name, backend, pages, idle time and owner.
@@ -145,6 +145,23 @@ export default Effect.gen(function*() {
 **Client**
 - **`strider` forwards argv over the socket without loading Effect.** Loading Effect costs about 600 ms per process, and agents run hundreds of commands. etest's `serve` uses the same trick. The daemon holds the model.
 - **Packaging** is the `@usestrider/browser/cli` subpath plus a `bin`, not a separate package (revision 5.10).
+
+## Built
+
+*2026-10-24, after [review 20](reviews/20-tooling.md), its third step.* The commands above run as written: a daemon per session (`src/internal/cli/daemon.ts`), started detached by `strider start`, holding the browser, the session's one context and the agent toolkit's session; the client (`src/internal/cli/client.ts`), which forwards a command over the session's socket without loading Effect; and `browsers`, `sessions` and `prune`, which run in the client's process.
+
+- **Starting.** The daemon parses `start`'s flags with `effect/cli`, claims the session's directory (taken while it exists, its `lock` naming the daemon), reads `--secret name=VARIABLE` from the environment the command ran in, creates the context from `--state` or from `--fork`'s session (asked for its state over its socket), and writes one JSON line on its standard output: the spec, once it serves, or why it couldn't start, which the client prints with an exit code (QUIRKS.md, Q170). Its own output then goes to `daemon.log`.
+- **Commands.** Each is parsed in the daemon by one `effect/cli` tree whose shared flags are `-s`, `-p` and `--json`; the toolkit's tools are its page commands, and `page new`, `page name`, `remove`, `run`, `state save`, `export test` and `stop` are the session's. Results print as one line, `clicked e9 on shop · 412 ms`, with `since last:` after it; a screenshot is written to `artifacts/` and its path printed; `--json` prints one JSON line. A failure prints its tag and message, and exits with its module's code: 10 `LocatorError`, 11 `PageError`, 12 `Timeout`, 13 `TargetGone`, 14 `ExpectationFailed`, 15 `InvalidInput`, 16 `PageNotFound`, 17 `NotPermitted`, 20 for no such session, 2 for a command that doesn't parse. Ctrl-C sends an `Interrupt` line that interrupts the command alone.
+- **Lifetime.** The idle timeout and `--owner-pid` are checked each second. Stopping closes the browser and deletes the session's directory, or, with `--keep`, only its socket and lock. A daemon killed outright leaves its directory, which `sessions` lists with its size and `prune` removes, after ending any process whose command line names it (Linux).
+- **Segments.** `run` imports the file afresh (Q175), checks that its default export is an `Effect`, and runs it with `CurrentSession` and a scope of its own; pages it returns are named into the session (Q173).
+- **Export.** `export test` writes the session's successful commands: a context, from the `--state` file when the session started from one; each page; each tool call as its statement, a ref as the role-and-name locator its snapshot gave it, a `%name%` as `Config.Redacted` of its variable, and each `run` as a marked placeholder, which the command lists.
+- **Where the build differs from this document.**
+  - **The socket carries JSON lines** of arguments, output and an exit code, not an `effect/rpc` group (Q171).
+  - **`--attach` reads its backend from the endpoint** (Q168), and the session's context is its own, so `control` isn't built (Q169).
+  - **A page a segment opens ends with it** (Q173).
+  - **`history` has no `--level` or `--failed`**; it lists what the page's log recorded of a kind.
+  - **Every page tool brings its page to the front first** (Q167).
+- **Not built:** an MCP server command, which `McpServer.toolkit(BrowserToolkit.toolkit)` covers for a program today; `control`; and a session's `downloads/` as its context's download directory, which the daemon creates and doesn't use yet.
 
 ## Open questions
 

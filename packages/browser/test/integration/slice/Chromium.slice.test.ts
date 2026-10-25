@@ -16,6 +16,7 @@ import { modules } from "./modules.ts"
 import { recordings } from "./recordings.ts"
 import { slice } from "./slice.ts"
 import { tooling } from "./tooling.ts"
+import { toolkit } from "./toolkit.ts"
 
 const backend = Chromium.layer({ executablePath: chromium.executable }).pipe(Layer.provide(NodeServices.layer))
 
@@ -27,4 +28,5 @@ declarations("Chromium", backend)
 contents("Chromium", backend)
 tooling("Chromium", backend)
 recordings("Chromium", backend)
+toolkit("Chromium", backend)
 attaching("Chromium", backend, Option.some(chromiumAttachable((endpoint) => Chromium.layerConnect(endpoint))))

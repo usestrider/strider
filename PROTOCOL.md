@@ -662,7 +662,7 @@ Adapter responsibilities:
 - **Tests.** `test/Tooling.test.ts` checks, without a browser: the profiles' values against the launchers', the presets' redaction, the roles, span names, attributes, suppression and redaction through `layerTest`, the fake's timeline, dialogs, popups, crash and close under `TestClock` and its `Unsupported` engine, and `VitestBrowser`'s `TestRun`. `test/integration/slice/tooling.ts` runs 7 tests on each backend: made files set and chosen, a mix refused, `accept` for a 204 and a download, a close a handler stays and one it leaves, the accessibility tree or `Unsupported`, two screencast frames or `Unsupported`, and protocol command spans under their operation only where asked. Integration tests: 435; one full run passed.
 - **Not built yet:**
   - recordings: `Har.record`, `Trace.record` and their exports, and `NetworkResponse`'s `statusText` and `httpVersion` (review 20, step 2; since built, below);
-  - `BrowserToolkit`, `CapturePolicy`, `CurrentSession` and the CLI (review 20, step 3);
+  - `BrowserToolkit`, `CapturePolicy`, `CurrentSession` and the CLI (review 20, step 3; since built, below);
   - a file screencast on Firefox (Q151);
   - an iframe's accessibility tree, which `getFullAXTree` takes a frame for.
 
@@ -686,7 +686,22 @@ Adapter responsibilities:
   - DOM snapshots in traces (`domSnapshots`, which fails as `NotBuilt`): they need Playwright's capture script, vendored and pinned, in the page's main world;
   - request bodies in a HAR (Q164), and a HAR's body for a document Chromium forgot (Q160);
   - holding a CDP response until its `ExtraInfo`, so events carry the headers sent (Q158);
-  - `BrowserToolkit`, `CapturePolicy`, `CurrentSession` and the CLI (review 20, step 3).
+  - `BrowserToolkit`, `CapturePolicy`, `CurrentSession` and the CLI (review 20, step 3; since built, below).
+
+**Built** (2026-10-24, after [review 20](reviews/20-tooling.md), its third step): agents and the CLI.
+
+- **The toolkit** (`src/internal/tools.ts`, `toolkit.ts`; `BrowserToolkit`, `CapturePolicy`). The seventeen tools are `effect/ai` `Tool`s defined once, with Schemas for parameters, results (`{ outcome, sinceLast }`) and failures (`BrowserToolkit.ToolFailure`), and failure mode `"return"`. `make` binds them to a context through a session that names its pages, keeps each one's latest snapshot, its waits (`w1`) and its registrations (`r1`), and records the context's and each named page's event channels with no bound (`Events.recorded`) for the digest: navigations, popups (named as they come), dialogs and the policy's decisions, downloads, uncaught exceptions, console errors, responses of 400 or more, and requests that failed other than by cancellation, which a hop's end now records. Secrets are revealed at dispatch and put back as `%name%` in every result. Under `CapturePolicy.strict` screenshots fail with `NotPermitted`, snapshot text inside an editable field is masked, and console text is left out.
+- **The CLI** (`src/internal/cli/`, `src/bin/strider.ts`; `CurrentSession`). As CLI.md's Built section says: a client that forwards a session's command over its Unix socket without loading Effect; a daemon per session, started detached, that parses commands with `effect/cli` into the toolkit's tools and the session's commands, serves them over `NodeSocketServer` one connection each, and ends at `stop`, its idle timeout or its owner's exit; segments; `state save` with mode 0600 and `--state` and `--fork` from `StorageState.Json`; `export test`; and `sessions` and `prune` in the client's process. The package compiles without Node's types, so the CLI uses Node's built-ins through an interface of its own (Q172).
+- **Where the build differs from the review.**
+  - **The tools that act bring their page to the front first** (Q167), which the review didn't foresee; the toolkit has no `activate`.
+  - **`BrowserToolkit.toolkit` is typed by its tools,** and `ToolFailure` is public; the review declared `Tools` as `Tool.Any` by name.
+  - **The CLI's socket carries JSON lines, not `effect/rpc`** (Q171); `--attach`'s backend is read from the endpoint (Q168); the session's context is its own, so `control` isn't built (Q169); and a page a segment opens ends with it (Q173).
+- **Tests.** `test/integration/slice/toolkit.ts` runs 2 tests on each backend: a page driven as a model would, with names, refs and locator strings, a secret filled and never echoed, the digest's console error and 404 once each, a wait for a popup across calls, a dialog decision and a route, and failures as data (a bad target, a ref from another page's snapshot, a missing page and a missing secret); and what each capture policy sends. `test/integration/Cli.test.ts` runs `strider` as processes on the pinned Chromium and Firefox: a session driven by page and target, through waits, a route, a dialog decision, a screenshot, a segment and a missing page, saved state, an exported test and `stop`; a session forked from another's state, and a daemon killed outright, listed and pruned; and the mistakes a command can make, with their exit codes, and the idle timeout. `test/Tooling.test.ts` checks the tool definitions, the masking, the argument scan and the exported locators. Integration tests: 456; of two full runs, one passed and one failed Firefox's traversal from its JSON viewer (Q69).
+- **Not built yet:**
+  - an MCP server command; `McpServer.toolkit(BrowserToolkit.toolkit)` serves the tools to a program today;
+  - `strider control` (Q169), and a session's `downloads/` as its context's download directory;
+  - transferring a page a segment opened into the session (Q173);
+  - `history`'s `--level` and `--failed`.
 
 ### Pause-on-start granularity
 

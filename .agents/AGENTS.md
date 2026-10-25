@@ -2,9 +2,9 @@
 
 This repository is Strider (`@usestrider/browser` on npm): Effect-native browser automation that speaks CDP, WebDriver
 BiDi and the WebKit inspector protocol directly. It is at the design stage. L0, the protocol layer, is built, and
-nine slices run through L1 and L2 on every backend (reviews 12, 13, 14, 16, 17, 18, 19, and 20's first two steps:
-actions, events, every event module, interacting and asserting, declarations, a page's contents, attaching and access,
-the rest of the API surface with capabilities and the test layers, and recordings);
+ten slices run through L1 and L2 on every backend (reviews 12, 13, 14, 16, 17, 18, 19 and 20's three steps: actions,
+events, every event module, interacting and asserting, declarations, a page's contents, attaching and access, the rest
+of the API surface with capabilities and the test layers, recordings, and the agent toolkit with the `strider` CLI);
 the rest of the package's modules are declarations,
 type-checked and documented, which the implementation replaces module by module. A member of an object that isn't
 built yet fails as the defect `NotBuilt`, naming itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm`
@@ -21,8 +21,9 @@ from the repository root.
 - `packages/browser` is the published package:
   - `src/`: one module per file, exported as namespaces. `src/index.ts` and each subpath's `index.ts` are generated.
     `src/internal/` is implementation that no subpath exports, such as the protocol client, each backend's wire,
-    launcher and adapter, L1's model (`model.ts`), the query engine that runs in the page (`engine.ts`), and the
-    event mechanism every event module shares (`events.ts`).
+    launcher and adapter, L1's model (`model.ts`), the query engine that runs in the page (`engine.ts`), the
+    event mechanism every event module shares (`events.ts`), the span helper every operation opens its span through
+    (`spans.ts`), and the `strider` client and daemon (`cli/`).
   - `scenarios/`: the acceptance scenarios from API.md, type-checked as ordinary code.
   - `typetest/`: Tstyche tests of access rules, requirement channels and what crosses by value.
   - `test/`: runtime tests with `@effect/vitest`, which run anywhere (`pnpm test --run`), except
@@ -64,7 +65,7 @@ Use the narrowest check that covers the change:
 | The protocol client or transports    | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts`, then `pnpm test:integration` |
 | A backend adapter or launcher        | `pnpm test:integration`                                                                                                                  |
 | The model, engine, locators or pages | `pnpm test:integration packages/browser/test/integration/adapter packages/browser/test/integration/slice`                                |
-| The `strider` command                | `pnpm test --run packages/browser/test/Browsers.test.ts`, then try it with `pnpm strider <command>`                                      |
+| The `strider` command                | `pnpm test --run packages/browser/test/Browsers.test.ts`, `pnpm test:integration packages/browser/test/integration/Cli.test.ts`          |
 | Access rules or other type behavior  | `pnpm test-types`                                                                                                                        |
 | JSDoc text, categories or links      | `pnpm jsdocs`                                                                                                                            |
 | JSDoc examples                       | `pnpm jsdocs`, then `pnpm examples`                                                                                                      |

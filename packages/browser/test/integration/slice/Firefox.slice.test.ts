@@ -17,6 +17,7 @@ import { modules } from "./modules.ts"
 import { recordings } from "./recordings.ts"
 import { slice } from "./slice.ts"
 import { tooling } from "./tooling.ts"
+import { toolkit } from "./toolkit.ts"
 
 const backend = Firefox.layer({ executablePath: firefox.executable }).pipe(
   Layer.provide(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor))
@@ -30,4 +31,5 @@ declarations("Firefox", backend)
 contents("Firefox", backend)
 tooling("Firefox", backend)
 recordings("Firefox", backend)
+toolkit("Firefox", backend)
 attaching("Firefox", backend, Option.some(firefoxAttachable((endpoint) => Firefox.layerConnect(endpoint))))

@@ -16,6 +16,7 @@ import { modules } from "./modules.ts"
 import { recordings } from "./recordings.ts"
 import { slice } from "./slice.ts"
 import { tooling } from "./tooling.ts"
+import { toolkit } from "./toolkit.ts"
 
 const backend = WebKit.layer({ executablePath: webkit.executable }).pipe(Layer.provide(NodeServices.layer))
 
@@ -27,4 +28,5 @@ declarations("WebKit", backend)
 contents("WebKit", backend)
 tooling("WebKit", backend)
 recordings("WebKit", backend)
+toolkit("WebKit", backend)
 attaching("WebKit", backend, Option.none())
