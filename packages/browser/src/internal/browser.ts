@@ -52,6 +52,7 @@ import * as PageImpl from "./page.ts"
 import * as Refusals from "./refusals.ts"
 import * as Routes from "./routes.ts"
 import type * as Runtime from "./runtime.ts"
+import * as Spans from "./spans.ts"
 import * as Storage from "./storage.ts"
 import * as StorageStates from "./storageState.ts"
 import * as Watchable from "./watchable.ts"
@@ -154,7 +155,7 @@ const makeContext = (
       // Owned by the caller's scope, which releases its popups too (CONCEPTS.md §3)
       pageEntry.owner = Option.some(scope)
       return Option.getOrThrow(runtime.page(pageEntry))
-    }).pipe(Effect.withSpan("UserContext.newPage", { attributes: { "browser.context.id": entry.id } })),
+    }).pipe(Spans.operation("UserContext.newPage", { attributes: { "browser.context.id": entry.id } })),
     cookies: Storage.cookieJar(runtime, entry.id),
     exportStorageState: StorageStates.exportState(runtime, entry.id),
     clock: Clock.make({
@@ -411,7 +412,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         grant: Option.some(grant),
         upgrade: upgradePage(entry)
       })
-    }).pipe(Effect.withSpan(`Page.${level}`, { attributes: { "browser.page.id": entry.id } }))
+    }).pipe(Spans.operation(`Page.${level}`, { attributes: { "browser.page.id": entry.id } }))
 
   /** `control` of a context the connection didn't create: a handle under a grant for the caller's scope. */
   const upgradeContext = (
@@ -443,7 +444,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         control: upgradeContext(entry)
       })
       return context
-    }).pipe(Effect.withSpan("UserContext.control", { attributes: { "browser.context.id": entry.id } }))
+    }).pipe(Spans.operation("UserContext.control", { attributes: { "browser.context.id": entry.id } }))
 
   const runtime: Runtime.Runtime = {
     model,
@@ -578,7 +579,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         )
       }
       return context
-    }).pipe(Effect.withSpan("Browser.newContext"))
+    }).pipe(Spans.operation("Browser.newContext"))
 
   const defaultEntry = yield* model.context(adapter.defaultContext)
   const browser: Browser.Browser = {
@@ -592,7 +593,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       operation: "Browser.capabilities.waitFor"
     }),
     newContext,
-    newPage: Effect.fn("Browser.newPage")(function*(options?: UserContext.Options) {
+    newPage: Spans.fn("Browser.newPage")(function*(options?: UserContext.Options) {
       const context = yield* newContext(options).pipe(Effect.mapError((error) =>
         new Page.PageError({
           operation: "Browser.newPage",

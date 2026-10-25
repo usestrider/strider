@@ -21,7 +21,7 @@ const pageError = (operation: string, reason: Page.PageErrorReason, id: Diagnost
 
 /**
  * A navigation's outcome: the navigation, at `at` (where it ended), or why the page didn't get there, going to
- * `url` if that is known.
+ * `url` if that is known. A download or a 204 the caller accepts is a navigation too.
  */
 export const settle = (
   model: Model.Model,
@@ -30,7 +30,8 @@ export const settle = (
   url: Option.Option<Url.Url>,
   at: string,
   outcome: Adapter.NavigationOutcome,
-  id: Diagnostics.OperationId
+  id: Diagnostics.OperationId,
+  accept: ReadonlyArray<"download" | "noContent"> = []
 ): Effect.Effect<PageNavigation.PageNavigation, Page.PageError> => {
   switch (outcome._tag) {
     case "Committed":
@@ -39,6 +40,10 @@ export const settle = (
     case "Activated":
       return Effect.succeed(Option.getOrThrow(Navigated.succeeded(model, navigation, at, outcome)))
     case "Download":
+      // `goto({ accept })` (review 20, candidate 1): the outcomes the caller asked for are navigations
+      if (accept.includes("download")) {
+        return Effect.succeed({ _tag: "BecameDownload", id: navigation, url: at as Url.Url })
+      }
       return Effect.fail(pageError(
         operation,
         new PageNavigation.BecameDownload({
@@ -48,6 +53,14 @@ export const settle = (
         id
       ))
     case "NoContent":
+      if (accept.includes("noContent")) {
+        return Effect.succeed({
+          _tag: "NoContent",
+          id: navigation,
+          url: at as Url.Url,
+          response: Option.flatMap(outcome.response, model.response)
+        })
+      }
       return Effect.fail(pageError(
         operation,
         new PageNavigation.NoContent({

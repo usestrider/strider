@@ -15,11 +15,15 @@ action (`click`, `dblclick`, `tap`, `hover`, `check`, `uncheck`, `focus`, `clear
 every event module (`Popup`, `Dialog`, `FileChooser`, `Download`, `ConsoleMessage`,
 `UncaughtException`, `PageNavigation`, `NetworkRequest`, `NetworkResponse`, `BrowserWorker`, `NetworkConnection`,
 `AutoResolution`), `Dialog.handle` and `FileChooser.handle`, and the declarations (`route`, `addInitScript`,
-`emulate`, `grant`, `clock`, and the context options `emulation`, `permissions` and `focus`) work on every backend. What a backend can't do or report
+`emulate`, `grant`, `clock`, and the context options `emulation`, `permissions` and `focus`), `FileInput.bytes`,
+`goto({ accept })`, `close({ runBeforeUnload: true })`, `Page.capability`, the span references
+(`Browser.SpanNameGenerator`, `TracerDisabledWhen`, `TraceProtocolCommands`) and `Diagnostics.withPreset`, and the
+test layers (`Browser.layerTest`, `VitestBrowser.layer`) work on every backend. What a backend can't do or report
 fails with `Unsupported`, naming the capability: modifiers on WebKit's pointer, an HTML drag anywhere but
-Chromium, a CSS-pixel or transparent screenshot and a PDF's header on Firefox, a PDF on WebKit, and a partitioned
-cookie anywhere but Chromium. A member that isn't built yet fails as the defect `NotBuilt`, naming itself
-(`Page.capability` and `WebKit.layerAttach` among them).
+Chromium, a CSS-pixel or transparent screenshot and a PDF's header on Firefox, a PDF on WebKit, a partitioned
+cookie anywhere but Chromium, `Capability.AxTree` anywhere but Chromium, and `Capability.Screencast` on Firefox. A
+member that isn't built yet fails as the defect `NotBuilt`, naming itself (`Har.record`, `Trace.record`, the agent
+toolkit and `WebKit.layerAttach` among them).
 
 ## Shape
 
@@ -69,5 +73,9 @@ cookie anywhere but Chromium. A member that isn't built yet fails as the defect 
   `{ phase: "response" }` or `{ phase: "auth" }` for the others. Return a `Route` decision valid for it
   (`Route.fulfill`, `Route.continueWith`, `Route.abort()`, `Route.fallthrough`, `Route.continue`); there is no
   `fetch` on the request. A failing handler lets the request continue, logged.
+- **Upload generated files as bytes.** `locator.setInputFiles(FileInput.bytes("report.csv", "text/csv", data))`
+  makes the file in the page; one call takes bytes or paths, not both.
+- **Test events without a browser.** `Effect.provide(Browser.layerTest("--resp(cart)--commit--load--|"))` gives a
+  fake whose first page plays the timeline under `TestClock`, with `-` as 10 ms; it has no DOM.
 - **Emulation is checked, not best-effort.** `page.emulate({...})` fails with `Unsupported` naming a field the
   backend can't apply; read `browser.capabilities` (`emulation.*`) to branch.

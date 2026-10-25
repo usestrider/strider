@@ -17,6 +17,7 @@ import * as Events from "./internal/events.ts"
 import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
 import type * as Model from "./internal/model.ts"
+import * as Spans from "./internal/spans.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import * as NetworkRequest from "./NetworkRequest.ts"
 import type * as Page from "./Page.ts"
@@ -148,7 +149,7 @@ export const next = <PE = never, PR = never>(
   Scope.Scope | PR
 > =>
   Effect.suspend(() => Events.next(kind("AutoResolution.next"), channel(target), accepts(filter), where)).pipe(
-    Effect.withSpan("AutoResolution.next")
+    Spans.operation("AutoResolution.next")
   )
 
 /**

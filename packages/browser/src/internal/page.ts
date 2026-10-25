@@ -2,7 +2,7 @@
  * Pages (API.md, Pages; review 12, candidate 7). Built: the state (`status`, `url`, `frames`, `workers`, `closed`), the
  * queries and `frame`, `goto`, `reload`, `back` and `forward`, `title`, `readHtml`, `snapshot`, `screenshot`, `pdf`,
  * origin storage, evaluation (review 18), the declarations (review 17), `activate`, `close`, the keyboard and mouse,
- * and `inspect` and `control` (review 19). `capability` fails as `NotBuilt`.
+ * and `inspect` and `control` (review 19), and `capability` (review 20).
  *
  * Every handle for a page shares its observe members (`observeMembers`). A page the connection controls for its life
  * has one `Page`; any other page has an observed handle, and `inspect` and `control` make handles under a grant,
@@ -15,6 +15,7 @@
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
+import * as Exit from "effect/Exit"
 import * as Hash from "effect/Hash"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
@@ -34,6 +35,7 @@ import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as Capabilities from "./capabilities.ts"
 import * as Captures from "./captures.ts"
 import * as Clock from "./clock.ts"
 import * as Devices from "./devices.ts"
@@ -45,12 +47,12 @@ import * as LocatorImpl from "./locator.ts"
 import type * as Model from "./model.ts"
 import * as Navigated from "./navigated.ts"
 import * as Navigation from "./navigation.ts"
-import * as NotBuilt from "./notBuilt.ts"
 import * as Operation from "./operation.ts"
 import * as Refusals from "./refusals.ts"
 import * as Routes from "./routes.ts"
 import * as Runtime from "./runtime.ts"
 import * as Snapshots from "./snapshot.ts"
+import * as Spans from "./spans.ts"
 import * as Storage from "./storage.ts"
 import * as Watchable from "./watchable.ts"
 
@@ -201,7 +203,8 @@ export const make = (owner: PageOwner): Page.Page => {
     start: (
       id: Diagnostics.OperationId
     ) => Effect.Effect<Option.Option<PageNavigation.Id>, Target.TargetGone | Page.PageError>,
-    waitUntil: PageNavigation.LoadState
+    waitUntil: PageNavigation.LoadState,
+    accept: ReadonlyArray<"download" | "noContent"> = []
   ) =>
     Effect.gen(function*() {
       const id = Operation.operationId()
@@ -221,15 +224,19 @@ export const make = (owner: PageOwner): Page.Page => {
       // Where it ended: the document's URL, which a same-document navigation set, or where it was going
       const document = "document" in outcome.value ? model.documents.get(outcome.value.document) : undefined
       const at = document?.url ?? Option.getOrElse(url, () => "")
-      const result = yield* Navigation.settle(model, operation, started.value, url, at, outcome.value, id)
+      const result = yield* Navigation.settle(model, operation, started.value, url, at, outcome.value, id, accept)
       if (!(yield* Navigated.reached(model, result, waitUntil, Option.some(budget.at)))) {
         return yield* Effect.fail(timedOut("postcondition", `The document committed but didn't reach ${waitUntil}`))
       }
       return Option.some(result)
     }).pipe(
       Effect.raceFirst(Runtime.pageEnded(entry, Operation.operationId())),
-      Effect.withSpan(operation, {
-        attributes: { "browser.page.id": entry.id, "browser.navigation.wait_until": waitUntil }
+      Spans.operation(operation, {
+        attributes: {
+          "browser.page.id": entry.id,
+          "browser.navigation.wait_until": waitUntil,
+          ...(Option.isSome(url) ? { "url.full": url.value } : {})
+        }
       })
     )
 
@@ -289,7 +296,7 @@ export const make = (owner: PageOwner): Page.Page => {
         Effect.annotateSpans({ "browser.evaluation.user_gesture": gesture })
       )
     }).pipe(
-      Effect.withSpan(operation, {
+      Spans.operation(operation, {
         attributes: {
           "browser.page.id": entry.id,
           "browser.evaluation.world": world._tag === "Main" ? "main" : world.name
@@ -322,7 +329,7 @@ export const make = (owner: PageOwner): Page.Page => {
           )
         )
         return response._tag === "Title" ? response.title : yield* Effect.die(new Error(`Page.title: ${response._tag}`))
-      }).pipe(Effect.withSpan("Page.title", { attributes: { "browser.page.id": entry.id } }))
+      }).pipe(Spans.operation("Page.title", { attributes: { "browser.page.id": entry.id } }))
     },
     get readHtml() {
       return Effect.gen(function*() {
@@ -334,7 +341,7 @@ export const make = (owner: PageOwner): Page.Page => {
         return response._tag === "Read" && typeof response.value === "string"
           ? response.value
           : yield* Effect.die(new Error(`Page.readHtml: ${response._tag}`))
-      }).pipe(Effect.withSpan("Page.readHtml", { attributes: { "browser.page.id": entry.id } }))
+      }).pipe(Spans.operation("Page.readHtml", { attributes: { "browser.page.id": entry.id } }))
     },
     snapshot: (options) =>
       Effect.gen(function*() {
@@ -348,7 +355,7 @@ export const make = (owner: PageOwner): Page.Page => {
           ? taken.snapshot as Snapshot.Snapshot<Locator.Locator>
           : yield* Effect.die(new Error(`Page.snapshot: ${taken.response._tag}`))
       }).pipe(
-        Effect.withSpan("Page.snapshot", {
+        Spans.operation("Page.snapshot", {
           attributes: {
             "browser.page.id": entry.id,
             "browser.snapshot.sources": options?.sources ?? "aria+interactivity"
@@ -371,10 +378,9 @@ export const make = (owner: PageOwner): Page.Page => {
         JSHandle.Serialized<A>,
         Page.PageError | Target.TargetGone | Deadline.Timeout
       >,
-    capability: NotBuilt.fn("Page.capability") as Page.Page["capability"],
+    capability: (capability) => Capabilities.acquire(runtime, entry, capability),
     context: owner.context,
     goto: (url, options) => {
-      if (options?.accept !== undefined && options.accept.length > 0) return NotBuilt.effect("Page.goto with accept")
       let parsed: URL
       try {
         parsed = new URL(url)
@@ -396,7 +402,8 @@ export const make = (owner: PageOwner): Page.Page => {
           Effect.map(adapter.navigate(entry.id, parsed.href, { referrer: Option.none() }), Option.some).pipe(
             Effect.mapError((error) => failure("Page.goto", id, error))
           ),
-        options?.waitUntil ?? "commit"
+        options?.waitUntil ?? "commit",
+        options?.accept ?? []
       ).pipe(Effect.map(Option.getOrThrow))
     },
     reload: (options) =>
@@ -487,29 +494,54 @@ export const make = (owner: PageOwner): Page.Page => {
         // Bringing a page to the front has no failure of its own: anything but its end is a defect
         return mapped._tag === "Gone" ? Effect.fail(mapped.error) : Effect.die(mapped.reason)
       }))
-    }).pipe(Effect.withSpan("Page.activate", { attributes: { "browser.page.id": entry.id } })),
+    }).pipe(Spans.operation("Page.activate", { attributes: { "browser.page.id": entry.id } })),
     close: ((options?: { readonly runBeforeUnload: boolean }) => {
-      if (options?.runBeforeUnload === true) return NotBuilt.effect("Page.close with runBeforeUnload")
+      const runBeforeUnload = options?.runBeforeUnload === true
       return Effect.gen(function*() {
         const id = Operation.operationId()
         const budget = yield* Operation.budget
         if (Option.isSome(yield* Deferred.poll(entry.closed))) return
-        yield* adapter.closePage(entry.id, { runBeforeUnload: false }).pipe(Effect.catch((error) => {
-          const mapped = Operation.fromAdapter(error, id, runtime.backend)
-          return mapped._tag === "Gone" ? Effect.void : Effect.die(mapped.reason)
-        }))
-        const closed = yield* Deferred.await(entry.closed).pipe(Effect.timeoutOption(Operation.millisLeft(budget.at)))
-        if (Option.isNone(closed)) {
+        // `runBeforeUnload` (review 20, candidate 1): the prompt is decided as any dialog is, and a handler's
+        // stay ends the close with the page open
+        const stayed = yield* Deferred.make<void>()
+        const onStay = () => Deferred.doneUnsafe(stayed, Exit.void)
+        if (runBeforeUnload) entry.stayed.add(onStay)
+        const outcome = yield* Effect.gen(function*() {
+          yield* adapter.closePage(entry.id, { runBeforeUnload }).pipe(Effect.catch((error) => {
+            const mapped = Operation.fromAdapter(error, id, runtime.backend)
+            return mapped._tag === "Gone" ? Effect.void : Effect.die(mapped.reason)
+          }))
+          return yield* Deferred.await(entry.closed).pipe(
+            Effect.as("closed" as const),
+            Effect.raceFirst(Effect.as(Deferred.await(stayed), "stayed" as const)),
+            Effect.timeoutOption(Operation.millisLeft(budget.at))
+          )
+        }).pipe(Effect.ensuring(Effect.sync(() => entry.stayed.delete(onStay))))
+        if (Option.isSome(outcome) && outcome.value === "stayed") {
+          return yield* Effect.fail(pageError(
+            "Page.close",
+            new Page.CloseCanceled({ hint: "The page's beforeunload prompt was answered with stay" }),
+            id
+          ))
+        }
+        if (Option.isNone(outcome)) {
           return yield* Effect.fail(Operation.timeout({
             operation: "Page.close",
             id,
             phase: "dispatchedUnconfirmed",
             budget: budget.budget,
             history: [],
-            hint: Option.some("The browser was asked to close the page, and hadn't confirmed it by the deadline")
+            hint: Option.some(
+              runBeforeUnload
+                ? "The browser was asked to close the page, and hadn't confirmed it by the deadline; a beforeunload " +
+                  "prompt nothing decided keeps it open"
+                : "The browser was asked to close the page, and hadn't confirmed it by the deadline"
+            )
           }))
         }
-      }).pipe(Effect.withSpan("Page.close", { attributes: { "browser.page.id": entry.id } }))
+      }).pipe(Spans.operation("Page.close", {
+        attributes: { "browser.page.id": entry.id, "browser.close.run_before_unload": runBeforeUnload }
+      }))
     }) as Page.Page["close"]
   }
   // A handle made under a grant fails above observe once the grant is released, and its declarations go with it

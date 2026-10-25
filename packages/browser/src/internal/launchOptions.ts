@@ -12,6 +12,8 @@ export const settings = (options: Browser.LaunchOptions) => ({
   headless: options.headless,
   args: options.args,
   profile: options.profile?.name,
+  profileArgs: options.profile?.args,
+  profilePrefs: options.profile?.prefs,
   userDataDir: options.userDataDir
 })
 

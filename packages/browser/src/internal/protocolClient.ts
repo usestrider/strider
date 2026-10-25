@@ -34,6 +34,7 @@ import * as Stream from "effect/Stream"
 import * as Protocol from "../protocol/Protocol.ts"
 import * as Transport from "../protocol/Transport.ts"
 import { ConnectionLost } from "../protocol/Transport.ts"
+import * as Tracing from "./tracing.ts"
 
 /** An error reply, as the browser sent it. */
 export interface WireError {
@@ -699,7 +700,7 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
         orElse: () => Effect.andThen(abandon, Effect.fail(failure(new Protocol.NoReply({ method, timeout }))))
       })
       : Deferred.await(entry.reply)
-    return yield* transport.send(wire.encode(entry.id, method, encoded, state.key)).pipe(
+    const exchange = transport.send(wire.encode(entry.id, method, encoded, state.key)).pipe(
       Effect.catch(() =>
         Effect.andThen(
           Effect.sync(() => unregister(entry)),
@@ -714,6 +715,12 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
       }),
       Effect.onInterrupt(() => abandon)
     )
+    // `Browser.TraceProtocolCommands`: each command its own span, under the operation that sent it.
+    return yield* (yield* Tracing.TraceProtocolCommands)
+      ? Effect.withSpan(exchange, method, {
+        attributes: { "browser.protocol.method": method, "browser.protocol.id": entry.id }
+      })
+      : exchange
   })
 
   // ── Subscriptions ──

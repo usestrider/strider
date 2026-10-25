@@ -19,13 +19,16 @@
  */
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
-import type * as Layer from "effect/Layer"
+import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as FilePath from "./FilePath.ts"
+import * as BrowserImpl from "./internal/browser.ts"
+import * as Fake from "./internal/fake.ts"
+import * as Tracing from "./internal/tracing.ts"
 import type * as LaunchProfile from "./LaunchProfile.ts"
 import type * as Page from "./Page.ts"
 import * as Reason from "./Reason.ts"
@@ -45,7 +48,7 @@ const TypeId = "~@usestrider/browser/Browser"
 export class Info extends Schema.Class<Info>("@usestrider/browser/Browser/Info")({
   product: Schema.String,
   version: Schema.String,
-  protocol: Schema.Literals(["cdp", "bidi", "webkit"]),
+  protocol: Schema.Literals(["cdp", "bidi", "webkit", "fake"]),
   revision: Schema.String
 }) {}
 
@@ -266,14 +269,23 @@ export interface ConnectOptions {
  *
  * **Details**
  *
- * The timeline is marble-style, after RxJS's `TestScheduler`, and runs under `TestClock`: each character is
- * one virtual tick, and named tokens are model events, such as `resp(cart)`, `commit`, `load`,
- * `dialog(confirm)`, `popup`, `crash`, and `|` for a normal close. The first page opened plays it.
+ * The timeline is marble-style, after RxJS's `TestScheduler`, and runs on Effect's clock, so under `TestClock`
+ * it moves only as the test adjusts it. The first page opened plays it:
+ *
+ * - `-` is a tick of 10 ms;
+ * - `commit` commits a document at `https://example.test/`, and `load` makes it interactive, then complete;
+ * - `resp(name)` is a request for `https://example.test/name`, answered with 200 and finished;
+ * - `dialog(kind)` opens an `alert`, `confirm`, `prompt` or `beforeunload` prompt, decided as any is;
+ * - `popup` opens a popup with the page as its opener;
+ * - `crash` ends the page as crashed, and `|` as closed by its script.
+ *
+ * Its facts are folded by the same model as a real backend's, so events, waits and lifetimes behave as they
+ * do with a browser. `goto` and `reload` commit at once; `info.protocol` is `"fake"`.
  *
  * **Gotchas**
  *
  * The fake has no DOM: locator actions and reads fail with `Unsupported`. It tests what happens around
- * events and lifetimes, not page content.
+ * events and lifetimes, not page content. A timeline it can't read fails the layer as a defect, naming where.
  *
  * **Example** (A response latched before it is awaited)
  *
@@ -284,7 +296,7 @@ export interface ConnectOptions {
  *
  * const test = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
- *   const cart = yield* NetworkResponse.next(page, { url: "https://shop.example.com/api/cart" })
+ *   const cart = yield* NetworkResponse.next(page, { url: "https://example.test/cart" })
  *   yield* TestClock.adjust("20 millis")
  *   return yield* cart
  * })).pipe(Effect.provide(Browser.layerTest("--resp(cart)--commit--load--|")))
@@ -294,7 +306,8 @@ export interface ConnectOptions {
  * @category layers
  * @since 0.1.0
  */
-export declare const layerTest: (timeline: string) => Layer.Layer<Browser>
+export const layerTest = (timeline: string): Layer.Layer<Browser> =>
+  Layer.unwrap(Effect.sync(() => BrowserImpl.layer(Fake.connect(Fake.parse(timeline)))))
 
 /**
  * What a span is about, as given to `SpanNameGenerator` and `TracerDisabledWhen`.
@@ -303,7 +316,7 @@ export declare const layerTest: (timeline: string) => Layer.Layer<Browser>
  * @category models
  * @since 0.1.0
  */
-export interface Operation {
+export interface Operation extends Tracing.Operation {
   /**
    * The operation, such as `Locator.click` or `Download.next`.
    */
@@ -315,11 +328,17 @@ export interface Operation {
  * Reference to the function that names each operation's span; by default the operation's name, such as
  * `Locator.click`.
  *
+ * **Details**
+ *
+ * Every operation opens one span. Its attributes are `browser.operation`, the id of what it acts on
+ * (`browser.page.id`, `browser.context.id` or `browser.realm.id`), its own, such as `browser.locator`, and a
+ * URL as `url.full`, shown as `Diagnostics.CurrentPreset` allows.
+ *
  * @stability unstable
  * @category references
  * @since 0.1.0
  */
-export declare const SpanNameGenerator: Context.Reference<(operation: Operation) => string>
+export const SpanNameGenerator: Context.Reference<(operation: Operation) => string> = Tracing.SpanNameGenerator
 
 /**
  * Reference to a predicate that suppresses an operation's span when it returns `true`.
@@ -328,17 +347,23 @@ export declare const SpanNameGenerator: Context.Reference<(operation: Operation)
  * @category references
  * @since 0.1.0
  */
-export declare const TracerDisabledWhen: Context.Reference<Predicate.Predicate<Operation>>
+export const TracerDisabledWhen: Context.Reference<Predicate.Predicate<Operation>> = Tracing.TracerDisabledWhen
 
 /**
  * Reference to whether each protocol command gets a child span; off unless set, because commands are a hot
  * path.
  *
+ * **Details**
+ *
+ * A command's span is named by its method, such as `Page.navigate` or `browsingContext.navigate`, with
+ * `browser.protocol.method` and `browser.protocol.id`, under the span of the operation that sent it. It is
+ * read where each command is sent, so it can be set around one operation.
+ *
  * @stability unstable
  * @category references
  * @since 0.1.0
  */
-export declare const TraceProtocolCommands: Context.Reference<boolean>
+export const TraceProtocolCommands: Context.Reference<boolean> = Tracing.TraceProtocolCommands
 
 /**
  * Reason for a launch that couldn't find a browser executable.

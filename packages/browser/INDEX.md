@@ -112,7 +112,7 @@ The `Browser` service, its accessors, and the settings every backend shares.
   - `readonly userDataDir?: FilePath.Local | string | undefined`
 - `interface ConnectOptions`
   - `readonly headers?: Readonly<Record<string, string | Redacted.Redacted<string>>> | undefined`
-- `interface Operation`
+- `interface Operation extends Tracing.Operation`
   - `readonly name: string`
   - `readonly target: Target.Description`
 - `type BrowserErrorReason = typeof BrowserErrorReason.Type`
@@ -1259,7 +1259,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
   - `readonly localStorage: OriginStorage.ReadonlyOriginStorage`
   - `readonly sessionStorage: OriginStorage.ReadonlyOriginStorage`
   - `evaluate<Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args): Effect.Effect<JSHandle.Serialized<A>, PageError | Targe…`
-  - `capability<H>(capability: Capability.Capability<H>): Effect.Effect<H, Capability.CapabilityError, Scope.Scope>`
+  - `capability<H>(capability: Capability.Capability<H>): Effect.Effect<H, Capability.CapabilityError | Target.TargetGone, Scope.Scope>`
 - `interface Page extends ReadonlyPage`
   - `getByRole(role: AriaRole.AriaRole, options?: Locator.RoleOptions | undefined): Locator.Locator`
   - `getByText(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator`
@@ -2139,7 +2139,7 @@ Runner-agnostic test support (`@usestrider/browser/test`).
 
 ### VitestBrowser
 
-The Vitest adapter (`@usestrider/browser/test/vitest`; peer dependency: `@effect/vitest`).
+The Vitest adapter (`@usestrider/browser/test/vitest`; optional peer dependency: `vitest` 5).
 
 *layers*
 

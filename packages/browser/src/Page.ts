@@ -308,8 +308,9 @@ export interface GotoOptions {
    */
   readonly waitUntil?: PageNavigation.LoadState | undefined
   /**
-   * Outcomes to accept as success. Otherwise a download fails with `BecameDownload` and a 204 with
-   * `NoContent`.
+   * Outcomes to accept as navigations: a download is returned as `PageNavigation`'s `BecameDownload`, and a 204
+   * or 205 as its `NoContent`, with the response. Otherwise a download fails with the `BecameDownload` reason and
+   * a 204 with `NoContent`. Either way the page stays where it was.
    *
    * @default none
    */
@@ -463,9 +464,12 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
     ...args: Args
   ): Effect.Effect<JSHandle.Serialized<A>, PageError | Target.TargetGone | Deadline.Timeout>
   /**
-   * Acquires a specialized feature bound to this page.
+   * Acquires a specialized feature bound to this page, for the caller's scope. A backend without it fails with
+   * `Unsupported`, naming the backends that have it.
    */
-  capability<H>(capability: Capability.Capability<H>): Effect.Effect<H, Capability.CapabilityError, Scope.Scope>
+  capability<H>(
+    capability: Capability.Capability<H>
+  ): Effect.Effect<H, Capability.CapabilityError | Target.TargetGone, Scope.Scope>
 }
 
 /**
@@ -627,8 +631,10 @@ export interface Page extends ReadonlyPage {
    */
   close(): Effect.Effect<void, Target.TargetGone | Deadline.Timeout>
   /**
-   * Closes the page, running `beforeunload` when asked. The page may refuse, which fails with
-   * `CloseCanceled` and leaves it usable.
+   * Closes the page, running `beforeunload` when asked. Its prompt is decided as any dialog is: by the page's
+   * `Dialog.handle`, or else its context's policy, which leaves. A handler's stay fails the close with
+   * `CloseCanceled` and leaves the page usable. Browsers prompt only once the user has interacted with the page,
+   * so an untouched page closes at once.
    */
   close(options: {
     readonly runBeforeUnload: boolean

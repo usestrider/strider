@@ -31,6 +31,7 @@ import * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import type * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Browser from "../Browser.ts"
 import * as ConsoleMessage from "../ConsoleMessage.ts"
@@ -55,6 +56,7 @@ import * as Network from "../webkit-protocol/Network.ts"
 import * as Page from "../webkit-protocol/Page.ts"
 import * as Playwright from "../webkit-protocol/Playwright.ts"
 import * as Runtime from "../webkit-protocol/Runtime.ts"
+import * as Screencast from "../webkit-protocol/Screencast.ts"
 import * as Target from "../webkit-protocol/Target.ts"
 import * as Worker from "../webkit-protocol/Worker.ts"
 import * as Adapter from "./adapter.ts"
@@ -571,7 +573,10 @@ const capabilities = (info: Browser.Info) => {
       entry("pdf.headerFooter", "unsupported", ["Playwright's WebKit has no print-to-PDF"]),
       entry("pdf.preferCssPageSize", "unsupported", ["Playwright's WebKit has no print-to-PDF"]),
       entry("cookies.partitioned", "unsupported", ["Playwright's WebKit doesn't report partitioned cookies"]),
-      entry("snapshot.clickListeners", "unsupported", ["Playwright's WebKit can't list event listeners"])
+      entry("snapshot.clickListeners", "unsupported", ["Playwright's WebKit can't list event listeners"]),
+      // Review 20
+      entry("capability.axTree", "unsupported", ["Playwright's WebKit reads accessibility one node at a time"]),
+      entry("capability.screencast", "supported", ["frames are the viewport's size when the screencast starts"])
     ]
   })
 }
@@ -796,7 +801,7 @@ export const connect: (
       endNavigation(
         navigation,
         navigation.status === 204 || navigation.status === 205
-          ? { _tag: "NoContent", status: navigation.status }
+          ? { _tag: "NoContent", status: navigation.status, response: Option.fromUndefinedOr(navigation.documentHop) }
           : { _tag: "Failed", error, errorDocument: Option.none() },
         evidence
       )
@@ -2943,6 +2948,31 @@ export const connect: (
       return fromDataUrl(dataURL)
     })
 
+    // Frames as WebKit paints them, through the page proxy, which outlives each process (review 20, P4)
+    const screencast = Effect.fnUntraced(function*(id: L1Target.NavigableId) {
+      const page = yield* pageOf(id)
+      const target = yield* targetOf(page)
+      const [width, height] = yield* protocol(pageSize(target, false))
+      const on = Protocol.on(page.session)
+      const frames = yield* page.session.subscribe(Screencast.screencastFrame)
+      const { generation } = yield* protocol(
+        Screencast.startScreencast({ width, height, toolbarHeight: 0, quality: 90 }).pipe(on)
+      )
+      yield* Effect.addFinalizer(() => Screencast.stopScreencast().pipe(on, Effect.ignore))
+      return frames.pipe(
+        Stream.mapError(protocolError),
+        Stream.mapEffect((frame) => {
+          const jpeg = fromBase64(frame.data)
+          const at = Adapter.now()
+          return Screencast.screencastFrameAck({ generation }).pipe(
+            on,
+            Effect.ignore,
+            Effect.as({ at, ...Adapter.jpegSize(jpeg), jpeg } satisfies Adapter.ScreencastFrame)
+          )
+        })
+      )
+    })
+
     const cookies = Effect.fnUntraced(function*(id: UserContext.Id) {
       const context = yield* contextOf(id)
       const { cookies } = yield* protocol(
@@ -3110,6 +3140,9 @@ export const connect: (
       declare,
       screenshot,
       pdf: () => Effect.fail(unsupported("pdf", "Playwright's WebKit has no print-to-PDF")),
+      accessibilityTree: () =>
+        Effect.fail(unsupported("capability.axTree", "Playwright's WebKit reads accessibility one node at a time")),
+      screencast,
       cookies,
       setCookies,
       clearCookies,

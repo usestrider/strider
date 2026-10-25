@@ -15,6 +15,7 @@ import * as Diagnostics from "../Diagnostics.ts"
 import * as Reason from "../Reason.ts"
 import { now } from "./adapter.ts"
 import * as Paths from "./paths.ts"
+import * as Spans from "./spans.ts"
 
 /** A browser process, started. */
 export interface Launched {
@@ -41,6 +42,22 @@ export const diagnostics = (step: string): Diagnostics.Diagnostics =>
 /** Fails a launch with a reason. */
 export const fail = (reason: Browser.BrowserErrorReason, step: string) =>
   Effect.fail(new Browser.BrowserError({ reason, diagnostics: diagnostics(step) }))
+
+/**
+ * A launch's span: the executable it named and, where the backend has them, the launch profile it used
+ * (review 20, candidate 1).
+ */
+export const span = (
+  name: string,
+  options: { readonly executablePath?: string | undefined; readonly profile?: string | undefined },
+  profiled = true
+) =>
+  Spans.operation(name, {
+    attributes: {
+      "browser.executable": options.executablePath,
+      ...(profiled ? { "browser.launch.profile": options.profile ?? "automation" } : {})
+    }
+  })
 
 /** Whether a path is absolute, on POSIX or Windows; the package doesn't assume Node's `path`. */
 export const isAbsolute = Paths.isAbsolute

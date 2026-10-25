@@ -17,6 +17,7 @@ import type * as Effect from "effect/Effect"
 import type * as Option from "effect/Option"
 import type * as Redacted from "effect/Redacted"
 import type * as Scope from "effect/Scope"
+import type * as Stream from "effect/Stream"
 import type * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Browser from "../Browser.ts"
 import type * as ConsoleMessage from "../ConsoleMessage.ts"
@@ -141,7 +142,7 @@ export type NavigationOutcome =
   | { readonly _tag: "Restored"; readonly document: Target.DocumentId }
   | { readonly _tag: "Activated"; readonly document: Target.DocumentId }
   | { readonly _tag: "Download"; readonly download: Option.Option<Download.Id> }
-  | { readonly _tag: "NoContent"; readonly status: 204 | 205 }
+  | { readonly _tag: "NoContent"; readonly status: 204 | 205; readonly response: Option.Option<NetworkRequest.HopId> }
   | {
     readonly _tag: "Failed"
     readonly error: string
@@ -655,6 +656,38 @@ export interface UserContextOptions {
   readonly acceptInsecureCerts: boolean
 }
 
+// ── Capabilities ──────────────────────────────────────────────────────────────────────────────────────────
+
+/** One node of a browser's accessibility tree (`Capability.AxNode`). */
+export interface AxNode {
+  readonly role: string
+  readonly name: string
+  readonly properties: Readonly<Record<string, unknown>>
+  readonly children: ReadonlyArray<AxNode>
+}
+
+/** One frame of a screencast, a JPEG, with its size in device pixels and when it arrived. */
+export interface ScreencastFrame {
+  readonly at: MonotonicInstant.MonotonicInstant
+  readonly width: number
+  readonly height: number
+  readonly jpeg: Uint8Array
+}
+
+/** A JPEG's size, from its frame header; zero when it has none. */
+export const jpegSize = (bytes: Uint8Array): { readonly width: number; readonly height: number } => {
+  let at = 2
+  while (at + 9 < bytes.length && bytes[at] === 0xff) {
+    const marker = bytes[at + 1]!
+    // Start of frame: any SOFn but DHT (C4), JPG (C8) and DAC (CC)
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      return { height: (bytes[at + 5]! << 8) | bytes[at + 6]!, width: (bytes[at + 7]! << 8) | bytes[at + 8]! }
+    }
+    at += 2 + ((bytes[at + 2]! << 8) | bytes[at + 3]!)
+  }
+  return { width: 0, height: 0 }
+}
+
 // ── Errors ────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** What a target was, for an error. */
@@ -792,6 +825,20 @@ export interface AdapterConnection {
     options: ScreenshotOptions
   ) => Effect.Effect<Uint8Array, AdapterError>
   readonly pdf: (page: Target.NavigableId, options: PdfOptions) => Effect.Effect<Uint8Array, AdapterError>
+
+  // Capabilities (review 20, candidate 2): what only some backends have; the others fail with `Unsupported`
+  /**
+   * The browser's own accessibility tree of a page's main frame: its nodes, an ignored one's children given to
+   * its parent (`capability.axTree`).
+   */
+  readonly accessibilityTree: (page: Target.NavigableId) => Effect.Effect<AxNode, AdapterError>
+  /**
+   * A page's frames as the browser paints them, from now until the scope closes, each acknowledged as it is
+   * read (`capability.screencast`).
+   */
+  readonly screencast: (
+    page: Target.NavigableId
+  ) => Effect.Effect<Stream.Stream<ScreencastFrame, AdapterError>, AdapterError, Scope.Scope>
   readonly cookies: (context: UserContext.Id) => Effect.Effect<ReadonlyArray<Cookie>, AdapterError>
   readonly setCookies: (context: UserContext.Id, cookies: ReadonlyArray<Cookie>) => Effect.Effect<void, AdapterError>
   readonly clearCookies: (context: UserContext.Id) => Effect.Effect<void, AdapterError>

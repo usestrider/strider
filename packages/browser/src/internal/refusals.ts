@@ -2,7 +2,6 @@
  * What a released grant fails a member with when the member's errors have no `TargetGone` (review 19, candidate 2):
  * its module's `NotPermitted`, or for a clock, `NotInstalled`, since the clock a grant installed was removed with it.
  */
-import * as Capability from "../Capability.ts"
 import * as CookieJar from "../CookieJar.ts"
 import * as Declaration from "../Declaration.ts"
 import * as Page from "../Page.ts"
@@ -59,12 +58,6 @@ export const page: Access.Members = {
     route,
     addInitScript: declaration("Page.addInitScript"),
     emulate: declaration("Page.emulate"),
-    capability: (reason, args) =>
-      new Capability.CapabilityError({
-        capability: String((args[0] as { readonly name?: string } | undefined)?.name ?? "capability"),
-        reason,
-        diagnostics: diagnostics()
-      }),
     ...clocks("Page")
   }
 }

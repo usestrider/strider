@@ -37,6 +37,7 @@ import * as Handles from "./internal/handles.ts"
 import type * as Model from "./internal/model.ts"
 import * as Operation from "./internal/operation.ts"
 import type * as Runtime from "./internal/runtime.ts"
+import * as Spans from "./internal/spans.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import * as NetworkRequest from "./NetworkRequest.ts"
 import type * as Page from "./Page.ts"
@@ -466,7 +467,7 @@ export const next: {
         delivery(found.behind.runtime, decoder, context, limit, Option.none())
       )
     })
-  }).pipe(Effect.withSpan("NetworkResponse.next"))) as typeof next
+  }).pipe(Spans.operation("NetworkResponse.next"))) as typeof next
 
 /**
  * Subscribes to responses and emits every match from now on, with bodies when `body` is given.

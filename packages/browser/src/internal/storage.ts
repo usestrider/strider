@@ -26,6 +26,7 @@ import * as Evaluation from "./evaluation.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
+import * as Spans from "./spans.ts"
 
 // ── Cookies ───────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -183,12 +184,12 @@ export const cookieJar = (runtime: Runtime.Runtime, context: UserContext.Id): Co
       Effect.mapError(cookieFailure(runtime, operation, id))
     )
   const attributes = { attributes: { "browser.context.id": context } }
-  const span = (operation: string) => Effect.withSpan(operation, attributes)
+  const span = (operation: string) => Spans.operation(operation, attributes)
   return {
     get list() {
       return Effect.suspend(() => list("CookieJar.list", Operation.operationId())).pipe(span("CookieJar.list"))
     },
-    listFor: Effect.fn("CookieJar.listFor", attributes)(function*(url: Url.Url | string) {
+    listFor: Spans.fn("CookieJar.listFor", attributes)(function*(url: Url.Url | string) {
       const id = Operation.operationId()
       let parsed: URL
       try {
@@ -207,14 +208,14 @@ export const cookieJar = (runtime: Runtime.Runtime, context: UserContext.Id): Co
       const now = Date.now()
       return (yield* list("CookieJar.listFor", id)).filter((cookie) => sends(parsed, cookie, now))
     }),
-    set: Effect.fn("CookieJar.set", attributes)(function*(input: CookieJar.Input) {
+    set: Spans.fn("CookieJar.set", attributes)(function*(input: CookieJar.Input) {
       const id = Operation.operationId()
       const cookie = fromInput(input)
       if (cookie instanceof Reason.InvalidInput) return yield* Effect.fail(cookieError("CookieJar.set", cookie, id))
       if (Option.isSome(cookie.partitionKey)) yield* requirePartitions(runtime, "CookieJar.set", id)
       yield* adapter.setCookies(context, [cookie]).pipe(Effect.mapError(cookieFailure(runtime, "CookieJar.set", id)))
     }),
-    remove: Effect.fn("CookieJar.remove", attributes)(function*(match: CookieJar.Match) {
+    remove: Spans.fn("CookieJar.remove", attributes)(function*(match: CookieJar.Match) {
       const id = Operation.operationId()
       const matching = (yield* adapter.cookies(context).pipe(
         Effect.mapError(cookieFailure(runtime, "CookieJar.remove", id))
@@ -335,7 +336,7 @@ export const originStorage = (
         })
         return decode(yield* Evaluation.fromRemote(value))
       }).pipe(Effect.mapError(storageFailure(operation, id)))
-    }).pipe(Effect.withSpan(operation, { attributes: { "browser.page.id": page.id } }))
+    }).pipe(Spans.operation(operation, { attributes: { "browser.page.id": page.id } }))
   }
   const areaOf = `(area) => area === "local" ? localStorage : sessionStorage`
   return {

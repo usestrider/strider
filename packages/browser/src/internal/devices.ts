@@ -21,6 +21,7 @@ import * as Keys from "./keys.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
+import * as Spans from "./spans.ts"
 
 type Failure = Reason.InvalidInput | Reason.Unsupported | Reason.BackendFailure
 
@@ -76,7 +77,7 @@ const sending = <E>(
       after(state)
     })).pipe(Effect.timeoutOption(Operation.millisLeft(budget.at)))
     if (Option.isNone(sent)) return yield* Effect.fail(timedOut())
-  }).pipe(Effect.withSpan(operation, { attributes: { "browser.page.id": owner.page.id } }))
+  }).pipe(Spans.operation(operation, { attributes: { "browser.page.id": owner.page.id } }))
 
 /** Whether the backend reports a capability as unsupported, with its limitations. */
 const unsupported = (owner: Owner, capability: string) =>
@@ -153,7 +154,7 @@ export const keyboard = (owner: Owner): Keyboard.Keyboard => ({
           (state) => Input.press(state, Keys.forCharacter(character))
         )
       ), { discard: true }).pipe(
-        Effect.withSpan("Keyboard.pressSequentially", {
+        Spans.operation("Keyboard.pressSequentially", {
           attributes: { "browser.page.id": owner.page.id, "browser.action.redacted": Redacted.isRedacted(text) }
         })
       )

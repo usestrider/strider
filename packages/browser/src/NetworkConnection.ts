@@ -28,6 +28,7 @@ import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
 import type * as Model from "./internal/model.ts"
 import type * as Runtime from "./internal/runtime.ts"
+import * as Spans from "./internal/spans.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -216,7 +217,7 @@ export const next = <PE = never, PR = never>(
   Effect.flatMap(
     subscription(target, filter, "NetworkConnection.next"),
     ({ accepts, channel, kind }) => Events.next(kind, channel, accepts, where)
-  ).pipe(Effect.withSpan("NetworkConnection.next"))
+  ).pipe(Spans.operation("NetworkConnection.next"))
 
 /**
  * Subscribes to connections and emits every match from now on.

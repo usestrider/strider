@@ -3,6 +3,8 @@ dist/
 *.tsbuildinfo
 .data/
 .examples/
+# Vitest's copies of recorded attachments
+.vitest/
 .repos/
 # symlinks to .agents/AGENTS.md, made by `pnpm install`
 /AGENTS.md

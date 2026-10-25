@@ -14,6 +14,7 @@ import * as Reason from "../Reason.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
+import * as Spans from "./spans.ts"
 
 /** The isolated world of the caller's code: apart from the engine's, where `page.evaluate` will run too. */
 export const isolatedWorld: Adapter.World = { _tag: "Isolated", name: "__strider_isolated__" }
@@ -141,4 +142,6 @@ export const add = (
     // Its dependents stop with it: L0 runs a script only after what it comes after ran
     yield* Scope.addFinalizer(scope, Effect.sync(() => (entry.live = false)))
     return handle
-  }).pipe(Effect.withSpan(owner.operation, { attributes: { "browser.initScript.world": options?.world ?? "main" } }))
+  }).pipe(Spans.operation(owner.operation, {
+    attributes: { ...Spans.scopeAttributes(owner.scope), "browser.initScript.world": options?.world ?? "main" }
+  }))

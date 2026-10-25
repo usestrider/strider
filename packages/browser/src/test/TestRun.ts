@@ -9,7 +9,7 @@
  * @stability unstable
  * @since 0.1.0
  */
-import type * as Context from "effect/Context"
+import * as Context from "effect/Context"
 import type * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as FilePath from "../FilePath.ts"
@@ -63,9 +63,14 @@ export type TestArtifact = typeof TestArtifact.Type
  * @since 0.1.0
  */
 export interface TestRun {
+  /**
+   * The test running when this is read; in Vitest, `TestRunner.getCurrentTest()`. Outside a test, its fields
+   * are empty.
+   */
   readonly info: TestInfo
   /**
-   * Attaches a file to the test; in Vitest, `recordArtifact`.
+   * Attaches a file to the test running now; in Vitest, `recordArtifact`. Outside a test, or in a runner that
+   * keeps no artifacts, nothing is attached and a warning is logged.
    */
   attach(artifact: TestArtifact): Effect.Effect<void>
 }
@@ -77,4 +82,4 @@ export interface TestRun {
  * @category tags
  * @since 0.1.0
  */
-export declare const TestRun: Context.Service<TestRun, TestRun>
+export const TestRun: Context.Service<TestRun, TestRun> = Context.Service<TestRun>("@usestrider/browser/test/TestRun")

@@ -19,6 +19,7 @@ import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
 import * as Serialization from "./serialization.ts"
+import * as Spans from "./spans.ts"
 
 const TypeId = "~@usestrider/browser/BrowserWorker"
 
@@ -26,7 +27,7 @@ export const make = (runtime: Runtime.Runtime, entry: Model.WorkerEntry): Browse
   const failure = (reason: BrowserWorker.BrowserWorkerErrorReason, id = Operation.operationId()) =>
     new BrowserWorker.BrowserWorkerError({ reason, diagnostics: Operation.diagnostics(id) })
 
-  const evaluate = Effect.fn("BrowserWorker.evaluate", { attributes: { "browser.realm.id": entry.realm } })(
+  const evaluate = Spans.fn("BrowserWorker.evaluate", { attributes: { "browser.realm.id": entry.realm } })(
     function*<Args extends ReadonlyArray<unknown>, B>(fn: (...args: Args) => B | Promise<B>, ...args: Args) {
       const id = Operation.operationId()
       yield* Filters.requires(runtime, "BrowserWorker.evaluate", "workers.evaluate").pipe(

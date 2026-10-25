@@ -102,11 +102,37 @@ export const remote = (path: FilePath.Remote): FileInput => FileInputImpl.make({
 /**
  * Creates a file input from bytes in memory.
  *
+ * **Details**
+ *
+ * The file is made in the page: its bytes cross into the caller's isolated world and become a `File`, set on
+ * the input through a `DataTransfer`, with `input` and `change` dispatched as a choice does. Its MIME type is
+ * kept, and no file system is shared with the browser, so it works with a browser the program attached to.
+ *
+ * **Gotchas**
+ *
+ * One call takes files that are all bytes or all paths: the browser sets files from paths and the page makes
+ * them from bytes, each replacing the other's, so a mix fails with `InvalidInput`.
+ *
+ * **Example** (Uploading a generated report)
+ *
+ * ```ts import.meta.vitest
+ * import { Effect } from "effect"
+ * import { FileInput, Page } from "@usestrider/browser"
+ *
+ * const uploadCsv = Effect.fn("uploadCsv")(function*(page: Page.Page, rows: ReadonlyArray<string>) {
+ *   const csv = new TextEncoder().encode(rows.join("\n"))
+ *   yield* page.getByLabel("Report").setInputFiles(FileInput.bytes("report.csv", "text/csv", csv))
+ * })
+ * ```
+ *
+ * @see {@link local} for a file on this machine
+ *
  * @stability unstable
  * @category constructors
  * @since 0.1.0
  */
-export declare const bytes: (name: FileName | string, mimeType: MimeType | string, data: Uint8Array) => FileInput
+export const bytes = (name: FileName | string, mimeType: MimeType | string, data: Uint8Array): FileInput =>
+  FileInputImpl.make({ _tag: "Bytes", name, mimeType, data })
 
 /**
  * Checks whether a value is a `FileInput`.

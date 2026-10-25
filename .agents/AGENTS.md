@@ -2,8 +2,9 @@
 
 This repository is Strider (`@usestrider/browser` on npm): Effect-native browser automation that speaks CDP, WebDriver
 BiDi and the WebKit inspector protocol directly. It is at the design stage. L0, the protocol layer, is built, and
-seven slices run through L1 and L2 on every backend (reviews 12, 13, 14, 16, 17, 18 and 19: actions, events, every
-event module, interacting and asserting, declarations, a page's contents, and attaching and access);
+eight slices run through L1 and L2 on every backend (reviews 12, 13, 14, 16, 17, 18, 19 and 20's first step: actions,
+events, every event module, interacting and asserting, declarations, a page's contents, attaching and access, and the
+rest of the API surface with capabilities and the test layers);
 the rest of the package's modules are declarations,
 type-checked and documented, which the implementation replaces module by module. A member of an object that isn't
 built yet fails as the defect `NotBuilt`, naming itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm`
@@ -84,6 +85,9 @@ Conventions section applies them. Effect's skills in `.repos/effect/.agents/skil
   union of `Schema.Error` classes; reasons several modules share live in `Reason`.
 - Library code uses `Effect.fnUntraced`; examples use `Effect.fn("name")`. A function that returns `Effect.gen` is a
   compile error.
+- An operation's span is opened through `src/internal/spans.ts` (`Spans.operation(name, { attributes })` or
+  `Spans.fn`), never `Effect.withSpan` or `Effect.fn`, so `SpanNameGenerator`, `TracerDisabledWhen` and the
+  diagnostics preset apply to it; name its target with `browser.page.id`, `browser.context.id` or `browser.realm.id`.
 - Nothing implicit (principle 23): every default is stated with `@default`, and nothing hidden waits or retries.
 - Generated files (sections marked `// @barrel:`, `INDEX.md`, `src/cdp/`, the protocol models) are regenerated, never edited.
 - A declaration that isn't built is erased at run time, so a module must not use one as it loads, or re-export one

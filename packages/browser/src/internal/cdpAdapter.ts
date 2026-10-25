@@ -25,8 +25,10 @@ import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
 import type * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Browser from "../Browser.ts"
+import * as Accessibility from "../cdp/Accessibility.ts"
 import * as BrowserCdp from "../cdp/Browser.ts"
 import * as DOM from "../cdp/DOM.ts"
 import * as Emulation from "../cdp/Emulation.ts"
@@ -617,7 +619,10 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
       entry("pdf.headerFooter", "supported"),
       entry("pdf.preferCssPageSize", "supported"),
       entry("cookies.partitioned", "supported"),
-      entry("snapshot.clickListeners", "unsupported", ["not built: it would take a command per element"])
+      entry("snapshot.clickListeners", "unsupported", ["not built: it would take a command per element"]),
+      // Review 20
+      entry("capability.axTree", "supported", ["the main frame's document"]),
+      entry("capability.screencast", "supported")
     ]
   })
 }
@@ -1585,7 +1590,11 @@ export const connect: (
         if (navigation === undefined || navigation.ended || request.requestId !== navigation.loaderId) return
         navigation.failed = params.errorText
         if (navigation.status === 204 || navigation.status === 205) {
-          endNavigation(navigation, { _tag: "NoContent", status: navigation.status }, "cdp:Network.loadingFailed")
+          endNavigation(navigation, {
+            _tag: "NoContent",
+            status: navigation.status,
+            response: Option.fromUndefinedOr(navigation.documentHop)
+          }, "cdp:Network.loadingFailed")
         } else if (params.errorText !== "net::ERR_ABORTED" || routed) {
           // An error page may still commit under this loader; it is reported as the document it created
           navigation.frame.failed.set(navigation.loaderId, navigation)
@@ -2819,6 +2828,54 @@ export const connect: (
       return fromBase64(data)
     })
 
+    // The full tree, ignored nodes left out and their children given to their parent (review 20, P3)
+    const accessibilityTree = Effect.fnUntraced(function*(id: L1Target.NavigableId) {
+      const page = yield* pageOf(id)
+      const { nodes } = yield* protocol(Accessibility.getFullAXTree({}).pipe(Protocol.on(page.target.session)))
+      const byId = new Map(nodes.map((node) => [node.nodeId, node]))
+      const text = (value: Accessibility.AXValue | undefined) =>
+        value === undefined || value.value === undefined ? "" : String(value.value)
+      const convert = (node: Accessibility.AXNode): ReadonlyArray<Adapter.AxNode> => {
+        const children = (node.childIds ?? []).flatMap((child) => {
+          const found = byId.get(child)
+          return found === undefined ? [] : convert(found)
+        })
+        if (node.ignored) return children
+        const properties: Record<string, unknown> = {}
+        if (node.description !== undefined) properties.description = node.description.value
+        if (node.value !== undefined) properties.value = node.value.value
+        for (const property of node.properties ?? []) properties[property.name] = property.value.value
+        return [{ role: text(node.role), name: text(node.name), properties, children }]
+      }
+      const root = nodes.find((node) => node.parentId === undefined)
+      const converted = root === undefined ? [] : convert(root)
+      return converted.length === 1
+        ? converted[0]!
+        : { role: "RootWebArea", name: "", properties: {}, children: converted }
+    })
+
+    // Frames as Chromium paints them; the next comes once this one is acknowledged (review 20, P4)
+    const screencast = Effect.fnUntraced(function*(id: L1Target.NavigableId) {
+      const page = yield* pageOf(id)
+      const session = page.target.session
+      const on = Protocol.on(session)
+      const frames = yield* session.subscribe(Page.screencastFrame)
+      yield* protocol(Page.startScreencast({ format: "jpeg" }).pipe(on))
+      yield* Effect.addFinalizer(() => Page.stopScreencast().pipe(on, Effect.ignore))
+      return frames.pipe(
+        Stream.mapError(protocolError),
+        Stream.mapEffect((frame) => {
+          const jpeg = fromBase64(frame.data)
+          const at = Adapter.now()
+          return Page.screencastFrameAck({ sessionId: frame.sessionId }).pipe(
+            on,
+            Effect.ignore,
+            Effect.as({ at, ...Adapter.jpegSize(jpeg), jpeg } satisfies Adapter.ScreencastFrame)
+          )
+        })
+      )
+    })
+
     const pdf = Effect.fnUntraced(function*(id: L1Target.NavigableId, options: Adapter.PdfOptions) {
       const page = yield* pageOf(id)
       const { data } = yield* protocol(
@@ -3057,6 +3114,8 @@ export const connect: (
       declare,
       screenshot,
       pdf,
+      accessibilityTree,
+      screencast,
       cookies,
       setCookies,
       clearCookies,

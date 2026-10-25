@@ -9,6 +9,7 @@
  * @since 0.1.0
  */
 import * as Schema from "effect/Schema"
+import * as Profiles from "./internal/profiles.ts"
 
 /**
  * A named set of browser arguments and preferences.
@@ -30,7 +31,11 @@ export class LaunchProfile extends Schema.Class<LaunchProfile>("@usestrider/brow
  * @category constants
  * @since 0.1.0
  */
-export declare const stock: LaunchProfile
+export const stock: LaunchProfile = new LaunchProfile({
+  name: "stock",
+  args: Profiles.chromiumArgs.stock,
+  prefs: Profiles.firefoxPrefs.stock
+})
 
 /**
  * First-run, sync and update prompts off; nothing a page can observe. The default.
@@ -39,7 +44,11 @@ export declare const stock: LaunchProfile
  * @category constants
  * @since 0.1.0
  */
-export declare const automation: LaunchProfile
+export const automation: LaunchProfile = new LaunchProfile({
+  name: "automation",
+  args: Profiles.chromiumArgs.automation,
+  prefs: Profiles.firefoxPrefs.automation
+})
 
 /**
  * `automation`, plus background-timer and renderer throttling off, for many pages at once.
@@ -52,4 +61,8 @@ export declare const automation: LaunchProfile
  * @category constants
  * @since 0.1.0
  */
-export declare const concurrent: LaunchProfile
+export const concurrent: LaunchProfile = new LaunchProfile({
+  name: "concurrent",
+  args: Profiles.chromiumArgs.concurrent,
+  prefs: Profiles.firefoxPrefs.concurrent
+})

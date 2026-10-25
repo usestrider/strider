@@ -20,6 +20,7 @@ import * as Browser from "../Browser.ts"
 import * as Transport from "../protocol/Transport.ts"
 import * as Reason from "../Reason.ts"
 import * as Launch from "./launch.ts"
+import * as Spans from "./spans.ts"
 
 const invalid = (expected: string, hint: string) =>
   Launch.fail(new Reason.InvalidInput({ input: "endpoint", expected, hint }), "check the endpoint")
@@ -72,7 +73,7 @@ export const chromiumWebSocket = (endpoint: string, options: Browser.ConnectOpti
       Effect.catch((error) => refused(`${version.href} named no browser WebSocket: ${error.message}`))
     )
     return answer.webSocketDebuggerUrl
-  }).pipe(Effect.withSpan("Chromium.resolveEndpoint", { attributes: { "browser.endpoint": endpoint } }))
+  }).pipe(Spans.operation("Chromium.resolveEndpoint", { attributes: { "browser.endpoint": endpoint } }))
 
 /** Firefox's session endpoint: its remote agent's WebSocket, with `/session` when the URL has no path. */
 export const firefoxWebSocket = (endpoint: string) =>
@@ -92,5 +93,5 @@ export const webSocket = (
 ): Effect.Effect<Transport.Transport, Browser.BrowserError, Scope.Scope | Socket.WebSocketConstructor> =>
   Transport.webSocket(url, options?.headers === undefined ? {} : { headers: options.headers }).pipe(
     Effect.catch((error) => refused(`${url}: ${error.message}`)),
-    Effect.withSpan("Browser.connect", { attributes: { "browser.endpoint": url } })
+    Spans.operation("Browser.connect", { attributes: { "browser.endpoint": url } })
   )

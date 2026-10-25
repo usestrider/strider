@@ -14,6 +14,7 @@ import * as Reason from "../Reason.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
+import * as Spans from "./spans.ts"
 
 /** One field's override, with the capability it needs. */
 interface Field {
@@ -207,4 +208,6 @@ export const emulate = (owner: Owner, settings: Emulation.Emulation) =>
       )
     }
     return yield* declare(owner, overrides, id)
-  }).pipe(Effect.withSpan(owner.operation, { attributes: { "browser.emulation": Object.keys(settings).join(",") } }))
+  }).pipe(Spans.operation(owner.operation, {
+    attributes: { ...Spans.scopeAttributes(owner.scope), "browser.emulation": Object.keys(settings).join(",") }
+  }))

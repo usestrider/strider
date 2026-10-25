@@ -10,8 +10,9 @@
  * @stability unstable
  * @since 0.1.0
  */
-import type * as Context from "effect/Context"
-import type * as Effect from "effect/Effect"
+import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
+import { dual } from "effect/Function"
 import * as Schema from "effect/Schema"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 
@@ -161,8 +162,11 @@ export class Diagnostics extends Schema.Class<Diagnostics>("@usestrider/browser/
  *
  * **Details**
  *
- * - `"strict"`: origins only, no titles. For production, exported traces and agents.
- * - `"local"`: paths and titles; query strings, fragments, user info and classified fields are stripped.
+ * - `"strict"`: a URL keeps its origin and path, with each query value `REDACTED` and no credentials or
+ *   fragment. For production, exported traces and agents.
+ * - `"local"`: a URL is shown whole. For a developer's own machine.
+ *
+ * Classified fields, such as typed text, are `Redacted` under both.
  *
  * @stability unstable
  * @category schemas
@@ -185,12 +189,16 @@ export type Preset = typeof Preset.Type
  * **Details**
  *
  * The default is `"strict"`, tests included. `withPreset` is `Effect.provideService` on this reference.
+ * Each operation's span reads it as it opens, for its `url.full` and a connection's `browser.endpoint`.
  *
  * @stability unstable
  * @category references
  * @since 0.1.0
  */
-export declare const CurrentPreset: Context.Reference<Preset>
+export const CurrentPreset: Context.Reference<Preset> = Context.Reference<Preset>(
+  "@usestrider/browser/Diagnostics/CurrentPreset",
+  { defaultValue: () => "strict" }
+)
 
 /**
  * Sets the preset for everything inside an effect.
@@ -216,7 +224,11 @@ export declare const CurrentPreset: Context.Reference<Preset>
  * @category combinators
  * @since 0.1.0
  */
-export declare const withPreset: {
+export const withPreset: {
   (preset: Preset): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   <A, E, R>(self: Effect.Effect<A, E, R>, preset: Preset): Effect.Effect<A, E, R>
-}
+} = dual(
+  2,
+  <A, E, R>(self: Effect.Effect<A, E, R>, preset: Preset): Effect.Effect<A, E, R> =>
+    Effect.provideService(self, CurrentPreset, preset)
+)

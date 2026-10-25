@@ -16,6 +16,7 @@ import * as LocatorImpl from "./locator.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
+import * as Spans from "./spans.ts"
 
 const pageError = (operation: string, reason: Page.PageErrorReason, id: Diagnostics.OperationId) =>
   new Page.PageError({ operation, reason, diagnostics: Operation.diagnostics(id) })
@@ -160,7 +161,7 @@ export const screenshot = (
     return captured.value
   }).pipe(
     Effect.raceFirst(Runtime.pageEnded(page, Operation.operationId())),
-    Effect.withSpan(operation, {
+    Spans.operation(operation, {
       attributes: {
         "browser.page.id": page.id,
         "browser.screenshot.area": area._tag,
@@ -251,6 +252,6 @@ export const pdf = (
     return printed.value
   }).pipe(
     Effect.raceFirst(Runtime.pageEnded(page, Operation.operationId())),
-    Effect.withSpan(operation, { attributes: { "browser.page.id": page.id } })
+    Spans.operation(operation, { attributes: { "browser.page.id": page.id } })
   )
 }

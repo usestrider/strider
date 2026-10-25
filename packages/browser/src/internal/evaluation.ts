@@ -28,6 +28,7 @@ import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
 import * as Serialization from "./serialization.ts"
+import * as Spans from "./spans.ts"
 
 export { isolatedWorld }
 
@@ -295,7 +296,7 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
         })
         return yield* then(value)
       }).pipe(Effect.mapError(asHandleFailure(operation, id, budget)))
-    }).pipe(Effect.withSpan(operation, { attributes: { "browser.realm.id": this.realm } }))
+    }).pipe(Spans.operation(operation, { attributes: { "browser.realm.id": this.realm } }))
   }
 
   evaluate<Args extends ReadonlyArray<unknown>, B>(fn: (value: A, ...args: Args) => B | Promise<B>, ...args: Args) {

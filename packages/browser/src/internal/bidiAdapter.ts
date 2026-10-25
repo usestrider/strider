@@ -475,7 +475,12 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
       entry("pdf.headerFooter", "unsupported", ["WebDriver BiDi prints no header or footer"]),
       entry("pdf.preferCssPageSize", "unsupported", ["WebDriver BiDi prints at the size it is given"]),
       entry("cookies.partitioned", "unsupported", ["Firefox doesn't say which partition a cookie is in"]),
-      entry("snapshot.clickListeners", "unsupported", ["WebDriver BiDi can't list event listeners"])
+      entry("snapshot.clickListeners", "unsupported", ["WebDriver BiDi can't list event listeners"]),
+      // Review 20
+      entry("capability.axTree", "unsupported", ["WebDriver BiDi has no accessibility tree"]),
+      entry("capability.screencast", "unsupported", [
+        "Firefox's browsingContext.startScreencast records a WebM file on the browser's host, and streams no frames"
+      ])
     ]
   })
 }
@@ -857,7 +862,7 @@ export const connect: (
         endNavigation(
           navigation,
           navigation.status === 204 || navigation.status === 205
-            ? { _tag: "NoContent", status: navigation.status }
+            ? { _tag: "NoContent", status: navigation.status, response: Option.fromUndefinedOr(navigation.documentHop) }
             : { _tag: "Failed", error: "navigation failed", errorDocument: Option.none() },
           "bidi:browsingContext.navigationFailed"
         )
@@ -1181,7 +1186,11 @@ export const connect: (
         const navigation = request.navigation
         if (navigation === undefined || navigation.ended) return
         if (navigation.status === 204 || navigation.status === 205) {
-          endNavigation(navigation, { _tag: "NoContent", status: navigation.status }, "bidi:network.fetchError")
+          endNavigation(navigation, {
+            _tag: "NoContent",
+            status: navigation.status,
+            response: Option.fromUndefinedOr(navigation.documentHop)
+          }, "bidi:network.fetchError")
         } else if (!params.errorText.includes("ABORTED")) {
           // An error page may still commit for this navigation; it is reported as the document it created
           endNavigation(
@@ -2695,6 +2704,15 @@ export const connect: (
       declare,
       screenshot,
       pdf,
+      accessibilityTree: () =>
+        Effect.fail(unsupported("capability.axTree", "WebDriver BiDi has no accessibility tree")),
+      screencast: () =>
+        Effect.fail(
+          unsupported(
+            "capability.screencast",
+            "Firefox's browsingContext.startScreencast records a WebM file on the browser's host, and streams no frames"
+          )
+        ),
       cookies,
       setCookies,
       clearCookies,

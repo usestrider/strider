@@ -13,31 +13,15 @@ import * as Option from "effect/Option"
 import * as Browser from "../Browser.ts"
 import * as Transport from "../protocol/Transport.ts"
 import * as Launch from "./launch.ts"
+import * as Profiles from "./profiles.ts"
 
 /** A launch profile's name; its preferences are Firefox's own. */
-export type Profile = "stock" | "automation" | "concurrent"
+export type Profile = Profiles.Profile
 
-type Prefs = Readonly<Record<string, string | number | boolean>>
+type Prefs = Profiles.Prefs
 
-const automation: Prefs = {
-  "app.update.disabledForTesting": true,
-  "browser.shell.checkDefaultBrowser": false,
-  "browser.startup.homepage_override.mstone": "ignore",
-  "browser.aboutwelcome.enabled": false,
-  "datareporting.policy.dataSubmissionEnabled": false,
-  "toolkit.telemetry.reportingpolicy.firstRun": false
-}
-
-/**
- * Each profile's preferences. `automation` turns off update, first-run and data-reporting prompts, nothing a
- * page can observe; `concurrent` adds background-timer throttling off, which pages can observe, so it is
- * opt-in.
- */
-export const profilePrefs: Readonly<Record<Profile, Prefs>> = {
-  stock: {},
-  automation,
-  concurrent: { ...automation, "dom.timeout.enable_budget_timer_throttling": false }
-}
+/** Each profile's preferences (`internal/profiles.ts`). */
+export const profilePrefs = Profiles.firefoxPrefs
 
 /** Settings for a launch, beside the executable it names. */
 export interface Settings {
@@ -45,6 +29,8 @@ export interface Settings {
   readonly headless?: boolean | undefined
   /** @default "automation" */
   readonly profile?: Profile | undefined
+  /** The profile's preferences, when a `LaunchProfile` value gives them; otherwise the named profile's. */
+  readonly profilePrefs?: Prefs | undefined
   /** Added after ours. */
   readonly args?: ReadonlyArray<string> | undefined
   /** A profile directory the caller owns, never deleted; otherwise a temporary one. */
@@ -83,7 +69,10 @@ export const launch = Effect.fnUntraced(function*(options: Options) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Launch.executable(options.executablePath)
   const profile = yield* Launch.profileDirectory(options.userDataDir, "strider-firefox-")
-  yield* fs.writeFileString(`${profile}/user.js`, userJs(profilePrefs[options.profile ?? "automation"])).pipe(
+  yield* fs.writeFileString(
+    `${profile}/user.js`,
+    userJs(options.profilePrefs ?? profilePrefs[options.profile ?? "automation"])
+  ).pipe(
     Effect.catch((error) =>
       Launch.fail(
         new Browser.ConnectionFailed({ stage: "refused", hint: `Couldn't write the profile: ${error.message}` }),
@@ -109,4 +98,4 @@ export const launch = Effect.fnUntraced(function*(options: Options) {
     )
   )
   return { launched, transport }
-})
+}, (effect, options) => Launch.span("Firefox.launch", options)(effect))

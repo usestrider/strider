@@ -25,6 +25,7 @@ import type * as Model from "./internal/model.ts"
 import * as Navigated from "./internal/navigated.ts"
 import * as Operation from "./internal/operation.ts"
 import type * as Runtime from "./internal/runtime.ts"
+import * as Spans from "./internal/spans.ts"
 import * as NetworkResponse from "./NetworkResponse.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -58,9 +59,13 @@ export type Id = typeof Id.Type
  * - `SameDocument`: the document stayed, through a fragment, the History API, or an intercepted navigation.
  * - `Restored`: a document came back from the back/forward cache.
  * - `Activated`: a prerendered document became the page's.
+ * - `BecameDownload`: the response was a download, and the page stayed where it was. Only `goto` with
+ *   `accept: ["download"]` returns it; otherwise it fails with the `BecameDownload` reason.
+ * - `NoContent`: the server answered 204 or 205, and the page stayed where it was. Only `goto` with
+ *   `accept: ["noContent"]` returns it; otherwise it fails with the `NoContent` reason.
  *
  * `url` is where the page went: the committed document's URL, after any redirects, or the URL a same-document
- * navigation set.
+ * navigation set; for `BecameDownload` and `NoContent`, the URL it was going to.
  *
  * @stability unstable
  * @category schemas
@@ -80,7 +85,13 @@ export const PageNavigation = Schema.Union([
     via: Schema.Literals(["fragment", "historyApi", "intercepted"])
   }),
   Schema.TaggedStruct("Restored", { id: Id, url: Url.Url, document: Target.DocumentId }),
-  Schema.TaggedStruct("Activated", { id: Id, url: Url.Url, document: Target.DocumentId })
+  Schema.TaggedStruct("Activated", { id: Id, url: Url.Url, document: Target.DocumentId }),
+  Schema.TaggedStruct("BecameDownload", { id: Id, url: Url.Url }),
+  Schema.TaggedStruct("NoContent", {
+    id: Id,
+    url: Url.Url,
+    response: Schema.Option(NetworkResponse.NetworkResponse)
+  })
 ])
 
 /**
@@ -224,7 +235,7 @@ export const next = <PE = never, PR = never>(
     }
     return Events.next(kind, channel, matches, where, delivery)
   }).pipe(
-    Effect.withSpan("PageNavigation.next", {
+    Spans.operation("PageNavigation.next", {
       attributes: { "browser.navigation.wait_until": filter?.waitUntil ?? "commit" }
     })
   )

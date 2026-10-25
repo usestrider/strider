@@ -44,6 +44,7 @@ import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
 import * as Snapshots from "./snapshot.ts"
+import * as Spans from "./spans.ts"
 import { describeSteps, matcher, queries, type Relative, roleStep } from "./steps.ts"
 
 // ── Locators ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -323,7 +324,9 @@ export class LocatorImpl implements Locator.Locator {
         ))
       }
       return yield* this.unmatched(operation, taken.response, id)
-    }).pipe(Effect.withSpan(operation, { attributes: { "browser.locator": this.description } }))
+    }).pipe(Spans.operation(operation, {
+      attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
+    }))
   }
 
   /**
@@ -394,7 +397,9 @@ export class LocatorImpl implements Locator.Locator {
           : this.error(operation, failure.reason, id)
       ))
       return value as JSHandle.Serialized<B>
-    }).pipe(Effect.withSpan(operation, { attributes: { "browser.locator": this.description } }))
+    }).pipe(Spans.operation(operation, {
+      attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
+    }))
   }
 
   /** A one-shot read of the one match (review 16, candidate 6): strict, and immediate. */
@@ -529,8 +534,11 @@ export class LocatorImpl implements Locator.Locator {
       { _tag: "FileInput" },
       (_ready, _io, id) =>
         Effect.gen({ self: this }, function*() {
+          const given = yield* FileInputImpl.partition(list, "files").pipe(
+            Effect.mapError((reason) => this.error("Locator.setInputFiles", reason, id))
+          )
           const paths: Array<string> = []
-          for (const file of list) {
+          for (const file of given._tag === "Paths" ? given.files : []) {
             const path = yield* FileInputImpl.path(owner.runtime, file).pipe(
               Effect.mapError((reason) => this.error("Locator.setInputFiles", reason, id))
             )
@@ -553,6 +561,28 @@ export class LocatorImpl implements Locator.Locator {
           )
           // The input went between the checks and now: check again
           if (found._tag !== "Found") return { retry: { _tag: "NoMatch" } } as const
+          if (given._tag === "Made") {
+            yield* FileInputImpl.setMade(owner.runtime, found.node, given.files, {
+              page: Option.some(owner.page),
+              at: budget.at,
+              id
+            }).pipe(Effect.mapError((failure) =>
+              failure._tag === "Gone"
+                ? failure.error
+                : failure._tag === "Deadline"
+                ? Operation.timeout({
+                  operation: "Locator.setInputFiles",
+                  id,
+                  phase: "dispatchedUnconfirmed",
+                  budget: budget.budget,
+                  history: [],
+                  hint: Option.some("The page didn't answer before the deadline; the files may have been set"),
+                  dispatch: { _tag: "MayHaveBeenSent" }
+                })
+                : this.error("Locator.setInputFiles", failure.reason, id)
+            ))
+            return "done" as const
+          }
           yield* owner.runtime.model.adapter.setInputFiles(found.node, paths).pipe(
             Effect.mapError((error) => this.adapterFailure("Locator.setInputFiles", error, id))
           )
@@ -743,7 +773,9 @@ export class LocatorImpl implements Locator.Locator {
         return yield* Effect.fail(this.invalidSelector(operation, response, id))
       }
       return yield* answer(response, id)
-    }).pipe(Effect.withSpan(operation, { attributes: { "browser.locator": this.description } }))
+    }).pipe(Spans.operation(operation, {
+      attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
+    }))
   }
 
   invalidSelector(
@@ -839,7 +871,9 @@ export class LocatorImpl implements Locator.Locator {
           { _tag: "MayHaveBeenSent" }
         ))
       }
-    }).pipe(Effect.withSpan(operation, { attributes: { "browser.locator": this.description } }))
+    }).pipe(Spans.operation(operation, {
+      attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
+    }))
   }
 
   /** `fill` and `clear`: the contents selected in the page and the value inserted, or set for a non-text input. */
@@ -1196,7 +1230,7 @@ export class LocatorImpl implements Locator.Locator {
       }
     }).pipe(
       Effect.raceFirst(Runtime.pageEnded(owner.page, Operation.operationId())),
-      Effect.withSpan(operation, {
+      Spans.operation(operation, {
         attributes: {
           "browser.locator": this.description,
           "browser.page.id": owner.page.id,

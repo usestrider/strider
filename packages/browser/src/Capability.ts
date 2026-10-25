@@ -42,6 +42,8 @@ export interface Capability<out H> {
  */
 export const isCapability = (u: unknown): u is Capability<unknown> => Predicate.hasProperty(u, TypeId)
 
+const make = <H>(name: string): Capability<H> => ({ [TypeId]: () => undefined as H, name })
+
 /**
  * One node of the browser's own accessibility tree, unprocessed.
  *
@@ -102,7 +104,7 @@ export interface ScreencastControl {
  * @category constants
  * @since 0.1.0
  */
-export declare const AxTree: Capability<AxTreeReader>
+export const AxTree: Capability<AxTreeReader> = make("AxTree")
 
 /**
  * Native screencast frames; CDP and patched WebKit.
@@ -111,7 +113,7 @@ export declare const AxTree: Capability<AxTreeReader>
  * @category constants
  * @since 0.1.0
  */
-export declare const Screencast: Capability<ScreencastControl>
+export const Screencast: Capability<ScreencastControl> = make("Screencast")
 
 /**
  * Schema for the reasons acquiring or using a capability can fail.

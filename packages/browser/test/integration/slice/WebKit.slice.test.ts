@@ -14,6 +14,7 @@ import { events } from "./events.ts"
 import { interaction } from "./interaction.ts"
 import { modules } from "./modules.ts"
 import { slice } from "./slice.ts"
+import { tooling } from "./tooling.ts"
 
 const backend = WebKit.layer({ executablePath: webkit.executable }).pipe(Layer.provide(NodeServices.layer))
 
@@ -23,4 +24,5 @@ modules("WebKit", backend)
 interaction("WebKit", backend)
 declarations("WebKit", backend)
 contents("WebKit", backend)
+tooling("WebKit", backend)
 attaching("WebKit", backend, Option.none())

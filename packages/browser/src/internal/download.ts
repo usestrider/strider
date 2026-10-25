@@ -17,6 +17,7 @@ import type * as Url from "../Url.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
+import * as Spans from "./spans.ts"
 import * as Watchable from "./watchable.ts"
 
 const TypeId = "~@usestrider/browser/Download"
@@ -139,7 +140,7 @@ export const make = (runtime: Runtime.Runtime, entry: Model.DownloadEntry): Down
     }),
     finished: completed("Download.finished").pipe(
       Effect.asVoid,
-      Effect.withSpan("Download.finished", { attributes: { "browser.download.id": entry.id } })
+      Spans.operation("Download.finished", { attributes: { "browser.download.id": entry.id } })
     ),
     stream: Stream.unwrap(Effect.map(file("Download.stream"), ({ fs, path }) =>
       fs.stream(path).pipe(
@@ -150,7 +151,7 @@ export const make = (runtime: Runtime.Runtime, entry: Model.DownloadEntry): Down
         const { fs, path } = yield* file("Download.saveAs")
         yield* fs.copyFile(path, to).pipe(Effect.catch((error) => unreadable("Download.saveAs", error.message)))
       }).pipe(
-        Effect.withSpan("Download.saveAs", { attributes: { "browser.download.id": entry.id, "browser.path": to } })
+        Spans.operation("Download.saveAs", { attributes: { "browser.download.id": entry.id, "browser.path": to } })
       ),
     cancel: Effect.suspend(() => {
       const id = Operation.operationId()
@@ -161,7 +162,7 @@ export const make = (runtime: Runtime.Runtime, entry: Model.DownloadEntry): Down
           return mapped._tag === "Gone" ? Effect.void : Effect.fail(failure("Download.cancel", mapped.reason))
         })
       )
-    }).pipe(Effect.withSpan("Download.cancel", { attributes: { "browser.download.id": entry.id } })),
+    }).pipe(Spans.operation("Download.cancel", { attributes: { "browser.download.id": entry.id } })),
     pipe() {
       return pipeArguments(this, arguments)
     },

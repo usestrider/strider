@@ -29,6 +29,7 @@ import * as Evaluation from "./evaluation.ts"
 import * as Handles from "./handles.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
+import * as Spans from "./spans.ts"
 import * as Storage from "./storage.ts"
 
 // ── In the page ───────────────────────────────────────────────────────────────────────────────────────────
@@ -480,7 +481,7 @@ export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id) =
       })
     }
     return new StorageState.StorageState({ cookies: cookies.map(Storage.fromAdapter), origins })
-  }).pipe(Effect.withSpan("UserContext.exportStorageState", { attributes: { "browser.context.id": context } }))
+  }).pipe(Spans.operation("UserContext.exportStorageState", { attributes: { "browser.context.id": context } }))
 
 // ── Import ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -630,7 +631,7 @@ export const applyState = (
       // Closed and confirmed before the context is returned: Firefox fails a tab created while one closes (QUIRKS.md)
       yield* page.close().pipe(Effect.mapError((error) => contextError(asReason(error, operation), id, operation)))
     }))
-  }).pipe(Effect.withSpan("StorageState.apply", { attributes: { "browser.context.id": context.id } }))
+  }).pipe(Spans.operation("StorageState.apply", { attributes: { "browser.context.id": context.id } }))
 
 /** A page's or route's failure reason, as a context's. */
 const asReason = (reason: { readonly _tag: string; readonly message: string }, operation: string) =>

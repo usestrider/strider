@@ -18,6 +18,7 @@
  * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
@@ -34,6 +35,8 @@ import * as Handlers from "./internal/handlers.ts"
 import * as Handles from "./internal/handles.ts"
 import type * as Model from "./internal/model.ts"
 import * as Operation from "./internal/operation.ts"
+import type * as Runtime from "./internal/runtime.ts"
+import * as Spans from "./internal/spans.ts"
 import type * as Page from "./Page.ts"
 import * as Reason from "./Reason.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -165,7 +168,7 @@ export const next = <PE = never, PR = never>(
   Effect.flatMap(
     subscription(target, filter, "FileChooser.next"),
     ({ accepts, channel, kind }) => Events.next(kind, channel, accepts, where)
-  ).pipe(Effect.withSpan("FileChooser.next"))
+  ).pipe(Spans.operation("FileChooser.next"))
 
 /**
  * Subscribes to file choosers and emits every match from now on. Observing doesn't decide them.
@@ -251,19 +254,32 @@ export const handle = <E, R>(
           handlers: entry.chooserHandlers,
           handler,
           pending: toPending,
-          decision: (chosen): Effect.Effect<Adapter.Decision, unknown> => {
+          decision: (chosen, chooser): Effect.Effect<Adapter.Decision, unknown> => {
             if (!isDecision(chosen) || !("files" in chosen)) {
               return Effect.die(
                 new Error("FileChooser.handle: the handler returned something that isn't a FileChooser decision")
               )
             }
             const files = (chosen as DecisionImpl).files
-            return files === undefined
-              ? Effect.succeed({ _tag: "Cancel" })
-              : Effect.map(
-                Effect.forEach(files, (file) => FileInputImpl.path(runtime, file)),
-                (paths) => ({ _tag: "SetFiles", files: paths })
-              )
+            if (files === undefined) return Effect.succeed({ _tag: "Cancel" })
+            return Effect.flatMap(FileInputImpl.partition(files, "files"), (given) =>
+              given._tag === "Paths"
+                ? Effect.map(
+                  Effect.forEach(given.files, (file) => FileInputImpl.path(runtime, file)),
+                  (paths): Adapter.Decision => ({ _tag: "SetFiles", files: paths })
+                )
+                // Made files are set on the chooser's input by the page, and the chooser is let go
+                : Option.match(chooser.element, {
+                  onNone: (): Effect.Effect<Adapter.Decision, unknown> =>
+                    Effect.fail(
+                      new Reason.Unsupported({
+                        capability: "FileChooser.choose with FileInput.bytes",
+                        backend: runtime.backend,
+                        hint: "The browser didn't say which input opened the chooser, so files can't be made on it"
+                      })
+                    ),
+                  onSome: (node) => setMade(runtime, entry, node, given.files)
+                }))
           },
           noun: () => "file chooser",
           operation: "FileChooser.handle.handled.waitFor",
@@ -273,6 +289,35 @@ export const handle = <E, R>(
         Effect.flatMap(Access.track(grant))
       )
   })
+
+/** Sets made files on a chooser's input, then lets the chooser go. */
+const setMade = Effect.fnUntraced(function*(
+  runtime: Runtime.Runtime,
+  page: Model.PageEntry,
+  node: Adapter.NodeBinding,
+  files: ReadonlyArray<FileInputImpl.Made>
+) {
+  const id = Operation.operationId()
+  const budget = yield* Operation.budget
+  yield* FileInputImpl.setMade(runtime, node, files, { page: Option.some(page), at: budget.at, id }).pipe(
+    Effect.mapError((failure) =>
+      failure._tag === "Gone"
+        ? failure.error
+        : failure._tag === "Reason"
+        ? failure.reason
+        : Operation.timeout({
+          operation: "FileChooser.handle",
+          id,
+          phase: "dispatchedUnconfirmed",
+          budget: budget.budget,
+          history: [],
+          hint: Option.some("The page didn't answer before the deadline; the files may have been set"),
+          dispatch: { _tag: "MayHaveBeenSent" }
+        })
+    )
+  )
+  return { _tag: "Cancel" } satisfies Adapter.Decision as Adapter.Decision
+})
 
 /**
  * A handler that selects `files`.

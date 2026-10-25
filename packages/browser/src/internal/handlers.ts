@@ -37,8 +37,8 @@ export interface Options<S, P, D, E, R> {
   readonly handler: (pending: P) => Effect.Effect<D, E, R>
   /** What the handler is given for an obligation. */
   readonly pending: (subject: S) => P
-  /** The adapter's decision for what the handler returned, or why it isn't one. */
-  readonly decision: (chosen: D) => Effect.Effect<Adapter.Decision, unknown>
+  /** The adapter's decision for what the handler returned about an obligation, or why it isn't one. */
+  readonly decision: (chosen: D, subject: S) => Effect.Effect<Adapter.Decision, unknown>
   /** What it decides, for the log: `"confirm"`, `"file chooser"`. */
   readonly noun: (subject: S) => string
   /** What a wait on `handled` reports: `"Dialog.handle.handled.waitFor"`. */
@@ -77,7 +77,7 @@ export const register = <S, P, D, E, R>(
           yield* report(`${described}: it failed, so ${options.fallback} decides`, exit.value.cause)
           return Option.none()
         }
-        const decision = yield* options.decision(exit.value.value).pipe(Effect.exit)
+        const decision = yield* options.decision(exit.value.value, subject).pipe(Effect.exit)
         if (Exit.isFailure(decision)) {
           yield* report(`${described}: its decision couldn't be made, so ${options.fallback} decides`, decision.cause)
           return Option.none()

@@ -14,48 +14,13 @@ import type * as Scope from "effect/Scope"
 import * as Browser from "../Browser.ts"
 import * as Transport from "../protocol/Transport.ts"
 import * as Launch from "./launch.ts"
+import * as Profiles from "./profiles.ts"
 
 /** A launch profile's name; its arguments are Chromium's own. */
-export type Profile = "stock" | "automation" | "concurrent"
+export type Profile = Profiles.Profile
 
-/*
- * Each profile's arguments.
- *
- * - `automation` turns off first-run, sync, update and crash-report prompts, the browser's own background
- *   traffic, and the component extensions that would otherwise attach as targets. Nothing a page can observe.
- * - `concurrent` adds the throttling switches for many pages at once. Pages can observe those (timer cadence,
- *   background rendering), so they are opt-in.
- */
-const automation: ReadonlyArray<string> = [
-  "--no-first-run",
-  "--no-default-browser-check",
-  "--no-service-autorun",
-  "--disable-sync",
-  "--disable-component-update",
-  "--disable-background-networking",
-  "--disable-default-apps",
-  "--disable-client-side-phishing-detection",
-  "--disable-domain-reliability",
-  "--disable-breakpad",
-  "--disable-hang-monitor",
-  "--disable-prompt-on-repost",
-  "--disable-component-extensions-with-background-pages",
-  "--disable-features=Translate,MediaRouter,DialMediaRouteProvider,OptimizationHints,AutofillServerCommunication",
-  "--metrics-recording-only",
-  "--password-store=basic",
-  "--use-mock-keychain"
-]
-
-export const profileArgs: Readonly<Record<Profile, ReadonlyArray<string>>> = {
-  stock: [],
-  automation,
-  concurrent: [
-    ...automation,
-    "--disable-background-timer-throttling",
-    "--disable-backgrounding-occluded-windows",
-    "--disable-renderer-backgrounding"
-  ]
-}
+/** Each profile's arguments (`internal/profiles.ts`). */
+export const profileArgs = Profiles.chromiumArgs
 
 /** Settings for a launch, beside the executable it names. */
 export interface Settings {
@@ -63,6 +28,8 @@ export interface Settings {
   readonly headless?: boolean | undefined
   /** @default "automation" */
   readonly profile?: Profile | undefined
+  /** The profile's arguments, when a `LaunchProfile` value gives them; otherwise the named profile's. */
+  readonly profileArgs?: ReadonlyArray<string> | undefined
   /** Added after the profile's. */
   readonly args?: ReadonlyArray<string> | undefined
   /** A profile directory the caller owns, never deleted; otherwise a temporary one. */
@@ -76,7 +43,7 @@ export interface Options extends Settings {
 
 /** The arguments a launch passes, in order: the profile's, the caller's, then ours. */
 export const argsFor = (options: Settings, userDataDir: string, debugging: "pipe" | "port"): ReadonlyArray<string> => [
-  ...profileArgs[options.profile ?? "automation"],
+  ...(options.profileArgs ?? profileArgs[options.profile ?? "automation"]),
   ...(options.headless ?? true ? ["--headless"] : []),
   ...(options.args ?? []),
   debugging === "pipe" ? "--remote-debugging-pipe" : "--remote-debugging-port=0",
@@ -99,7 +66,7 @@ export const launch: (
   })
   const transport = yield* Transport.pipe(launched.handle)
   return { launched, transport }
-})
+}, (effect, options) => Launch.span("Chromium.launch", options)(effect))
 
 /**
  * Launches with a debugging port and connects over a WebSocket, for runtimes that can't pass extra file
@@ -135,4 +102,4 @@ export const launchWithPort = Effect.fnUntraced(function*(
     )
   )
   return { launched, transport }
-})
+}, (effect, options) => Launch.span("Chromium.launch", options)(effect))

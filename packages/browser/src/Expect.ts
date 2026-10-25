@@ -37,6 +37,7 @@ import { LocatorImpl } from "./internal/locator.ts"
 import type * as Model from "./internal/model.ts"
 import * as Operation from "./internal/operation.ts"
 import * as Runtime from "./internal/runtime.ts"
+import * as Spans from "./internal/spans.ts"
 import { describeSteps } from "./internal/steps.ts"
 import type * as Locator from "./Locator.ts"
 import type * as MonotonicInstant from "./MonotonicInstant.ts"
@@ -614,7 +615,7 @@ const expectIn = (subject: InPage, expectation: Engine.Expectation, matcherName:
           Operation.appendObservation(history, { error: `unexpected answer ${response._tag}` })
       }
     }
-  }).pipe(Effect.withSpan(`Expect.${matcherName}`, { attributes: { "browser.subject": subject.description } }))
+  }).pipe(Spans.operation(`Expect.${matcherName}`, { attributes: { "browser.subject": subject.description } }))
 
 /** An expectation on a `Watchable`: its value now, then each change, until it holds or the deadline ends. */
 const watching = <A>(
@@ -643,14 +644,14 @@ const watching = <A>(
     )
     if (Option.isSome(found) && Option.isSome(found.value)) return
     return yield* Effect.fail(failure(id, description, condition, started, history, checks, triggers))
-  }).pipe(Effect.withSpan(`Expect.${matcherName}`, { attributes: { "browser.subject": description } }))
+  }).pipe(Spans.operation(`Expect.${matcherName}`, { attributes: { "browser.subject": description } }))
 
 /**
  * An expectation on any other effect: run again at `CheckInterval` until its value holds or the deadline ends.
  * The subject runs under the expectation's deadline, so a check still running at it, or failing with it, is a
  * check that didn't finish, and the expectation fails with what the others saw.
  */
-const polling = Effect.fn("Expect.that")(
+const polling = Spans.fn("Expect.that")(
   function*<A, E, R>(subject: Effect.Effect<A, E, R>, condition: Condition.Condition<A>) {
     const id = Operation.operationId()
     const budget = yield* Operation.budget

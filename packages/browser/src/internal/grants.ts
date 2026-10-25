@@ -12,6 +12,7 @@ import * as Reason from "../Reason.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
+import * as Spans from "./spans.ts"
 
 interface Grant {
   readonly origin: Option.Option<string>
@@ -102,4 +103,6 @@ export const grant = (
       })
     )
     return { remove: Scope.close(scope, Exit.void) } satisfies Declaration.Registration
-  }).pipe(Effect.withSpan(operation, { attributes: { "browser.permissions": permissions.join(",") } }))
+  }).pipe(Spans.operation(operation, {
+    attributes: { "browser.context.id": context, "browser.permissions": permissions.join(",") }
+  }))

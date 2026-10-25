@@ -31,6 +31,7 @@ import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as RouteDecision from "./routeDecision.ts"
 import type * as Runtime from "./runtime.ts"
+import * as Spans from "./spans.ts"
 import * as UrlPattern from "./urlPattern.ts"
 import * as Watchable from "./watchable.ts"
 
@@ -283,5 +284,11 @@ export const register = <E, R, P extends Route.Phase>(
     }
     return registration
   }).pipe(
-    Effect.withSpan(owner.operation, { attributes: { "browser.route.pattern": pattern, "browser.route.phase": phase } })
+    Spans.operation(owner.operation, {
+      attributes: {
+        ...Spans.scopeAttributes(owner.scope),
+        "browser.route.pattern": pattern,
+        "browser.route.phase": phase
+      }
+    })
   )

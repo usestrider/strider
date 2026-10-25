@@ -28,6 +28,7 @@ import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
 import type * as Model from "./internal/model.ts"
 import type * as Runtime from "./internal/runtime.ts"
+import * as Spans from "./internal/spans.ts"
 import type * as Page from "./Page.ts"
 import * as Reason from "./Reason.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -206,7 +207,7 @@ export const next = <PE = never, PR = never>(
   Effect.flatMap(
     subscription(target, filter, "Download.next"),
     ({ accepts, channel, kind }) => Events.next(kind, channel, accepts, where)
-  ).pipe(Effect.withSpan("Download.next"))
+  ).pipe(Spans.operation("Download.next"))
 
 /**
  * Subscribes to downloads and emits every match from now on.

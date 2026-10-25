@@ -98,4 +98,4 @@ export const launch: (
   })
   const transport = yield* Transport.pipe(launched.handle)
   return { launched, transport }
-})
+}, (effect, options) => Launch.span("WebKit.launch", options, false)(effect))

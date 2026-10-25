@@ -198,7 +198,7 @@ type NavigationOutcome =
   | { _tag: "Restored"; document: DocumentId }        // back/forward cache
   | { _tag: "Activated"; document: DocumentId }       // prerender
   | { _tag: "Download"; download: DownloadId }        // old document stays
-  | { _tag: "NoContent"; status: 204 | 205 }          // old document stays
+  | { _tag: "NoContent"; status: 204 | 205; response: Option<ResponseRef> }   // old document stays
   | { _tag: "Failed"; error: NetError; errorDocument: Option<DocumentId> }   // None: no error page correlated (yet)
   | { _tag: "Superseded"; by: NavigationId }
   | { _tag: "Canceled"; reason: "beforeunload" | "navigateEvent" | "sandbox" | "unloading" | "traversalInProgress" }
@@ -291,6 +291,7 @@ Cleanup groups can span sibling pages, independently of this graph.
   - Transfer to another scope is explicit and atomic with respect to shutdown. Ambiguous opener evidence never implies ownership.
 - **Ownership ledger.** The connection records owned resources, groups and transfers. A persisted ledger yields *reclamation candidates* only. Automatic destructive reclaim across connections needs verified browser incarnation, resource identity and claimant coordination, and is deferred.
 - **Requesting a close is not ending a lifetime.** `close({ runBeforeUnload: true })` can be refused (`PageError{CloseCanceled}`), and the page stays usable. A close timeout leaves closure unconfirmed rather than fabricating `PageClosed`. Teardown of owned resources uses a bounded close without beforeunload.
+  Built with review 20: the prompt is decided as any dialog is, a handler's stay is the refusal, and an owned context's policy leaves. Browsers prompt only once the user has interacted with the page, so an untouched page closes at once (QUIRKS.md, Q150).
 - **Lifetime signal and `within`.** Each object has a single-assignment `closed: Effect<CloseReason>`. `within(effect): Effect<A, E | TargetGone, R>` arbitrates completion against the end of the lifetime and delivers the typed reason; closing a `Scope` alone would only interrupt. Caller interruption remains interruption. Whichever of completion or end wins the race is recorded once.
 - **Remote facts and model loss.** A remote close invalidates local bindings without sending another close. Permanent loss of observation ends lifetimes with `ConnectionLost` or `ModelUnavailable` without asserting remote destruction. A temporary quarantine fails current operations without completing `closed`, and resumes only after a verified resynchronization.
 - **Suspension** (back/forward cache) is a domain state, not a scope operation. Explicit-ref operations fail fast; waits may opt in to resume within their deadline. Resuming never revives invalid handles.
@@ -330,6 +331,7 @@ Cleanup groups can span sibling pages, independently of this graph.
   - **Success:** `Committed`, `SameDocument`, `Restored`, `Activated`. An HTTP 404/500 document is a successful commit.
   - **`back`/`forward`:** `NoOp{noHistoryEntry}` becomes `None`.
   - **Failure:** everything else becomes `PageError` with a navigation reason (`NavigationFailed`, `NavigationCanceled`, `NavigationSuperseded`, `BecameDownload`, `NoContent`). `BecameDownload` and `NoContent` count as failures unless the call accepts them.
+  - **Accepted outcomes** (built with review 20): `goto({ accept })` returns a download as `BecameDownload{id, url}` and a 204 or 205 as `NoContent{id, url, response}`, variants of `PageNavigation` that nothing else returns.
   - **`waitUntil`:** a navigation resolves at commit. `domContentLoaded` or `load`, when asked for, waits on the resulting document and generation within the same deadline.
 
 ## 5. Input and obligations
@@ -534,7 +536,8 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
 ## 10. Secrets and diagnostics
 
 - **Classified fields.** Credentials, cookie values, typed text, and authentication and cookie headers are classified. They are wrapped as `Redacted` on the way out. Values with preset-dependent detail (URLs, titles, descriptions) implement Effect's `Redactable` and render from the preset in the current fiber's context, so Effect's logs, spans, errors and inspection redact them the same way, in user code too. Sensitive header names join `Headers.CurrentRedactedNames`.
-- **Descriptions** use ids and preset-dependent URL detail (README.md); the default preset is origins only.
+- **Descriptions** use ids and preset-dependent URL detail (README.md); the default preset shows a URL's origin and path, each query value `REDACTED` (origins only until review 20).
+- Built with review 20: `Diagnostics.CurrentPreset`, `"strict"` unless set, and the span helper every operation's span opens through. Under `"strict"` a URL in a span attribute keeps its origin and path, each query value `REDACTED`, with no credentials or fragment; under `"local"` it is whole. The helper renders it as a string when the span opens, from the preset in the operation's context, rather than as a `Redactable`; the model's own log uses the layer's preset (QUIRKS.md, Q156). Descriptions don't use the preset yet.
 - **Raw content** (bodies, console arguments, DOM snapshots, screenshots) may contain secrets echoed by the page. It is recorded as metadata by default and exported only under an explicit capture policy. There is no taint tracking.
 - **Agent secret placeholders** are substituted at dispatch, inside L1. A page can still echo a secret into other channels, so capture policy applies to anything sent to a model.
 

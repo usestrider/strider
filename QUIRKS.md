@@ -198,6 +198,11 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *We:* accept it: a select's popup and a date picker aren't drivable headless, and pages rarely check `isTrusted` on `change`.
 - *Reconsider:* choosing an option with keys where a backend can.
 
+**Q150. A page prompts before unloading only once the user has interacted with it** (Browser). `close({ runBeforeUnload: true })` on a page whose `beforeunload` listener asks to stay closes at once, with no prompt, unless something was clicked in it first; after a click, the prompt opens and a handler decides it. The same on all three browsers.
+- *Seen:* review 20's build, a probe of an untouched and a clicked page on each backend.
+- *We:* `close`'s docs say so, and the tests click before closing.
+- *Reconsider:* nothing; it is the browsers' rule against abusive prompts.
+
 ## Browsers: downloads and file choosers
 
 **Q25. Each browser does something different with a download nobody configured** (Browser). Chromium cancels it; Firefox and WebKit save it into `$HOME/Downloads` (WebKit without reporting the path).
@@ -533,6 +538,11 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *We:* `realm` waits for the main world's report, or the document's end, as it does for an existing user world on WebKit (Q102).
 - *Reconsider:* nothing.
 
+**Q151. Firefox implements `browsingContext.startScreencast`, which records a file** (Browser). Review 20's P4 found no screencast in WebDriver BiDi; Firefox 158 answers the command with a WebM path in the browser's downloads folder, and sends no frames.
+- *Seen:* review 20's build, a raw BiDi probe.
+- *We:* `Capability.Screencast`, whose handle is a stream of frames, stays `Unsupported` on BiDi, and the limitation says why.
+- *Reconsider:* recording a video through it for `Trace`, or a capability of its own for a file screencast.
+
 ## Ours: workarounds and odd shapes
 
 **Q58. `PromptBlocking` carries the dialog's kind and text, not `Page.Prompt`** (Ours). `Reason` is a leaf module, and importing `Page` into it makes a load cycle.
@@ -768,3 +778,33 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *Seen:* review 19's revision.
 - *We:* as above.
 - *Reconsider:* taking `HttpClient` from the caller, if a runtime has no `fetch`.
+
+**Q152. A file chooser answered with made files is let go before its handler counts** (Ours). `FileInput.bytes` files are set by the page on the chooser's input, and the chooser is then resolved as canceled, which no backend acts on; the page's `change` can arrive before the handler's `handled` goes up.
+- *Seen:* review 20's build, on WebKit.
+- *We:* the tests wait on `handled`.
+- *Reconsider:* counting the handler before its files are set.
+
+**Q153. One call can't mix made files with paths** (Ours). The browser sets files from paths and the page makes files from bytes, each replacing the other's, so `setInputFiles` and `FileChooser.choose` with both fail with `InvalidInput`.
+- *Seen:* review 20's build.
+- *We:* as above.
+- *Reconsider:* reading local files into made ones, which loses nothing but the browser's own MIME guess.
+
+**Q154. `Browser.layerTest`'s browser is a protocol of its own** (Ours). `Info.protocol` gained `"fake"`, the fake has its own support table, its timeline's URLs are `https://example.test/…`, and its `goto` commits at once, with no response.
+- *Seen:* review 20's build.
+- *We:* as above.
+- *Reconsider:* whether a timeline should name its URLs.
+
+**Q155. An operation's span no longer captures its call site** (Ours). `Effect.fn` adds the caller's stack frame to a span; the span helper opens spans with `Effect.withSpan` around `Effect.fnUntraced`, so `SpanNameGenerator` and `TracerDisabledWhen` apply to every operation alike.
+- *Seen:* review 20's build.
+- *We:* as above.
+- *Reconsider:* capturing the call site in the helper when Effect exposes it.
+
+**Q156. The model's own log uses the layer's diagnostics preset** (Ours). A route decision the backend refused is logged by the model's fiber, which runs with the layer's context, so `Diagnostics.withPreset` around an operation doesn't reach it.
+- *Seen:* review 20's build.
+- *We:* as above.
+- *Reconsider:* carrying the preset with the route's declaration.
+
+**Q157. Vitest copies each attached file into `.vitest/attachments`** (Ours, from Vitest). `recordArtifact` with a path copies the file under the project root, named by its hash.
+- *Seen:* review 20's build, the `TestRun.attach` test.
+- *We:* the repository ignores `.vitest/`.
+- *Reconsider:* nothing.

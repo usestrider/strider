@@ -26,6 +26,7 @@ import * as Semaphore from "effect/Semaphore"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as BrowserWorker from "../BrowserWorker.ts"
 import type * as ConsoleMessage from "../ConsoleMessage.ts"
+import * as Diagnostics from "../Diagnostics.ts"
 import type * as Dialog from "../Dialog.ts"
 import type * as Download from "../Download.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
@@ -40,6 +41,7 @@ import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
 import * as Events from "./events.ts"
 import * as Input from "./input.ts"
+import * as Spans from "./spans.ts"
 
 /** What happens to a dialog no handler claims (UserContext.Options.dialogs; CONCEPTS.md §5). */
 export type DialogPolicy = "dismiss" | "accept" | "leaveOpen"
@@ -231,6 +233,8 @@ export interface PageEntry {
   readonly promptHandlers: Array<Handler<PromptEvent>>
   /** `FileChooser.handle` registrations, oldest first: the latest decides. */
   readonly chooserHandlers: Array<Handler<FileChooserEvent>>
+  /** Told when a handler answers the page's `beforeunload` prompt with stay: a `close` waiting on it fails. */
+  readonly stayed: Set<() => void>
   /** Its routes, oldest first: the most recent is asked first (review 17). */
   readonly routes: Array<RouteEntry>
   /** Its dedicated workers. */
@@ -583,7 +587,13 @@ export const make = Effect.fnUntraced(function*() {
     const handler = page?.promptHandlers.at(-1)
     if (handler !== undefined) {
       const decision = yield* handler.decide(prompt)
-      if (Option.isSome(decision)) return yield* resolve(obligation, decision.value)
+      if (Option.isSome(decision)) {
+        yield* resolve(obligation, decision.value)
+        if (prompt.kind === "beforeunload" && decision.value._tag === "Dismiss") {
+          for (const stayed of Array.from(page!.stayed)) stayed()
+        }
+        return
+      }
     }
     const context = page === undefined ? undefined : contexts.get(page.context)
     const policy = context?.policy ?? Option.none()
@@ -666,8 +676,10 @@ export const make = Effect.fnUntraced(function*() {
         }
         const level = yield* References.UnhandledLogLevel
         if (level !== undefined) {
+          // The URL as the diagnostics preset shows it (review 20, candidate 1)
+          const shown = Spans.redactUrl(url, yield* Diagnostics.CurrentPreset)
           yield* Effect.logWithLevel(level)(
-            `A route's decision for ${url} couldn't be applied, so it continues: ${failure.error.message}`
+            `A route's decision for ${shown} couldn't be applied, so it continues: ${failure.error.message}`
           )
         }
       }
@@ -774,6 +786,7 @@ export const make = Effect.fnUntraced(function*() {
             },
             promptHandlers: [],
             chooserHandlers: [],
+            stayed: new Set(),
             routes: [],
             workers: yield* SubscriptionRef.make<ReadonlyArray<WorkerEntry>>([]),
             tree: yield* SubscriptionRef.make<FrameTreeState>({ url: fact.url, frames: [], closed: Option.none() })

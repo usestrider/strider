@@ -25,6 +25,7 @@ import * as Handlers from "./internal/handlers.ts"
 import * as Handles from "./internal/handles.ts"
 import type * as Model from "./internal/model.ts"
 import * as Operation from "./internal/operation.ts"
+import * as Spans from "./internal/spans.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
 import type * as Target from "./Target.ts"
@@ -231,7 +232,7 @@ export const next = <PE = never, PR = never>(
 > =>
   Effect.suspend(() =>
     Events.next(kind("Dialog.next"), Handles.page(target).entry.events.dialog, accepts(filter), where)
-  ).pipe(Effect.withSpan("Dialog.next"))
+  ).pipe(Spans.operation("Dialog.next"))
 
 /**
  * Subscribes to dialogs and emits every match from now on. Observing doesn't decide them.

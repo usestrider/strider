@@ -14,6 +14,7 @@ import type * as Deadline from "./Deadline.ts"
 import * as Events from "./internal/events.ts"
 import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
+import * as Spans from "./internal/spans.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -100,7 +101,7 @@ export const next = <PE = never, PR = never>(
   Effect.flatMap(
     subscription(target, filter, "UncaughtException.next"),
     ({ accepts, channel, kind }) => Events.next(kind, channel, accepts, where)
-  ).pipe(Effect.withSpan("UncaughtException.next"))
+  ).pipe(Spans.operation("UncaughtException.next"))
 
 /**
  * Subscribes to uncaught exceptions and emits every match from now on.

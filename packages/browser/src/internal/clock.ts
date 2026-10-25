@@ -26,6 +26,7 @@ import type * as Adapter from "./adapter.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
+import * as Spans from "./spans.ts"
 
 /** A timeline's state, as a document needs it to start. */
 export type State =
@@ -397,7 +398,9 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
         Effect.mapError((error) => clockError(operation, backendFailure("declare", error.message)))
       )
       yield* Scope.close(previous, Exit.void)
-    }).pipe(Effect.withSpan(operation, { attributes: { "browser.clock.mode": next.mode } }))
+    }).pipe(Spans.operation(operation, {
+      attributes: { ...Spans.scopeAttributes(owner.scope), "browser.clock.mode": next.mode }
+    }))
 
   return {
     install: (mode) =>
@@ -438,7 +441,9 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
         // Removing it affects later documents only: those it reached keep the shim (CONCEPTS.md §7)
         yield* Scope.addFinalizer(scope, Effect.sync(() => (timeline.installed = Option.none())))
         return { remove: Scope.close(scope, Exit.void) } satisfies Declaration.Registration
-      }).pipe(Effect.withSpan(`${owner.name}.install`, { attributes: { "browser.clock.mode": mode.mode } })),
+      }).pipe(Spans.operation(`${owner.name}.install`, {
+        attributes: { ...Spans.scopeAttributes(owner.scope), "browser.clock.mode": mode.mode }
+      })),
     adjust: Effect.fnUntraced(function*(duration: Duration.Input) {
       const operation = `${owner.name}.adjust`
       const installed = yield* require(operation, ["controlled"])

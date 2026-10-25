@@ -94,16 +94,21 @@
   },
   "peerDependencies": {
     "@effect/platform-node": "^4.0.6",
-    "effect": "^4.0.6"
+    "effect": "^4.0.6",
+    "vitest": "^5.0.5"
   },
   "peerDependenciesMeta": {
     "@effect/platform-node": {
+      "optional": true
+    },
+    "vitest": {
       "optional": true
     }
   },
   "devDependencies": {
     "@effect/platform-node": "^4.0.6",
     "@usestrider/utils": "workspace:^",
-    "effect": "^4.0.6"
+    "effect": "^4.0.6",
+    "vitest": "^5.0.5"
   }
 }
