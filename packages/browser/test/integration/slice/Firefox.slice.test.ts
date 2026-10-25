@@ -14,6 +14,7 @@ import { declarations } from "./declarations.ts"
 import { events } from "./events.ts"
 import { interaction } from "./interaction.ts"
 import { modules } from "./modules.ts"
+import { recordings } from "./recordings.ts"
 import { slice } from "./slice.ts"
 import { tooling } from "./tooling.ts"
 
@@ -28,4 +29,5 @@ interaction("Firefox", backend)
 declarations("Firefox", backend)
 contents("Firefox", backend)
 tooling("Firefox", backend)
+recordings("Firefox", backend)
 attaching("Firefox", backend, Option.some(firefoxAttachable((endpoint) => Firefox.layerConnect(endpoint))))

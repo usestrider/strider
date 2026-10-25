@@ -19,6 +19,7 @@ import * as DateTime from "effect/DateTime"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import type * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
 import * as References from "effect/References"
 import * as Scope from "effect/Scope"
@@ -136,8 +137,14 @@ export interface NavigationEvent {
 
 /** How a request hop ended. */
 export type HopEnd =
-  | { readonly _tag: "Finished"; readonly encodedBytes: number }
-  | { readonly _tag: "Failed"; readonly error: string }
+  | {
+    readonly _tag: "Finished"
+    readonly encodedBytes: number
+    readonly at: MonotonicInstant.MonotonicInstant
+    /** The protocol, where the backend says it only now (WebKit). */
+    readonly httpVersion: Option.Option<string>
+  }
+  | { readonly _tag: "Failed"; readonly error: string; readonly at: MonotonicInstant.MonotonicInstant }
   /** Dropped from the model while still in flight, past `maxHops`. */
   | { readonly _tag: "Forgotten" }
 
@@ -145,6 +152,10 @@ export type HopEnd =
 export interface HopEntry {
   readonly request: NetworkRequest.NetworkRequest
   response: Option.Option<NetworkResponse.NetworkResponse>
+  /** The headers as the network sent them, where the backend reports them apart (`HopHeaders`). */
+  sent: Option.Option<Headers.Headers>
+  /** The headers as the network received them, likewise. */
+  received: Option.Option<Headers.Headers>
   readonly end: Deferred.Deferred<HopEnd>
   readonly page: Option.Option<PageEntry>
   readonly context: Option.Option<ContextEntry>
@@ -314,6 +325,8 @@ export interface Model {
   readonly forget: (id: PageNavigation.Id) => void
   /** The response of a navigation request, by hop. */
   readonly response: (hop: NetworkRequest.HopId) => Option.Option<NetworkResponse.NetworkResponse>
+  /** A hop the model still keeps, by id: its request, its response so far, and its end (review 20's recordings). */
+  readonly hop: (hop: NetworkRequest.HopId) => Option.Option<HopEntry>
   /** The realm the engine is installed in, per document, until the realm or the document ends. */
   readonly engineRealms: Map<Target.DocumentId, Target.RealmId>
   /** The page a navigable belongs to: itself, or the page whose frame it is. */
@@ -1009,6 +1022,8 @@ export const make = Effect.fnUntraced(function*() {
           keepHop(fact.request.hop, {
             request: fact.request,
             response: Option.none(),
+            sent: Option.none(),
+            received: Option.none(),
             end: Deferred.makeUnsafe<HopEnd>(),
             page: owner.page,
             context: owner.context
@@ -1032,12 +1047,24 @@ export const make = Effect.fnUntraced(function*() {
           )
           return
         }
+        case "HopHeaders": {
+          const hop = hops.get(fact.hop)
+          if (hop === undefined) return
+          if (fact.phase === "request") hop.sent = Option.some(fact.headers)
+          else hop.received = Option.some(fact.headers)
+          return
+        }
         case "RequestFinished": {
-          endHop(fact.hop, { _tag: "Finished", encodedBytes: fact.encodedBytes })
+          endHop(fact.hop, {
+            _tag: "Finished",
+            encodedBytes: fact.encodedBytes,
+            at: fact.at,
+            httpVersion: Option.fromUndefinedOr(fact.httpVersion)
+          })
           return
         }
         case "RequestFailed": {
-          endHop(fact.hop, { _tag: "Failed", error: fact.error })
+          endHop(fact.hop, { _tag: "Failed", error: fact.error, at: fact.at })
           return
         }
         case "ConsoleMessage": {
@@ -1189,7 +1216,7 @@ export const make = Effect.fnUntraced(function*() {
       yield* Deferred.succeed(entry.outcome, { _tag: "Failed", error: "connection lost", errorDocument: Option.none() })
     }
     for (const hop of hops.values()) {
-      Deferred.doneUnsafe(hop.end, Effect.succeed({ _tag: "Failed", error: "connection lost" }))
+      Deferred.doneUnsafe(hop.end, Effect.succeed({ _tag: "Failed", error: "connection lost", at: Adapter.now() }))
     }
     yield* Deferred.succeed(lost, undefined)
   })
@@ -1208,6 +1235,7 @@ export const make = Effect.fnUntraced(function*() {
         navigation,
         forget: (id) => void navigations.delete(id),
         response: (hop) => Option.fromNullishOr(responses.get(hop)),
+        hop: (hop) => Option.fromNullishOr(hops.get(hop)),
         engineRealms,
         pageOf,
         pageList,

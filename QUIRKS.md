@@ -92,7 +92,7 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 - *Reconsider:* whether the viewer's realm should be hidden from callers.
 
 **Q69. Firefox's traversal back from its JSON viewer went unreported under full load** (Browser). In one full integration run after review 16, the conformance test's `traverse(-1)` from `/json` removed the viewer's realm and fetched the page again, but no new realm and no end came within 10 s. Three runs of that test alone passed.
-- *Seen:* review 16's revision, one full run of three; review 17's revision, two full runs of four.
+- *Seen:* review 16's revision, one full run of three; review 17's revision, two full runs of four; review 20's second step, one full run, which three runs of the test alone passed.
 - *We:* nothing yet; the restore inference (Q4) waits for a realm that didn't come.
 - *Reconsider:* with Q4 and Q5, an end Firefox reports for every traversal.
 
@@ -373,6 +373,31 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 **Q98. A paused request's resource type differs from its events'** (Browser). Chromium's `Fetch` calls a `fetch()` an `XHR`, where its `Network` events say `Fetch`; WebKit's pause carries no type.
 - *Seen:* review 17, P11.
 - *We:* a paused request takes the type its network events gave it, where they came first.
+- *Reconsider:* nothing.
+
+**Q158. Chromium leaves `Cookie` and `Set-Cookie` out of its network events** (Browser). `requestWillBeSent` and `responseReceived` carry the headers a page may see; the ones the network sent and received, cookies included, come in `requestWillBeSentExtraInfo` and `responseReceivedExtraInfo`, before or after them, by request id.
+- *Seen:* review 20's build: a HAR of a page that set a cookie had none on Chromium.
+- *We:* the CDP adapter reports them as a hop's own headers (`HopHeaders`), which recordings prefer; `NetworkRequest` and `NetworkResponse` keep the headers the main events give. An `ExtraInfo` that comes before its request waits for it; one for a redirect's next hop that comes before that hop starts is given to the hop before.
+- *Reconsider:* holding a response until its `ExtraInfo` arrives, as Playwright does, so every event has the headers sent.
+
+**Q159. Chromium never ends a favicon request cut off by the next navigation** (Browser). The page's favicon request, started as one document loaded and cut off by a `goto`, gets no response, no `loadingFinished` and no `loadingFailed`.
+- *Seen:* review 20's build, in a HAR on Chromium.
+- *We:* a HAR marks it `_incomplete`; `inFlightAtStop: "wait"` waits for it until the deadline.
+- *Reconsider:* ending a request with its document, if a protocol event allows it.
+
+**Q160. Chromium forgets a document's bodies once the page navigates on** (Browser). `Network.getResponseBody` for the document a page just left fails "No resource with given identifier found", or "Missing resource for given requestId".
+- *Seen:* review 20's build, a HAR recording two navigations in a row.
+- *We:* a HAR records that entry without its body.
+- *Reconsider:* reading a document's body as its response finishes, before the next commit, if recordings need them.
+
+**Q161. A page can read a response before the browser reports its hop finished** (Browser). A `fetch` resolved and its text shown in the page, and Chromium's `loadingFinished` for it hadn't arrived yet.
+- *Seen:* review 20's build, a HAR exported right after the page showed what it fetched.
+- *We:* an export waits for the bodies of the hops that ended, never for one in flight: that entry is `_incomplete`. A program that needs it waits with `NetworkResponse.next` and a body, which waits for the hop's end.
+- *Reconsider:* nothing.
+
+**Q166. WebKit says a response's protocol only as it ends** (Browser). `responseReceived` has the status text but no protocol; `loadingFinished.metrics.protocol` has it. CDP and Firefox say it with the response.
+- *Seen:* review 20, P2.
+- *We:* `NetworkResponse.httpVersion` is `None` on WebKit, and a HAR takes the protocol from the hop's end.
 - *Reconsider:* nothing.
 
 ## Browsers: emulation, permissions and declarations
@@ -807,4 +832,24 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 **Q157. Vitest copies each attached file into `.vitest/attachments`** (Ours, from Vitest). `recordArtifact` with a path copies the file under the project root, named by its hash.
 - *Seen:* review 20's build, the `TestRun.attach` test.
 - *We:* the repository ignores `.vitest/`.
+- *Reconsider:* nothing.
+
+**Q162. Ids are unique within the process, not the connection** (Ours). A trace recording learns of operations from their spans' attributes, which carry ids; two connections minting `N1` would have made one's operations look like the other's.
+- *Seen:* review 20's build.
+- *We:* every connection's ids come from the process's counters, so no two connections mint the same one.
+- *Reconsider:* nothing; it makes ids stronger evidence everywhere.
+
+**Q163. A recording's timings are the library's, not the browser's** (Ours). A HAR's `wait` runs from the request event to the response event, and `receive` from there to the end, on the library's monotonic clock; `blocked`, `dns`, `connect` and `ssl` are -1, since no backend reports them alike (P2). `startedDateTime` is the wall time read as the recording started, plus the monotonic time since. A minimal HAR's timings, and a response that never came, are -1, as Playwright writes them.
+- *Seen:* review 20, P2.
+- *We:* as above.
+- *Reconsider:* each backend's own phases as `_` extensions.
+
+**Q164. A HAR has no request bodies** (Ours). The event model keeps a request's body only while a route holds it.
+- *Seen:* review 20's build.
+- *We:* entries have no `postData`.
+- *Reconsider:* keeping bodies for recordings, through `requestBody` where the backend has it.
+
+**Q165. A caller's span in a trace spans the operations inside it** (Ours). Its own start and end are on Effect's clock, which `TestClock` freezes, so its step runs from its first recorded operation's start to its last one's end.
+- *Seen:* review 20's build.
+- *We:* as above.
 - *Reconsider:* nothing.

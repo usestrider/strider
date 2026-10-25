@@ -261,6 +261,8 @@ export const connect = (steps: ReadonlyArray<Step>) => (sink: Adapter.Sink) =>
                     hop,
                     url,
                     status: 200 as NetworkResponse.StatusCode,
+                    statusText: "OK",
+                    httpVersion: Option.some("http/1.1"),
                     headers: Headers.empty,
                     servedBy: "network",
                     at: Adapter.now()

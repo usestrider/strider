@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Diagnostics from "../Diagnostics.ts"
 import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
+import * as Recorders from "./recorders.ts"
 import * as Tracing from "./tracing.ts"
 
 /** An operation's span settings, as `Effect.withSpan` takes them. */
@@ -54,7 +55,8 @@ export const redactUrl = (url: string, preset: Diagnostics.Preset): string => {
 export const operation = (name: string, options: Options = {}) => <A, E, R>(self: Effect.Effect<A, E, R>) =>
   Effect.gen(function*() {
     const operation: Tracing.Operation = { name, target: targetOf(options.attributes) }
-    if ((yield* Tracing.TracerDisabledWhen)(operation)) return yield* self
+    const raw = options.attributes ?? {}
+    if ((yield* Tracing.TracerDisabledWhen)(operation)) return yield* Recorders.observe(name, raw, false, self)
     const preset = yield* Diagnostics.CurrentPreset
     const attributes: Record<string, unknown> = { "browser.operation": name }
     for (const [key, value] of Object.entries(options.attributes ?? {})) {
@@ -62,7 +64,11 @@ export const operation = (name: string, options: Options = {}) => <A, E, R>(self
         ? redactUrl(value, preset)
         : value
     }
-    return yield* Effect.withSpan(self, (yield* Tracing.SpanNameGenerator)(operation), { attributes })
+    return yield* Effect.withSpan(
+      Recorders.observe(name, raw, true, self),
+      (yield* Tracing.SpanNameGenerator)(operation),
+      { attributes }
+    )
   })
 
 /** `Effect.fn` with the operation's span: a function whose effect opens it. */

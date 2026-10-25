@@ -114,7 +114,9 @@ export type ServedBy = typeof ServedBy.Type
  * **Details**
  *
  * `servedBy` says what answered: the network, a cache, a service worker or a route. A request that fails has
- * no response, so nothing to say.
+ * no response, so nothing to say. `statusText` is the status line's reason phrase as the browser reports it,
+ * empty for HTTP/2 and later. `httpVersion` is the protocol as the browser names it, such as `http/1.1` or
+ * `h2`; `None` where the backend doesn't say with the response: WebKit reports it when the response ends.
  *
  * @stability unstable
  * @category models
@@ -124,6 +126,8 @@ export class NetworkResponse extends Schema.Class<NetworkResponse>("@usestrider/
   hop: NetworkRequest.HopId,
   url: Url.Url,
   status: StatusCode,
+  statusText: Schema.String,
+  httpVersion: Schema.Option(Schema.String),
   headers: Schema.Headers,
   servedBy: ServedBy,
   at: MonotonicInstant.MonotonicInstant

@@ -18,7 +18,7 @@ The spec has three identity layers, and drivers tend to conflate them:
 
 Realms are siblings of documents, not children. The one exception that forces this is the initial `about:blank` Window, which the first same-origin navigation reuses (`HTML#initialise-the-document-object`).
 
-**Every public id is minted by the adapter, in L1's types** (review 08, candidate 2; review 12). Backend ids are correlation evidence held in the adapter's tables, and L1 never sees one. This isolates identity from process swaps and session churn. It also lets a navigation started by a command have its id before the command is sent. Each connection's adapter mints its own, so a reconnection starts a new id namespace.
+**Every public id is minted by the adapter, in L1's types** (review 08, candidate 2; review 12). Backend ids are correlation evidence held in the adapter's tables, and L1 never sees one. This isolates identity from process swaps and session churn. It also lets a navigation started by a command have its id before the command is sent. Each connection's adapter mints its own, so a reconnection starts a new id namespace. Built with review 20: the counters are the process's, so no two connections mint the same id, and a trace recording can match an operation to its target by the ids in its span (QUIRKS.md, Q162).
 
 | Id | Minted when |
 |---|---|
@@ -375,6 +375,7 @@ Cleanup groups can span sibling pages, independently of this graph.
 ## 6. Network
 
 - **Requests and hops.** A request id spans the redirect chain. Each hop has its own identity, snapshot, response and body access, so a held 302 never becomes the next hop's 200. Snapshots record explicitly when information (such as CDP's extra-info events) is missing.
+  Built with review 20: a hop also keeps the headers as the network sent and received them where the backend reports them apart (CDP's `ExtraInfo`, with `Cookie` and `Set-Cookie`), and the time its end was reported; recordings read them, and the request and response events keep the headers their own events gave (QUIRKS.md, Q158).
 - **Request lifecycle.** `Sent → ResponseStarted → Completed | Failed`.
   - A service-worker response can start without `Sent`.
   - Requests of a destroyed document may never terminate. They are tracked as detached, and no network failure is fabricated for them.

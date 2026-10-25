@@ -710,13 +710,13 @@ HAR recordings: a page's or context's network traffic, exported as an HTTP Archi
 - `interface ExportOptions` (experimental)
   - `readonly include?: ReadonlyArray<SecretClass> | undefined`
 - `interface Recording extends Declaration.Registration` (experimental)
-  - `readonly entries: Watchable.Watchable<number>`
+  - `readonly entries: WatchableApi.Watchable<number>`
   - `exportHar(path: FilePath.Local | string, options?: ExportOptions | undefined): Effect.Effect<FilePath.Local, HarError>`
 - `type HarErrorReason = typeof HarErrorReason.Type` (experimental)
 
 *schemas*
 
-- `const HarErrorReason = Schema.Union([WriteFailed, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])` (experimental)
+- `const HarErrorReason = Schema.Union([WriteFailed, Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])` (experimental)
 
 *constructors*
 
@@ -1116,7 +1116,7 @@ Responses a page or context receives: the event, and, when asked for, their bodi
 
 - `type StatusCode = typeof StatusCode.Type`
 - `type ServedBy = typeof ServedBy.Type`
-- `class NetworkResponse: Schema.Class { hop, url, status, headers, servedBy, at }`
+- `class NetworkResponse: Schema.Class { hop, url, status, statusText, httpVersion, headers, servedBy, at }`
 - `interface CapturedResponse<B> extends NetworkResponse, HttpIncomingMessage.HttpIncomingMessage<ResponseError>`
   - `readonly body: B`
 - `type BodyDecoder<B, DE, DR> = (message: HttpIncomingMessage.HttpIncomingMessage<ResponseError>) => Effect.Effect<B, DE, DR>`

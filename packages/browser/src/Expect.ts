@@ -615,7 +615,9 @@ const expectIn = (subject: InPage, expectation: Engine.Expectation, matcherName:
           Operation.appendObservation(history, { error: `unexpected answer ${response._tag}` })
       }
     }
-  }).pipe(Spans.operation(`Expect.${matcherName}`, { attributes: { "browser.subject": subject.description } }))
+  }).pipe(Spans.operation(`Expect.${matcherName}`, {
+    attributes: { "browser.page.id": subject.page.id, "browser.subject": subject.description }
+  }))
 
 /** An expectation on a `Watchable`: its value now, then each change, until it holds or the deadline ends. */
 const watching = <A>(

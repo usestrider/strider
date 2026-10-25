@@ -13,6 +13,7 @@ import { declarations } from "./declarations.ts"
 import { events } from "./events.ts"
 import { interaction } from "./interaction.ts"
 import { modules } from "./modules.ts"
+import { recordings } from "./recordings.ts"
 import { slice } from "./slice.ts"
 import { tooling } from "./tooling.ts"
 
@@ -25,4 +26,5 @@ interaction("WebKit", backend)
 declarations("WebKit", backend)
 contents("WebKit", backend)
 tooling("WebKit", backend)
+recordings("WebKit", backend)
 attaching("WebKit", backend, Option.none())

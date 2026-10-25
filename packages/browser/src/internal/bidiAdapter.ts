@@ -1147,6 +1147,8 @@ export const connect: (
           hop: request.hop,
           url: params.response.url as Url.Url,
           status: Math.min(599, Math.max(100, params.response.status || 200)) as NetworkResponse.StatusCode,
+          statusText: params.response.statusText,
+          httpVersion: Option.fromUndefinedOr(params.response.protocol || undefined),
           headers: headersOf(params.response.headers),
           // BiDi says only whether the network served it: Firefox's fromCache is true for a service
           // worker's response too (review 09)

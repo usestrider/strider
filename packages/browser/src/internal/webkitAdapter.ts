@@ -1461,7 +1461,8 @@ export const connect: (
           _tag: "RequestFinished",
           hop: request.hop,
           encodedBytes: params.metrics?.responseBodyBytesReceived ?? 0,
-          at: Adapter.now()
+          at: Adapter.now(),
+          httpVersion: params.metrics?.protocol
         })
         Deferred.doneUnsafe(request.finished, Effect.void)
       },
@@ -1513,6 +1514,8 @@ export const connect: (
             hop: request.hop,
             url: resource.url as Url.Url,
             status: Math.min(599, Math.max(100, resource.response?.status || 200)) as NetworkResponse.StatusCode,
+            statusText: resource.response?.statusText ?? "",
+            httpVersion: Option.none(),
             headers: headersOf(resource.response?.headers),
             servedBy: "cache",
             at: Adapter.now()
@@ -1596,6 +1599,8 @@ export const connect: (
                 hop,
                 url: params.response.url as Url.Url,
                 status: Math.min(599, Math.max(100, params.response.status || 200)) as NetworkResponse.StatusCode,
+                statusText: params.response.statusText,
+                httpVersion: Option.none(),
                 headers: headersOf(params.response.headers),
                 servedBy: servedBy(request, params.response),
                 at: Adapter.now()
@@ -1641,6 +1646,8 @@ export const connect: (
           hop: request.hop,
           url: response.url as Url.Url,
           status: Math.min(599, Math.max(100, response.status || 200)) as NetworkResponse.StatusCode,
+          statusText: response.statusText,
+          httpVersion: Option.none(),
           headers: headersOf(response.headers),
           servedBy: servedBy(request, response),
           at: Adapter.now()

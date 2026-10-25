@@ -381,7 +381,9 @@ const foldEvents: ReadonlyArray<Protocol.EventDef<string, any>> = [
   Runtime.consoleAPICalled,
   Runtime.exceptionThrown,
   Network.requestWillBeSent,
+  Network.requestWillBeSentExtraInfo,
   Network.responseReceived,
+  Network.responseReceivedExtraInfo,
   Network.loadingFinished,
   Network.requestServedFromCache,
   Network.loadingFailed,
@@ -1554,6 +1556,22 @@ export const connect: (
             at: Adapter.now()
           })
         })
+        const early = earlyHeaders.get(key)
+        if (early !== undefined) {
+          earlyHeaders.delete(key)
+          for (const { phase, headers } of early) {
+            emit({ _tag: "HopHeaders", hop: request.hop, phase, headers: headersOf(headers) })
+          }
+        }
+      },
+      // The headers as sent and received (review 20): to the request's current hop, or kept until it is sent
+      [Network.requestWillBeSentExtraInfo.method]: (target, params: Network.RequestWillBeSentExtraInfoParams) => {
+        if (target === undefined) return
+        rawHeaders(requestKey(target, params.requestId), "request", params.headers)
+      },
+      [Network.responseReceivedExtraInfo.method]: (target, params: Network.ResponseReceivedExtraInfoParams) => {
+        if (target === undefined) return
+        rawHeaders(requestKey(target, params.requestId), "response", params.headers)
       },
       [Network.requestServedFromCache.method]: (target, params: Network.RequestServedFromCacheParams) => {
         if (target === undefined) return
@@ -1706,6 +1724,8 @@ export const connect: (
                   hop,
                   url: params.request.url as Url.Url,
                   status: params.responseStatusCode as NetworkResponse.StatusCode,
+                  statusText: params.responseStatusText ?? "",
+                  httpVersion: Option.none(),
                   headers: Headers.fromInput(
                     Object.fromEntries((params.responseHeaders ?? []).map((header) => [header.name, header.value]))
                   ),
@@ -1750,6 +1770,20 @@ export const connect: (
       }
     }
 
+    // ExtraInfo that came before its request, by request key; a few hundred at most
+    const earlyHeaders = new Map<string, Array<{ phase: "request" | "response"; headers: Network.Headers }>>()
+    const rawHeaders = (key: string, phase: "request" | "response", headers: Network.Headers) => {
+      const request = requests.get(key)
+      if (request !== undefined) {
+        emit({ _tag: "HopHeaders", hop: request.hop, phase, headers: headersOf(headers) })
+        return
+      }
+      const early = earlyHeaders.get(key) ?? []
+      early.push({ phase, headers })
+      earlyHeaders.set(key, early)
+      if (earlyHeaders.size > 500) earlyHeaders.delete(earlyHeaders.keys().next().value!)
+    }
+
     const emitResponse = (request: RequestEntry, response: Network.Response) => {
       if (request.navigation !== undefined && request.requestId === request.navigation.loaderId) {
         request.navigation.status = response.status
@@ -1760,6 +1794,8 @@ export const connect: (
           hop: request.hop,
           url: response.url as Url.Url,
           status: Math.min(599, Math.max(100, response.status || 200)) as NetworkResponse.StatusCode,
+          statusText: response.statusText,
+          httpVersion: Option.fromUndefinedOr(response.protocol || undefined),
           headers: headersOf(response.headers),
           servedBy: servedBy(request, response),
           at: Adapter.now()

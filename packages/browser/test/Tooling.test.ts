@@ -2,6 +2,7 @@
  * Review 20's first step, without a browser: launch profiles as values, the diagnostics presets, the span helper
  * and its references, roles, made files, `Browser.layerTest`'s fake and the Vitest adapter.
  */
+import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import {
   AriaRole,
@@ -9,17 +10,25 @@ import {
   Diagnostics,
   Dialog,
   FileInput,
+  Har,
   LaunchProfile,
   NetworkResponse,
+  Page,
   PageNavigation,
-  Popup
+  Popup,
+  Trace
 } from "@usestrider/browser"
 import { TestRun } from "@usestrider/browser/test"
 import { VitestBrowser } from "@usestrider/browser/test/vitest"
 import * as Effect from "effect/Effect"
+import * as Zip from "effect/encoding/Zip"
 import * as Layer from "effect/Layer"
+import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
 import * as Tracer from "effect/Tracer"
+import * as fs from "node:fs"
+import * as os from "node:os"
+import * as path from "node:path"
 import { TestRunner } from "vitest"
 import * as Chromium from "../src/internal/chromiumLauncher.ts"
 import * as Fake from "../src/internal/fake.ts"
@@ -204,4 +213,72 @@ describe("VitestBrowser", () => {
     )
     assert.include(info.id, "reads the current test each time")
   })
+})
+
+/** A fresh directory for a test's files. */
+const directory = () => fs.mkdtempSync(path.join(os.tmpdir(), "strider-recordings-"))
+
+/** A zip's entries, as text. */
+const unzip = (file: string) =>
+  Stream.make(new Uint8Array(fs.readFileSync(file))).pipe(
+    Stream.pipeThroughChannel(Zip.decode()),
+    Stream.mapEffect((entry) =>
+      Stream.mkString(Stream.decodeText(entry.body)).pipe(Effect.map((text) => [entry.header.path, text] as const))
+    ),
+    Stream.runCollect,
+    Effect.map((entries) => new Map(entries))
+  )
+
+describe("Recordings", () => {
+  it.effect("records a HAR of the timeline's responses, with the library's timings", () =>
+    Effect.gen(function*() {
+      const out = path.join(directory(), "cart.har")
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const har = yield* Har.record(page, { content: "embed" })
+        yield* TestClock.adjust("20 millis")
+        yield* har.entries.waitFor((count) => count === 1)
+        assert.strictEqual(yield* har.exportHar(out), out)
+      })).pipe(Effect.provide(Browser.layerTest("--resp(cart)--")))
+      const { log } = JSON.parse(fs.readFileSync(out, "utf8"))
+      assert.strictEqual(log.version, "1.2")
+      assert.strictEqual(log.entries.length, 1)
+      const [entry] = log.entries
+      assert.strictEqual(entry.request.url, "https://example.test/cart")
+      assert.deepInclude(entry.response, { status: 200, statusText: "OK", httpVersion: "http/1.1" })
+      assert.deepInclude(entry.timings, { blocked: -1, dns: -1, connect: -1, ssl: -1, send: 0 })
+      assert.isAtLeast(entry.timings.wait, 0)
+      assert.strictEqual(entry.response.content.text, "")
+      assert.isUndefined(entry._incomplete)
+      assert.strictEqual(entry._resourceType, "fetch")
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("records a trace whose steps nest in the caller's spans", () =>
+    Effect.gen(function*() {
+      const out = path.join(directory(), "trace.zip")
+      const checkout = Effect.fn("checkout")(function*(page: Page.Page) {
+        yield* page.goto("https://example.test/cart")
+        yield* Effect.ignore(page.title)
+      })
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const trace = yield* Trace.record(page)
+        yield* checkout(page)
+        yield* trace.exportTrace(out)
+      })).pipe(Effect.provide(Browser.layerTest("")))
+      const files = yield* unzip(out)
+      const events = files.get("trace.trace")!.trim().split("\n").map((line) => JSON.parse(line))
+      assert.deepInclude(events[0], { version: 9, type: "context-options", origin: "library", browserName: "fake" })
+      const before = events.filter((event) => event.type === "before")
+      const group = before.find((event) => event.title === "checkout")
+      const goto = before.find((event) => event.title === "Page.goto")
+      assert.isDefined(group)
+      assert.deepInclude(goto, { class: "Page", method: "goto", parentId: group.callId })
+      assert.strictEqual(goto.params["url.full"], "https://example.test/cart")
+      const title = before.find((event) => event.title === "Page.title")
+      const failed = events.find((event) => event.type === "after" && event.callId === title.callId)
+      assert.strictEqual(failed.error.name, "PageError")
+      const groupEnd = events.find((event) => event.type === "after" && event.callId === group.callId)
+      assert.isAtLeast(groupEnd.endTime, group.startTime)
+    }).pipe(Effect.provide(NodeServices.layer)))
 })

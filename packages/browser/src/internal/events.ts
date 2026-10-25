@@ -46,7 +46,7 @@ export interface End {
   readonly reason: Target.CloseReason
 }
 
-type Failure = Subscription.EventOverflow | Target.TargetGone | Cause.Done
+export type Failure = Subscription.EventOverflow | Target.TargetGone | Cause.Done
 
 interface Subscriber<A> {
   readonly accepts: (entry: Entry<A>) => boolean
@@ -159,6 +159,17 @@ const subscribe = <A>(
     )
     return subscriber
   })
+
+/**
+ * Every entry the filter accepts from now on, with no bound, for a recording that keeps them all (review 20):
+ * its queue ends when the channel's target ends normally or the scope closes, and fails with `TargetGone` on
+ * another end.
+ */
+export const recorded = <A>(
+  channel: Channel<A>,
+  accepts: (entry: Entry<A>) => boolean
+): Effect.Effect<Queue.Dequeue<Entry<A>, Failure>, never, Scope.Scope> =>
+  Effect.map(subscribe(channel, accepts, Number.POSITIVE_INFINITY), (subscriber) => subscriber.queue)
 
 /** What a module tells the mechanism about its events. */
 export interface Kind<A, B> {

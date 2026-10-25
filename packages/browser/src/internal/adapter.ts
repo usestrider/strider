@@ -14,6 +14,7 @@
  */
 import * as Data from "effect/Data"
 import type * as Effect from "effect/Effect"
+import type * as Headers from "effect/http/Headers"
 import type * as Option from "effect/Option"
 import type * as Redacted from "effect/Redacted"
 import type * as Scope from "effect/Scope"
@@ -46,7 +47,10 @@ export type HandleId = string & { readonly HandleId: unique symbol }
 /** Id of a declaration's registration. */
 export type RegistrationId = string & { readonly RegistrationId: unique symbol }
 
-/** Mints a connection's ids: opaque, short, unique within the connection, and never a protocol id. */
+/**
+ * Mints a connection's ids: opaque, short, never a protocol id, and unique within the process, so no two
+ * connections mint the same one and an operation's span names its target unambiguously (review 20).
+ */
 export interface Ids {
   readonly userContext: () => UserContext.Id
   readonly navigable: () => Target.NavigableId
@@ -63,9 +67,11 @@ export interface Ids {
   readonly registration: () => RegistrationId
 }
 
-/** A connection's ids: a counter per kind behind a prefix (`N3`, `D7`, `Q12.1`). */
+/** The process's counters, one per kind, which every connection's ids share. */
+const counters = new Map<string, number>()
+
+/** A connection's ids: a counter per kind behind a prefix (`N3`, `D7`, `Q12.1`), shared by the process's connections. */
 export const makeIds = (): Ids => {
-  const counters = new Map<string, number>()
   const next = <A extends string>(prefix: string) => (): A => {
     const n = (counters.get(prefix) ?? 0) + 1
     counters.set(prefix, n)
@@ -280,7 +286,19 @@ export type Fact =
     readonly _tag: "RequestFinished"
     readonly hop: NetworkRequest.HopId
     readonly encodedBytes: number
+    /** The response's protocol, where the backend says it only as the response ends (WebKit, review 20, P2). */
+    readonly httpVersion?: string | undefined
     readonly at: MonotonicInstant.MonotonicInstant
+  }
+  | {
+    /**
+     * A hop's headers as the network sent or received them, where the backend reports them apart from the
+     * request and response (CDP's `ExtraInfo` events, which carry `Cookie` and `Set-Cookie`; review 20).
+     */
+    readonly _tag: "HopHeaders"
+    readonly hop: NetworkRequest.HopId
+    readonly phase: "request" | "response"
+    readonly headers: Headers.Headers
   }
   | {
     readonly _tag: "RequestFailed"
