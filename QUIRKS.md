@@ -43,11 +43,13 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* PROTOCOL.md, History and restores; probes 3.
 - *We:* report each as `Restored` where the evidence allows, inferring Firefox's from a new main-world realm while a traversal is in flight.
 - *Reconsider:* the inference on Firefox, which is timing-dependent (Q5), and the duplicate console message.
+- **Reported** in review 21's fifth step: drafted in `upstream/webdriver-bidi-restores.md`, not sent.
 
 **Q5. Firefox can reply to `traverseHistory` before the restored document's realm arrives** (Browser). Under load, the reply came first, and the adapter, which looked for a waiting realm only at the reply, never ended the traversal.
 - *Seen:* review 14's revision, in two full integration runs of four.
 - *We:* restore the traversal when the realm arrives (`restoring` on the navigable).
 - *Reconsider:* whether Firefox will ever report restores with a commit, which would remove both this and Q4's inference.
+- **Reported** in review 21's fifth step: drafted in `upstream/webdriver-bidi-restores.md`, not sent.
 
 **Q6. Chromium retries are needed for "Not attached to an active page"** (Ours). Chromium refuses a page's commands for a moment while it swaps documents.
 - *Seen:* PROTOCOL.md, History and restores.
@@ -114,12 +116,14 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* nothing yet; the restore inference (Q4) waits for a realm that didn't come.
 - *Reconsider:* with Q4 and Q5, an end Firefox reports for every traversal.
 - **Resolved** in `a7ee8dc` (review 21's first step): traced under synthetic load, where 12 of 32 runs failed: Firefox sends no `navigationStarted` for a traversal that leaves its JSON viewer before the viewer has loaded, fetches the page again, and reports no new document. With the viewer off in `automation` (Q15), 48 of 48 passed. The viewer's own case goes into Q4's report.
+- **Reported** in review 21's fifth step: drafted in `upstream/webdriver-bidi-restores.md`, not sent.
 
 **Q149. A Chromium page closed under full load went unreported** (Browser). In one full integration run after review 19, the conformance test's `closePage` was answered, and no `NavigableRemoved` came within 10 s; three runs of that test alone passed.
 - *Seen:* review 19's revision, once.
 - *We:* nothing yet.
 - *Reconsider:* whether `Target.targetDestroyed` or `detachedFromTarget` was lost, or arrived for a target the adapter no longer tracked, if it happens again.
 - **Resolved** in `a7ee8dc` (review 21's first step): traced under synthetic load, where 4 of 48 runs failed: Chromium answers a `Target.closeTarget` sent as a navigation commits, and drops it; the page stays attached and alive, and a second close closes it. Raw CDP showed the same, 10 dropped closes in 120. The adapter first sends a page command, `Page.getNavigationHistory`, which Chromium refuses during the swap and accepts once it is over, and which is answered with a dialog open; with it, raw CDP dropped no close in 120, and 100 of 100 stress runs passed.
+- **Reported** in review 21's fifth step: drafted in `upstream/chromium-close-dropped.md`, not sent.
 
 ## Browsers: dialogs, popups, focus and input
 
@@ -163,6 +167,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* WebKit probe findings.
 - *We:* never send either outside what the model has seen; a frame that goes between the check and the command is a race we can't close.
 - *Reconsider:* when the build is rolled.
+- **Reported** in review 21's fifth step: drafted in `upstream/playwright-webkit-crashes.md`, not sent.
 
 **Q23. A raw WebKit dialog answer left the page blocked once** (Browser). In a scratch probe, the same answer the adapter sends left the dialog open; the difference was never traced.
 - *Seen:* WebKit probe findings.
@@ -298,6 +303,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* report the browser's text and level as they are.
 - *Reconsider:* formatting from the arguments ourselves, which needs their handles.
 - **Resolved** in `c790129` (review 21's fourth step): the library applies the Console Standard's formatter (`%s`, `%d`, `%i`, `%f`, `%o`, `%O`, `%c`) to the arguments CDP and WebKit report (`internal/consoleFormat.ts`), as Firefox applies its own. Two differences stay. Firefox writes `%f` as printf does (`1.250000`, not `parseFloat`'s `1.25`) and sends its formatted text as the call's only argument, so nothing can reformat it (reported: `upstream/firefox-console-args-formatted.md`). And objects read as each browser describes them: review 21 meant to render them one way, but WebDriver BiDi serializes an `Error` without its message, so one rendering would have dropped Chromium's error messages.
+- **Reported** in review 21's fifth step: drafted in `upstream/firefox-console-args-formatted.md`, not sent.
 
 **Q34. Console locations have different bases and columns** (Browser). Chromium's and Firefox's lines and columns are 0-based, WebKit's 1-based; the column points at the call's property on Chromium and its parenthesis on WebKit.
 - *Seen:* review 14, P9.
@@ -407,6 +413,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 17, P3, through the adapter and raw BiDi.
 - *We:* a new URL is `Unsupported` (`interception.continueUrl`); the BiDi adapter sends a new body's length.
 - *Reconsider:* when Firefox implements `url`.
+- **Reported** in review 21's fifth step: drafted in `upstream/firefox-continue-request.md`, not sent.
 
 **Q93. Firefox can't fulfill at the response phase, and leaves a request it refused paused** (Browser). `network.provideResponse` there answers `unsupported operation`; a continue with new headers replaces the response's.
 - *Seen:* review 17, P5.
@@ -454,6 +461,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 20's build, in a HAR on Chromium.
 - *We:* a HAR marks it `_incomplete`; `inFlightAtStop: "wait"` waits for it until the deadline.
 - *Reconsider:* ending a request with its document, if a protocol event allows it.
+- **Reported** in review 21's fifth step: drafted in `upstream/chromium-favicon-never-ends.md`, not sent.
 
 **Q160. Chromium forgets a document's bodies once the page navigates on** (Browser). `Network.getResponseBody` for the document a page just left fails "No resource with given identifier found", or "Missing resource for given requestId".
 - *Seen:* review 20's build, a HAR recording two navigations in a row.
@@ -546,6 +554,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 18, P1 and P2.
 - *We:* input names the frame and its origin; the BiDi adapter subtracts the origin and sends to the frame's context, and keyboard input goes there too.
 - *Reconsider:* a drag between documents on Firefox, which is sent to the source's frame.
+- **Reported** in review 21's fifth step: drafted in `upstream/firefox-cross-site-frame-input.md`, not sent.
 
 **Q112. No backend reports a frame's name** (Browser). The frame tree each protocol gives has ids and URLs; a frame's `name` is its document's `window.name`, which only its document can read.
 - *Seen:* review 18.
@@ -607,6 +616,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 19, P5 and P6.
 - *We:* the BiDi adapter ends a session it started when its scope closes, bounded by a second, and a connect refused for it says why (`ConnectionFailed{handshake}`).
 - *Reconsider:* a program that dies without ending its session still locks Firefox (Q146).
+- **Reported** in review 21's fifth step: drafted in `upstream/firefox-session-outlives-socket.md`, not sent.
 
 **Q138. Firefox reports the contexts that exist as `session.subscribe` is answered** (Browser). The BiDi adapter mapped Firefox's `"default"` user context after subscribing, so the tabs those events reported landed in a context of their own, never the default: a launched Firefox's first tab, and an attached Firefox's first tab.
 - *Seen:* review 19, P8, through the facts; nothing at L1 read the default context's pages before.
@@ -644,6 +654,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* PROTOCOL.md, Transports.
 - *We:* lose the connection with a description; launched browsers use the pipe; remote endpoints are limited to 128 MiB until Effect's constructor passes `ws` options through.
 - *Reconsider:* a `ws` constructor of our own, or upstream option passthrough.
+- **Reported** in review 21's fifth step: drafted in `upstream/effect-websocket-max-payload.md`, not sent.
 
 **Q56. WebKit carries a command in a wrapper that takes a negated id** (Browser and ours). Commands to a target or worker go inside `Target.sendMessageToTarget` or `Worker.sendMessageToWorker`; we give the wrapper the negated id of the command it carries.
 - *Seen:* PROTOCOL.md, Built for WebKit.
@@ -680,6 +691,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* a correction in `packages/tools/codegen/protocols/bidi/patches/navigationInfo-userContext.json` makes the member nullable, as Q53's two are; the adapter places no context it can't attribute.
 - *Reconsider:* on each roll (`pnpm codegen:audit`), and whether to report the transient tab with the deviation.
 - **Resolved** in `38ce8ff` (review 21's second step): as above.
+- **Reported** in review 21's fifth step: drafted in `upstream/firefox-window-user-context-null.md`, not sent.
 
 **Q180. A page another client crashed went unreported under load** (Browser, or ours: not traced). The CDP-only test where a second client attaches to a page and sends `Page.crash` waits for the page's end, `PageCrashed`; under synthetic load (eight processes at once beside a dozen busy loops), none came within 10 s in 24 runs of 40, with and without review 21's third step. It passed alone, and failed once in a normal full run.
 - *Seen:* review 21's third step.
@@ -954,6 +966,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* nothing more.
 - *Reconsider:* a CLI command that ends a stuck session, if one turns up.
 - **Kept** in review 21: the *We* line is the decision.
+- **Reported** in review 21's fifth step: drafted in `upstream/firefox-session-outlives-socket.md`, not sent.
 
 **Q147. An attached Chromium's every page gets the library's interceptor** (Ours). The CDP adapter enables `Fetch` for every page from its start, with a pattern nothing matches (Q103), observed pages included: nothing changes for the page, but the interceptor is installed while the client is attached.
 - *Seen:* review 19.
