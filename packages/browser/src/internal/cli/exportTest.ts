@@ -25,6 +25,13 @@ export type Browser =
 
 const quote = (text: string) => JSON.stringify(text)
 
+/**
+ * A session's context's focus: emulated where the backend has focus emulation, which WebDriver BiDi hasn't, so
+ * every page keeps rendering while another is in front (QUIRKS.md, Q19). The daemon and the exported test agree.
+ */
+export const focusFor = (browser: Browser): "emulated" | "system" =>
+  browser.backend === "chromium" || browser.backend === "webkit" ? "emulated" : "system"
+
 /** A locator expression for a target, on the page variable `page`; a ref as its snapshot named it. */
 export const locatorOf = (
   page: string,
@@ -99,11 +106,14 @@ export const render = (options: {
 }): { readonly text: string; readonly placeholders: ReadonlyArray<string> } => {
   const used = new Set<string>(["Browser"])
   const placeholders: Array<string> = []
+  const focus = focusFor(options.browser) === "emulated" ? `focus: "emulated"` : undefined
   const body: Array<string> = options.state === undefined
-    ? ["const context = yield* Browser.newContext()"]
+    ? [`const context = yield* Browser.newContext(${focus === undefined ? "" : `{ ${focus} }`})`]
     : [
       `const saved = yield* (yield* FileSystem.FileSystem).readFileString(${quote(options.state)})`,
-      `const context = yield* Browser.newContext({ storageState: yield* Schema.decodeEffect(StorageState.Json)(saved) })`
+      `const context = yield* Browser.newContext({ storageState: yield* Schema.decodeEffect(StorageState.Json)(saved)${
+        focus === undefined ? "" : `, ${focus}`
+      } })`
     ]
   if (options.state !== undefined) used.add("StorageState")
   const pages = new Set<string>()

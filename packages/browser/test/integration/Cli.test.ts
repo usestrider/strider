@@ -73,7 +73,7 @@ describe("strider", () => {
         "password=SECRET_PW"
       )
       assert.strictEqual(started.code, 0, started.err)
-      assert.match(started.out, /^session shop · .* at .* · idle timeout 1h/)
+      assert.match(started.out, /^session shop · .* at .* · focus emulated · idle timeout 1h/)
       try {
         assert.strictEqual((yield* run("-s", "shop", "page", "new", "--name", "shop", url)).code, 0)
         const snapshot = yield* shop("snapshot")
@@ -117,6 +117,8 @@ describe("strider", () => {
         const test = path.join(env.XDG_RUNTIME_DIR, "shop.test.ts")
         assert.strictEqual((yield* run("-s", "shop", "export", "test", test)).code, 0)
         const exported = fs.readFileSync(test, "utf8")
+        // The test's context is made as the session's was, with every page rendering
+        assert.include(exported, `const context = yield* Browser.newContext({ focus: "emulated" })`)
         assert.include(exported, `const shop = yield* context.newPage`)
         assert.include(exported, `shop.getByRole("button", { name: "Sign in", exact: true }).click()`)
         assert.include(exported, `.fill(yield* Config.Redacted("SECRET_PW"))`)

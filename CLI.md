@@ -161,6 +161,7 @@ export default Effect.gen(function*() {
   - **A page a segment opens ends with it** (Q173).
   - **`history` has no `--level` or `--failed`**; it lists what the page's log recorded of a kind.
   - **Every page tool brings its page to the front first** (Q167).
+  - **The session's context emulates focus** on Chromium and WebKit, so a page keeps rendering behind a popup, and `start` says so (`focus emulated`); Firefox opens every page as a window, which does the same (review 21, its second step; Q19, Q71). An exported test makes its context the same way.
 - **Not built:** an MCP server command, which `McpServer.toolkit(BrowserToolkit.toolkit)` covers for a program today; `control`; and a session's `downloads/` as its context's download directory, which the daemon creates and doesn't use yet.
 
 ## Open questions

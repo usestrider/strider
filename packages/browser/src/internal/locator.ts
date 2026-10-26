@@ -117,7 +117,7 @@ const explain = (reason: Engine.NotReady, frames: number): string => {
     case "NotStable":
       return `The element kept moving: its box changed within ${frames} frames`
     case "NoRenderingOpportunity":
-      return "The page rendered no frame: a page in the background, such as the opener of a popup, may render none; page.activate brings it to the front"
+      return "The page rendered no frame: a page in the background, such as the opener of a popup on Chromium, may render none; page.activate brings it to the front, and a context made with newContext({ focus: \"emulated\" }) keeps every page rendering"
     case "Covered":
       return `Another element covers the element's action point: ${reason.by}`
     case "Intercepted":
@@ -1090,7 +1090,7 @@ export class LocatorImpl implements Locator.Locator {
         const reasons = history.map((each) => each.value as Engine.NotReady)
         const last = reasons.at(-1)
         // A page that rendered no frame in some rounds and one in others renders too seldom to tell the element
-        // is still: what moved is the page's frame rate, which page.activate mends (QUIRKS.md, Q71)
+        // is still: what moved is the page's frame rate, which page.activate mends (QUIRKS.md, Q19 and Q71)
         const starved = last?._tag === "NotStable" && reasons.some((reason) => reason._tag === "NoRenderingOpportunity")
         return Operation.timeout({
           operation,

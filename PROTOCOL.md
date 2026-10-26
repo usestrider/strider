@@ -721,6 +721,17 @@ Adapter responsibilities:
 - **Probes** (review 21, What the browsers do, P3 and P7; and, for the build, closes sent as a navigation commits, with and without a page command first, and which page commands answer with an alert open).
 - **Tests.** The conformance suite asks for a redirect hop's body. `test/integration/slice/modules.ts` adds an event stream's body, and `contents.ts` a clip below a short page in quirks mode; `tooling.ts` reads a chooser handler's count without waiting. `test/Input.test.ts` checks `Input.recover`. Integration tests: 462, all passing in one full run.
 
+**Built** (2026-10-25, after [review 21](reviews/21-quirks.md), its second step): pages that render in the background.
+
+- **Firefox's pages** (the BiDi adapter, `createPage`; `LaunchProfile.automation`). A page the library creates opens as a window (`browsingContext.create({ type: "window" })`), as Chromium's have since Q70, and `automation` sets `browser.link.open_newwindow: 2`, so a popup, or a link that opens a page, opens as a window too. A page behind another then keeps rendering, where a tab rendered about once a second (review 21, P2; Q71).
+- **Firefox's `null` user contexts** (`patches/navigationInfo-userContext.json`). Windows brought out a deviation: Firefox names no user context in the navigation events of the transient tab a new window opens, nor in `contextDestroyed` for a window whose user context was removed. Undecodable, each made the adapter rebuild its model from `getTree` mid-navigation, which is what broke navigation in review 16's probe of windows. A correction makes both members nullable, and the adapter places no context it can't attribute (Q178).
+- **Chromium's popups** (`locator.ts`). No switch keeps an opener rendering behind a popup opened as a tab over it (review 21, P1). The `NoRenderingOpportunity` hint names `newContext({ focus: "emulated" })` beside `page.activate` (Q19).
+- **The CLI** (`cli/daemon.ts`, `cli/exportTest.ts`). The session's context emulates focus on Chromium and WebKit, `start` says `focus emulated`, and an exported test makes its context the same way (`ExportTest.focusFor`).
+- **Where the build differs from the review.**
+  - **Firefox's windows needed a protocol correction** (Q178), which the review didn't foresee; the first full run with windows failed most of Firefox's adapter tests.
+- **Probes** (review 21, What the browsers do, P1 and P2; and, for the build, the events of a window's creation and of its user context's removal, over raw BiDi and through the adapter's recorded traffic).
+- **Tests.** `test/integration/slice/events.ts` adds a popup's opener acted on without `activate`: on Firefox as launched, on Chromium and WebKit with focus emulated, and on Chromium without it a timeout whose hint names focus emulation. `interaction.ts` acts on a page behind another on every backend without `activate`. The CLI test checks the session's focus and the exported context. Integration tests: 465, all passing in one full run.
+
 ### Pause-on-start granularity
 
 Before-author-script setup for *new* targets needs them paused at creation. Granularity differs by backend, and the access model depends on it.

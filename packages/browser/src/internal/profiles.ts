@@ -51,6 +51,9 @@ const firefoxAutomation: Prefs = {
   // The JSON viewer replaces a JSON response's document with a devtools page, whose text is the viewer's
   // buttons; off, the document is the JSON as served, as in Chromium and WebKit (review 21, P3; QUIRKS.md, Q15)
   "devtools.jsonview.enabled": false,
+  // A popup, or a link that opens a new page, opens as a window rather than a tab over its opener, which would
+  // leave the opener rendering about once a second (review 21, P2; QUIRKS.md, Q71)
+  "browser.link.open_newwindow": 2,
   "app.update.disabledForTesting": true,
   "browser.shell.checkDefaultBrowser": false,
   "browser.startup.homepage_override.mstone": "ignore",
@@ -61,8 +64,9 @@ const firefoxAutomation: Prefs = {
 
 /**
  * Each profile's preferences. `automation` turns off update, first-run and data-reporting prompts, nothing a
- * page can observe, and the JSON viewer, so a JSON response is the document the server sent; `concurrent` adds
- * background-timer throttling off, which pages can observe, so it is opt-in.
+ * page can observe, and the JSON viewer, so a JSON response is the document the server sent, and opens new pages
+ * as windows, so a page behind a popup keeps rendering; `concurrent` adds background-timer throttling off, which
+ * pages can observe, so it is opt-in.
  */
 export const firefoxPrefs: Readonly<Record<Profile, Prefs>> = {
   stock: {},

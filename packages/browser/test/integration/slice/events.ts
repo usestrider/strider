@@ -83,6 +83,46 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
           }))
         }), timeout)
 
+      it.effect(
+        "keeps a popup's opener rendering: on Firefox as launched, elsewhere with focus emulated",
+        () =>
+          Effect.gen(function*() {
+            const { origin, url } = yield* fixture((origin) =>
+              opener("Open", `${origin}/child`) +
+              `<button onclick="document.getElementById('out').textContent = 'clicked'">After</button><p id="out">not yet</p>`
+            )
+            // Firefox opens the popup as a window, so its opener stays in front of its own (QUIRKS.md, Q71); Chromium
+            // opens it as a tab over its opener, which renders nothing until focus is emulated (Q19)
+            const act = (focus: "system" | "emulated") =>
+              Effect.scoped(Effect.gen(function*() {
+                const context = yield* Browser.newContext({ focus })
+                const page = yield* context.newPage
+                yield* page.goto(url)
+                const popup = yield* Popup.next(page, { url: `${origin}/child` })
+                yield* page.getByText("Open").click()
+                yield* popup
+                return yield* page.getByText("After").click().pipe(
+                  Effect.andThen(page.getByText("clicked", { exact: true }).pipe(Expect.toBeVisible)),
+                  Deadline.within("5 seconds"),
+                  Effect.exit
+                )
+              }))
+            if (name === "Firefox") {
+              assert.isTrue(Exit.isSuccess(yield* act("system")))
+            } else {
+              const unemulated = yield* act("system")
+              if (name === "Chromium") {
+                assert(Exit.isFailure(unemulated))
+                const error = Option.getOrThrow(Exit.findErrorOption(unemulated))
+                assert(Deadline.isTimeout(error), String(error))
+                assert.include(Option.getOrElse(error.hint, () => ""), `focus: "emulated"`)
+              }
+              assert.isTrue(Exit.isSuccess(yield* act("emulated")))
+            }
+          }),
+        timeout
+      )
+
       it.effect("matches a popup by the URL it was opened for, among two", () =>
         Effect.gen(function*() {
           const { origin, url } = yield* fixture((origin) =>

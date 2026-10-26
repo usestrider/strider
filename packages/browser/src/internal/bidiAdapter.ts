@@ -743,11 +743,14 @@ export const connect: (
     const addNavigable = (info: {
       readonly context: string
       readonly parent?: string | null | undefined
-      readonly userContext: string
+      readonly userContext: string | null
       readonly originalOpener: string | null
       readonly url: string
     }, adopted: boolean): NavigableEntry | undefined => {
       if (navigables.has(info.context)) return navigables.get(info.context)
+      // Firefox names no user context for a window's context as it goes (QUIRKS.md, Q178): one that never came
+      // can't be placed, and isn't adopted
+      if (info.userContext === null) return undefined
       const parent = info.parent === null || info.parent === undefined ? undefined : navigables.get(info.parent)
       if (info.parent !== null && info.parent !== undefined && parent === undefined) return undefined
       const context = contextFor(info.userContext)
@@ -1573,9 +1576,11 @@ export const connect: (
 
     const createPage = Effect.fnUntraced(function*(id: UserContext.Id) {
       const context = yield* contextOf(id)
+      // A window of its own, as Chromium's pages are (QUIRKS.md, Q70): a tab behind another renders about once a
+      // second, too seldom to act on, and a window keeps rendering whichever page came last (review 21, P2; Q71)
       const created = yield* protocol(
         BrowsingContext.create({
-          type: "tab",
+          type: "window",
           userContext: context.bidi as BrowserBidi.UserContext
         }).pipe(on)
       )

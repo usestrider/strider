@@ -1830,8 +1830,17 @@
         },
         "userContext": {
           "type": {
-            "_tag": "Ref",
-            "shape": "browser#UserContext"
+            "_tag": "Union",
+            "members": [
+              {
+                "_tag": "Ref",
+                "shape": "browser#UserContext"
+              },
+              {
+                "_tag": "Literal",
+                "value": null
+              }
+            ]
           },
           "optional": false,
           "traits": {
@@ -2234,8 +2243,17 @@
         },
         "userContext": {
           "type": {
-            "_tag": "Ref",
-            "shape": "browser#UserContext"
+            "_tag": "Union",
+            "members": [
+              {
+                "_tag": "Ref",
+                "shape": "browser#UserContext"
+              },
+              {
+                "_tag": "Literal",
+                "value": null
+              }
+            ]
           },
           "optional": true,
           "traits": {

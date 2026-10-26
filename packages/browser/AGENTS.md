@@ -68,8 +68,9 @@ member that isn't built yet fails as the defect `NotBuilt`, naming itself (a tra
 - **Reads are strict.** `readText`, `readValue` and the other reads need exactly one match and never wait: none is
   `NoMatch`, several `StrictViolation`. To wait for a value, expect it: `field.pipe(Expect.toHaveValue("Ada"))`.
 - **Held input is scoped.** `yield* page.keyboard.hold("Shift")` inside `Effect.scoped`; the scope releases it.
-- **A page in the background of a Firefox context barely renders,** so actions there time out; call
-  `page.activate` on it first.
+- **A popup's opener on Chromium renders nothing while the popup is in front,** so actions on it time out: call
+  `page.activate` on it first, or make the context with `newContext({ focus: "emulated" })` when many pages act
+  at once. Firefox opens every page, popups too, as a window, which keeps rendering; WebKit renders them all.
 - **A route has one phase.** `page.route(pattern, handler)` sees requests before they are sent; pass
   `{ phase: "response" }` or `{ phase: "auth" }` for the others. Return a `Route` decision valid for it
   (`Route.fulfill`, `Route.continueWith`, `Route.abort()`, `Route.fallthrough`, `Route.continue`); there is no

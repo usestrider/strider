@@ -863,7 +863,7 @@ export interface Info {
   readonly context: BrowsingContext
   readonly originalOpener: BrowsingContext | null
   readonly url: string
-  readonly userContext: Browser.UserContext
+  readonly userContext: Browser.UserContext | null
   readonly parent?: BrowsingContext | null | undefined
 }
 
@@ -881,7 +881,7 @@ export const Info = /*#__PURE__*/ Schema.suspend(() =>
     context: BrowsingContext,
     originalOpener: Schema.Union([BrowsingContext, Schema.Null]),
     url: Schema.String,
-    userContext: Browser.UserContext,
+    userContext: Schema.Union([Browser.UserContext, Schema.Null]),
     parent: Schema.optional(Schema.Union([BrowsingContext, Schema.Null]))
   }).annotate({ identifier: "browsingContext.Info" })
 ) as any as Schema.Codec<Info>
@@ -1147,7 +1147,7 @@ export interface NavigationInfo {
   readonly navigation: Navigation | null
   readonly timestamp: number
   readonly url?: string | undefined
-  readonly userContext?: Browser.UserContext | undefined
+  readonly userContext?: Browser.UserContext | null | undefined
 }
 
 /**
@@ -1163,7 +1163,7 @@ export const NavigationInfo = /*#__PURE__*/ Schema.suspend(() =>
     navigation: Schema.Union([Navigation, Schema.Null]),
     timestamp: Schema.Int,
     url: Schema.optional(Schema.String),
-    userContext: Schema.optional(Browser.UserContext)
+    userContext: Schema.optional(Schema.Union([Browser.UserContext, Schema.Null]))
   }).annotate({ identifier: "browsingContext.NavigationInfo" })
 ) as any as Schema.Codec<NavigationInfo>
 

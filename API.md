@@ -213,7 +213,7 @@ class LaunchProfile extends Schema.Class<LaunchProfile>("@usestrider/browser/Lau
   prefs: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Number, Schema.Boolean]))
 }) {}
 declare const stock: LaunchProfile                       // the browser's own defaults; nothing added
-declare const automation: LaunchProfile                  // first-run, sync and update prompts off; nothing a page can observe; and Firefox's JSON viewer off, so a JSON response is the document served (review 21)
+declare const automation: LaunchProfile                  // first-run, sync and update prompts off; nothing a page can observe; and Firefox's JSON viewer off, so a JSON response is the document served, and its new pages opened as windows, so a page behind a popup keeps rendering (review 21)
 declare const concurrent: LaunchProfile                  // automation, plus background-timer and renderer throttling off, for many pages at once
 
 program.pipe(Effect.provide(Chromium.layer({ executablePath: "/usr/bin/chromium" })))
@@ -281,7 +281,7 @@ interface UserContext extends ObservedUserContext {     // two levels only: read
 interface Options {                                      // UserContext.Options; an unset option keeps the browser's own value unless a default is stated
   readonly storageState?: StorageState.StorageState | undefined   // decoded with StorageState.Json
   readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined   // decision when no handler claims a dialog; default "dismiss"
-  readonly focus?: "system" | "emulated" | undefined    // default "system"; "emulated" makes every page report focus (owned contexts only)
+  readonly focus?: "system" | "emulated" | undefined    // default "system"; "emulated" makes every page report focus, and keeps a page behind a popup rendering on Chromium (owned contexts only)
   readonly eventLog?: number | undefined                // retained events per module and page, for history; default 100, 0 keeps none
   readonly emulation?: Emulation.Emulation | undefined  // held for the context's life: emulate(...) without a scope
   readonly permissions?: ReadonlyArray<Permission> | undefined   // granted for the context's life, every origin: grant(...) without a scope

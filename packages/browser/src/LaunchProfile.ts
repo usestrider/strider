@@ -43,7 +43,8 @@ export const stock: LaunchProfile = new LaunchProfile({
  * **Details**
  *
  * Firefox's JSON viewer is off too, so a JSON response's document is the JSON as served, as in Chromium and
- * WebKit, rather than the viewer's page.
+ * WebKit, rather than the viewer's page; and Firefox opens a page's popups as windows, so the page keeps
+ * rendering behind them.
  *
  * @stability unstable
  * @category constants

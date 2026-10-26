@@ -366,16 +366,9 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* first.goto(url)
             const second = yield* first.context.newPage
             yield* second.goto(url)
-            const click = first.getByRole("button", { name: "Click me" }).click().pipe(Deadline.within("5 seconds"))
-            if (name === "Firefox") {
-              // Firefox renders a page in the background of its context about once a second, too seldom to act
-              const error = yield* Effect.flip(click)
-              assert(Deadline.isTimeout(error), String(error))
-              assert.include(Option.getOrElse(error.hint, () => ""), "page.activate")
-              yield* first.activate
-            }
-            // Chromium renders a background page of its context only when each page is a window (review 16, P10)
-            yield* click
+            // Each page is a window of its own, which keeps rendering behind another: Chromium's since review 16
+            // (P10), Firefox's since review 21 (QUIRKS.md, Q71), where a tab behind another rendered about once a second
+            yield* first.getByRole("button", { name: "Click me" }).click().pipe(Deadline.within("5 seconds"))
             yield* first.getByText("clicked", { exact: true }).pipe(Expect.toBeVisible)
           }))
         }), timeout)

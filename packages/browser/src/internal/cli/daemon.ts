@@ -849,9 +849,13 @@ const start = Command.make(
       const services = yield* Layer.build(layerOf(browser, userDataDir)).pipe(Effect.mapError(failedWith))
       const instance = Context.get(services, Browser.Browser)
       const scope = yield* Effect.scope
-      const context = yield* instance.newContext(
-        Option.match(initial, { onNone: () => ({}), onSome: (storageState) => ({ storageState }) })
-      ).pipe(
+      // Every page of the session keeps rendering while another is in front, as a person's would: focus is
+      // emulated where the backend can, and Firefox opens new pages as windows (QUIRKS.md, Q19 and Q71)
+      const focus = ExportTest.focusFor(browser)
+      const context = yield* instance.newContext({
+        ...Option.match(initial, { onNone: () => ({}), onSome: (storageState) => ({ storageState }) }),
+        focus
+      }).pipe(
         Effect.mapError(failedWith)
       )
       const session = yield* ToolkitImpl.makeSession({ context, secrets, capture: CapturePolicy.local })
@@ -892,9 +896,9 @@ const start = Command.make(
       }).pipe(Effect.forkScoped)
       const where = browser._tag === "Launch" ? `at ${browser.executablePath}` : `attached to ${browser.endpoint}`
       ready(
-        `session ${flags.name} · ${instance.info.product} ${where} · idle timeout ${Duration.format(idle)}${
-          Option.isSome(flags.ownerPid) ? ` · ends with process ${flags.ownerPid.value}` : ""
-        }${
+        `session ${flags.name} · ${instance.info.product} ${where} · focus ${focus} · idle timeout ${
+          Duration.format(idle)
+        }${Option.isSome(flags.ownerPid) ? ` · ends with process ${flags.ownerPid.value}` : ""}${
           Option.isSome(flags.state)
             ? ` · state from ${flags.state.value}`
             : Option.isSome(flags.fork)
