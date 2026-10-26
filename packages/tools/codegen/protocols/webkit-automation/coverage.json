@@ -1,0 +1,12 @@
+{
+  "revision": "webkitgtk-2.54.1",
+  "counts": {
+    "domains": 1,
+    "types": 32,
+    "commands": 57,
+    "events": 4,
+    "excluded": 0,
+    "approximated": 0
+  },
+  "entries": []
+}

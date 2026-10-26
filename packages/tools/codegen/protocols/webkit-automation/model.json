@@ -1,0 +1,4167 @@
+{
+  "backend": "webkit",
+  "revision": "webkitgtk-2.54.1",
+  "domains": {
+    "Automation": {
+      "dependencies": [],
+      "traits": {
+        "status": "stable",
+        "description": "Automation domain exposes commands for automating user interactions with the browser."
+      }
+    }
+  },
+  "shapes": {
+    "Automation#AuthenticatorProtocol": {
+      "_tag": "Enum",
+      "values": [
+        "ctap1_u2f",
+        "ctap2",
+        "ctap2_1"
+      ],
+      "traits": {
+        "status": "stable",
+        "description": "This enum contains the different protocol types supported by virtual authenticators."
+      }
+    },
+    "Automation#AuthenticatorTransport": {
+      "_tag": "Enum",
+      "values": [
+        "usb",
+        "nfc",
+        "ble",
+        "internal"
+      ],
+      "traits": {
+        "status": "stable",
+        "description": "Authenticators may implement various transports for communicating with clients. This enumeration defines hints as to how clients might communicate with a particular authenticator in order to obtain an assertion for a specific credential."
+      }
+    },
+    "Automation#BrowsingContext": {
+      "_tag": "Struct",
+      "members": {
+        "handle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Opaque handle for a browsing context (window or tab). Used as a key for window-related commands."
+          }
+        },
+        "active": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Whether the browsing context has focus at the time the command is handled."
+          }
+        },
+        "url": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The URL loaded by the browsing context at the time the command is handled."
+          }
+        },
+        "windowSize": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#Size"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The current size of the browsing context's window."
+          }
+        },
+        "windowOrigin": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#Point"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The current (x, y) position of the browsing context's window relative to the top-left of the screen."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "A handle representing an open window or tab in the automation session."
+      }
+    },
+    "Automation#BrowsingContextHandle": {
+      "_tag": "Alias",
+      "type": {
+        "_tag": "Scalar",
+        "scalar": "string"
+      },
+      "traits": {
+        "status": "stable",
+        "description": "An opaque identifier for a browsing context.",
+        "id": true
+      }
+    },
+    "Automation#BrowsingContextPresentation": {
+      "_tag": "Enum",
+      "values": [
+        "Window",
+        "Tab"
+      ],
+      "traits": {
+        "status": "stable",
+        "description": "How a browsing context is presented by the user agent. A browsing context is considered a tab if it shares an OS-level window with another browsing context."
+      }
+    },
+    "Automation#Cookie": {
+      "_tag": "Struct",
+      "members": {
+        "name": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Cookie name."
+          }
+        },
+        "value": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Cookie value.",
+            "sensitive": true
+          }
+        },
+        "domain": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Cookie domain. If empty, the domain is inherited from the relevant browsing context."
+          }
+        },
+        "path": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Cookie path."
+          }
+        },
+        "expires": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "number"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Cookie expiration in seconds since the UNIX epoch."
+          }
+        },
+        "size": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "integer"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Cookie size."
+          }
+        },
+        "httpOnly": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "True if cookie is http-only."
+          }
+        },
+        "secure": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "True if cookie is secure."
+          }
+        },
+        "session": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "True in case of session cookie."
+          }
+        },
+        "sameSite": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#CookieSameSitePolicy"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Cookie same site policy."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable"
+      }
+    },
+    "Automation#CookieSameSitePolicy": {
+      "_tag": "Enum",
+      "values": [
+        "None",
+        "Lax",
+        "Strict"
+      ],
+      "traits": {
+        "status": "stable",
+        "description": "Enumerates values for cookies same site policy"
+      }
+    },
+    "Automation#CoordinateSystem": {
+      "_tag": "Enum",
+      "values": [
+        "Page",
+        "Viewport",
+        "LayoutViewport"
+      ],
+      "traits": {
+        "status": "stable",
+        "description": "The coordinate system in which rects, points, and sizes are to be interpreted. LayoutViewport is a legacy value and should not be used going forward."
+      }
+    },
+    "Automation#ErrorMessage": {
+      "_tag": "Enum",
+      "values": [
+        "InternalError",
+        "Timeout",
+        "JavaScriptError",
+        "JavaScriptTimeout",
+        "WindowNotFound",
+        "FrameNotFound",
+        "NodeNotFound",
+        "InvalidNodeIdentifier",
+        "InvalidElementState",
+        "NoJavaScriptDialog",
+        "NotImplemented",
+        "MissingParameter",
+        "InvalidParameter",
+        "InvalidSelector",
+        "ElementNotInteractable",
+        "ElementNotSelectable",
+        "ScreenshotError",
+        "UnexpectedAlertOpen",
+        "TargetOutOfBounds",
+        "UnableToLoadExtension",
+        "UnableToUnloadExtension",
+        "NoSuchExtension",
+        "NoSuchUserContext",
+        "NoSuchScript"
+      ],
+      "traits": {
+        "status": "stable",
+        "description": "This enum contains predefined error messages that can be used to signal a well-defined error condition, such as a missing implementation, unknown window handle, and so forth. The backend signals one of these errors by using it as a prefix of the commands's error message (the errorString argument in generated C++ backend dispatchers). This will be reported to the frontend as a protocol error with a JSON-RPC error code of 'ServerError'. It is up to the frontend whether and how to deal with errors."
+      }
+    },
+    "Automation#FrameHandle": {
+      "_tag": "Alias",
+      "type": {
+        "_tag": "Scalar",
+        "scalar": "string"
+      },
+      "traits": {
+        "status": "stable",
+        "description": "An opaque identifier for a frame in a page.",
+        "id": true
+      }
+    },
+    "Automation#InputSource": {
+      "_tag": "Struct",
+      "members": {
+        "sourceId": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "A unique identifier for this input source."
+          }
+        },
+        "sourceType": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#InputSourceType"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The type of this input source. This affects what input source state fields are valid for this input source."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable"
+      }
+    },
+    "Automation#InputSourceState": {
+      "_tag": "Struct",
+      "members": {
+        "sourceId": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The input source whose state is described by this object."
+          }
+        },
+        "pressedCharKey": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "For 'keyboard' input sources, specifies a character key that has 'pressed' state. Unmentioned character keys are assumed to have a 'released' state."
+          }
+        },
+        "pressedVirtualKeys": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Ref",
+              "shape": "Automation#VirtualKey"
+            }
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "For 'keyboard' input sources, specifies virtual keys that have a 'pressed' state. Unmentioned virtual keys are assumed to have a 'released' state."
+          }
+        },
+        "pressedButton": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#MouseButton"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "For 'mouse' input sources, specifies which mouse button has a 'pressed' state. Unmentioned mouse buttons are assumed to have a 'released' state. For 'touch' input sources, passing MouseButton::Left denotes a touch-down state."
+          }
+        },
+        "mouseInteraction": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#MouseInteraction"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "For 'mouse' input sources, specifies which type of interaction took place. If unmentioned and the interaction cannot be determined through other heuristics, the state is dropped."
+          }
+        },
+        "origin": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#MouseMoveOrigin"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "For 'mouse' or 'wheel' input sources, specifies the origin type of a mouse move transition. Defaults to 'Viewport' if omitted."
+          }
+        },
+        "nodeHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#NodeHandle"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The handle of the element to use as origin when origin type is 'Element'."
+          }
+        },
+        "location": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#Point"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "For 'mouse', 'wheel' or 'touch' input sources, specifies a location in view coordinates to which the input source should transition. Transitioning to this state may interpolate intemediate input source states to better simulate real user movements and gestures."
+          }
+        },
+        "delta": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#Size"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "For 'wheel' input sources, specifies a scroll delta."
+          }
+        },
+        "duration": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "integer"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The minimum number of milliseconds that must elapse while the relevant input source transitions to this state."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "A new state for a specific input source. All state-related fields are optional and must be applicable to the InputSource referenced by 'sourceId'. If no state-related fields are specified, the state is assumed to remain the same as in the previous step (i.e., 'sustained')."
+      }
+    },
+    "Automation#InputSourceType": {
+      "_tag": "Enum",
+      "values": [
+        "Null",
+        "Mouse",
+        "Keyboard",
+        "Touch",
+        "Wheel",
+        "Pen"
+      ],
+      "traits": {
+        "status": "stable",
+        "description": "The type of an input source. This determines which state properties are applicable to the input source. The 'Null' input source type has no properties, only a duration. This can extend the effective wait for a tick."
+      }
+    },
+    "Automation#InteractionStep": {
+      "_tag": "Struct",
+      "members": {
+        "states": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Ref",
+              "shape": "Automation#InputSourceState"
+            }
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "A list of new input states for input sources that must transition during this step. Source state transitions that cannot be performed concurrently (i.e., touch gestures) are performed sequentially in the order they are listed."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "A set of input source states to which all applicable input sources must transition before further steps may be processed. If an input source does not have a corresponding state in a step, its state assumed to be 'released' for that step."
+      }
+    },
+    "Automation#KeyModifier": {
+      "_tag": "Enum",
+      "values": [
+        "CapsLock",
+        "Control",
+        "Shift",
+        "Meta",
+        "Alt"
+      ],
+      "traits": {
+        "status": "stable",
+        "description": "Enumerates different key modifiers that can remain pressed during other mouse/touch interactions."
+      }
+    },
+    "Automation#KeyboardInteraction": {
+      "_tag": "Struct",
+      "members": {
+        "type": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#KeyboardInteractionType"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The type of interaction to be performed by a step."
+          }
+        },
+        "key": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#VirtualKey"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "A virtual key to be used to perform the specified interaction."
+          }
+        },
+        "text": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "A unicode string to be delivered to the page. The sequence of key events is determined by splitting the string at grapheme cluster boundaries."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "A single step in a key sequence. A step can contain a key up/down of a virtual key, or a sequence of Unicode code points that are delivered to the page at grapheme cluster boundaries. Either a 'key' or 'text' property must be specified."
+      }
+    },
+    "Automation#KeyboardInteractionType": {
+      "_tag": "Enum",
+      "values": [
+        "KeyPress",
+        "KeyRelease",
+        "InsertByKey"
+      ],
+      "traits": {
+        "status": "stable",
+        "description": "Enumerates different ways of interacting with a keyboard device. 'InsertByKey' implies that a separate KeyDown and KeyUp event are produced for each combining character sequence, regardless of the actual keystrokes required to produce the character sequence."
+      }
+    },
+    "Automation#MouseButton": {
+      "_tag": "Enum",
+      "values": [
+        "None",
+        "Left",
+        "Middle",
+        "Right",
+        "Back",
+        "Forward"
+      ],
+      "traits": {
+        "status": "stable",
+        "description": "Enumerates different mouse buttons that can be used."
+      }
+    },
+    "Automation#MouseInteraction": {
+      "_tag": "Enum",
+      "values": [
+        "Move",
+        "Down",
+        "Up",
+        "SingleClick",
+        "DoubleClick"
+      ],
+      "traits": {
+        "status": "stable",
+        "description": "Enumerates different ways of interacting with a mouse cursor."
+      }
+    },
+    "Automation#MouseMoveOrigin": {
+      "_tag": "Enum",
+      "values": [
+        "Viewport",
+        "Pointer",
+        "Element"
+      ],
+      "traits": {
+        "status": "stable",
+        "description": "Enumerates different origin types that can be used in mouse move interactions."
+      }
+    },
+    "Automation#NodeHandle": {
+      "_tag": "Alias",
+      "type": {
+        "_tag": "Scalar",
+        "scalar": "string"
+      },
+      "traits": {
+        "status": "stable",
+        "description": "An opaque identifier for a node in a page.",
+        "id": true
+      }
+    },
+    "Automation#PageLoadStrategy": {
+      "_tag": "Enum",
+      "values": [
+        "None",
+        "Eager",
+        "Normal"
+      ],
+      "traits": {
+        "status": "stable",
+        "description": "Enumerates different page load strategies."
+      }
+    },
+    "Automation#PermissionState": {
+      "_tag": "Enum",
+      "values": [
+        "granted",
+        "denied",
+        "prompt"
+      ],
+      "traits": {
+        "status": "stable",
+        "description": "Values represent the concept of a permission state."
+      }
+    },
+    "Automation#Point": {
+      "_tag": "Struct",
+      "members": {
+        "x": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "number"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable"
+          }
+        },
+        "y": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "number"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable"
+          }
+        }
+      },
+      "traits": {
+        "status": "stable"
+      }
+    },
+    "Automation#Rect": {
+      "_tag": "Struct",
+      "members": {
+        "origin": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#Point"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable"
+          }
+        },
+        "size": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#Size"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable"
+          }
+        }
+      },
+      "traits": {
+        "status": "stable"
+      }
+    },
+    "Automation#SessionPermission": {
+      "_tag": "Enum",
+      "values": [
+        "GetUserMedia"
+      ],
+      "traits": {
+        "status": "stable",
+        "description": "Enumerates different permissions that must be obtained in order to use privileged APIs."
+      }
+    },
+    "Automation#SessionPermissionData": {
+      "_tag": "Struct",
+      "members": {
+        "permission": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#SessionPermission"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable"
+          }
+        },
+        "value": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable"
+          }
+        }
+      },
+      "traits": {
+        "status": "stable"
+      }
+    },
+    "Automation#Size": {
+      "_tag": "Struct",
+      "members": {
+        "width": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "number"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable"
+          }
+        },
+        "height": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "number"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable"
+          }
+        }
+      },
+      "traits": {
+        "status": "stable"
+      }
+    },
+    "Automation#VirtualAuthenticatorConfiguration": {
+      "_tag": "Struct",
+      "members": {
+        "protocol": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#AuthenticatorProtocol"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The protocol of the authenticator"
+          }
+        },
+        "transport": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#AuthenticatorTransport"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The transport of the protocol"
+          }
+        },
+        "hasResidentKey": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "If the authenticator has a resident key"
+          }
+        },
+        "hasUserVerification": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "If the authenticator supports user verification"
+          }
+        },
+        "isUserConsenting": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "If the virtual authenticator should consent to requests"
+          }
+        },
+        "isUserVerified": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "If user verification requests should succeeed"
+          }
+        },
+        "extensions": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Scalar",
+              "scalar": "string"
+            }
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "An array containing extension identifiers"
+          }
+        },
+        "uvm": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Scalar",
+              "scalar": "integer"
+            }
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "Up to 3 User Verification Method entries"
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Parameters used when creating a virtual authenticator"
+      }
+    },
+    "Automation#VirtualAuthenticatorCredential": {
+      "_tag": "Struct",
+      "members": {
+        "credentialId": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The Credential ID encoded using Base64url Encoding."
+          }
+        },
+        "isResidentCredential": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "If set to true, a client-side discoverable credential is created. If set to false, a server-side credential is created instead."
+          }
+        },
+        "rpId": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The Relying Party ID the credential is scoped to."
+          }
+        },
+        "privateKey": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "An asymmetric key package containing a single private key per [RFC5958], encoded using Base64url Encoding."
+          }
+        },
+        "userHandle": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The userHandle associated to the credential encoded using Base64url Encoding. This property may not be defined."
+          }
+        },
+        "signCount": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "integer"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The initial value for a signature counter associated to the public key credential source."
+          }
+        },
+        "largeBlob": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The large, per-credential blob associated to the public key credential source, encoded using Base64url Encoding. This property may not be defined."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "A credential object used for virtual authenticators."
+      }
+    },
+    "Automation#VirtualKey": {
+      "_tag": "Enum",
+      "values": [
+        "Shift",
+        "ShiftRight",
+        "Control",
+        "ControlRight",
+        "Alternate",
+        "AlternateRight",
+        "Meta",
+        "MetaRight",
+        "Command",
+        "CommandRight",
+        "Cancel",
+        "Help",
+        "Backspace",
+        "Tab",
+        "Clear",
+        "Enter",
+        "Pause",
+        "Escape",
+        "PageUp",
+        "PageUpRight",
+        "PageDown",
+        "PageDownRight",
+        "End",
+        "EndRight",
+        "Home",
+        "HomeRight",
+        "LeftArrow",
+        "LeftArrowRight",
+        "UpArrow",
+        "UpArrowRight",
+        "RightArrow",
+        "RightArrowRight",
+        "DownArrow",
+        "DownArrowRight",
+        "Insert",
+        "InsertRight",
+        "Delete",
+        "DeleteRight",
+        "Space",
+        "Semicolon",
+        "Equals",
+        "Return",
+        "NumberPad0",
+        "NumberPad1",
+        "NumberPad2",
+        "NumberPad3",
+        "NumberPad4",
+        "NumberPad5",
+        "NumberPad6",
+        "NumberPad7",
+        "NumberPad8",
+        "NumberPad9",
+        "NumberPadMultiply",
+        "NumberPadAdd",
+        "NumberPadSeparator",
+        "NumberPadSubtract",
+        "NumberPadDecimal",
+        "NumberPadDivide",
+        "Function1",
+        "Function2",
+        "Function3",
+        "Function4",
+        "Function5",
+        "Function6",
+        "Function7",
+        "Function8",
+        "Function9",
+        "Function10",
+        "Function11",
+        "Function12"
+      ],
+      "traits": {
+        "status": "stable",
+        "description": "Enumerates different platform-independent virtual keys on a physical keyboard whose input via keyboard may or may not produce characters."
+      }
+    },
+    "Automation#WebExtensionResourceOptions": {
+      "_tag": "Enum",
+      "values": [
+        "Path",
+        "ArchivePath",
+        "Base64"
+      ],
+      "traits": {
+        "status": "stable",
+        "description": "The format of the resource used to load the web extension."
+      }
+    },
+    "Automation#acceptCurrentJavaScriptDialog": {
+      "_tag": "Command",
+      "method": "Automation.acceptCurrentJavaScriptDialog",
+      "params": "Automation#acceptCurrentJavaScriptDialog.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Accepts a JavaScript alert, confirm, or prompt dialog currently showing in a browsing context. Equivalent to clicking the 'OK' button."
+      }
+    },
+    "Automation#acceptCurrentJavaScriptDialog.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Accepts a JavaScript alert, confirm, or prompt dialog currently showing in a browsing context. Equivalent to clicking the 'OK' button."
+      }
+    },
+    "Automation#addSingleCookie": {
+      "_tag": "Command",
+      "method": "Automation.addSingleCookie",
+      "params": "Automation#addSingleCookie.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Add a cookie to cookie storage for the specified browsing context."
+      }
+    },
+    "Automation#addSingleCookie.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "cookie": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#Cookie"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The cookie that should be added to storage."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Add a cookie to cookie storage for the specified browsing context."
+      }
+    },
+    "Automation#addVirtualAuthenticator": {
+      "_tag": "Command",
+      "method": "Automation.addVirtualAuthenticator",
+      "params": "Automation#addVirtualAuthenticator.Params",
+      "result": "Automation#addVirtualAuthenticator.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Adds a virtual web authentication authenticator for the specified browsing context."
+      }
+    },
+    "Automation#addVirtualAuthenticator.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "authenticator": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#VirtualAuthenticatorConfiguration"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The configuration for the virtual authenticator to be created."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Adds a virtual web authentication authenticator for the specified browsing context."
+      }
+    },
+    "Automation#addVirtualAuthenticator.Result": {
+      "_tag": "Struct",
+      "members": {
+        "authenticatorId": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The authenticatorId of the created authenticator"
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Adds a virtual web authentication authenticator for the specified browsing context."
+      }
+    },
+    "Automation#addVirtualAuthenticatorCredential": {
+      "_tag": "Command",
+      "method": "Automation.addVirtualAuthenticatorCredential",
+      "params": "Automation#addVirtualAuthenticatorCredential.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Add a credential to a specified virutal authenticator for the specified browsing context"
+      }
+    },
+    "Automation#addVirtualAuthenticatorCredential.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "authenticatorId": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The virtual authenticator id to add the credential to."
+          }
+        },
+        "credential": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#VirtualAuthenticatorCredential"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The parameters of the credential to add."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Add a credential to a specified virutal authenticator for the specified browsing context"
+      }
+    },
+    "Automation#bidiMessageSent": {
+      "_tag": "Event",
+      "method": "Automation.bidiMessageSent",
+      "params": "Automation#bidiMessageSent.Params",
+      "traits": {
+        "status": "stable",
+        "description": "Relay a WebDriver Bidi message from the automation session to be processed by the client.",
+        "condition": "ENABLE(WEBDRIVER_BIDI)"
+      }
+    },
+    "Automation#bidiMessageSent.Params": {
+      "_tag": "Struct",
+      "members": {
+        "message": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "A Bidi message sent by WebKit to the client, encoded as a UTF-8 JSON literal."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Relay a WebDriver Bidi message from the automation session to be processed by the client.",
+        "condition": "ENABLE(WEBDRIVER_BIDI)"
+      }
+    },
+    "Automation#browsingContextCleared": {
+      "_tag": "Event",
+      "method": "Automation.browsingContextCleared",
+      "params": "Automation#browsingContextCleared.Params",
+      "traits": {
+        "status": "stable",
+        "description": "Fired when the specified browsing context has navigated or closed. Existing element references from the browsing context are no longer valid."
+      }
+    },
+    "Automation#browsingContextCleared.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable"
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Fired when the specified browsing context has navigated or closed. Existing element references from the browsing context are no longer valid."
+      }
+    },
+    "Automation#cancelInteractionSequence": {
+      "_tag": "Command",
+      "method": "Automation.cancelInteractionSequence",
+      "params": "Automation#cancelInteractionSequence.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Cancel an active interaction sequence that is currently in progress."
+      }
+    },
+    "Automation#cancelInteractionSequence.Params": {
+      "_tag": "Struct",
+      "members": {
+        "handle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The browsing context to be interacted with."
+          }
+        },
+        "frameHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#FrameHandle"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the frame passed to performInteractionSequence. The main frame is used if this parameter empty string or excluded."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Cancel an active interaction sequence that is currently in progress."
+      }
+    },
+    "Automation#closeBrowsingContext": {
+      "_tag": "Command",
+      "method": "Automation.closeBrowsingContext",
+      "params": "Automation#closeBrowsingContext.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Try to close the specified browsing context. This can trigger an unload prompt and thereafter succeed or fail."
+      }
+    },
+    "Automation#closeBrowsingContext.Params": {
+      "_tag": "Struct",
+      "members": {
+        "handle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context that should be closed."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Try to close the specified browsing context. This can trigger an unload prompt and thereafter succeed or fail."
+      }
+    },
+    "Automation#computeElementLayout": {
+      "_tag": "Command",
+      "method": "Automation.computeElementLayout",
+      "params": "Automation#computeElementLayout.Params",
+      "result": "Automation#computeElementLayout.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Computes the layout for an element."
+      }
+    },
+    "Automation#computeElementLayout.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context the frame is located."
+          }
+        },
+        "frameHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#FrameHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the frame that contains the element."
+          }
+        },
+        "nodeHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#NodeHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle of the element to use."
+          }
+        },
+        "scrollIntoViewIfNeeded": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "If the element should be scrolled into view before computing its layout."
+          }
+        },
+        "coordinateSystem": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#CoordinateSystem"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The coordinate system to use for rect and point results."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Computes the layout for an element."
+      }
+    },
+    "Automation#computeElementLayout.Result": {
+      "_tag": "Struct",
+      "members": {
+        "rect": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#Rect"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The layout rect for the requested element. Values are converted to the requested coordinate system."
+          }
+        },
+        "inViewCenterPoint": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#Point"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The in-view center point for the requested element. Values are converted to the requested coordinate system."
+          }
+        },
+        "isObscured": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "If the in-view center point of the requested element is obscured by another element."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Computes the layout for an element."
+      }
+    },
+    "Automation#createBrowsingContext": {
+      "_tag": "Command",
+      "method": "Automation.createBrowsingContext",
+      "params": "Automation#createBrowsingContext.Params",
+      "result": "Automation#createBrowsingContext.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Opens a new browsing context in the automation session and makes it the active browsing context for user interaction. This command creates a browsing context in a new window rather than adding a tab to an existing window.",
+        "createsResource": true,
+        "release": [
+          {
+            "method": "Automation.closeBrowsingContext",
+            "param": "handle",
+            "from": "/handle"
+          }
+        ]
+      }
+    },
+    "Automation#createBrowsingContext.Params": {
+      "_tag": "Struct",
+      "members": {
+        "presentationHint": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextPresentation"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "A hint for the desired presentation of new browsing context (new tab or new window)."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Opens a new browsing context in the automation session and makes it the active browsing context for user interaction. This command creates a browsing context in a new window rather than adding a tab to an existing window."
+      }
+    },
+    "Automation#createBrowsingContext.Result": {
+      "_tag": "Struct",
+      "members": {
+        "handle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "An opaque handle for the newly created browsing context."
+          }
+        },
+        "presentation": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextPresentation"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "How the browser presented the new browsing context (new tab or new window)."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Opens a new browsing context in the automation session and makes it the active browsing context for user interaction. This command creates a browsing context in a new window rather than adding a tab to an existing window."
+      }
+    },
+    "Automation#deleteAllCookies": {
+      "_tag": "Command",
+      "method": "Automation.deleteAllCookies",
+      "params": "Automation#deleteAllCookies.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Delete all cookies that are visible to the specified browsing context."
+      }
+    },
+    "Automation#deleteAllCookies.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Delete all cookies that are visible to the specified browsing context."
+      }
+    },
+    "Automation#deleteSession": {
+      "_tag": "Command",
+      "method": "Automation.deleteSession",
+      "params": null,
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Closes the automation session. Deletion of browsing contexts is handled by separate previous closeBrowsingContext commands."
+      }
+    },
+    "Automation#deleteSingleCookie": {
+      "_tag": "Command",
+      "method": "Automation.deleteSingleCookie",
+      "params": "Automation#deleteSingleCookie.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Deletes a cookie with the given name if visible to the specified browsing context."
+      }
+    },
+    "Automation#deleteSingleCookie.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "cookieName": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Name of the cookie to remove."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Deletes a cookie with the given name if visible to the specified browsing context."
+      }
+    },
+    "Automation#dismissCurrentJavaScriptDialog": {
+      "_tag": "Command",
+      "method": "Automation.dismissCurrentJavaScriptDialog",
+      "params": "Automation#dismissCurrentJavaScriptDialog.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Dismisses a JavaScript alert, confirm, or prompt dialog currently showing in a browsing context. Equivalent to clicking the 'Cancel' button."
+      }
+    },
+    "Automation#dismissCurrentJavaScriptDialog.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Dismisses a JavaScript alert, confirm, or prompt dialog currently showing in a browsing context. Equivalent to clicking the 'Cancel' button."
+      }
+    },
+    "Automation#emitActiveBidiScriptRealmCreatedEvents": {
+      "_tag": "Command",
+      "method": "Automation.emitActiveBidiScriptRealmCreatedEvents",
+      "params": null,
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Emit script.realmCreated events for currently active realms in the automation session.",
+        "condition": "ENABLE(WEBDRIVER_BIDI)"
+      }
+    },
+    "Automation#evaluateJavaScriptFunction": {
+      "_tag": "Command",
+      "method": "Automation.evaluateJavaScriptFunction",
+      "params": "Automation#evaluateJavaScriptFunction.Params",
+      "result": "Automation#evaluateJavaScriptFunction.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Evaluates a script function in a browsing context and calls it with the supplied arguments."
+      }
+    },
+    "Automation#evaluateJavaScriptFunction.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context the script should be evaluated."
+          }
+        },
+        "frameHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#FrameHandle"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the frame the script should be evaluated. The main frame is used if this parameter empty string or excluded."
+          }
+        },
+        "function": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The script to evaluate in the browsing context. It must be a function result."
+          }
+        },
+        "arguments": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Scalar",
+              "scalar": "string"
+            }
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The arguments to pass to the function when called. They will be parsed as JSON before calling the function."
+          }
+        },
+        "expectsImplicitCallbackArgument": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The function expects a callback function as the last argument. It is expected to call this callback with a result."
+          }
+        },
+        "forceUserGesture": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "Force a user gesture when the script is evaluated. Defaults to false if omitted."
+          }
+        },
+        "callbackTimeout": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "number"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The timeout in milliseconds that the implicit callback is expected to be called in, otherwise a <code>JavaScriptTimeout</code> error is returned."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Evaluates a script function in a browsing context and calls it with the supplied arguments."
+      }
+    },
+    "Automation#evaluateJavaScriptFunction.Result": {
+      "_tag": "Struct",
+      "members": {
+        "result": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The result returned by the called function. It is JSON encoded after the function returns or calls the callback."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Evaluates a script function in a browsing context and calls it with the supplied arguments."
+      }
+    },
+    "Automation#fileChooserDismissed": {
+      "_tag": "Event",
+      "method": "Automation.fileChooserDismissed",
+      "params": "Automation#fileChooserDismissed.Params",
+      "traits": {
+        "status": "stable",
+        "description": "Fired when a file chooser for a file input element is dismissed by selecting files or cancelling."
+      }
+    },
+    "Automation#fileChooserDismissed.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "selectionCancelled": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "If true, file selection was cancelled due to an error. For example, this could occur if a file's MIME type cannot be handled by WebKit."
+          }
+        },
+        "selectedFiles": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Scalar",
+              "scalar": "string"
+            }
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "A list of file names that were successfully selected for upload."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Fired when a file chooser for a file input element is dismissed by selecting files or cancelling."
+      }
+    },
+    "Automation#generateTestReport": {
+      "_tag": "Command",
+      "method": "Automation.generateTestReport",
+      "params": "Automation#generateTestReport.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "generate a test report for the specified browsing context"
+      }
+    },
+    "Automation#generateTestReport.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "message": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The body message for the generated test report."
+          }
+        },
+        "group": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The group value to use when sending a test report."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "generate a test report for the specified browsing context"
+      }
+    },
+    "Automation#getAllCookies": {
+      "_tag": "Command",
+      "method": "Automation.getAllCookies",
+      "params": "Automation#getAllCookies.Params",
+      "result": "Automation#getAllCookies.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Returns all cookies visible to the specified browsing context."
+      }
+    },
+    "Automation#getAllCookies.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Returns all cookies visible to the specified browsing context."
+      }
+    },
+    "Automation#getAllCookies.Result": {
+      "_tag": "Struct",
+      "members": {
+        "cookies": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Ref",
+              "shape": "Automation#Cookie"
+            }
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Array of cookie objects."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Returns all cookies visible to the specified browsing context."
+      }
+    },
+    "Automation#getBrowsingContext": {
+      "_tag": "Command",
+      "method": "Automation.getBrowsingContext",
+      "params": "Automation#getBrowsingContext.Params",
+      "result": "Automation#getBrowsingContext.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Fetches information about the specified browsing context."
+      }
+    },
+    "Automation#getBrowsingContext.Params": {
+      "_tag": "Struct",
+      "members": {
+        "handle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Fetches information about the specified browsing context."
+      }
+    },
+    "Automation#getBrowsingContext.Result": {
+      "_tag": "Struct",
+      "members": {
+        "context": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContext"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The browsing context available to the session."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Fetches information about the specified browsing context."
+      }
+    },
+    "Automation#getBrowsingContexts": {
+      "_tag": "Command",
+      "method": "Automation.getBrowsingContexts",
+      "params": null,
+      "result": "Automation#getBrowsingContexts.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Fetches information about all open browsing contexts (windows and tabs) in the automation session."
+      }
+    },
+    "Automation#getBrowsingContexts.Result": {
+      "_tag": "Struct",
+      "members": {
+        "contexts": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Ref",
+              "shape": "Automation#BrowsingContext"
+            }
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "All known browsing contexts available to the session."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Fetches information about all open browsing contexts (windows and tabs) in the automation session."
+      }
+    },
+    "Automation#getComputedLabel": {
+      "_tag": "Command",
+      "method": "Automation.getComputedLabel",
+      "params": "Automation#getComputedLabel.Params",
+      "result": "Automation#getComputedLabel.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Get the Accessible Name and Description Computation computed accessible name of the element."
+      }
+    },
+    "Automation#getComputedLabel.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "frameHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#FrameHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the frame that contains the element. The main frame is used if this parameter is empty string."
+          }
+        },
+        "nodeHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#NodeHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle of the element to get the label of."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Get the Accessible Name and Description Computation computed accessible name of the element."
+      }
+    },
+    "Automation#getComputedLabel.Result": {
+      "_tag": "Struct",
+      "members": {
+        "label": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The computed label for the element."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Get the Accessible Name and Description Computation computed accessible name of the element."
+      }
+    },
+    "Automation#getComputedRole": {
+      "_tag": "Command",
+      "method": "Automation.getComputedRole",
+      "params": "Automation#getComputedRole.Params",
+      "result": "Automation#getComputedRole.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Get the computed WAI-ARIA role of the element."
+      }
+    },
+    "Automation#getComputedRole.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "frameHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#FrameHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the frame that contains the element. The main frame is used if this parameter is empty string."
+          }
+        },
+        "nodeHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#NodeHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle of the element to get the role of."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Get the computed WAI-ARIA role of the element."
+      }
+    },
+    "Automation#getComputedRole.Result": {
+      "_tag": "Struct",
+      "members": {
+        "role": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The computed WAI-ARIA role of the element."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Get the computed WAI-ARIA role of the element."
+      }
+    },
+    "Automation#getSessionPermissions": {
+      "_tag": "Command",
+      "method": "Automation.getSessionPermissions",
+      "params": null,
+      "result": "Automation#getSessionPermissions.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Returns the state of all session permissions, which control whether privileged Web APIs can be used. Permissions are applied to all browsing contexts associated with the automation session."
+      }
+    },
+    "Automation#getSessionPermissions.Result": {
+      "_tag": "Struct",
+      "members": {
+        "permissions": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Ref",
+              "shape": "Automation#SessionPermissionData"
+            }
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Array of available session permissions and their values."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Returns the state of all session permissions, which control whether privileged Web APIs can be used. Permissions are applied to all browsing contexts associated with the automation session."
+      }
+    },
+    "Automation#getVirtualAuthenticatorCredentials": {
+      "_tag": "Command",
+      "method": "Automation.getVirtualAuthenticatorCredentials",
+      "params": "Automation#getVirtualAuthenticatorCredentials.Params",
+      "result": "Automation#getVirtualAuthenticatorCredentials.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Get all credentials for a given virtual authenticator for the specified browsing context"
+      }
+    },
+    "Automation#getVirtualAuthenticatorCredentials.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "authenticatorId": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The virtual authenticator id to fetch all credentials for."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Get all credentials for a given virtual authenticator for the specified browsing context"
+      }
+    },
+    "Automation#getVirtualAuthenticatorCredentials.Result": {
+      "_tag": "Struct",
+      "members": {
+        "credentials": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Ref",
+              "shape": "Automation#VirtualAuthenticatorCredential"
+            }
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Array of credentials for given virtual authenticator"
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Get all credentials for a given virtual authenticator for the specified browsing context"
+      }
+    },
+    "Automation#goBackInBrowsingContext": {
+      "_tag": "Command",
+      "method": "Automation.goBackInBrowsingContext",
+      "params": "Automation#goBackInBrowsingContext.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Navigates a browsing context to go back one page in history."
+      }
+    },
+    "Automation#goBackInBrowsingContext.Params": {
+      "_tag": "Struct",
+      "members": {
+        "handle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context that should be navigated."
+          }
+        },
+        "pageLoadStrategy": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#PageLoadStrategy"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The page load strategy to use when determining when navigation is complete."
+          }
+        },
+        "pageLoadTimeout": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "number"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The timeout in milliseconds that the navigation is expected to be completed in, otherwise a <code>Timeout</code> error is returned."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Navigates a browsing context to go back one page in history."
+      }
+    },
+    "Automation#goForwardInBrowsingContext": {
+      "_tag": "Command",
+      "method": "Automation.goForwardInBrowsingContext",
+      "params": "Automation#goForwardInBrowsingContext.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Navigates a browsing context to got forward one page in history."
+      }
+    },
+    "Automation#goForwardInBrowsingContext.Params": {
+      "_tag": "Struct",
+      "members": {
+        "handle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context that should be navigated."
+          }
+        },
+        "pageLoadStrategy": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#PageLoadStrategy"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The page load strategy to use when determining when navigation is complete."
+          }
+        },
+        "pageLoadTimeout": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "number"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The timeout in milliseconds that the navigation is expected to be completed in, otherwise a <code>Timeout</code> error is returned."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Navigates a browsing context to got forward one page in history."
+      }
+    },
+    "Automation#hideWindowOfBrowsingContext": {
+      "_tag": "Command",
+      "method": "Automation.hideWindowOfBrowsingContext",
+      "params": "Automation#hideWindowOfBrowsingContext.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Causes the window of the specified browsing context to be hidden/minimized/iconified. This command implicitly exits fullscreen mode."
+      }
+    },
+    "Automation#hideWindowOfBrowsingContext.Params": {
+      "_tag": "Struct",
+      "members": {
+        "handle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context whose window should be hidden."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Causes the window of the specified browsing context to be hidden/minimized/iconified. This command implicitly exits fullscreen mode."
+      }
+    },
+    "Automation#inspectBrowsingContext": {
+      "_tag": "Command",
+      "method": "Automation.inspectBrowsingContext",
+      "params": "Automation#inspectBrowsingContext.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Inspect the specified browsing context using Web Inspector.",
+        "condition": "defined(WTF_PLATFORM_MAC) && WTF_PLATFORM_MAC"
+      }
+    },
+    "Automation#inspectBrowsingContext.Params": {
+      "_tag": "Struct",
+      "members": {
+        "handle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context that should be inspected."
+          }
+        },
+        "enableAutoCapturing": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "If this option is present and set to true, the Web Inspector will automatically start a timeline recording of the specified browsing context once it is attached. Note that this disables the debugger for the duration of the recording."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Inspect the specified browsing context using Web Inspector.",
+        "condition": "defined(WTF_PLATFORM_MAC) && WTF_PLATFORM_MAC"
+      }
+    },
+    "Automation#isShowingJavaScriptDialog": {
+      "_tag": "Command",
+      "method": "Automation.isShowingJavaScriptDialog",
+      "params": "Automation#isShowingJavaScriptDialog.Params",
+      "result": "Automation#isShowingJavaScriptDialog.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Checks if a browsing context is showing a JavaScript alert, confirm, or prompt dialog."
+      }
+    },
+    "Automation#isShowingJavaScriptDialog.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Checks if a browsing context is showing a JavaScript alert, confirm, or prompt dialog."
+      }
+    },
+    "Automation#isShowingJavaScriptDialog.Result": {
+      "_tag": "Struct",
+      "members": {
+        "result": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "If the browsing context is showing a JavaScript dialog or not."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Checks if a browsing context is showing a JavaScript alert, confirm, or prompt dialog."
+      }
+    },
+    "Automation#loadWebExtension": {
+      "_tag": "Command",
+      "method": "Automation.loadWebExtension",
+      "params": "Automation#loadWebExtension.Params",
+      "result": "Automation#loadWebExtension.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Loads a web extension in the automation session.",
+        "condition": "defined(WTF_PLATFORM_MAC) && WTF_PLATFORM_MAC"
+      }
+    },
+    "Automation#loadWebExtension.Params": {
+      "_tag": "Struct",
+      "members": {
+        "type": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#WebExtensionResourceOptions"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "A hint for the resource format used to load the extension."
+          }
+        },
+        "value": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "One of the following: the path to the extension, the path to the extension's archive, or the base 64 encoded data of the extension's archive."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Loads a web extension in the automation session.",
+        "condition": "defined(WTF_PLATFORM_MAC) && WTF_PLATFORM_MAC"
+      }
+    },
+    "Automation#loadWebExtension.Result": {
+      "_tag": "Struct",
+      "members": {
+        "extension": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The unique identifier of the extension."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Loads a web extension in the automation session.",
+        "condition": "defined(WTF_PLATFORM_MAC) && WTF_PLATFORM_MAC"
+      }
+    },
+    "Automation#maximizeWindowOfBrowsingContext": {
+      "_tag": "Command",
+      "method": "Automation.maximizeWindowOfBrowsingContext",
+      "params": "Automation#maximizeWindowOfBrowsingContext.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Causes the window of the specified browsing context to be maximized. This command implicitly exits fullscreen mode."
+      }
+    },
+    "Automation#maximizeWindowOfBrowsingContext.Params": {
+      "_tag": "Struct",
+      "members": {
+        "handle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context whose window should be maximized."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Causes the window of the specified browsing context to be maximized. This command implicitly exits fullscreen mode."
+      }
+    },
+    "Automation#messageOfCurrentJavaScriptDialog": {
+      "_tag": "Command",
+      "method": "Automation.messageOfCurrentJavaScriptDialog",
+      "params": "Automation#messageOfCurrentJavaScriptDialog.Params",
+      "result": "Automation#messageOfCurrentJavaScriptDialog.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Returns the text displayed in a JavaScript alert, confirm, or prompt dialog currently showing in a browsing context."
+      }
+    },
+    "Automation#messageOfCurrentJavaScriptDialog.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Returns the text displayed in a JavaScript alert, confirm, or prompt dialog currently showing in a browsing context."
+      }
+    },
+    "Automation#messageOfCurrentJavaScriptDialog.Result": {
+      "_tag": "Struct",
+      "members": {
+        "message": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Text being displayed in the current JavaScript dialog."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Returns the text displayed in a JavaScript alert, confirm, or prompt dialog currently showing in a browsing context."
+      }
+    },
+    "Automation#navigateBrowsingContext": {
+      "_tag": "Command",
+      "method": "Automation.navigateBrowsingContext",
+      "params": "Automation#navigateBrowsingContext.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Navigates a browsing context to a specified URL."
+      }
+    },
+    "Automation#navigateBrowsingContext.Params": {
+      "_tag": "Struct",
+      "members": {
+        "handle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context that should be navigated."
+          }
+        },
+        "url": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The URL to load in the browsing context."
+          }
+        },
+        "pageLoadStrategy": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#PageLoadStrategy"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The page load strategy to use when determining when navigation is complete."
+          }
+        },
+        "pageLoadTimeout": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "number"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The timeout in milliseconds that the navigation is expected to be completed in, otherwise a <code>Timeout</code> error is returned."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Navigates a browsing context to a specified URL."
+      }
+    },
+    "Automation#performApplicationCommand": {
+      "_tag": "Command",
+      "method": "Automation.performApplicationCommand",
+      "params": "Automation#performApplicationCommand.Params",
+      "result": "Automation#performApplicationCommand.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Perform a named command by delegating to the automation session client application."
+      }
+    },
+    "Automation#performApplicationCommand.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the targeted browsing context."
+          }
+        },
+        "commandName": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The name of the command to perform."
+          }
+        },
+        "arguments": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "JSON-encoded command arguments."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Perform a named command by delegating to the automation session client application."
+      }
+    },
+    "Automation#performApplicationCommand.Result": {
+      "_tag": "Struct",
+      "members": {
+        "result": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "JSON-encoded command result."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Perform a named command by delegating to the automation session client application."
+      }
+    },
+    "Automation#performInteractionSequence": {
+      "_tag": "Command",
+      "method": "Automation.performInteractionSequence",
+      "params": "Automation#performInteractionSequence.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Perform multiple simulated interactions over time using a list of input sources and a list of steps, where each step specifies a state for each input source at the time that step is performed."
+      }
+    },
+    "Automation#performInteractionSequence.Params": {
+      "_tag": "Struct",
+      "members": {
+        "handle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The browsing context to be interacted with."
+          }
+        },
+        "frameHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#FrameHandle"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the frame in which to search for the elements in case of an 'Element' type MouseMoveOrigin. The main frame is used if this parameter empty string or excluded."
+          }
+        },
+        "inputSources": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Ref",
+              "shape": "Automation#InputSource"
+            }
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "All input sources that are used to perform this interaction sequence."
+          }
+        },
+        "steps": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Ref",
+              "shape": "Automation#InteractionStep"
+            }
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "A list of steps that are executed in order."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Perform multiple simulated interactions over time using a list of input sources and a list of steps, where each step specifies a state for each input source at the time that step is performed."
+      }
+    },
+    "Automation#performKeyboardInteractions": {
+      "_tag": "Command",
+      "method": "Automation.performKeyboardInteractions",
+      "params": "Automation#performKeyboardInteractions.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Simulates delivering the results of pressing one or more keyboard keys together or successively."
+      }
+    },
+    "Automation#performKeyboardInteractions.Params": {
+      "_tag": "Struct",
+      "members": {
+        "handle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context which should receive key."
+          }
+        },
+        "interactions": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Ref",
+              "shape": "Automation#KeyboardInteraction"
+            }
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "An ordered list of key sequences to be delivered using native key events."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Simulates delivering the results of pressing one or more keyboard keys together or successively."
+      }
+    },
+    "Automation#performMouseInteraction": {
+      "_tag": "Command",
+      "method": "Automation.performMouseInteraction",
+      "params": "Automation#performMouseInteraction.Params",
+      "result": "Automation#performMouseInteraction.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Simulates interaction with a mouse cursor."
+      }
+    },
+    "Automation#performMouseInteraction.Params": {
+      "_tag": "Struct",
+      "members": {
+        "handle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The browsing context to be interacted with."
+          }
+        },
+        "position": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#Point"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The requested position for the mouse cursor, specified in viewport coordinates."
+          }
+        },
+        "button": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#MouseButton"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The button to use to perform the interaction. This parameter only has an effect for the <code>Down</code>, <code>Up</code>, <code>Click</code>, and <code>DoubleClick</code> mouse interactions."
+          }
+        },
+        "interaction": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#MouseInteraction"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The type of interaction to be performed with the mouse cursor."
+          }
+        },
+        "modifiers": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Ref",
+              "shape": "Automation#KeyModifier"
+            }
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Key modifiers to be active during the mouse interaction."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Simulates interaction with a mouse cursor."
+      }
+    },
+    "Automation#performMouseInteraction.Result": {
+      "_tag": "Struct",
+      "members": {
+        "position": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#Point"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The updated position of the mouse cursor, specified in viewport coordinates."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Simulates interaction with a mouse cursor."
+      }
+    },
+    "Automation#processBidiMessage": {
+      "_tag": "Command",
+      "method": "Automation.processBidiMessage",
+      "params": "Automation#processBidiMessage.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Relay a WebDriver Bidi message from the client to be processed by the automation session.",
+        "condition": "ENABLE(WEBDRIVER_BIDI)"
+      }
+    },
+    "Automation#processBidiMessage.Params": {
+      "_tag": "Struct",
+      "members": {
+        "message": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "A Bidi message sent by the client to WebKit, encoded as a UTF-8 JSON literal."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Relay a WebDriver Bidi message from the client to be processed by the automation session.",
+        "condition": "ENABLE(WEBDRIVER_BIDI)"
+      }
+    },
+    "Automation#receiveInspectorMessage": {
+      "_tag": "Event",
+      "method": "Automation.receiveInspectorMessage",
+      "params": "Automation#receiveInspectorMessage.Params",
+      "traits": {
+        "status": "stable",
+        "description": "Relay a Web Inspector backend message from a browsing context's Inspector controller back to the client.",
+        "condition": "ENABLE(REMOTE_INSPECTOR)"
+      }
+    },
+    "Automation#receiveInspectorMessage.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context whose Inspector controller emitted the message."
+          }
+        },
+        "message": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "An Inspector backend message sent by WebKit to the client, encoded as a UTF-8 JSON literal."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Relay a Web Inspector backend message from a browsing context's Inspector controller back to the client.",
+        "condition": "ENABLE(REMOTE_INSPECTOR)"
+      }
+    },
+    "Automation#reloadBrowsingContext": {
+      "_tag": "Command",
+      "method": "Automation.reloadBrowsingContext",
+      "params": "Automation#reloadBrowsingContext.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Reloads the current page in a browsing context."
+      }
+    },
+    "Automation#reloadBrowsingContext.Params": {
+      "_tag": "Struct",
+      "members": {
+        "handle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context that should be reloaded."
+          }
+        },
+        "pageLoadStrategy": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#PageLoadStrategy"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The page load strategy to use when determining when navigation is complete."
+          }
+        },
+        "pageLoadTimeout": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "number"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The timeout in milliseconds that the navigation is expected to be completed in, otherwise a <code>Timeout</code> error is returned."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Reloads the current page in a browsing context."
+      }
+    },
+    "Automation#removeAllVirtualAuthenticatorCredentials": {
+      "_tag": "Command",
+      "method": "Automation.removeAllVirtualAuthenticatorCredentials",
+      "params": "Automation#removeAllVirtualAuthenticatorCredentials.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Remove all credentials from a given virtual authenticatior for the specified browsing context"
+      }
+    },
+    "Automation#removeAllVirtualAuthenticatorCredentials.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "authenticatorId": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The virtual authenticator id to fetch all credentials for."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Remove all credentials from a given virtual authenticatior for the specified browsing context"
+      }
+    },
+    "Automation#removeVirtualAuthenticator": {
+      "_tag": "Command",
+      "method": "Automation.removeVirtualAuthenticator",
+      "params": "Automation#removeVirtualAuthenticator.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Removes a virtual web authentication authenticator for the specified browsing context."
+      }
+    },
+    "Automation#removeVirtualAuthenticator.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "authenticatorId": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The virtual authenticator id to remove."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Removes a virtual web authentication authenticator for the specified browsing context."
+      }
+    },
+    "Automation#removeVirtualAuthenticatorCredential": {
+      "_tag": "Command",
+      "method": "Automation.removeVirtualAuthenticatorCredential",
+      "params": "Automation#removeVirtualAuthenticatorCredential.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Remove a credential from a virtual authenticator for the specified browsing context"
+      }
+    },
+    "Automation#removeVirtualAuthenticatorCredential.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "authenticatorId": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The virtual authenticator id to fetch all credentials for."
+          }
+        },
+        "credentialId": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The credentialId of the credential to remove from the virtual authenticator"
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Remove a credential from a virtual authenticator for the specified browsing context"
+      }
+    },
+    "Automation#resolveBrowsingContext": {
+      "_tag": "Command",
+      "method": "Automation.resolveBrowsingContext",
+      "params": "Automation#resolveBrowsingContext.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Validates that the specified browsing context exists. Command fails with <code>WindowNotFound</code> or <code>FrameNotFound</code> if the browsing context is invalid. Does not depend on user prompt handler behaviors."
+      }
+    },
+    "Automation#resolveBrowsingContext.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context that should be made focused."
+          }
+        },
+        "frameHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#FrameHandle"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the frame that should be focused. Defaults to the main frame if omitted."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Validates that the specified browsing context exists. Command fails with <code>WindowNotFound</code> or <code>FrameNotFound</code> if the browsing context is invalid. Does not depend on user prompt handler behaviors."
+      }
+    },
+    "Automation#resolveChildFrameHandle": {
+      "_tag": "Command",
+      "method": "Automation.resolveChildFrameHandle",
+      "params": "Automation#resolveChildFrameHandle.Params",
+      "result": "Automation#resolveChildFrameHandle.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Determines the <code>FrameHandle</code> based on the ordinal, name or node handle of a child frame."
+      }
+    },
+    "Automation#resolveChildFrameHandle.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context in which to search for the frame."
+          }
+        },
+        "frameHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#FrameHandle"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the frame in which to search for the frame. The main frame is used if this parameter empty string or excluded."
+          }
+        },
+        "ordinal": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "integer"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The ordinal of the child frame to resolve as a <code>FrameHandle</code>. This is analogous to 'window.frames[ordinal]' in JavaScript."
+          }
+        },
+        "name": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The name of the child frame to resolve as a <code>FrameHandle</code>. This is analogous to 'window.frames[name]' in JavaScript."
+          }
+        },
+        "nodeHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#NodeHandle"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The handle of the child frame owner element to resolve as a <code>FrameHandle</code>."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Determines the <code>FrameHandle</code> based on the ordinal, name or node handle of a child frame."
+      }
+    },
+    "Automation#resolveChildFrameHandle.Result": {
+      "_tag": "Struct",
+      "members": {
+        "result": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#FrameHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The <code>FrameHandle</code> for the requested frame."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Determines the <code>FrameHandle</code> based on the ordinal, name or node handle of a child frame."
+      }
+    },
+    "Automation#resolveParentFrameHandle": {
+      "_tag": "Command",
+      "method": "Automation.resolveParentFrameHandle",
+      "params": "Automation#resolveParentFrameHandle.Params",
+      "result": "Automation#resolveParentFrameHandle.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Determines the <code>FrameHandle</code> for the parent frame of the supplied <code>FrameHandle</code>."
+      }
+    },
+    "Automation#resolveParentFrameHandle.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context the frame is located."
+          }
+        },
+        "frameHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#FrameHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the frame that should resolve its parent frame."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Determines the <code>FrameHandle</code> for the parent frame of the supplied <code>FrameHandle</code>."
+      }
+    },
+    "Automation#resolveParentFrameHandle.Result": {
+      "_tag": "Struct",
+      "members": {
+        "result": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#FrameHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The <code>FrameHandle</code> for the requested frame."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Determines the <code>FrameHandle</code> for the parent frame of the supplied <code>FrameHandle</code>."
+      }
+    },
+    "Automation#selectOptionElement": {
+      "_tag": "Command",
+      "method": "Automation.selectOptionElement",
+      "params": "Automation#selectOptionElement.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Selects the given option element. In case of container with multiple options enabled, the element selectedness is toggled."
+      }
+    },
+    "Automation#selectOptionElement.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "frameHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#FrameHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the frame that contains the element."
+          }
+        },
+        "nodeHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#NodeHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle of the element to use."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Selects the given option element. In case of container with multiple options enabled, the element selectedness is toggled."
+      }
+    },
+    "Automation#sendInspectorMessage": {
+      "_tag": "Command",
+      "method": "Automation.sendInspectorMessage",
+      "params": "Automation#sendInspectorMessage.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Relay a Web Inspector backend message from the client into the given browsing context's Inspector controller. Available when the session is configured to permit Inspector-protocol testing over the Automation transport.",
+        "condition": "ENABLE(REMOTE_INSPECTOR)"
+      }
+    },
+    "Automation#sendInspectorMessage.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context whose Inspector controller should receive the message."
+          }
+        },
+        "message": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "An Inspector backend message sent by the client to WebKit, encoded as a UTF-8 JSON literal."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Relay a Web Inspector backend message from the client into the given browsing context's Inspector controller. Available when the session is configured to permit Inspector-protocol testing over the Automation transport.",
+        "condition": "ENABLE(REMOTE_INSPECTOR)"
+      }
+    },
+    "Automation#setFilesForInputFileUpload": {
+      "_tag": "Command",
+      "method": "Automation.setFilesForInputFileUpload",
+      "params": "Automation#setFilesForInputFileUpload.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Sets the choosen files for the given input file upload element."
+      }
+    },
+    "Automation#setFilesForInputFileUpload.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "frameHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#FrameHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the frame that contains the input element."
+          }
+        },
+        "nodeHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#NodeHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle of the input element."
+          }
+        },
+        "filenames": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Scalar",
+              "scalar": "string"
+            }
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Absolute paths to the choosen files."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Sets the choosen files for the given input file upload element."
+      }
+    },
+    "Automation#setFilesToSelectForFileUpload": {
+      "_tag": "Command",
+      "method": "Automation.setFilesToSelectForFileUpload",
+      "params": "Automation#setFilesToSelectForFileUpload.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Sets the files to be selected when a file input type element becomes active in a browsing context."
+      }
+    },
+    "Automation#setFilesToSelectForFileUpload.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "filenames": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Scalar",
+              "scalar": "string"
+            }
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Absolute paths to the files that should be selected."
+          }
+        },
+        "fileContents": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Scalar",
+              "scalar": "string"
+            }
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "An array of Base64-encoded binary data for each file to be selected. If this property is provided, it is assumed that 'filenames' are not real file paths on the session host's filesystem, and this binary data will be used instead."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Sets the files to be selected when a file input type element becomes active in a browsing context."
+      }
+    },
+    "Automation#setSessionPermissions": {
+      "_tag": "Command",
+      "method": "Automation.setSessionPermissions",
+      "params": "Automation#setSessionPermissions.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Attempts to set the state of session permissions, which control whether privileged Web APIs can be used. Permissions that are not understood are ignored. Permissions are applied to all browsing contexts associated with the automation session."
+      }
+    },
+    "Automation#setSessionPermissions.Params": {
+      "_tag": "Struct",
+      "members": {
+        "permissions": {
+          "type": {
+            "_tag": "List",
+            "items": {
+              "_tag": "Ref",
+              "shape": "Automation#SessionPermissionData"
+            }
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Array of session permissions to set, if they are available."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Attempts to set the state of session permissions, which control whether privileged Web APIs can be used. Permissions that are not understood are ignored. Permissions are applied to all browsing contexts associated with the automation session."
+      }
+    },
+    "Automation#setStorageAccessPermissionState": {
+      "_tag": "Command",
+      "method": "Automation.setStorageAccessPermissionState",
+      "params": "Automation#setStorageAccessPermissionState.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Simulates user modification of a PermissionDescriptor's permission status for storage-access."
+      }
+    },
+    "Automation#setStorageAccessPermissionState.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the targeted browsing context."
+          }
+        },
+        "frameHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#FrameHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the frame to set storage access permission for."
+          }
+        },
+        "state": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#PermissionState"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The new state to be applied to the permission."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Simulates user modification of a PermissionDescriptor's permission status for storage-access."
+      }
+    },
+    "Automation#setStorageAccessPolicy": {
+      "_tag": "Command",
+      "method": "Automation.setStorageAccessPolicy",
+      "params": "Automation#setStorageAccessPolicy.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Modifies the storage access policy for the specified browsing context."
+      }
+    },
+    "Automation#setStorageAccessPolicy.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "blocked": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Whether to block third-party cookie storage access."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Modifies the storage access policy for the specified browsing context."
+      }
+    },
+    "Automation#setUserInputForCurrentJavaScriptPrompt": {
+      "_tag": "Command",
+      "method": "Automation.setUserInputForCurrentJavaScriptPrompt",
+      "params": "Automation#setUserInputForCurrentJavaScriptPrompt.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Sets the user entered value in a JavaScript prompt dialog currently showing in a browsing context."
+      }
+    },
+    "Automation#setUserInputForCurrentJavaScriptPrompt.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "userInput": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The text to enter in the prompt."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Sets the user entered value in a JavaScript prompt dialog currently showing in a browsing context."
+      }
+    },
+    "Automation#setVirtualAuthenticatorUserVerified": {
+      "_tag": "Command",
+      "method": "Automation.setVirtualAuthenticatorUserVerified",
+      "params": "Automation#setVirtualAuthenticatorUserVerified.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "set isUserVerified property for a given virtual authenticator for the specified browsing context"
+      }
+    },
+    "Automation#setVirtualAuthenticatorUserVerified.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context."
+          }
+        },
+        "authenticatorId": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The virtual authenticator id to fetch all credentials for."
+          }
+        },
+        "isUserVerified": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The isUserVerified value to set on the given virtual authenticator"
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "set isUserVerified property for a given virtual authenticator for the specified browsing context"
+      }
+    },
+    "Automation#setWindowFrameOfBrowsingContext": {
+      "_tag": "Command",
+      "method": "Automation.setWindowFrameOfBrowsingContext",
+      "params": "Automation#setWindowFrameOfBrowsingContext.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Moves and/or resizes the window of the specified top-level browsing context to the specified position and size. Both position and size may be omitted. This command implicitly exits fullscreen and restores the window (if previously hidden), then optionally sets the window frame."
+      }
+    },
+    "Automation#setWindowFrameOfBrowsingContext.Params": {
+      "_tag": "Struct",
+      "members": {
+        "handle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context to be resized."
+          }
+        },
+        "origin": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#Point"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The new origin for the browsing context's window. The position is interpreted in screen coordinate space, relative to the upper left corner of the screen."
+          }
+        },
+        "size": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#Size"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The new size for the browsing context's window. The size is interpreted in screen pixels."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Moves and/or resizes the window of the specified top-level browsing context to the specified position and size. Both position and size may be omitted. This command implicitly exits fullscreen and restores the window (if previously hidden), then optionally sets the window frame."
+      }
+    },
+    "Automation#switchToBrowsingContext": {
+      "_tag": "Command",
+      "method": "Automation.switchToBrowsingContext",
+      "params": "Automation#switchToBrowsingContext.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Activates the specified browsing context and optional frame, which gives them focus (causing the 'focus' DOM event to fire, and 'blur' DOM event to fire for the previous browsing context and frame)."
+      }
+    },
+    "Automation#switchToBrowsingContext.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context that should be made focused."
+          }
+        },
+        "frameHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#FrameHandle"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the frame that should be focused. Defaults to the main frame if omitted."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Activates the specified browsing context and optional frame, which gives them focus (causing the 'focus' DOM event to fire, and 'blur' DOM event to fire for the previous browsing context and frame)."
+      }
+    },
+    "Automation#takeScreenshot": {
+      "_tag": "Command",
+      "method": "Automation.takeScreenshot",
+      "params": "Automation#takeScreenshot.Params",
+      "result": "Automation#takeScreenshot.Result",
+      "traits": {
+        "status": "stable",
+        "description": "Take a screenshot of the current page or given element in a browsing context."
+      }
+    },
+    "Automation#takeScreenshot.Params": {
+      "_tag": "Struct",
+      "members": {
+        "handle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context to take a screenshot of."
+          }
+        },
+        "frameHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#FrameHandle"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the frame that contains the element. The main frame is used if this parameter is empty string or excluded."
+          }
+        },
+        "nodeHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#NodeHandle"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The handle of the element to take a screenshot of. The browsing context document element is used if this parameter is excluded."
+          }
+        },
+        "scrollIntoViewIfNeeded": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "If the element should be scrolled into view before taking the screenshot."
+          }
+        },
+        "clipToViewport": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "boolean"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "Whether a screenshot of the entire page should be clipped to the visual viewport. A value of 'false' preserves behavior for legacy protocol screenshots."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Take a screenshot of the current page or given element in a browsing context."
+      }
+    },
+    "Automation#takeScreenshot.Result": {
+      "_tag": "Struct",
+      "members": {
+        "data": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "Base64-encoded image data (PNG)."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Take a screenshot of the current page or given element in a browsing context."
+      }
+    },
+    "Automation#unloadWebExtension": {
+      "_tag": "Command",
+      "method": "Automation.unloadWebExtension",
+      "params": "Automation#unloadWebExtension.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Unloads a web extension in the automation session.",
+        "condition": "defined(WTF_PLATFORM_MAC) && WTF_PLATFORM_MAC"
+      }
+    },
+    "Automation#unloadWebExtension.Params": {
+      "_tag": "Struct",
+      "members": {
+        "identifier": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "string"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The identifier of the extension to unload."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Unloads a web extension in the automation session.",
+        "condition": "defined(WTF_PLATFORM_MAC) && WTF_PLATFORM_MAC"
+      }
+    },
+    "Automation#waitForNavigationToComplete": {
+      "_tag": "Command",
+      "method": "Automation.waitForNavigationToComplete",
+      "params": "Automation#waitForNavigationToComplete.Params",
+      "result": null,
+      "traits": {
+        "status": "stable",
+        "description": "Wait for pending navigation to complete."
+      }
+    },
+    "Automation#waitForNavigationToComplete.Params": {
+      "_tag": "Struct",
+      "members": {
+        "browsingContextHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#BrowsingContextHandle"
+          },
+          "optional": false,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the browsing context in which wait for pending navigation to complete."
+          }
+        },
+        "frameHandle": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#FrameHandle"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The handle for the frame in which wait for pending navigation to complete. The main frame is used if this parameter empty string or excluded."
+          }
+        },
+        "pageLoadStrategy": {
+          "type": {
+            "_tag": "Ref",
+            "shape": "Automation#PageLoadStrategy"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The page load strategy to use when determining when navigation is complete."
+          }
+        },
+        "pageLoadTimeout": {
+          "type": {
+            "_tag": "Scalar",
+            "scalar": "number"
+          },
+          "optional": true,
+          "traits": {
+            "status": "stable",
+            "description": "The timeout in milliseconds that the navigation is expected to be completed in, otherwise a <code>Timeout</code> error is returned."
+          }
+        }
+      },
+      "traits": {
+        "status": "stable",
+        "description": "Wait for pending navigation to complete."
+      }
+    }
+  }
+}

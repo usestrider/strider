@@ -21,6 +21,8 @@ export interface Source {
   readonly description: string
   /** The output directory under `packages/browser/src`, which also keys brands: `cdp`, `bidi-protocol`, `webkit-protocol`. */
   readonly output: string
+  /** The protocol's directory under `packages/tools/codegen/protocols`, where its model is corrected. */
+  readonly directory: string
 }
 
 export type Verdict =
@@ -432,7 +434,7 @@ export const emit = (model: ProtocolModel, source: Source): Emitted => {
         domainTraits.description ?? `The ${domain} ${model.backend === "bidi" ? "module" : "domain"}.`
       ),
       "",
-      `Generated from ${source.description}. Don't edit: correct the model (\`packages/tools/codegen/protocols/${model.backend}\`) and run \`pnpm codegen:protocol\`.`,
+      `Generated from ${source.description}. Don't edit: correct the model (\`packages/tools/codegen/protocols/${source.directory}\`) and run \`pnpm codegen:protocol\`.`,
       "",
       `@stability ${domainTraits.status === "experimental" ? "experimental" : "unstable"}`,
       "@since 0.1.0"

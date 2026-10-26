@@ -145,6 +145,11 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* load events are the main frame's (`frames.readiness`, `partial`); `contentFrame` is `Unsupported`; an adopted page's `document.readyState` is asked as its target is set up, so a page attached after its load is `complete`.
 - *Reconsider:* asking a child frame's readiness in its realm, if a use waits on one.
 
+**Q211. A page stock WebKit's Automation just opened is still loading, and a navigation sent then returns when that load ends** (Browser). `createBrowsingContext` answers while the new page loads its first `about:blank`; a `navigateBrowsingContext` sent at once, with the `Normal` load strategy, is answered when that load completes, and the navigation it asked for commits after, unloading the document the next command runs in ("Callback was not called before the unload event").
+- *Seen:* review 23's first step: its integration test failed every time once the machine was quiet, and passed in the probes, which did more before navigating.
+- *We:* the test waits for the new page's first load (`waitForNavigationToComplete`) before navigating; the adapter will.
+- *Reconsider:* nothing.
+
 ## Browsers: dialogs, popups, focus and input
 
 **Q16. A dialog blocks evaluation on Chromium and WebKit, not on Firefox** (Browser). Every evaluation in every world waits while a dialog is open on Chromium and WebKit; Firefox answers.
@@ -286,6 +291,16 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 22's fifth step, in its first probe of the protocol and again through the library.
 - *We:* `prompts` is `unsupported`; an operation on the page waits until its deadline, and `WebKit.layerAttach`'s documentation says a person must dismiss the dialog.
 - *Reconsider:* nothing on stock WebKit.
+
+**Q206. Stock WebKit's Automation says a dialog is open, and its message, but not its kind** (Browser). `isShowingJavaScriptDialog` and `messageOfCurrentJavaScriptDialog` answer; nothing announces a dialog, and nothing says whether it is an alert, a confirm, a prompt or a `beforeunload`, or a prompt's default value. The browser knows both, and reports them only to its WebDriver BiDi, which is compiled out (Q204).
+- *Seen:* review 23, P6, and its first step's measurement.
+- *We:* review 23 decided: symbolic breakpoints if their cost is small, else `Dialog.Unknown`. Their cost is Q207's, so the adapter (its second step) asks every 100 ms whether a dialog is open and reports it as `Dialog.Unknown`, with its message.
+- *Reconsider:* when WebKitGTK ships its WebDriver BiDi, whose `userPromptOpened` has both.
+
+**Q207. A debugger slows a stock WebKit page's JavaScript by about 80%, and a symbolic breakpoint can't see a native call's arguments** (Browser). With `Debugger.enable`, a benchmark of loops, sorting, strings, DOM and recursion ran in 38 ms instead of 21 (median of seven); symbolic breakpoints on `alert`, `confirm` and `prompt` added nothing more. A breakpoint's probe names the dialog's kind, but it fires for any function of that name, the page's own included, and evaluates in the caller's frame, where `arguments` doesn't exist, so a prompt's default value can't be read.
+- *Seen:* review 23's first step, against WebKitGTK 2.54.1's MiniBrowser.
+- *We:* the adapter attaches no debugger to learn dialogs' kinds (Q206).
+- *Reconsider:* nothing.
 
 ## Browsers: downloads and file choosers
 
@@ -612,6 +627,11 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Reconsider:* evaluating a Firefox script's source at global scope, if the page's CSP allows it.
 - **Kept** in review 21: the *We* line is the decision.
 
+**Q209. On stock WebKit, `Page.overrideUserAgent` answers, but the document keeps its user agent, and there is no network throttling** (Browser). After the override, `navigator.userAgent` in the loaded document is unchanged; `Network.setEmulatedConditions` is "not found" in WebKitGTK 2.54.1.
+- *Seen:* review 23, P5.
+- *We:* review 23's capabilities list a user agent for the document already loaded, and throttling, as unsupported.
+- *Reconsider:* whether requests carry the override, in the adapter's step.
+
 ## Browsers: frames, captures and storage
 
 **Q110. Chromium renders nothing in a cross-site frame outside the viewport** (Browser). No animation frame runs in an out-of-process iframe that is scrolled out of view, so an action in it saw no rendering opportunity and timed out with `NoRenderingOpportunity`.
@@ -797,6 +817,21 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 **Q195. Stock WebKit numbers frames, loaders and requests in each web process from `0.1`** (Browser). Two pages, or one page's targets before and after a cross-site navigation, which are different processes, have the same ids; Playwright's build gives each a unique one.
 - *Seen:* review 22's fifth step: with two tabs, both main frames were `0.1`, and a navigation ran in the other page's context.
 - *We:* the transport qualifies each target's ids with its page proxy's and its own (`webkitStockTransport.ts`), on the paths the adapter reads, never by walking a message, and takes the qualification off a command's.
+- *Reconsider:* nothing.
+
+**Q204. WebKitGTK's WebDriver server has no WebDriver BiDi in release builds** (Browser). `ENABLE_WEBDRIVER_BIDI` follows `ENABLE_EXPERIMENTAL_FEATURES`, which releases turn off: `WebKitWebDriver` has no `--bidi-port`, and a session asking for `webSocketUrl` fails "Failed to match capabilities". The browser's Automation domain keeps the BiDi commands under their condition.
+- *Seen:* review 23, P1.
+- *We:* Strider speaks the Automation protocol itself, over the inspector server's socket (review 23).
+- *Reconsider:* when a WebKitGTK release builds it in.
+
+**Q205. With `WEBKIT_INSPECTOR_HTTP_SERVER` set, WebKitGTK ignores `WEBKIT_INSPECTOR_SERVER`** (Browser). The socket server then takes a random port, behind the HTTP server (`WebKitInitialize.cpp`), so a client of the socket can't find it.
+- *Seen:* review 23, P11: a probe that set both found nothing listening on the socket's port.
+- *We:* a browser launched for automation gets only `WEBKIT_INSPECTOR_SERVER`; attaching uses the HTTP server.
+- *Reconsider:* nothing.
+
+**Q208. Stock WebKit's Automation evaluates in the page's world, and its inspector tunnel is off** (Browser). `evaluateJavaScriptFunction` sees the page's globals and expandos, and no other execution context appears; `sendInspectorMessage`, which would carry the inspector protocol through the session, answers only a client that allows inspector testing, which WebKitGTK's API doesn't.
+- *Seen:* review 23, P3 and P4.
+- *We:* the inspector reaches a page as its own target on the same socket; the engine runs in the page's world, as when attached (Q194).
 - *Reconsider:* nothing.
 
 ## Ours: workarounds and odd shapes
@@ -1236,3 +1271,9 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 22's fifth step.
 - *We:* `isolatedWorlds` is `unsupported`, and `WebKit.layerAttach`'s documentation says where the engine runs; a caller's function never moves there: `evaluate` fails `Unsupported`, and `evaluateInMainWorld` runs.
 - *Reconsider:* nothing while stock WebKit makes no worlds.
+
+**Q210. Every WebKit protocol's generated header named the patched build's directory** (Ours). The emitter wrote `protocols/<dialect>`, and the stock and Automation protocols are in WebKit's dialect, so their modules said to correct `protocols/webkit`.
+- *Seen:* review 22's fifth step, noticed after its commit.
+- *We:* each source names its own directory (`Emit.Source.directory`).
+- *Reconsider:* nothing.
+

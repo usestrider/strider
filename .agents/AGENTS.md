@@ -46,8 +46,9 @@ itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm` from the repos
 - `packages/tools/codegen`: protocol code generation. `protocols/<backend>/` holds the vendored spec (`source/`),
   corrections (`patches/`), our annotations (`overlay/`), and the generated `model.json` and `coverage.json`. Its
   output is `packages/browser/src/cdp/`, `packages/browser/src/bidi-protocol/`,
-  `packages/browser/src/webkit-protocol/` (Playwright's WebKit build) and
-  `packages/browser/src/webkit-stock-protocol/` (stock WebKit, from WebKitGTK's source). Never edit generated files:
+  `packages/browser/src/webkit-protocol/` (Playwright's WebKit build, until review 23 removes it),
+  `packages/browser/src/webkit-stock-protocol/` (stock WebKit's inspector, from WebKitGTK's source) and
+  `packages/browser/src/webkit-automation-protocol/` (stock WebKit's Automation domain). Never edit generated files:
   change a correction or an annotation and run `pnpm codegen:protocol`. A correction says what the spec states,
   what the wire does, and the evidence. On a roll, `pnpm codegen:audit` lists the corrections the new spec has
   absorbed. `keyboards/source/` holds Unicode CLDR's keyboard layouts, which `pnpm codegen:keyboards` turns into

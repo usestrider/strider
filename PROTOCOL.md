@@ -238,6 +238,14 @@ interface Traits {                               // spec facts plus overlay anno
 - **Corrections:** none.
 - **Output:** 28 modules at `@usestrider/browser/webkit-stock-protocol`, with 188 types, 248 commands and 110 events; 12 approximated, none excluded.
 
+**Built for WebKit's Automation protocol** (2026-10-26, after [review 23](reviews/23-webkit-without-playwright.md), its first step):
+
+- **Source.** `Automation.json` from `Source/WebKit/UIProcess/Automation/` in WebKitGTK 2.54.1's source release, unchanged, in `protocols/webkit-automation/source/`, with the Automation code's notice (`LICENSE`, BSD-2-clause, copyright Apple Inc.) and `SOURCE.md`. Read as the stock protocol's files are, as a backend of its own (`webkit-automation`).
+- **The dialect's macros.** Its conditions are WebKit's macros, `ENABLE(WEBDRIVER_BIDI)` and `defined(WTF_PLATFORM_MAC) && WTF_PLATFORM_MAC`; `possible` reads `ENABLE`, `USE`, `HAVE` and `PLATFORM` as the flags they name, `PLATFORM(IOS_FAMILY)` off as its `defined` form is.
+- **Overlay:** 3 id brands (browsing contexts, frames, nodes), the cookie's value as sensitive, and `createBrowsingContext` as creating a page `closeBrowsingContext` releases.
+- **Output:** 1 module at `@usestrider/browser/webkit-automation-protocol`, with 32 types, 57 commands and 4 events; none approximated or excluded.
+- **Also.** A generated module's header names its own protocol's directory, not its dialect's (Q210), which corrected the stock protocol's 28 headers.
+
 **Built** (2026-10-20): the correction audit and the rest of the drift test.
 
 - **The correction audit.** `pnpm codegen:audit` (`strider-codegen audit <backend> [--check]`) rebuilds each backend's model once without each correction, and lists the ones whose absence changes nothing: the spec has absorbed them, so they can go, and `--check` fails until they do. A correction another one builds on is needed. It runs on each roll; today BiDi's two corrections are both needed, and CDP and WebKit have none.
@@ -856,6 +864,15 @@ Adapter responsibilities:
   - **The CLI's `--attach` doesn't reach it** (Q168; CLI.md, Built).
   - **The MiniBrowser runs under Xvfb,** a display server, since it has no headless mode (Q202).
 - **Tests.** `test/StockWebKit.test.ts` reads a list whose page wrote a socket's path into its title, and qualifies a target's ids on their paths and nowhere else: not in a header's name, not in an evaluation's value. `test/integration/StockWebKit.test.ts` attaches to a MiniBrowser: call site 7 on two tabs whose ids are numbered alike, with a route the page's own click goes through, and both tabs left for a second connection; navigations across processes, to a 404, a redirect, a refused connection, a blocked port, a 204, a download, a fragment and a reload; console messages, a fulfilled route, an init script in the main world, cookies, storage and a full-page screenshot; the capability table and the refusals of `newPage`, a click (`NotSent`), `evaluate` and a JPEG; a page the browser opens, found, and the browser's exit, as `ConnectionLost`. Integration tests: 513, all passing in one full run, a file at a time.
+
+**Built** (2026-10-26, after [review 23](reviews/23-webkit-without-playwright.md), its first step): the inspector server's socket and the Automation protocol, which the adapter's next step drives.
+
+- **GVariant** (`internal/gvariant.ts`). Encodes and decodes from type strings, with GVariant's alignment and framing offsets: the basic types, strings, variants, maybes, arrays, tuples and dictionary entries, as `boolean`, `number`, `bigint`, `string`, `{ type, value }`, `null` and arrays. Encoding is little-endian; decoding takes either; malformed data throws `GVariantError`.
+- **The socket** (`internal/webkitInspectorSocket.ts`). A frame is the body's size in four big-endian bytes, a flags byte (bit 0, little-endian), the message's name, a nul and its parameters. `connect` takes an Effect `Socket` the program made, so the library opens no connection of its own, and gives `send`, the server's messages as a stream, and `closed`. It reads `DidStartAutomationSession`, `SetTargetList`, `SendMessageToFrontend` and `DidClose`, and writes `StartAutomationSession`, `Setup`, `SendMessageToBackend` and `FrontendDidClose`; a message it doesn't know is skipped, a frame that doesn't parse loses the connection.
+- **The protocol** (Code generation, Built for WebKit's Automation protocol).
+- **The measurement review 23 asked for** (Q207). With the debugger attached, a benchmark page's JavaScript ran about 80% slower, and a symbolic breakpoint can't read a prompt's default value. By the maintainer's decision, the adapter learns no dialog's kind, and reports one as `Dialog.Unknown` (Q206).
+- **Where the build differs from the review.** **The socket is the program's,** an Effect `Socket`: Effect has no service that opens a TCP connection to a port chosen at run time, so `WebKit.layer` will need one the program provides, which `NodeSocket.makeNet` satisfies. The review didn't foresee it.
+- **Tests.** `test/WebKitInspectorSocket.test.ts` encodes and decodes the GVariant specification's examples, frames `StartAutomationSession` as the MiniBrowser accepted it, reads the frames it sent however they're split, and connects to a server that plays them. `test/integration/WebKitAutomation.test.ts` starts a session with the MiniBrowser in automation mode, which names itself and the pinned version, opens a page and, once its first document has loaded (Q211), navigates it, clicks it (`isTrusted`), types `hé@`, takes a screenshot, answers a `confirm`, and evaluates in the same page as an inspector target on the same socket. Integration tests: 514. In the full run, a file at a time, the other 513 passed and the new test failed for Q211; after the fix, it passes alone, five times out of five, and beside the stock WebKit tests.
 
 ### Pause-on-start granularity
 

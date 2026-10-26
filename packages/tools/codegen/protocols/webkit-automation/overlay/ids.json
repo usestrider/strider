@@ -1,0 +1,8 @@
+{
+  "reason": "Ids and handles the browser mints. Each is branded by protocol, domain and kind, so an id never crosses protocols or kinds (PROTOCOL.md, Shape of the output). An automation session names its pages, frames and elements by handles of its own.",
+  "annotate": [
+    { "target": "Automation#BrowsingContextHandle", "traits": { "id": true } },
+    { "target": "Automation#FrameHandle", "traits": { "id": true } },
+    { "target": "Automation#NodeHandle", "traits": { "id": true } }
+  ]
+}

@@ -62,15 +62,22 @@ const traits = (item: CdpItem, extra: Partial<Traits> = {}): Traits => ({
 })
 
 /**
- * WebKit: whether an item compiled in under `condition` can be in a build Playwright ships. Playwright builds
- * WebKit for Linux, macOS and Windows, never iOS, so `WTF_PLATFORM_IOS_FAMILY` is off; any other flag may be on
- * in some build, so it counts as on, and the item is kept with its condition recorded. The grammar is the C
- * preprocessor's subset the spec uses: `defined(X)`, `X`, `!`, `&&`, `||` and parentheses.
+ * WebKit: whether an item compiled in under `condition` can be in a build the library drives. Those are WebKit's
+ * builds for Linux, macOS and Windows, never iOS, so `WTF_PLATFORM_IOS_FAMILY` (`PLATFORM(IOS_FAMILY)`) is off; any
+ * other flag may be on in some build, so it counts as on, and the item is kept with its condition recorded. The
+ * grammar is the C preprocessor's subset the specs use: `defined(X)`, `X`, WebKit's macros (`ENABLE(X)`, `USE(X)`,
+ * `HAVE(X)`, `PLATFORM(X)`), `!`, `&&`, `||` and parentheses.
  */
 export const possible = (condition: string): boolean => {
   const tokens = condition.match(/defined|[A-Za-z_][A-Za-z0-9_]*|&&|\|\||[!()]/g) ?? []
   let at = 0
   const flag = (name: string) => name !== "WTF_PLATFORM_IOS_FAMILY"
+  const macros: Readonly<Record<string, string>> = {
+    ENABLE: "ENABLE_",
+    USE: "USE_",
+    HAVE: "HAVE_",
+    PLATFORM: "WTF_PLATFORM_"
+  }
   const expect = (token: string) => {
     if (tokens[at] !== token) throw new Error(`Condition ${condition}: expected ${token} at ${at}`)
     at++
@@ -88,6 +95,12 @@ export const possible = (condition: string): boolean => {
       const name = tokens[at++]!
       expect(")")
       return flag(name)
+    }
+    if (token !== undefined && macros[token] !== undefined && tokens[at] === "(") {
+      expect("(")
+      const name = tokens[at++]!
+      expect(")")
+      return flag(`${macros[token]}${name}`)
     }
     if (token !== undefined && /^[A-Za-z_]/.test(token)) return flag(token)
     throw new Error(`Condition ${condition}: unexpected ${String(token)}`)

@@ -87,11 +87,15 @@ describe("parse", () => {
     )
   })
 
-  it("WebKit: keeps what some Playwright build compiles in, once, with its condition", () => {
+  it("WebKit: keeps what some desktop build compiles in, once, with its condition", () => {
     const ios = "defined(WTF_PLATFORM_IOS_FAMILY) && WTF_PLATFORM_IOS_FAMILY"
     assert.isFalse(possible(ios))
     assert.isTrue(possible(`!(${ios})`))
     assert.isTrue(possible("(defined(ENABLE_WEB_ARCHIVE) && ENABLE_WEB_ARCHIVE) && (defined(USE_CF) && USE_CF)"))
+    // WebKit's macros, as the Automation protocol writes them
+    assert.isTrue(possible("ENABLE(WEBDRIVER_BIDI)"))
+    assert.isTrue(possible("ENABLE(REMOTE_INSPECTOR) && USE(SOUP)"))
+    assert.isFalse(possible("PLATFORM(IOS_FAMILY)"))
     assert.throws(() => possible("defined(A"), /expected \)/)
     const webkit = parse("test", [{
       domains: [{
@@ -233,7 +237,7 @@ describe("emit", () => {
       { target: "Net#Cookie:value", traits: { sensitive: true } }
     ]
   }]])
-  const { coverage, modules } = emit(annotated, { description: "a fixture", output: "cdp" })
+  const { coverage, modules } = emit(annotated, { description: "a fixture", output: "cdp", directory: "cdp" })
   const net = modules.get("Net.ts")!
   const card = modules.get("Card.ts")!
 

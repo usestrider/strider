@@ -2210,6 +2210,10 @@ The WebKit backend (`@usestrider/browser/webkit`): Playwright-patched WebKit bui
 - `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
 - `const layerAttach: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
 
+## `@usestrider/browser/webkit-automation-protocol`
+
+1 generated modules: Automation. Their declarations are in the API reference.
+
 ## `@usestrider/browser/webkit-protocol`
 
 33 generated modules: Animation, Audit, Browser, Canvas, Console, CPUProfiler, CSS, Debugger, Dialog, DOM, DOMDebugger, DOMStorage, Emulation, GenericTypes, Heap, IndexedDB, Input, Inspector, LayerTree, Memory, Network, Page, Playwright, Recording, Runtime, Screencast, ScriptProfiler, Security, ServiceWorker, Storage, Target, Timeline, Worker. Their declarations are in the API reference.

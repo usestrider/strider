@@ -1,0 +1,6 @@
+{
+  "reason": "Classified values (README, Diagnostics and secrets): cookie values. They decode as Redacted, so L0 traffic captured in diagnostics can't leak them.",
+  "annotate": [
+    { "target": "Automation#Cookie:value", "traits": { "sensitive": true } }
+  ]
+}

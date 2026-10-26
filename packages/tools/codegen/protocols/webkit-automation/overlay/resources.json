@@ -1,0 +1,12 @@
+{
+  "reason": "Commands whose replies hand out something with a remote lifetime: a page the session opens. A reply that arrives after its caller was interrupted, or timed out, is routed to an owner, which adopts or releases it (PROTOCOL.md, Protocol client). `release` names the command that releases it, `Automation.closeBrowsingContext`.",
+  "annotate": [
+    {
+      "target": "Automation#createBrowsingContext",
+      "traits": {
+        "createsResource": true,
+        "release": [{ "method": "Automation.closeBrowsingContext", "param": "handle", "from": "/handle" }]
+      }
+    }
+  ]
+}
