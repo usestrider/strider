@@ -45,6 +45,15 @@ const runLocal = async () => {
     )
     return
   }
+  if (command === "mcp") {
+    // An MCP server over standard input and output, for a client that launches it (review 22)
+    const [{ run }, NodeStdio] = await Promise.all([
+      import("../internal/cli/mcp.ts"),
+      import("@effect/platform-node/NodeStdio")
+    ])
+    run(argv, bin, NodeStdio.layer).pipe(Effect.provide(NodeServices.layer), NodeRuntime.runMain)
+    return
+  }
   Cli.run(argv).pipe(Effect.provide(NodeServices.layer), NodeRuntime.runMain)
 }
 

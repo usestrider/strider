@@ -344,8 +344,13 @@ export interface Model {
   readonly documentOf: (navigable: Target.NavigableId) => Effect.Effect<Option.Option<Target.DocumentId>>
   /** Ends when the connection does. */
   readonly lost: Deferred.Deferred<void>
-  /** Closes a page its owner's scope released, and waits for the close under the default budget. */
-  readonly release: (page: Target.NavigableId) => Effect.Effect<void>
+  /**
+   * Closes a page its owner's scope released, and waits for the close under the default budget; with `by`, only
+   * while `by` still owns it.
+   */
+  readonly release: (page: Target.NavigableId, by?: Scope.Scope) => Effect.Effect<void>
+  /** Moves a page's ownership to `to`, which then releases it (CONCEPTS.md §3, transfers). */
+  readonly transfer: (page: Target.NavigableId, to: Scope.Scope) => Effect.Effect<void>
 }
 
 /** The most navigations remembered at once: a page's own navigations nobody waits for are dropped oldest first. */
@@ -726,10 +731,12 @@ export const make = Effect.fnUntraced(function*() {
    * default budget: a page created right after must not meet a browser still closing this one (QUIRKS.md, Q119
    * and Q135).
    */
-  const release = (page: Target.NavigableId) =>
+  const release = (page: Target.NavigableId, by?: Scope.Scope) =>
     Effect.suspend(() => {
       const entry = pages.get(page)
       if (adapter === undefined || entry === undefined) return Effect.void
+      // A page transferred to another scope is that scope's to release (CONCEPTS.md §3, transfers)
+      if (by !== undefined && (Option.isNone(entry.owner) || entry.owner.value !== by)) return Effect.void
       return adapter.closePage(page, { runBeforeUnload: false }).pipe(
         Effect.ignore,
         Effect.andThen(Operation.budget),
@@ -844,7 +851,7 @@ export const make = Effect.fnUntraced(function*() {
             if (Option.isSome(opener.value.owner)) {
               const scope = opener.value.owner.value
               entry.owner = Option.some(scope)
-              yield* Scope.addFinalizer(scope, release(fact.page)).pipe(Effect.forkIn(modelScope))
+              yield* Scope.addFinalizer(scope, release(fact.page, scope)).pipe(Effect.forkIn(modelScope))
             }
           }
           yield* SubscriptionRef.update(owner.state, (state) => ({ ...state, pages: [...state.pages, fact.page] }))
@@ -1264,7 +1271,14 @@ export const make = Effect.fnUntraced(function*() {
         pageList,
         documentOf,
         lost,
-        release
+        release,
+        transfer: (page, to) =>
+          Effect.suspend(() => {
+            const entry = pages.get(page)
+            if (entry === undefined) return Effect.void
+            entry.owner = Option.some(to)
+            return Scope.addFinalizer(to, release(page, to))
+          })
       }
     })
 

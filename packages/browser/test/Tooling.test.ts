@@ -267,20 +267,24 @@ describe("BrowserToolkit", () => {
       "await",
       "back",
       "click",
+      "control",
       "dialog",
       "expect",
       "fill",
+      "find",
       "goto",
       "history",
       "newPage",
       "next",
       "pages",
       "press",
+      "release",
       "route",
       "screenshot",
       "scroll",
       "select",
-      "snapshot"
+      "snapshot",
+      "tabs"
     ])
     for (const tool of Object.values(BrowserToolkit.toolkit.tools)) assert.strictEqual(tool.failureMode, "return")
   })

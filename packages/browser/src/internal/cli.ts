@@ -12,6 +12,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
+import * as Ledger from "../Ledger.ts"
 import * as Browsers from "./browsers.ts"
 import * as Client from "./cli/client.ts"
 import * as Node from "./cli/node.ts"
@@ -180,11 +181,92 @@ const runningFrom = (fs: FileSystem.FileSystem, dir: string) =>
         ))
   )
 
-/** `strider prune <name>`: removes what a session that didn't end cleanly left behind. */
+/** When a process started, in milliseconds since the epoch, where `/proc` says (Linux); `None` elsewhere. */
+const startedAt = Effect.fnUntraced(
+  function*(fs: FileSystem.FileSystem, pid: number) {
+    const boot = (yield* fs.readFileString("/proc/stat")).match(/^btime (\d+)$/m)?.[1]
+    // The fields after the command's name, which is in parentheses and may hold spaces
+    const stat = (yield* fs.readFileString(`/proc/${pid}/stat`)).split(") ")[1]?.split(" ")
+    const ticks = stat?.[19]
+    if (boot === undefined || ticks === undefined) return Option.none<number>()
+    // Clock ticks since boot, a hundred a second on Linux
+    return Option.some((Number(boot) + Number(ticks) / 100) * 1000)
+  },
+  Effect.orElseSucceed(() => Option.none<number>())
+)
+
+/**
+ * Whether a ledger's program still runs: its process id is alive and, where `/proc` says when it started, it is
+ * the same process. When that can't be told, it counts as running, so nothing of a live program is reclaimed.
+ */
+const stillRunning = Effect.fnUntraced(function*(fs: FileSystem.FileSystem, owner: Ledger.Record["owner"]) {
+  if (!Node.alive(owner.pid)) return false
+  const started = yield* startedAt(fs, owner.pid)
+  return Option.isNone(started) || Math.abs(started.value - owner.startedAt) < 3000
+})
+
+/** `strider prune` with no name: what the ledger's ended programs left, reclaimed with `--yes` (review 22). */
+const pruneLedger = Effect.fnUntraced(function*(yes: boolean) {
+  const fs = yield* FileSystem.FileSystem
+  const os = yield* Effect.promise(() => Node.os())
+  const directory = Session.ledgerRoot(Node.process.env, os.homedir())
+  const records = yield* Ledger.read(directory)
+  let found = 0
+  for (const { file, record } of records) {
+    if (yield* stillRunning(fs, record.owner)) continue
+    found++
+    yield* Console.log(
+      `left by process ${record.owner.pid}, started ${new Date(record.owner.startedAt).toISOString()}, which has ended:`
+    )
+    for (const item of record.items) {
+      if (item._tag === "Browser") {
+        const running = yield* runningFrom(fs, item.profile)
+        yield* Console.log(
+          `  ${item.executable}, ${
+            running.length === 0 ? "no longer running" : `running as ${running.join(", ")}`
+          }, its profile ${item.profile}`
+        )
+        if (yes) {
+          for (const pid of running) {
+            try {
+              Node.process.kill(Number(pid), "SIGKILL")
+            } catch {
+              // It exited meanwhile
+            }
+          }
+        }
+      } else {
+        const exists = yield* fs.exists(item.path).pipe(Effect.orElseSucceed(() => false))
+        yield* Console.log(
+          `  ${item.path}${exists ? ` (${megabytes(yield* sizeOf(fs, item.path))})` : ", already gone"}`
+        )
+        if (yes && exists) yield* fs.remove(item.path, { recursive: true }).pipe(Effect.ignore)
+      }
+    }
+    if (yes) yield* fs.remove(file).pipe(Effect.ignore)
+  }
+  if (found === 0) return yield* Console.log("Nothing is left behind by a program that ended")
+  yield* Console.log(
+    yes ? `reclaimed what ${found} ended program${found === 1 ? "" : "s"} left` : "strider prune --yes reclaims it"
+  )
+})
+
+/**
+ * `strider prune <name>`: removes what a session that didn't end cleanly left behind. With no name, what the
+ * ledger's ended programs left, which `--yes` reclaims.
+ */
 export const prune = Command.make(
   "prune",
-  { name: Argument.String("name") },
-  Effect.fnUntraced(function*({ name }) {
+  {
+    name: Argument.String("name").pipe(Argument.optional),
+    yes: Flag.Boolean("yes").pipe(
+      Flag.withDescription("With no name: reclaim what the ledger's ended programs left, not only list it"),
+      Flag.withDefault(false)
+    )
+  },
+  Effect.fnUntraced(function*({ name: given, yes }) {
+    if (Option.isNone(given)) return yield* pruneLedger(yes)
+    const name = given.value
     const fs = yield* FileSystem.FileSystem
     const rootDir = yield* sessionRoot
     const paths = Session.paths(rootDir, name)
@@ -211,7 +293,11 @@ export const prune = Command.make(
       }`
     )
   })
-).pipe(Command.withDescription("Remove a session a crash left behind, and any browser still running from it"))
+).pipe(
+  Command.withDescription(
+    "Remove a session a crash left behind, and any browser still running from it; with no name, list what the ledger's ended programs left"
+  )
+)
 
 /** `strider`: the commands that need no session. A session's commands go to its daemon. */
 export const strider = Command.make("strider").pipe(

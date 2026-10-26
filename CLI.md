@@ -71,6 +71,10 @@ strider -s checkout -p shop next download --within 2m   # → w1: waiting from n
 strider -s checkout -p shop click 'role=button[name="Export CSV"]'
 strider -s checkout await w1                    # → d1 "export.csv", 12 KB
 strider -s checkout -p shop history console --level error
+strider -s checkout -p shop history network --failed    # no response, or a status of 400 or more
+strider -s checkout -p shop find "Add to cart" --role button   # → e9  button "Add to cart"  (main > list "Products"); refs from the latest snapshot
+strider -s checkout tabs                        # the browser's pages the session doesn't hold: an attached browser's own tabs
+strider -s checkout control N4 --name mail      # takes one, named, until `strider -s checkout release -p mail`
 strider -s checkout run pay.ts                  # a segment: the file's default export, run in the live session
 strider -s checkout -p shop route "**/analytics/**" abort   # → r1, a scoped handler; `strider remove r1` ends it
 strider -s checkout state save ./auth/shop.state
@@ -79,7 +83,22 @@ strider stop -s checkout
 
 strider start --name task-1 --chromium /usr/bin/chromium --state ./auth/shop.state   # a fork from a saved state
 strider start --name task-2 --chromium /usr/bin/chromium --fork checkout             # a fork from a running session
+
+strider -s checkout mcp                          # an MCP server over stdio for the session, for a client that runs no commands
+strider prune                                   # what programs that died left behind, from the ledger; --yes reclaims it
 ```
+
+An MCP client such as Claude Desktop launches `strider mcp` from its configuration, and shares the session with the shell:
+
+```json
+{
+  "mcpServers": {
+    "strider": { "command": "strider", "args": ["mcp", "-s", "checkout"] }
+  }
+}
+```
+
+With `["mcp", "--start", "--chromium", "/usr/bin/chromium"]` instead, it starts a session of its own, which ends when the client stops it, unless `--keep`.
 
 ```
 clicked button "Add to cart" on shop · 412 ms
@@ -95,9 +114,11 @@ export default Effect.gen(function*() {
   yield* shop.getByText("Pay").click()
   const popup = yield* popups
   yield* popup.getByLabel("Card number").fill("4242 4242 4242 4242")
-  return { popup }                                        // returned handles move into the session, as p2
+  return { popup }                                        // returned handles are named into the session, as p2
 })
 ```
+
+A page the segment opens itself belongs to the segment's scope, and closes with it, unless the segment keeps it: `yield* session.keep(page, "receipt")` moves it into the session (review 22).
 
 ## Contracts
 
@@ -114,7 +135,7 @@ export default Effect.gen(function*() {
 **Storage**
 - **The session directory is temporary by default.** It sits at a predictable path, so an agent can find a session's artifacts without being told. It is acquired before the browser starts and deleted after the browser exits, like the library's own temporary profile (API.md, Modules and backends). `strider stop --keep` leaves it and prints its path.
 - **`--user-data-dir` moves the profile to a directory you own.** We never delete it. The browser locks it, so only one running session can use it.
-- **Hard kills are reported, never reclaimed automatically.** After a SIGKILL or a power loss, the directory remains and nobody holds its lock. `strider sessions` reports it with its size. Starting that name again fails with a hint, and `strider prune <name>` removes the directory and any browser still running from it. This follows the ownership ledger's rule (CONCEPTS.md §3): candidates for reclaim, never automatic deletion.
+- **Hard kills are reported, never reclaimed automatically.** After a SIGKILL or a power loss, the directory remains and nobody holds its lock. `strider sessions` reports it with its size. Starting that name again fails with a hint, and `strider prune <name>` removes the directory and any browser still running from it. This follows the ownership ledger's rule (CONCEPTS.md §3): candidates for reclaim, never automatic deletion. Since review 22, every session's daemon also keeps a ledger record, in `$XDG_STATE_HOME/strider/ledger` (`~/.local/state` when unset), of the browser it launched and the directories it made. `strider prune` with no name lists what each dead program's record names, and `--yes` reclaims it: a browser still running from its profile is killed, and its directories removed. A program using the library writes records only if it provides `Ledger.layer`.
 - **A fork copies storage state into a new session.** `--fork` copies from a running session in memory. `--state` reads a file that `strider state save` wrote with mode 0600.
   - Storage state covers cookies, localStorage and IndexedDB. Playwright made IndexedDB opt-in in 1.51 because Firebase Auth keeps its tokens there; ours includes it, because `exportStorageState` promises the full restorable state.
   - It doesn't carry sessionStorage, service workers, the HTTP cache, in-memory state, or logins bound to the device or a client certificate. Sites that depend on those need `--user-data-dir`.
@@ -136,7 +157,7 @@ export default Effect.gen(function*() {
 - **Segments belong to the CLI.** `CurrentSession` comes from `@usestrider/browser/cli`, and only `strider run` provides it. Programs and tests pass pages around as values, as they always do, and never construct a session.
 - **`strider run` provides `CurrentSession`, `Scope` and the daemon's platform services.** A segment that requires anything else fails with an error naming the missing service.
 - **The CLI doesn't type-check.** A segment is a file in your project, so your `tsc` checks it against the same Strider version the daemon runs from. Agent skills run `tsc --noEmit` before `strider run`, because a segment that fails halfway leaves its earlier steps done.
-- **It runs in its own scope, like a script.** Its routes, handlers and waits end with it. Handles it returns are transferred into the session and named, which is the explicit transfer CONCEPTS.md §3 already defines.
+- **It runs in its own scope, like a script.** Its routes, handlers and waits end with it. Handles it returns are named into the session; a page it opened itself closes with the segment unless it keeps it with `CurrentSession.keep`, which is the explicit transfer CONCEPTS.md §3 defines (review 22: before it, returning a page was described as transferring it, which the build never did, Q173).
 - **Segments use locators, not refs.** A ref only means something inside its session.
 
 **Export**
@@ -162,12 +183,25 @@ export default Effect.gen(function*() {
   - **`history` has no `--level` or `--failed`**; it lists what the page's log recorded of a kind.
   - **Every page tool brings its page to the front first** (Q167).
   - **The session's context emulates focus** on Chromium and WebKit, so a page keeps rendering behind a popup, and `start` says so (`focus emulated`); Firefox opens every page as a window, which does the same (review 21, its second step; Q19, Q71). An exported test makes its context the same way.
-- **Not built:** an MCP server command, which `McpServer.toolkit(BrowserToolkit.toolkit)` covers for a program today; `control`; and a session's `downloads/` as its context's download directory, which the daemon creates and doesn't use yet.
+- **Not built:** an MCP server command, which `McpServer.toolkit(BrowserToolkit.toolkit)` covers for a program today; `control`; and a session's `downloads/` as its context's download directory, which the daemon creates and doesn't use yet. All three since built (review 22, below).
+
+*2026-10-26, after [review 22](reviews/22-everything-deferred.md), its first step.*
+
+- **Tabs and control** (Q169). The daemon gives the toolkit the browser, so `strider tabs` lists the pages the session doesn't hold, `control <id>` or `--url <pattern>` takes one with `Page.control` in a scope of its own and names it, and `release -p <name>` closes that scope: the tab's declarations end, and it stays open. An exported test marks a controlled tab with a placeholder.
+- **`find`** searches the page's latest snapshot, taking one if there is none, for refs whose name or text contains the query, or equals it with `--exact`, narrowed by `--role`; a match without a ref of its own, such as text, is its nearest element with one.
+- **`history --level` and `--failed`**, through `ConsoleMessage`'s filter, and the digest's rule for a failed request.
+- **Downloads** go to the session's `downloads/`, through the context's new `downloads` option.
+- **Keeping a segment's page** (Q173). `CurrentSession.keep` names the page into the session and transfers it to the session's scope: the model's release closes a page only for the scope that still owns it.
+- **`strider mcp`** runs in a process of its own, with Effect: `effect/ai`'s `McpServer` over standard input and output, with the toolkit's tools, each forwarded to the daemon as a `Tool` request over the session's socket and answered with its result encoded by the tool's Schema. Standard output is the client's, so `start`'s spec and every log go to standard error. Tools with no parameters use `Tool.EmptyParams`, whose JSON Schema an MCP client reads as an object.
+- **The ledger** (`Ledger`, Q146). The daemon builds its browser's layer with `Ledger.layer` on the CLI's ledger directory; `prune` with no name reads it, tells a dead program from a reused process id by its start time where `/proc` says it, and with `--yes` kills what still runs from a recorded profile and removes recorded directories.
+- **Where the build differs from review 22.**
+  - **Firefox user contexts on an attached browser aren't recorded:** removing one needs a new WebDriver BiDi session, which Firefox refuses while a dead program's session lingers (Q137).
+  - **The toolkit takes the browser as an option,** `browser`, so a model reaches beyond its context only when given it; without it, `tabs` and `control` fail with `NotPermitted`.
 
 ## Open questions
 
 None. Type-checking was settled by leaving it to the project's own `tsc`, and failed requests by the rule under Commands.
 
 Candidates, not yet designed:
-- **Page-provided tools (WebMCP).** When a page registers tools for agents, one call can replace a sequence of clicks that a banner might block. Their names, schemas and results come from the page, so they are untrusted input.
-- **Searching a snapshot** instead of printing it, to keep output small. It would query the structured `Snapshot`, not grep its text.
+- **Page-provided tools (WebMCP).** When a page registers tools for agents, one call can replace a sequence of clicks that a banner might block. Their names, schemas and results come from the page, so they are untrusted input. Designed in review 22 (candidate 3c), and built once a browser ships the API.
+- **Searching a snapshot** instead of printing it, to keep output small. It would query the structured `Snapshot`, not grep its text. Built since (review 22): `strider find`.

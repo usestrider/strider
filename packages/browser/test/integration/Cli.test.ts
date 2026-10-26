@@ -7,7 +7,7 @@
  */
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { execFile } from "node:child_process"
+import { execFile, spawn } from "node:child_process"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
@@ -32,8 +32,45 @@ const strider = (env: Record<string, string>, ...args: ReadonlyArray<string>) =>
     )
   })
 
+/** `strider mcp` as a client runs it: messages written to its standard input, answers read until the last id. */
+const mcp = (env: Record<string, string>, args: ReadonlyArray<string>, messages: ReadonlyArray<object>, last: number) =>
+  Effect.callback<ReadonlyArray<any>>((resume) => {
+    const child = spawn(process.execPath, [bin, ...args], {
+      env: { ...process.env, ...env },
+      stdio: ["pipe", "pipe", "pipe"]
+    })
+    const answers: Array<any> = []
+    let buffered = ""
+    let errors = ""
+    const timer = setTimeout(() => {
+      child.kill()
+      resume(Effect.die(new Error(`strider mcp answered ${JSON.stringify(answers)}; stderr: ${errors}`)))
+    }, 60_000)
+    child.stderr.on("data", (data) => void (errors += String(data)))
+    child.stdout.on("data", (data) => {
+      buffered += String(data)
+      let end: number
+      while ((end = buffered.indexOf("\n")) >= 0) {
+        const line = buffered.slice(0, end)
+        buffered = buffered.slice(end + 1)
+        if (line.trim() === "") continue
+        const answer = JSON.parse(line)
+        answers.push(answer)
+        if (answer.id === last) {
+          clearTimeout(timer)
+          child.stdin.end()
+          child.kill()
+          resume(Effect.succeed(answers))
+        }
+      }
+    })
+    for (const message of messages) child.stdin.write(`${JSON.stringify(message)}\n`)
+  })
+
 const environment = () => ({
   XDG_RUNTIME_DIR: fs.mkdtempSync(path.join(os.tmpdir(), "strider-cli-")),
+  // The ledger's own, so a test sees only its sessions' records
+  XDG_STATE_HOME: fs.mkdtempSync(path.join(os.tmpdir(), "strider-cli-state-")),
   SECRET_PW: "hunter2"
 })
 
@@ -184,9 +221,100 @@ describe("strider", () => {
         const again = yield* run("start", "--name", "first", "--chromium", chromium.executable)
         assert.notStrictEqual(again.code, 0)
         assert.include(again.err, "strider prune first")
+        // The ledger lists what the dead daemon launched, and --yes reclaims it (review 22)
+        const listed = yield* run("prune")
+        assert.include(listed.out, "which has ended:")
+        assert.include(listed.out, firefox.executable)
+        assert.include(listed.out, "strider prune --yes reclaims it")
+        assert.include((yield* run("prune", "--yes")).out, "reclaimed what 1 ended program left")
+        assert.include((yield* run("prune")).out, "Nothing is left behind by a program that ended")
         const pruned = yield* run("prune", "first")
         assert.match(pruned.out, /^removed .*first/)
         assert.isFalse(fs.existsSync(path.join(env.XDG_RUNTIME_DIR, "strider", "first")))
+      })),
+    timeout
+  )
+
+  it.live(
+    "takes the browser's own tab, finds and filters, keeps a segment's page, downloads into the session, and serves MCP",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const served = yield* site
+        const url = `${served.origin}/fixture?html=${encodeURIComponent(app)}`
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const tools = (...args: ReadonlyArray<string>) => strider(env, "-s", "tools", ...args)
+        const started = yield* run("start", "--name", "tools", "--chromium", chromium.executable)
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          // The launched browser's own first tab is outside the session's context: control takes it
+          const tabs = yield* tools("tabs")
+          const tab = tabs.out.split("\n")[0]!.split("  ")[0]!
+          assert.match(tab, /\S/, tabs.out)
+          const taken = yield* tools("control", tab, "--name", "own")
+          assert.strictEqual(taken.code, 0, taken.err)
+          assert.strictEqual((yield* tools("-p", "own", "goto", url)).code, 0)
+          assert.strictEqual((yield* tools("release", "-p", "own")).code, 0)
+          assert.strictEqual((yield* tools("-p", "own", "snapshot")).code, 16, "a released tab has no name")
+          // find returns refs, and history narrows to a level or to failures
+          assert.strictEqual((yield* tools("page", "new", "--name", "shop", url)).code, 0)
+          const found = yield* tools("-p", "shop", "find", "Sign in", "--role", "button")
+          assert.match(found.out, /^(e\d+) {2}button "Sign in"/, found.err)
+          const ref = /^(e\d+)/.exec(found.out)![1]!
+          assert.strictEqual((yield* tools("-p", "shop", "click", ref)).code, 0)
+          // The site answers any path, so a route makes the status request fail
+          assert.strictEqual(
+            (yield* tools("-p", "shop", "route", "**/api/status", "fulfill", "--status", "500", "--body", "down")).code,
+            0
+          )
+          assert.strictEqual((yield* tools("-p", "shop", "click", "role=button[name=\"Status\"]")).code, 0)
+          let errors = ""
+          let failures = ""
+          for (let attempt = 0; attempt < 50 && (errors === "" || !failures.includes("500")); attempt++) {
+            errors = (yield* tools("-p", "shop", "history", "console", "--level", "error")).out
+            failures = (yield* tools("-p", "shop", "history", "network", "--failed")).out
+            if (errors === "" || !failures.includes("500")) yield* Effect.sleep("100 millis")
+          }
+          assert.include(errors, "console error on shop: signed in")
+          assert.match(failures, /500 .*\/api\/status/)
+          // A segment keeps a page it opened, which outlives it
+          const kept = yield* tools("run", path.join(fixtures, "keep-page.ts"))
+          assert.strictEqual(kept.code, 0, kept.err)
+          assert.include((yield* tools("pages")).out, "kept")
+          assert.strictEqual((yield* tools("-p", "kept", "goto", url)).code, 0)
+          // Downloads go to the session's own directory
+          const downloads = path.join(env.XDG_RUNTIME_DIR, "strider", "tools", "downloads")
+          yield* tools(
+            "-p",
+            "shop",
+            "goto",
+            `${served.origin}/fixture?html=${encodeURIComponent(`<a href="/download" download>Get</a>`)}`
+          )
+          yield* tools("-p", "shop", "click", "text=\"Get\"")
+          for (let attempt = 0; attempt < 50 && fs.readdirSync(downloads).length === 0; attempt++) {
+            yield* Effect.sleep("100 millis")
+          }
+          assert.isAbove(fs.readdirSync(downloads).length, 0)
+          // strider mcp serves the session's tools to a client over standard input and output
+          const answers = yield* mcp(env, ["-s", "tools", "mcp"], [
+            {
+              jsonrpc: "2.0",
+              id: 1,
+              method: "initialize",
+              params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } }
+            },
+            { jsonrpc: "2.0", method: "notifications/initialized" },
+            { jsonrpc: "2.0", id: 2, method: "tools/list" },
+            { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "pages", arguments: {} } }
+          ], 3)
+          const listedTools = answers.find((answer) => answer.id === 2)?.result?.tools?.map((tool: any) => tool.name)
+          assert.includeMembers(listedTools ?? [], ["click", "find", "control"])
+          const pages = JSON.stringify(answers.find((answer) => answer.id === 3)?.result)
+          assert.include(pages, "shop")
+          assert.include(pages, "kept")
+        } finally {
+          yield* tools("stop")
+        }
       })),
     timeout
   )

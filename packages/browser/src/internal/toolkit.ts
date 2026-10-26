@@ -18,12 +18,14 @@ import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/encoding/Base64"
+import * as Exit from "effect/Exit"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import type * as CapturePolicy from "../ai/CapturePolicy.ts"
+import type * as Browser from "../Browser.ts"
 import * as ConsoleMessage from "../ConsoleMessage.ts"
 import * as Deadline from "../Deadline.ts"
 import type * as Declaration from "../Declaration.ts"
@@ -31,6 +33,7 @@ import * as Dialog from "../Dialog.ts"
 import * as Download from "../Download.ts"
 import * as Expect from "../Expect.ts"
 import type * as Locator from "../Locator.ts"
+import * as NetworkRequest from "../NetworkRequest.ts"
 import * as NetworkResponse from "../NetworkResponse.ts"
 import type * as Page from "../Page.ts"
 import * as PageNavigation from "../PageNavigation.ts"
@@ -44,12 +47,15 @@ import * as Events from "./events.ts"
 import * as Handles from "./handles.ts"
 import type * as Model from "./model.ts"
 import * as Tools from "./tools.ts"
+import * as UrlPattern from "./urlPattern.ts"
 
 /** What a toolkit is bound to. */
 export interface Options {
   readonly context: UserContext.UserContext
   readonly secrets: Readonly<Record<string, Redacted.Redacted<string>>>
   readonly capture: CapturePolicy.CapturePolicy
+  /** The browser, for `tabs` and `control`; without it, they fail with `NotPermitted`. */
+  readonly browser?: Browser.Browser | undefined
 }
 
 const failed = (error: string, message: string, reason?: string) =>
@@ -379,7 +385,77 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       }
     })
 
+  // ── The browser's other pages, taken with control (review 22, candidate 4a) ──
+  // Each controlled page's grant lives in a scope of its own, which release closes
+  const controlled = new Map<string, Scope.Closeable>()
+  const browserPages = Effect.suspend(() =>
+    options.browser === undefined
+      ? Effect.fail(
+        failed(
+          "NotPermitted",
+          "This toolkit was made for its context alone; BrowserToolkit.make with the browser lists and controls its tabs"
+        )
+      )
+      : Effect.map(options.browser.pages, (pages) => pages.filter((page) => !nameById.has(page.id)))
+  )
+
   const handlers = Tools.toolkit.of({
+    tabs: () =>
+      run(
+        Effect.flatMap(browserPages, (pages) =>
+          Effect.forEach(pages, (page) =>
+            Effect.map(page.url, (url) => ({ tab: String(page.id), url: String(url) }))))
+      ),
+    control: ({ name, tab, url }) =>
+      run(Effect.gen(function*() {
+        if ((tab === undefined) === (url === undefined)) {
+          return yield* Effect.fail(failed("InvalidInput", "Name the tab one way: by its id from tabs, or by a URL"))
+        }
+        if (name !== undefined && byName.has(name)) {
+          return yield* Effect.fail(failed("InvalidInput", `A page is already named ${name}`))
+        }
+        const pages = yield* browserPages
+        const listed = yield* Effect.forEach(pages, (page) => Effect.map(page.url, (at) => ({ page, at: String(at) })))
+        const matches = url === undefined ? undefined : UrlPattern.compile(url)
+        const found = listed.filter((each) => tab !== undefined ? String(each.page.id) === tab : matches!(each.at))
+        if (found.length !== 1) {
+          return yield* Effect.fail(
+            failed(
+              "InvalidInput",
+              `${found.length === 0 ? "No tab" : `${found.length} tabs`} matched ${tab ?? url}; the tabs are ${
+                listed.map((each) => `${each.page.id} ${each.at}`).join(", ") || "none"
+              }`
+            )
+          )
+        }
+        const grant = yield* Scope.fork(scope)
+        const page = yield* found[0]!.page.control.pipe(
+          Scope.provide(grant),
+          Effect.onError(() => Scope.close(grant, Exit.void))
+        )
+        const named = yield* nameOf(page, name)
+        controlled.set(named, grant)
+        return { page: named, url: String(yield* page.url) }
+      })),
+    release: ({ page: name }) =>
+      run(Effect.gen(function*() {
+        const grant = controlled.get(name)
+        if (grant === undefined) {
+          return yield* Effect.fail(
+            failed(
+              "InvalidInput",
+              `${name} wasn't taken with control; a page the session opened is the session's, and closes with it`
+            )
+          )
+        }
+        controlled.delete(name)
+        const page = byName.get(name)
+        byName.delete(name)
+        snapshots.delete(name)
+        if (page !== undefined) nameById.delete(page.id)
+        yield* Scope.close(grant, Exit.void)
+        return `released ${name}; the tab stays open`
+      })),
     pages: () =>
       run(Effect.gen(function*() {
         const pages = yield* refresh
@@ -418,6 +494,43 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
         Effect.map(page.snapshot(), (snapshot) => {
           snapshots.set(name, snapshot)
           return capture.snapshotText === "full" ? snapshot.text : masked(snapshot.text)
+        })),
+    find: ({ page: name, query, role, exact }) =>
+      onPage(name, (page) =>
+        Effect.gen(function*() {
+          let snapshot = snapshots.get(name)
+          if (snapshot === undefined) {
+            snapshot = yield* page.snapshot()
+            snapshots.set(name, snapshot)
+          }
+          const wanted = exact === true ? query : query.toLowerCase()
+          const matches = (text: string) => exact === true ? text === wanted : text.toLowerCase().includes(wanted)
+          const found: Array<{ ref: string; role: string; name: string; path: string }> = []
+          const seen = new Set<string>()
+          // A match without a ref of its own, such as text, is reported as the nearest element with one
+          const visit = (node: Snapshot.Node, path: ReadonlyArray<string>, owner: Snapshot.Node | undefined) => {
+            const nodeName = node.name._tag === "None" ? "" : node.name.value
+            const nodeRole = String(node.role.role)
+            const holder = Option.isSome(node.ref) ? node : owner
+            if (holder !== undefined && Option.isSome(holder.ref) && matches(nodeName)) {
+              const holderRole = String(holder.role.role)
+              const ref = holder.ref.value
+              if ((role === undefined || holderRole === role) && !seen.has(ref)) {
+                seen.add(ref)
+                found.push({
+                  ref,
+                  role: holderRole,
+                  name: holder.name._tag === "None" ? "" : holder.name.value,
+                  path: path.join(" > ")
+                })
+              }
+            }
+            const label = nodeName === "" ? nodeRole : `${nodeRole} "${nodeName}"`
+            const next = Option.isSome(node.ref) && nodeRole !== "text" ? [...path, label] : path
+            for (const child of node.children) visit(child, next, holder)
+          }
+          visit(snapshot.root, [], undefined)
+          return found
         })),
     screenshot: ({ page: name }) =>
       acting(name, (page) =>
@@ -552,7 +665,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
           if (text !== undefined) yield* Expect.toContainText(locator, yield* reveal(text))
           return `${target} is ${state}${text === undefined ? "" : ` and contains ${JSON.stringify(text)}`}`
         })),
-    history: ({ page: name, kind }) =>
+    history: ({ page: name, kind, level, failed }) =>
       onPage(name, (page): Effect.Effect<ReadonlyArray<string>, unknown> => {
         switch (kind) {
           case "navigation":
@@ -562,17 +675,39 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
             )
           case "console":
             return Effect.map(
-              ConsoleMessage.history(page),
+              ConsoleMessage.history(page, level === undefined ? undefined : { level }),
               (history) =>
                 capture.consoleText === "omitted"
                   ? history.entries.map((message) => `console ${message.level} (text not sent)`)
                   : history.entries.map((message) => consoleLine(message, name))
             )
           case "network":
-            return Effect.map(
-              NetworkResponse.history(page),
-              (history) => history.entries.map((response) => `${response.status} ${response.url}`)
-            )
+            return failed !== true
+              ? Effect.map(
+                NetworkResponse.history(page),
+                (history) => history.entries.map((response) => `${response.status} ${response.url}`)
+              )
+              // A failed request, as the digest says it (CLI.md): no response for a reason other than its
+              // cancellation, or a status of 400 or more
+              : Effect.gen(function*() {
+                const requests = yield* NetworkRequest.history(page)
+                const responses = yield* NetworkResponse.history(page)
+                const lines: Array<{ readonly at: number; readonly line: string }> = []
+                for (const response of responses.entries) {
+                  if (response.status >= 400) {
+                    lines.push({ at: response.at, line: `${response.status} ${response.url}` })
+                  }
+                }
+                for (const request of requests.entries) {
+                  const hop = Option.getOrUndefined(runtime.model.hop(request.hop))
+                  const end = hop === undefined ? undefined : yield* Deferred.poll(hop.end)
+                  const ended = end === undefined || Option.isNone(end) ? undefined : yield* end.value
+                  if (ended?._tag === "Failed" && !ended.canceled) {
+                    lines.push({ at: request.at, line: `failed ${request.method} ${request.url}: ${ended.error}` })
+                  }
+                }
+                return lines.sort((a, b) => a.at - b.at).map((each) => each.line)
+              })
           case "dialog":
             return Effect.map(
               Dialog.history(page),

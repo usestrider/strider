@@ -83,7 +83,9 @@ member that isn't built yet fails as the defect `NotBuilt`, naming itself (a tra
   write a trace trace.playwright.dev opens. Exports are redacted unless `include` names a class of secret.
 - **Drive a browser from a shell with `strider`.** `strider start --name s --chromium <path>`, then
   `strider -s s page new --name shop <url>`, `strider -s s -p shop snapshot`, `strider -s s -p shop click e9`; every
-  command names its session and page. `strider -s s stop` ends it.
+  command names its session and page. `strider -s s stop` ends it. `strider -s s -p shop find "Sign in"` gives refs
+  without the whole snapshot; `strider -s s tabs` and `strider -s s control <id> --name mail` take a tab the browser
+  already has. An MCP client such as Claude Desktop runs `strider mcp -s s` to share the session.
 - **Test events without a browser.** `Effect.provide(Browser.layerTest("--resp(cart)--commit--load--|"))` gives a
   fake whose first page plays the timeline under `TestClock`, with `-` as 10 ms; it has no DOM.
 - **Emulation is checked, not best-effort.** `page.emulate({...})` fails with `Unsupported` naming a field the

@@ -137,6 +137,13 @@ export const render = (options: {
       if (step.url !== undefined) body.push(`yield* ${page}.goto(${quote(step.url)})`)
       continue
     }
+    if (step._tag === "Tool" && step.tool === "control") {
+      // A tab the session took from the browser: the test takes it with control, or opens its own page
+      const tab = String((step.params as { tab?: string; url?: string }).tab ?? (step.params as { url?: string }).url)
+      placeholders.push(`control ${tab}`)
+      body.push(`// TODO strider control ${tab}: a tab of the browser's own; take it with page.control in the test`)
+      continue
+    }
     const params = step.params as Record<string, string | ReadonlyArray<string> | number | undefined>
     const page = typeof params.page === "string" ? variable(params.page) : "page"
     const target = step.target ?? ""

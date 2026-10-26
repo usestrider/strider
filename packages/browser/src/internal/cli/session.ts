@@ -32,16 +32,29 @@ export const paths = (rootDir: string, name: string) => {
   }
 }
 
+/**
+ * Where the CLI keeps its ledger (`Ledger`, review 22): `$XDG_STATE_HOME/strider/ledger`, else
+ * `~/.local/state/strider/ledger`. It outlives a session's directory, which is in the runtime directory.
+ */
+export const ledgerRoot = (env: Readonly<Record<string, string | undefined>>, home: string): string =>
+  `${
+    env.XDG_STATE_HOME !== undefined && env.XDG_STATE_HOME !== "" ? env.XDG_STATE_HOME : `${home}/.local/state`
+  }/strider/ledger`
+
 /** A command, as the client sends it: one JSON line. An `Interrupt` line after it interrupts the command. */
 export type Request =
   | { readonly _tag: "Command"; readonly argv: ReadonlyArray<string>; readonly cwd: string }
   | { readonly _tag: "Interrupt" }
+  /** One of the toolkit's tools, called as a model calls it: `strider mcp` forwards these (review 22). */
+  | { readonly _tag: "Tool"; readonly tool: string; readonly params: unknown }
 
 /** What a daemon answers, one JSON line each: output, then the exit code, which ends the answer. */
 export type Response =
   | { readonly _tag: "Out"; readonly text: string }
   | { readonly _tag: "Err"; readonly text: string }
   | { readonly _tag: "Exit"; readonly code: number }
+  /** A tool's result, encoded by its Schema: its success, or, with `failure`, its `ToolFailure`. */
+  | { readonly _tag: "ToolResult"; readonly failure: boolean; readonly value: unknown }
 
 /** What a daemon prints as it starts: its spec, once it serves, or why it couldn't. */
 export type Started =

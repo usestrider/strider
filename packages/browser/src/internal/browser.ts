@@ -28,6 +28,7 @@ import * as Browser from "../Browser.ts"
 import * as CookieJar from "../CookieJar.ts"
 import * as Declaration from "../Declaration.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
+import * as Ledger from "../Ledger.ts"
 import * as Page from "../Page.ts"
 import * as PageClock from "../PageClock.ts"
 import * as Reason from "../Reason.ts"
@@ -151,8 +152,8 @@ const makeContext = (
               diagnostics: Operation.diagnostics(id)
             })
         })),
-        // Owned teardown: no beforeunload; a page that already closed needs nothing
-        (page) => runtime.model.release(page)
+        // Owned teardown: no beforeunload; a page that already closed, or was transferred, needs nothing
+        (page) => runtime.model.release(page, scope)
       )
       const pageEntry = runtime.model.pages.get(created)
       if (pageEntry === undefined) return yield* Effect.die(new Error(`${created} was created but never added`))
@@ -513,23 +514,51 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           : Effect.fail(contextError("Browser.newContext", mapped.reason, id))
       }
       // A directory the context owns for its downloads, made first so it is removed after the context
-      // (review 14, candidate 8)
-      const downloads = Option.isNone(runtime.fileSystem) ? Option.none<string>() : Option.some(
-        yield* runtime.fileSystem.value.makeTempDirectoryScoped({ prefix: "strider-downloads-" }).pipe(
-          Effect.mapError((error) =>
-            contextError(
-              "Browser.newContext",
-              new Reason.BackendFailure({
-                kind: "Rejected",
-                method: "FileSystem.makeTempDirectoryScoped",
-                metadata: {},
-                hint: `Couldn't create the context's download directory: ${error.message}`
-              }),
-              id
+      // (review 14, candidate 8); or the caller's, or none (review 22, candidate 4c)
+      const asked = options?.downloads ?? "temporary"
+      if (typeof asked === "object" && !/^(\/|[A-Za-z]:[\\/])/.test(asked.directory)) {
+        return yield* Effect.fail(contextError(
+          "Browser.newContext",
+          new Reason.InvalidInput({
+            input: "downloads",
+            expected: "an absolute directory, which the browser writes to",
+            hint: `${asked.directory} isn't one`
+          }),
+          id
+        ))
+      }
+      // A temporary one is in the ledger while it exists, forgotten after it is removed
+      const ledger = yield* Ledger.CurrentLedger
+      let made: string | undefined
+      yield* Effect.addFinalizer(() =>
+        made === undefined ? Effect.void : ledger.remove({ _tag: "Directory", path: made })
+      )
+      const downloads = asked === "deny"
+        ? Option.none<string>()
+        : typeof asked === "object"
+        ? Option.some(asked.directory)
+        : Option.isNone(runtime.fileSystem)
+        ? Option.none<string>()
+        : Option.some(
+          yield* runtime.fileSystem.value.makeTempDirectoryScoped({ prefix: "strider-downloads-" }).pipe(
+            Effect.mapError((error) =>
+              contextError(
+                "Browser.newContext",
+                new Reason.BackendFailure({
+                  kind: "Rejected",
+                  method: "FileSystem.makeTempDirectoryScoped",
+                  metadata: {},
+                  hint: `Couldn't create the context's download directory: ${error.message}`
+                }),
+                id
+              )
             )
           )
         )
-      )
+      if (asked === "temporary" && Option.isSome(downloads)) {
+        made = downloads.value
+        yield* ledger.add({ _tag: "Directory", path: downloads.value })
+      }
       const created = yield* Effect.acquireRelease(
         adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: false }).pipe(Effect.catch(failed)),
         (context) =>
@@ -546,7 +575,10 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       entry.eventLog = options?.eventLog ?? entry.eventLog
       const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: created }
       yield* adapter.declare(scope, { _tag: "FileChooser" }).pipe(Effect.catch(failed))
-      if (Option.isSome(downloads)) {
+      if (asked === "deny") {
+        yield* adapter.declare(scope, { _tag: "Downloads", behavior: { _tag: "Deny" } }).pipe(Effect.catch(failed))
+        yield* Effect.annotateCurrentSpan("browser.context.downloads", "deny")
+      } else if (Option.isSome(downloads)) {
         yield* adapter.declare(scope, { _tag: "Downloads", behavior: { _tag: "Allow", directory: downloads.value } })
           .pipe(Effect.catch(failed))
         yield* Effect.annotateCurrentSpan("browser.context.downloads", downloads.value)

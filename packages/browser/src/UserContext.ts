@@ -251,6 +251,18 @@ export interface Options {
    */
   readonly eventLog?: number | undefined
   /**
+   * Where the context's downloads go: `"temporary"`, a directory the library makes for the context and removes
+   * after it; `"deny"`, none is allowed; or `{ directory }`, one the caller owns, which is never removed.
+   *
+   * **Details**
+   *
+   * A browser the program shares no file system with saves downloads where it can't read them: on such a browser,
+   * `Download.stream` and `saveAs` fail with `Unsupported`.
+   *
+   * @default "temporary"
+   */
+  readonly downloads?: "temporary" | "deny" | { readonly directory: string } | undefined
+  /**
    * Settings held for the context's life, declared before its first page: `emulate(…)` without a scope. A
    * field the backend can't apply fails the context with `Unsupported`.
    *

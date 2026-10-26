@@ -253,6 +253,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* give every context the library creates a temporary download directory, removed after it. The default context keeps the browser's behaviour.
 - *Reconsider:* a `downloads: "deny"` option, and what attached browsers' contexts should do.
 - **Kept** in review 21: the *We* line is the decision.
+- **Resolved** in review 22's first step: `UserContext.Options.downloads` is `"temporary"` (as before), `"deny"`, or `{ directory }` the caller owns; the CLI's sessions download into their own `downloads/`.
 
 **Q26. Every browser writes a download into a partial file of its own naming** (Browser). `<guid>.crdownload` (Chromium), `<name>.<random>.bin.part` beside an empty `<name>` (Firefox), `<uuid>.wkdownload` beside an empty `<uuid>` (WebKit), renamed when done.
 - *Seen:* review 14, P2.
@@ -967,6 +968,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Reconsider:* a CLI command that ends a stuck session, if one turns up.
 - **Kept** in review 21: the *We* line is the decision.
 - **Reported** in review 21's fifth step: drafted in `upstream/firefox-session-outlives-socket.md`, not sent.
+- **Resolved** in review 22's first step: the CLI's daemons keep a ledger record of the browser they launched, so `strider prune --yes` kills a Firefox a dead program left running, which frees its session.
 
 **Q147. An attached Chromium's every page gets the library's interceptor** (Ours). The CDP adapter enables `Fetch` for every page from its start, with a pattern nothing matches (Q103), observed pages included: nothing changes for the page, but the interceptor is installed while the client is attached.
 - *Seen:* review 19.
@@ -1057,6 +1059,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* `control` fails, saying so.
 - *Reconsider:* the default context as an attached session's, observed, with `control` acquiring for the session's scope.
 - **Kept** in review 21: a declared piece still unbuilt, built when a use needs it.
+- **Resolved** in review 22's first step: `strider tabs` lists the browser's own tabs, `strider control` takes one into the session for its scope, named, and `strider release` gives it back; the toolkit has the same tools when made with the browser.
 
 **Q170. The client learns a session started from one line** (Ours). `strider start` runs the daemon detached, with its standard output piped; the daemon writes one JSON line, ready or why not, and from then on writes its own output to `daemon.log` in the session's directory, since nothing reads the pipe.
 - *Seen:* review 20's build.
@@ -1081,6 +1084,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* as above; `strider page new` opens a page for the session.
 - *Reconsider:* transferring a returned page's ownership to the session, which CONCEPTS.md §3 allows.
 - **Kept** in review 21: a declared piece still unbuilt, built when a use needs it.
+- **Resolved** in review 22's first step: `CurrentSession.keep(page, name)` transfers a page the segment opened to the session's scope; returning a page still only names it.
 
 **Q174. A popup collected by `await` is usually still blank** (Browser). The popup event comes before its first navigation, so the URL `await` can report is `about:blank`; the toolkit says "so far".
 - *Seen:* review 20's build, on every backend.

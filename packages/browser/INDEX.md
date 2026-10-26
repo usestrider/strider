@@ -837,6 +837,34 @@ Launch profiles: a browser's flags and preferences, as values you can inspect.
 - `const automation: LaunchProfile`
 - `const concurrent: LaunchProfile`
 
+### Ledger
+
+A record of what a program owns outside itself: the browsers it launched and the directories it made for them (CONCEPTS.md §3, Ownership ledger; review 22). A program that ends normally removes what it made and its record; one that dies leaves both, and `strider prune` reads the records whose program is gone and reclaims what they name.
+
+*layers*
+
+- `const layer: (directory: string) => Layer.Layer<never, never, FileSystem.FileSystem | Path.Path>` (experimental)
+
+*models*
+
+- `type Item = typeof Item.Type` (experimental)
+- `class Record: Schema.Class { owner, items }` (experimental)
+- `interface Ledger` (experimental)
+  - `readonly add: (item: Item) => Effect.Effect<void>`
+  - `readonly remove: (item: Item) => Effect.Effect<void>`
+
+*schemas*
+
+- `const Item = Schema.Union([Schema.TaggedStruct("Browser", { pid: Schema.Number, executable: Schema.String, profile: Schema.String }), Schema.TaggedStruct("Directory", { path: Schema.String })])` (experimental)
+
+*getters*
+
+- `const read: (directory: string) => Effect.Effect< ReadonlyArray<{ readonly file: string; readonly record: Record }>, never, FileSystem.FileSystem | Path.Path >` (experimental)
+
+*references*
+
+- `const CurrentLedger: Context.Reference<Ledger>` (experimental)
+
 ### Locator
 
 Locators find elements, and act on them or read them.
@@ -1759,6 +1787,7 @@ User contexts (the spec's term; Playwright calls them browser contexts), at two 
   - `readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined`
   - `readonly focus?: "system" | "emulated" | undefined`
   - `readonly eventLog?: number | undefined`
+  - `readonly downloads?: "temporary" | "deny" | { readonly directory: string } | undefined`
   - `readonly emulation?: Emulation.Emulation | undefined`
   - `readonly permissions?: ReadonlyArray<Permission> | undefined`
 - `type UserContextErrorReason = typeof UserContextErrorReason.Type`
@@ -1808,7 +1837,7 @@ The agent toolkit (`@usestrider/browser/ai`): one definition that serves an in-p
 *models*
 
 - `type SecretName = typeof SecretName.Type` (experimental)
-- `type ToolName = | "pages" | "newPage" | "goto" | "back" | "snapshot" | "screenshot" | "click" | "fill" | "press" | "select" | "scroll" | "next" | "await" | "expect" | "history" | "route" | "dialog"` (experimental)
+- `type ToolName = | "pages" | "newPage" | "tabs" | "control" | "release" | "goto" | "back" | "snapshot" | "find" | "screenshot" | "click" | "fill" | "press" | "select" | "scroll" | "next" | "await" | "expect" | "histo…` (experimental)
 - `type Tools = ToolsImpl.Tools` (experimental)
 - `const ToolFailure = ToolsImpl.ToolFailure` (experimental)
 - `type ToolFailure = ToolsImpl.ToolFailure` (experimental)
@@ -1816,6 +1845,7 @@ The agent toolkit (`@usestrider/browser/ai`): one definition that serves an in-p
   - `readonly context: UserContext.UserContext`
   - `readonly secrets: Readonly<Record<SecretName | string, Redacted.Redacted<string>>>`
   - `readonly capture: CapturePolicy.CapturePolicy`
+  - `readonly browser?: Browser.Browser | undefined`
 
 *schemas*
 
@@ -1883,6 +1913,7 @@ What `strider run` provides to a segment (`@usestrider/browser/cli`).
 - `interface CurrentSession` (experimental)
   - `readonly context: UserContext.UserContext`
   - `page(name: PageName | string): Effect.Effect<Page.Page, PageNotFound>`
+  - `keep(page: Page.Page, name?: PageName | string): Effect.Effect<PageName, NameTaken>`
 
 *tags*
 
@@ -1899,10 +1930,12 @@ What `strider run` provides to a segment (`@usestrider/browser/cli`).
 *guards*
 
 - `const isPageNotFound: (u: unknown) => u is PageNotFound` (experimental)
+- `const isNameTaken: (u: unknown) => u is NameTaken` (experimental)
 
 *errors*
 
 - `class PageNotFound: Schema.TaggedError "PageNotFound" { name, hint }` (experimental)
+- `class NameTaken: Schema.TaggedError "NameTaken" { name, hint }` (experimental)
 
 ## `@usestrider/browser/firefox`
 

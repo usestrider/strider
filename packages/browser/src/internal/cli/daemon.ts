@@ -40,10 +40,12 @@ import * as Browser from "../../Browser.ts"
 import * as Chromium from "../../chromium/Chromium.ts"
 import * as CurrentSession from "../../cli/CurrentSession.ts"
 import * as Firefox from "../../firefox/Firefox.ts"
+import * as Ledger from "../../Ledger.ts"
 import * as Page from "../../Page.ts"
 import * as StorageState from "../../StorageState.ts"
 import type * as UserContext from "../../UserContext.ts"
 import * as WebKit from "../../webkit/WebKit.ts"
+import * as Handles from "../handles.ts"
 import * as ToolkitImpl from "../toolkit.ts"
 import type * as Tools from "../tools.ts"
 import * as ExportTest from "./exportTest.ts"
@@ -78,6 +80,32 @@ interface Daemon {
 /** A tool's final result, as the toolkit's `handle` gives it; the toolkit's tools give no preliminary ones. */
 const callTool = (daemon: Daemon, tool: keyof Tools.Tools, params: Record<string, unknown>) =>
   Effect.flatMap(daemon.session.toolkit.handle(tool, params as never), Stream.runLast)
+
+/** A tool call's target as a locator expression, for the exported test: a ref is the locator its snapshot names. */
+const targetOf = (daemon: Daemon, params: Record<string, unknown>) => {
+  const page = typeof params.page === "string" ? params.page : undefined
+  return typeof params.target === "string" && page !== undefined
+    ? ExportTest.locatorOf(page, params.target, Option.getOrUndefined(daemon.session.latest(page)))
+    : undefined
+}
+
+/** Records a successful tool call for `export test`. */
+const record = (
+  daemon: Daemon,
+  name: string,
+  params: Record<string, unknown>,
+  outcome: unknown,
+  target: string | undefined
+) => {
+  const page = typeof params.page === "string" ? params.page : undefined
+  daemon.steps.push({
+    _tag: "Tool",
+    tool: name,
+    params,
+    target: target === undefined ? undefined : target.replace(/^[A-Za-z_$][\w$]*\./, `${variable(page!)}.`),
+    result: typeof outcome === "string" ? outcome : (outcome as { readonly wait?: string }).wait
+  })
+}
 
 class CommandFailed extends Data.TaggedError("CommandFailed")<{
   readonly error: string
@@ -124,9 +152,8 @@ const commands = (daemon: Daemon) => {
     const config = yield* root
     const started = performance.now()
     const page = typeof params.page === "string" ? params.page : undefined
-    const target = typeof params.target === "string" && page !== undefined
-      ? ExportTest.locatorOf(page, params.target, Option.getOrUndefined(daemon.session.latest(page)))
-      : undefined
+    // Read before the call: a ref is the locator its snapshot named, which the call may replace
+    const target = targetOf(daemon, params)
     const result = yield* Effect.orDie(callTool(daemon, name, params))
     const last = Option.getOrThrow(result)
     if (last.isFailure) {
@@ -140,15 +167,7 @@ const commands = (daemon: Daemon) => {
     }
     const value = last.result as { readonly outcome: unknown; readonly sinceLast: ReadonlyArray<string> }
     const shown = yield* present(value.outcome)
-    daemon.steps.push({
-      _tag: "Tool",
-      tool: name,
-      params,
-      target: target === undefined ? undefined : target.replace(/^[A-Za-z_$][\w$]*\./, `${variable(page!)}.`),
-      result: typeof value.outcome === "string"
-        ? value.outcome
-        : (value.outcome as { readonly wait?: string }).wait
-    })
+    record(daemon, name, params, value.outcome, target)
     if (config.json) {
       yield* Console.log(JSON.stringify({
         page,
@@ -188,6 +207,38 @@ const commands = (daemon: Daemon) => {
     "snapshot",
     {},
     () => Effect.flatMap(pageFlag, (page) => tool("snapshot", { page }, (text: string) => Effect.succeed({ text })))
+  )
+  const find = Command.make(
+    "find",
+    {
+      query: Argument.String("query").pipe(Argument.withDescription("Text a name contains, or equals with --exact")),
+      role: Flag.String("role").pipe(Flag.withDescription("Only elements with this role"), Flag.optional),
+      exact: Flag.Boolean("exact").pipe(Flag.withDefault(false))
+    },
+    ({ exact, query, role }) =>
+      Effect.flatMap(
+        onPage((page) => ({
+          page,
+          query,
+          ...(Option.isSome(role) ? { role: role.value } : {}),
+          ...(exact ? { exact } : {})
+        })),
+        (params) =>
+          tool(
+            "find",
+            params,
+            (found: ReadonlyArray<{ ref: string; role: string; name: string; path: string }>) =>
+              Effect.succeed({
+                text: found.length === 0
+                  ? `nothing in the latest snapshot matches ${JSON.stringify(query)}`
+                  : found.map((each) =>
+                    `${each.ref}  ${each.role}${each.name === "" ? "" : ` "${each.name}"`}${
+                      each.path === "" ? "" : `  (${each.path})`
+                    }`
+                  ).join("\n")
+              })
+          )
+      )
   )
   const screenshot = Command.make(
     "screenshot",
@@ -297,10 +348,25 @@ const commands = (daemon: Daemon) => {
   )
   const history = Command.make(
     "history",
-    { kind: Argument.Literals("kind", ["navigation", "console", "network", "dialog", "download", "exception"]) },
-    ({ kind }) =>
+    {
+      kind: Argument.Literals("kind", ["navigation", "console", "network", "dialog", "download", "exception"]),
+      level: Flag.Literals("level", ["debug", "log", "info", "warning", "error"]).pipe(
+        Flag.withDescription("Console messages at this level"),
+        Flag.optional
+      ),
+      failed: Flag.Boolean("failed").pipe(
+        Flag.withDescription("Network requests that failed, or were answered 400 or more"),
+        Flag.withDefault(false)
+      )
+    },
+    ({ failed, kind, level }) =>
       Effect.flatMap(
-        onPage((page) => ({ page, kind })),
+        onPage((page) => ({
+          page,
+          kind,
+          ...(Option.isSome(level) ? { level: level.value } : {}),
+          ...(failed ? { failed } : {})
+        })),
         (params) =>
           tool("history", params, (entries: ReadonlyArray<string>) =>
             Effect.succeed({ text: entries.length === 0 ? `no ${kind} recorded` : entries.join("\n") }))
@@ -387,14 +453,42 @@ const commands = (daemon: Daemon) => {
         }))
     ])
   )
-  const control = Command.make("control", { page: Argument.String("page") }, () =>
-    Effect.fail(
-      new CommandFailed({
-        error: "NotBuilt",
-        message:
-          "The session's pages are the ones it opens, in its own context, and are controlled already; controlling an attached browser's own tabs isn't built (PROTOCOL.md, Not built)"
+  // The browser's own tabs: an attached browser's, or a launched one's first (review 22, candidate 4a)
+  const tabs = Command.make(
+    "tabs",
+    {},
+    () =>
+      tool("tabs", {}, (outcome: ReadonlyArray<{ tab: string; url: string }>) =>
+        Effect.succeed({
+          text: outcome.map((each) => `${each.tab}  ${each.url}`).join("\n") ||
+            "no tabs beyond the session's pages"
+        }))
+  )
+  const control = Command.make(
+    "control",
+    {
+      tab: Argument.String("tab").pipe(Argument.withDescription("A tab's id, from strider tabs"), Argument.optional),
+      url: Flag.String("url").pipe(Flag.withDescription("A URL pattern that matches exactly one tab"), Flag.optional),
+      name: Flag.String("name").pipe(Flag.optional)
+    },
+    ({ name, tab, url }) =>
+      Effect.gen(function*() {
+        const params = {
+          ...(Option.isSome(tab) ? { tab: tab.value } : {}),
+          ...(Option.isSome(url) ? { url: url.value } : {}),
+          ...(Option.isSome(name) ? { name: name.value } : {})
+        }
+        yield* tool("control", params, (outcome: { page: string; url: string }) =>
+          Effect.succeed({
+            text: `${outcome.page} at ${outcome.url}, controlled until strider release -p ${outcome.page}`
+          }))
       })
-    ))
+  )
+  const release = Command.make(
+    "release",
+    {},
+    () => Effect.flatMap(pageFlag, (page) => tool("release", { page }))
+  )
   const run = Command.make(
     "run",
     { file: Argument.String("file") },
@@ -467,6 +561,7 @@ const commands = (daemon: Daemon) => {
     Command.withSubcommands([
       pages,
       snapshot,
+      find,
       screenshot,
       goto,
       back,
@@ -483,7 +578,9 @@ const commands = (daemon: Daemon) => {
       dialog,
       remove,
       page,
+      tabs,
       control,
+      release,
       run,
       state,
       exportCommand,
@@ -541,7 +638,15 @@ const segment = Effect.fnUntraced(function*(daemon: Daemon, file: string) {
     page: (name) =>
       daemon.session.page(name).pipe(
         Effect.mapError((failure) => new CurrentSession.PageNotFound({ name, hint: failure.message }))
+      ),
+    // The page's ownership moves to the session's scope, which then closes it (review 22, candidate 4b)
+    keep: Effect.fnUntraced(function*(page: Page.Page, name?: CurrentSession.PageName | string) {
+      const named = yield* daemon.session.name(page, name).pipe(
+        Effect.mapError((failure) => new CurrentSession.NameTaken({ name: name ?? "", hint: failure.message }))
       )
+      yield* Handles.page(page).runtime.model.transfer(page.id, daemon.scope)
+      return CurrentSession.PageName.make(named)
+    })
   }
   const value = yield* Effect.scoped(
     (module.default as Effect.Effect<unknown, unknown, CurrentSession.CurrentSession | Scope.Scope>).pipe(
@@ -594,7 +699,7 @@ const capture = (lines: Array<Session.Response>): Console.Console => {
 }
 
 /** One connection: a command, run and answered, which an `Interrupt` line after it interrupts. */
-const serve = (tree: ReturnType<typeof commands>, touch: () => void) => (socket: Socket.Socket) =>
+const serve = (daemon: Daemon, tree: ReturnType<typeof commands>, touch: () => void) => (socket: Socket.Socket) =>
   Effect.scoped(Effect.gen(function*() {
     const reader = yield* socket.reader
     const writer = yield* socket.writer
@@ -614,6 +719,28 @@ const serve = (tree: ReturnType<typeof commands>, touch: () => void) => (socket:
       }
     }).pipe(Effect.ignore, Effect.forkScoped)
     const request = yield* Queue.take(requests)
+    if (request._tag === "Tool") {
+      // A tool called as a model calls it, for strider mcp: its encoded result, then the exit code
+      touch()
+      const params = (request.params ?? {}) as Record<string, unknown>
+      const target = targetOf(daemon, params)
+      const exit = yield* Effect.exit(callTool(daemon, request.tool as keyof Tools.Tools, params))
+      touch()
+      const lines: Array<Session.Response> = []
+      if (Exit.isSuccess(exit) && Option.isSome(exit.value)) {
+        const result = exit.value.value
+        if (!result.isFailure) {
+          record(daemon, request.tool, params, (result.result as { readonly outcome: unknown }).outcome, target)
+        }
+        lines.push({ _tag: "ToolResult", failure: result.isFailure, value: result.encodedResult })
+        lines.push({ _tag: "Exit", code: 0 })
+      } else {
+        lines.push({ _tag: "Err", text: `${request.tool} isn't one of the session's tools, or it died` })
+        lines.push({ _tag: "Exit", code: 1 })
+      }
+      for (const line of lines) yield* writer.write(`${JSON.stringify(line)}\n`).pipe(Effect.ignore)
+      return
+    }
     if (request._tag !== "Command") return
     touch()
     const lines: Array<Session.Response> = []
@@ -846,7 +973,13 @@ const start = Command.make(
       // The session's own profile directory, made here: a launcher uses a directory it is given as it is
       if (Option.isNone(flags.userDataDir)) yield* fs.makeDirectory(paths.profile).pipe(Effect.mapError(failedWith))
       const userDataDir = Option.getOrElse(flags.userDataDir, () => paths.profile)
-      const services = yield* Layer.build(layerOf(browser, userDataDir)).pipe(Effect.mapError(failedWith))
+      // What the session launches and makes is in the CLI's ledger, which strider prune reads if it dies (review 22)
+      const os = yield* Effect.promise(() => Node.os())
+      const ledger = yield* Layer.build(Ledger.layer(Session.ledgerRoot(process.env, os.homedir())))
+      const services = yield* Layer.build(layerOf(browser, userDataDir)).pipe(
+        Effect.provideContext(ledger),
+        Effect.mapError(failedWith)
+      )
       const instance = Context.get(services, Browser.Browser)
       const scope = yield* Effect.scope
       // Every page of the session keeps rendering while another is in front, as a person's would: focus is
@@ -854,11 +987,19 @@ const start = Command.make(
       const focus = ExportTest.focusFor(browser)
       const context = yield* instance.newContext({
         ...Option.match(initial, { onNone: () => ({}), onSome: (storageState) => ({ storageState }) }),
-        focus
+        focus,
+        // The session's own directory, which strider stop --keep keeps (review 22, candidate 4c)
+        downloads: { directory: paths.downloads }
       }).pipe(
         Effect.mapError(failedWith)
       )
-      const session = yield* ToolkitImpl.makeSession({ context, secrets, capture: CapturePolicy.local })
+      const session = yield* ToolkitImpl.makeSession({
+        context,
+        secrets,
+        capture: CapturePolicy.local,
+        // The session can take the browser's own tabs with control
+        browser: instance
+      })
       const stopped = yield* Deferred.make<boolean>()
       let last = performance.now()
       const daemon: Daemon = {
@@ -884,7 +1025,7 @@ const start = Command.make(
       )
       const touch = () => void (last = performance.now())
       const tree = commands(daemon)
-      yield* server.run(serve(tree, touch)).pipe(Effect.ignore, Effect.forkScoped)
+      yield* server.run(serve(daemon, tree, touch)).pipe(Effect.ignore, Effect.forkScoped)
       yield* Effect.gen(function*() {
         while (true) {
           yield* Effect.sleep("1 second")
@@ -947,7 +1088,7 @@ export const daemon = (argv: ReadonlyArray<string>) => {
             | { readonly _tag?: string; readonly error?: string; readonly message?: string }
             | undefined
           const text = [
-            ...lines.map((line) => line._tag === "Exit" ? "" : line.text),
+            ...lines.map((line) => line._tag === "Out" || line._tag === "Err" ? line.text : ""),
             ...(error?._tag === "CommandFailed" ? [`${error.error}: ${error.message}`] : [])
           ].filter((line) => line !== "").join("\n")
           Node.process.stdout.write(

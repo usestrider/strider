@@ -43,7 +43,10 @@ const tool = <const Name extends string, P extends Schema.Struct.Fields, S exten
 ) =>
   Tool.make(name, {
     description,
-    parameters: Schema.Struct(parameters),
+    // A tool with no parameters has Tool.EmptyParams, whose JSON Schema an MCP client reads as an object
+    parameters: (Object.keys(parameters).length === 0 ? Tool.EmptyParams : Schema.Struct(parameters)) as Schema.Struct<
+      P
+    >,
     success: result(outcome),
     failure: ToolFailure,
     failureMode: "return"
@@ -61,6 +64,31 @@ export const newPage = tool(
   "Opens a page in the context, named as given or p1, p2…, and navigates it when a URL is given.",
   { name: Schema.optional(Schema.String), url: Schema.optional(Schema.String) },
   Schema.Struct({ page: Schema.String, url: Schema.String })
+)
+
+export const tabs = tool(
+  "tabs",
+  "Lists the browser's pages the session hasn't named, such as an attached browser's own tabs, by id and URL. Needs a toolkit made with the browser.",
+  {},
+  Schema.Array(Schema.Struct({ tab: Schema.String, url: Schema.String }))
+)
+
+export const control = tool(
+  "control",
+  "Takes control of one of the browser's pages, by its id from tabs or a URL pattern that matches one, and names it, as given or p1, p2…; it is a page as any other until release.",
+  {
+    tab: Schema.optional(Schema.String.annotate({ description: "A tab's id, from tabs" })),
+    url: Schema.optional(Schema.String.annotate({ description: "A URL pattern matching exactly one tab" })),
+    name: Schema.optional(Schema.String)
+  },
+  Schema.Struct({ page: Schema.String, url: Schema.String })
+)
+
+export const release = tool(
+  "release",
+  "Gives back a page control took: its routes and handlers end, and the page stays open, unnamed.",
+  { page: PageName },
+  Schema.String
 )
 
 export const goto = tool(
@@ -162,9 +190,26 @@ export const expect = tool(
 
 export const history = tool(
   "history",
-  "What the page's event log recorded of a kind, oldest first.",
-  { page: PageName, kind: Schema.Literals(["navigation", "console", "network", "dialog", "download", "exception"]) },
+  "What the page's event log recorded of a kind, oldest first. Console messages can be narrowed to a level, and network to the failed requests: no response for a reason other than cancellation, or a status of 400 or more.",
+  {
+    page: PageName,
+    kind: Schema.Literals(["navigation", "console", "network", "dialog", "download", "exception"]),
+    level: Schema.optional(Schema.Literals(["debug", "log", "info", "warning", "error"])),
+    failed: Schema.optional(Schema.Boolean)
+  },
   Schema.Array(Schema.String)
+)
+
+export const find = tool(
+  "find",
+  "Searches the page's latest snapshot, taking one if there is none, for elements whose name or text contains the query, or equals it with exact; narrows by role. Returns their refs, which are targets, each with its role, name and the named elements it is in.",
+  {
+    page: PageName,
+    query: Schema.String,
+    role: Schema.optional(Schema.String),
+    exact: Schema.optional(Schema.Boolean)
+  },
+  Schema.Array(Schema.Struct({ ref: Schema.String, role: Schema.String, name: Schema.String, path: Schema.String }))
 )
 
 export const route = tool(
@@ -191,9 +236,13 @@ export const dialog = tool(
 export const toolkit = Toolkit.make(
   pages,
   newPage,
+  tabs,
+  control,
+  release,
   goto,
   back,
   snapshot,
+  find,
   screenshot,
   click,
   fill,

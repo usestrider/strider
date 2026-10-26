@@ -143,6 +143,76 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         timeout
       )
 
+      it.effect(
+        "finds refs by text, filters history, and takes the browser's own tab with control",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const url = `${served.origin}/fixture?html=${encodeURIComponent(app)}`
+            const browser = yield* Browser.Browser
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const tools = yield* BrowserToolkit.make({
+                context: page.context,
+                secrets: {},
+                capture: CapturePolicy.local,
+                browser
+              })
+              const opened = yield* call(tools, "newPage", { name: "shop", url })
+              assert.strictEqual(opened.value.outcome.page, "shop")
+              // find takes a snapshot when there is none, and returns targets
+              const found = yield* call(tools, "find", { page: "shop", query: "Sign in", role: "button" })
+              assert.isFalse(found.failed, JSON.stringify(found.value))
+              assert.strictEqual(found.value.outcome.length, 1)
+              assert.match(found.value.outcome[0].ref, /^e\d+$/)
+              const clicked = yield* call(tools, "click", { page: "shop", target: found.value.outcome[0].ref })
+              assert.isFalse(clicked.failed, JSON.stringify(clicked.value))
+              // The click logs a console error and fetches a missing resource: history narrows to them
+              yield* call(tools, "expect", {
+                page: "shop",
+                target: "css=#out",
+                state: "visible",
+                text: "wrong password"
+              })
+              let errors: ReadonlyArray<string> = []
+              let failed: ReadonlyArray<string> = []
+              for (let attempt = 0; attempt < 50 && (errors.length === 0 || failed.length === 0); attempt++) {
+                errors =
+                  (yield* call(tools, "history", { page: "shop", kind: "console", level: "error" })).value.outcome
+                failed = (yield* call(tools, "history", { page: "shop", kind: "network", failed: true })).value.outcome
+                if (errors.length === 0 || failed.length === 0) yield* Effect.sleep("100 millis")
+              }
+              assert.deepStrictEqual(errors, ["console error on shop: signed in, with a warning"])
+              assert.isTrue(failed.some((line: string) => /^404 .*\/missing$/.test(line)), failed.join(", "))
+              const warnings = yield* call(tools, "history", { page: "shop", kind: "console", level: "warning" })
+              assert.deepStrictEqual(warnings.value.outcome, [])
+              // The launched browser's own first tab is the browser's, outside the context (QUIRKS.md, Q141)
+              const tabs = yield* call(tools, "tabs", {})
+              assert.isFalse(tabs.failed, JSON.stringify(tabs.value))
+              const tab = tabs.value.outcome.find((each: { tab: string }) => each.tab !== String(page.id))
+              assert.isDefined(tab, JSON.stringify(tabs.value.outcome))
+              const controlled = yield* call(tools, "control", { tab: tab.tab, name: "own" })
+              assert.isFalse(controlled.failed, JSON.stringify(controlled.value))
+              assert.strictEqual(controlled.value.outcome.page, "own")
+              const went = yield* call(tools, "goto", { page: "own", url })
+              assert.isFalse(went.failed, JSON.stringify(went.value))
+              const released = yield* call(tools, "release", { page: "own" })
+              assert.isFalse(released.failed, JSON.stringify(released.value))
+              assert.strictEqual((yield* call(tools, "goto", { page: "own", url })).value.error, "PageNotFound")
+              // A page the session opened isn't control's to release
+              assert.strictEqual((yield* call(tools, "release", { page: "shop" })).value.error, "InvalidInput")
+              // Without the browser, the model can't reach beyond its context
+              const bounded = yield* BrowserToolkit.make({
+                context: page.context,
+                secrets: {},
+                capture: CapturePolicy.local
+              })
+              assert.strictEqual((yield* call(bounded, "tabs", {})).value.error, "NotPermitted")
+            }))
+          }),
+        timeout
+      )
+
       it.effect("sends what the capture policy allows", () =>
         Effect.gen(function*() {
           const served = yield* site

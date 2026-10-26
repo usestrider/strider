@@ -52,7 +52,7 @@ const load = (specifier: string): Promise<unknown> => import(specifier)
 
 export const net = () => load("node:net") as Promise<{ readonly createConnection: (path: string) => NetSocket }>
 
-export const os = () => load("node:os") as Promise<{ readonly tmpdir: () => string }>
+export const os = () => load("node:os") as Promise<{ readonly tmpdir: () => string; readonly homedir: () => string }>
 
 export const fs = () =>
   load("node:fs") as Promise<{

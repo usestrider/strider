@@ -8,7 +8,7 @@ import * as Node from "./node.ts"
 import * as Session from "./session.ts"
 
 /** The commands this process runs itself. */
-export const local = new Set(["browsers", "sessions", "prune", "__daemon"])
+export const local = new Set(["browsers", "sessions", "prune", "mcp", "__daemon"])
 
 /** The sessions whose sockets exist. */
 export const running = async (rootDir: string): Promise<Array<string>> => {
@@ -59,7 +59,7 @@ export const forward = async (argv: ReadonlyArray<string>): Promise<number> => {
         const response = JSON.parse(line) as Session.Response
         if (response._tag === "Out") process.stdout.write(`${response.text}\n`)
         else if (response._tag === "Err") process.stderr.write(`${response.text}\n`)
-        else {
+        else if (response._tag === "Exit") {
           code = response.code
           socket.end()
         }
@@ -89,7 +89,12 @@ export const forward = async (argv: ReadonlyArray<string>): Promise<number> => {
  * `strider start`: starts the session's daemon, detached, with this command's arguments, and prints what it
  * answers once it serves, or why it couldn't start.
  */
-export const start = async (argv: ReadonlyArray<string>, bin: string): Promise<number> => {
+export const start = async (
+  argv: ReadonlyArray<string>,
+  bin: string,
+  // Where the daemon's spec goes: standard output, unless that is someone else's, as strider mcp's is
+  say: (text: string) => void = (text) => void Node.process.stdout.write(`${text}\n`)
+): Promise<number> => {
   const process = Node.process
   const childProcess = await Node.childProcess()
   const child = childProcess.spawn(process.execPath, [...process.execArgv, bin, "__daemon", ...argv], {
@@ -116,7 +121,7 @@ export const start = async (argv: ReadonlyArray<string>, bin: string): Promise<n
       if (end < 0) return
       const started = JSON.parse(buffered.slice(0, end)) as Session.Started
       if (started._tag === "Ready") {
-        process.stdout.write(`${started.text}\n`)
+        say(started.text)
         finish(0)
       } else {
         process.stderr.write(`${started.text}\n`)
@@ -170,5 +175,50 @@ export const ask = async (
     })
     socket.on("error", () => resolve({ code: Session.exitCodes.NoSession!, out: "" }))
     socket.on("close", () => resolve({ code, out }))
+  })
+}
+
+/**
+ * One of the toolkit's tools, called on a session's daemon as a model calls it (`strider mcp`, review 22): its
+ * result encoded by the tool's Schema, or why there is none.
+ */
+export const callTool = async (
+  rootDir: string,
+  name: string,
+  tool: string,
+  params: unknown
+): Promise<
+  | { readonly _tag: "Result"; readonly failure: boolean; readonly value: unknown }
+  | { readonly _tag: "NoResult"; readonly message: string }
+> => {
+  const net = await Node.net()
+  return new Promise((resolve) => {
+    const socket = net.createConnection(Session.paths(rootDir, name).socket)
+    let buffered = ""
+    let result: { readonly _tag: "Result"; readonly failure: boolean; readonly value: unknown } | undefined
+    let errors = ""
+    socket.on(
+      "connect",
+      () => socket.write(`${JSON.stringify({ _tag: "Tool", tool, params } satisfies Session.Request)}\n`)
+    )
+    socket.on("data", (data) => {
+      buffered += new TextDecoder().decode(data)
+      let end: number
+      while ((end = buffered.indexOf("\n")) >= 0) {
+        const line = JSON.parse(buffered.slice(0, end)) as Session.Response
+        buffered = buffered.slice(end + 1)
+        if (line._tag === "ToolResult") result = { _tag: "Result", failure: line.failure, value: line.value }
+        if (line._tag === "Err") errors += line.text
+        if (line._tag === "Exit") socket.end()
+      }
+    })
+    socket.on(
+      "error",
+      (error) => resolve({ _tag: "NoResult", message: `The session ${name} isn't running: ${error.message}` })
+    )
+    socket.on(
+      "close",
+      () => resolve(result ?? { _tag: "NoResult", message: errors || `The session ${name} gave no result` })
+    )
   })
 }

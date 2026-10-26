@@ -759,6 +759,21 @@ Adapter responsibilities:
   - **`AutoResolution.policy`'s option is `ContextOption`,** not `Option`, which reads as Effect's.
 - **Tests.** `test/ConsoleFormat.test.ts` checks the formatter; `modules.ts` formats a call on every backend, waits for a canceled download to complete and gets `Ended`, and reads the new policies; `contents.ts` expects `NoMatch` for a capture of no element; `attaching.ts` expects `TargetGone{AccessReleased}` from a released route and cookie jar. Integration tests: 468, all passing in one full run, a file at a time.
 
+**Built** (2026-10-26, after [review 22](reviews/22-everything-deferred.md), its first step): CLI sessions and agents. The library has no dependency but `effect` since `@usestrider/vitest` was split out, just before this step.
+
+- **Tabs and control** (`internal/toolkit.ts`, `tools.ts`; `BrowserToolkit.MakeOptions.browser`). `tabs` lists `Browser.pages` the session hasn't named; `control` takes one, by id or by a URL pattern that matches exactly one, with `ObservedPage.control` in a scope forked from the toolkit's; `release` closes that scope. The CLI's `tabs`, `control` and `release` are these tools (Q169).
+- **`find`** walks the page's latest snapshot, taking one if there is none, for nodes whose name contains the query, or equals it with `exact`, narrowed by role. A match without a ref of its own reports its nearest element with one, with the path of named elements it is in.
+- **History filters.** `history`'s `level` uses `ConsoleMessage`'s filter. `failed` lists responses of 400 or more and requests whose hop ended `Failed` without being canceled, in time order: the digest's rule.
+- **Downloads** (`UserContext.Options.downloads`; `internal/browser.ts`). `"deny"` declares `Downloads{Deny}`, and `{ directory }`, which must be absolute, `Downloads{Allow}` there. The CLI's sessions download into their own directory (Q25).
+- **Transfers** (`Model.transfer`, `Model.release(page, by)`; `CurrentSession.keep`). A scope releases a page only while it still owns it, so a page transferred to the session's scope outlives the segment that opened it (Q173).
+- **`strider mcp`** (`internal/cli/mcp.ts`). `McpServer.layerStdio` with `McpServer.toolkit(Tools.toolkit)`, each handler forwarding a `Tool` request to the session's daemon, which runs it and answers with `ToolResult`, the result encoded by the tool's Schema, decoded again here. Every log goes to standard error (`Logger.LogToStderr`). Tools without parameters use `Tool.EmptyParams`.
+- **The ledger** (`Ledger`; `internal/launch.ts`, `browser.ts`; `strider prune`). The launchers record each browser with its profile, and each temporary profile and downloads directory, through `Ledger.CurrentLedger`, which records nothing unless `Ledger.layer` provides it; each is forgotten after it is gone. The daemon provides it on `$XDG_STATE_HOME/strider/ledger`. `prune` with no name reads the records, takes a program as gone when its process id is dead or, where `/proc` says when it started, is another process's, and with `--yes` kills what runs from a recorded profile, found by its command line, and removes recorded directories (Q146).
+- **Where the build differs from the review.**
+  - **The toolkit's reach beyond its context is an option** (`browser`), not a given.
+  - **Firefox user contexts on an attached browser aren't in the ledger** (CONCEPTS.md §3, Ownership ledger).
+  - **An MCP client's tool calls go through the daemon's socket as their own request,** `Tool`, beside the CLI's `Command`, so the client's calls are recorded for `export test` as the CLI's are.
+- **Tests.** `test/Sessions.test.ts` checks the ledger's records, `strider mcp`'s arguments and an exported controlled tab. `test/integration/slice/toolkit.ts` finds a ref, filters history and takes a launched browser's own tab on every backend. `test/integration/Cli.test.ts` takes a tab, finds, filters, keeps a segment's page, downloads into the session, serves MCP to a client over stdio, and lists and reclaims what a killed daemon's ledger names. Integration tests: 472, all passing in one full run, a file at a time.
+
 ### Pause-on-start granularity
 
 Before-author-script setup for *new* targets needs them paused at creation. Granularity differs by backend, and the access model depends on it.

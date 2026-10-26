@@ -16,6 +16,7 @@ import type * as Effect from "effect/Effect"
 import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
+import type * as Browser from "../Browser.ts"
 import * as ToolkitImpl from "../internal/toolkit.ts"
 import * as ToolsImpl from "../internal/tools.ts"
 import type * as UserContext from "../UserContext.ts"
@@ -49,9 +50,13 @@ export type SecretName = typeof SecretName.Type
 export type ToolName =
   | "pages"
   | "newPage"
+  | "tabs"
+  | "control"
+  | "release"
   | "goto"
   | "back"
   | "snapshot"
+  | "find"
   | "screenshot"
   | "click"
   | "fill"
@@ -122,6 +127,14 @@ export interface MakeOptions {
    * What snapshots, screenshots and digests may contain before they reach the model. Required.
    */
   readonly capture: CapturePolicy.CapturePolicy
+  /**
+   * The browser, so the model can list its other pages (`tabs`) and take control of one (`control`), such as
+   * an attached browser's own tabs. Without it, those tools fail with `NotPermitted`: a model reaches beyond
+   * the context only when it is given the browser.
+   *
+   * @default none
+   */
+  readonly browser?: Browser.Browser | undefined
 }
 
 /**

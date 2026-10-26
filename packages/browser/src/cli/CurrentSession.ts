@@ -49,6 +49,13 @@ export interface CurrentSession {
    * The page with this name; fails at once when there is none.
    */
   page(name: PageName | string): Effect.Effect<Page.Page, PageNotFound>
+  /**
+   * Keeps a page the segment opened once the segment ends: its ownership moves from the segment's scope to the
+   * session's, and it is named into the session, `name` or the next `p1`, `p2`…, whose name it returns
+   * (review 22). A page the segment returns is named without being kept, so it closes with the segment unless
+   * something else owns it, such as a session page that opened it as a popup.
+   */
+  keep(page: Page.Page, name?: PageName | string): Effect.Effect<PageName, NameTaken>
 }
 
 /**
@@ -107,3 +114,31 @@ export class PageNotFound extends Schema.TaggedError<PageNotFound>(PageNotFoundT
  * @since 0.1.0
  */
 export const isPageNotFound = (u: unknown): u is PageNotFound => Predicate.hasProperty(u, PageNotFoundTypeId)
+
+const NameTakenTypeId = "~@usestrider/browser/cli/CurrentSession/NameTaken"
+
+/**
+ * Error for a name another of the session's pages has. Its hint lists the session's page names.
+ *
+ * @stability experimental
+ * @category errors
+ * @since 0.1.0
+ */
+export class NameTaken extends Schema.TaggedError<NameTaken>(NameTakenTypeId)("NameTaken", {
+  name: Schema.String,
+  hint: Schema.String
+}) {
+  readonly [NameTakenTypeId] = NameTakenTypeId
+  override get message(): string {
+    return `A page is already named ${this.name} (${this.hint})`
+  }
+}
+
+/**
+ * Checks whether a value is a `NameTaken`.
+ *
+ * @stability experimental
+ * @category guards
+ * @since 0.1.0
+ */
+export const isNameTaken = (u: unknown): u is NameTaken => Predicate.hasProperty(u, NameTakenTypeId)

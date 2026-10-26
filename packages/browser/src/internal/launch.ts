@@ -12,6 +12,7 @@ import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Stream from "effect/Stream"
 import * as Browser from "../Browser.ts"
 import * as Diagnostics from "../Diagnostics.ts"
+import * as Ledger from "../Ledger.ts"
 import * as Reason from "../Reason.ts"
 import { now } from "./adapter.ts"
 import * as Paths from "./paths.ts"
@@ -100,7 +101,11 @@ export const executable = Effect.fnUntraced(function*(executablePath: string | u
 export const profileDirectory = Effect.fnUntraced(function*(userDataDir: string | undefined, prefix: string) {
   const fs = yield* FileSystem.FileSystem
   if (userDataDir !== undefined) return userDataDir
-  return yield* fs.makeTempDirectoryScoped({ prefix }).pipe(
+  // In the ledger while it exists: the finalizer that forgets it runs after the one that removes it (review 22)
+  const ledger = yield* Ledger.CurrentLedger
+  let made: string | undefined
+  yield* Effect.addFinalizer(() => made === undefined ? Effect.void : ledger.remove({ _tag: "Directory", path: made }))
+  const directory = yield* fs.makeTempDirectoryScoped({ prefix }).pipe(
     Effect.catch((error) =>
       fail(
         new Browser.ConnectionFailed({
@@ -111,6 +116,9 @@ export const profileDirectory = Effect.fnUntraced(function*(userDataDir: string 
       )
     )
   )
+  made = directory
+  yield* ledger.add({ _tag: "Directory", path: directory })
+  return directory
 })
 
 const tailBytes = 8 * 1024
@@ -128,6 +136,10 @@ export const spawn = Effect.fnUntraced(function*(
     readonly env?: Readonly<Record<string, string>> | undefined
   }
 ) {
+  // In the ledger while it runs, known by the profile its command line names (review 22)
+  const ledger = yield* Ledger.CurrentLedger
+  let launched: Ledger.Item | undefined
+  yield* Effect.addFinalizer(() => launched === undefined ? Effect.void : ledger.remove(launched))
   const handle = yield* ChildProcess.make(executable, args, {
     additionalFds: options.additionalFds ?? {},
     stdin: "ignore",
@@ -147,6 +159,8 @@ export const spawn = Effect.fnUntraced(function*(
       )
     )
   )
+  launched = { _tag: "Browser", pid: Number(handle.pid), executable, profile: userDataDir }
+  yield* ledger.add(launched)
   let tail = ""
   let partial = ""
   const lines: Array<string> = []
