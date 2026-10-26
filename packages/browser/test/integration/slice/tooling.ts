@@ -140,10 +140,18 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
       it.effect("reads the browser's own accessibility tree where there is one", () =>
         Effect.gen(function*() {
           const { info } = yield* Browser.Browser
-          const url = yield* fixture(`<main><button>Save</button></main>`)
+          const { crossSite } = yield* site
+          const inner = (label: string) => `<button>${label}</button>`
+          const url = yield* fixture(
+            `<main><button>Save</button><iframe src="/fixture?html=${
+              encodeURIComponent(inner("In frame"))
+            }"></iframe><iframe src="${crossSite}/fixture?html=${
+              encodeURIComponent(inner("Cross site"))
+            }"></iframe></main>`
+          )
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const acquired = yield* page.capability(Capability.AxTree).pipe(
               Effect.flatMap((tree) => tree.read),
               Effect.exit
@@ -159,8 +167,18 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             const tree = acquired.value
             assert.strictEqual(tree.role, "RootWebArea")
             assert.isTrue(findNode(tree, (node) => node.role === "button" && node.name === "Save"))
+            // Each iframe's tree is under it, in process or out (review 22)
+            for (const name of ["In frame", "Cross site"]) {
+              assert.isTrue(
+                findNode(tree, (node) =>
+                  node.role === "Iframe" && findNode(node, (inside) =>
+                    inside.role === "button" && inside.name === name)),
+                name
+              )
+            }
             // Ignored nodes are left out: no generic container with no name is kept for the main element's parent
-            assert.isFalse(findNode(tree, (node) => node.properties.ignored === true))
+            assert.isFalse(findNode(tree, (node) =>
+              node.properties.ignored === true))
           }))
         }), timeout)
 

@@ -63,6 +63,11 @@ export interface Registry {
   readonly all: () => ReadonlyArray<Registered>
   /** The effective override of each kind for a placement. */
   readonly overrides: (placement: Placement) => ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
+  /**
+   * The init-script bundle for a dedicated worker: the main world's scripts declared for workers, in the same
+   * order, or `undefined` where there are none (review 22).
+   */
+  readonly workerBundle: (placement: Placement) => string | undefined
   /** The init-script bundle for each world, by world key. */
   readonly bundles: (
     placement: Placement
@@ -89,6 +94,16 @@ export const make = (): Registry => {
   const registered = new Map<Adapter.RegistrationId, Registered>()
   let sequence = 0
   const inScope = (placement: Placement) => [...registered.values()].filter((entry) => covers(entry.scope, placement))
+  // A placement's init scripts in the order they run: the environment phase first, then by precedence
+  const scriptsOf = (placement: Placement) =>
+    inScope(placement)
+      .filter((entry): entry is Registered & { declaration: Extract<Adapter.Declaration, { _tag: "InitScript" }> } =>
+        entry.declaration._tag === "InitScript"
+      )
+      .sort((a, b) =>
+        (a.declaration.phase === b.declaration.phase ? 0 : a.declaration.phase === "environment" ? -1 : 1) ||
+        byPrecedence(a, b)
+      )
   const byPrecedence = (a: Registered, b: Registered) =>
     specificity(a.scope) - specificity(b.scope) || a.sequence - b.sequence
   return {
@@ -122,15 +137,14 @@ export const make = (): Registry => {
       }
       return effective
     },
+    workerBundle: (placement) => {
+      const sources = scriptsOf(placement)
+        .filter((entry) => entry.declaration.workers && entry.declaration.world._tag === "Main")
+        .map((entry) => wrap(entry.id, entry.declaration.source, entry.declaration.after))
+      return sources.length === 0 ? undefined : block(sources)
+    },
     bundles: (placement) => {
-      const scripts = inScope(placement)
-        .filter((entry): entry is Registered & { declaration: Extract<Adapter.Declaration, { _tag: "InitScript" }> } =>
-          entry.declaration._tag === "InitScript"
-        )
-        .sort((a, b) =>
-          (a.declaration.phase === b.declaration.phase ? 0 : a.declaration.phase === "environment" ? -1 : 1) ||
-          byPrecedence(a, b)
-        )
+      const scripts = scriptsOf(placement)
       const bundles = new Map<string, { world: Adapter.World; sources: Array<string> }>()
       for (const entry of scripts) {
         const key = worldKey(entry.declaration.world)

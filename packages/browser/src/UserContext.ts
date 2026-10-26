@@ -28,6 +28,7 @@ import type * as Declaration from "./Declaration.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as Emulation from "./Emulation.ts"
 import type * as InitScript from "./InitScript.ts"
+import type * as Keyboard from "./Keyboard.ts"
 import type * as Page from "./Page.ts"
 import type * as PageClock from "./PageClock.ts"
 import * as Reason from "./Reason.ts"
@@ -244,6 +245,14 @@ export interface Options {
    * @default "system"
    */
   readonly focus?: "system" | "emulated" | undefined
+  /**
+   * The keyboard layout `type` and `press` use for its pages (review 22). On Firefox the page sees the layout's
+   * `key`, but the `code` Firefox gives that key on a US keyboard, and no AltGr or dead-key presses
+   * (`input.keyboardLayout`).
+   *
+   * @default "us"
+   */
+  readonly keyboardLayout?: Keyboard.Layout | undefined
   /**
    * Events retained per event module and page, for `history`; 0 keeps none.
    *

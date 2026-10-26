@@ -372,6 +372,7 @@ export const conformance = (backend: Backend) =>
               source: "window.fromInit = 'yes'",
               world: { _tag: "Main" },
               phase: "user",
+              workers: false,
               timing: "beforeAuthorScript",
               after: []
             })
@@ -886,6 +887,7 @@ export const conformance = (backend: Backend) =>
                 source,
                 world: { _tag: "Main" },
                 phase: "user",
+                workers: false,
                 timing: "beforeAuthorScript",
                 after
               })

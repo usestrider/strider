@@ -266,7 +266,10 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
     Effect.gen(function*() {
       const pageEntry = Handles.page(page).entry
       yield* drain(pageEntry.events.navigation, (navigation) => {
-        if (navigation.outcome._tag === "Committed" || navigation.outcome._tag === "SameDocument") {
+        if (
+          navigation.frame === pageEntry.id &&
+          (navigation.outcome._tag === "Committed" || navigation.outcome._tag === "SameDocument")
+        ) {
           note(`${name} navigated to ${navigation.url}`)
         }
       })

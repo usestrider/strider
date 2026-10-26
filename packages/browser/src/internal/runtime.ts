@@ -70,6 +70,7 @@ export interface Runtime {
   readonly settle: (
     operation: string,
     navigation: PageNavigation.Id,
+    frame: Target.NavigableId,
     url: Option.Option<Url.Url>,
     at: string,
     outcome: Adapter.NavigationOutcome,

@@ -483,8 +483,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
     // A launched browser's layer has both; one it connects to may not (review 14, candidates 8 and 9)
     fileSystem: yield* Effect.serviceOption(FileSystem.FileSystem),
     path: yield* Effect.serviceOption(Path.Path),
-    settle: (operation, navigation, url, at, outcome, id) =>
-      Navigation.settle(model, operation, navigation, url, at, outcome, id)
+    settle: (operation, navigation, frame, url, at, outcome, id) =>
+      Navigation.settle(model, operation, navigation, frame, url, at, outcome, id)
   }
 
   const newContext = (
@@ -573,6 +573,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       entry.owned = true
       entry.policy = Option.some(options?.dialogs ?? "dismiss")
       entry.eventLog = options?.eventLog ?? entry.eventLog
+      entry.keyboardLayout = options?.keyboardLayout ?? entry.keyboardLayout
       const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: created }
       yield* adapter.declare(scope, { _tag: "FileChooser" }).pipe(Effect.catch(failed))
       if (asked === "deny") {

@@ -224,7 +224,17 @@ export const make = (owner: PageOwner): Page.Page => {
       // Where it ended: the document's URL, which a same-document navigation set, or where it was going
       const document = "document" in outcome.value ? model.documents.get(outcome.value.document) : undefined
       const at = document?.url ?? Option.getOrElse(url, () => "")
-      const result = yield* Navigation.settle(model, operation, started.value, url, at, outcome.value, id, accept)
+      const result = yield* Navigation.settle(
+        model,
+        operation,
+        started.value,
+        entry.id,
+        url,
+        at,
+        outcome.value,
+        id,
+        accept
+      )
       if (!(yield* Navigated.reached(model, result, waitUntil, Option.some(budget.at)))) {
         return yield* Effect.fail(timedOut("postcondition", `The document committed but didn't reach ${waitUntil}`))
       }
@@ -261,12 +271,14 @@ export const make = (owner: PageOwner): Page.Page => {
       return yield* Effect.gen(function*() {
         const realm = yield* Evaluation.pageRealm(runtime, entry, world, id, budget.at)
         const values = yield* Evaluation.toLocal(args, realm)
+        const group = yield* Evaluation.groupFor(runtime, realm, result)
         called = true
         const value = yield* Evaluation.call(runtime, {
           realm,
           functionDeclaration: fn.toString(),
           arguments: values,
           result,
+          group,
           userActivation: gesture,
           page: Option.some(entry),
           at: budget.at,

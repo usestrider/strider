@@ -751,6 +751,7 @@ Init scripts: code that runs in every new document of a page or context, before 
   - `readonly world?: "main" | "isolated" | undefined`
   - `readonly after?: ReadonlyArray<InitScript> | undefined`
   - `readonly timing?: "beforeAuthorScript" | "bestEffort" | undefined`
+  - `readonly workers?: boolean | undefined`
 
 *schemas*
 
@@ -798,6 +799,7 @@ Keys sent to whatever has focus, for what locators can't express.
 
 - `type Key = typeof Key.Type`
 - `type Modifier = "Alt" | "Control" | "Meta" | "Shift"`
+- `type Layout = "us" | "uk" | "de" | "fr" | "es" | "it"`
 - `interface PressOptions`
   - `readonly modifiers?: ReadonlyArray<Modifier> | undefined`
 - `interface TypeOptions`
@@ -933,6 +935,7 @@ Locators find elements, and act on them or read them.
 - `interface DragOptions extends PointerOptions`
   - `readonly targetPosition?: Mouse.Point | undefined`
   - `readonly steps?: number | undefined`
+  - `readonly html?: "native" | "synthetic" | undefined`
 - `interface PressOptions extends ActionOptions, Keyboard.PressOptions`
 - `interface TypeOptions extends ActionOptions, Keyboard.TypeOptions`
 - `type SelectOption = | { readonly value: string } | { readonly label: string } | { readonly index: number }`
@@ -1362,8 +1365,10 @@ Page time: the clock a page's scripts see, under your control.
 *models*
 
 - `type Mode = | { readonly mode: "fixed"; readonly at: DateTime.DateTime.Input } | { readonly mode: "offset"; readonly by: Duration.Input } | { readonly mode: "controlled"; readonly at: DateTime.DateTime.Input }`
+- `interface InstallOptions`
+  - `readonly workers?: boolean | undefined`
 - `interface PageClock`
-  - `install(mode: Mode): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>`
+  - `install(mode: Mode, options?: InstallOptions | undefined): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scop…`
   - `adjust(duration: Duration.Input): Effect.Effect<void, PageClockError | Target.TargetGone>`
   - `setTime(at: DateTime.DateTime.Input): Effect.Effect<void, PageClockError | Target.TargetGone>`
   - `readonly resume: Effect.Effect<void, PageClockError | Target.TargetGone>`
@@ -1397,13 +1402,14 @@ Navigations of a page: the event, and the success value of `goto`, `reload`, `ba
 - `type LoadState = "commit" | "domContentLoaded" | "load"`
 - `interface Filter`
   - `readonly url?: Url.Pattern | string | undefined`
+  - `readonly frames?: "main" | "all" | undefined`
 - `interface NextFilter extends Filter`
   - `readonly waitUntil?: LoadState | undefined`
 
 *schemas*
 
 - `const Id = Schema.String.pipe(Schema.brand("~@usestrider/browser/PageNavigation/Id"))`
-- `const PageNavigation = Schema.Union([Schema.TaggedStruct("Committed", { id: Id, url: Url.Url, document: Target.DocumentId, response: Schema.Option(NetworkResponse.NetworkResponse) }), Schema.TaggedStruct("SameDocument", { …`
+- `const PageNavigation = Schema.Union([Schema.TaggedStruct("Committed", { id: Id, frame: Target.NavigableId, url: Url.Url, document: Target.DocumentId, response: Schema.Option(NetworkResponse.NetworkResponse) }), Schema.Tagg…`
 
 *subscriptions*
 
@@ -1796,6 +1802,7 @@ User contexts (the spec's term; Playwright calls them browser contexts), at two 
   - `readonly storageState?: StorageState.StorageState | undefined`
   - `readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined`
   - `readonly focus?: "system" | "emulated" | undefined`
+  - `readonly keyboardLayout?: Keyboard.Layout | undefined`
   - `readonly eventLog?: number | undefined`
   - `readonly downloads?: "temporary" | "deny" | { readonly directory: string } | undefined`
   - `readonly emulation?: Emulation.Emulation | undefined`

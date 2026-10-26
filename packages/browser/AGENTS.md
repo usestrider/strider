@@ -79,6 +79,12 @@ member that isn't built yet fails as the defect `NotBuilt`, naming itself (a tra
   `Route.continueWith({ status, headers })` changes a response but not its body (not on WebKit).
 - **Replay a HAR with a route.** `page.route("**/api/**", yield* Route.fromHar("api.har"))` answers from the
   recording, matching method, URL and body; export it with `include: ["requestBodies"]` to match bodies.
+- **HTML drag and drop on every browser:** `dragTo(target, { html: "synthetic" })` has the page dispatch the drag's
+  events (untrusted); the default, `"native"`, is Chromium's alone for a `draggable` element.
+- **Type on another keyboard layout** with `Browser.newContext({ keyboardLayout: "de" })` (`us`, `uk`, `de`, `fr`,
+  `es`, `it`): the page sees the layout's keys, Shift, AltGr and dead keys (Firefox: keys only).
+- **Workers:** `addInitScript(script, { workers: true })` and `clock.install(mode, { workers: true })` reach dedicated
+  workers started later (not on Firefox); `PageNavigation.next(page, { frames: "all" })` sees frames' navigations.
 - **Upload generated files as bytes.** `locator.setInputFiles(FileInput.bytes("report.csv", "text/csv", data))`
   makes the file in the page; one call takes bytes or paths, not both.
 - **Record, then export.** `const har = yield* Har.record(page, { content: "embed" })`, act, then

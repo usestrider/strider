@@ -405,6 +405,7 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
       entry("isolatedWorlds", "supported"),
       entry("pauseOnStart.frames", "supported", ["declarative: preload scripts and overrides scoped by context"]),
       entry("pauseOnStart.workers", "unsupported", ["preload scripts don't run in workers"]),
+      entry("initScripts.workers", "unsupported", ["WebDriver BiDi's preload scripts run in documents only"]),
       entry("pauseOnStart.popups", "supported", ["declarative: preload scripts and overrides scoped by user context"]),
       entry("input.native", "unsupported", ["WebDriver actions, not native input"]),
       entry("input.webdriver", "supported"),
@@ -435,6 +436,9 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
         "WebDriver BiDi has no command for it, so each character is typed as a key"
       ]),
       entry("input.pointerModifiers", "supported", ["modifiers are held as keys; a mouse event's flags are ignored"]),
+      entry("input.keyboardLayout", "partial", [
+        "WebDriver BiDi sends a key as its value: the code is Firefox's for that key on a US keyboard, and there is no AltGr or dead key"
+      ]),
       entry("input.dragAndDrop", "unsupported", [
         "Firefox starts an HTML drag from WebDriver actions, and never drops it"
       ]),
@@ -1905,20 +1909,23 @@ export const connect: (
       return { _tag: "Value", value: toRemote(reply.result, realm, keep) } satisfies Adapter.RemoteResult
     })
 
+    // A realm's handles go in one command (review 22, QUIRKS.md, Q132)
     const releaseHandles = (list: ReadonlyArray<Adapter.HandleId>) =>
-      Effect.forEach(list, (id) => {
-        const handle = handles.get(id)
-        handles.delete(id)
-        return handle === undefined
-          ? Effect.void
-          : Script.disown({
-            handles: [handle.handle as Script.Handle],
-            target: { realm: handle.realm as Script.Realm }
-          }).pipe(
-            on,
-            Effect.ignore
-          )
-      }, { concurrency: "unbounded", discard: true })
+      Effect.suspend(() => {
+        const byRealm = new Map<string, Array<Script.Handle>>()
+        for (const id of list) {
+          const handle = handles.get(id)
+          if (handle === undefined) continue
+          handles.delete(id)
+          byRealm.set(handle.realm, [...(byRealm.get(handle.realm) ?? []), handle.handle as Script.Handle])
+        }
+        return Effect.forEach(
+          byRealm,
+          ([realm, owned]) =>
+            Script.disown({ handles: owned, target: { realm: realm as Script.Realm } }).pipe(on, Effect.ignore),
+          { concurrency: "unbounded", discard: true }
+        )
+      })
 
     const dispatchInput = Effect.fnUntraced(
       function*(
@@ -1965,6 +1972,9 @@ export const connect: (
               })
               break
             case "Key":
+              // WebDriver BiDi sends a key as its value alone: it has no AltGr or dead key, and the character a
+              // layout's strokes type is sent as itself (review 22)
+              if (event.key === "AltGraph" || event.key === "Dead") break
               batch("key").push({
                 type: event.type === "down" ? "keyDown" : "keyUp",
                 value: Redacted.make(keyValue(event.key))

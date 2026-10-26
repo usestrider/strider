@@ -142,12 +142,19 @@ const unknownKey = (key: string) =>
     hint: `${JSON.stringify(key)} isn't a key`
   })
 
+/** The layout a page's context types with (review 22). */
+export const layoutOf = (runtime: Runtime.Runtime, page: Model.PageEntry): Keyboard.Layout =>
+  runtime.model.contexts.get(page.context)?.keyboardLayout ?? "us"
+
 export const keyboard = (owner: Owner): Keyboard.Keyboard => ({
   press: (key, options) =>
-    sending(owner, "Keyboard.press", keyboardError("Keyboard.press"), (state) => {
-      const definition = Keys.definition(key)
-      return definition === undefined ? unknownKey(key) : Input.press(state, definition, options?.modifiers ?? [])
-    }),
+    sending(
+      owner,
+      "Keyboard.press",
+      keyboardError("Keyboard.press"),
+      (state) =>
+        Input.type(state, key, layoutOf(owner.runtime, owner.page), options?.modifiers ?? []) ?? unknownKey(key)
+    ),
   pressSequentially: (text, options) => {
     const characters = Array.from(Redacted.isRedacted(text) ? Redacted.value(text) : text)
     const delay = options?.delay === undefined ? Duration.zero : Duration.fromInputUnsafe(options.delay)
@@ -158,7 +165,7 @@ export const keyboard = (owner: Owner): Keyboard.Keyboard => ({
           owner,
           "Keyboard.pressSequentially",
           keyboardError("Keyboard.pressSequentially"),
-          (state) => Input.press(state, Keys.forCharacter(character))
+          (state) => Input.type(state, character, layoutOf(owner.runtime, owner.page))!
         )
       ), { discard: true }).pipe(
         Spans.operation("Keyboard.pressSequentially", {
@@ -172,7 +179,7 @@ export const keyboard = (owner: Owner): Keyboard.Keyboard => ({
       text: Redacted.isRedacted(text) ? Redacted.value(text) : text
     }]),
   hold: Effect.fnUntraced(function*(key: Keyboard.Key | string) {
-    const definition = Keys.definition(key)
+    const definition = Keys.definition(key, layoutOf(owner.runtime, owner.page))
     if (definition === undefined) {
       return yield* Effect.fail(keyboardError("Keyboard.hold")(unknownKey(key), Operation.operationId()))
     }

@@ -29,6 +29,7 @@ import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Browser from "../Browser.ts"
 import * as Accessibility from "../cdp/Accessibility.ts"
 import * as BrowserCdp from "../cdp/Browser.ts"
+import * as Debugger from "../cdp/Debugger.ts"
 import * as DOM from "../cdp/DOM.ts"
 import * as Emulation from "../cdp/Emulation.ts"
 import * as Fetch from "../cdp/Fetch.ts"
@@ -57,6 +58,7 @@ import * as CdpWire from "./cdpWire.ts"
 import * as ConsoleFormat from "./consoleFormat.ts"
 import * as Declarations from "./declarations.ts"
 import * as Launch from "./launch.ts"
+import * as Groups from "./objectGroups.ts"
 import * as ProtocolClient from "./protocolClient.ts"
 import * as Retired from "./retired.ts"
 
@@ -231,6 +233,8 @@ interface DownloadEntry {
 interface HandleEntry {
   readonly target: TargetEntry
   readonly objectId: string
+  /** The object group it was made in (review 22, Q132). */
+  readonly group: string | undefined
 }
 
 // ── Mapping ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -419,7 +423,8 @@ const foldEvents: ReadonlyArray<Protocol.EventDef<string, any>> = [
   Network.webSocketClosed,
   Network.eventSourceMessageReceived,
   Fetch.requestPaused,
-  Fetch.authRequired
+  Fetch.authRequired,
+  Debugger.paused
 ]
 
 const base64 = (bytes: Uint8Array): string => Encoding.encode(bytes)
@@ -594,6 +599,8 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
       entry("isolatedWorlds", "supported"),
       entry("pauseOnStart.frames", "supported"),
       entry("pauseOnStart.workers", "supported"),
+      entry("input.keyboardLayout", "supported"),
+      entry("initScripts.workers", "supported", ["dedicated workers started after the script was declared"]),
       entry(
         "pauseOnStart.popups",
         ownership === "launched" ? "supported" : "unsupported",
@@ -720,6 +727,7 @@ export const connect: (
     const downloads = new Map<string, DownloadEntry>()
     const downloadsById = new Map<Download.Id, DownloadEntry>()
     const handles = new Map<Adapter.HandleId, HandleEntry>()
+    const groups = Groups.make()
     const connections = new Map<string, NetworkConnection.Id>()
     // HTML drags Chromium started and the adapter intercepted, by page, until they are dropped (review 16, candidate 4)
     // `stale`: announced after the gesture that started it was released (QUIRKS.md, Q88)
@@ -1152,6 +1160,21 @@ export const connect: (
       [Target.attachedToTarget.method]: (target, params: Target.AttachedToTargetParams) => attached(target, params),
       [Target.detachedFromTarget.method]: () => {
         // The session's own end, delivered by `ended`, carries everything
+      },
+      // A dedicated worker paused before its first script by its gate's breakpoint: its init scripts run, and it
+      // goes on (review 22, candidate 6b)
+      [Debugger.paused.method]: (target, params: Debugger.PausedParams) => {
+        if (target === undefined || target.kind !== "worker" || params.reason !== "instrumentation") return
+        const on = Protocol.on(target.session)
+        const bundle = target.page === undefined ? undefined : registry.workerBundle(placement(target.page))
+        detach(
+          Effect.all([
+            bundle === undefined ? Effect.void : Runtime.evaluate({ expression: bundle }).pipe(on),
+            // Disabling the debugger clears its breakpoint
+            Debugger.resume({}).pipe(on),
+            Debugger.disable().pipe(on)
+          ], { discard: true }).pipe(Effect.ignore)
+        )
       },
       [Target.targetCrashed.method]: (_target, params: Target.TargetCrashedParams) => {
         const page = targetsById.get(params.targetId)?.page
@@ -2102,6 +2125,16 @@ export const connect: (
     // (recorded): the domains are enabled and the worker resumed in one go, in that order, before any reply.
     const workerGate = Effect.fnUntraced(function*(target: TargetEntry, waiting: boolean) {
       const on = Protocol.on(target.session)
+      // A dedicated worker that gets init scripts pauses before its first script, where its global is whole: one
+      // waiting for the debugger has no timers yet (review 22, candidate 6b; QUIRKS.md, Q187)
+      const scripted = target.kind === "worker" && target.page !== undefined && waiting &&
+        registry.workerBundle(placement(target.page)) !== undefined
+      if (scripted) {
+        yield* Effect.all([
+          Debugger.enable({}).pipe(on),
+          Debugger.setInstrumentationBreakpoint({ instrumentation: "beforeScriptExecution" }).pipe(on)
+        ], { discard: true }).pipe(Effect.ignore)
+      }
       yield* Effect.all([Runtime.enable().pipe(on), Network.enable({}).pipe(on), resume(target.session, waiting)], {
         concurrency: "unbounded",
         discard: true
@@ -2691,6 +2724,7 @@ export const connect: (
           arguments: call.arguments.map((argument) => toCallArgument(argument, handles, nodes)),
           awaitPromise: call.awaitPromise,
           userGesture: call.userActivation,
+          ...(call.group === undefined ? {} : { objectGroup: call.group }),
           returnByValue: false,
           serializationOptions: call.result === "value"
             ? { serialization: "deep", maxDepth: 64 }
@@ -2701,7 +2735,8 @@ export const connect: (
       const value = (object: Runtime.RemoteObject): Adapter.RemoteValue => {
         if (call.result === "handle" && object.objectId !== undefined) {
           const handle = ids.handle()
-          handles.set(handle, { target: realm.target, objectId: object.objectId })
+          handles.set(handle, { target: realm.target, objectId: object.objectId, group: call.group })
+          if (call.group !== undefined) Groups.join(groups, call.group, handle)
           return {
             ...toRemoteValue(object.deepSerializedValue ?? { type: object.type }, documentOf),
             handle
@@ -2723,14 +2758,15 @@ export const connect: (
       return { _tag: "Value", value: value(reply.result) } satisfies Adapter.RemoteResult
     })
 
+    // A group given whole goes in one command (review 22, QUIRKS.md, Q132)
     const releaseHandles = (list: ReadonlyArray<Adapter.HandleId>) =>
-      Effect.forEach(list, (id) => {
-        const handle = handles.get(id)
-        handles.delete(id)
-        return handle === undefined || handle.target.ended
-          ? Effect.void
-          : Runtime.releaseObject({ objectId: handle.objectId as Runtime.RemoteObjectId }).pipe(
-            Protocol.on(handle.target.session),
+      Effect.forEach(Groups.release(groups, handles, list), (released) => {
+        const target = released._tag === "Group" ? released.first.target : released.handle.target
+        if (target.ended) return Effect.void
+        const on = Protocol.on(target.session)
+        return (released._tag === "Group"
+          ? Runtime.releaseObjectGroup({ objectGroup: released.group }).pipe(on)
+          : Runtime.releaseObject({ objectId: released.handle.objectId as Runtime.RemoteObjectId }).pipe(on)).pipe(
             Effect.ignore
           )
       }, { concurrency: "unbounded", discard: true })
@@ -3026,28 +3062,65 @@ export const connect: (
     // The full tree, ignored nodes left out and their children given to their parent (review 20, P3)
     const accessibilityTree = Effect.fnUntraced(function*(id: L1Target.NavigableId) {
       const page = yield* pageOf(id)
-      const { nodes } = yield* protocol(Accessibility.getFullAXTree({}).pipe(Protocol.on(page.target.session)))
-      const byId = new Map(nodes.map((node) => [node.nodeId, node]))
-      const text = (value: Accessibility.AXValue | undefined) =>
-        value === undefined || value.value === undefined ? "" : String(value.value)
-      const convert = (node: Accessibility.AXNode): ReadonlyArray<Adapter.AxNode> => {
-        const children = (node.childIds ?? []).flatMap((child) => {
-          const found = byId.get(child)
-          return found === undefined ? [] : convert(found)
-        })
-        if (node.ignored) return children
-        const properties: Record<string, unknown> = {}
-        if (node.description !== undefined) properties.description = node.description.value
-        if (node.value !== undefined) properties.value = node.value.value
-        for (const property of node.properties ?? []) properties[property.name] = property.value.value
-        return [{ role: text(node.role), name: text(node.name), properties, children }]
-      }
-      const root = nodes.find((node) => node.parentId === undefined)
-      const converted = root === undefined ? [] : convert(root)
+      const main = frames.get(page.targetId)
+      const converted = yield* frameTree(main?.owner ?? page.target, main?.frameId)
       return converted.length === 1
         ? converted[0]!
         : { role: "RootWebArea", name: "", properties: {}, children: converted }
     })
+
+    // A frame's tree, read on the session that owns the frame, with each iframe's frame stitched in under it
+    // (review 22, candidate 6c): Chromium reads a frame's tree alone
+    const frameTree = (
+      owner: TargetEntry,
+      frameId: string | undefined
+    ): Effect.Effect<ReadonlyArray<Adapter.AxNode>, Adapter.AdapterError> =>
+      Effect.gen(function*() {
+        const on = Protocol.on(owner.session)
+        const { nodes } = yield* protocol(
+          Accessibility.getFullAXTree(frameId === undefined ? {} : { frameId: frameId as Page.FrameId }).pipe(on)
+        )
+        const byId = new Map(nodes.map((node) => [node.nodeId, node]))
+        const text = (value: Accessibility.AXValue | undefined) =>
+          value === undefined || value.value === undefined ? "" : String(value.value)
+        // The frame each iframe holds, by its element, and that frame's tree
+        const stitched = new Map<string, ReadonlyArray<Adapter.AxNode>>()
+        yield* Effect.forEach(
+          nodes.filter((node) => text(node.role) === "Iframe" && node.backendDOMNodeId !== undefined),
+          (node) =>
+            Effect.gen(function*() {
+              const described = yield* DOM.describeNode({ backendNodeId: node.backendDOMNodeId! }).pipe(
+                on,
+                Effect.option
+              )
+              const held = Option.flatMap(described, ({ node }) => Option.fromUndefinedOr(node.frameId))
+              const child = Option.isSome(held) ? frames.get(held.value) : undefined
+              if (child === undefined) return
+              stitched.set(
+                node.nodeId,
+                yield* frameTree(child.owner, child.frameId).pipe(Effect.orElseSucceed(() => []))
+              )
+            }),
+          { concurrency: "unbounded", discard: true }
+        )
+        const convert = (node: Accessibility.AXNode): ReadonlyArray<Adapter.AxNode> => {
+          const children = [
+            ...(node.childIds ?? []).flatMap((child) => {
+              const found = byId.get(child)
+              return found === undefined ? [] : convert(found)
+            }),
+            ...(stitched.get(node.nodeId) ?? [])
+          ]
+          if (node.ignored) return children
+          const properties: Record<string, unknown> = {}
+          if (node.description !== undefined) properties.description = node.description.value
+          if (node.value !== undefined) properties.value = node.value.value
+          for (const property of node.properties ?? []) properties[property.name] = property.value.value
+          return [{ role: text(node.role), name: text(node.name), properties, children }]
+        }
+        const root = nodes.find((node) => node.parentId === undefined)
+        return root === undefined ? [] : convert(root)
+      })
 
     // Frames as Chromium paints them; the next comes once this one is acknowledged (review 20, P4)
     const screencast = Effect.fnUntraced(function*(id: L1Target.NavigableId) {

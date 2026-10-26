@@ -8,8 +8,9 @@
  *   world, with user activation inside `Page.withUserGesture`.
  * - **A document that ends before the call** is no failure: nothing ran, so the call goes to the new one. One
  *   that ends during it is `TargetGone`, since the function may have run partly, and nothing runs it again.
- * - **A handle** is a remote object in one realm, released when its scope closes or by `release`, once.
- *   A primitive result has no remote object, and its handle holds the value.
+ * - **A handle** is a remote object in one realm, released by `release` or when its scope closes, once.
+ *   A primitive result has no remote object, and its handle holds the value. A scope's handles in a realm are
+ *   one object group, which its close releases in one command (review 22, QUIRKS.md, Q132).
  */
 import * as Effect from "effect/Effect"
 import * as Inspectable from "effect/Inspectable"
@@ -123,6 +124,8 @@ export interface Call {
   readonly functionDeclaration: string
   readonly arguments: ReadonlyArray<Adapter.LocalValue>
   readonly result: "value" | "handle"
+  /** The object group a handle result joins (`groupOf`). */
+  readonly group?: string | undefined
   readonly userActivation: boolean
   /** The page whose dialogs can pause the call: one nothing will decide fails it at once. */
   readonly page: Option.Option<Model.PageEntry>
@@ -138,6 +141,7 @@ export const call = (runtime: Runtime.Runtime, options: Call): Effect.Effect<Ada
       arguments: options.arguments,
       awaitPromise: true,
       result: options.result,
+      ...(options.group === undefined ? {} : { group: options.group }),
       userActivation: options.userActivation
     }).pipe(
       Effect.mapError((error): Failure => Operation.fromAdapter(error, options.id, runtime.backend)),
@@ -267,7 +271,7 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
     this.page = page
   }
 
-  private get remote(): Option.Option<Adapter.HandleId> {
+  get remote(): Option.Option<Adapter.HandleId> {
     return "handle" in this.value && this.value.handle !== undefined ? Option.some(this.value.handle) : Option.none()
   }
 
@@ -282,6 +286,7 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
       if (this.released) return yield* Effect.die(new Error(`${operation}: the handle was released`))
       const id = Operation.operationId()
       const budget = yield* Operation.budget
+      const group = yield* groupFor(this.runtime, this.realm, result)
       return yield* Effect.gen({ self: this }, function*() {
         const rest = yield* toLocal(args, this.realm, 1)
         const value = yield* call(this.runtime, {
@@ -289,6 +294,7 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
           functionDeclaration: fn.toString(),
           arguments: [localOf(this as HandleImpl<unknown>), ...rest],
           result,
+          group,
           userActivation: false,
           page: this.page,
           at: budget.at,
@@ -352,7 +358,58 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
   }
 }
 
-/** A handle for a result, released when the caller's scope closes. */
+/** A scope's handles in one realm: an object group, released together as the scope closes (review 22, Q132). */
+export interface Group {
+  readonly name: string
+  readonly handles: Set<HandleImpl<unknown>>
+}
+
+const groups = new WeakMap<Scope.Scope, Map<Target.RealmId, Group>>()
+let made = 0
+
+/** The group of a scope's handles in a realm, made with the finalizer that releases them in one command. */
+export const groupOf = (runtime: Runtime.Runtime, scope: Scope.Scope, realm: Target.RealmId): Effect.Effect<Group> =>
+  Effect.suspend(() => {
+    let realms = groups.get(scope)
+    if (realms === undefined) {
+      realms = new Map()
+      groups.set(scope, realms)
+    }
+    const found = realms.get(realm)
+    if (found !== undefined) return Effect.succeed(found)
+    const group: Group = { name: `strider-${++made}`, handles: new Set() }
+    const own = realms
+    own.set(realm, group)
+    return Scope.addFinalizer(
+      scope,
+      Effect.suspend(() => {
+        own.delete(realm)
+        const remote: Array<Adapter.HandleId> = []
+        for (const handle of group.handles) {
+          if (handle.released) continue
+          handle.released = true
+          remote.push(...Option.toArray(handle.remote))
+        }
+        return remote.length === 0 ? Effect.void : runtime.model.adapter.releaseHandles(remote)
+      })
+    ).pipe(Effect.as(group))
+  })
+
+/** The group a call's handle result joins: its scope's in the realm, where it asks for a handle. */
+export const groupFor = (
+  runtime: Runtime.Runtime,
+  realm: Target.RealmId,
+  result: "value" | "handle"
+): Effect.Effect<string | undefined> =>
+  result === "value" ?
+    Effect.undefined :
+    Effect.flatMap(Effect.serviceOption(Scope.Scope), (scope) =>
+      Option.match(scope, {
+        onNone: () => Effect.undefined,
+        onSome: (scope) => Effect.map(groupOf(runtime, scope, realm), (group) => group.name)
+      }))
+
+/** A handle for a result, released with its group when the caller's scope closes. */
 export const own = <A>(
   runtime: Runtime.Runtime,
   realm: Target.RealmId,
@@ -361,7 +418,7 @@ export const own = <A>(
 ): Effect.Effect<JSHandle.JSHandle<A>, never, Scope.Scope> =>
   Effect.gen(function*() {
     const handle = new HandleImpl<A>(runtime, realm, value, page)
-    const scope = yield* Effect.scope
-    yield* Scope.addFinalizer(scope, Effect.suspend(() => handle.release))
+    const group = yield* groupOf(runtime, yield* Effect.scope, realm)
+    group.handles.add(handle as HandleImpl<unknown>)
     return handle
   })

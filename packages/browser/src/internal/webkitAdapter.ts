@@ -63,6 +63,7 @@ import * as Adapter from "./adapter.ts"
 import * as ConsoleFormat from "./consoleFormat.ts"
 import * as Declarations from "./declarations.ts"
 import * as Launch from "./launch.ts"
+import * as Groups from "./objectGroups.ts"
 import * as ProtocolClient from "./protocolClient.ts"
 import * as Retired from "./retired.ts"
 import * as Utility from "./webkitUtility.ts"
@@ -237,6 +238,8 @@ interface DownloadEntry {
 interface HandleEntry {
   readonly session: ProtocolClient.Session
   readonly objectId: string
+  /** The object group it was made in (review 22, Q132). */
+  readonly group: string | undefined
 }
 
 // ── Mapping ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -526,6 +529,8 @@ const capabilities = (info: Browser.Info) => {
       ]),
       entry("pauseOnStart.frames", "supported", ["frames run in their page's process, which is paused"]),
       entry("pauseOnStart.workers", "supported"),
+      entry("input.keyboardLayout", "supported"),
+      entry("initScripts.workers", "supported", ["dedicated workers started after the script was declared"]),
       entry("pauseOnStart.popups", "supported"),
       entry("input.native", "supported"),
       // Recorded: an intercept never sees the requests of a page a service worker controls, even those the
@@ -652,6 +657,9 @@ export const connect: (
     const downloads = new Map<string, DownloadEntry>()
     const downloadsById = new Map<Download.Id, DownloadEntry>()
     const handles = new Map<Adapter.HandleId, HandleEntry>()
+    const groups = Groups.make()
+    // Each object group's anchor, an object made in it, by the group's name (review 22, QUIRKS.md, Q132 and Q185)
+    const anchors = new Map<string, Deferred.Deferred<string, Adapter.AdapterError>>()
     const connections = new Map<string, NetworkConnection.Id>()
     // Loads that failed before the command that started them replied
     const failedLoads = new Map<string, string>()
@@ -1950,6 +1958,9 @@ export const connect: (
           concurrency: "unbounded",
           discard: true
         }).pipe(Effect.ignore)
+        // A new worker waits for `Worker.initialized`, so this runs before its own script (review 22, 6b)
+        const bundle = registry.workerBundle(placement(worker.target.page))
+        if (bundle !== undefined) yield* Runtime.evaluate({ expression: bundle }).pipe(on, Effect.ignore)
         return { through: 0, apply: Effect.void } satisfies ProtocolClient.Synced
       }).pipe(
         Effect.ensuring(
@@ -2178,7 +2189,9 @@ export const connect: (
       if (registry.fileChooser(placement(page))) {
         yield* Page.setInterceptFileChooserDialog({ enabled: true }).pipe(on)
       }
-      for (const world of page.worlds) yield* Page.createUserWorld({ name: world }).pipe(on)
+      for (const world of page.worlds) {
+        yield* Page.createUserWorld({ name: world }).pipe(on, Effect.catchIf(worldExists, () => Effect.void))
+      }
     })
 
     // The viewport waits for the page's first target, where its size before is measured
@@ -2522,6 +2535,10 @@ export const connect: (
       for (const waiter of Array.from(realmWaiters.get(id) ?? [])) waiter()
     }
 
+    // A world the page asked for at the same time as its target's setup created it (QUIRKS.md, Q190)
+    const worldExists = (error: Protocol.ProtocolError) =>
+      error.reason._tag === "Rejected" && /world with the given name already exists/i.test(error.message)
+
     const realmFor = Effect.fnUntraced(function*(id: L1Target.DocumentId, world: Adapter.World) {
       const document = documents.get(id)
       if (document === undefined) return yield* Effect.fail(foreign(id))
@@ -2533,34 +2550,34 @@ export const connect: (
       const existing = find()
       if (existing !== undefined) return existing.id
       // The main world, and a world the page has already, come to each new document, reported a moment after it
-      // commits; creating a world again fails (review 17's build), so wait for its report, or the document's end
+      // commits; creating a world again fails (review 17's build), so its report is waited for, or the document's end
       const page = document.frame.page
-      if (world._tag === "Main" || page.worlds.has(world.name)) {
-        yield* Effect.callback<void>((resume) => {
-          const check = () => {
-            if (find() !== undefined || !documents.has(id)) {
-              removeRealmWaiter(id, check)
-              resume(Effect.void)
-            }
+      if (world._tag !== "Main" && !page.worlds.has(world.name)) {
+        // A world is created in every frame of the page, now and in every target it gets: a target still being set
+        // up can create it first (QUIRKS.md, Q190)
+        page.worlds.add(world.name)
+        const target = yield* targetOf(page)
+        yield* protocol(
+          Page.createUserWorld({ name: world.name }).pipe(
+            Protocol.on(target.session),
+            Effect.catchIf(worldExists, () => Effect.void)
+          )
+        )
+      }
+      yield* Effect.callback<void>((resume) => {
+        const check = () => {
+          if (find() !== undefined || !documents.has(id)) {
+            removeRealmWaiter(id, check)
+            resume(Effect.void)
           }
-          addRealmWaiter(id, check)
-          check()
-          return Effect.sync(() => removeRealmWaiter(id, check))
-        })
-        const arrived = find()
-        if (arrived !== undefined) return arrived.id
-        return yield* Effect.fail(gone({ _tag: "Document", id }, { _tag: "DocumentReplaced" }))
-      }
-      // A world is created in every frame of the page, now and in every target it gets
-      page.worlds.add(world.name)
-      const target = yield* targetOf(page)
-      yield* protocol(Page.createUserWorld({ name: world.name }).pipe(Protocol.on(target.session)))
-      yield* target.session.drainObserved
-      const created = find()
-      if (created === undefined) {
-        return yield* Effect.fail(gone({ _tag: "Document", id }, { _tag: "DocumentReplaced" }))
-      }
-      return created.id
+        }
+        addRealmWaiter(id, check)
+        check()
+        return Effect.sync(() => removeRealmWaiter(id, check))
+      })
+      const arrived = find()
+      if (arrived !== undefined) return arrived.id
+      return yield* Effect.fail(gone({ _tag: "Document", id }, { _tag: "DocumentReplaced" }))
     })
 
     // The realm's helper, installed on first use.
@@ -2594,12 +2611,49 @@ export const connect: (
         )
       })
 
+    // WebKit puts what a call returns in the object group of the object it was called on, and its
+    // `callFunctionOn` names no group: a group's handles come from calls on an object made in it
+    const anchorOf = (realm: RealmEntry, group: string) =>
+      Effect.suspend(() => {
+        const found = anchors.get(group)
+        if (found !== undefined) return Deferred.await(found)
+        const anchor = Deferred.makeUnsafe<string, Adapter.AdapterError>()
+        anchors.set(group, anchor)
+        return Runtime.evaluate({
+          expression: "({})",
+          objectGroup: group,
+          ...(realm.contextId === undefined ? {} : { contextId: realm.contextId as Runtime.ExecutionContextId }),
+          doNotPauseOnExceptionsAndMuteConsole: true
+        }).pipe(
+          Protocol.on(realm.session),
+          Effect.mapError((error): Adapter.AdapterError =>
+            error.reason._tag === "SessionEnded" || error.reason._tag === "Rejected"
+              ? gone({ _tag: "Realm", id: realm.id }, { _tag: "RealmDestroyed" })
+              : protocolError(error)
+          ),
+          Effect.flatMap((reply) =>
+            reply.wasThrown === true || reply.result.objectId === undefined
+              ? Effect.fail(gone({ _tag: "Realm", id: realm.id }, { _tag: "RealmDestroyed" }))
+              : Effect.succeed(reply.result.objectId as string)
+          ),
+          Effect.onExit((exit) =>
+            Effect.sync(() => {
+              if (Exit.isFailure(exit)) anchors.delete(group)
+              Deferred.doneUnsafe(anchor, exit)
+            })
+          )
+        )
+      })
+
     const evaluate = Effect.fnUntraced(function*(id: L1Target.RealmId, call: Adapter.EvaluationCall) {
       const realm = realms.get(id)
       if (realm === undefined || realm.ended) {
         return yield* Effect.fail(gone({ _tag: "Realm", id }, { _tag: "RealmDestroyed" }))
       }
       const helper = yield* helperOf(realm)
+      const anchor = call.result === "handle" && call.group !== undefined
+        ? yield* anchorOf(realm, call.group)
+        : undefined
       const on = Protocol.on(realm.session)
       const realmGone = (error: Protocol.ProtocolError): Adapter.AdapterError =>
         realm.ended || error.reason._tag === "SessionEnded"
@@ -2624,9 +2678,12 @@ export const connect: (
         { discard: true }
       )
       const reply = yield* Runtime.callFunctionOn({
-        objectId: helper as Runtime.RemoteObjectId,
-        functionDeclaration: Utility.call(call.functionDeclaration, call.result, call.awaitPromise),
+        objectId: (anchor ?? helper) as Runtime.RemoteObjectId,
+        functionDeclaration: anchor === undefined
+          ? Utility.call(call.functionDeclaration, call.result, call.awaitPromise)
+          : Utility.callBeside(call.functionDeclaration, call.result, call.awaitPromise),
         arguments: [
+          ...(anchor === undefined ? [] : [{ objectId: helper as Runtime.RemoteObjectId }]),
           { value: call.arguments.map((argument) => argument._tag === "Value" ? "v" : "h") },
           ...call.arguments.map((argument): Runtime.CallArgument => {
             if (argument._tag === "Value") return { value: argument.value }
@@ -2646,7 +2703,8 @@ export const connect: (
         const type = remoteType(object)
         if (object.objectId === undefined || object.subtype === "null") return primitive(object)
         const handle = ids.handle()
-        handles.set(handle, { session: realm.session, objectId: object.objectId })
+        handles.set(handle, { session: realm.session, objectId: object.objectId, group: call.group })
+        if (call.group !== undefined) Groups.join(groups, call.group, handle)
         return type === "node"
           ? {
             type,
@@ -2701,16 +2759,15 @@ export const connect: (
       } satisfies Adapter.RemoteResult
     })
 
+    // A group given whole goes in one command, its anchor with it (review 22, QUIRKS.md, Q132)
     const releaseHandles = (list: ReadonlyArray<Adapter.HandleId>) =>
-      Effect.forEach(list, (id) => {
-        const handle = handles.get(id)
-        handles.delete(id)
-        return handle === undefined
-          ? Effect.void
-          : Runtime.releaseObject({ objectId: handle.objectId as Runtime.RemoteObjectId }).pipe(
-            Protocol.on(handle.session),
-            Effect.ignore
-          )
+      Effect.forEach(Groups.release(groups, handles, list), (released) => {
+        if (released._tag === "Group") anchors.delete(released.group)
+        return (released._tag === "Group"
+          ? Runtime.releaseObjectGroup({ objectGroup: released.group }).pipe(Protocol.on(released.first.session))
+          : Runtime.releaseObject({ objectId: released.handle.objectId as Runtime.RemoteObjectId }).pipe(
+            Protocol.on(released.handle.session)
+          )).pipe(Effect.ignore)
       }, { concurrency: "unbounded", discard: true })
 
     // Page coordinates reach every frame (review 18, P1), so a frame changes nothing here

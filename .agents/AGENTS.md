@@ -48,7 +48,8 @@ from the repository root.
   `packages/browser/src/webkit-protocol/`. Never edit generated files:
   change a correction or an annotation and run `pnpm codegen:protocol`. A correction says what the spec states,
   what the wire does, and the evidence. On a roll, `pnpm codegen:audit` lists the corrections the new spec has
-  absorbed.
+  absorbed. `keyboards/source/` holds Unicode CLDR's keyboard layouts, which `pnpm codegen:keyboards` turns into
+  `packages/browser/src/internal/keyboardLayouts.ts` (review 22).
 - `.repos/`: read-only references cloned by `scripts/worktree-setup.sh`, such as Effect's sources and its
   `.agents/skills`. Never import from them.
 
@@ -61,6 +62,7 @@ Use the narrowest check that covers the change:
 | Source, scenarios or configuration   | `pnpm check`, `pnpm lint-fix`                                                                                                            |
 | A new, renamed or removed module     | `pnpm codegen`, then `pnpm check`                                                                                                        |
 | Protocol corrections or annotations  | `pnpm codegen:protocol`, then `pnpm check` and `pnpm test --run packages/browser/test/Drift.test.ts`                                     |
+| Keyboard layouts                     | `pnpm codegen:keyboards`, then `pnpm test --run packages/browser/test/Keys.test.ts`                                                      |
 | Runtime behavior                     | `pnpm test --run <file>`                                                                                                                 |
 | The protocol client or transports    | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts`, then `pnpm test:integration` |
 | A backend adapter or launcher        | `pnpm test:integration`                                                                                                                  |

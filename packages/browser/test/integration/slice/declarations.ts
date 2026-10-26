@@ -518,6 +518,48 @@ export const declarations = (
 
       // ── The clock ──
 
+      it.effect("runs init scripts and the clock in a page's dedicated workers where the backend can", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const script = page.addInitScript({ source: "self.__marked = 'yes'" }, { workers: true })
+            const clock = page.clock.install({ mode: "controlled", at: "2030-01-02T03:04:05Z" }, { workers: true })
+            if (name === "Firefox") {
+              // WebDriver BiDi's preload scripts run in documents only
+              for (const declared of [script, clock]) {
+                const error = yield* Effect.flip(declared)
+                assert(Declaration.isDeclarationError(error), String(error))
+                assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "initScripts.workers" })
+              }
+              return
+            }
+            yield* script
+            yield* clock
+            const start = Date.UTC(2030, 0, 2, 3, 4, 5)
+            const first = yield* run(
+              page,
+              origin,
+              `const worker = new Worker(URL.createObjectURL(new Blob(["onmessage = () => postMessage([self.__marked ?? 'none', Date.now()])"], { type: "text/javascript" })))
+              window.ask = () => new Promise((resolve) => { worker.onmessage = (event) => resolve(event.data); worker.postMessage(0) })
+              return await window.ask()`
+            )
+            assert.deepStrictEqual(first, ["yes", start])
+            // An operation reaches the worker as it reaches the page's documents
+            yield* page.clock.adjust("1 hour")
+            const later = yield* page.evaluateInMainWorld(() =>
+              (window as unknown as { ask: () => Promise<[string, number]> }).ask()
+            )
+            assert.deepStrictEqual(later, ["yes", start + 3_600_000])
+            // A script in workers comes after only scripts that run there too
+            const documentsOnly = yield* page.addInitScript({ source: "self.__other = 1" })
+            const refused = yield* Effect.flip(
+              page.addInitScript({ source: "self.__after = 1" }, { workers: true, after: [documentsOnly] })
+            )
+            assert.strictEqual(refused.reason._tag, "InvalidInput")
+          }))
+        }), timeout)
+
       it.effect("runs call site 10 on a controlled clock", () =>
         Effect.gen(function*() {
           const { origin } = yield* site

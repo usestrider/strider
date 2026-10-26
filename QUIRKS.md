@@ -221,6 +221,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* the CDP adapter turns interception on with the first move that holds a button, and finishes the drags it intercepts. `input.dragAndDrop` is unsupported elsewhere, so `dragTo` from a draggable element fails there with `Unsupported` before anything is sent. Drags by pointer events work everywhere.
 - *Reconsider:* Firefox, if it starts dropping; and whether interception, once on, should stay on for the page's life.
 - **Kept** in review 21: Firefox starts drags it never drops; Strider refuses `dragTo` up front there.
+- **Resolved** in review 22's third step: `dragTo(target, { html: "synthetic" })` has the page dispatch an HTML drag's events, untrusted, on every backend; the refusal of a native one names it.
 
 **Q77. WebKit fires no `click` after a tap** (Browser). A touch start and end reach the page, with touch pointer events, on all three; Chromium and Firefox follow with compatibility mouse events and `click`, and WebKit doesn't.
 - *Seen:* review 16, P6.
@@ -245,6 +246,21 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* `close`'s docs say so, and the tests click before closing.
 - *Reconsider:* nothing; it is the browsers' rule against abusive prompts.
 - **Kept** in review 21: the *We* line is the decision.
+
+**Q186. Chromium and WebKit ignore a `dropEffect` set on a `DataTransfer` a script made** (Browser). In a drag the page dispatches, the `dropEffect` a `dragover` handler sets reaches `dragend` on Firefox; Chromium and WebKit keep `"none"`.
+- *Seen:* review 22's build of `dragTo({ html: "synthetic" })`.
+- *We:* `dragend` sees what the browser keeps, which `dragTo`'s Gotchas say.
+- *Reconsider:* nothing on our side: the browser owns a `DataTransfer`'s drop effect.
+
+**Q188. WebKit's key events ignore the modifiers held** (Browser). As its mouse events do (Q72): a key typed with Shift held, as a layout's capital is, reaches the page with `shiftKey` false, and the Shift key's own `keydown` too; the character typed is the right one.
+- *Seen:* review 22's build, when a German layout's `Y` was typed on every backend.
+- *We:* nothing: the text is right, and the flags are WebKit's.
+- *Reconsider:* whether WebKit's `Input.dispatchKeyEvent` takes its modifiers another way.
+
+**Q189. A WebDriver key action names a key value, never a key's place** (Browser). Firefox picks the `code` for the value as a US keyboard would, and WebDriver has no AltGr and no dead key, so a layout's `z` on `KeyY` arrives as `z` on `KeyZ`.
+- *Seen:* review 22's build, when a German layout was typed on every backend.
+- *We:* `input.keyboardLayout` is `partial` on Firefox: the BiDi adapter sends each character as its value, leaving out the `AltGraph` and `Dead` strokes, so the page gets the layout's characters with US codes.
+- *Reconsider:* reporting it upstream, if WebDriver BiDi grows a key's code or location in its actions.
 
 ## Browsers: downloads and file choosers
 
@@ -341,6 +357,11 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* `EvaluationThrown`'s message drops the trailing `at` lines, which `stack` has.
 - *Reconsider:* nothing.
 - **Kept** in review 21: the *We* line is the decision.
+
+**Q187. A Chromium dedicated worker paused at start has no timers yet** (Browser). Attached waiting for the debugger, its global has `Date` and `performance` but no `setTimeout`, `setInterval`, their clears or `reportError`, which appear once it starts; a script run there can't wrap them.
+- *Seen:* review 22's build, when the page clock in workers ran there and found no `setTimeout` to replace.
+- *We:* a dedicated worker that gets init scripts is resumed with a `beforeScriptExecution` instrumentation breakpoint set, and the scripts run where it pauses, before the worker's first script, with its global whole; then the debugger is disabled.
+- *Reconsider:* nothing, unless Chromium installs the timers earlier.
 
 ## Browsers: network
 
@@ -722,6 +743,11 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* nothing yet.
 - *Reconsider:* whether `Page.crash` was refused or ignored (the test ignores its failure), or whether `Inspector.targetCrashed` or `Target.targetCrashed` came and the adapter missed it; trace it as Q149 was.
 
+**Q185. WebKit's `callFunctionOn` names no object group** (Browser). What a call returns joins the group of the object it was called on, and the WebKit adapter calls everything on its helper, which is in none.
+- *Seen:* review 22's build of grouped handles; a probe read a handle back after its group's release, and failed, as it should.
+- *We:* a group's handles come from calls on an object made in the group (`Runtime.evaluate` with `objectGroup`), with the helper passed as an argument.
+- *Reconsider:* nothing: CDP's `callFunctionOn` takes `objectGroup`, WebKit's doesn't.
+
 ## Ours: workarounds and odd shapes
 
 **Q58. `PromptBlocking` carries the dialog's kind and text, not `Page.Prompt`** (Ours). `Reason` is a leaf module, and importing `Page` into it makes a load cycle.
@@ -819,6 +845,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* nothing.
 - *Reconsider:* other layouts, if a test needs one.
 - **Kept** in review 21: a declared piece still unbuilt, built when a use needs it.
+- **Resolved** in review 22's third step: `UserContext.Options.keyboardLayout` chooses `us`, `uk`, `de`, `fr`, `es` or `it`, generated from Unicode CLDR's Windows layouts, and `type` and `press` hold Shift and AltGr and press dead keys as the layout does. Firefox follows a layout's keys but gives them US codes (`input.keyboardLayout`).
 
 **Q87. `Expect.that` turns its subject's timeout into its own failure** (Ours). A subject still running at the expectation's deadline, or failing with `Timeout` once it has passed, ends the expectation with `ExpectationFailed`; a shorter deadline inside the subject stays the subject's failure. The two are told apart only by whether the expectation's deadline has passed.
 - *Seen:* review 16's revision, under full load: a `Locator.count` timed out while resolving.
@@ -937,6 +964,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 18's revision.
 - *We:* as above.
 - *Reconsider:* releasing a scope's handles in one command per realm.
+- **Resolved** in review 22's third step: a scope's handles in a realm are one object group, released in one `Runtime.releaseObjectGroup` as the scope closes (on WebKit through an object made in the group, Q185), and in one `script.disown` on BiDi.
 
 **Q133. `page.readHtml` reads from the engine's world** (Ours). The review said the isolated world; the document's HTML is the same from either, and the engine is already there.
 - *Seen:* review 18's revision.
@@ -1134,3 +1162,8 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* keep a finished request answerable while there is room for 1000, as the model keeps hops (`maxHops`), and forget the oldest after (`internal/retired.ts`). A request still in flight stays until it ends.
 - *Reconsider:* ending a target's requests with it, which Q159's favicon, never ended, would need.
 - **Resolved** in `a7ee8dc` (review 21's first step): as above.
+
+**Q190. A world was created twice for a WebKit page just made** (Ours). `Page.createUserWorld` refuses a name the target has (`World with the given name already exists`); a popup's first locator asked for the engine's world while its target's setup, which creates the page's worlds in each target it gets, created it too, and the click failed.
+- *Seen:* review 22's third step, in a full run: call site 3 on WebKit, once.
+- *We:* both take a world that exists as made, and a world asked for is waited for until its realm is reported or its document ends.
+- *Reconsider:* nothing.

@@ -357,6 +357,30 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           }))
         }), timeout)
 
+      it.effect("reports a frame's own navigations when asked, each naming its frame", () =>
+        Effect.gen(function*() {
+          const { origin, url } = yield* fixture(() => `<iframe id="inner" src="/child"></iframe>`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.frame(page.locator("#inner")).getByText("child of").pipe(Expect.toBeVisible)
+            const inFrame = yield* PageNavigation.next(page, { url: `${origin}/child?moved`, frames: "all" })
+            yield* page.evaluateInMainWorld(() => {
+              ;(document.getElementById("inner") as HTMLIFrameElement).contentWindow!.location.href = "/child?moved"
+            })
+            const navigation = yield* inFrame
+            assert(navigation._tag === "Committed", navigation._tag)
+            assert.notStrictEqual(navigation.frame, page.id)
+            assert.strictEqual(Option.getOrThrow(navigation.response).status, 200)
+            // The page's own are the default, and name the page
+            const own = yield* PageNavigation.history(page)
+            assert.deepStrictEqual(own.entries.map((each) => [each.url, each.frame === page.id]), [[url, true]])
+            const all = yield* PageNavigation.history(page, { frames: "all" })
+            assert.includeDeepMembers(all.entries.map((each) => each.url), [url, `${origin}/child?moved`])
+            assert.isTrue(all.entries.some((each) => each.frame === navigation.frame))
+          }))
+        }), timeout)
+
       it.effect("waits for the document a navigation committed to load", () =>
         Effect.gen(function*() {
           const { origin, url } = yield* fixture((origin) =>

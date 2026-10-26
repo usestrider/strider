@@ -47,6 +47,23 @@ export type Key = typeof Key.Type
 export type Modifier = "Alt" | "Control" | "Meta" | "Shift"
 
 /**
+ * A keyboard layout, from Unicode CLDR's Windows layouts (review 22): which key, with which modifiers, types each
+ * character.
+ *
+ * **Details**
+ *
+ * `us` is the default; `uk`, `de`, `fr`, `es` and `it` are the common European ones. A character a layout types
+ * with Shift or AltGr is typed with them held, one only a dead key reaches as the dead key and then its other
+ * key, and one the layout has no key for as a key of its own with an empty `code`. The page sees the layout's
+ * `key` and `code`; the browser's own layout doesn't change.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type Layout = "us" | "uk" | "de" | "fr" | "es" | "it"
+
+/**
  * Settings for pressing one key.
  *
  * @stability unstable

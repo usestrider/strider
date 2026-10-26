@@ -30,6 +30,7 @@ import type * as ConsoleMessage from "../ConsoleMessage.ts"
 import * as Diagnostics from "../Diagnostics.ts"
 import type * as Dialog from "../Dialog.ts"
 import type * as Download from "../Download.ts"
+import type * as Keyboard from "../Keyboard.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import type * as NetworkConnection from "../NetworkConnection.ts"
 import type * as NetworkRequest from "../NetworkRequest.ts"
@@ -131,6 +132,8 @@ export interface RouteEntry {
 /** A navigation of a page, when it ended (review 14, candidate 6). */
 export interface NavigationEvent {
   readonly navigation: PageNavigation.Id
+  /** The navigable it happened in: the page's own id, or a frame's (review 22). */
+  readonly frame: Target.NavigableId
   /** Where it ended: the committed document's URL, or the one a same-document navigation set; else where it was going. */
   readonly url: string
   readonly outcome: Adapter.NavigationOutcome
@@ -302,6 +305,8 @@ export interface ContextEntry {
   policy: Option.Option<DialogPolicy>
   /** Events retained per kind and target, for `history` (`UserContext.Options.eventLog`). */
   eventLog: number
+  /** The layout its pages' keyboards type with (`UserContext.Options.keyboardLayout`, review 22). */
+  keyboardLayout: Keyboard.Layout
   readonly events: ContextEvents
   /** Its workers: its pages' dedicated workers, and its shared and service workers. */
   readonly workers: SubscriptionRef.SubscriptionRef<ReadonlyArray<WorkerEntry>>
@@ -407,8 +412,11 @@ export const make = Effect.fnUntraced(function*() {
   const frames = new Map<Target.NavigableId, PageEntry>()
   const documents = new Map<Target.DocumentId, DocumentEntry>()
   const navigations = new Map<PageNavigation.Id, NavigationEntry>()
-  // A page's own navigations, from their start to their end: where they went, for the event
-  const started = new Map<PageNavigation.Id, { readonly page: PageEntry; readonly url: string }>()
+  // A page's navigations and its frames', from their start to their end: where they went, for the event
+  const started = new Map<
+    PageNavigation.Id,
+    { readonly page: PageEntry; readonly frame: Target.NavigableId; readonly url: string }
+  >()
   const navigationHops = new Set<NetworkRequest.HopId>()
   const responses = new Map<NetworkRequest.HopId, NetworkResponse.NetworkResponse>()
   const hops = new Map<NetworkRequest.HopId, HopEntry>()
@@ -569,6 +577,7 @@ export const make = Effect.fnUntraced(function*() {
       owned: false,
       policy: Option.none(),
       eventLog: defaultEventLog,
+      keyboardLayout: "us",
       events: {
         autoResolution: Events.make(target, cap),
         request: Events.make(target, cap),
@@ -884,10 +893,10 @@ export const make = Effect.fnUntraced(function*() {
             pending.entry.value.url = Option.some(fact.url)
             Events.revise(pending.channel, pending.entry)
           }
-          // A page's own navigations are its events; a frame's wait for frames (review 14, candidate 6)
-          const page = pages.get(fact.navigable)
+          // A page's navigations are its events, and since review 22 its frames' too, each naming its navigable
+          const page = pages.get(fact.navigable) ?? frames.get(fact.navigable)
           if (page !== undefined) {
-            started.set(fact.navigation, { page, url: fact.url })
+            started.set(fact.navigation, { page, frame: fact.navigable, url: fact.url })
             if (started.size > maxNavigations) started.delete(started.keys().next().value!)
           }
           return
@@ -1035,6 +1044,7 @@ export const make = Effect.fnUntraced(function*() {
             if (pages.has(start.page.id)) {
               Events.publish(start.page.events.navigation, {
                 navigation: fact.navigation,
+                frame: start.frame,
                 url: endedAt(fact.outcome, start.url),
                 outcome: fact.outcome
               })

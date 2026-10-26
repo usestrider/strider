@@ -434,6 +434,11 @@ export interface EvaluationCall {
   readonly awaitPromise: boolean
   /** `"value"` serializes the result; `"handle"` keeps objects as handles the caller must release. */
   readonly result: "value" | "handle"
+  /**
+   * The object group a handle result joins: `releaseHandles` given every handle of a group releases them in one
+   * command (review 22, QUIRKS.md, Q132).
+   */
+  readonly group?: string | undefined
   /** Grants transient user activation for the call. */
   readonly userActivation: boolean
 }
@@ -504,6 +509,8 @@ export type Declaration =
     readonly world: World
     /** `environment` scripts (library shims such as the page clock) run before `user` scripts. */
     readonly phase: "environment" | "user"
+    /** Whether it also runs in dedicated workers, before their own script (`initScripts.workers`, review 22). */
+    readonly workers: boolean
     readonly timing: "beforeAuthorScript" | "bestEffort"
     /**
      * Scripts this one depends on, by registration: it runs in a document only if each of them ran there
@@ -828,6 +835,10 @@ export interface AdapterConnection {
    */
   readonly realm: (document: Target.DocumentId, world: World) => Effect.Effect<Target.RealmId, AdapterError>
   readonly evaluate: (realm: Target.RealmId, call: EvaluationCall) => Effect.Effect<RemoteResult, AdapterError>
+  /**
+   * Releases handles: a group given whole in one command (CDP's and WebKit's `Runtime.releaseObjectGroup`), the
+   * handles of a realm on BiDi in one `script.disown`, and any other one at a time (review 22, Q132).
+   */
   readonly releaseHandles: (handles: ReadonlyArray<HandleId>) => Effect.Effect<void>
 
   // Input

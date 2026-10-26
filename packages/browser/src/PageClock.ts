@@ -15,7 +15,8 @@
  *
  * **Gotchas**
  *
- * - Workers, CSS animations and `document.timeline` keep real time.
+ * - Workers keep real time unless the clock is installed with `workers: true` (review 22), which Firefox can't
+ *   do; CSS animations and `document.timeline` always do.
  * - A document loaded before `install` gets the clock then; what its scripts captured before keeps real time.
  * - A page's clock and its context's can't both be installed: one timeline covers a page.
  *
@@ -52,6 +53,24 @@ export type Mode =
   | { readonly mode: "controlled"; readonly at: DateTime.DateTime.Input }
 
 /**
+ * Settings for `install`.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface InstallOptions {
+  /**
+   * Whether dedicated workers started from now on get the clock too, before their own script, on the same
+   * timeline: `adjust`, `setTime` and `resume` reach them as they reach documents (review 22). `Unsupported` on
+   * Firefox (`initScripts.workers`).
+   *
+   * @default false
+   */
+  readonly workers?: boolean | undefined
+}
+
+/**
  * The clock of a page or context.
  *
  * **Example** (Paused application time)
@@ -80,7 +99,8 @@ export interface PageClock {
    * `Conflict`.
    */
   install(
-    mode: Mode
+    mode: Mode,
+    options?: InstallOptions | undefined
   ): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>
   /**
    * Advances a controlled clock, firing every due timer in order, an interval as often as it falls due.

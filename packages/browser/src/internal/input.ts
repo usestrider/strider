@@ -117,15 +117,46 @@ const withModifiers = (state: State, wanted: ReadonlyArray<Keyboard.Modifier>) =
 const textOf = (definition: Keys.Definition, flags: Adapter.Modifiers) =>
   flags.control || flags.alt || flags.meta ? undefined : definition.text
 
-/** One key pressed and released, with modifiers; Shift turns `a` into `A`. */
+/** One key pressed and released, with modifiers; Shift turns `a` into `A` on the layout. */
 export const press = (
   state: State,
   definition: Keys.Definition,
-  wanted: ReadonlyArray<Keyboard.Modifier> = []
+  wanted: ReadonlyArray<Keyboard.Modifier> = [],
+  layout: Keyboard.Layout = "us"
 ): Array<Adapter.InputEvent> => {
   const { after, before, flags } = withModifiers(state, wanted)
-  const pressed = flags.shift ? Keys.withShift(definition) : definition
+  const pressed = flags.shift ? Keys.withShift(definition, layout) : definition
   return [...before, key("down", pressed, flags, textOf(pressed, flags)), key("up", pressed, flags), ...after]
+}
+
+/**
+ * A key or a character typed on a layout (review 22): each stroke with the Shift its layout holds for it, and
+ * AltGr pressed around it as a key of its own, with the caller's modifiers; `undefined` for what isn't a key.
+ */
+export const type = (
+  state: State,
+  typed: string,
+  layout: Keyboard.Layout,
+  wanted: ReadonlyArray<Keyboard.Modifier> = []
+): Array<Adapter.InputEvent> | undefined => {
+  const strokes = Keys.strokes(typed, layout)
+  if (strokes === undefined) return undefined
+  return strokes.flatMap((stroke) => {
+    const all: ReadonlyArray<Keyboard.Modifier> = stroke.shift && !wanted.includes("Shift")
+      ? [...wanted, "Shift"]
+      : wanted
+    const { after, before, flags } = withModifiers(state, all)
+    // A layout's own Shift already made the character: the caller's turns an unshifted one, as `press` does
+    const pressed = flags.shift && !stroke.shift ? Keys.withShift(stroke.definition, layout) : stroke.definition
+    return [
+      ...before,
+      ...(stroke.altGraph ? [key("down", Keys.altGraph, flags)] : []),
+      key("down", pressed, flags, textOf(pressed, flags)),
+      key("up", pressed, flags),
+      ...(stroke.altGraph ? [key("up", Keys.altGraph, flags)] : []),
+      ...after
+    ]
+  })
 }
 
 /** A key held down, for `keyboard.hold`. */

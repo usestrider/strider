@@ -24,6 +24,7 @@ import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
+import * as Tracer from "effect/Tracer"
 import * as zlib from "node:zlib"
 import { site } from "../adapter/harness.ts"
 
@@ -205,6 +206,44 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("releases a scope's handles in a realm in one command, and one released alone by itself", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const spans: Array<Tracer.NativeSpan> = []
+          const tracer = Tracer.make({
+            span(options) {
+              const span = new Tracer.NativeSpan(options)
+              spans.push(span)
+              return span
+            }
+          })
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p><p>c</p>`))
+            yield* Effect.scoped(Effect.gen(function*() {
+              const paragraphs = yield* Effect.forEach(
+                [0, 1, 2],
+                (index) =>
+                  page.evaluateHandle((at: number) =>
+                    document.querySelectorAll("p")[at]!, index)
+              )
+              assert.strictEqual(yield* paragraphs[1]!.evaluate((element) => element.textContent), "b")
+              yield* paragraphs[2]!.release
+            })).pipe(Effect.provideService(Browser.TraceProtocolCommands, true))
+          })).pipe(Effect.withTracer(tracer))
+          const released = spans.flatMap((span) => {
+            const method = span.attributes.get("browser.protocol.method")
+            return typeof method === "string" && /^Runtime\.release|^script\.disown/.test(method) ? [method] : []
+          })
+          // The one released alone, then the other two together as the scope closed
+          assert.deepStrictEqual(
+            released,
+            name === "Firefox"
+              ? ["script.disown", "script.disown"]
+              : ["Runtime.releaseObject", "Runtime.releaseObjectGroup"]
+          )
+        }), timeout)
+
       it.effect("evaluates with the locator's one match first, in the isolated world", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -212,11 +251,14 @@ export const contents = (
             const page = yield* Browser.newPage()
             yield* page.goto(fixtureUrl(origin, `<p id="x" data-n="3">hello</p><p>a</p><p>b</p>`))
             assert.strictEqual(
-              yield* page.locator("#x").evaluate((element, suffix: string) => element.textContent + suffix, "!"),
+              yield* page.locator("#x").evaluate((element, suffix: string) =>
+                element.textContent + suffix, "!"),
               "hello!"
             )
             assert.strictEqual(
-              yield* page.locator("#x").evaluate((element) => Number((element as HTMLElement).dataset["n"]) * 2),
+              yield* page.locator("#x").evaluate((element) =>
+                Number((element as HTMLElement).dataset["n"]) * 2
+              ),
               6
             )
             const missing = reasonOf(yield* Effect.exit(page.locator("#nothing").evaluate((element) => element.id)))

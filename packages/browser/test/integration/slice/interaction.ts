@@ -176,7 +176,79 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const error = yield* Effect.flip(html)
               assert(Locator.isLocatorError(error) && error.reason._tag === "Unsupported", String(error))
               assert.strictEqual(error.reason.capability, "input.dragAndDrop")
+              assert.include(error.reason.hint, `html: "synthetic"`)
             }
+          }))
+        }), timeout)
+
+      it.effect(
+        "types on its context's keyboard layout: the layout's keys, Shift, AltGr and dead keys",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field"><p id="log"></p><script>
+              const log = []
+              document.getElementById("field").addEventListener("keydown", (event) => {
+                log.push(event.key + ":" + event.code + (event.shiftKey ? "+S" : ""))
+                document.getElementById("log").textContent = log.join(" ")
+              })
+            </script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const context = yield* Browser.newContext({ keyboardLayout: "de" })
+              const page = yield* context.newPage
+              yield* page.goto(url)
+              const field = page.locator("#field")
+              yield* field.pressSequentially("zY@ê")
+              yield* field.pipe(Expect.toHaveValue("zY@ê"))
+              const log = yield* page.locator("#log").readText
+              if (name === "Firefox") {
+                // WebDriver BiDi sends each character as its value: Firefox gives it the code a US keyboard would
+                // (input.keyboardLayout)
+                assert.include(log, "z:KeyZ")
+                assert.include(log, "ê:")
+              } else {
+                // WebKit's key events ignore the modifiers held, as its mouse events do (QUIRKS.md, Q188)
+                const shift = name === "WebKit" ? "" : "+S"
+                assert.strictEqual(
+                  log,
+                  `z:KeyY Shift:ShiftLeft${shift} Y:KeyZ${shift} AltGraph:AltRight @:KeyQ Dead:Backquote ê:KeyE`
+                )
+              }
+              // A press is a character's strokes too
+              yield* page.keyboard.press("@")
+              yield* field.pipe(Expect.toHaveValue("zY@ê@"))
+            }))
+          }),
+        timeout
+      )
+
+      it.effect("drags with HTML drag events the page dispatches, on every backend", () =>
+        Effect.gen(function*() {
+          const write = (id: string, text: string) => `document.getElementById('${id}').textContent = ${text}`
+          const { url } = yield* fixture(() =>
+            `<div id="card" draggable="true" ondragstart="event.dataTransfer.setData('text/plain', 'card-7'); event.dataTransfer.effectAllowed = 'move'" ondragend="${
+              write("ended", "'ended ' + event.dataTransfer.dropEffect")
+            }" style="position:absolute;left:0;top:100px;width:40px;height:40px;background:green">C</div><div id="bin" ondragenter="this.dataset.entered = 'yes'" ondragover="event.preventDefault(); event.dataTransfer.dropEffect = 'move'" ondrop="event.preventDefault(); ${
+              write(
+                "dropped",
+                "'binned ' + event.dataTransfer.getData('text/plain') + ' ' + event.isTrusted + ' ' + this.dataset.entered + ' ' + event.shiftKey"
+              )
+            }" style="position:absolute;left:300px;top:100px;width:60px;height:60px;background:gray"><span>B</span></div><div id="wall" ondragleave="${
+              write("dropped", "'refused'")
+            }" style="position:absolute;left:300px;top:200px;width:40px;height:40px;background:black">W</div><p id="dropped">nothing yet</p><p id="ended">nothing yet</p>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.locator("#card").dragTo(page.locator("#bin"), { html: "synthetic", modifiers: ["Shift"] })
+            yield* page.locator("#dropped").pipe(Expect.toHaveText("binned card-7 false yes true"))
+            // Chromium and WebKit ignore a dropEffect set on a DataTransfer a script made (QUIRKS.md, Q186)
+            yield* page.locator("#ended").pipe(Expect.toHaveText(name === "Firefox" ? "ended move" : "ended none"))
+            // A target whose dragover nothing cancels gets no drop
+            yield* page.locator("#card").dragTo(page.locator("#wall"), { html: "synthetic" })
+            yield* page.locator("#dropped").pipe(Expect.toHaveText("refused"))
+            yield* page.locator("#ended").pipe(Expect.toHaveText("ended none"))
           }))
         }), timeout)
 

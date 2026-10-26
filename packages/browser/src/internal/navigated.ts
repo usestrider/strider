@@ -10,6 +10,7 @@ import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
+import type * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as Adapter from "./adapter.ts"
 import type * as Model from "./model.ts"
@@ -19,6 +20,7 @@ import * as Operation from "./operation.ts"
 export const succeeded = (
   model: Model.Model,
   navigation: PageNavigation.Id,
+  frame: Target.NavigableId,
   at: string,
   outcome: Adapter.NavigationOutcome
 ): Option.Option<PageNavigation.PageNavigation> => {
@@ -28,16 +30,24 @@ export const succeeded = (
       return Option.some({
         _tag: "Committed",
         id: navigation,
+        frame,
         url,
         document: outcome.document,
         response: Option.flatMap(outcome.response, model.response)
       })
     case "SameDocument":
-      return Option.some({ _tag: "SameDocument", id: navigation, url, document: outcome.document, via: outcome.via })
+      return Option.some({
+        _tag: "SameDocument",
+        id: navigation,
+        frame,
+        url,
+        document: outcome.document,
+        via: outcome.via
+      })
     case "Restored":
-      return Option.some({ _tag: "Restored", id: navigation, url, document: outcome.document })
+      return Option.some({ _tag: "Restored", id: navigation, frame, url, document: outcome.document })
     case "Activated":
-      return Option.some({ _tag: "Activated", id: navigation, url, document: outcome.document })
+      return Option.some({ _tag: "Activated", id: navigation, frame, url, document: outcome.document })
     default:
       return Option.none()
   }

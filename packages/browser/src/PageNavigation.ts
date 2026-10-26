@@ -6,8 +6,8 @@
  * the status is in the response. Failures are reasons of `Page.PageError`, so recovery reads the same whether
  * the navigation came from `goto` or was awaited with `next`.
  *
- * A navigation is an event when it ends, including those `goto` starts. Only the page's own navigations are,
- * not its frames'.
+ * A navigation is an event when it ends, including those `goto` starts. A page's own navigations are its events,
+ * and with `frames: "all"` its frames' too (review 22), each naming the navigable it happened in.
  *
  * @stability unstable
  * @since 0.1.0
@@ -65,7 +65,8 @@ export type Id = typeof Id.Type
  *   `accept: ["noContent"]` returns it; otherwise it fails with the `NoContent` reason.
  *
  * `url` is where the page went: the committed document's URL, after any redirects, or the URL a same-document
- * navigation set; for `BecameDownload` and `NoContent`, the URL it was going to.
+ * navigation set; for `BecameDownload` and `NoContent`, the URL it was going to. `frame` is the navigable it
+ * happened in: the page's own id, or a frame's (review 22).
  *
  * @stability unstable
  * @category schemas
@@ -74,21 +75,24 @@ export type Id = typeof Id.Type
 export const PageNavigation = Schema.Union([
   Schema.TaggedStruct("Committed", {
     id: Id,
+    frame: Target.NavigableId,
     url: Url.Url,
     document: Target.DocumentId,
     response: Schema.Option(NetworkResponse.NetworkResponse)
   }),
   Schema.TaggedStruct("SameDocument", {
     id: Id,
+    frame: Target.NavigableId,
     url: Url.Url,
     document: Target.DocumentId,
     via: Schema.Literals(["fragment", "historyApi", "intercepted"])
   }),
-  Schema.TaggedStruct("Restored", { id: Id, url: Url.Url, document: Target.DocumentId }),
-  Schema.TaggedStruct("Activated", { id: Id, url: Url.Url, document: Target.DocumentId }),
-  Schema.TaggedStruct("BecameDownload", { id: Id, url: Url.Url }),
+  Schema.TaggedStruct("Restored", { id: Id, frame: Target.NavigableId, url: Url.Url, document: Target.DocumentId }),
+  Schema.TaggedStruct("Activated", { id: Id, frame: Target.NavigableId, url: Url.Url, document: Target.DocumentId }),
+  Schema.TaggedStruct("BecameDownload", { id: Id, frame: Target.NavigableId, url: Url.Url }),
   Schema.TaggedStruct("NoContent", {
     id: Id,
+    frame: Target.NavigableId,
     url: Url.Url,
     response: Schema.Option(NetworkResponse.NetworkResponse)
   })
@@ -131,6 +135,12 @@ export interface Filter {
    * @default any URL
    */
   readonly url?: Url.Pattern | string | undefined
+  /**
+   * Whose navigations: the page's own, or its frames' too (review 22).
+   *
+   * @default "main"
+   */
+  readonly frames?: "main" | "all" | undefined
 }
 
 /**
@@ -158,7 +168,8 @@ const kind = (
   operation,
   noun: "a navigation",
   // Only a navigation that got somewhere is delivered as one (`succeeded` accepts nothing else)
-  deliver: (event) => Option.getOrThrow(Navigated.succeeded(runtime.model, event.navigation, event.url, event.outcome))
+  deliver: (event) =>
+    Option.getOrThrow(Navigated.succeeded(runtime.model, event.navigation, event.frame, event.url, event.outcome))
 })
 
 const succeeded = (event: Model.NavigationEvent) =>
@@ -168,14 +179,19 @@ const succeeded = (event: Model.NavigationEvent) =>
 const subscription = (target: Page.ObservedPage, filter: Filter | undefined, operation: string) =>
   Effect.suspend(() => {
     const behind = Handles.page(target)
-    return Effect.map(Filters.url(operation, filter?.url), (matches) => ({
-      behind,
-      kind: kind(behind.runtime, operation),
-      channel: behind.entry.events.navigation,
-      matches: (entry: Events.Entry<Model.NavigationEvent>) => Filters.urlMatches(matches, entry.value.url),
-      accepts: (entry: Events.Entry<Model.NavigationEvent>) =>
-        succeeded(entry.value) && Filters.urlMatches(matches, entry.value.url)
-    }))
+    const all = filter?.frames === "all"
+    return Effect.map(Filters.url(operation, filter?.url), (matches) => {
+      const ours = (entry: Events.Entry<Model.NavigationEvent>) => all || entry.value.frame === behind.entry.id
+      return {
+        behind,
+        kind: kind(behind.runtime, operation),
+        channel: behind.entry.events.navigation,
+        matches: (entry: Events.Entry<Model.NavigationEvent>) =>
+          ours(entry) && Filters.urlMatches(matches, entry.value.url),
+        accepts: (entry: Events.Entry<Model.NavigationEvent>) =>
+          ours(entry) && succeeded(entry.value) && Filters.urlMatches(matches, entry.value.url)
+      }
+    })
   })
 
 /**
@@ -222,6 +238,7 @@ export const next = <PE = never, PR = never>(
         const result = yield* behind.runtime.settle(
           "PageNavigation.next",
           event.navigation,
+          event.frame,
           Option.some(event.url as Url.Url),
           event.url,
           event.outcome,

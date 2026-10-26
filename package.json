@@ -5,7 +5,7 @@
   "scripts": {
     "prepare": "node scripts/setup-agents.mjs && effect-tsgo patch",
     "codegen": "pnpm --recursive --filter \"./packages/*\" run codegen",
-    "check": "tsc -b tsconfig.json && pnpm --recursive --filter \"./packages/*\" run codegen --check && strider-codegen generate cdp --check && strider-codegen generate bidi --check && strider-codegen generate webkit --check",
+    "check": "tsc -b tsconfig.json && pnpm --recursive --filter \"./packages/*\" run codegen --check && strider-codegen generate cdp --check && strider-codegen generate bidi --check && strider-codegen generate webkit --check && strider-codegen keyboards --check",
     "build": "tsc -b tsconfig.packages.json && pnpm --recursive --filter \"./packages/*\" run build",
     "lint": "oxlint && dprint check",
     "lint-fix": "oxlint --fix && dprint fmt",
@@ -20,6 +20,7 @@
     "all": "pnpm check && pnpm lint && pnpm test --run && pnpm test-types && pnpm reference",
     "reference": "pnpm jsdocs && pnpm examples && pnpm index && pnpm api-reference",
     "codegen:protocol": "strider-codegen generate cdp && strider-codegen generate bidi && strider-codegen generate webkit",
+    "codegen:keyboards": "strider-codegen keyboards",
     "codegen:audit": "strider-codegen audit cdp && strider-codegen audit bidi && strider-codegen audit webkit"
   },
   "devDependencies": {

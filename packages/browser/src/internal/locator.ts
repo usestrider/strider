@@ -35,6 +35,7 @@ import type * as Snapshot from "../Snapshot.ts"
 import type * as Target from "../Target.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as Devices from "./devices.ts"
 import type * as Engine from "./engine.ts"
 import * as Evaluation from "./evaluation.ts"
 import * as FileInputImpl from "./fileInput.ts"
@@ -152,6 +153,55 @@ export interface Owner {
   readonly page: Model.PageEntry
   /** `None` for a page controlled for its life. */
   readonly grant: Option.Option<Access.Grant>
+}
+
+/**
+ * An HTML drag the page dispatches (review 22, candidate 6e), run in the isolated world with the element and the
+ * target: untrusted events sharing one `DataTransfer`, in the order HTML's drag-and-drop model fires them, with a
+ * drop only where the `dragover` was canceled. Its points are the positions given, from each padding box, or the
+ * centres; the target's events go to the element at its point when that is in the target. Returns what came of it.
+ */
+const syntheticDrag = (
+  source: Element,
+  target: Element,
+  from: { readonly x: number; readonly y: number } | null,
+  to: { readonly x: number; readonly y: number } | null,
+  keys: { readonly altKey: boolean; readonly ctrlKey: boolean; readonly metaKey: boolean; readonly shiftKey: boolean }
+): "dropped" | "refused" | "canceled" => {
+  const pointIn = (element: Element, position: { readonly x: number; readonly y: number } | null) => {
+    const box = element.getBoundingClientRect()
+    return position === null
+      ? { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+      : { x: box.left + element.clientLeft + position.x, y: box.top + element.clientTop + position.y }
+  }
+  const start = pointIn(source, from)
+  const end = pointIn(target, to)
+  const hit = source.ownerDocument.elementFromPoint(end.x, end.y)
+  const over = hit !== null && (hit === target || target.contains(hit)) ? hit : target
+  const dataTransfer = new DataTransfer()
+  const fire = (element: Element, type: string, at: { readonly x: number; readonly y: number }) =>
+    element.dispatchEvent(
+      new DragEvent(type, {
+        bubbles: true,
+        cancelable: type !== "dragleave" && type !== "dragend",
+        composed: true,
+        dataTransfer,
+        clientX: at.x,
+        clientY: at.y,
+        ...keys
+      })
+    )
+  if (!fire(source, "dragstart", start)) return "canceled"
+  fire(source, "drag", start)
+  fire(over, "dragenter", end)
+  const accepted = !fire(over, "dragover", end)
+  if (accepted) fire(over, "drop", end)
+  else {
+    dataTransfer.dropEffect = "none"
+    fire(over, "dragleave", end)
+  }
+  fire(source, "dragend", end)
+  return accepted ? "dropped" : "refused"
 }
 
 export class LocatorImpl implements Locator.Locator {
@@ -477,8 +527,8 @@ export class LocatorImpl implements Locator.Locator {
   }
   press(key: Keyboard.Key | string, options?: Locator.PressOptions) {
     return Effect.suspend(() => {
-      const definition = Keys.definition(key)
-      if (definition === undefined) return Effect.fail(this.unknownKey("Locator.press", key))
+      const layout = Devices.layoutOf(this.owner.runtime, this.owner.page)
+      if (Keys.strokes(key, layout) === undefined) return Effect.fail(this.unknownKey("Locator.press", key))
       return this.act(
         "Locator.press",
         options,
@@ -486,7 +536,7 @@ export class LocatorImpl implements Locator.Locator {
         { _tag: "Focus" },
         (_ready, io) =>
           Effect.as(
-            io.send(Input.press(this.owner.page.inputState, definition, options?.modifiers ?? [])),
+            io.send(Input.type(this.owner.page.inputState, key, layout, options?.modifiers ?? [])!),
             "done" as const
           )
       )
@@ -505,7 +555,13 @@ export class LocatorImpl implements Locator.Locator {
           Effect.forEach(characters, (character, index) =>
             Effect.andThen(
               index > 0 && Duration.isGreaterThan(delay, Duration.zero) ? Effect.sleep(delay) : Effect.void,
-              io.send(Input.press(this.owner.page.inputState, Keys.forCharacter(character)))
+              io.send(
+                Input.type(
+                  this.owner.page.inputState,
+                  character,
+                  Devices.layoutOf(this.owner.runtime, this.owner.page)
+                )!
+              )
             ), { discard: true }),
           "done" as const
         ),
@@ -593,17 +649,123 @@ export class LocatorImpl implements Locator.Locator {
   dragTo(target: Locator.ReadonlyLocator, options?: Locator.DragOptions) {
     const to = this.samePageLocator(target, "dragTo")
     const steps = options?.steps ?? 1
+    const html = options?.html ?? "native"
     return this.pointer(
       "Locator.dragTo",
       options,
       (state, point, targetPoint) => Input.drag(state, point, targetPoint!, steps, options?.modifiers ?? []),
       {
         target: Effect.suspend(() => to.pointOf(options?.targetPosition)),
-        // An HTML drag is a capability: Firefox never drops one, and WebKit's protocol can't (review 16, P5)
-        draggable: (id) => Effect.flatMap(this.requires("Locator.dragTo", "input.dragAndDrop", id), () => Effect.void),
+        draggable: (id, io) =>
+          html === "native"
+            // An HTML drag is a capability: Firefox never drops one, and WebKit's protocol can't (review 16, P5)
+            ? Effect.as(
+              this.requires(
+                "Locator.dragTo",
+                "input.dragAndDrop",
+                id,
+                `dragTo(target, { html: "synthetic" }) has the page dispatch the drag's events, untrusted`
+              ),
+              "gesture" as const
+            )
+            : Effect.andThen(io.disarm, this.syntheticDrag(to, options, id)),
         position: options?.position
       }
-    ).pipe(Effect.annotateSpans({ "browser.locator.target": to.description, "browser.drag.steps": steps }))
+    ).pipe(
+      Effect.annotateSpans({
+        "browser.locator.target": to.description,
+        "browser.drag.steps": steps,
+        "browser.drag.html": html
+      })
+    )
+  }
+
+  /**
+   * An HTML drag the page dispatches (review 22, candidate 6e): the element and the target resolved now, in one
+   * document, and the drag's events sent there from the isolated world, sharing one `DataTransfer` (P3).
+   */
+  private syntheticDrag(to: LocatorImpl, options: Locator.DragOptions | undefined, id: Diagnostics.OperationId) {
+    const operation = "Locator.dragTo"
+    const owner = this.owner
+    return Effect.gen({ self: this }, function*() {
+      const budget = yield* Operation.budget
+      const resolve = (locator: LocatorImpl) =>
+        Runtime.element(owner.runtime, owner.page, locator.steps, id, budget.at).pipe(
+          Effect.mapError((failure) => this.sendFailure(operation, failure, id, budget)),
+          Effect.flatMap((found) =>
+            found._tag === "Found"
+              ? Effect.succeed(found)
+              : Effect.fail(this.error(
+                operation,
+                new Locator.NoMatch({ hint: `${locator.description} matched no one element as the drag began` }),
+                id
+              ))
+          )
+        )
+      const source = yield* resolve(this)
+      const target = yield* resolve(to)
+      if (source.routed.document !== target.routed.document) {
+        return yield* Effect.fail(this.error(
+          operation,
+          new Reason.InvalidInput({
+            input: "target",
+            expected: "an element in the dragged element's document",
+            hint: "A synthetic drag shares one DataTransfer, which doesn't cross documents"
+          }),
+          id
+        ))
+      }
+      const keys = options?.modifiers ?? []
+      const outcome = yield* Effect.gen(function*() {
+        const realm = yield* Evaluation.documentRealm(
+          owner.runtime,
+          source.routed.document,
+          Evaluation.isolatedWorld,
+          id
+        )
+        const rest = yield* Evaluation.toLocal(
+          [
+            options?.position ?? null,
+            options?.targetPosition ?? null,
+            {
+              altKey: keys.includes("Alt"),
+              ctrlKey: keys.includes("Control"),
+              metaKey: keys.includes("Meta"),
+              shiftKey: keys.includes("Shift")
+            }
+          ],
+          realm,
+          2
+        )
+        const result = yield* Evaluation.call(owner.runtime, {
+          realm,
+          functionDeclaration: syntheticDrag.toString(),
+          arguments: [{ _tag: "Node", node: source.node }, { _tag: "Node", node: target.node }, ...rest],
+          result: "value",
+          userActivation: false,
+          page: Option.some(owner.page),
+          at: budget.at,
+          id
+        })
+        return yield* Evaluation.fromRemote(result)
+      }).pipe(Effect.mapError((failure) =>
+        failure._tag === "Gone"
+          ? failure.error
+          : failure._tag === "Deadline"
+          ? Operation.timeout({
+            operation,
+            id,
+            phase: "dispatchedUnconfirmed",
+            budget: budget.budget,
+            history: [],
+            hint: Option.some("The page didn't answer before the deadline; the drag's events may have been sent"),
+            dispatch: { _tag: "MayHaveBeenSent" }
+          })
+          : this.error(operation, failure.reason, id)
+      ))
+      yield* Effect.annotateCurrentSpan("browser.drag.outcome", String(outcome))
+      return "done" as const
+    })
   }
 
   // ── Errors ──
@@ -742,7 +904,7 @@ export class LocatorImpl implements Locator.Locator {
   }
 
   /** Fails with `Unsupported` when the backend reports a capability as unsupported. */
-  private requires(operation: string, capability: string, id: Diagnostics.OperationId) {
+  private requires(operation: string, capability: string, id: Diagnostics.OperationId, instead?: string) {
     return Effect.flatMap(SubscriptionRef.get(this.owner.runtime.model.adapter.capabilities), (capabilities) => {
       const entry = capabilities.entries.find((each) => each.name === capability)
       return entry === undefined || entry.status !== "unsupported" ? Effect.void : Effect.fail(this.error(
@@ -750,7 +912,12 @@ export class LocatorImpl implements Locator.Locator {
         new Reason.Unsupported({
           capability,
           backend: this.owner.runtime.backend,
-          hint: entry.limitations.join("; ") || `${this.owner.runtime.backend} can't do this`
+          hint: [
+            entry.limitations.join("; ") || `${this.owner.runtime.backend} can't do this`,
+            ...(instead === undefined
+              ? []
+              : [instead])
+          ].join("; ")
         }),
         id
       ))
@@ -918,7 +1085,11 @@ export class LocatorImpl implements Locator.Locator {
     extra: {
       readonly guard?: boolean
       readonly target?: Effect.Effect<Option.Option<{ readonly x: number; readonly y: number }>, unknown>
-      readonly draggable?: (id: Diagnostics.OperationId) => Effect.Effect<void, Locator.LocatorError>
+      /** For an HTML drag: send the gesture, or say it was done another way. */
+      readonly draggable?: (
+        id: Diagnostics.OperationId,
+        io: { readonly disarm: Effect.Effect<Option.Option<string>> }
+      ) => Effect.Effect<"gesture" | "done", Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
       readonly position?: Mouse.Point | undefined
     } = {}
   ) {
@@ -934,10 +1105,13 @@ export class LocatorImpl implements Locator.Locator {
       (ready, io, id) =>
         Effect.gen({ self: this }, function*() {
           const state = owner.page.inputState
+          // A drag the page dispatches carries its modifiers in its events, which every backend can
+          if (ready.draggable && extra.draggable !== undefined && (yield* extra.draggable(id, io)) === "done") {
+            return "done" as const
+          }
           if (Input.anyModifier(state, options?.modifiers ?? [])) {
             yield* this.requires(operation, "input.pointerModifiers", id)
           }
-          if (ready.draggable && extra.draggable !== undefined) yield* extra.draggable(id)
           let target: { readonly x: number; readonly y: number } | undefined
           if (extra.target !== undefined) {
             const point = yield* extra.target.pipe(Effect.orElseSucceed(() => Option.none()))

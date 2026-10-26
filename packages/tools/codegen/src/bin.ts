@@ -7,6 +7,8 @@
  *                                                  protocols/<backend>/coverage.json
  *   strider-codegen audit <backend> [--check]      which corrections the vendored spec has absorbed; run on
  *                                                  each roll (`--check` fails if any has)
+ *   strider-codegen keyboards [--check]            packages/browser/src/internal/keyboardLayouts.ts, from
+ *                                                  CLDR's keyboard data in keyboards/source (review 22)
  *
  * Run from the repository root. `--check` regenerates in memory and fails if anything differs from what is
  * committed, so CI never regenerates.
@@ -21,6 +23,7 @@ import * as Path from "effect/Path"
 import { execFileSync } from "node:child_process"
 import { CodegenError, fromThrown } from "./CodegenError.ts"
 import { emit } from "./Emit.ts"
+import * as Keyboards from "./Keyboards.ts"
 import { auditCorrections, Backend, build, outputs, protocolDirectory, serialize } from "./Pipeline.ts"
 
 const sources: Record<Backend, string> = {
@@ -29,11 +32,16 @@ const sources: Record<Backend, string> = {
   webkit: "the WebKit inspector protocol as Playwright patches it, WebKit build 2359 (WebKit 26.6)"
 }
 
-const writeOrCheck = Effect.fnUntraced(function*(file: string, content: string, check: boolean) {
+const writeOrCheck = Effect.fnUntraced(function*(
+  file: string,
+  content: string,
+  check: boolean,
+  fix: string = "pnpm codegen:protocol"
+) {
   const fs = yield* FileSystem.FileSystem
   const current = (yield* fs.exists(file)) ? yield* fs.readFileString(file) : undefined
   if (current === content) return false
-  if (check) return yield* new CodegenError({ message: `${file} is out of date; run pnpm codegen:protocol` })
+  if (check) return yield* new CodegenError({ message: `${file} is out of date; run ${fix}` })
   yield* fs.writeFileString(file, content)
   return true
 })
@@ -112,6 +120,29 @@ const auditCommand = Command.make("audit", { backend, check }, ({ backend, check
     }
   }))
 
-const cli = Command.make("strider-codegen").pipe(Command.withSubcommands([model, generate, auditCommand]))
+const keyboards = Command.make("keyboards", { check }, ({ check }) =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const root = process.cwd()
+    const directory = path.join(root, "packages/tools/codegen/keyboards/source")
+    const layouts: Array<readonly [string, string, Keyboards.Layout]> = []
+    for (const [name, file] of Keyboards.sources) {
+      layouts.push([name, file, Keyboards.parse(yield* fs.readFileString(path.join(directory, file)))])
+    }
+    const file = path.join(root, "packages/browser/src/internal/keyboardLayouts.ts")
+    const formatted = yield* format(root, path.relative(root, file), Keyboards.emit(layouts))
+    const written = yield* writeOrCheck(file, formatted, check, "pnpm codegen:keyboards")
+    yield* Console.log(
+      `keyboards: ${
+        layouts.map(([name, , layout]) => `${name} ${layout.keys.size}+${layout.composed.size}`).join(", ")
+      }` +
+        (check ? "; up to date" : written ? "; written" : "; unchanged")
+    )
+  }))
+
+const cli = Command.make("strider-codegen").pipe(
+  Command.withSubcommands([model, generate, auditCommand, keyboards])
+)
 
 Command.run(cli, { version: "0.0.0" }).pipe(Effect.provide(NodeServices.layer), NodeRuntime.runMain)

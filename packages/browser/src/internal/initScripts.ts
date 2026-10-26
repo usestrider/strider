@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
+import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Declaration from "../Declaration.ts"
 import type * as InitScript from "../InitScript.ts"
 import * as Reason from "../Reason.ts"
@@ -27,11 +28,25 @@ export interface Owner {
   readonly operation: string
 }
 
+/** `Unsupported` where the backend can't run a script in a worker before the worker's own (review 22). */
+export const inWorkers = (runtime: Runtime.Runtime): Effect.Effect<void, Reason.Unsupported> =>
+  Effect.flatMap(SubscriptionRef.get(runtime.model.adapter.capabilities), (capabilities) => {
+    const entry = capabilities.entries.find((each) => each.name === "initScripts.workers")
+    return entry === undefined || entry.status !== "unsupported" ? Effect.void : Effect.fail(
+      new Reason.Unsupported({
+        capability: "initScripts.workers",
+        backend: runtime.backend,
+        hint: entry.limitations.join("; ") || `${runtime.backend} can't run a script in a worker first`
+      })
+    )
+  })
+
 /** What a script of this library is: its registration, where, and whether it is still in force. */
 interface Registered {
   readonly id: Adapter.RegistrationId
   readonly scope: Adapter.DeclarationScope
   readonly world: Adapter.World
+  readonly workers: boolean
   live: boolean
 }
 
@@ -76,6 +91,20 @@ export const add = (
       new Declaration.DeclarationError({ declaration: owner.operation, reason, diagnostics: Operation.diagnostics(id) })
     const source = yield* sourceOf(owner.runtime, script).pipe(Effect.mapError(fail))
     const world: Adapter.World = options?.world === "isolated" ? isolatedWorld : { _tag: "Main" }
+    const workers = options?.workers === true
+    if (workers) {
+      // A worker has one world, its own (review 22)
+      if (world._tag !== "Main") {
+        return yield* Effect.fail(fail(
+          new Reason.InvalidInput({
+            input: "workers",
+            expected: "a script in the main world",
+            hint: "A worker has no isolated world"
+          })
+        ))
+      }
+      yield* inWorkers(owner.runtime).pipe(Effect.mapError(fail))
+    }
     const after: Array<Adapter.RegistrationId> = []
     for (const dependency of options?.after ?? []) {
       const known = registered.get(dependency)
@@ -98,6 +127,15 @@ export const add = (
           })
         ))
       }
+      if (workers && !known.workers) {
+        return yield* Effect.fail(fail(
+          new Reason.InvalidInput({
+            input: "after",
+            expected: "a script that runs in workers too",
+            hint: `${known.id} runs in documents only, so this one would never run in a worker`
+          })
+        ))
+      }
       if (!covers(known.scope, owner.scope, context)) {
         return yield* Effect.fail(fail(
           new Reason.InvalidInput({
@@ -115,6 +153,7 @@ export const add = (
       source,
       world,
       phase: "user",
+      workers,
       timing: options?.timing ?? "beforeAuthorScript",
       after
     }).pipe(
@@ -130,7 +169,7 @@ export const add = (
       id: registration as unknown as InitScript.Id,
       remove: Scope.close(scope, Exit.void)
     }
-    const entry: Registered = { id: registration, scope: owner.scope, world, live: true }
+    const entry: Registered = { id: registration, scope: owner.scope, world, workers, live: true }
     registered.set(handle, entry)
     // Its dependents stop with it: L0 runs a script only after what it comes after ran
     yield* Scope.addFinalizer(scope, Effect.sync(() => (entry.live = false)))

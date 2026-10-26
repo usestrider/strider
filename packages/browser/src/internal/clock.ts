@@ -11,7 +11,9 @@
  * - **The engine is untouched**: it runs in its own world, which keeps the real timers and frames (review 17,
  *   P16), so actionability and expectations run on native rendering.
  * - **What it covers**: `Date`, `performance.now`, and in controlled mode `setTimeout`, `setInterval`,
- *   `requestAnimationFrame` and their clears. Not workers, CSS animations or `document.timeline`.
+ *   `requestAnimationFrame` and their clears. Not CSS animations or `document.timeline`.
+ * - **Workers**, when installed with `workers: true` (review 22): the init script runs in the scope's dedicated
+ *   workers too, and each operation reaches the current ones as it reaches documents.
  */
 import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
@@ -19,10 +21,12 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
+import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Declaration from "../Declaration.ts"
 import * as PageClock from "../PageClock.ts"
 import * as Reason from "../Reason.ts"
 import type * as Adapter from "./adapter.ts"
+import * as InitScripts from "./initScripts.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
@@ -54,8 +58,10 @@ const shim = (key: string, initial: State, version: number): string => {
   const realClearTimeout = global.clearTimeout.bind(global)
   const realSetInterval = global.setInterval.bind(global)
   const realClearInterval = global.clearInterval.bind(global)
-  const realFrame = global.requestAnimationFrame.bind(global)
-  const realCancelFrame = global.cancelAnimationFrame.bind(global)
+  // A worker may have no animation frames
+  const frames = typeof global.requestAnimationFrame === "function"
+  const realFrame = frames ? global.requestAnimationFrame.bind(global) : () => 0
+  const realCancelFrame = frames ? global.cancelAnimationFrame.bind(global) : () => {}
   const report = (error: unknown) => {
     if (typeof global.reportError === "function") global.reportError(error)
   }
@@ -197,11 +203,13 @@ const shim = (key: string, initial: State, version: number): string => {
     if (timers.has(Number(id)) || moved.has(Number(id))) clear(id)
     else realClearInterval(id)
   }
-  global.requestAnimationFrame = (callback: unknown) =>
-    state.mode === "controlled" ? schedule(callback, 0, [], false, true) : realFrame(callback)
-  global.cancelAnimationFrame = (id: unknown) => {
-    if (timers.has(Number(id)) || moved.has(Number(id))) clear(id)
-    else realCancelFrame(id)
+  if (frames) {
+    global.requestAnimationFrame = (callback: unknown) =>
+      state.mode === "controlled" ? schedule(callback, 0, [], false, true) : realFrame(callback)
+    global.cancelAnimationFrame = (id: unknown) => {
+      if (timers.has(Number(id)) || moved.has(Number(id))) clear(id)
+      else realCancelFrame(id)
+    }
   }
 
   const controls = {
@@ -262,6 +270,8 @@ const operationSource = (
 interface Installed {
   state: State
   version: number
+  /** Whether the scope's dedicated workers get it too. */
+  readonly workers: boolean
   /** The scope `install` returned the registration of. */
   readonly scope: Scope.Closeable
   /** The current init script's scope, replaced with each operation. */
@@ -312,38 +322,50 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
   const token = `@usestrider/browser/clock/${crypto.randomUUID()}`
   const adapter = owner.runtime.model.adapter
 
-  /** Evaluates in the main world of every current document of the timeline's pages; a document that ends is skipped. */
-  const broadcast = (functionDeclaration: string) =>
-    Effect.forEach(
-      [...owner.runtime.model.documents.values()].filter((document) => {
-        const page = owner.runtime.model.pageOf(document.navigable)
-        return Option.isSome(page) && owner.pages().includes(page.value)
-      }),
-      (document) =>
-        adapter.realm(document.id, { _tag: "Main" }).pipe(
-          Effect.flatMap((realm) =>
-            adapter.evaluate(realm, {
-              functionDeclaration,
-              arguments: [],
-              awaitPromise: false,
-              result: "value",
-              userActivation: false
-            })
-          ),
-          Effect.flatMap((result) =>
-            result._tag === "Exception"
-              ? Effect.fail(`the clock threw in ${document.url}: ${result.text}`)
-              : Effect.void
-          ),
-          Effect.catch((error) =>
-            typeof error === "string"
-              ? Effect.fail(error)
-              : error.reason._tag === "Gone"
-              ? Effect.void
-              : Effect.fail(error.message)
-          )
-        ),
-      { concurrency: "unbounded", discard: true }
+  /**
+   * Evaluates in the main world of every current document of the timeline's pages, and with `workers` in their
+   * dedicated workers; a document or worker that ends is skipped.
+   */
+  const broadcast = (functionDeclaration: string, workers: boolean) =>
+    Effect.flatMap(
+      workers
+        ? Effect.map(Effect.forEach(owner.pages(), (page) => SubscriptionRef.get(page.workers)), (each) => each.flat())
+        : Effect.succeed([]),
+      (dedicated) =>
+        Effect.forEach(
+          [
+            ...[...owner.runtime.model.documents.values()].filter((document) => {
+              const page = owner.runtime.model.pageOf(document.navigable)
+              return Option.isSome(page) && owner.pages().includes(page.value)
+            }).map((document) => ({ url: document.url, realm: adapter.realm(document.id, { _tag: "Main" }) })),
+            ...dedicated.map((worker) => ({ url: worker.url, realm: Effect.succeed(worker.realm) }))
+          ],
+          (where) =>
+            where.realm.pipe(
+              Effect.flatMap((realm) =>
+                adapter.evaluate(realm, {
+                  functionDeclaration,
+                  arguments: [],
+                  awaitPromise: false,
+                  result: "value",
+                  userActivation: false
+                })
+              ),
+              Effect.flatMap((result) =>
+                result._tag === "Exception"
+                  ? Effect.fail(`the clock threw in ${where.url}: ${result.text}`)
+                  : Effect.void
+              ),
+              Effect.catch((error) =>
+                typeof error === "string"
+                  ? Effect.fail(error)
+                  : error.reason._tag === "Gone"
+                  ? Effect.void
+                  : Effect.fail(error.message)
+              )
+            ),
+          { concurrency: "unbounded", discard: true }
+        )
     )
 
   const declare = Effect.fnUntraced(function*(installed: Installed) {
@@ -353,6 +375,7 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
       source: installer(token, installed.state, installed.version),
       world: { _tag: "Main" },
       phase: "environment",
+      workers: installed.workers,
       timing: "beforeAuthorScript",
       after: []
     }).pipe(Scope.provide(script), Effect.onError(() => Scope.close(script, Exit.void)))
@@ -392,7 +415,9 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
     Effect.gen(function*() {
       installed.version++
       installed.state = next
-      yield* broadcast(run).pipe(Effect.mapError((hint) => clockError(operation, backendFailure("evaluate", hint))))
+      yield* broadcast(run, installed.workers).pipe(
+        Effect.mapError((hint) => clockError(operation, backendFailure("evaluate", hint)))
+      )
       const previous = installed.script
       installed.script = yield* declare(installed).pipe(
         Effect.mapError((error) => clockError(operation, backendFailure("declare", error.message)))
@@ -403,7 +428,7 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
     }))
 
   return {
-    install: (mode) =>
+    install: (mode, options) =>
       Effect.gen(function*() {
         const operation = `${owner.name}.install`
         const id = Operation.operationId()
@@ -426,14 +451,16 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
             fail(new Reason.InvalidInput({ input: "mode", expected: "a time or a duration", hint: state }))
           )
         }
+        const workers = options?.workers === true
+        if (workers) yield* InitScripts.inWorkers(owner.runtime).pipe(Effect.mapError(fail))
         const scope = yield* Scope.fork(yield* Effect.scope)
-        const installed: Installed = { state, version: 1, scope, script: scope }
+        const installed: Installed = { state, version: 1, workers, scope, script: scope }
         installed.script = yield* declare(installed).pipe(
           Effect.mapError((error) => fail(backendFailure("declare", error.message))),
           Effect.onError(() => Scope.close(scope, Exit.void))
         )
         // The documents loaded already get it now; what their scripts captured before keeps real time
-        yield* broadcast(`function() { return ${installer(token, state, installed.version)} }`).pipe(
+        yield* broadcast(`function() { return ${installer(token, state, installed.version)} }`, workers).pipe(
           Effect.mapError((hint) => fail(backendFailure("evaluate", hint))),
           Effect.onError(() => Scope.close(scope, Exit.void))
         )
