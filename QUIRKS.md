@@ -296,6 +296,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 22's fifth step, in its first probe of the protocol and again through the library.
 - *We:* `prompts` is `unsupported`; an operation on the page waits until its deadline, and `WebKit.layerAttach`'s documentation says a person must dismiss the dialog.
 - *Reconsider:* nothing on stock WebKit.
+- **Revised** in `1548837` (review 23's second step): launched in automation mode, Automation says a dialog is open, and the adapter asks every 100 ms, so it is reported, as `Dialog.Unknown` (Q206), and answered; attached, it still stops the page unreported.
 
 **Q206. Stock WebKit's Automation says a dialog is open, and its message, but not its kind** (Browser). `isShowingJavaScriptDialog` and `messageOfCurrentJavaScriptDialog` answer; nothing announces a dialog, and nothing says whether it is an alert, a confirm, a prompt or a `beforeunload`, or a prompt's default value. The browser knows both, and reports them only to its WebDriver BiDi, which is compiled out (Q204).
 - *Seen:* review 23, P6, and its first step's measurement.
