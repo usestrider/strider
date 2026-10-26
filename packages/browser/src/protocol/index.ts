@@ -27,6 +27,12 @@ export * as Protocol from "./Protocol.ts"
  * @stability experimental
  * @since 0.1.0
  */
+export * as SocketConnector from "./SocketConnector.ts"
+
+/**
+ * @stability experimental
+ * @since 0.1.0
+ */
 export * as Transport from "./Transport.ts"
 
 /**

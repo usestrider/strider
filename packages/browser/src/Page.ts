@@ -85,7 +85,7 @@ export type DocumentStatus = typeof DocumentStatus.Type
  */
 export const Prompt = Schema.Struct({
   id: Dialog.PromptId,
-  kind: Schema.Literals(["alert", "confirm", "prompt", "beforeunload"]),
+  kind: Schema.Literals(["alert", "confirm", "prompt", "beforeunload", "unknown"]),
   blocking: Schema.Literals(["confirmed", "suspected"])
 })
 

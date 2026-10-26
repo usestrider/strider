@@ -60,7 +60,7 @@ Obligations decided by a default policy because no handler decided them.
 
 *schemas*
 
-- `const Subject = Schema.Union([Schema.TaggedStruct("Dialog", { kind: Schema.Literals(["Alert", "Confirm", "Prompt", "BeforeUnload"]), message: Schema.String }), Schema.TaggedStruct("FileChooser", {}), Schema.TaggedSt…`
+- `const Subject = Schema.Union([Schema.TaggedStruct("Dialog", { kind: Schema.Literals(["Alert", "Confirm", "Prompt", "BeforeUnload", "Unknown"]), message: Schema.String }), Schema.TaggedStruct("FileChooser", {}), Sche…`
 - `const Policy = Schema.Union([Schema.TaggedStruct("ContextOption", { name: Schema.Literal("dialogs"), value: Schema.String }), Schema.TaggedStruct("Default", {})])`
 
 *subscriptions*
@@ -1334,7 +1334,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
 *schemas*
 
 - `const DocumentStatus = Schema.Struct({ id: Target.DocumentId, readiness: Schema.Literals(["loading", "interactive", "complete"]), lifecycle: Schema.Literals(["active", "suspended"]) })`
-- `const Prompt = Schema.Struct({ id: Dialog.PromptId, kind: Schema.Literals(["alert", "confirm", "prompt", "beforeunload"]), blocking: Schema.Literals(["confirmed", "suspected"]) })`
+- `const Prompt = Schema.Struct({ id: Dialog.PromptId, kind: Schema.Literals(["alert", "confirm", "prompt", "beforeunload", "unknown"]), blocking: Schema.Literals(["confirmed", "suspected"]) })`
 - `const Status = Schema.Union([Schema.TaggedStruct("Open", { url: Url.Url, document: DocumentStatus, prompt: Schema.Option(Prompt) }), Schema.TaggedStruct("Closed", { reason: Target.CloseReason })])`
 - `const FrameTree: Schema.Codec<FrameTree, FrameTreeEncoded>`
 - `const PageErrorReason = Schema.Union([PageNavigation.NavigationFailed, PageNavigation.NavigationCanceled, PageNavigation.NavigationSuperseded, PageNavigation.BecameDownload, PageNavigation.NoContent, InitializationFailed, C…`
@@ -2117,6 +2117,36 @@ The protocol layer's client contract (L0): commands and events as data, the sess
 
 - `type CommandArgs<P> = [P] extends [void] ? [] : {} extends P ? [params?: P] : [params: P]` (experimental)
 
+### SocketConnector
+
+Opens scoped socket connections to endpoints chosen at run time, such as the inspector server of a stock WebKit browser `WebKit.layer` launched (review 23).
+
+*services*
+
+- `const SocketConnector: Context.Service<SocketConnector, SocketConnector>` (experimental)
+
+*layers*
+
+- `const layer: (make: (endpoint: Endpoint) => Effect.Effect<Socket.Socket>) => Layer.Layer<SocketConnector>` (experimental)
+
+*models*
+
+- `interface Endpoint` (experimental)
+  - `readonly host: string`
+  - `readonly port: number`
+  - `readonly path?: string | undefined`
+  - `readonly tls?: boolean | TlsOptions | undefined`
+  - `readonly connectTimeout?: Duration.Input | undefined`
+- `type TlsOptions = Socket.TlsUpgradeOptions` (experimental)
+- `interface Connection extends Socket.Reader, Socket.Writer` (experimental)
+  - `readonly close: Effect.Effect<void>`
+- `interface SocketConnector` (experimental)
+  - `readonly connect: (endpoint: Endpoint) => Effect.Effect<Connection, Socket.SocketError, Scope.Scope>`
+
+*constructors*
+
+- `const fromSocket: (socket: Socket.Socket) => Effect.Effect<Connection, Socket.SocketError, Scope.Scope>` (experimental)
+
 ### Transport
 
 Transports carry a browser connection's messages (L0): framed text in both directions, read by one consumer, never reconnected.
@@ -2202,12 +2232,12 @@ Runner-agnostic test support (`@usestrider/browser/test`).
 
 ### WebKit
 
-The WebKit backend (`@usestrider/browser/webkit`): Playwright-patched WebKit builds, launched, and stock WebKit targets, attached.
+The WebKit backend (`@usestrider/browser/webkit`): stock WebKit, launched in automation mode or attached through its inspector, and, until review 23's last step removes it, Playwright's patched build.
 
 *layers*
 
-- `const layer: (options: Browser.LaunchOptions) => Layer.Layer< Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
-- `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem >`
+- `const layer: (options: Browser.LaunchOptions) => Layer.Layer< Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | SocketConnector.SocketConnector >`
+- `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | SocketConnector.SocketConnector >`
 - `const layerAttach: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
 
 ## `@usestrider/browser/webkit-automation-protocol`

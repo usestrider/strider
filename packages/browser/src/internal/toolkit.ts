@@ -750,7 +750,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
           Dialog.handle(page, (pending) =>
             Effect.succeed(
               decision === "accept"
-                ? pending._tag === "Prompt" && text !== undefined
+                ? (pending._tag === "Prompt" || pending._tag === "Unknown") && text !== undefined
                   ? pending.respond(text)
                   : pending._tag === "BeforeUnload"
                   ? pending.leave

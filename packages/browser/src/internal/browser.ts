@@ -24,6 +24,7 @@ import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import { pipeArguments } from "effect/Pipeable"
 import type * as Scope from "effect/Scope"
+import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Browser from "../Browser.ts"
 import * as CookieJar from "../CookieJar.ts"
 import * as Declaration from "../Declaration.ts"
@@ -522,7 +523,13 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       }
       // A directory the context owns for its downloads, made first so it is removed after the context
       // (review 14, candidate 8); or the caller's, or none (review 22, candidate 4c)
-      const asked = options?.downloads ?? "temporary"
+      // A backend that reports no downloads, such as stock WebKit (review 23), gets none by default; asked for,
+      // they fail as the adapter refuses them (QUIRKS.md, Q220)
+      const capabilities = (yield* SubscriptionRef.get(model.adapter.capabilities)).entries
+      const reports = (name: string) =>
+        capabilities.every((entry) => entry.name !== name || entry.status !== "unsupported")
+      const reportsDownloads = reports("downloads")
+      const asked = options?.downloads ?? (reportsDownloads ? "temporary" : "none")
       if (typeof asked === "object" && !/^(\/|[A-Za-z]:[\\/])/.test(asked.directory)) {
         return yield* Effect.fail(contextError(
           "Browser.newContext",
@@ -540,7 +547,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       yield* Effect.addFinalizer(() =>
         made === undefined ? Effect.void : ledger.remove({ _tag: "Directory", path: made })
       )
-      const downloads = asked === "deny"
+      const downloads = asked === "deny" || asked === "none"
         ? Option.none<string>()
         : typeof asked === "object"
         ? Option.some(asked.directory)
@@ -582,7 +589,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       entry.eventLog = options?.eventLog ?? entry.eventLog
       entry.keyboardLayout = options?.keyboardLayout ?? entry.keyboardLayout
       const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: created }
-      yield* adapter.declare(scope, { _tag: "FileChooser" }).pipe(Effect.catch(failed))
+      // Where file choosers aren't reported, as on stock WebKit (review 23), the browser cancels them itself
+      if (reports("fileChooser")) yield* adapter.declare(scope, { _tag: "FileChooser" }).pipe(Effect.catch(failed))
       if (asked === "deny") {
         yield* adapter.declare(scope, { _tag: "Downloads", behavior: { _tag: "Deny" } }).pipe(Effect.catch(failed))
         yield* Effect.annotateCurrentSpan("browser.context.downloads", "deny")

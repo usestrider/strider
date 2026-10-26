@@ -38,9 +38,15 @@ const runLocal = async () => {
   if (command === "__daemon") {
     const { daemon } = await import("../internal/cli/daemon.ts")
     // The daemon's process ends with its session
+    const { SocketConnector } = await import("../protocol/index.ts")
     daemon(argv.slice(1)).pipe(
       Effect.ensuring(Effect.sync(() => process.exit(0))),
-      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)),
+      Effect.provide(Layer.mergeAll(
+        NodeServices.layer,
+        NodeSocket.layerWebSocketConstructor,
+        // Stock WebKit's inspector server is a TCP socket (review 23)
+        SocketConnector.layer((endpoint) => NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port }))
+      )),
       NodeRuntime.runMain
     )
     return

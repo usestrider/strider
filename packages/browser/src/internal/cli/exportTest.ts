@@ -4,7 +4,9 @@
  * the locator its snapshot names, a `%name%` secret its `Config.Redacted`, and a wait the `next` it started.
  * Reads (`pages`, `snapshot`, `screenshot`, `history`) aren't repeated.
  */
+import * as Option from "effect/Option"
 import type * as Snapshot from "../../Snapshot.ts"
+import * as WebKitAutomation from "../webkitAutomation.ts"
 
 /** A command the session ran, as the test repeats it. */
 export type Step =
@@ -30,7 +32,12 @@ const quote = (text: string) => JSON.stringify(text)
  * every page keeps rendering while another is in front (QUIRKS.md, Q19). The daemon and the exported test agree.
  */
 export const focusFor = (browser: Browser): "emulated" | "system" =>
-  browser.backend === "chromium" || browser.backend === "webkit" ? "emulated" : "system"
+  browser.backend === "chromium" || (browser.backend === "webkit" && !stockWebKit(browser)) ? "emulated" : "system"
+
+/** Whether a session launches stock WebKit, whose every page is a window of its own (review 23). */
+const stockWebKit = (browser: Browser) =>
+  browser._tag === "Launch" && browser.backend === "webkit" &&
+  Option.isSome(WebKitAutomation.automationArguments(browser.executablePath))
 
 /** A locator expression for a target, on the page variable `page`; a ref as its snapshot named it. */
 export const locatorOf = (
@@ -275,8 +282,16 @@ export const render = (options: {
       ].join(", ")
     } } from "effect"`,
     ...(needsResponse ? [`import { HttpServerResponse } from "effect/http"`] : []),
+    ...(stockWebKit(options.browser)
+      ? [
+        `import * as NodeSocket from "@effect/platform-node/NodeSocket"`,
+        `import { SocketConnector } from "@usestrider/browser/protocol"`
+      ]
+      : []),
     ``,
-    `const browser = ${browserLayer}.pipe(Layer.provide(NodeServices.layer))`,
+    stockWebKit(options.browser)
+      ? `const browser = ${browserLayer}.pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, SocketConnector.layer((endpoint) => NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port })))))`
+      : `const browser = ${browserLayer}.pipe(Layer.provide(NodeServices.layer))`,
     ``,
     `describe(${quote(options.name)}, () => {`,
     `  layer(browser, { excludeTestServices: true })((it) => {`,

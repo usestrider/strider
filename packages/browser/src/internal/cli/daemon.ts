@@ -27,6 +27,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
+import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Queue from "effect/Queue"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
@@ -42,6 +43,7 @@ import * as CurrentSession from "../../cli/CurrentSession.ts"
 import * as Firefox from "../../firefox/Firefox.ts"
 import * as Ledger from "../../Ledger.ts"
 import * as Page from "../../Page.ts"
+import type * as SocketConnector from "../../protocol/SocketConnector.ts"
 import * as StorageState from "../../StorageState.ts"
 import type * as UserContext from "../../UserContext.ts"
 import * as WebKit from "../../webkit/WebKit.ts"
@@ -817,7 +819,17 @@ const browserOf = (flags: {
     )
 }
 
-const layerOf = (browser: ExportTest.Browser, userDataDir: string) => {
+const layerOf = (
+  browser: ExportTest.Browser,
+  userDataDir: string
+): Layer.Layer<
+  Browser.Browser,
+  Browser.BrowserError,
+  | ChildProcessSpawner.ChildProcessSpawner
+  | FileSystem.FileSystem
+  | Socket.WebSocketConstructor
+  | SocketConnector.SocketConnector
+> => {
   if (browser._tag === "Attach") {
     return browser.backend === "chromium"
       ? Chromium.layerConnect(browser.endpoint)

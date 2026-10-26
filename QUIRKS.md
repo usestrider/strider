@@ -150,6 +150,11 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* the test waits for the new page's first load (`waitForNavigationToComplete`) before navigating; the adapter will.
 - *Reconsider:* nothing.
 
+**Q215. Stock WebKit's inspector reports a history traversal under the old document's URL, with no realm** (Browser). Going back, through Automation's `goBackInBrowsingContext` or the page's `history.back()`, the new load's `Page.frameNavigated` names the URL of the document left, and no `Runtime.executionContextCreated` or load event follows, though the page shows the entry gone back to.
+- *Seen:* review 23's second step: `page.back()` was reported committed to the page it left, and the next read waited for a realm that never came.
+- *We:* `navigation.traverse` is `unsupported` on stock WebKit, attached or launched, and `back` and `forward` refuse; a traversal the page makes is still misreported.
+- *Reconsider:* taking the URL from the document's request, and asking for its realm, if a use needs a page's own traversals.
+
 ## Browsers: dialogs, popups, focus and input
 
 **Q16. A dialog blocks evaluation on Chromium and WebKit, not on Firefox** (Browser). Every evaluation in every world waits while a dialog is open on Chromium and WebKit; Firefox answers.
@@ -300,6 +305,16 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 **Q207. A debugger slows a stock WebKit page's JavaScript by about 80%, and a symbolic breakpoint can't see a native call's arguments** (Browser). With `Debugger.enable`, a benchmark of loops, sorting, strings, DOM and recursion ran in 38 ms instead of 21 (median of seven); symbolic breakpoints on `alert`, `confirm` and `prompt` added nothing more. A breakpoint's probe names the dialog's kind, but it fires for any function of that name, the page's own included, and evaluates in the caller's frame, where `arguments` doesn't exist, so a prompt's default value can't be read.
 - *Seen:* review 23's first step, against WebKitGTK 2.54.1's MiniBrowser.
 - *We:* the adapter attaches no debugger to learn dialogs' kinds (Q206).
+- *Reconsider:* nothing.
+
+**Q212. Stock WebKit names no opener for a page a page opens** (Browser). Neither its target list, its `Target` domain nor Automation's browsing contexts say which page opened another.
+- *Seen:* review 23's second step.
+- *We:* launched, a page the connection didn't ask for is reported opened, with no opener: `Popup` events of a context see it, a page's own don't.
+- *Reconsider:* reading `window.opener` where the popup is same-origin.
+
+**Q214. WebKitGTK's Automation builds no touch, and a mouse state makes an event only when it names its interaction** (Browser). `ENABLE_WEBDRIVER_TOUCH_INTERACTIONS` is off for WebKitGTK, and the dispatcher's touch path is a release assertion; a mouse source's state with a button and a location but no `mouseInteraction` moves nothing.
+- *Seen:* review 23's second step: the first clicks didn't reach the page; WebKitGTK 2.54.1's `OptionsGTK.cmake` and `SimulatedInputDispatcher.cpp`.
+- *We:* each event is a step naming its interaction (`Move`, `Down`, `Up`), each step declares only the sources it uses, never a touch one, and touch input is refused.
 - *Reconsider:* nothing.
 
 ## Browsers: downloads and file choosers
@@ -632,6 +647,11 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* review 23's capabilities list a user agent for the document already loaded, and throttling, as unsupported.
 - *Reconsider:* whether requests carry the override, in the adapter's step.
 
+**Q218. A launched MiniBrowser takes its time zone at launch and its language from neither the environment nor the protocol** (Browser). `--time-zone` sets the page's time zone, and nothing changes it after; `LANG`, `LANGUAGE` and `LC_ALL` leave `navigator.language` `en-US`.
+- *Seen:* review 23's second step's probe.
+- *We:* `emulation.locale` and `emulation.timezone` are `unsupported` on stock WebKit: a context's options reach the adapter after its process starts.
+- *Reconsider:* passing a new context's time zone to its process at launch.
+
 ## Browsers: frames, captures and storage
 
 **Q110. Chromium renders nothing in a cross-site frame outside the viewport** (Browser). No animation frame runs in an out-of-process iframe that is scrolled out of view, so an action in it saw no rendering opportunity and timed out with `NoRenderingOpportunity`.
@@ -833,6 +853,21 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 23, P3 and P4.
 - *We:* the inspector reaches a page as its own target on the same socket; the engine runs in the page's world, as when attached (Q194).
 - *Reconsider:* nothing.
+
+**Q213. MiniBrowser's first window is taken by the first page asked for, and its last window's close ends it** (Browser). In automation mode the first window has loaded nothing, and the first `createBrowsingContext` returns it rather than open one (`browser_window_get_or_create_web_view_for_automation`); closing the last window quits the browser before the command is answered.
+- *Seen:* review 23's second step: an anchor opened that way never appeared, and closing every page ended the browser.
+- *We:* each process claims its first window first. A context's process keeps it as its anchor, minimized and never reported; the default context's reports it as the browser's first tab (Q141) and opens a window more as its anchor. A context lives as long as its process, whatever its pages.
+- *Reconsider:* nothing.
+
+**Q216. A WebKitGTK browser told an inspector port that's taken keeps running without its server** (Browser). It says so only on stderr ("Failed to start remote inspector server on …: Address already in use").
+- *Seen:* review 23's second step's probe, with a port another program held.
+- *We:* the launch picks a port at random, watches stderr for that line, and tries another, five times.
+- *Reconsider:* nothing.
+
+**Q217. GNOME Web's automation mode needs a session bus, opens no second page, and aborts as a page closes** (Browser). Without a D-Bus session, libportal aborts it at start; with one, its first `createBrowsingContext` takes its first window, a second is never answered, and closing a page ends it (status 134).
+- *Seen:* review 23's second step, GNOME Web 50.4 from the pinned nixpkgs under `dbus-run-session`.
+- *We:* `WebKit.layer` launches only the MiniBrowser; another executable fails with `InvalidInput`, saying so (review 23, decision 3).
+- *Reconsider:* when GNOME Web's automation mode opens windows as asked.
 
 ## Ours: workarounds and odd shapes
 
@@ -1277,4 +1312,14 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* each source names its own directory (`Emit.Source.directory`).
 - *Reconsider:* nothing.
 - **Resolved** in `251796e` (review 23's first step): as above, which corrected the stock protocol's headers.
+
+**Q219. Launched stock WebKit pairs a page's two names by its document's time origin** (Ours). Automation knows a page by its handle and the inspector by its target, and neither names the other; the adapter reads `performance.timeOrigin` through both and pairs them, which writes nothing the page sees.
+- *Seen:* review 23's second step.
+- *We:* as above, under one permit at a time; a page made by the connection is the one paired to the handle it made.
+- *Reconsider:* if a WebKit release names a page's target in Automation's browsing contexts.
+
+**Q220. A context's defaults the backend doesn't report are left out, not refused** (Ours). Every context the library makes downloads to a temporary directory and declares its file choosers; where `downloads` or `fileChooser` is `unsupported`, as on stock WebKit, those defaults are skipped, and asked for, they fail.
+- *Seen:* review 23's second step: every `newPage` failed on the defaults.
+- *We:* as above (`browser.ts`).
+- *Reconsider:* nothing.
 

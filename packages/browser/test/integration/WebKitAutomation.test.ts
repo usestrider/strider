@@ -14,6 +14,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as InspectorSocket from "../../src/internal/webkitInspectorSocket.ts"
+import * as SocketConnector from "../../src/protocol/SocketConnector.ts"
 import { site } from "./adapter/harness.ts"
 import { webkitgtk } from "./browsers.ts"
 import { startMiniBrowserForAutomation } from "./stockWebKit.ts"
@@ -29,7 +30,9 @@ const page = (origin: string) =>
 
 /** A session over the socket: the Automation target's commands, and a page target's inspector. */
 const open = Effect.fnUntraced(function*(port: number) {
-  const connection = yield* InspectorSocket.connect(yield* NodeSocket.makeNet({ host: "127.0.0.1", port }))
+  const connection = yield* InspectorSocket.connect(
+    yield* SocketConnector.fromSocket(yield* NodeSocket.makeNet({ host: "127.0.0.1", port }))
+  )
   const started = yield* Deferred.make<{ readonly browserName: string; readonly browserVersion: string }>()
   const targets = yield* SubscriptionRef.make<ReadonlyArray<InspectorSocket.Target>>([])
   let connectionId = 0n

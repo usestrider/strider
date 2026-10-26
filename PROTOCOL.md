@@ -874,6 +874,33 @@ Adapter responsibilities:
 - **Where the build differs from the review.** **The socket is the program's,** an Effect `Socket`: Effect has no service that opens a TCP connection to a port chosen at run time, so `WebKit.layer` will need one the program provides, which `NodeSocket.makeNet` satisfies. The review didn't foresee it.
 - **Tests.** `test/WebKitInspectorSocket.test.ts` encodes and decodes the GVariant specification's examples, frames `StartAutomationSession` as the MiniBrowser accepted it, reads the frames it sent however they're split, and connects to a server that plays them. `test/integration/WebKitAutomation.test.ts` starts a session with the MiniBrowser in automation mode, which names itself and the pinned version, opens a page and, once its first document has loaded (Q211), navigates it, clicks it (`isTrusted`), types `hé@`, takes a screenshot, answers a `confirm`, and evaluates in the same page as an inspector target on the same socket. Integration tests: 514. In the full run, a file at a time, the other 513 passed and the new test failed for Q211; after the fix, it passes alone, five times out of five, and beside the stock WebKit tests.
 
+**Built** (2026-10-26, after [review 23](reviews/23-webkit-without-playwright.md), its second step): stock WebKit, launched in automation mode.
+
+- **`WebKit.layer` with the MiniBrowser** (`internal/webkitAutomation.ts`). An executable named `MiniBrowser` is launched with `--automation` and `WEBKIT_INSPECTOR_SERVER` on a random port, tried again on another while its stderr says the port is taken (Q216), with the XDG directories in a temporary one; the program's `SocketConnector` connects, and the session starts. `headless: true` is `InvalidInput`. Any other executable is Playwright's build, until review 23's last step.
+- **`SocketConnector`** (`@usestrider/browser/protocol`; `SocketConnector.layer`, `fromSocket`). The shape of Effect-TS/effect#8735's `effect/socket/SocketConnector`, provisional. The CLI's daemon provides it from `NodeSocket.makeNet`, and an exported test does for stock WebKit.
+- **A process per context** (`Group`). The default context's process announces its first window, as every backend's first tab (Q141), and opens one more, minimized, as its anchor; a context's process keeps its first window as its anchor. A process claims its first window before anything else, since the first page asked for takes it (Q213). A context's removal ends its process; the default context's end loses the connection.
+- **Every process's pages, one transport.** Each `WebPage` target is a page proxy in Playwright's envelope, `<process>-<target>`, in its process's context, with review 22's qualification of ids; `Playwright.enable` announces the pages open.
+- **The adapter's launched profile** (`webkitAdapter.ts`, `Options.automation`):
+  - a page made by `createBrowsingContext`, a window, waited for until its first document loads (Q211), and reported `Created`; a page another opened is reported `Opened`, with no opener (Q212);
+  - a page's handle paired with its target by `performance.timeOrigin`, read through both (Q219), after which its declared viewport is applied and its dialogs watched;
+  - navigation by `navigateBrowsingContext` with no load strategy, a child frame's by script; history refused (Q215);
+  - input as interaction sequences of the mouse, keyboard and wheel, each step naming its interaction, never a touch source (Q214); text by `InsertByKey`;
+  - dialogs found by `isShowingJavaScriptDialog` every 100 ms, reported `unknown` with their message, and answered by accepting, dismissing, or setting a prompt's text first, which fails for a dialog that wasn't one (Q206);
+  - the viewport as the window's size, less the toolbar measured once per process; JavaScript off by `Page.overrideSetting`; media without forced colors;
+  - a file input's files by `setFilesForInputFileUpload`, the element found by its path through Automation;
+  - cookies through a page of the context.
+- **`Dialog.Unknown`** (`Dialog`, `AutoResolution`, `Page.Prompt`, `Reason.PromptBlocking`; the adapter's prompt kind `unknown`). A dialog with its message, `accept`, `dismiss` and `respond(text)`; `acceptAll` accepts it and `dismissAll` dismisses it.
+- **A context's defaults** (`browser.ts`). Where `downloads` or `fileChooser` is `unsupported`, a new context makes no download directory and arms no chooser; asked for, they fail (Q220).
+- **The CLI.** A session that launches the MiniBrowser doesn't emulate focus: its pages are windows.
+- **Where the build differs from the review.**
+  - **GNOME Web isn't launched.** It needs a D-Bus session, opens no second page in automation mode, and aborts as one closes (Q217): decision 3 defers it.
+  - **History is refused,** not driven: stock WebKit's inspector misreports a traversal (Q215).
+  - **The time zone and locale aren't context options:** a context's options reach the adapter after its process starts, and the MiniBrowser takes no language from anywhere (Q218).
+  - **Screenshots stay the inspector's** `snapshotRect`, since Automation's takes no rectangle.
+  - **A page's opener is unknown** (Q212), and a popup isn't paused, as the review said.
+  - **`strider browsers` doesn't find the MiniBrowser yet:** its search goes with Playwright's cache in the last step.
+- **Tests.** `test/integration/StockWebKitLaunched.test.ts` launches the MiniBrowser through `WebKit.layer` on an X server the test names in `DISPLAY`: its name and version and first tab; a click the page trusts, `fill` and `press`; a screenshot; a `confirm` and a `prompt` as `Unknown`, one answered with text; two contexts as processes with their own cookies, one at a 640 by 480 viewport; a fulfilled route and a file input; the capability table and the refusals of `back` and `evaluate`. The WebKit slices provide `SocketConnector`. Integration tests: 519, all passing in one full run, a file at a time.
+
 ### Pause-on-start granularity
 
 Before-author-script setup for *new* targets needs them paused at creation. Granularity differs by backend, and the access model depends on it.

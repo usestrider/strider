@@ -63,6 +63,11 @@ the API declares is built.
   started with `WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9333` attaches with `WebKit.layerAttach("http://127.0.0.1:9333")`
   for looking, not driving: no clicks or typing, so script the page with `evaluateInMainWorld`, which is also the
   only evaluation there, since stock WebKit has no isolated worlds.
+- **Stock WebKit launched** is `WebKit.layer({ executablePath: ".../MiniBrowser" })`, which needs a display
+  (`DISPLAY`; there is no headless mode) and a `SocketConnector` (`@usestrider/browser/protocol`):
+  `SocketConnector.layer((endpoint) => NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port }))`. Clicks
+  and typing work; `evaluate` doesn't (use `evaluateInMainWorld`); dialogs arrive as `Dialog.Unknown`, so a
+  `Dialog.handle` handler matching on `_tag` needs that case; `back` and `forward` are refused.
 - **Errors are per module, with a reason.** Recover with
   `Effect.catchReason("LocatorError", "StrictViolation", …)`. Any operation can also fail with `TargetGone` or
   `Timeout`, which says how far it got (`timeout.phase`); a `waitFor` on a value that settled for good, such as a

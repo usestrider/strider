@@ -34,7 +34,7 @@ import type * as UserContext from "./UserContext.ts"
  */
 export const Subject = Schema.Union([
   Schema.TaggedStruct("Dialog", {
-    kind: Schema.Literals(["Alert", "Confirm", "Prompt", "BeforeUnload"]),
+    kind: Schema.Literals(["Alert", "Confirm", "Prompt", "BeforeUnload", "Unknown"]),
     message: Schema.String
   }),
   Schema.TaggedStruct("FileChooser", {}),
@@ -113,7 +113,13 @@ export interface Filter {
 
 // ── Implementation ──
 
-const kinds = { alert: "Alert", confirm: "Confirm", prompt: "Prompt", beforeunload: "BeforeUnload" } as const
+const kinds = {
+  alert: "Alert",
+  confirm: "Confirm",
+  prompt: "Prompt",
+  beforeunload: "BeforeUnload",
+  unknown: "Unknown"
+} as const
 
 const deliver = (event: Model.AutoResolutionEvent): AutoResolution => {
   switch (event._tag) {

@@ -7,6 +7,7 @@ import { WebKit } from "@usestrider/browser/webkit"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { webkit } from "../browsers.ts"
+import { socketConnector } from "../sockets.ts"
 import { attaching } from "./attaching.ts"
 import { contents } from "./contents.ts"
 import { declarations } from "./declarations.ts"
@@ -18,7 +19,9 @@ import { slice } from "./slice.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 
-const backend = WebKit.layer({ executablePath: webkit.executable }).pipe(Layer.provide(NodeServices.layer))
+const backend = WebKit.layer({ executablePath: webkit.executable }).pipe(
+  Layer.provide(Layer.mergeAll(NodeServices.layer, socketConnector))
+)
 
 slice("WebKit", backend, () => {})
 events("WebKit", backend)

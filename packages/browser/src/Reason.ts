@@ -226,7 +226,7 @@ export class NotSerializable extends Schema.Error<NotSerializable>("@usestrider/
  */
 export class PromptBlocking extends Schema.Error<PromptBlocking>("@usestrider/browser/Reason/PromptBlocking")({
   _tag: Schema.tag("PromptBlocking"),
-  kind: Schema.Literals(["alert", "confirm", "prompt", "beforeunload"]),
+  kind: Schema.Literals(["alert", "confirm", "prompt", "beforeunload", "unknown"]),
   text: Schema.String,
   hint: Schema.String
 }) {

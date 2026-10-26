@@ -177,7 +177,8 @@ export type ObligationSubject =
     readonly _tag: "Prompt"
     readonly prompt: Dialog.PromptId
     readonly page: Target.NavigableId
-    readonly kind: "alert" | "confirm" | "prompt" | "beforeunload"
+    /** `unknown` where the browser doesn't say, as stock WebKit's Automation doesn't (QUIRKS.md, Q206). */
+    readonly kind: "alert" | "confirm" | "prompt" | "beforeunload" | "unknown"
     readonly message: string
     readonly defaultValue: string
   }

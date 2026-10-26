@@ -80,7 +80,8 @@ export const Dialog = Schema.Union([
   Schema.TaggedStruct("Alert", { id: PromptId, message: Schema.String }),
   Schema.TaggedStruct("Confirm", { id: PromptId, message: Schema.String }),
   Schema.TaggedStruct("Prompt", { id: PromptId, message: Schema.String, defaultValue: Schema.String }),
-  Schema.TaggedStruct("BeforeUnload", { id: PromptId })
+  Schema.TaggedStruct("BeforeUnload", { id: PromptId }),
+  Schema.TaggedStruct("Unknown", { id: PromptId, message: Schema.String })
 ])
 
 /**
@@ -104,7 +105,10 @@ export type Dialog = typeof Dialog.Type
  * **Details**
  *
  * A `Prompt`'s `accept` answers with `defaultValue`; `respond(text)` answers with other text. A
- * `BeforeUnload` dialog asks whether to leave the page.
+ * `BeforeUnload` dialog asks whether to leave the page. An `Unknown` dialog is one whose kind the browser doesn't
+ * report, as stock WebKit doesn't (QUIRKS.md, Q206): `accept` answers as its OK button would, a prompt with its
+ * default value; `dismiss` as its Cancel button; and `respond(text)` answers a prompt with text, failing for a
+ * dialog that wasn't one.
  *
  * @stability unstable
  * @category models
@@ -119,6 +123,11 @@ export type Pending =
     readonly dismiss: Decision
   }
   | Extract<Dialog, { readonly _tag: "BeforeUnload" }> & { readonly leave: Decision; readonly stay: Decision }
+  | Extract<Dialog, { readonly _tag: "Unknown" }> & {
+    readonly accept: Decision
+    respond(text: string): Decision
+    readonly dismiss: Decision
+  }
 
 /**
  * Which kind of dialog.
@@ -164,7 +173,8 @@ const kinds: Record<Model.PromptEvent["kind"], Kind> = {
   alert: "Alert",
   confirm: "Confirm",
   prompt: "Prompt",
-  beforeunload: "BeforeUnload"
+  beforeunload: "BeforeUnload",
+  unknown: "Unknown"
 }
 
 const toDialog = (prompt: Model.PromptEvent): Dialog => {
@@ -178,6 +188,8 @@ const toDialog = (prompt: Model.PromptEvent): Dialog => {
       return { _tag: "Prompt", id, message: prompt.message, defaultValue: prompt.defaultValue }
     case "beforeunload":
       return { _tag: "BeforeUnload", id }
+    case "unknown":
+      return { _tag: "Unknown", id, message: prompt.message }
   }
 }
 
@@ -197,6 +209,13 @@ const toPending = (prompt: Model.PromptEvent): Pending => {
       }
     case "BeforeUnload":
       return { ...dialog, leave: accepted, stay: dismissed }
+    case "Unknown":
+      return {
+        ...dialog,
+        accept: accepted,
+        respond: (text) => decision({ _tag: "Accept", promptText: Option.some(text) }),
+        dismiss: dismissed
+      }
   }
 }
 

@@ -10,14 +10,14 @@
  *   the browser's name and version; it pushes the list of its targets whenever it changes (`SetTargetList`), an
  *   `Automation` target for the session and a `WebPage` target for each page; `Setup` connects to a target, and
  *   `SendMessageToBackend` and `SendMessageToFrontend` carry the protocol's JSON to and from it.
- * - **The connection** is one socket, from the program's own `Socket` (Effect's), for as long as the scope.
+ * - **The connection** is one socket, which the program's `SocketConnector` opened, for as long as the scope.
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Queue from "effect/Queue"
 import type * as Scope from "effect/Scope"
-import type * as Socket from "effect/socket/Socket"
 import * as Stream from "effect/Stream"
+import type * as SocketConnector from "../protocol/SocketConnector.ts"
 import * as Transport from "../protocol/Transport.ts"
 import * as GVariant from "./gvariant.ts"
 
@@ -181,15 +181,11 @@ export interface Connection {
 
 const lostError = (lost: Transport.ConnectionLost) => new Transport.TransportError({ reason: lost })
 
-/** A connection over `socket`, opened now, for as long as the scope. */
-export const connect: (socket: Socket.Socket) => Effect.Effect<Connection, Transport.TransportError, Scope.Scope> =
-  Effect.fnUntraced(function*(socket: Socket.Socket) {
-    const { pull } = yield* socket.reader.pipe(
-      Effect.mapError((error) =>
-        new Transport.TransportError({ reason: new Transport.ConnectFailed({ description: error.message }) })
-      )
-    )
-    const writer = yield* socket.writer
+/** A connection over `socket`, which its connector opened, for as long as the scope. */
+export const connect: (socket: SocketConnector.Connection) => Effect.Effect<Connection, never, Scope.Scope> = Effect
+  .fnUntraced(function*(socket: SocketConnector.Connection) {
+    const pull = socket.pull
+    const writer = socket
     const incoming = yield* Queue.unbounded<Incoming>()
     const lost = Deferred.makeUnsafe<Transport.ConnectionLost>()
     const read = makeFrameReader()

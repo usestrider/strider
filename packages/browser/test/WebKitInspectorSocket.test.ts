@@ -11,6 +11,7 @@ import * as Stream from "effect/Stream"
 import * as net from "node:net"
 import * as GVariant from "../src/internal/gvariant.ts"
 import * as InspectorSocket from "../src/internal/webkitInspectorSocket.ts"
+import * as SocketConnector from "../src/protocol/SocketConnector.ts"
 
 const hex = (text: string) => Uint8Array.from(text.match(/../g)!.map((byte) => parseInt(byte, 16)))
 const toHex = (bytes: Uint8Array) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
@@ -106,7 +107,9 @@ describe("The inspector socket's frames", () => {
         server.listen(0, "127.0.0.1", () => resume(Effect.succeed((server.address() as net.AddressInfo).port)))
       })
       yield* Effect.addFinalizer(() => Effect.sync(() => server.close()))
-      const connection = yield* InspectorSocket.connect(yield* NodeSocket.makeNet({ host: "127.0.0.1", port }))
+      const connection = yield* InspectorSocket.connect(
+        yield* SocketConnector.fromSocket(yield* NodeSocket.makeNet({ host: "127.0.0.1", port }))
+      )
       const collected = yield* connection.messages.pipe(Stream.take(2), Stream.runCollect, Effect.forkScoped)
       yield* connection.send({
         _tag: "StartAutomationSession",
