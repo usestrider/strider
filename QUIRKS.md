@@ -816,6 +816,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Reconsider:* goes away as modules are built.
 - **Resolved** in `a7ee8dc` (review 21's first step): the builds removed the stubs: the one `NotBuilt` left is `Trace.record`'s `domSnapshots`, which is declared and documented.
 - **Revised** in `d8ee372` (review 22's fourth step): `domSnapshots` is built, so nothing is `NotBuilt` now; the module stays for what a later review declares before building.
+- **Revised** in `4b7b77a` (review 22's fifth step): `WebKit.layerAttach`, the last declaration a module had left, is built, so every member the API declares is.
 
 **Q61. A `Watchable` is an effect value with members attached** (Ours). Effect 4 has no public way to subclass `Effect`.
 - *Seen:* review 12.
@@ -1158,6 +1159,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* the rule is in the session's start, and the spec it prints names the backend.
 - *Reconsider:* a flag per protocol, if an endpoint is ever ambiguous.
 - **Kept** in review 21: the *We* line is the decision.
+- **Revised** in `4b7b77a` (review 22's fifth step): an endpoint is ambiguous now. Stock WebKit's inspector server is an HTTP endpoint too, which `--attach` reads as Chromium's, so stock WebKit isn't reached from the CLI; the flag per protocol above is the way, for a review to decide (CLI.md, Built).
 
 **Q169. A session's context is its own, also when it attaches** (Ours). The daemon creates the session's one context, so its pages are controlled from the start; the attached browser's own tabs aren't in it, and `strider control`, which would take one, isn't built.
 - *Seen:* review 20's build.
