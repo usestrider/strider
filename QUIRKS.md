@@ -221,7 +221,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* the CDP adapter turns interception on with the first move that holds a button, and finishes the drags it intercepts. `input.dragAndDrop` is unsupported elsewhere, so `dragTo` from a draggable element fails there with `Unsupported` before anything is sent. Drags by pointer events work everywhere.
 - *Reconsider:* Firefox, if it starts dropping; and whether interception, once on, should stay on for the page's life.
 - **Kept** in review 21: Firefox starts drags it never drops; Strider refuses `dragTo` up front there.
-- **Resolved** in review 22's third step: `dragTo(target, { html: "synthetic" })` has the page dispatch an HTML drag's events, untrusted, on every backend; the refusal of a native one names it.
+- **Resolved** in `64f94a7` (review 22's third step): `dragTo(target, { html: "synthetic" })` has the page dispatch an HTML drag's events, untrusted, on every backend; the refusal of a native one names it.
 
 **Q77. WebKit fires no `click` after a tap** (Browser). A touch start and end reach the page, with touch pointer events, on all three; Chromium and Firefox follow with compatibility mouse events and `click`, and WebKit doesn't.
 - *Seen:* review 16, P6.
@@ -845,7 +845,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* nothing.
 - *Reconsider:* other layouts, if a test needs one.
 - **Kept** in review 21: a declared piece still unbuilt, built when a use needs it.
-- **Resolved** in review 22's third step: `UserContext.Options.keyboardLayout` chooses `us`, `uk`, `de`, `fr`, `es` or `it`, generated from Unicode CLDR's Windows layouts, and `type` and `press` hold Shift and AltGr and press dead keys as the layout does. Firefox follows a layout's keys but gives them US codes (`input.keyboardLayout`).
+- **Resolved** in `64f94a7` (review 22's third step): `UserContext.Options.keyboardLayout` chooses `us`, `uk`, `de`, `fr`, `es` or `it`, generated from Unicode CLDR's Windows layouts, and `type` and `press` hold Shift and AltGr and press dead keys as the layout does. Firefox follows a layout's keys but gives them US codes (`input.keyboardLayout`).
 
 **Q87. `Expect.that` turns its subject's timeout into its own failure** (Ours). A subject still running at the expectation's deadline, or failing with `Timeout` once it has passed, ends the expectation with `ExpectationFailed`; a shorter deadline inside the subject stays the subject's failure. The two are told apart only by whether the expectation's deadline has passed.
 - *Seen:* review 16's revision, under full load: a `Locator.count` timed out while resolving.
@@ -964,7 +964,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 18's revision.
 - *We:* as above.
 - *Reconsider:* releasing a scope's handles in one command per realm.
-- **Resolved** in review 22's third step: a scope's handles in a realm are one object group, released in one `Runtime.releaseObjectGroup` as the scope closes (on WebKit through an object made in the group, Q185), and in one `script.disown` on BiDi.
+- **Resolved** in `64f94a7` (review 22's third step): a scope's handles in a realm are one object group, released in one `Runtime.releaseObjectGroup` as the scope closes (on WebKit through an object made in the group, Q185), and in one `script.disown` on BiDi.
 
 **Q133. `page.readHtml` reads from the engine's world** (Ours). The review said the isolated world; the document's HTML is the same from either, and the engine is already there.
 - *Seen:* review 18's revision.
