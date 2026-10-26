@@ -144,7 +144,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 13.
 - *We:* don't activate behind the caller's back; the timeout's hint names `page.activate`.
 - *Reconsider:* whether an explicit option to keep openers rendering is worth having.
-- **Resolved** in review 21's second step: no Chromium switch keeps an opener rendering once its popup opens as a tab over it, but focus emulation does (review 21, P1). The `NoRenderingOpportunity` hint names `newContext({ focus: "emulated" })` beside `page.activate`, and the CLI's session context emulates focus on Chromium and WebKit. The library's default stays `focus: "system"` (review 21, Considered and not adopted).
+- **Resolved** in `38ce8ff` (review 21's second step): no Chromium switch keeps an opener rendering once its popup opens as a tab over it, but focus emulation does (review 21, P1). The `NoRenderingOpportunity` hint names `newContext({ focus: "emulated" })` beside `page.activate`, and the CLI's session context emulates focus on Chromium and WebKit. The library's default stays `focus: "system"` (review 21, Considered and not adopted).
 
 **Q20. A paused popup blocks its opener's `window.open`** (Browser). On Chromium, `window.open` doesn't return until the paused popup resumes, and popups can be paused only browser-wide.
 - *Seen:* probe 22.
@@ -185,7 +185,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 16's revision.
 - *We:* don't activate behind the caller's back; the timeout's hint names `page.activate`, after which the action works.
 - *Reconsider:* Firefox pages as windows, probed again; or a stable check that spans rounds, which would make such actions slow rather than stuck.
-- **Resolved** in review 21's second step: Firefox's pages the library creates open as windows, and `automation` adds `browser.link.open_newwindow: 2`, so a popup, or a link that opens a page, opens as a window too. Every page then keeps rendering behind another (review 21, P2), and the slice tests act on a page behind another, and on a popup's opener, without `activate`. Review 16's probe saw navigation break in windows: that was Q178.
+- **Resolved** in `38ce8ff` (review 21's second step): Firefox's pages the library creates open as windows, and `automation` adds `browser.link.open_newwindow: 2`, so a popup, or a link that opens a page, opens as a window too. Every page then keeps rendering behind another (review 21, P2), and the slice tests act on a page behind another, and on a popup's opener, without `activate`. Review 16's probe saw navigation break in windows: that was Q178.
 
 **Q72. WebKit's mouse events ignore modifiers** (Browser). Neither the event's modifier flags nor Shift held as a key reach a click's `shiftKey`.
 - *Seen:* review 16, P1.
@@ -670,7 +670,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 21's build, when Firefox's pages became windows (Q71): the events failed to decode, so the adapter rebuilt its model from `browsingContext.getTree` in the middle of a navigation, and its documents went unreported. A raw BiDi client, which decodes nothing, didn't see a problem. It is what broke navigation in review 16's probe of windows.
 - *We:* a correction in `packages/tools/codegen/protocols/bidi/patches/navigationInfo-userContext.json` makes the member nullable, as Q53's two are; the adapter places no context it can't attribute.
 - *Reconsider:* on each roll (`pnpm codegen:audit`), and whether to report the transient tab with the deviation.
-- **Resolved** in review 21's second step: as above.
+- **Resolved** in `38ce8ff` (review 21's second step): as above.
 
 ## Ours: workarounds and odd shapes
 
