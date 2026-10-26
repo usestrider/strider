@@ -5,7 +5,7 @@
   "scripts": {
     "prepare": "node scripts/setup-agents.mjs && effect-tsgo patch",
     "codegen": "pnpm --recursive --filter \"./packages/*\" run codegen",
-    "check": "tsc -b tsconfig.json && pnpm --recursive --filter \"./packages/*\" run codegen --check && strider-codegen generate cdp --check && strider-codegen generate bidi --check && strider-codegen generate webkit --check && strider-codegen keyboards --check",
+    "check": "tsc -b tsconfig.json && pnpm --recursive --filter \"./packages/*\" run codegen --check && strider-codegen generate cdp --check && strider-codegen generate bidi --check && strider-codegen generate webkit --check && strider-codegen generate webkit-stock --check && strider-codegen keyboards --check",
     "build": "tsc -b tsconfig.packages.json && pnpm --recursive --filter \"./packages/*\" run build",
     "lint": "oxlint && dprint check",
     "lint-fix": "oxlint --fix && dprint fmt",
@@ -19,9 +19,9 @@
     "strider": "node packages/browser/src/bin/strider.ts",
     "all": "pnpm check && pnpm lint && pnpm test --run && pnpm test-types && pnpm reference",
     "reference": "pnpm jsdocs && pnpm examples && pnpm index && pnpm api-reference",
-    "codegen:protocol": "strider-codegen generate cdp && strider-codegen generate bidi && strider-codegen generate webkit",
+    "codegen:protocol": "strider-codegen generate cdp && strider-codegen generate bidi && strider-codegen generate webkit && strider-codegen generate webkit-stock",
     "codegen:keyboards": "strider-codegen keyboards",
-    "codegen:audit": "strider-codegen audit cdp && strider-codegen audit bidi && strider-codegen audit webkit"
+    "codegen:audit": "strider-codegen audit cdp && strider-codegen audit bidi && strider-codegen audit webkit && strider-codegen audit webkit-stock"
   },
   "devDependencies": {
     "@babel/cli": "^8.0.6",

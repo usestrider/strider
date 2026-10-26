@@ -11,7 +11,8 @@ action (`click`, `dblclick`, `tap`, `hover`, `check`, `uncheck`, `focus`, `clear
 `evaluateInMainWorld`, `evaluateHandle`, `JSHandle`, `Locator.evaluate`), snapshots with refs and `AriaPattern`,
 `screenshot`, `pdf` and `readHtml`, cookies, `localStorage` and `sessionStorage`, storage state with IndexedDB
 (`exportStorageState`, the context option `storageState`), attaching (`Chromium.layerConnect`,
-`Firefox.layerConnect`, `Bidi.layerConnect`), `browser.pages`, the default context, `inspect` and `control` for a scope,
+`Firefox.layerConnect`, `Bidi.layerConnect`, and `WebKit.layerAttach` for stock WebKit), `browser.pages`, the default
+context, `inspect` and `control` for a scope,
 every event module (`Popup`, `Dialog`, `FileChooser`, `Download`, `ConsoleMessage`,
 `UncaughtException`, `PageNavigation`, `NetworkRequest`, `NetworkResponse`, `BrowserWorker`, `NetworkConnection`,
 `AutoResolution`), `Dialog.handle` and `FileChooser.handle`, and the declarations (`route`, `addInitScript`,
@@ -22,9 +23,9 @@ test layers (`Browser.layerTest`, and `VitestBrowser.layer` from `@usestrider/vi
 (`BrowserToolkit`, `CapturePolicy`) and the `strider` command (CLI.md) work on every backend. What a backend can't do or report
 fails with `Unsupported`, naming the capability: modifiers on WebKit's pointer, an HTML drag anywhere but
 Chromium, a CSS-pixel or transparent screenshot and a PDF's header on Firefox, a PDF on WebKit, a partitioned
-cookie anywhere but Chromium, `Capability.AxTree` anywhere but Chromium, and `Capability.Screencast` on Firefox. A
-member that isn't built yet fails as the defect `NotBuilt`, naming itself (a trace's `domSnapshots` and
-`WebKit.layerAttach` among them).
+cookie anywhere but Chromium, `Capability.AxTree` anywhere but Chromium, `Capability.Screencast` on Firefox, and on
+stock WebKit input, dialogs, new pages and `evaluate` (`WebKit.layerAttach`'s documentation lists them). Every member
+the API declares is built.
 
 ## Shape
 
@@ -58,7 +59,10 @@ member that isn't built yet fails as the defect `NotBuilt`, naming itself (a tra
   (`browser.pages`, an attached browser's tabs, a launched browser's first tab) is observed: `yield* page.inspect` or
   `yield* page.control` inside `Effect.scoped` gains access for the scope, after which the handle fails with
   `TargetGone{AccessReleased}` and its routes are removed. Attach with `Chromium.layerConnect("http://127.0.0.1:9222")`
-  or `Firefox.layerConnect("ws://127.0.0.1:9222")`; Firefox takes one client at a time.
+  or `Firefox.layerConnect("ws://127.0.0.1:9222")`; Firefox takes one client at a time. A WebKitGTK or WPE browser
+  started with `WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9333` attaches with `WebKit.layerAttach("http://127.0.0.1:9333")`
+  for looking, not driving: no clicks or typing, so script the page with `evaluateInMainWorld`, which is also the
+  only evaluation there, since stock WebKit has no isolated worlds.
 - **Errors are per module, with a reason.** Recover with
   `Effect.catchReason("LocatorError", "StrictViolation", …)`. Any operation can also fail with `TargetGone` or
   `Timeout`, which says how far it got (`timeout.phase`); a `waitFor` on a value that settled for good, such as a

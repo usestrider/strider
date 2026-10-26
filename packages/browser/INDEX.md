@@ -2213,3 +2213,7 @@ The WebKit backend (`@usestrider/browser/webkit`): Playwright-patched WebKit bui
 ## `@usestrider/browser/webkit-protocol`
 
 33 generated modules: Animation, Audit, Browser, Canvas, Console, CPUProfiler, CSS, Debugger, Dialog, DOM, DOMDebugger, DOMStorage, Emulation, GenericTypes, Heap, IndexedDB, Input, Inspector, LayerTree, Memory, Network, Page, Playwright, Recording, Runtime, Screencast, ScriptProfiler, Security, ServiceWorker, Storage, Target, Timeline, Worker. Their declarations are in the API reference.
+
+## `@usestrider/browser/webkit-stock-protocol`
+
+28 generated modules: Animation, Audit, Browser, Canvas, Console, CPUProfiler, CSS, Debugger, DOM, DOMDebugger, DOMStorage, GenericTypes, Heap, IndexedDB, Inspector, LayerTree, Memory, Network, Page, Recording, Runtime, ScriptProfiler, Security, ServiceWorker, Storage, Target, Timeline, Worker. Their declarations are in the API reference.

@@ -1351,11 +1351,17 @@ export class LocatorImpl implements Locator.Locator {
               ),
               Effect.raceFirst(Runtime.promptBlocked(owner.page, true)),
               Effect.mapError((failure) =>
-                // The input may have reached the page: the error says so, and nothing is sent again
+                // The input may have reached the page: the error says so, and nothing is sent again. A backend
+                // that can't send input refuses before it sends any (stock WebKit's inspector)
                 failure._tag === "Gone"
                   ? failure.error
                   : failure._tag === "Reason"
-                  ? this.error(operation, failure.reason, id, { _tag: "MayHaveBeenSent" })
+                  ? this.error(
+                    operation,
+                    failure.reason,
+                    id,
+                    failure.reason._tag === "Unsupported" ? { _tag: "NotSent" } : { _tag: "MayHaveBeenSent" }
+                  )
                   : this.error(
                     operation,
                     new Reason.BackendFailure({ kind: "Rejected", method: "input", metadata: {}, hint: "deadline" }),

@@ -59,6 +59,8 @@ import * as Runtime from "../webkit-protocol/Runtime.ts"
 import * as Screencast from "../webkit-protocol/Screencast.ts"
 import * as Target from "../webkit-protocol/Target.ts"
 import * as Worker from "../webkit-protocol/Worker.ts"
+import * as StockPage from "../webkit-stock-protocol/Page.ts"
+import * as StockTarget from "../webkit-stock-protocol/Target.ts"
 import * as Adapter from "./adapter.ts"
 import * as ConsoleFormat from "./consoleFormat.ts"
 import * as Declarations from "./declarations.ts"
@@ -169,6 +171,8 @@ interface NavigationEntry {
   readonly sameDocument: boolean
   documentHop: NetworkRequest.HopId | undefined
   status: number | undefined
+  /** Whether its response asked to be saved, `Content-Disposition: attachment`. */
+  attachment: boolean
   ended: boolean
 }
 
@@ -357,7 +361,7 @@ const globToRegex = (glob: string): string =>
   `^${glob.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\/]/g, "\\$&")).join(".*")}$`
 
 /** The events the fold needs. */
-const foldEvents: ReadonlyArray<Protocol.EventDef<string, any>> = [
+const playwrightEvents: ReadonlyArray<Protocol.EventDef<string, any>> = [
   Playwright.pageProxyCreated,
   Playwright.provisionalLoadFailed,
   Playwright.downloadCreated,
@@ -392,6 +396,28 @@ const foldEvents: ReadonlyArray<Protocol.EventDef<string, any>> = [
   Network.webSocketFrameReceived,
   Network.webSocketClosed
 ]
+
+/**
+ * Stock WebKit's (review 22, candidate 7): what it reports of Playwright's build's events, three of them in its own
+ * shapes, which have no `frameId` for a page's load and no `crashed` for a target's end.
+ */
+const stockEvents: ReadonlyArray<Protocol.EventDef<string, any>> = playwrightEvents
+  .filter((event) =>
+    !event.method.startsWith("Playwright.") && !event.method.startsWith("Dialog.") &&
+    event.method !== "Page.frameAttached" && event.method !== "Page.navigatedWithinDocument" &&
+    event.method !== "Page.fileChooserOpened"
+  )
+  .map((event) =>
+    event.method === "Page.domContentEventFired"
+      ? StockPage.domContentEventFired
+      : event.method === "Page.loadEventFired"
+      ? StockPage.loadEventFired
+      : event.method === "Target.targetDestroyed"
+      ? StockTarget.targetDestroyed
+      : event
+  )
+  // Pages come and go as the transport says, in Playwright's envelope
+  .concat([Playwright.pageProxyCreated])
 
 const base64 = (bytes: Uint8Array): string => Encoding.encode(bytes)
 const fromBase64 = (text: string): Uint8Array => {
@@ -608,6 +634,75 @@ const capabilities = (info: Browser.Info) => {
   })
 }
 
+/**
+ * Stock WebKit's (review 22, candidate 7): Playwright's build's table, whose other entries stock WebKit's domains
+ * serve as they do there, with what its remote inspector lacks. It has no `Playwright`, `Input`, `Dialog`,
+ * `Emulation` or `Screencast` domain, no `Page.navigate`, `Page.createUserWorld` or `DOM.describeNode`, and no
+ * events for a frame's attachment, a same-document navigation or a file chooser.
+ */
+const stockCapabilities = (info: Browser.Info) => {
+  const evidence = `WebKit adapter stock profile, ${info.product} ${info.revision}`
+  const noInput = "stock WebKit's inspector protocol has no Input domain"
+  const differ: Readonly<Record<string, readonly [Browser.CapabilityEntry["status"], ReadonlyArray<string>]>> = {
+    userContexts: ["unsupported", [
+      "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"
+    ]],
+    isolatedWorlds: ["unsupported", ["stock WebKit's inspector makes no worlds: the engine runs in the page's"]],
+    "pauseOnStart.popups": ["unsupported", ["a page the browser opens is found by reading the inspector's list"]],
+    "input.native": ["unsupported", [noInput]],
+    "input.keyboardLayout": ["unsupported", [noInput]],
+    "input.insertText": ["unsupported", [noInput]],
+    "input.pointerModifiers": ["unsupported", [noInput]],
+    "input.dragAndDrop": ["unsupported", [noInput]],
+    prompts: ["unsupported", ["stock WebKit's inspector has no Dialog domain: a dialog blocks the page unreported"]],
+    fileChooser: ["unsupported", ["stock WebKit's inspector reports no file chooser"]],
+    downloads: ["unsupported", ["stock WebKit's inspector reports no downloads: a navigation that became one ends so"]],
+    "downloads.progress": ["unsupported", ["stock WebKit's inspector reports no downloads"]],
+    "downloads.cancel": ["unsupported", ["stock WebKit's inspector reports no downloads"]],
+    permissions: ["unsupported", ["stock WebKit's inspector has no Emulation domain"]],
+    "permissions.anyOrigin": ["unsupported", ["stock WebKit's inspector has no Emulation domain"]],
+    "evaluation.userActivation": ["supported", []],
+    "screenshot.cssScale": ["unsupported", ["stock WebKit's snapshotRect captures device pixels, as PNG"]],
+    "screenshot.omitBackground": ["unsupported", ["stock WebKit's inspector has no background override"]],
+    "capability.screencast": ["unsupported", ["stock WebKit's inspector has no Screencast domain"]],
+    "capability.video": ["unsupported", ["stock WebKit's inspector has no Screencast domain"]],
+    "screenshot.format": ["partial", ["PNG only: stock WebKit's snapshotRect writes nothing else"]],
+    "navigation.referrer": ["unsupported", ["stock WebKit navigates by script, with the document's own referrer"]],
+    "navigation.traverse": ["unsupported", ["stock WebKit's inspector has no history commands"]],
+    "navigation.sameDocument": ["unsupported", ["stock WebKit's inspector reports no same-document navigation"]],
+    "frames.contentFrame": ["unsupported", ["stock WebKit's inspector can't say which frame an iframe holds"]],
+    "frames.readiness": ["partial", ["a frame's load is reported for the page's main frame only"]]
+  }
+  const playwright = capabilities(info).entries
+  const entries = playwright.map((entry) => {
+    const different = differ[entry.name]
+    if (different !== undefined) {
+      return { ...entry, evidence, status: different[0], limitations: [...different[1]] }
+    }
+    // Every emulation needs the Emulation domain
+    if (entry.name.startsWith("emulation.")) {
+      return {
+        ...entry,
+        evidence,
+        status: "unsupported" as const,
+        limitations: ["stock WebKit's inspector has no Emulation domain"]
+      }
+    }
+    // What Playwright's build lacks, stock WebKit lacks too
+    return {
+      ...entry,
+      evidence,
+      limitations: entry.limitations.map((each) => each.replace("Playwright's WebKit", "WebKit"))
+    }
+  })
+  for (const [name, [status, limitations]] of Object.entries(differ)) {
+    if (!entries.some((entry) => entry.name === name)) {
+      entries.push({ name, status, evidence, limitations: [...limitations] })
+    }
+  }
+  return new Browser.CapabilitySet({ entries })
+}
+
 // ── The adapter ───────────────────────────────────────────────────────────────────────────────────────────
 
 const gone = (target: L1Target.Description, reason: L1Target.CloseReason) =>
@@ -625,14 +720,25 @@ const closed = (): L1Target.CloseReason => ({ _tag: "ConnectionLost" })
 /**
  * Connects the WebKit adapter over a transport. The connection lives as long as the scope.
  */
+export interface Options extends Adapter.ConnectOptions {
+  readonly revision?: string | undefined
+  /**
+   * Which WebKit: Playwright's build, launched or attached over its pipe, or stock WebKit's remote inspector,
+   * attached through `webkitStockTransport.ts` (review 22, candidate 7), which has no `Playwright`, `Input`,
+   * `Dialog`, `Emulation` or `Screencast` domain and makes no contexts, pages or worlds.
+   */
+  readonly profile?: "playwright" | "stock" | undefined
+}
+
 export const connect: (
   transport: Transport.Transport,
-  options: Adapter.ConnectOptions & { readonly revision?: string | undefined }
+  options: Options
 ) => Effect.Effect<Adapter.AdapterConnection, Browser.BrowserError, Scope.Scope> = Effect.fnUntraced(
   function*(
     transport: Transport.Transport,
-    options: Adapter.ConnectOptions & { readonly revision?: string | undefined }
+    options: Options
   ) {
+    const stock = options.profile === "stock"
     const ids = Adapter.makeIds()
     const registry = Declarations.make()
     const contexts = new Map<UserContext.Id, ContextEntry>()
@@ -790,7 +896,33 @@ export const connect: (
     ): NavigationEntry => {
       const normalized = normalize(url)
       const index = frame.expected.findIndex((expected) => normalize(expected.url) === normalized)
-      const expected = index >= 0 ? frame.expected.splice(index, 1)[0] : frame.expected.shift()
+      if (stock && index < 0 && normalized === "about:blank" && frame.expected.length > 0) {
+        // Stock WebKit's error page is about:blank, and a load it refuses before any request, such as to a port it
+        // blocks, shows only that: the goto it stands in for failed (QUIRKS.md, Q199)
+        const refused = frame.expected.shift()!
+        const failed = startNavigationAs(
+          frame,
+          refused.id,
+          `refused:${refused.id}`,
+          refused.url,
+          refused.initiatedAs,
+          false
+        )
+        endNavigation(
+          failed,
+          {
+            _tag: "Failed",
+            error: "WebKit showed its error page instead: a load it refused, such as to a port it blocks",
+            errorDocument: Option.none()
+          },
+          "webkit:Network.requestWillBeSent"
+        )
+      }
+      const expected = index >= 0
+        ? frame.expected.splice(index, 1)[0]
+        : stock && normalized === "about:blank"
+        ? undefined
+        : frame.expected.shift()
       return startNavigationAs(
         frame,
         expected?.id ?? ids.navigation(),
@@ -817,6 +949,7 @@ export const connect: (
         sameDocument,
         documentHop: undefined,
         status: undefined,
+        attachment: false,
         ended: false
       }
       if (!sameDocument) {
@@ -928,7 +1061,8 @@ export const connect: (
         page: id,
         context: context.id,
         kind: params.openerId === undefined ? "tab" : "popup",
-        origin: attachedAtConnect
+        // Stock WebKit's pages are all the browser's own: none is made here
+        origin: attachedAtConnect || stock
           ? { _tag: "Adopted", opener: openerId }
           : params.openerId === undefined
           ? { _tag: "Created" }
@@ -1170,7 +1304,7 @@ export const connect: (
       },
       [Target.targetDestroyed.method]: (where, params: Target.TargetDestroyedParams) => {
         const page = where.page
-        if (page === undefined || !params.crashed || page.target?.targetId !== params.targetId) return
+        if (page === undefined || params.crashed !== true || page.target?.targetId !== params.targetId) return
         endPage(page, { _tag: "PageCrashed" }, "webkit:Target.targetDestroyed")
       },
       [Target.didCommitProvisionalTarget.method]: (where, params: Target.DidCommitProvisionalTargetParams) => {
@@ -1301,14 +1435,15 @@ export const connect: (
           "webkit:Page.navigatedWithinDocument"
         )
       },
-      [Page.domContentEventFired.method]: (_where, params: Page.DomContentEventFiredParams) => {
-        const document = frames.get(params.frameId)?.document
+      [Page.domContentEventFired.method]: (where, params: Page.DomContentEventFiredParams) => {
+        // Stock WebKit names no frame: its load events are the page's
+        const document = frames.get(params.frameId ?? where.target?.mainFrameId ?? "")?.document
         if (document === undefined || document.interactive) return
         document.interactive = true
         emit({ _tag: "DocumentReadiness", document: document.id, readiness: "interactive" })
       },
-      [Page.loadEventFired.method]: (_where, params: Page.LoadEventFiredParams) => {
-        const document = frames.get(params.frameId)?.document
+      [Page.loadEventFired.method]: (where, params: Page.LoadEventFiredParams) => {
+        const document = frames.get(params.frameId ?? where.target?.mainFrameId ?? "")?.document
         if (document === undefined) return
         if (document.complete) {
           // A document that loads again was opened again: `document.open()` shows only this (probe 17)
@@ -1599,6 +1734,13 @@ export const connect: (
         const navigation = request.navigation
         if (navigation !== undefined && (navigation.status === 204 || navigation.status === 205)) {
           failLoad(navigation, params.errorText, "webkit:Network.loadingFailed")
+        } else if (stock && navigation !== undefined && navigation.documentHop === request.hop) {
+          // Stock WebKit reports neither a failed load nor a download: its document's request does (QUIRKS.md, Q198)
+          if (navigation.attachment) {
+            endNavigation(navigation, { _tag: "Download", download: Option.none() }, "webkit:Network.loadingFailed")
+          } else {
+            failLoad(navigation, params.errorText, "webkit:Network.loadingFailed")
+          }
         }
       },
       [Network.requestIntercepted.method]: (where, params: Network.RequestInterceptedParams) => {
@@ -1708,6 +1850,9 @@ export const connect: (
       })
       if (request.navigation !== undefined && request.navigation.documentHop === request.hop) {
         request.navigation.status = response.status
+        request.navigation.attachment = Object.entries(response.headers).some(([name, value]) =>
+          name.toLowerCase() === "content-disposition" && /^\s*attachment/i.test(String(value))
+        )
       }
       emit({
         _tag: "ResponseReceived",
@@ -1829,7 +1974,7 @@ export const connect: (
     }
 
     const makeFold = (control: ProtocolClient.FoldControl): ProtocolClient.Fold => ({
-      events: new Map(foldEvents.map((event) => [event.method, event])),
+      events: new Map((stock ? stockEvents : playwrightEvents).map((event) => [event.method, event])),
       apply: (session, method, params) =>
         Effect.suspend(() => {
           handlers[method]?.(whereOf(session), params)
@@ -1914,12 +2059,32 @@ export const connect: (
       // Contexts it replays arrive after the snapshot, so they are folded on top of it
       yield* Runtime.enable().pipe(on)
       yield* Worker.enable().pipe(on)
+      // An adopted page's document loaded before we came, and no event will say how far: it's asked (QUIRKS.md,
+      // Q201)
+      const readyState = first && (attachedAtConnect || stock)
+        ? yield* Runtime.evaluate({ expression: "document.readyState", returnByValue: true }).pipe(
+          on,
+          Effect.map(({ result }) => result.value as unknown),
+          Effect.option
+        )
+        : Option.none()
       const failure = yield* configure.pipe(Effect.flip, Effect.option)
       const page = target.page
       return {
         through: received,
         apply: Effect.suspend(() => {
           installTree(target, result.frameTree, first)
+          const adopted = page.main.document
+          if (adopted !== undefined && Option.isSome(readyState)) {
+            if (readyState.value === "interactive" || readyState.value === "complete") {
+              adopted.interactive = true
+              emit({ _tag: "DocumentReadiness", document: adopted.id, readiness: "interactive" })
+            }
+            if (readyState.value === "complete") {
+              adopted.complete = true
+              emit({ _tag: "DocumentReadiness", document: adopted.id, readiness: "complete" })
+            }
+          }
           if (first) {
             if (failure._tag === "Some") {
               emit({ _tag: "PageInitializationFailed", page: page.id, description: failure.value.message })
@@ -1946,7 +2111,8 @@ export const connect: (
       snapshot(
         target,
         first,
-        first
+        // Stock WebKit has no Emulation domain: the window's size is the viewport
+        first && !stock
           ? Effect.andThen(
             applyPageProxyOverride(target.page, "Viewport", registry.overrides(placement(target.page)).get("Viewport")),
             configureTarget(target)
@@ -1972,6 +2138,11 @@ export const connect: (
       )
 
     const pageProxyGate = Effect.fnUntraced(function*(page: PageEntry) {
+      if (stock) {
+        // Playwright's build pauses every new target once enabled; stock WebKit when asked
+        yield* Target.setPauseOnStart({ pauseOnStart: true }).pipe(Protocol.on(page.session), Effect.ignore)
+        return { through: 0, apply: Effect.void } satisfies ProtocolClient.Synced
+      }
       yield* DialogWk.enable().pipe(Protocol.on(page.session), Effect.ignore)
       yield* configurePageProxy(page).pipe(Effect.ignore)
       return { through: 0, apply: Effect.void } satisfies ProtocolClient.Synced
@@ -2309,22 +2480,37 @@ export const connect: (
     })
     const failConnect = (error: Protocol.ProtocolError) =>
       Launch.fail(new Browser.ConnectionFailed({ stage: "handshake", hint: error.message }), "connect")
-    const { os } = yield* Playwright.getInfo().pipe(Protocol.on(client.root), Effect.catch(failConnect))
-    const info = new Browser.Info({
-      product: `Playwright WebKit (${os})`,
-      version: options.revision ?? "unknown",
-      protocol: "webkit",
-      revision: options.revision ?? "unknown"
-    })
+    // Stock WebKit's inspector server says nothing of the browser, and has no session of its own to ask (QUIRKS.md,
+    // Q203)
+    const info = stock
+      ? new Browser.Info({
+        product: "WebKit (stock)",
+        version: options.revision ?? "unknown",
+        protocol: "webkit",
+        revision: options.revision ?? "unknown"
+      })
+      : yield* Playwright.getInfo().pipe(
+        Protocol.on(client.root),
+        Effect.catch(failConnect),
+        Effect.map(({ os }) =>
+          new Browser.Info({
+            product: `Playwright WebKit (${os})`,
+            version: options.revision ?? "unknown",
+            protocol: "webkit",
+            revision: options.revision ?? "unknown"
+          })
+        )
+      )
     yield* control.run(Effect.suspend(() => {
       emit({ _tag: "UserContextAdded", context: defaultContext, isDefault: true })
       return flush
     }))
-    // Pages that existed before are announced before the reply, and adopted
+    // Pages that existed before are announced before the reply, and adopted; stock WebKit's transport answers as
+    // Playwright's build does
     yield* Playwright.enable().pipe(Protocol.on(client.root), Effect.catch(failConnect))
     yield* client.root.drainObserved
     attachedAtConnect = false
-    const capabilitySet = yield* SubscriptionRef.make(capabilities(info))
+    const capabilitySet = yield* SubscriptionRef.make(stock ? stockCapabilities(info) : capabilities(info))
 
     // ── Operations ──
 
@@ -3253,7 +3439,155 @@ export const connect: (
     // Browser-wide declarations of the default context
     yield* applyDownloads(contexts.get(defaultContext)!).pipe(Effect.ignore)
 
-    return {
+    // ── Stock WebKit (review 22, candidate 7) ──
+
+    const refuse = (capability: string, hint: string) => () => Effect.fail(unsupported(capability, hint))
+
+    // No navigate command: the frame's document goes by script, and its events report the navigation as any
+    const navigateByScript = Effect.fnUntraced(function*(
+      navigable: L1Target.NavigableId,
+      url: string,
+      options: { readonly referrer: Option.Option<string> }
+    ) {
+      if (Option.isSome(options.referrer)) {
+        return yield* Effect.fail(
+          unsupported("navigation.referrer", "stock WebKit navigates by script, with the document's own referrer")
+        )
+      }
+      const frame = yield* frameById(navigable)
+      // The page's document is known once its first snapshot is in
+      yield* Deferred.await(frame.page.ready)
+      if (frame.document === undefined) {
+        return yield* Effect.fail(gone({ _tag: "Frame", id: navigable }, { _tag: "DocumentReplaced" }))
+      }
+      // A fragment of the document it shows: a navigation stock WebKit wouldn't report, so none would be seen to end
+      // (QUIRKS.md, Q200)
+      if (url.includes("#") && withoutFragment(url) === withoutFragment(frame.document.url)) {
+        return yield* Effect.fail(
+          unsupported("navigation.sameDocument", "stock WebKit's inspector reports no same-document navigation")
+        )
+      }
+      // A main frame's script runs in whatever document it shows, so a document the browser replaced meanwhile,
+      // such as with an error page, doesn't fail it; a child frame's runs in its document's realm
+      const where = frame.parent === undefined
+        ? { session: (yield* targetOf(frame.page)).session, contextId: undefined }
+        : yield* Effect.flatMap(realmFor(frame.document.id, { _tag: "Main" }), (id) => {
+          const realm = realms.get(id)
+          return realm === undefined ? Effect.fail(foreign(navigable)) : Effect.succeed(realm)
+        })
+      const id = expect(frame, url)
+      yield* protocol(
+        Runtime.evaluate({
+          expression: `location.href = ${JSON.stringify(url)}; 0`,
+          doNotPauseOnExceptionsAndMuteConsole: true,
+          ...(where.contextId === undefined ? {} : { contextId: where.contextId as Runtime.ExecutionContextId })
+        }).pipe(Protocol.on(where.session))
+      ).pipe(Effect.tapError(() => Effect.sync(() => unexpect(frame, id))))
+      return id
+    })
+
+    // A rectangle as PNG, at the device's scale: stock WebKit's `snapshotRect` takes nothing else
+    const snapshotOf = Effect.fnUntraced(function*(id: L1Target.NavigableId, options: Adapter.ScreenshotOptions) {
+      if (options.format !== "png") {
+        return yield* Effect.fail(unsupported("screenshot.format", "stock WebKit's snapshotRect writes PNG only"))
+      }
+      if (options.scale === "css") {
+        return yield* Effect.fail(
+          unsupported("screenshot.cssScale", "stock WebKit's snapshotRect captures device pixels")
+        )
+      }
+      if (options.omitBackground) {
+        return yield* Effect.fail(
+          unsupported("screenshot.omitBackground", "stock WebKit's inspector has no background override")
+        )
+      }
+      const page = yield* pageOf(id)
+      const target = yield* targetOf(page)
+      const clip = Option.getOrUndefined(options.clip)
+      const region = clip ?? (yield* protocol(pageSize(target, options.fullPage)).pipe(
+        Effect.map(([width, height]) => ({ x: 0, y: 0, width, height }))
+      ))
+      const { dataURL } = yield* protocol(
+        StockPage.snapshotRect({
+          x: Math.round(region.x),
+          y: Math.round(region.y),
+          width: Math.max(1, Math.round(region.width)),
+          height: Math.max(1, Math.round(region.height)),
+          coordinateSystem: clip !== undefined || options.fullPage ? "Page" : "Viewport"
+        }).pipe(Protocol.on(target.session))
+      )
+      return fromDataUrl(dataURL)
+    })
+
+    // The cookies every page's document can see, from each page's target, once each
+    const stockCookies = Effect.fnUntraced(function*(_id: UserContext.Id) {
+      const seen = new Map<string, Adapter.Cookie>()
+      for (const page of pages.values()) {
+        if (page.target === undefined || page.ended) continue
+        const reply = yield* StockPage.getCookies().pipe(Protocol.on(page.target.session), Effect.option)
+        if (reply._tag === "None") continue
+        for (const cookie of reply.value.cookies) {
+          seen.set(`${cookie.name}|${cookie.domain}|${cookie.path}`, {
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookie.path,
+            expires: cookie.session || cookie.expires < 0 ? Option.none() : Option.some(cookie.expires),
+            httpOnly: cookie.httpOnly,
+            secure: cookie.secure,
+            sameSite: Option.some(cookie.sameSite as "Strict" | "Lax" | "None"),
+            partitionKey: cookie.partitionKey === undefined || cookie.partitionKey === ""
+              ? Option.none()
+              : Option.some({ topLevelSite: cookie.partitionKey, crossSiteAncestor: Option.none() }),
+            priority: Option.none()
+          })
+        }
+      }
+      return [...seen.values()]
+    })
+
+    const anyTarget = Effect.suspend(() => {
+      const page = [...pages.values()].find((each) => each.target !== undefined && !each.ended)
+      return page === undefined
+        ? Effect.fail(unsupported("cookies", "stock WebKit sets cookies through a page, and none is open"))
+        : Effect.succeed(page.target!)
+    })
+
+    const stockSetCookies = Effect.fnUntraced(function*(_id: UserContext.Id, list: ReadonlyArray<Adapter.Cookie>) {
+      const target = yield* anyTarget
+      for (const cookie of list) {
+        yield* protocol(
+          StockPage.setCookie({
+            cookie: {
+              name: cookie.name,
+              value: cookie.value,
+              domain: cookie.domain,
+              path: cookie.path,
+              expires: Option.getOrElse(cookie.expires, () => -1),
+              session: Option.isNone(cookie.expires),
+              httpOnly: cookie.httpOnly,
+              secure: cookie.secure,
+              sameSite: Option.getOrElse(cookie.sameSite, () => "Lax")
+            } as StockPage.Cookie
+          }).pipe(Protocol.on(target.session))
+        )
+      }
+    })
+
+    const stockClearCookies = Effect.fnUntraced(function*(id: UserContext.Id) {
+      const target = yield* anyTarget
+      for (const cookie of yield* stockCookies(id)) {
+        const host = cookie.domain.startsWith(".") ? cookie.domain.slice(1) : cookie.domain
+        yield* protocol(
+          StockPage.deleteCookie({
+            cookieName: cookie.name,
+            url: `${cookie.secure ? "https" : "http"}://${host}${cookie.path}`
+          }).pipe(Protocol.on(target.session))
+        )
+      }
+    })
+
+    const connection = {
       info,
       capabilities: capabilitySet,
       pauseScope: "browser",
@@ -3309,6 +3643,34 @@ export const connect: (
           if (download.ended) return Effect.void
           return protocol(Playwright.cancelDownload({ uuid: download.uuid }).pipe(Protocol.on(client.root)))
         })
+    } satisfies Adapter.AdapterConnection
+    if (!stock) return connection
+    const noPages = "stock WebKit's inspector makes no contexts or pages, and closes none"
+    return {
+      ...connection,
+      createUserContext: refuse("userContexts", noPages),
+      removeUserContext: refuse("userContexts", noPages),
+      createPage: refuse("userContexts", noPages),
+      closePage: refuse("userContexts", noPages),
+      activatePage: refuse("emulation.focus", "stock WebKit's inspector has no Emulation domain"),
+      navigate: navigateByScript,
+      traverse: refuse("navigation.traverse", "stock WebKit's inspector has no history commands"),
+      realm: (document, world) =>
+        world._tag === "Main"
+          ? realmFor(document, world)
+          : Effect.fail(unsupported("isolatedWorlds", "stock WebKit's inspector makes no worlds")),
+      dispatchInput: refuse("input.native", "stock WebKit's inspector protocol has no Input domain"),
+      screenshot: snapshotOf,
+      screencast: refuse("capability.screencast", "stock WebKit's inspector has no Screencast domain"),
+      cookies: stockCookies,
+      setCookies: stockSetCookies,
+      clearCookies: stockClearCookies,
+      grantPermissions: refuse("permissions", "stock WebKit's inspector has no Emulation domain"),
+      resetPermissions: refuse("permissions", "stock WebKit's inspector has no Emulation domain"),
+      contentFrame: refuse("frames.contentFrame", "stock WebKit's inspector can't say which frame an iframe holds"),
+      setInputFiles: refuse("fileChooser", "stock WebKit's inspector can't set a file input's files"),
+      downloadPath: refuse("downloads", "stock WebKit's inspector reports no downloads"),
+      cancelDownload: refuse("downloads.cancel", "stock WebKit's inspector reports no downloads")
     } satisfies Adapter.AdapterConnection
   }
 )

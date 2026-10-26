@@ -26,7 +26,7 @@ import type * as Adapter from "./adapter.ts"
 import * as Evaluation from "./evaluation.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
-import type * as Runtime from "./runtime.ts"
+import * as Runtime from "./runtime.ts"
 import * as Spans from "./spans.ts"
 
 // ── Cookies ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -318,7 +318,13 @@ export const originStorage = (
       const id = Operation.operationId()
       const budget = yield* Operation.budget
       return yield* Effect.gen(function*() {
-        const realm = yield* Evaluation.pageRealm(runtime, page, Evaluation.isolatedWorld, id, budget.at)
+        const realm = yield* Evaluation.pageRealm(
+          runtime,
+          page,
+          yield* Runtime.ownWorld(runtime, Evaluation.isolatedWorld),
+          id,
+          budget.at
+        )
         const value = yield* Evaluation.call(runtime, {
           realm,
           functionDeclaration: fn,

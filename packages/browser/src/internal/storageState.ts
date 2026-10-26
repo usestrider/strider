@@ -431,7 +431,12 @@ export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id) =
     const origins: Array<typeof StorageState.OriginState.Type> = []
     for (const source of yield* sourcesOf(runtime, context)) {
       const text = yield* Effect.gen(function*() {
-        const realm = yield* Evaluation.documentRealm(runtime, source.document, Evaluation.isolatedWorld, id)
+        const realm = yield* Evaluation.documentRealm(
+          runtime,
+          source.document,
+          yield* Runtime.ownWorld(runtime, Evaluation.isolatedWorld),
+          id
+        )
         const value = yield* Evaluation.call(runtime, {
           realm,
           functionDeclaration: readOrigin.toString(),
@@ -619,7 +624,12 @@ export const applyState = (
           document = found.routed.document
         }
         yield* Effect.gen(function*() {
-          const realm = yield* Evaluation.documentRealm(runtime, document, Evaluation.isolatedWorld, id)
+          const realm = yield* Evaluation.documentRealm(
+            runtime,
+            document,
+            yield* Runtime.ownWorld(runtime, Evaluation.isolatedWorld),
+            id
+          )
           yield* Evaluation.call(runtime, {
             realm,
             functionDeclaration: writeOrigin.toString(),

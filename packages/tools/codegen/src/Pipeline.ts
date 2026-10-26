@@ -13,18 +13,24 @@ import { fromThrown } from "./CodegenError.ts"
 import { applyCorrections, applyOverlays, audit, Correction, Overlay } from "./Corrections.ts"
 import type { ProtocolModel } from "./Model.ts"
 
-export const Backend = Schema.Literals(["cdp", "bidi", "webkit"])
+export const Backend = Schema.Literals(["cdp", "bidi", "webkit", "webkit-stock"])
 export type Backend = typeof Backend.Type
 
 /** The revision each vendored source is pinned to; see `protocols/<backend>/source/SOURCE.md`. */
 export const revisions: Record<Backend, string> = {
   cdp: "0.0.1696802",
   bidi: "f922e6af669ead51496db85f37813f39438ef171",
-  webkit: "playwright-webkit-2359"
+  webkit: "playwright-webkit-2359",
+  "webkit-stock": "webkitgtk-2.54.1"
 }
 
 /** Where each backend's modules are written, under `packages/browser/src`. */
-export const outputs: Record<Backend, string> = { cdp: "cdp", bidi: "bidi-protocol", webkit: "webkit-protocol" }
+export const outputs: Record<Backend, string> = {
+  cdp: "cdp",
+  bidi: "bidi-protocol",
+  webkit: "webkit-protocol",
+  "webkit-stock": "webkit-stock-protocol"
+}
 
 const readJson = Effect.fnUntraced(function*<S extends Schema.Top>(path: string, schema: S) {
   const fs = yield* FileSystem.FileSystem
@@ -64,6 +70,18 @@ export const inputs = Effect.fnUntraced(function*(root: string, backend: Backend
     // WebKit's file is the list of domains itself
     ? yield* readJson(path.join(directory, "source", "protocol.json"), Schema.Unknown).pipe(
       Effect.map((domains) => () => Cdp.parse(revisions.webkit, [{ domains } as CdpProtocol], "webkit"))
+    )
+    : backend === "webkit-stock"
+    // Stock WebKit's are a file per domain, in WebKit's dialect
+    ? yield* Effect.flatMap(
+      fs.readDirectory(path.join(directory, "source")),
+      (names) =>
+        Effect.forEach(
+          names.filter((name) => name.endsWith(".json")).sort(),
+          (name) => readJson(path.join(directory, "source", name), Schema.Unknown)
+        )
+    ).pipe(
+      Effect.map((domains) => () => Cdp.parse(revisions["webkit-stock"], [{ domains } as CdpProtocol], "webkit"))
     )
     : yield* Effect.forEach(
       [

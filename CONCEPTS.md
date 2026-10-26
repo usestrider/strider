@@ -313,7 +313,7 @@ Cleanup groups can span sibling pages, independently of this graph.
 - **Frames.** A frame is created synchronously, before any protocol notification arrives. It ends on container removal, or when its parent's document permanently ends; the adapter closes orphans itself because HTML never fires an event for them. A frame keeps its identity across process swaps; only its adapter session changes.
 - **Realms and worlds.**
   - **Kinds:** window (main or isolated world), dedicated, shared and service workers, and worklets. The kind is an open union.
-  - **The library's own code** runs in a utility isolated world wherever one exists. Stock WebKit has none, and says so as a capability.
+  - **The library's own code** runs in a utility isolated world wherever one exists. Stock WebKit has none, and says so as a capability: there the engine, the trace capture and the library's own reads run in the page's world, and a caller's `evaluate` is refused rather than moved there (review 22; QUIRKS.md, Q194).
   - **Two discovery strategies, chosen per context:**
     - **Tracked:** realm events folded into state.
     - **OnDemand:** no `Runtime.enable`; realms acquired when needed and validated on use. This is the stealth posture. It has no observable realm set and no console capture, and these are absent from the types rather than failing.
@@ -341,7 +341,7 @@ Cleanup groups can span sibling pages, independently of this graph.
 
 ## 5. Input and obligations
 
-- **Input fidelity is a backend property:** `native` (CDP, patched WebKit), `webdriver` (BiDi) or `synthetic` (stock WebKit shims; untrusted, no activation).
+- **Input fidelity is a backend property:** `native` (CDP, patched WebKit) or `webdriver` (BiDi). Stock WebKit has no input: its inspector has no `Input` domain, and the library refuses input there (`input.native`, `Unsupported`, nothing sent) rather than dispatch untrusted events that stand in for it; a page's own script can dispatch them with `evaluateInMainWorld` (review 22).
 - **Input state** is kept per page: pressed keys and buttons, pointer position, and an undo list. Input to one page is serialized, and acquiring the permit consumes the operation deadline. Actionability is checked again after acquiring the permit.
   - **L1 keeps it, and every gesture is built from it** (review 16, candidate 1). The keys held, in the order they were pressed, the buttons held and the pointer's position are L1's, and the adapters keep none of their own: every mouse event carries the buttons held, so moves with a button down are a drag on every backend, where the CDP adapter used to send no buttons and WebKit's forgot them between calls.
   - **Modifiers are keys.** A gesture with modifiers presses the ones not already held before it and releases them after, in the same dispatch, and also sets the events' flags, which Firefox ignores. Shift changes the key a press sends (`a` becomes `A`), and Control, Alt or Meta make it a shortcut with no text. WebKit's mouse events ignore modifiers either way, which the capability `input.pointerModifiers` says.

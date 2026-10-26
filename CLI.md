@@ -198,6 +198,8 @@ A page the segment opens itself belongs to the segment's scope, and closes with 
   - **Firefox user contexts on an attached browser aren't recorded:** removing one needs a new WebDriver BiDi session, which Firefox refuses while a dead program's session lingers (Q137).
   - **The toolkit takes the browser as an option,** `browser`, so a model reaches beyond its context only when given it; without it, `tabs` and `control` fail with `NotPermitted`.
 
+*2026-10-26, after [review 22](reviews/22-everything-deferred.md), its fifth step.* `--attach` doesn't reach stock WebKit, which the library now attaches to (`WebKit.layerAttach`): its inspector server is an HTTP endpoint too, which the flag reads as Chromium's (Q168). Telling the two apart takes a flag per protocol, which the review didn't decide; a program attaches with `WebKit.layerAttach` meanwhile.
+
 ## Open questions
 
 None. Type-checking was settled by leaving it to the project's own `tsc`, and failed requests by the rule under Commands.

@@ -39,6 +39,25 @@ import * as Operation from "./operation.ts"
 /** The utility world the engine runs in. */
 export const utilityWorld: Adapter.World = { _tag: "Isolated", name: "__strider_utility__" }
 
+/** Whether the backend makes no worlds, as stock WebKit's inspector doesn't (review 22; QUIRKS.md, Q194). */
+const makesNoWorlds = (runtime: Runtime): Effect.Effect<boolean> =>
+  Effect.map(
+    SubscriptionRef.get(runtime.model.adapter.capabilities),
+    (capabilities) =>
+      capabilities.entries.some((entry) => entry.name === "isolatedWorlds" && entry.status === "unsupported")
+  )
+
+/** The world the engine runs in: its own, or the page's where the backend makes no worlds. */
+export const engineWorld = (runtime: Runtime): Effect.Effect<Adapter.World> =>
+  Effect.map(makesNoWorlds(runtime), (none): Adapter.World => none ? { _tag: "Main" } : utilityWorld)
+
+/**
+ * The world the library's own reads run in, such as storage's: `world`, or the page's where the backend makes no
+ * worlds. A caller's function never moves there: `evaluate` fails with `Unsupported` instead.
+ */
+export const ownWorld = (runtime: Runtime, world: Adapter.World): Effect.Effect<Adapter.World> =>
+  Effect.map(makesNoWorlds(runtime), (none): Adapter.World => none ? { _tag: "Main" } : world)
+
 export interface Runtime {
   readonly model: Model.Model
   /** The backend, as errors name it: the browser's product. */
@@ -156,7 +175,7 @@ const call = (
 const engineRealm = Effect.fnUntraced(function*(runtime: Runtime, document: Target.DocumentId) {
   const known = runtime.model.engineRealms.get(document)
   if (known !== undefined) return known
-  const realm = yield* runtime.model.adapter.realm(document, utilityWorld)
+  const realm = yield* runtime.model.adapter.realm(document, yield* engineWorld(runtime))
   const installed = yield* call(runtime, realm, Engine.install, [])
   if (installed._tag === "Exception") {
     return yield* Effect.die(new Error(`The engine didn't install: ${installed.text}`))

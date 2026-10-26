@@ -142,7 +142,7 @@ WebKit JSON ─┘           (committed)                                        
 |---|---|
 | CDP | `devtools-protocol` PDL/JSON, pinned per Chromium major |
 | BiDi | the spec's CDDL, plus extension specs and vendor grammars (Selenium's normalizer is the model) |
-| WebKit | the `protocol.json` shipped inside each Playwright WebKit build; the upstream inspector JSON for stock WebKit |
+| WebKit | the `protocol.json` shipped inside each Playwright WebKit build; for stock WebKit (`webkit-stock`), the inspector's domain files from WebKitGTK's source |
 
 ```ts
 interface ProtocolModel {                        // one committed JSON file per backend revision
@@ -230,6 +230,13 @@ interface Traits {                               // spec facts plus overlay anno
 - **Overlay:** 21 id brands (targets, workers and downloads have bare string ids, with no type to brand); 9 sensitive members (cookie values, credentials, typed text); 8 resource-creating commands, with `Playwright.deleteContext`, `Playwright.closePage` and `Runtime.releaseObject` as their releases (`Page.createUserWorld` has none: a world lasts as long as its page); input compensation; and the `Playwright` domain marked as sent on the browser session.
 - **Corrections:** none so far; the adapter's probes record what the wire does (Backend adapters, Built for WebKit).
 - **Output:** 33 modules at `@usestrider/browser/webkit-protocol`, with 206 types, 308 commands and 128 events.
+
+**Built for stock WebKit** (2026-10-26, after [review 22](reviews/22-everything-deferred.md), its fifth step):
+
+- **Source.** The 28 domain files of `Source/JavaScriptCore/inspector/protocol/` in WebKitGTK 2.54.1's source release, as nixpkgs packages it, unchanged, in `protocols/webkit-stock/source/`; `SOURCE.md` records the release, its licenses and the files' hash. The pipeline reads every `*.json` there as a domain and parses them as one protocol, in WebKit's dialect, as a backend of its own (`webkit-stock`, revision `webkitgtk-2.54.1`).
+- **Overlay:** the patched build's annotations that name what stock WebKit has: 18 id brands, 3 sensitive members and 5 resource-creating commands, each file saying it is that subset. It can make no context, page or world, and has no input to type with.
+- **Corrections:** none.
+- **Output:** 28 modules at `@usestrider/browser/webkit-stock-protocol`, with 188 types, 248 commands and 110 events; 12 approximated, none excluded.
 
 **Built** (2026-10-20): the correction audit and the rest of the drift test.
 
@@ -393,7 +400,7 @@ Adapter responsibilities:
 - **Not supported, and said so:** PDFs, interception of authentication (WebKit answers challenges from credentials set in advance), a response-phase `Fail`, and the per-page locale and geolocation above.
 - **Hazards** (PROBES.md, Results): `Playwright.navigate` with a frame id the page doesn't have, and `Dialog.handleJavaScriptDialog` with no dialog open, abort the browser. The adapter navigates only frames it has seen and not seen go, and answers only a dialog it has seen open and not seen close; a frame that goes between that check and the command is a race it can't close.
 - **Tests:** the conformance suite's 24 tests pass against build 2359 as they do against Chromium and Firefox; 6 WebKit tests check the launcher and its revision check, the raw connection, every error-table row (with unknown methods at every level), a cross-site navigation followed across targets, `document.open()`, and a crash.
-- **Not built:** the attach-only stock profile (iOS, WKWebView, the WebKitGTK inspector). It needs stock WebKit's protocol, vendored and modeled as a backend of its own (its domains differ from Playwright's: no `Playwright`, no page proxies), and an endpoint to record against, which this environment doesn't have.
+- **Not built:** the attach-only stock profile (iOS, WKWebView, the WebKitGTK inspector). It needs stock WebKit's protocol, vendored and modeled as a backend of its own (its domains differ from Playwright's: no `Playwright`, no page proxies), and an endpoint to record against, which this environment doesn't have. (Since built for WebKitGTK's and WPE's inspector: review 22's fifth step, below.)
 
 **Built** (2026-10-20): history and back/forward-cache restores, on every backend, which no test had covered.
 
@@ -412,7 +419,7 @@ Adapter responsibilities:
 - **Enrichment and the domain `RcMap`** wait for what consumes them in L1, and the on-demand realm strategy for a measured need.
 - **A test of prerender activation**, which headless Chromium doesn't produce. (**Downloading Chrome for Testing** was listed here too; review 10 decided the library never downloads a browser: Launches name their browser, below.)
 - **The rest of the CLI.** `strider browsers` is built; the session commands of CLI.md aren't.
-- **The attach-only stock WebKit profile** (Built for WebKit, above). Its endpoint is available after all: nixpkgs has WebKitGTK 2.54 and WPE (cog), whose remote inspector an environment variable turns on. What it needs is stock WebKit's own protocol, vendored as a backend of its own, a wire for it, and a smaller adapter.
+- **The attach-only stock WebKit profile** (Built for WebKit, above). Its endpoint is available after all: nixpkgs has WebKitGTK 2.54 and WPE (cog), whose remote inspector an environment variable turns on. What it needs is stock WebKit's own protocol, vendored as a backend of its own, a wire for it, and a smaller adapter. (Since built: review 22's fifth step, below, with the patched adapter's profile and a transport rather than a wire and an adapter of its own; WPE wasn't in the pinned nixpkgs after all.)
 
 **Tests and pinned browsers** (2026-10-20). The browser integration tests run in a Nix environment that fixes the machine they see, against the builds their fixtures and the error tables' evidence were recorded from, pinned in `packages/browser/test/integration/browsers.json`: Chromium 155.0.8059.79, Firefox 158.0 and Playwright's WebKit build 2359. The standard tests run anywhere.
 
@@ -636,7 +643,7 @@ Adapter responsibilities:
 - **Probes** (review 19, What the browsers do): a launched browser's first tab; two tabs adopted on connect, an isolated world and an intercept on them; headless Chromium with two URLs; Chromium's HTTP endpoint; several clients; what a closed connection leaves, and Firefox's sessions; a dialog across a disconnect; and the BiDi adapter's contexts, on the pinned builds.
 - **Tests.** `test/integration/slice/attaching.ts` runs on each backend: a launched browser's pages, its first tab controlled for a scope, `AccessReleased` and `NotPermitted` after it, a route removed with its grant, and `inspect`; the default context controlled for a scope, a cookie, a page it made closed with the scope, and a dialog no policy decides, which blocks reads with `PromptBlocking`. On Chromium and Firefox: call site 7 against a browser the test starts with two tabs, attached through Chromium's HTTP endpoint, and both tabs and the route's end checked by a second connection. On Firefox: a second client refused while one holds the session, and accepted after it ends. The conformance suite checks the browser's first tab is in the default context. Integration tests: 414; each of two full runs failed one test, a Chromium close under load (Q149, new) and Q69.
 - **Not built yet:**
-  - `WebKit.layerAttach`, for stock WebKit's remote inspector, which needs its protocol generated as a backend of its own;
+  - `WebKit.layerAttach`, for stock WebKit's remote inspector, which needs its protocol generated as a backend of its own (since built: review 22's fifth step, below);
   - `Page.capability` (`AxTree`, `Screencast`), with the tooling (batch 5; since built: review 20, below);
   - a dialog open on a page when a client attaches, which nothing reports (Q139);
   - ending a session a dead program left behind (Q146);
@@ -824,6 +831,32 @@ Adapter responsibilities:
 - **Also.** CDP's `capability.axTree` entry no longer says "the main frame's document", which review 22's third step made untrue.
 - **Tests.** `recordings.ts` records a page with a `<style>`, an adopted sheet, an open shadow root, an iframe, a filled input and a `Redacted` password, then clicks, and expands every reference as the viewer does: the button before and after the click, the target, the values and the redaction under each preset, the shadow root, the sheets, and the iframe's own snapshot; on Firefox, a native screencast is a WebM video. `tooling.ts` records a video on Firefox, and expects `Unsupported` elsewhere. Integration tests: 508, all passing in one full run, a file at a time.
 
+**Built** (2026-10-26, after [review 22](reviews/22-everything-deferred.md), its fifth step): stock WebKit, attached.
+
+- **The protocol** (Code generation, Built for stock WebKit): `@usestrider/browser/webkit-stock-protocol`, generated from WebKitGTK 2.54.1's source.
+- **The transport** (`internal/webkitStockTransport.ts`; `connect.ts`, `webkitInspector`). It reads the inspector server's list at `/`, HTML whose Inspect buttons name each page's WebSocket (Q196), opens a WebSocket per page, and presents them as one transport in Playwright's envelope, so the WebKit wire and adapter serve both builds:
+  - a page is a page proxy, `<connection>-<target>`, announced by `Playwright.pageProxyCreated` in the default context, and ended by `pageProxyDestroyed` when its WebSocket closes while the list still answers; a list that can't be read loses the connection;
+  - `Playwright.enable` is answered as Playwright's build answers it, the pages open announced before the reply, and the list is read every 250 ms after; any other command with no page proxy is answered `Method not found`, which the wire reads as `Unsupported`;
+  - each target's frame, loader and request ids are qualified with its page proxy's id and its own (Q195), on the paths the adapter reads, never by walking a message, and unqualified in the commands sent to it.
+- **The adapter's stock profile** (`webkitAdapter.ts`, `Options.profile: "stock"`). The events stock WebKit has, three in its own shapes: load events without `frameId`, and `targetDestroyed` without `crashed`. No `Playwright.getInfo`, so `Browser.info` is `WebKit (stock)`, its version `unknown` (Q203); every page is adopted; a page's later targets are paused with `Target.setPauseOnStart` and resumed after their setup; no viewport is set. The capability table is the patched build's with what stock WebKit lacks (`stockCapabilities`), and the operations it lacks refuse with `Unsupported`. Its own:
+  - `navigate` runs `location.href = url` in the main frame's current document, or in a child frame's main-world realm, once the page's first snapshot is in; it refuses a referrer, and a fragment of the document shown (Q200);
+  - a document's failed request ends its navigation: `BecameDownload` when the response said `attachment`, `NoContent` after a 204 or 205, otherwise `Failed` with the error (Q198); the error page, `about:blank`, claims no `goto` elsewhere, and one that starts while a `goto` waits fails it (Q199);
+  - `screenshot` is `Page.snapshotRect`, PNG at the device's scale;
+  - cookies are `Page.getCookies`, `setCookie` and `deleteCookie`, through any open page;
+  - an adopted page's `document.readyState` is asked as its first target is set up (Q201).
+- **The engine's world** (`Runtime.engineWorld`, `Runtime.ownWorld`). Where `isolatedWorlds` is `unsupported`, the engine, the trace capture, `inspect`'s setup and the storage reads run in the main world (Q194); a caller's `evaluate` is refused.
+- **Refused input says nothing was sent:** an action whose `dispatchInput` fails `Unsupported` reports `dispatch: NotSent`, on every backend.
+- **`WebKit.layerAttach(endpoint, options?)`** takes an `http:` or `https:` endpoint; `options.headers` go with the list's requests and each handshake.
+- **The test machine.** `flake.nix` pins WebKitGTK 2.54.1 (`browsers.json`, `webkitgtk`) and names its MiniBrowser in `STRIDER_WEBKITGTK` and Xvfb in `STRIDER_XVFB`. `test/integration/stockWebKit.ts` starts Xvfb on a display it picks (`-displayfd`), and the MiniBrowser with its inspector on a free port, a profile and XDG directories of its own, and scripts allowed to open windows (Q202).
+- **Where the build differs from the review.**
+  - **One adapter with two profiles,** not an adapter of its own: of the events the patched adapter reads, three differ in shape, so the stock profile swaps its events, capabilities and a few operations, and the transport presents stock WebKit's pages in Playwright's envelope.
+  - **Only WebKitGTK's and WPE's inspector server is read:** ios-webkit-debug-proxy, which the review named, lists its pages another way, and nothing here could test it.
+  - **Input is refused, not shimmed.** CONCEPTS.md planned synthetic input for stock WebKit; untrusted events aren't the input they'd stand for, so input is `Unsupported` and a page's own script can dispatch events. CONCEPTS.md now says so.
+  - **The engine runs in the page's world** (Q194), which the review didn't say: stock WebKit can make no world.
+  - **The CLI's `--attach` doesn't reach it** (Q168; CLI.md, Built).
+  - **The MiniBrowser runs under Xvfb,** a display server, since it has no headless mode (Q202).
+- **Tests.** `test/StockWebKit.test.ts` reads a list whose page wrote a socket's path into its title, and qualifies a target's ids on their paths and nowhere else: not in a header's name, not in an evaluation's value. `test/integration/StockWebKit.test.ts` attaches to a MiniBrowser: call site 7 on two tabs whose ids are numbered alike, with a route the page's own click goes through, and both tabs left for a second connection; navigations across processes, to a 404, a redirect, a refused connection, a blocked port, a 204, a download, a fragment and a reload; console messages, a fulfilled route, an init script in the main world, cookies, storage and a full-page screenshot; the capability table and the refusals of `newPage`, a click (`NotSent`), `evaluate` and a JPEG; a page the browser opens, found, and the browser's exit, as `ConnectionLost`. Integration tests: 513, all passing in one full run, a file at a time.
+
 ### Pause-on-start granularity
 
 Before-author-script setup for *new* targets needs them paused at creation. Granularity differs by backend, and the access model depends on it.
@@ -845,7 +878,7 @@ Each backend ships as its own subpath export (`@usestrider/browser/chromium`, `/
 2. **BiDi:** Firefox, plus Chrome over chromium-bidi as a cross-check.
 3. **WebKit inspector:**
    - a *patched* profile for Playwright's builds, revision-pinned because about 27% of rolls change the protocol (built 2026-10-20 for build 2359);
-   - an attach-only *stock* profile for iOS, WKWebView and the WebKitGTK inspector (not built: Built for WebKit, above).
+   - an attach-only *stock* profile for WebKitGTK's and WPE's inspector server (built 2026-10-26 for WebKitGTK 2.54.1, after review 22); iOS and WKWebView, behind Safari's own inspector, list their pages another way, which isn't read.
 4. **Experimental BiDi profiles:** Safari Technology Preview (needs `safari:experimentalWebSocketUrl`) and WebKitGTK/WPE (about 23% of WPT).
 
 ### Capability snapshot
@@ -857,17 +890,17 @@ This is a planning inventory from the research, not a conformance result. `?` me
 | own process / headless | ✓/✓ | ✓/✓ | ✓/✓ | ✓/✓ | attach-only | ✓/✗ |
 | user contexts | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
 | isolated worlds (`inspect`) | ✓ | ✓ | ✓ | ✓ | ✗ | partial |
-| pause-on-start scope | per page for frames and workers; browser-wide for popups (probe 22) | declarative | declarative | per page proxy (probe 22) | partial | n/a |
-| input fidelity | native | webdriver | webdriver | native | synthetic | webdriver |
-| network events / interception | ✓ / req, resp, auth | ✓ / req, resp, auth | ✓ / req, resp*, auth | ✓ / req | ✓ / req, resp | ✗ / ✗ |
+| pause-on-start scope | per page for frames and workers; browser-wide for popups (probe 22) | declarative | declarative | per page proxy (probe 22) | a page's later targets; not new pages (built) | n/a |
+| input fidelity | native | webdriver | webdriver | native | ✗ (refused; built) | webdriver |
+| network events / interception | ✓ / req, resp, auth | ✓ / req, resp, auth | ✓ / req, resp*, auth | ✓ / req | ✓ / req (built) | ✗ / ✗ |
 | body access | buffered + stream | collectors | collectors | ✓ | ✓ | ✗ |
 | console | ✓ (needs Runtime) | ✓ | ✓ | ✓ | ✓ | ✗ |
-| prompts / file chooser / downloads | ✓/✓/✓ | ✓/✓/✓ | ✓/✓/✓ | ✓/✓/✓ | shim/✗/✗ | ✓/✗/✗ |
-| screencast / PDF / AX tree | frames/✓/✓ | ✗/✓/✗ | file/✓/✗ | frames/✗/partial | ✗/✗/partial | ✗/✗/✗ |
+| prompts / file chooser / downloads | ✓/✓/✓ | ✓/✓/✓ | ✓/✓/✓ | ✓/✓/✓ | ✗ (a dialog blocks unreported)/✗/✗ | ✓/✗/✗ |
+| screencast / PDF / AX tree | frames/✓/✓ | ✗/✓/✗ | file/✓/✗ | frames/✗/partial | ✗/✗/✗ | ✗/✗/✗ |
 | evaluation with user activation | ✓ | ✓ (probe 20) | ✓ (probe 20) | ✓ | ? | ? |
 | page time: virtual / injected | ✓/✓ | ✗/✓ | ✗/✓ | ✗/✓ | ✗/? | ✗/? |
 | WebSocket frames | ✓ | ✗ | ✗ | ✓ | ✓ | ✗ |
-| event-listener listing (snapshot evidence) | ✓ | via `goog:cdp` | ✗ | ? | ? | ✗ |
+| event-listener listing (snapshot evidence) | ✓ | via `goog:cdp` | ✗ | ? | ✗ | ✗ |
 
 \* Firefox accepts a `provideResponse` body only at the request phase.
 

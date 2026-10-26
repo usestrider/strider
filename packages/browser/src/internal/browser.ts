@@ -53,7 +53,7 @@ import * as Navigation from "./navigation.ts"
 import * as Operation from "./operation.ts"
 import * as PageImpl from "./page.ts"
 import * as Routes from "./routes.ts"
-import type * as Runtime from "./runtime.ts"
+import * as Runtime from "./runtime.ts"
 import * as Spans from "./spans.ts"
 import * as Storage from "./storage.ts"
 import * as StorageStates from "./storageState.ts"
@@ -383,7 +383,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
 
   /**
    * `inspect` and `control` of a page: the page itself when it is controlled for life, or a handle under a grant
-   * for the caller's scope. `inspect` installs the isolated world first, and changes nothing the page shows.
+   * for the caller's scope. `inspect` installs the isolated world first, and changes nothing the page shows; where
+   * the backend makes no worlds, it waits for the page's own instead.
    */
   const upgradePage = (entry: Model.PageEntry) => (level: "inspect" | "control") =>
     Effect.gen(function*() {
@@ -393,7 +394,13 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       if (level === "inspect") {
         const id = Operation.operationId()
         const budget = yield* Operation.budget
-        yield* Evaluation.pageRealm(runtime, entry, Evaluation.isolatedWorld, id, budget.at).pipe(
+        yield* Evaluation.pageRealm(
+          runtime,
+          entry,
+          yield* Runtime.ownWorld(runtime, Evaluation.isolatedWorld),
+          id,
+          budget.at
+        ).pipe(
           Effect.mapError((failure) =>
             new Page.PageError({
               operation: "Page.inspect",

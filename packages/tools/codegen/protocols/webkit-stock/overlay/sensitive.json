@@ -1,0 +1,23 @@
+{
+  "reason": "Classified values (README, Diagnostics and secrets): cookie values and authentication passwords. They decode as Redacted, so L0 traffic captured in diagnostics can't leak them. Headers are a record and are redacted by name through Effect's Headers, not here. Stock WebKit's subset of `protocols/webkit/overlay/sensitive.json`: it has no input to type with.",
+  "annotate": [
+    {
+      "target": "Page#Cookie:value",
+      "traits": {
+        "sensitive": true
+      }
+    },
+    {
+      "target": "Storage#Cookie:value",
+      "traits": {
+        "sensitive": true
+      }
+    },
+    {
+      "target": "Storage#CookieFilter:value",
+      "traits": {
+        "sensitive": true
+      }
+    }
+  ]
+}

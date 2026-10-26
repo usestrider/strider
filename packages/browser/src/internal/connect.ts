@@ -5,8 +5,10 @@
  * - **Chromium** takes its WebSocket URL, or its HTTP endpoint, whose `/json/version` names the WebSocket (P4).
  * - **Firefox** takes its remote agent's WebSocket; `/session` is added when the URL has no path.
  * - **Any WebDriver BiDi endpoint** is taken as given.
+ * - **Stock WebKit** takes its inspector server's HTTP endpoint, whose list names a WebSocket per page (review 22,
+ *   candidate 7).
  *
- * The headers go with the WebSocket handshake, and with Chromium's HTTP lookup.
+ * The headers go with the WebSocket handshake, and with Chromium's and WebKit's HTTP requests.
  */
 import * as Effect from "effect/Effect"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
@@ -21,6 +23,7 @@ import * as Transport from "../protocol/Transport.ts"
 import * as Reason from "../Reason.ts"
 import * as Launch from "./launch.ts"
 import * as Spans from "./spans.ts"
+import * as WebKitStockTransport from "./webkitStockTransport.ts"
 
 const invalid = (expected: string, hint: string) =>
   Launch.fail(new Reason.InvalidInput({ input: "endpoint", expected, hint }), "check the endpoint")
@@ -95,3 +98,20 @@ export const webSocket = (
     Effect.catch((error) => refused(`${url}: ${error.message}`)),
     Spans.operation("Browser.connect", { attributes: { "browser.endpoint": url } })
   )
+
+/** Stock WebKit's inspector server at its HTTP endpoint, as one transport: its pages, read from its list. */
+export const webkitInspector = (
+  endpoint: string,
+  options: Browser.ConnectOptions | undefined
+): Effect.Effect<Transport.Transport, Browser.BrowserError, Scope.Scope | Socket.WebSocketConstructor> =>
+  Effect.gen(function*() {
+    const url = yield* parse(
+      endpoint,
+      ["http:", "https:"],
+      "a WebKit inspector server's HTTP endpoint (http://host:port), as WEBKIT_INSPECTOR_HTTP_SERVER names it"
+    )
+    return yield* WebKitStockTransport.connect(url, { headers: plainHeaders(options?.headers), poll: "250 millis" })
+      .pipe(
+        Effect.catch((error) => refused(error.message))
+      )
+  }).pipe(Spans.operation("Browser.connect", { attributes: { "browser.endpoint": endpoint } }))

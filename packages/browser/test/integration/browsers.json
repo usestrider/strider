@@ -1,6 +1,7 @@
 {
-  "comment": "The browsers the integration tests are pinned to. flake.nix reads this file, asserts that its nixpkgs revision provides exactly these, and its dev shell names them in STRIDER_CHROMIUM, STRIDER_FIREFOX and STRIDER_WEBKIT. The fixtures are the drift test's recordings of each (test/fixtures/traffic/). Moving a pin means moving nixpkgs (flake.lock), recording the fixtures again, and re-checking the error tables' evidence.",
+  "comment": "The browsers the integration tests are pinned to. flake.nix reads this file, asserts that its nixpkgs revision provides exactly these, and its dev shell names them in STRIDER_CHROMIUM, STRIDER_FIREFOX, STRIDER_WEBKIT and STRIDER_WEBKITGTK. The fixtures are the drift test's recordings of each (test/fixtures/traffic/). Moving a pin means moving nixpkgs (flake.lock), recording the fixtures again, and re-checking the error tables' evidence.",
   "chromium": { "version": "155.0.8059.79", "fixture": "cdp-chromium-155" },
   "firefox": { "version": "158.0", "fixture": "bidi-firefox-158" },
-  "webkit": { "revision": "2359", "fixture": "webkit-playwright-2359" }
+  "webkit": { "revision": "2359", "fixture": "webkit-playwright-2359" },
+  "webkitgtk": { "version": "2.54.1" }
 }

@@ -367,7 +367,7 @@ const call = (
 ): Effect.Effect<Adapter.RemoteValue, CaptureFailed> =>
   Effect.gen(function*() {
     const adapter = runtime.model.adapter
-    const realm = yield* adapter.realm(document, Runtime.utilityWorld)
+    const realm = yield* adapter.realm(document, yield* Runtime.engineWorld(runtime))
     const evaluate = (functionDeclaration: string, values: ReadonlyArray<Adapter.LocalValue>) =>
       adapter.evaluate(realm, {
         functionDeclaration,

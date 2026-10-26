@@ -33,7 +33,8 @@ import { auditCorrections, Backend, build, outputs, protocolDirectory, serialize
 const sources: Record<Backend, string> = {
   cdp: "the Chrome DevTools Protocol, devtools-protocol 0.0.1696802 (Chrome 155)",
   bidi: "WebDriver BiDi's CDDL, w3c/webdriver-bidi f922e6a (2026-10-08), and the Permissions spec's module",
-  webkit: "the WebKit inspector protocol as Playwright patches it, WebKit build 2359 (WebKit 26.6)"
+  webkit: "the WebKit inspector protocol as Playwright patches it, WebKit build 2359 (WebKit 26.6)",
+  "webkit-stock": "the WebKit inspector protocol as WebKit ships it, WebKitGTK 2.54.1"
 }
 
 const writeOrCheck = Effect.fnUntraced(function*(

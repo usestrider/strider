@@ -7,7 +7,7 @@ Two kinds of entry:
 - **Browser:** something a browser or protocol does that is surprising, inconsistent with the other browsers, or at odds with its spec.
 - **Ours:** a compromise in Strider itself: a workaround a browser forced, a shape the platform or Effect forced, or a choice that reads oddly out of context.
 
-Each entry says what is weird, where it was seen (with the builds: Chromium 155.0.8059.79, Firefox 158.0, Playwright's WebKit 2359), what Strider does about it now, and what to reconsider. None is resolved by being listed here; this is the list to walk when the library is built. Entries are never removed, only marked:
+Each entry says what is weird, where it was seen (with the builds: Chromium 155.0.8059.79, Firefox 158.0, Playwright's WebKit 2359, and for stock WebKit WebKitGTK 2.54.1's MiniBrowser), what Strider does about it now, and what to reconsider. None is resolved by being listed here; this is the list to walk when the library is built. Entries are never removed, only marked:
 
 - **Resolved**, with the commit that resolved it;
 - **Kept**, with the review that kept it and why;
@@ -124,6 +124,26 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Reconsider:* whether `Target.targetDestroyed` or `detachedFromTarget` was lost, or arrived for a target the adapter no longer tracked, if it happens again.
 - **Resolved** in `a7ee8dc` (review 21's first step): traced under synthetic load, where 4 of 48 runs failed: Chromium answers a `Target.closeTarget` sent as a navigation commits, and drops it; the page stays attached and alive, and a second close closes it. Raw CDP showed the same, 10 dropped closes in 120. The adapter first sends a page command, `Page.getNavigationHistory`, which Chromium refuses during the swap and accepts once it is over, and which is answered with a dialog open; with it, raw CDP dropped no close in 120, and 100 of 100 stress runs passed.
 - **Reported** in review 21's fifth step: drafted in `upstream/chromium-close-dropped.md`, not sent.
+
+**Q198. Stock WebKit reports a failed load and a download only through the document's request** (Browser). It has no `Playwright.provisionalLoadFailed` or `downloadCreated`: a refused connection is `Network.loadingFailed` with the error, and a download's response is followed by `loadingFailed` "Frame load interrupted", canceled, as a 204's is.
+- *Seen:* review 22's fifth step, WebKitGTK 2.54.1's MiniBrowser.
+- *We:* on stock WebKit, the document request's failure ends its navigation: `BecameDownload` when the response said `Content-Disposition: attachment`, `NoContent` after a 204 or 205, and otherwise `Failed` with the error; the download itself isn't reported (`downloads`, `unsupported`).
+- *Reconsider:* a response that downloads without saying `attachment`, such as a type WebKit can't show, fails with "Frame load interrupted".
+
+**Q199. After a failed load, WebKitGTK shows an error page as a navigation to `about:blank`** (Browser). It follows the failure as a navigation of its own, which can interrupt one started right after. A load refused before any request, such as to port 1, which WebKit blocks, shows only the error page: no request, no failure, where Playwright's build reports `provisionalLoadFailed` (Q3).
+- *Seen:* review 22's fifth step: a `goto` right after a refused one was credited with the error page's commit, and one to port 1 committed `about:blank`.
+- *We:* on stock WebKit, an `about:blank` navigation claims no `goto` to another URL; one that starts while a `goto` waits in the frame fails that `goto`, saying WebKit showed its error page instead. The tests wait for the error page before going on.
+- *Reconsider:* a `goto` started just before an earlier failure's error page commits fails with it.
+
+**Q200. Stock WebKit reports no same-document navigation** (Browser). Its `Page` domain has no `navigatedWithinDocument`: a fragment or `history.pushState` changes the page's URL unseen.
+- *Seen:* review 22's fifth step: a `goto` to a fragment of the document shown waited until its deadline, and `page.url` kept the URL before `pushState`.
+- *We:* `navigation.sameDocument` is `unsupported`, and the stock profile's `goto` refuses a URL that differs from the document's only in its fragment.
+- *Reconsider:* reading `location.href` where the URL matters, if a use needs it.
+
+**Q201. Stock WebKit's frames arrive by navigating, and its load events name no frame** (Browser). It has no `frameAttached`, so a frame is known from its first `frameNavigated`; `domContentEventFired` and `loadEventFired` have no `frameId`; and `DOM.describeNode`, which says which frame an iframe holds, isn't there. A page attached after it loaded gets no load event at all.
+- *Seen:* review 22's fifth step, against the vendored protocol and in the MiniBrowser.
+- *We:* load events are the main frame's (`frames.readiness`, `partial`); `contentFrame` is `Unsupported`; an adopted page's `document.readyState` is asked as its target is set up, so a page attached after its load is `complete`.
+- *Reconsider:* asking a child frame's readiness in its realm, if a use waits on one.
 
 ## Browsers: dialogs, popups, focus and input
 
@@ -261,6 +281,11 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 22's build, when a German layout was typed on every backend.
 - *We:* `input.keyboardLayout` is `partial` on Firefox: the BiDi adapter sends each character as its value, leaving out the `AltGraph` and `Dead` strokes, so the page gets the layout's characters with US codes.
 - *Reconsider:* reporting it upstream, if WebDriver BiDi grows a key's code or location in its actions.
+
+**Q197. A dialog stops a stock WebKit page's scripts, and nothing reports it** (Browser). Stock WebKit's inspector has no `Dialog` domain: while an `alert` is open, `Runtime.evaluate` waits, and the page's status shows no prompt.
+- *Seen:* review 22's fifth step, in its first probe of the protocol and again through the library.
+- *We:* `prompts` is `unsupported`; an operation on the page waits until its deadline, and `WebKit.layerAttach`'s documentation says a person must dismiss the dialog.
+- *Reconsider:* nothing on stock WebKit.
 
 ## Browsers: downloads and file choosers
 
@@ -686,6 +711,21 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Reconsider:* when BiDi scopes prompt handling to contexts.
 - **Kept** in review 21: the *We* line is the decision.
 
+**Q196. WebKitGTK's inspector server lists its pages as HTML, with their titles and URLs unescaped** (Browser). `/` is a page for people: each page's title and URL are written into it as they are, beside its Inspect button, whose script names the page's WebSocket. A page titled with a socket's path would read as another page. It doesn't say when pages come or go either.
+- *Seen:* review 22's fifth step.
+- *We:* the transport reads a page's path only from its button's script, and reads the list every 250 ms for pages that arrive; a page's end is its WebSocket's close, while the list still answers.
+- *Reconsider:* nothing.
+
+**Q202. WebKitGTK's MiniBrowser has no headless mode** (Browser). It draws through GTK and has no `--headless`, so it needs a display; WPE, which can run without one, isn't in the pinned nixpkgs.
+- *Seen:* review 22, P6.
+- *We:* the integration tests run it under Xvfb, on a display Xvfb picks (`-displayfd`), from the Nix environment (`STRIDER_WEBKITGTK`, `STRIDER_XVFB`).
+- *Reconsider:* WPE's headless platform, once nixpkgs has it.
+
+**Q203. Stock WebKit's inspector says nothing of the browser** (Browser). There is no browser session to ask: the server's list and each page's `Target` domain name no product or version.
+- *Seen:* review 22's fifth step.
+- *We:* `Browser.info` is `WebKit (stock)`, its version and revision `unknown`.
+- *Reconsider:* reading the version from the user agent, if one carries it.
+
 ## Browsers: protocols and transports
 
 **Q53. Firefox deviates from the BiDi spec in two events** (Browser). `contextCreated` has no `hasPlannedNavigation`, which the spec requires, and `navigationStarted` has no `url` for the navigation that `close({ promptUnload: true })` starts.
@@ -753,6 +793,11 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 22's build of grouped handles; a probe read a handle back after its group's release, and failed, as it should.
 - *We:* a group's handles come from calls on an object made in the group (`Runtime.evaluate` with `objectGroup`), with the helper passed as an argument.
 - *Reconsider:* nothing: CDP's `callFunctionOn` takes `objectGroup`, WebKit's doesn't.
+
+**Q195. Stock WebKit numbers frames, loaders and requests in each web process from `0.1`** (Browser). Two pages, or one page's targets before and after a cross-site navigation, which are different processes, have the same ids; Playwright's build gives each a unique one.
+- *Seen:* review 22's fifth step: with two tabs, both main frames were `0.1`, and a navigation ran in the other page's context.
+- *We:* the transport qualifies each target's ids with its page proxy's and its own (`webkitStockTransport.ts`), on the paths the adapter reads, never by walking a message, and takes the qualification off a command's.
+- *Reconsider:* nothing.
 
 ## Ours: workarounds and odd shapes
 
@@ -1184,3 +1229,8 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 22's build.
 - *We:* as above, documented on `Trace.record`.
 - *Reconsider:* recording a new segment after each export, if a use exports more than once while recording.
+
+**Q194. On stock WebKit, the engine runs in the page's world** (Ours). Stock WebKit's inspector has no `Page.createUserWorld`, so the locator engine, the trace capture, `inspect`'s setup and the library's own reads, such as storage's, run where the page's scripts can see them, and change what they use.
+- *Seen:* review 22's fifth step.
+- *We:* `isolatedWorlds` is `unsupported`, and `WebKit.layerAttach`'s documentation says where the engine runs; a caller's function never moves there: `evaluate` fails `Unsupported`, and `evaluateInMainWorld` runs.
+- *Reconsider:* nothing while stock WebKit makes no worlds.
