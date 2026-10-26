@@ -147,3 +147,12 @@ In four steps, each committed and pushed when its tests pass:
 4. Playwright's build removed, with the documents and QUIRKS.md (1, 7, 8).
 
 Review 22's sixth step and the release work follow, the license notices with them.
+
+## Decision
+
+Adopted, 2026-10-26. The maintainer asked what I would answer, and agreed to these ("sure"):
+
+1. **Dialog kinds:** symbolic breakpoints, measured first on a JavaScript-heavy page with the debugger attached and without, and whether a prompt's default value can be read while paused. If the slowdown is small, they're used; if the kind is known but the default isn't, they're used and the prompt's default comes back to the maintainer as an API question; if the slowdown is real, `Dialog.Unknown`. Never a wrapper in the page.
+2. **A browser process per context:** yes. The resident size is measured in the build, without shared pages counted twice, and documented.
+3. **GNOME Web:** launched too, if its automation mode probes as the MiniBrowser's does; the tests pin the MiniBrowser. A difference defers GNOME Web, not the build.
+4. **The comparison scripts:** stock Chrome only.
