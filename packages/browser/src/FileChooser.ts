@@ -254,7 +254,7 @@ export const handle = <E, R>(
           handlers: entry.chooserHandlers,
           handler,
           pending: toPending,
-          decision: (chosen, chooser): Effect.Effect<Adapter.Decision, unknown> => {
+          decision: (chosen, chooser): Effect.Effect<Adapter.Decision | Handlers.Staged, unknown> => {
             if (!isDecision(chosen) || !("files" in chosen)) {
               return Effect.die(
                 new Error("FileChooser.handle: the handler returned something that isn't a FileChooser decision")
@@ -262,24 +262,31 @@ export const handle = <E, R>(
             }
             const files = (chosen as DecisionImpl).files
             if (files === undefined) return Effect.succeed({ _tag: "Cancel" })
-            return Effect.flatMap(FileInputImpl.partition(files, "files"), (given) =>
-              given._tag === "Paths"
-                ? Effect.map(
-                  Effect.forEach(given.files, (file) => FileInputImpl.path(runtime, file)),
-                  (paths): Adapter.Decision => ({ _tag: "SetFiles", files: paths })
-                )
-                // Made files are set on the chooser's input by the page, and the chooser is let go
-                : Option.match(chooser.element, {
-                  onNone: (): Effect.Effect<Adapter.Decision, unknown> =>
-                    Effect.fail(
-                      new Reason.Unsupported({
-                        capability: "FileChooser.choose with FileInput.bytes",
-                        backend: runtime.backend,
-                        hint: "The browser didn't say which input opened the chooser, so files can't be made on it"
+            return Effect.flatMap(
+              FileInputImpl.partition(files, "files"),
+              (given): Effect.Effect<Adapter.Decision | Handlers.Staged, unknown> =>
+                given._tag === "Paths"
+                  ? Effect.map(
+                    Effect.forEach(given.files, (file) => FileInputImpl.path(runtime, file)),
+                    (paths): Adapter.Decision => ({ _tag: "SetFiles", files: paths })
+                  )
+                  // Made files are set on the chooser's input by the page, and the chooser is let go
+                  : Option.match(chooser.element, {
+                    onNone: (): Effect.Effect<Handlers.Staged, unknown> =>
+                      Effect.fail(
+                        new Reason.Unsupported({
+                          capability: "FileChooser.choose with FileInput.bytes",
+                          backend: runtime.backend,
+                          hint: "The browser didn't say which input opened the chooser, so files can't be made on it"
+                        })
+                      ),
+                    onSome: (node) =>
+                      Effect.succeed<Handlers.Staged>({
+                        _tag: "Staged",
+                        apply: setMade(runtime, entry, node, given.files)
                       })
-                    ),
-                  onSome: (node) => setMade(runtime, entry, node, given.files)
-                }))
+                  })
+            )
           },
           noun: () => "file chooser",
           operation: "FileChooser.handle.handled.waitFor",

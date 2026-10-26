@@ -148,7 +148,7 @@ const makeContext = (
             })
         })),
         // Owned teardown: no beforeunload; a page that already closed needs nothing
-        (page) => adapter.closePage(page, { runBeforeUnload: false }).pipe(Effect.ignore)
+        (page) => runtime.model.release(page)
       )
       const pageEntry = runtime.model.pages.get(created)
       if (pageEntry === undefined) return yield* Effect.die(new Error(`${created} was created but never added`))

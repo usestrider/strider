@@ -109,4 +109,7 @@ Playwright and other prior art are evidence of what works, not a template.
 
 When a probe or a build turns up something weird (a browser behaving oddly or differently from the others, or a
 compromise in Strider it forced), add it to `QUIRKS.md` in the same commit, with the next number: what it is, where
-it was seen, what Strider does now, and what to reconsider. Entries are never removed, only marked resolved.
+it was seen, what Strider does now, and what to reconsider. Entries are never removed, only marked **Resolved**,
+**Kept** or **Reported**, as `QUIRKS.md` says. A test that fails only in full runs is a quirk too: reproduce it by
+running that test in many processes at once beside busy loops, trace it from the protocol's messages, and fix the
+cause, never with a retry or a delay (review 21 found Q69 and Q149 this way).

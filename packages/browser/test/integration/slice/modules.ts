@@ -11,6 +11,7 @@ import {
   Browser,
   BrowserWorker,
   ConsoleMessage,
+  Deadline,
   Download,
   Expect,
   FileChooser,
@@ -415,6 +416,25 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             assert(error.reason._tag === "BodyUnavailable")
             assert.strictEqual(error.reason.why, "redirect")
             assert.strictEqual((yield* landed).status, 200)
+          }))
+        }), timeout)
+
+      it.effect("says at once that an event stream's body never finishes", () =>
+        Effect.gen(function*() {
+          const { origin, url } = yield* fixture(() => button("Listen", "window.source = new EventSource('/events')"))
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const stream = yield* NetworkResponse.next(page, {
+              url: `${origin}/events`,
+              body: (message) => message.text
+            })
+            yield* page.getByText("Listen").click()
+            // Well within the deadline, which a wait for the body's end would have used up (QUIRKS.md, Q40)
+            const error = yield* stream.pipe(Effect.flip, Deadline.within("5 seconds"))
+            assert(NetworkResponse.isResponseError(error), String(error))
+            assert(error.reason._tag === "BodyUnavailable")
+            assert.strictEqual(error.reason.why, "streaming")
           }))
         }), timeout)
 

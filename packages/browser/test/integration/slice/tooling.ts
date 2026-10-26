@@ -80,8 +80,8 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             const handler = yield* FileChooser.handle(page, FileChooser.choose(made))
             yield* page.getByRole("button", { name: "Choose" }).click()
             yield* page.getByText("a.txt:text/plain:5:hello|b.csv:text/csv:3:x,y").pipe(Expect.toBeVisible)
-            // The page sets made files before the chooser is let go, so it can see them first (QUIRKS.md Q150)
-            yield* handler.handled.waitFor((count) => count === 1)
+            // The handler is counted as it decides, before the page sets the files (QUIRKS.md, Q152)
+            assert.strictEqual(yield* handler.handled, 1)
           }))
         }), timeout)
 

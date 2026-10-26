@@ -327,6 +327,12 @@ const delivery = <B, DE, DR>(
     if (response.status >= 300 && response.status < 400 && response.headers["location"] !== undefined) {
       return yield* Effect.fail(unavailable(url, "redirect", "A redirect hop has no body; its next hop has one"))
     }
+    // A stream of server-sent events never finishes, so neither does its body (QUIRKS.md, Q40)
+    if (/^text\/event-stream\b/i.test(response.headers["content-type"] ?? "")) {
+      return yield* Effect.fail(
+        unavailable(url, "streaming", "The response is a stream of server-sent events, which never finishes")
+      )
+    }
     const ended = yield* Option.match(wait, {
       onNone: () => Effect.map(Deferred.await(hop.end), Option.some),
       onSome: (duration) => Effect.timeoutOption(Deferred.await(hop.end), duration)

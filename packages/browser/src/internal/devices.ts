@@ -55,13 +55,18 @@ const sending = <E>(
       })
     const sent = yield* owner.page.input.withPermit(Effect.gen(function*() {
       const state = owner.page.inputState
-      if (Option.isSome(state.broken)) {
+      const unknown = yield* Input.recover(
+        state,
+        (events) => owner.runtime.model.adapter.dispatchInput(owner.page.id, events)
+      )
+      if (Option.isSome(unknown)) {
         return yield* Effect.fail(fail(
           new Reason.BackendFailure({
             kind: "Rejected",
             method: "input",
             metadata: {},
-            hint: `A held input's release failed (${state.broken.value}), so the page's input state is unknown`
+            hint: `A held input's release failed (${unknown.value}), and failed again when sent before this ` +
+              "gesture, so the page's input state is unknown"
           }),
           id
         ))
@@ -113,7 +118,9 @@ const releasing = (
         Effect.catch((error) =>
           Effect.sync(() => {
             // A page that is gone took its input with it
-            if (error.reason._tag !== "Gone") state.broken = Option.some(`${describe}: ${error.message}`)
+            if (error.reason._tag !== "Gone") {
+              state.broken = Option.some({ description: `${describe}: ${error.message}`, release: sent })
+            }
           })
         )
       )

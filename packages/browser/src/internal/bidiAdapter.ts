@@ -50,6 +50,7 @@ import * as BidiWire from "./bidiWire.ts"
 import * as Declarations from "./declarations.ts"
 import * as Launch from "./launch.ts"
 import * as ProtocolClient from "./protocolClient.ts"
+import * as Retired from "./retired.ts"
 
 // ── Tables ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -540,6 +541,13 @@ export const connect: (
     const navigations = new Map<string, NavigationEntry>()
     const requests = new Map<string, RequestEntry>()
     const hops = new Map<NetworkRequest.HopId, RequestEntry>()
+    // Finished requests stay answerable while there is room (QUIRKS.md, Q177)
+    const retire = Retired.make((key: string) => {
+      const request = requests.get(key)
+      if (request === undefined) return
+      requests.delete(key)
+      for (let hop = 0; hop <= request.redirects; hop++) hops.delete(ids.hop(request.id, hop))
+    })
     const obligations = new Map<Adapter.ObligationId, ObligationEntry>()
     const downloads = new Map<string, { readonly id: Download.Id; path: string | undefined }>()
     const downloadsById = new Map<Download.Id, { readonly id: Download.Id; path: string | undefined }>()
@@ -1106,7 +1114,7 @@ export const connect: (
         const data = params.request
         let request = requests.get(data.request)
         if (request !== undefined && params.redirectCount > request.redirects) {
-          hops.delete(request.hop)
+          // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
           request.redirects = params.redirectCount
           request.hop = ids.hop(request.id, request.redirects)
           hops.set(request.hop, request)
@@ -1172,6 +1180,7 @@ export const connect: (
         // A redirect's response completes its hop; the request goes on
         if (params.response.status < 300 || params.response.status >= 400) {
           Deferred.doneUnsafe(request.finished, Effect.void)
+          retire(params.request.request)
         }
       },
       [Network.fetchError.method]: (params: Network.FetchErrorParameters) => {
@@ -1185,6 +1194,7 @@ export const connect: (
           at: Adapter.now()
         })
         Deferred.doneUnsafe(request.finished, Effect.fail(params.errorText))
+        retire(params.request.request)
         const navigation = request.navigation
         if (navigation === undefined || navigation.ended) return
         if (navigation.status === 204 || navigation.status === 205) {
@@ -2507,15 +2517,41 @@ export const connect: (
         return yield* Effect.fail(unsupported("screenshot.omitBackground", "WebDriver BiDi has no background override"))
       }
       const clip = Option.getOrUndefined(options.clip)
+      let origin: "document" | "viewport" = options.fullPage || clip !== undefined ? "document" : "viewport"
+      let box = clip
+      if (clip !== undefined && !options.fullPage) {
+        // Firefox refuses a document clip beyond the root element's box, as on a short page in quirks mode, so a
+        // clip inside the viewport is taken from the viewport, offset by the scroll position (QUIRKS.md, Q114)
+        const view = yield* Script.evaluate({
+          expression: "JSON.stringify([scrollX, scrollY, innerWidth, innerHeight])",
+          target: { context: navigable.bidi as BrowsingContext.BrowsingContext, sandbox: "__strider_utility__" },
+          awaitPromise: false
+        } as Script.EvaluateParameters).pipe(
+          on,
+          Effect.map((result) =>
+            result.type === "success" && result.result.type === "string"
+              ? JSON.parse(String(result.result.value)) as [number, number, number, number]
+              : undefined
+          ),
+          Effect.orElseSucceed(() => undefined)
+        )
+        if (view !== undefined) {
+          const [x, y, width, height] = view
+          if (clip.x >= x && clip.y >= y && clip.x + clip.width <= x + width && clip.y + clip.height <= y + height) {
+            origin = "viewport"
+            box = { ...clip, x: clip.x - x, y: clip.y - y }
+          }
+        }
+      }
       const { data } = yield* protocol(
         BrowsingContext.captureScreenshot({
           context: navigable.bidi as BrowsingContext.BrowsingContext,
-          origin: options.fullPage || clip !== undefined ? "document" : "viewport",
+          origin,
           format: {
             type: `image/${options.format}`,
             ...(Option.isSome(options.quality) ? { quality: options.quality.value / 100 } : {})
           },
-          ...(clip === undefined ? {} : { clip: { type: "box", ...clip } })
+          ...(box === undefined ? {} : { clip: { type: "box", ...box } })
         } as BrowsingContext.CaptureScreenshotParameters).pipe(on)
       )
       return fromBase64(data)
@@ -2648,6 +2684,9 @@ export const connect: (
     const responseBody = Effect.fnUntraced(function*(hop: NetworkRequest.HopId) {
       const request = hops.get(hop)
       if (request === undefined) return yield* Effect.fail(foreign(hop))
+      if (request.hop !== hop) {
+        return yield* Effect.fail(unsupported("body.redirect", "A redirect's body isn't kept; only the last hop's is"))
+      }
       yield* Deferred.await(request.finished).pipe(
         Effect.mapError((error) => unsupported("body.failed", `The request failed (${error}), so it has no body`))
       )

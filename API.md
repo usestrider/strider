@@ -213,7 +213,7 @@ class LaunchProfile extends Schema.Class<LaunchProfile>("@usestrider/browser/Lau
   prefs: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Number, Schema.Boolean]))
 }) {}
 declare const stock: LaunchProfile                       // the browser's own defaults; nothing added
-declare const automation: LaunchProfile                  // first-run, sync and update prompts off; nothing a page can observe
+declare const automation: LaunchProfile                  // first-run, sync and update prompts off; nothing a page can observe; and Firefox's JSON viewer off, so a JSON response is the document served (review 21)
 declare const concurrent: LaunchProfile                  // automation, plus background-timer and renderer throttling off, for many pages at once
 
 program.pipe(Effect.provide(Chromium.layer({ executablePath: "/usr/bin/chromium" })))

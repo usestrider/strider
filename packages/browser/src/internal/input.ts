@@ -8,6 +8,7 @@
  *
  * Callers hold the page's input permit while they build and send, so the state matches what was sent.
  */
+import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type * as Keyboard from "../Keyboard.ts"
 import type * as Mouse from "../Mouse.ts"
@@ -20,13 +21,40 @@ export interface State {
   readonly buttons: Set<Mouse.Button>
   position: { readonly x: number; readonly y: number }
   /**
-   * A held input whose release failed, so the page may still have it down: gestures fail until the page is
-   * reset (CONCEPTS.md §5, Compensation).
+   * A held input whose release failed, so the page may still have it down, and the release that failed. The
+   * next gesture sends that release again first, and fails if it fails again (CONCEPTS.md §5, Compensation;
+   * QUIRKS.md, Q84).
    */
-  broken: Option.Option<string>
+  broken: Option.Option<Broken>
+}
+
+/** A release that failed: what it was, and its events. */
+export interface Broken {
+  readonly description: string
+  readonly release: ReadonlyArray<Adapter.InputEvent>
 }
 
 export const make = (): State => ({ keys: [], buttons: new Set(), position: { x: 0, y: 0 }, broken: Option.none() })
+
+/**
+ * Before a gesture: on a page whose release failed, sends that release again, and forgets the failure if it gets
+ * through, so the page's input is known again. `Some` says why the state is still unknown.
+ */
+export const recover = <E>(
+  state: State,
+  dispatch: (events: ReadonlyArray<Adapter.InputEvent>) => Effect.Effect<void, E>
+): Effect.Effect<Option.Option<string>> =>
+  Effect.suspend(() => {
+    if (Option.isNone(state.broken)) return Effect.succeed(Option.none())
+    const broken = state.broken.value
+    return dispatch(broken.release).pipe(
+      Effect.andThen(Effect.sync(() => {
+        state.broken = Option.none()
+        return Option.none<string>()
+      })),
+      Effect.orElseSucceed(() => Option.some(broken.description))
+    )
+  })
 
 const bits: Readonly<Record<Mouse.Button, number>> = { left: 1, right: 2, middle: 4 }
 

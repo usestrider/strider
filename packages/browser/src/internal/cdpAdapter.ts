@@ -23,7 +23,6 @@ import * as Encoding from "effect/encoding/Base64"
 import * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
-import * as Schedule from "effect/Schedule"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -58,6 +57,7 @@ import * as CdpWire from "./cdpWire.ts"
 import * as Declarations from "./declarations.ts"
 import * as Launch from "./launch.ts"
 import * as ProtocolClient from "./protocolClient.ts"
+import * as Retired from "./retired.ts"
 
 // ── Tables ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -668,14 +668,27 @@ export const connect: (
     const navigations = new Map<string, NavigationEntry>()
     const requests = new Map<string, RequestEntry>()
     const hops = new Map<NetworkRequest.HopId, RequestEntry>()
+    // Finished requests stay answerable while there is room (QUIRKS.md, Q177)
+    const retire = Retired.make((key: string) => {
+      const request = requests.get(key)
+      if (request === undefined) return
+      requests.delete(key)
+      for (let hop = 0; hop <= request.redirects; hop++) hops.delete(ids.hop(request.id, hop))
+    })
     const obligations = new Map<Adapter.ObligationId, ObligationEntry>()
     const downloads = new Map<string, DownloadEntry>()
     const downloadsById = new Map<Download.Id, DownloadEntry>()
     const handles = new Map<Adapter.HandleId, HandleEntry>()
     const connections = new Map<string, NetworkConnection.Id>()
     // HTML drags Chromium started and the adapter intercepted, by page, until they are dropped (review 16, candidate 4)
-    const drags = new Map<L1Target.NavigableId, { readonly data: Input.DragData; entered: boolean }>()
+    // `stale`: announced after the gesture that started it was released (QUIRKS.md, Q88)
+    const drags = new Map<
+      L1Target.NavigableId,
+      { readonly data: Input.DragData; entered: boolean; readonly stale: boolean }
+    >()
     const interceptingDrags = new Set<L1Target.NavigableId>()
+    // The buttons each page's last mouse event left held
+    const heldButtons = new Map<L1Target.NavigableId, number>()
     // A worker no page owns belongs to the context its target names
     const workerContexts = new Map<TargetEntry, ContextEntry>()
     let attachedAtConnect = true
@@ -1108,7 +1121,10 @@ export const connect: (
       },
       [Input.dragIntercepted.method]: (target, params: Input.DragInterceptedParams) => {
         // Headless Chromium starts no drag of its own; an intercepted one is finished with drag events
-        if (target?.page !== undefined) drags.set(target.page.id, { data: params.data, entered: false })
+        if (target?.page !== undefined) {
+          const stale = (heldButtons.get(target.page.id) ?? 0) === 0
+          drags.set(target.page.id, { data: params.data, entered: false, stale })
+        }
       },
       [BrowserCdp.downloadWillBegin.method]: (_target, params: BrowserCdp.DownloadWillBeginParams) => {
         const frame = frameOf(params.frameId)
@@ -1503,7 +1519,7 @@ export const connect: (
         if (request !== undefined && params.redirectResponse !== undefined) {
           emitResponse(request, params.redirectResponse)
           emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
-          hops.delete(request.hop)
+          // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
           request.servedFromCache = false
           request.redirects++
           request.hop = ids.hop(request.id, request.redirects)
@@ -1590,6 +1606,7 @@ export const connect: (
         if (request === undefined) return
         emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: params.encodedDataLength, at: Adapter.now() })
         Deferred.doneUnsafe(request.finished, Effect.void)
+        retire(requestKey(target, params.requestId))
       },
       [Network.loadingFailed.method]: (target, params: Network.LoadingFailedParams) => {
         if (target === undefined) return
@@ -1604,6 +1621,7 @@ export const connect: (
           at: Adapter.now()
         })
         Deferred.doneUnsafe(request.finished, Effect.fail(params.errorText))
+        retire(requestKey(target, params.requestId))
         const navigation = request.navigation
         if (navigation === undefined || navigation.ended || request.requestId !== navigation.loaderId) return
         navigation.failed = params.errorText
@@ -2371,13 +2389,29 @@ export const connect: (
       return page.id
     })
 
+    // Chromium says a page isn't attached for a moment while it swaps documents, as just after a navigation
+    // commits (recorded 2026-10-20); a command refused for that never ran, so it is sent again, at once: the
+    // refusal covers only the swap's moment, and the command sent again is accepted (review 21, P7; QUIRKS.md,
+    // Q6)
+    const whileSwapping = <A>(effect: Effect.Effect<A, Protocol.ProtocolError>) =>
+      effect.pipe(Effect.retry({
+        while: (error) =>
+          error.reason._tag === "Rejected" && error.reason.reason === "Unrecognized" &&
+          error.reason.description === "Not attached to an active page",
+        times: 3
+      }))
+
     const closePage = Effect.fnUntraced(
       function*(id: L1Target.NavigableId, options: { readonly runBeforeUnload: boolean }) {
         const page = yield* pageOf(id)
         if (options.runBeforeUnload) {
-          yield* protocol(Page.close().pipe(Protocol.on(page.target.session)))
+          yield* protocol(whileSwapping(Page.close().pipe(Protocol.on(page.target.session))))
           return
         }
+        // Chromium answers a close sent while the page swaps documents, then drops it (QUIRKS.md, Q149). A page
+        // command it accepts says the swap is over; this one is the browser's, so it is answered with a dialog
+        // open or the page's script stuck
+        yield* protocol(whileSwapping(Page.getNavigationHistory().pipe(Protocol.on(page.target.session))))
         page.closing = { _tag: "PageClosed", by: "command" }
         yield* protocol(
           Target.closeTarget({ targetId: page.targetId as Target.TargetID }).pipe(Protocol.on(client.root))
@@ -2434,17 +2468,6 @@ export const connect: (
       }
       return id
     })
-
-    // Chromium says a page isn't attached for a moment while it swaps documents, as just after a navigation
-    // commits (recorded 2026-10-20); a command refused for that never ran, so it is sent again
-    const whileSwapping = <A>(effect: Effect.Effect<A, Protocol.ProtocolError>) =>
-      effect.pipe(Effect.retry({
-        while: (error) =>
-          error.reason._tag === "Rejected" && error.reason.reason === "Unrecognized" &&
-          error.reason.description === "Not attached to an active page",
-        schedule: Schedule.spaced("50 millis"),
-        times: 20
-      }))
 
     const reload = Effect.fnUntraced(function*(id: L1Target.NavigableId, options: { readonly ignoreCache: boolean }) {
       const page = yield* pageOf(id)
@@ -2597,6 +2620,16 @@ export const connect: (
         for (const event of events) {
           switch (event._tag) {
             case "Mouse": {
+              heldButtons.set(page.id, event.buttons)
+              const announced = drags.get(page.id)
+              if (announced?.stale === true) {
+                // A drag Chromium announced after its gesture's release belongs to no gesture: it is canceled
+                // before this one, which would otherwise continue it (QUIRKS.md, Q88)
+                drags.delete(page.id)
+                yield* protocol(
+                  Input.dispatchDragEvent({ type: "dragCancel", x: event.x, y: event.y, data: announced.data }).pipe(on)
+                ).pipe(Effect.ignore)
+              }
               const drag = drags.get(page.id)
               if (drag !== undefined && event.type !== "down") {
                 // An intercepted HTML drag: moves are drag events, and the release drops it

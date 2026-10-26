@@ -40,6 +40,11 @@ export const stock: LaunchProfile = new LaunchProfile({
 /**
  * First-run, sync and update prompts off; nothing a page can observe. The default.
  *
+ * **Details**
+ *
+ * Firefox's JSON viewer is off too, so a JSON response's document is the JSON as served, as in Chromium and
+ * WebKit, rather than the viewer's page.
+ *
  * @stability unstable
  * @category constants
  * @since 0.1.0

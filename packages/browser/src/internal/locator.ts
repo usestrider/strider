@@ -1147,44 +1147,50 @@ export class LocatorImpl implements Locator.Locator {
         })
       // Input reaches the page from here: a dialog it opens may block it, and a dialog nothing will decide fails it
       const send = (ready: Ready) => (events: ReadonlyArray<Adapter.InputEvent>) =>
-        Effect.suspend(() => {
-          if (Option.isSome(owner.page.inputState.broken)) {
-            return Effect.fail(this.error(
-              operation,
-              new Reason.BackendFailure({
-                kind: "Rejected",
-                method: "input",
-                metadata: {},
-                hint:
-                  `A held input's release failed (${owner.page.inputState.broken.value}), so the page's input state is unknown`
-              }),
-              id
-            ))
-          }
-          sent = true
-          const frame = ready.routed.hops.at(-1)
-          return owner.runtime.model.adapter.dispatchInput(
-            owner.page.id,
-            events,
-            frame === undefined ? undefined : { frame: frame.frame, origin: ready.origin }
-          ).pipe(
-            Effect.mapError((error): Runtime.SendFailure => Operation.fromAdapter(error, id, owner.runtime.backend)),
-            Effect.raceFirst(Runtime.promptBlocked(owner.page, true)),
-            Effect.mapError((failure) =>
-              // The input may have reached the page: the error says so, and nothing is sent again
-              failure._tag === "Gone"
-                ? failure.error
-                : failure._tag === "Reason"
-                ? this.error(operation, failure.reason, id, { _tag: "MayHaveBeenSent" })
-                : this.error(
-                  operation,
-                  new Reason.BackendFailure({ kind: "Rejected", method: "input", metadata: {}, hint: "deadline" }),
-                  id,
-                  { _tag: "MayHaveBeenSent" }
-                )
+        Effect.flatMap(
+          Input.recover(owner.page.inputState, (release) =>
+            owner.runtime.model.adapter.dispatchInput(owner.page.id, release)),
+          (unknown) => {
+            if (Option.isSome(unknown)) {
+              return Effect.fail(this.error(
+                operation,
+                new Reason.BackendFailure({
+                  kind: "Rejected",
+                  method: "input",
+                  metadata: {},
+                  hint: `A held input's release failed (${unknown.value}), and failed again when sent before this ` +
+                    "gesture, so the page's input state is unknown"
+                }),
+                id
+              ))
+            }
+            sent = true
+            const frame = ready.routed.hops.at(-1)
+            return owner.runtime.model.adapter.dispatchInput(
+              owner.page.id,
+              events,
+              frame === undefined ? undefined : { frame: frame.frame, origin: ready.origin }
+            ).pipe(
+              Effect.mapError((error): Runtime.SendFailure =>
+                Operation.fromAdapter(error, id, owner.runtime.backend)
+              ),
+              Effect.raceFirst(Runtime.promptBlocked(owner.page, true)),
+              Effect.mapError((failure) =>
+                // The input may have reached the page: the error says so, and nothing is sent again
+                failure._tag === "Gone"
+                  ? failure.error
+                  : failure._tag === "Reason"
+                  ? this.error(operation, failure.reason, id, { _tag: "MayHaveBeenSent" })
+                  : this.error(
+                    operation,
+                    new Reason.BackendFailure({ kind: "Rejected", method: "input", metadata: {}, hint: "deadline" }),
+                    id,
+                    { _tag: "MayHaveBeenSent" }
+                  )
+              )
             )
-          )
-        })
+          }
+        )
       while (true) {
         const left = Operation.millisLeft(budget.at)
         if (left <= 0) return yield* Effect.fail(timedOut())

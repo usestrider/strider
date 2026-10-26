@@ -63,6 +63,7 @@ import * as Adapter from "./adapter.ts"
 import * as Declarations from "./declarations.ts"
 import * as Launch from "./launch.ts"
 import * as ProtocolClient from "./protocolClient.ts"
+import * as Retired from "./retired.ts"
 import * as Utility from "./webkitUtility.ts"
 import * as WebKitWire from "./webkitWire.ts"
 
@@ -622,6 +623,13 @@ export const connect: (
     const navigations = new Map<string, NavigationEntry>()
     const requests = new Map<string, RequestEntry>()
     const hops = new Map<NetworkRequest.HopId, RequestEntry>()
+    // Finished requests stay answerable while there is room (QUIRKS.md, Q177)
+    const retire = Retired.make((key: string) => {
+      const request = requests.get(key)
+      if (request === undefined) return
+      requests.delete(key)
+      for (let hop = 0; hop <= request.redirects; hop++) hops.delete(ids.hop(request.id, hop))
+    })
     const obligations = new Map<Adapter.ObligationId, ObligationEntry>()
     const downloads = new Map<string, DownloadEntry>()
     const downloadsById = new Map<Download.Id, DownloadEntry>()
@@ -1388,7 +1396,7 @@ export const connect: (
         if (request !== undefined && params.redirectResponse !== undefined) {
           emitResponse(request, params.redirectResponse)
           emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
-          hops.delete(request.hop)
+          // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
           request.redirects++
           request.hop = ids.hop(request.id, request.redirects)
           request.url = params.request.url
@@ -1465,6 +1473,7 @@ export const connect: (
           httpVersion: params.metrics?.protocol
         })
         Deferred.doneUnsafe(request.finished, Effect.void)
+        retire(requestKey(where.session, params.requestId))
       },
       [Network.requestServedFromMemoryCache.method]: (
         where,
@@ -1523,6 +1532,7 @@ export const connect: (
         })
         emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
         Deferred.doneUnsafe(request.finished, Effect.void)
+        retire(requestKey(where.session, params.requestId))
       },
       [Network.loadingFailed.method]: (where, params: Network.LoadingFailedParams) => {
         const request = requests.get(requestKey(where.session, params.requestId))
@@ -1535,6 +1545,7 @@ export const connect: (
           at: Adapter.now()
         })
         Deferred.doneUnsafe(request.finished, Effect.fail(params.errorText))
+        retire(requestKey(where.session, params.requestId))
         // A document's load that failed after a 204 or 205 kept the old document
         const navigation = request.navigation
         if (navigation !== undefined && (navigation.status === 204 || navigation.status === 205)) {

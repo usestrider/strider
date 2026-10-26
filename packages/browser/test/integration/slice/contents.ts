@@ -640,12 +640,28 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("captures a clip in the viewport below a short page's content", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            // No doctype: in quirks mode the root element is only as tall as its content (QUIRKS.md, Q114)
+            yield* page.goto(fixtureUrl(origin, `<p>hi</p>`))
+            const ratio = yield* page.evaluate(() =>
+              devicePixelRatio
+            )
+            const clip = pngSize(
+              yield* page.screenshot({ area: { _tag: "Clip", rect: cssRect({ x: 0, y: 200, width: 20, height: 20 }) } })
+            )
+            assert.deepStrictEqual(clip, { width: 20 * ratio, height: 20 * ratio })
+          }))
+        }), timeout)
+
       it.effect("captures in CSS pixels and without a background where the backend can", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            // Firefox refuses a clip beyond the root element's box, which a short page in quirks mode has (QUIRKS.md)
             yield* page.goto(fixtureUrl(origin, `<!DOCTYPE html><p>hi</p>`))
             const width = yield* page.evaluate(() =>
               innerWidth
@@ -752,9 +768,7 @@ export const contents = (
             assert.deepStrictEqual(token.sameSite, Option.some("lax"))
             assert.deepStrictEqual(token.partitionKey, { _tag: "Unpartitioned" })
             assert.deepStrictEqual(CookieJar.toCookie(token).value, "secret")
-            const plain = all.find((cookie) =>
-              cookie.name === "plain"
-            )!
+            const plain = all.find((cookie) => cookie.name === "plain")!
             // A cookie that didn't say: WebKit reports Lax, the others nothing (QUIRKS.md)
             assert.deepStrictEqual(plain.sameSite, name === "WebKit" ? Option.some("lax") : Option.none())
             assert.strictEqual(Option.isSome(plain.priority), name === "Chromium")

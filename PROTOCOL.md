@@ -703,6 +703,24 @@ Adapter responsibilities:
   - transferring a page a segment opened into the session (Q173);
   - `history`'s `--level` and `--failed`.
 
+**Built** (2026-10-25, after [review 21](reviews/21-quirks.md), its first step): lifetimes and flakes. The two flakes the full runs kept showing are traced under synthetic load and fixed, and so are the other quirks of this step.
+
+- **The stress harness.** One integration test in eight or ten processes at once, each with its own browser, beside a dozen busy loops: a throwaway script, not kept, whose runs QUIRKS.md records.
+- **Firefox's JSON viewer** (`LaunchProfile.automation`). `devtools.jsonview.enabled` is `false`, so a JSON response's document is the JSON as served (review 21, P3). Q69 was the viewer's own path: a traversal that leaves the viewer before it has loaded gets no `navigationStarted`, the page is fetched again, and no document is reported. Under load, 12 of 32 runs of the history test failed with the viewer on, and none of 48 with it off (Q15, Q69).
+- **A close Chromium drops** (the CDP adapter, `closePage`). Chromium answers a `Target.closeTarget` that arrives as a navigation commits and never acts on it: the page stays attached, alive and listed (Q149; 4 of 48 stress runs, and 10 of 120 closes over raw CDP). The adapter first sends `Page.getNavigationHistory` on the page's session, which Chromium refuses with "Not attached to an active page" during the swap and accepts once it is over, and which the browser answers with a dialog open or the page's script stuck. A `runBeforeUnload` close's `Page.close` goes through the same retry. With it, 100 of 100 stress runs passed, and raw CDP dropped no close in 120.
+- **The swap's refusals** (the CDP adapter, `whileSwapping`). A command refused with "Not attached to an active page" is sent again at once, at most three times, instead of every 50 ms for a second (review 21, P7; Q6).
+- **Releases wait** (`Model.release`). A page released by its scope, or a popup by its opener's, is closed and then waited for, under the default budget, so a page created right after can't meet a browser still closing it (Q119, Q135).
+- **Request tables** (`src/internal/retired.ts`; every adapter). A finished request stays answerable while there is room for 1000, and the oldest is forgotten after; before, the tables kept every request for the connection's life (Q177). A redirect's earlier hop ids stay, so a body read for one answers `Unsupported{body.redirect}` (Q39).
+- **An event stream's body** (`NetworkResponse`). A response whose content type is `text/event-stream` is `BodyUnavailable{streaming}` at once (Q40).
+- **Input** (`Input.recover`; `devices.ts`, `locator.ts`). After a held input's release failed, the next gesture sends that release again first, and runs if it gets through (Q84). A drag Chromium announces after its gesture's release is canceled with `dragCancel` before the next gesture (Q88).
+- **File choosers** (`Handlers.Staged`). A decision the library carries out itself, as made files are, is counted in `handled` when the handler decides, and carried out after (Q152).
+- **Firefox's clips** (the BiDi adapter, `screenshot`). A clip inside the viewport is captured with the `viewport` origin, offset by the scroll position (Q114).
+- **Where the build differs from the review.**
+  - **The review expected Q149 to be a lost event.** Chromium sends no event at all: it drops the close.
+  - **Q177 is new,** found while fixing Q39.
+- **Probes** (review 21, What the browsers do, P3 and P7; and, for the build, closes sent as a navigation commits, with and without a page command first, and which page commands answer with an alert open).
+- **Tests.** The conformance suite asks for a redirect hop's body. `test/integration/slice/modules.ts` adds an event stream's body, and `contents.ts` a clip below a short page in quirks mode; `tooling.ts` reads a chooser handler's count without waiting. `test/Input.test.ts` checks `Input.recover`. Integration tests: 462, all passing in one full run.
+
 ### Pause-on-start granularity
 
 Before-author-script setup for *new* targets needs them paused at creation. Granularity differs by backend, and the access model depends on it.

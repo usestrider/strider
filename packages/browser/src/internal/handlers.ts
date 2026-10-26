@@ -38,7 +38,7 @@ export interface Options<S, P, D, E, R> {
   /** What the handler is given for an obligation. */
   readonly pending: (subject: S) => P
   /** The adapter's decision for what the handler returned about an obligation, or why it isn't one. */
-  readonly decision: (chosen: D, subject: S) => Effect.Effect<Adapter.Decision, unknown>
+  readonly decision: (chosen: D, subject: S) => Effect.Effect<Adapter.Decision | Staged, unknown>
   /** What it decides, for the log: `"confirm"`, `"file chooser"`. */
   readonly noun: (subject: S) => string
   /** What a wait on `handled` reports: `"Dialog.handle.handled.waitFor"`. */
@@ -47,6 +47,16 @@ export interface Options<S, P, D, E, R> {
   readonly name: string
   /** What decides when it doesn't: `"the context's policy"`. */
   readonly fallback: string
+}
+
+/**
+ * A decision the library carries out itself before the adapter's part, such as made files the page sets on a
+ * chooser's input. It is counted in `handled` when the handler decides, as every decision is, and carried out
+ * after (QUIRKS.md, Q152).
+ */
+export interface Staged {
+  readonly _tag: "Staged"
+  readonly apply: Effect.Effect<Adapter.Decision, unknown>
 }
 
 /** Registers a handler for the scope; removing it, or closing its scope, leaves later obligations to the one before. */
@@ -83,7 +93,13 @@ export const register = <S, P, D, E, R>(
           return Option.none()
         }
         yield* SubscriptionRef.update(handled, (count) => count + 1)
-        return Option.some(decision.value)
+        if (decision.value._tag !== "Staged") return Option.some(decision.value)
+        const applied = yield* decision.value.apply.pipe(Effect.exit)
+        if (Exit.isFailure(applied)) {
+          yield* report(`${described}: its decision couldn't be made, so ${options.fallback} decides`, applied.cause)
+          return Option.none()
+        }
+        return Option.some(applied.value)
       })
     }
     options.handlers.push(registration)

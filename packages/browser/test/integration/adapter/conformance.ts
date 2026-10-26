@@ -314,6 +314,9 @@ export const conformance = (backend: Backend) =>
                 fact.response.hop === hop.replace(/\.1$/, ".0")
             )
             assert.strictEqual(first.response.status, 302)
+            // The first hop's id is still the adapter's: asked for its body, it says it was a redirect (Q39)
+            const refused = yield* world.adapter.responseBody(first.response.hop).pipe(Effect.flip)
+            assert.deepInclude(refused.reason, { _tag: "Unsupported", capability: "body.redirect" })
           }), timeout)
 
         it.effect("tracks frames, in process and out, and ends the children of a replaced document", () =>

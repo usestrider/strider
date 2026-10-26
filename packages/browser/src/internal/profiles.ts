@@ -48,6 +48,9 @@ export const chromiumArgs: Readonly<Record<Profile, ReadonlyArray<string>>> = {
 export type Prefs = Readonly<Record<string, string | number | boolean>>
 
 const firefoxAutomation: Prefs = {
+  // The JSON viewer replaces a JSON response's document with a devtools page, whose text is the viewer's
+  // buttons; off, the document is the JSON as served, as in Chromium and WebKit (review 21, P3; QUIRKS.md, Q15)
+  "devtools.jsonview.enabled": false,
   "app.update.disabledForTesting": true,
   "browser.shell.checkDefaultBrowser": false,
   "browser.startup.homepage_override.mstone": "ignore",
@@ -58,8 +61,8 @@ const firefoxAutomation: Prefs = {
 
 /**
  * Each profile's preferences. `automation` turns off update, first-run and data-reporting prompts, nothing a
- * page can observe; `concurrent` adds background-timer throttling off, which pages can observe, so it is
- * opt-in.
+ * page can observe, and the JSON viewer, so a JSON response is the document the server sent; `concurrent` adds
+ * background-timer throttling off, which pages can observe, so it is opt-in.
  */
 export const firefoxPrefs: Readonly<Record<Profile, Prefs>> = {
   stock: {},

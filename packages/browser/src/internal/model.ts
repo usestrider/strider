@@ -42,6 +42,7 @@ import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
 import * as Events from "./events.ts"
 import * as Input from "./input.ts"
+import * as Operation from "./operation.ts"
 import * as Spans from "./spans.ts"
 
 /** What happens to a dialog no handler claims (UserContext.Options.dialogs; CONCEPTS.md §5). */
@@ -343,6 +344,8 @@ export interface Model {
   readonly documentOf: (navigable: Target.NavigableId) => Effect.Effect<Option.Option<Target.DocumentId>>
   /** Ends when the connection does. */
   readonly lost: Deferred.Deferred<void>
+  /** Closes a page its owner's scope released, and waits for the close under the default budget. */
+  readonly release: (page: Target.NavigableId) => Effect.Effect<void>
 }
 
 /** The most navigations remembered at once: a page's own navigations nobody waits for are dropped oldest first. */
@@ -718,13 +721,24 @@ export const make = Effect.fnUntraced(function*() {
     yield* resolve(obligation, fallback)
   })
 
-  /** Closes a popup its opener's scope released, unless it already closed. */
+  /**
+   * Closes a page its owner's scope released, unless it already closed, and waits for the close under the
+   * default budget: a page created right after must not meet a browser still closing this one (QUIRKS.md, Q119
+   * and Q135).
+   */
   const release = (page: Target.NavigableId) =>
-    Effect.suspend(() =>
-      adapter === undefined || !pages.has(page)
-        ? Effect.void
-        : adapter.closePage(page, { runBeforeUnload: false }).pipe(Effect.ignore)
-    )
+    Effect.suspend(() => {
+      const entry = pages.get(page)
+      if (adapter === undefined || entry === undefined) return Effect.void
+      return adapter.closePage(page, { runBeforeUnload: false }).pipe(
+        Effect.ignore,
+        Effect.andThen(Operation.budget),
+        Effect.flatMap((budget) =>
+          Deferred.await(entry.closed).pipe(Effect.timeoutOption(Operation.millisLeft(budget.at)))
+        ),
+        Effect.asVoid
+      )
+    })
 
   /** Keeps a hop, dropping the oldest finished one past `maxHops`, or else the oldest. */
   const keepHop = (id: NetworkRequest.HopId, hop: HopEntry) => {
@@ -1249,7 +1263,8 @@ export const make = Effect.fnUntraced(function*() {
         pageOf,
         pageList,
         documentOf,
-        lost
+        lost,
+        release
       }
     })
 

@@ -1,0 +1,54 @@
+/**
+ * A page's input state after a release failed (QUIRKS.md, Q84): the next gesture sends that release again first,
+ * and the page's input is known again once it gets through.
+ */
+import { assert, describe, it } from "@effect/vitest"
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
+import type * as Adapter from "../src/internal/adapter.ts"
+import * as Input from "../src/internal/input.ts"
+
+const release: ReadonlyArray<Adapter.InputEvent> = [{
+  _tag: "Mouse",
+  type: "up",
+  x: 10,
+  y: 20,
+  button: "left",
+  clickCount: 1,
+  modifiers: { alt: false, control: false, meta: false, shift: false },
+  buttons: 0
+}]
+
+const broken = (): Input.State => {
+  const state = Input.make()
+  state.broken = Option.some({ description: "mouse.up: the page didn't answer", release })
+  return state
+}
+
+describe("Input.recover", () => {
+  it.effect("sends nothing when the page's input state is known", () =>
+    Effect.gen(function*() {
+      const sent: Array<ReadonlyArray<Adapter.InputEvent>> = []
+      const unknown = yield* Input.recover(Input.make(), (events) => Effect.sync(() => void sent.push(events)))
+      assert.isTrue(Option.isNone(unknown))
+      assert.deepStrictEqual(sent, [])
+    }))
+
+  it.effect("sends the failed release again, and forgets the failure once it gets through", () =>
+    Effect.gen(function*() {
+      const state = broken()
+      const sent: Array<ReadonlyArray<Adapter.InputEvent>> = []
+      const unknown = yield* Input.recover(state, (events) => Effect.sync(() => void sent.push(events)))
+      assert.isTrue(Option.isNone(unknown))
+      assert.deepStrictEqual(sent, [release])
+      assert.isTrue(Option.isNone(state.broken))
+    }))
+
+  it.effect("says why the state is still unknown when the release fails again", () =>
+    Effect.gen(function*() {
+      const state = broken()
+      const unknown = yield* Input.recover(state, () => Effect.fail("refused"))
+      assert.deepStrictEqual(unknown, Option.some("mouse.up: the page didn't answer"))
+      assert.isTrue(Option.isSome(state.broken))
+    }))
+})
