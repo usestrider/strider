@@ -287,12 +287,7 @@ const captured = <B>(response: NetworkResponse, bytes: Uint8Array, body: B): Cap
         catch: (error) =>
           responseError(
             response.url,
-            new Reason.BackendFailure({
-              kind: "IncompatibleResponse",
-              method: "json",
-              metadata: {},
-              hint: `The body isn't JSON: ${String(error)}`
-            })
+            new MalformedBody({ expected: "json", hint: `The body isn't JSON: ${String(error)}` })
           )
       })),
     urlParamsBody: Effect.map(text, (text) => UrlParams.fromInput(new URLSearchParams(text))),
@@ -578,13 +573,31 @@ export class BodyUnavailable
 }
 
 /**
+ * Reason for a body that was read but isn't what it was read as, such as `json` of a body that isn't JSON: the
+ * page's response, not the browser, is at fault (QUIRKS.md, Q64).
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class MalformedBody extends Schema.Error<MalformedBody>("@usestrider/browser/NetworkResponse/MalformedBody")({
+  _tag: Schema.tag("MalformedBody"),
+  expected: Schema.Literal("json"),
+  hint: Schema.String
+}) {
+  override get message(): string {
+    return `The body isn't ${this.expected}: ${this.hint}`
+  }
+}
+
+/**
  * Schema for the reasons reading a response can fail.
  *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
  */
-export const ResponseErrorReason = Schema.Union([BodyUnavailable, Reason.BackendFailure])
+export const ResponseErrorReason = Schema.Union([BodyUnavailable, MalformedBody, Reason.BackendFailure])
 
 /**
  * The reasons reading a response can fail.

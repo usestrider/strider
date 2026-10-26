@@ -124,7 +124,9 @@ export interface Browser {
   /**
    * Creates a context and a page in it, released together: `newContext`, then its `newPage`.
    */
-  newPage(options?: UserContext.Options | undefined): Effect.Effect<Page.Page, Page.PageError, Scope.Scope>
+  newPage(
+    options?: UserContext.Options | undefined
+  ): Effect.Effect<Page.Page, Page.PageError | Target.TargetGone, Scope.Scope>
   /**
    * Every page of the browser, as they open and close: a `Page` for one this connection controls for its life, and
    * an observed page for any other, such as a launched browser's own first tab or an attached browser's tabs, whose
@@ -182,7 +184,7 @@ export const isBrowser = (u: unknown): u is Browser => Predicate.hasProperty(u, 
  */
 export const newPage = (
   options?: UserContext.Options | undefined
-): Effect.Effect<Page.Page, Page.PageError, Browser | Scope.Scope> =>
+): Effect.Effect<Page.Page, Page.PageError | Target.TargetGone, Browser | Scope.Scope> =>
   Effect.flatMap(Effect.service(Browser), (browser) => browser.newPage(options))
 
 /**

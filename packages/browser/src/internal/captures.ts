@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
+import * as Locator from "../Locator.ts"
 import * as Page from "../Page.ts"
 import * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
@@ -59,12 +60,29 @@ const elementBox = (
   Effect.gen(function*() {
     const answer = yield* Runtime.sendRouted(runtime, page, { op: "rect", steps: locator.steps }, id, at)
     const response = answer.response
+    // A capture never waits: the element is there now, or the capture says why it isn't (QUIRKS.md, Q126)
+    if (response._tag === "NoMatch") {
+      return new Page.PageError({
+        operation,
+        reason: new Locator.NoMatch({
+          hint: `${locator.description}: a capture never waits, and Expect waits for what it expects`
+        }),
+        diagnostics: Operation.diagnostics(id)
+      })
+    }
+    if (response._tag === "Strict") {
+      return new Page.PageError({
+        operation,
+        reason: new Locator.StrictViolation({
+          candidates: response.candidates,
+          suggestions: [],
+          hint: `${response.count} elements match ${locator.description}, and a capture needs exactly one`
+        }),
+        diagnostics: Operation.diagnostics(id)
+      })
+    }
     if (response._tag !== "Rect") {
-      const why = response._tag === "NoMatch"
-        ? "nothing matched it"
-        : response._tag === "Strict"
-        ? `${response.count} elements matched it`
-        : response._tag === "StaleRef"
+      const why = response._tag === "StaleRef"
         ? `its ref is stale (${response.why})`
         : `the engine answered ${response._tag}`
       return invalid(

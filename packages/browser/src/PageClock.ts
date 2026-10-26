@@ -31,6 +31,7 @@ import type * as Scope from "effect/Scope"
 import type * as Declaration from "./Declaration.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import * as Reason from "./Reason.ts"
+import type * as Target from "./Target.ts"
 
 /**
  * How the page's clock behaves once installed.
@@ -78,20 +79,22 @@ export interface PageClock {
    * Removing it affects later documents only. A clock already installed on the page or its context is a
    * `Conflict`.
    */
-  install(mode: Mode): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope>
+  install(
+    mode: Mode
+  ): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>
   /**
    * Advances a controlled clock, firing every due timer in order, an interval as often as it falls due.
    */
-  adjust(duration: Duration.Input): Effect.Effect<void, PageClockError>
+  adjust(duration: Duration.Input): Effect.Effect<void, PageClockError | Target.TargetGone>
   /**
    * Jumps a fixed or controlled clock to `at`; due timers fire at most once.
    */
-  setTime(at: DateTime.DateTime.Input): Effect.Effect<void, PageClockError>
+  setTime(at: DateTime.DateTime.Input): Effect.Effect<void, PageClockError | Target.TargetGone>
   /**
    * Returns to real time, from the time the clock shows now: the clock becomes an offset, and the timers waiting
    * on a controlled clock move to real ones.
    */
-  readonly resume: Effect.Effect<void, PageClockError>
+  readonly resume: Effect.Effect<void, PageClockError | Target.TargetGone>
 }
 
 /**

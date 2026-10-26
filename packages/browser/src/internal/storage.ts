@@ -15,6 +15,7 @@ import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as CookieJar from "../CookieJar.ts"
+import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import * as OriginStorage from "../OriginStorage.ts"
 import * as Reason from "../Reason.ts"
@@ -33,19 +34,13 @@ import * as Spans from "./spans.ts"
 const cookieError = (operation: string, reason: CookieJar.CookieJarErrorReason, id: Diagnostics.OperationId) =>
   new CookieJar.CookieJarError({ operation, reason, diagnostics: Operation.diagnostics(id) })
 
-/** An adapter's failure, as a cookie jar's: a context that ended is the backend refusing. */
+/** An adapter's failure, as a cookie jar's: a context that ended is `TargetGone` (QUIRKS.md, Q131). */
 const cookieFailure = (runtime: Runtime.Runtime, operation: string, id: Diagnostics.OperationId) =>
 (
   error: Adapter.AdapterError
-) => {
+): CookieJar.CookieJarError | Target.TargetGone => {
   const mapped = Operation.fromAdapter(error, id, runtime.backend)
-  return cookieError(
-    operation,
-    mapped._tag === "Reason"
-      ? mapped.reason
-      : new Reason.BackendFailure({ kind: "Rejected", method: operation, metadata: {}, hint: mapped.error.message }),
-    id
-  )
+  return mapped._tag === "Gone" ? mapped.error : cookieError(operation, mapped.reason, id)
 }
 
 /** A cookie as the adapter has it, as the `Cookie` schema says it. */
@@ -261,22 +256,22 @@ const storageError = (operation: string, reason: OriginStorage.OriginStorageErro
   new OriginStorage.OriginStorageError({ operation, reason, diagnostics: Operation.diagnostics(id) })
 
 /** An evaluation's failure, as origin storage's: what the page threw is the browser refusing. */
-const storageFailure = (operation: string, id: Diagnostics.OperationId) =>
+const storageFailure = (operation: string, id: Diagnostics.OperationId, budget: Operation.Budget) =>
 (
   failure: Evaluation.Failure
-): OriginStorage.OriginStorageError | Target.TargetGone => {
+): OriginStorage.OriginStorageError | Target.TargetGone | Deadline.Timeout => {
   if (failure._tag === "Gone") return failure.error
+  // The deadline is a Timeout, as everywhere else (QUIRKS.md, Q131): the call was sent, so a write may have happened
   if (failure._tag === "Deadline") {
-    return storageError(
+    return Operation.timeout({
       operation,
-      new Reason.BackendFailure({
-        kind: "Rejected",
-        method: operation,
-        metadata: {},
-        hint: "The page didn't answer before the deadline"
-      }),
-      id
-    )
+      id,
+      phase: "dispatchedUnconfirmed",
+      budget: budget.budget,
+      history: [],
+      hint: Option.some("The page didn't answer before the deadline; a write may have happened"),
+      dispatch: { _tag: "MayHaveBeenSent" }
+    })
   }
   const reason = failure.reason
   if (reason._tag === "EvaluationThrown") {
@@ -335,7 +330,7 @@ export const originStorage = (
           id
         })
         return decode(yield* Evaluation.fromRemote(value))
-      }).pipe(Effect.mapError(storageFailure(operation, id)))
+      }).pipe(Effect.mapError(storageFailure(operation, id, budget)))
     }).pipe(Spans.operation(operation, { attributes: { "browser.page.id": page.id } }))
   }
   const areaOf = `(area) => area === "local" ? localStorage : sessionStorage`

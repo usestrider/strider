@@ -51,12 +51,38 @@ export const Subject = Schema.Union([
 export type Subject = typeof Subject.Type
 
 /**
+ * Schema for what chose an automatic decision: a context option, or the library's one rule for its kind.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Policy = Schema.Union([
+  Schema.TaggedStruct("ContextOption", { name: Schema.Literal("dialogs"), value: Schema.String }),
+  Schema.TaggedStruct("Default", {})
+])
+
+/**
+ * What chose an automatic decision.
+ *
+ * **Details**
+ *
+ * - `ContextOption`: an option the context was made with, such as `dialogs: "dismiss"`.
+ * - `Default`: the library's one rule for the kind, which no option sets: a file chooser nothing decides is
+ *   canceled, and a request no route decides continues.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type Policy = typeof Policy.Type
+
+/**
  * One obligation decided by a default policy.
  *
  * **Details**
  *
- * `decision` is what was done, such as `"dismiss"`, `"cancel"` or `"continue"`; `policy` is the setting that
- * chose it, such as `dialogs: "dismiss"`.
+ * `decision` is what was done, such as `"dismiss"`, `"cancel"` or `"continue"`; `policy` is what chose it.
  *
  * @stability unstable
  * @category models
@@ -65,7 +91,7 @@ export type Subject = typeof Subject.Type
 export class AutoResolution extends Schema.Class<AutoResolution>("@usestrider/browser/AutoResolution")({
   subject: Subject,
   decision: Schema.String,
-  policy: Schema.String,
+  policy: Policy,
   at: MonotonicInstant.MonotonicInstant
 }) {}
 
@@ -95,14 +121,15 @@ const deliver = (event: Model.AutoResolutionEvent): AutoResolution => {
       return new AutoResolution({
         subject: { _tag: "Dialog", kind: kinds[event.prompt.kind], message: event.prompt.message },
         decision: event.decision,
-        policy: `dialogs: "${event.policy}"`,
+        policy: { _tag: "ContextOption", name: "dialogs", value: event.policy },
         at: event.at
       })
     case "FileChooser":
       return new AutoResolution({
         subject: { _tag: "FileChooser" },
         decision: event.decision,
-        policy: `fileChoosers: "cancel"`,
+        // No option sets it: the one rule for a chooser nothing decides (QUIRKS.md, Q63)
+        policy: { _tag: "Default" },
         at: event.at
       })
     case "PausedRequest":
@@ -110,7 +137,8 @@ const deliver = (event: Model.AutoResolutionEvent): AutoResolution => {
       return new AutoResolution({
         subject: { _tag: "PausedRequest", request: event.request },
         decision: event.decision,
-        policy: `routes: "continue"`,
+        // No option sets it either (QUIRKS.md, Q105)
+        policy: { _tag: "Default" },
         at: event.at
       })
   }

@@ -33,7 +33,7 @@ import type * as Emulation from "./Emulation.ts"
 import type * as InitScript from "./InitScript.ts"
 import type * as JSHandle from "./JSHandle.ts"
 import type * as Keyboard from "./Keyboard.ts"
-import type * as Locator from "./Locator.ts"
+import * as Locator from "./Locator.ts"
 import type * as Mouse from "./Mouse.ts"
 import type * as OriginStorage from "./OriginStorage.ts"
 import type * as PageClock from "./PageClock.ts"
@@ -589,7 +589,7 @@ export interface Page extends ReadonlyPage {
     pattern: Url.Pattern | string,
     handler: Route.Handler<E, R, P>,
     options?: Route.Options<P> | undefined
-  ): Effect.Effect<Route.Registration, Route.RouteError, Scope.Scope | R>
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone, Scope.Scope | R>
   /**
    * Runs a script in every new document of this page, before its own scripts, while the registration lives.
    *
@@ -614,14 +614,14 @@ export interface Page extends ReadonlyPage {
   addInitScript(
     script: InitScript.Source,
     options?: InitScript.Options | undefined
-  ): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError, Scope.Scope>
+  ): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>
   /**
    * Overrides the given settings while the registration lives; page overrides beat context ones. One call is
    * one registration, and a field the backend can't apply fails it before anything is applied (`Emulation`).
    */
   emulate(
     settings: Emulation.Emulation
-  ): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope>
+  ): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>
   /**
    * Brings the page to the front. Waits that depend on rendering need it.
    */
@@ -736,6 +736,9 @@ export const PageErrorReason = Schema.Union([
   CloseCanceled,
   Reason.EvaluationThrown,
   Reason.NotSerializable,
+  // A capture's element: none, or several (QUIRKS.md, Q126)
+  Locator.NoMatch,
+  Locator.StrictViolation,
   Reason.InvalidInput,
   Reason.NotPermitted,
   Reason.Unsupported,

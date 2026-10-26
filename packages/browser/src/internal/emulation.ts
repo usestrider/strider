@@ -11,6 +11,7 @@ import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Declaration from "../Declaration.ts"
 import type * as Emulation from "../Emulation.ts"
 import * as Reason from "../Reason.ts"
+import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
@@ -148,7 +149,7 @@ export const declare = (
   owner: Owner,
   overrides: ReadonlyArray<Field>,
   id: ReturnType<typeof Operation.operationId>
-): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope> =>
+): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope> =>
   Effect.gen(function*() {
     const fail = (reason: Declaration.DeclarationErrorReason) =>
       new Declaration.DeclarationError({ declaration: owner.operation, reason, diagnostics: Operation.diagnostics(id) })
@@ -168,27 +169,20 @@ export const declare = (
       }
     }
     const scope = yield* Scope.fork(yield* Effect.scope)
-    yield* Effect.forEach(overrides, (field) =>
-      adapter.declare(owner.scope, { _tag: "Override", override: field.override }), {
-      discard: true
-    }).pipe(
+    yield* Effect.forEach(
+      overrides,
+      (field) => adapter.declare(owner.scope, { _tag: "Override", override: field.override }),
+      {
+        discard: true
+      }
+    ).pipe(
       Scope.provide(scope),
       Effect.mapError((error) => {
         const mapped = Operation.fromAdapter(error, id, owner.runtime.backend)
-        return fail(
-          mapped._tag === "Gone"
-            ? new Reason.BackendFailure({
-              kind: "Rejected",
-              method: owner.operation,
-              metadata: {},
-              hint: mapped.error.message
-            })
-            : mapped.reason
-        )
+        // A target that went is TargetGone, as for every operation on it (QUIRKS.md, Q143)
+        return mapped._tag === "Gone" ? mapped.error : fail(mapped.reason)
       }),
-      Effect.onError(() =>
-        Scope.close(scope, Exit.void)
-      )
+      Effect.onError(() => Scope.close(scope, Exit.void))
     )
     return { remove: Scope.close(scope, Exit.void) } satisfies Declaration.Registration
   })

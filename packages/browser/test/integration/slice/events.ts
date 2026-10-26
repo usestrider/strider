@@ -207,7 +207,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             const decided = yield* decisions
             assert.deepStrictEqual(decided.subject, { _tag: "Dialog", kind: "Confirm", message: "Sure?" })
             assert.strictEqual(decided.decision, "dismiss")
-            assert.strictEqual(decided.policy, `dialogs: "dismiss"`)
+            assert.deepStrictEqual(decided.policy, { _tag: "ContextOption", name: "dialogs", value: "dismiss" })
             yield* page.getByText("false", { exact: true }).pipe(Expect.toBeVisible)
             assert.strictEqual((yield* AutoResolution.history(page.context)).entries.length, 1)
           }))

@@ -11,8 +11,10 @@
 import type * as Effect from "effect/Effect"
 import type * as Predicate from "effect/Predicate"
 import * as P from "effect/Predicate"
+import * as Schema from "effect/Schema"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
+import * as Diagnostics from "./Diagnostics.ts"
 import type * as Target from "./Target.ts"
 
 const TypeId = "~@usestrider/browser/Watchable"
@@ -52,11 +54,13 @@ export interface Watchable<A> extends Effect.Effect<A> {
   /**
    * Waits until the value satisfies `refinement`, checking the current value first.
    */
-  waitFor<B extends A>(refinement: Predicate.Refinement<A, B>): Effect.Effect<B, Deadline.Timeout | Target.TargetGone>
+  waitFor<B extends A>(
+    refinement: Predicate.Refinement<A, B>
+  ): Effect.Effect<B, Deadline.Timeout | Target.TargetGone | Ended>
   /**
    * Waits until the value satisfies `predicate`, checking the current value first.
    */
-  waitFor(predicate: Predicate.Predicate<A>): Effect.Effect<A, Deadline.Timeout | Target.TargetGone>
+  waitFor(predicate: Predicate.Predicate<A>): Effect.Effect<A, Deadline.Timeout | Target.TargetGone | Ended>
   /**
    * Derives a watchable from the same source.
    */
@@ -71,3 +75,38 @@ export interface Watchable<A> extends Effect.Effect<A> {
  * @since 0.1.0
  */
 export const isWatchable = (u: unknown): u is Watchable<unknown> => P.hasProperty(u, TypeId)
+
+const EndedTypeId = "~@usestrider/browser/Watchable/Ended"
+
+/**
+ * Error for a wait on a value that settled on one it doesn't satisfy, such as a download's status once it
+ * completed: nothing else will come, though the entity lives on (QUIRKS.md, Q62).
+ *
+ * **Details**
+ *
+ * `value` is the final value. A watchable whose entity ended fails a wait with `TargetGone` instead, since its
+ * end is its target's.
+ *
+ * @stability unstable
+ * @category errors
+ * @since 0.1.0
+ */
+export class Ended extends Schema.TaggedError<Ended>(EndedTypeId)("Ended", {
+  operation: Schema.String,
+  value: Schema.Unknown,
+  diagnostics: Diagnostics.Diagnostics
+}) {
+  readonly [EndedTypeId] = EndedTypeId
+  override get message(): string {
+    return `${this.operation}: the value settled on one that doesn't satisfy the predicate, so nothing else will`
+  }
+}
+
+/**
+ * Checks whether a value is an `Ended`.
+ *
+ * @stability unstable
+ * @category guards
+ * @since 0.1.0
+ */
+export const isEnded = (u: unknown): u is Ended => P.hasProperty(u, EndedTypeId)

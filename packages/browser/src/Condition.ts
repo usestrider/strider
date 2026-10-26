@@ -5,6 +5,7 @@
  * @since 0.1.0
  */
 import { dual } from "effect/Function"
+import type { Pipeable } from "effect/Pipeable"
 import * as Predicate from "effect/Predicate"
 import type * as P from "effect/Predicate"
 import * as ConditionImpl from "./internal/condition.ts"
@@ -18,7 +19,7 @@ const TypeId = ConditionImpl.TypeId
  * @category models
  * @since 0.1.0
  */
-export interface Condition<in A> {
+export interface Condition<in A> extends Pipeable {
   readonly [TypeId]: (a: A) => boolean
 }
 

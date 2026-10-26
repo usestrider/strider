@@ -28,6 +28,7 @@ import * as TraceImpl from "./internal/trace.ts"
 import * as NetworkResponse from "./NetworkResponse.ts"
 import type * as Page from "./Page.ts"
 import * as Reason from "./Reason.ts"
+import type * as Target from "./Target.ts"
 import type * as UserContext from "./UserContext.ts"
 
 /**
@@ -119,7 +120,7 @@ export interface Recording extends Declaration.Registration {
 export const record = (
   target: UserContext.UserContext | Page.Page,
   options?: Options | undefined
-): Effect.Effect<Recording, TraceError, Scope.Scope> =>
+): Effect.Effect<Recording, TraceError | Target.TargetGone, Scope.Scope> =>
   Effect.gen(function*() {
     if (options?.domSnapshots === true) return yield* NotBuilt.effect("Trace.record with domSnapshots")
     const scope = yield* Effect.scope
@@ -127,7 +128,7 @@ export const record = (
     const { runtime, grant } = found.behind
     const id = Operation.operationId()
     const fail = (reason: TraceErrorReason) => new TraceError({ reason, diagnostics: Operation.diagnostics(id) })
-    yield* Access.checkOr(grant, fail)
+    yield* Access.check(grant)
     const screencast = options?.screencast ?? "off"
     if (screencast === "native") {
       yield* Filters.requires(runtime, "Trace.record", "capability.screencast").pipe(

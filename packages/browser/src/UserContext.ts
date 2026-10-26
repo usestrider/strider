@@ -142,7 +142,7 @@ export interface UserContext extends ObservedUserContext {
   /**
    * Opens a page in this context. It is closed, with the popups it opened, when the scope closes.
    */
-  readonly newPage: Effect.Effect<Page.Page, Page.PageError, Scope.Scope>
+  readonly newPage: Effect.Effect<Page.Page, Page.PageError | Target.TargetGone, Scope.Scope>
   readonly pages: Watchable.Watchable<ReadonlyArray<Page.Page>>
   readonly workers: Watchable.Watchable<ReadonlyArray<BrowserWorker.BrowserWorker>>
   /**
@@ -152,7 +152,7 @@ export interface UserContext extends ObservedUserContext {
   /**
    * Reads the context's storage, to save and start other contexts from.
    */
-  readonly exportStorageState: Effect.Effect<StorageState.StorageState, UserContextError>
+  readonly exportStorageState: Effect.Effect<StorageState.StorageState, UserContextError | Target.TargetGone>
   /**
    * A clock for every page of the context, as one timeline (opt-in).
    */
@@ -165,20 +165,20 @@ export interface UserContext extends ObservedUserContext {
     pattern: Url.Pattern | string,
     handler: Route.Handler<E, R, P>,
     options?: Route.Options<P> | undefined
-  ): Effect.Effect<Route.Registration, Route.RouteError, Scope.Scope | R>
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone, Scope.Scope | R>
   /**
    * Runs a script in every new document of every page while the registration lives.
    */
   addInitScript(
     script: InitScript.Source,
     options?: InitScript.Options | undefined
-  ): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError, Scope.Scope>
+  ): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>
   /**
    * Overrides the given settings for every page while the registration lives.
    */
   emulate(
     settings: Emulation.Emulation
-  ): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope>
+  ): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>
   /**
    * Grants permissions while the registration lives. Grants are combined (AND) with Permissions Policy.
    *
@@ -201,7 +201,7 @@ export interface UserContext extends ObservedUserContext {
   grant(
     permissions: ReadonlyArray<Permission>,
     options?: GrantOptions | undefined
-  ): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope>
+  ): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>
 }
 
 /**

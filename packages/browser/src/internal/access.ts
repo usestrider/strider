@@ -9,7 +9,6 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
 import type * as Declaration from "../Declaration.ts"
-import * as Reason from "../Reason.ts"
 import * as Target from "../Target.ts"
 import * as Operation from "./operation.ts"
 
@@ -73,30 +72,12 @@ export const track = <R extends Declaration.Registration>(grant: Option.Option<G
     ? Effect.as(grant.value.onRelease(registration.remove), registration)
     : Effect.succeed(registration)
 
-/** Why a released grant refuses a member whose errors have no `TargetGone`: its module's `NotPermitted`. */
-export const releasedReason = (grant: Grant): Reason.NotPermitted =>
-  new Reason.NotPermitted({
-    required: grant.level,
-    hint: "The access was released with the scope that acquired it; acquire it again with inspect or control"
-  })
-
-/** Fails with `refuse`'s error once the grant is released; for members whose errors have no `TargetGone`. */
-export const checkOr = <E>(
-  grant: Option.Option<Grant>,
-  refuse: (reason: Reason.NotPermitted) => E
-): Effect.Effect<void, E> =>
-  Effect.suspend(() =>
-    Option.isSome(grant) && grant.value.released() ? Effect.fail(refuse(releasedReason(grant.value))) : Effect.void
-  )
-
 /** How a handle's members are guarded, by name; a sub-handle's are named after it, as `clock.install`. */
 export interface Members {
   /** Members that need no grant: what observing gives. */
   readonly observed: ReadonlySet<string>
   /** Members that make a declaration, removed with the grant. */
   readonly declarations: ReadonlySet<string>
-  /** Members whose errors have no `TargetGone`: the error a released grant fails them with, given its arguments. */
-  readonly refusals: Readonly<Record<string, (reason: Reason.NotPermitted, args: ReadonlyArray<unknown>) => unknown>>
 }
 
 /**
@@ -105,13 +86,9 @@ export interface Members {
  * way. Locators carry the grant in their owner, so they check it themselves.
  */
 export const guard = <A extends object>(handle: A, grant: Grant, members: Members, prefix = ""): A => {
-  const wrap = (value: unknown, name: string, args: ReadonlyArray<unknown>): unknown => {
+  const wrap = (value: unknown, name: string): unknown => {
     if (!Effect.isEffect(value)) return value
-    const refuse = members.refusals[name]
-    const checked = Effect.andThen(
-      refuse === undefined ? check(Option.some(grant)) : checkOr(Option.some(grant), (reason) => refuse(reason, args)),
-      value
-    )
+    const checked = Effect.andThen(check(Option.some(grant)), value)
     return members.declarations.has(name)
       ? Effect.flatMap(checked, (registration) => track(Option.some(grant))(registration as Declaration.Registration))
       : checked
@@ -126,14 +103,14 @@ export const guard = <A extends object>(handle: A, grant: Grant, members: Member
     }
     if (descriptor.get !== undefined) {
       const get = descriptor.get
-      Object.defineProperty(out, key, { ...descriptor, get: () => wrap(get.call(handle), name, []) })
+      Object.defineProperty(out, key, { ...descriptor, get: () => wrap(get.call(handle), name) })
       continue
     }
     const value = descriptor.value
     if (typeof value === "function") {
-      out[key] = (...args: ReadonlyArray<unknown>) => wrap(value.apply(handle, args), name, args)
+      out[key] = (...args: ReadonlyArray<unknown>) => wrap(value.apply(handle, args), name)
     } else if (Effect.isEffect(value)) {
-      out[key] = wrap(value, name, [])
+      out[key] = wrap(value, name)
     } else if (value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
       out[key] = guard(value as object, grant, members, `${name}.`)
     } else {

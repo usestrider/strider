@@ -28,6 +28,7 @@ import * as Watchable from "./internal/watchable.ts"
 import * as NetworkResponse from "./NetworkResponse.ts"
 import type * as Page from "./Page.ts"
 import * as Reason from "./Reason.ts"
+import type * as Target from "./Target.ts"
 import type * as Url from "./Url.ts"
 import type * as UserContext from "./UserContext.ts"
 import type * as WatchableApi from "./Watchable.ts"
@@ -153,14 +154,14 @@ export interface Recording extends Declaration.Registration {
 export const record = (
   target: UserContext.UserContext | Page.Page,
   options: Options
-): Effect.Effect<Recording, HarError, Scope.Scope> =>
+): Effect.Effect<Recording, HarError | Target.TargetGone, Scope.Scope> =>
   Effect.gen(function*() {
     const scope = yield* Effect.scope
     const found = Handles.target(target)
     const { runtime, grant } = found.behind
     const id = Operation.operationId()
     const fail = (reason: HarErrorReason) => new HarError({ reason, diagnostics: Operation.diagnostics(id) })
-    yield* Access.checkOr(grant, fail)
+    yield* Access.check(grant)
     let matches: (url: string) => boolean = () => true
     if (options.url !== undefined) {
       try {

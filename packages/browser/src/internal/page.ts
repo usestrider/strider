@@ -41,6 +41,7 @@ import * as Clock from "./clock.ts"
 import * as Devices from "./devices.ts"
 import * as Emulation from "./emulation.ts"
 import * as Evaluation from "./evaluation.ts"
+import * as Guarded from "./guarded.ts"
 import * as Handles from "./handles.ts"
 import * as InitScripts from "./initScripts.ts"
 import * as LocatorImpl from "./locator.ts"
@@ -48,7 +49,6 @@ import type * as Model from "./model.ts"
 import * as Navigated from "./navigated.ts"
 import * as Navigation from "./navigation.ts"
 import * as Operation from "./operation.ts"
-import * as Refusals from "./refusals.ts"
 import * as Routes from "./routes.ts"
 import * as Runtime from "./runtime.ts"
 import * as Snapshots from "./snapshot.ts"
@@ -546,7 +546,7 @@ export const make = (owner: PageOwner): Page.Page => {
   }
   // A handle made under a grant fails above observe once the grant is released, and its declarations go with it
   const handle = Option.isSome(owner.grant)
-    ? Access.guard(page, owner.grant.value, Refusals.page)
+    ? Access.guard(page, owner.grant.value, Guarded.page)
     : page
   Handles.registerPage(handle, { runtime, entry, grant: owner.grant })
   return handle

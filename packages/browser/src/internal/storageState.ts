@@ -19,10 +19,11 @@ import * as Redacted from "effect/Redacted"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as CookieJar from "../CookieJar.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
+import type * as Page from "../Page.ts"
 import * as Reason from "../Reason.ts"
 import * as Route from "../Route.ts"
 import * as StorageState from "../StorageState.ts"
-import type * as Target from "../Target.ts"
+import * as Target from "../Target.ts"
 import * as Url from "../Url.ts"
 import * as UserContext from "../UserContext.ts"
 import * as Evaluation from "./evaluation.ts"
@@ -557,9 +558,13 @@ export const applyState = (
     const origins = state.origins.filter((origin) => origin.localStorage.length > 0 || origin.indexedDb.length > 0)
     if (origins.length === 0) return
     yield* Effect.scoped(Effect.gen(function*() {
-      const routeFailure = (error: Route.RouteError) => contextError(asReason(error.reason, operation), id, operation)
+      // The context's own setup: a target that went fails it, as BackendFailure
+      const reasonOf = (error: Route.RouteError | Page.PageError | Target.TargetGone) =>
+        Target.isTargetGone(error) ? error : error.reason
+      const routeFailure = (error: Route.RouteError | Target.TargetGone) =>
+        contextError(asReason(reasonOf(error), operation), id, operation)
       const page = yield* context.newPage.pipe(
-        Effect.mapError((error) => contextError(asReason(error.reason, operation), id, operation))
+        Effect.mapError((error) => contextError(asReason(reasonOf(error), operation), id, operation))
       )
       const { entry } = Handles.page(page)
       const html = (body: string) =>

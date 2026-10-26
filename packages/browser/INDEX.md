@@ -53,6 +53,7 @@ Obligations decided by a default policy because no handler decided them.
 *models*
 
 - `type Subject = typeof Subject.Type`
+- `type Policy = typeof Policy.Type`
 - `class AutoResolution: Schema.Class { subject, decision, policy, at }`
 - `interface Filter`
   - `readonly subject?: Subject["_tag"] | ReadonlyArray<Subject["_tag"]> | undefined`
@@ -60,6 +61,7 @@ Obligations decided by a default policy because no handler decided them.
 *schemas*
 
 - `const Subject = Schema.Union([Schema.TaggedStruct("Dialog", { kind: Schema.Literals(["Alert", "Confirm", "Prompt", "BeforeUnload"]), message: Schema.String }), Schema.TaggedStruct("FileChooser", {}), Schema.TaggedSt…`
+- `const Policy = Schema.Union([Schema.TaggedStruct("ContextOption", { name: Schema.Literal("dialogs"), value: Schema.String }), Schema.TaggedStruct("Default", {})])`
 
 *subscriptions*
 
@@ -81,7 +83,7 @@ The `Browser` service, its accessors, and the settings every backend shares.
   - `readonly info: Info`
   - `readonly capabilities: Watchable.Watchable<CapabilitySet>`
   - `newContext(options?: UserContext.Options | undefined): Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Scope.Scope>`
-  - `newPage(options?: UserContext.Options | undefined): Effect.Effect<Page.Page, Page.PageError, Scope.Scope>`
+  - `newPage(options?: UserContext.Options | undefined): Effect.Effect<Page.Page, Page.PageError | Target.TargetGone, Scope.Scope>`
   - `readonly pages: Watchable.Watchable<ReadonlyArray<Page.ObservedPage>>`
   - `readonly defaultContext: UserContext.ObservedUserContext`
 
@@ -91,7 +93,7 @@ The `Browser` service, its accessors, and the settings every backend shares.
 
 *accessors*
 
-- `const newPage: (options?: UserContext.Options | undefined) => Effect.Effect<Page.Page, Page.PageError, Browser | Scope.Scope>`
+- `const newPage: (options?: UserContext.Options | undefined) => Effect.Effect<Page.Page, Page.PageError | Target.TargetGone, Browser | Scope.Scope>`
 - `const newContext: (options?: UserContext.Options | undefined) => Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Browser | Scope.Scope>`
 
 *layers*
@@ -241,7 +243,7 @@ Conditions for `Expect.that`: predicates with a description, so a failure says w
 
 *models*
 
-- `interface Condition<in A>`
+- `interface Condition<in A> extends Pipeable`
   - `readonly [TypeId]: (a: A) => boolean`
 
 *constructors*
@@ -311,11 +313,11 @@ A context's cookies.
   - `readonly domain?: Domain | string | undefined`
   - `readonly path?: string | undefined`
 - `interface CookieJar`
-  - `readonly list: Effect.Effect<ReadonlyArray<Cookie>, CookieJarError>`
-  - `listFor(url: Url.Url | string): Effect.Effect<ReadonlyArray<Cookie>, CookieJarError>`
-  - `set(cookie: Input): Effect.Effect<void, CookieJarError>`
-  - `remove(match: Match): Effect.Effect<void, CookieJarError>`
-  - `readonly clear: Effect.Effect<void, CookieJarError>`
+  - `readonly list: Effect.Effect<ReadonlyArray<Cookie>, CookieJarError | Target.TargetGone>`
+  - `listFor(url: Url.Url | string): Effect.Effect<ReadonlyArray<Cookie>, CookieJarError | Target.TargetGone>`
+  - `set(cookie: Input): Effect.Effect<void, CookieJarError | Target.TargetGone>`
+  - `remove(match: Match): Effect.Effect<void, CookieJarError | Target.TargetGone>`
+  - `readonly clear: Effect.Effect<void, CookieJarError | Target.TargetGone>`
 - `type CookieJarErrorReason = typeof CookieJarErrorReason.Type`
 
 *schemas*
@@ -461,7 +463,7 @@ Dialogs: `alert`, `confirm`, `prompt` and `beforeunload`.
 
 *handlers*
 
-- `const handle: <E, R>(page: Page.Page, handler: (dialog: Pending) => Effect.Effect<Decision, E, R>) => Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope.Scope | R>`
+- `const handle: <E, R>(page: Page.Page, handler: (dialog: Pending) => Effect.Effect<Decision, E, R>) => Effect.Effect<Declaration.HandlerRegistration, Target.TargetGone, Scope.Scope | R>`
 - `const acceptAll: (dialog: Pending) => Effect.Effect<Decision>`
 - `const dismissAll: (dialog: Pending) => Effect.Effect<Decision>`
 
@@ -642,7 +644,7 @@ File choosers: what a page opens when a file input is clicked.
 
 *handlers*
 
-- `const handle: <E, R>(page: Page.Page, handler: (chooser: Pending) => Effect.Effect<Decision, E, R>) => Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope.Scope | R>`
+- `const handle: <E, R>(page: Page.Page, handler: (chooser: Pending) => Effect.Effect<Decision, E, R>) => Effect.Effect<Declaration.HandlerRegistration, Target.TargetGone, Scope.Scope | R>`
 - `const choose = (files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>) => (chooser: Pending): Effect.Effect<Decision, FileChooserError> => { const list: ReadonlyArray<FileInput.FileInput> = Array.isArray(…`
 
 *guards*
@@ -720,7 +722,7 @@ HAR recordings: a page's or context's network traffic, exported as an HTTP Archi
 
 *constructors*
 
-- `const record: (target: UserContext.UserContext | Page.Page, options: Options) => Effect.Effect<Recording, HarError, Scope.Scope>` (experimental)
+- `const record: (target: UserContext.UserContext | Page.Page, options: Options) => Effect.Effect<Recording, HarError | Target.TargetGone, Scope.Scope>` (experimental)
 
 *guards*
 
@@ -1130,7 +1132,7 @@ Responses a page or context receives: the event, and, when asked for, their bodi
 
 - `const StatusCode = Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 100, maximum: 599 })), Schema.brand("~@usestrider/browser/NetworkResponse/StatusCode"))`
 - `const ServedBy = Schema.Literals(["network", "cache", "serviceWorker", "cacheOrServiceWorker", "route", "unknown"])`
-- `const ResponseErrorReason = Schema.Union([BodyUnavailable, Reason.BackendFailure])`
+- `const ResponseErrorReason = Schema.Union([BodyUnavailable, MalformedBody, Reason.BackendFailure])`
 
 *combinators*
 
@@ -1166,6 +1168,7 @@ Responses a page or context receives: the event, and, when asked for, their bodi
 *reasons*
 
 - `class BodyUnavailable: Schema.Error { why, hint }`
+- `class MalformedBody: Schema.Error { expected, hint }`
 
 ### OriginStorage
 
@@ -1174,12 +1177,12 @@ Responses a page or context receives: the event, and, when asked for, their bodi
 *models*
 
 - `interface ReadonlyOriginStorage`
-  - `readonly entries: Effect.Effect< ReadonlyArray<readonly [key: string, value: string]>, OriginStorageError | Target.TargetGone >`
-  - `get(key: string): Effect.Effect<Option.Option<string>, OriginStorageError | Target.TargetGone>`
+  - `readonly entries: Effect.Effect< ReadonlyArray<readonly [key: string, value: string]>, OriginStorageError | Target.TargetGone | Deadline.Timeout >`
+  - `get(key: string): Effect.Effect<Option.Option<string>, OriginStorageError | Target.TargetGone | Deadline.Timeout>`
 - `interface OriginStorage extends ReadonlyOriginStorage`
-  - `set(key: string, value: string | Redacted.Redacted<string>): Effect.Effect<void, OriginStorageError | Target.TargetGone>`
-  - `remove(key: string): Effect.Effect<void, OriginStorageError | Target.TargetGone>`
-  - `readonly clear: Effect.Effect<void, OriginStorageError | Target.TargetGone>`
+  - `set(key: string, value: string | Redacted.Redacted<string>): Effect.Effect<void, OriginStorageError | Target.TargetGone | Deadline.Timeout>`
+  - `remove(key: string): Effect.Effect<void, OriginStorageError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly clear: Effect.Effect<void, OriginStorageError | Target.TargetGone | Deadline.Timeout>`
 - `type OriginStorageErrorReason = typeof OriginStorageErrorReason.Type`
 
 *schemas*
@@ -1285,8 +1288,8 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
   - `readonly mouse: Mouse.Mouse`
   - `readonly clock: PageClock.PageClock`
   - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect.…`
-  - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError, Scope.Sc…`
-  - `emulate(settings: Emulation.Emulation): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope>`
+  - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError | Target.…`
+  - `emulate(settings: Emulation.Emulation): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>`
   - `readonly activate: Effect.Effect<void, Target.TargetGone>`
   - `close(): Effect.Effect<void, Target.TargetGone | Deadline.Timeout>`
   - `close(options: { readonly runBeforeUnload: boolean }): Effect.Effect<void, PageError | Target.TargetGone | Deadline.Timeout>`
@@ -1330,10 +1333,10 @@ Page time: the clock a page's scripts see, under your control.
 
 - `type Mode = | { readonly mode: "fixed"; readonly at: DateTime.DateTime.Input } | { readonly mode: "offset"; readonly by: Duration.Input } | { readonly mode: "controlled"; readonly at: DateTime.DateTime.Input }`
 - `interface PageClock`
-  - `install(mode: Mode): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope>`
-  - `adjust(duration: Duration.Input): Effect.Effect<void, PageClockError>`
-  - `setTime(at: DateTime.DateTime.Input): Effect.Effect<void, PageClockError>`
-  - `readonly resume: Effect.Effect<void, PageClockError>`
+  - `install(mode: Mode): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>`
+  - `adjust(duration: Duration.Input): Effect.Effect<void, PageClockError | Target.TargetGone>`
+  - `setTime(at: DateTime.DateTime.Input): Effect.Effect<void, PageClockError | Target.TargetGone>`
+  - `readonly resume: Effect.Effect<void, PageClockError | Target.TargetGone>`
 - `type PageClockErrorReason = typeof PageClockErrorReason.Type`
 
 *schemas*
@@ -1672,7 +1675,7 @@ Trace recordings, exported in the format Playwright's trace viewer reads.
 
 *constructors*
 
-- `const record: (target: UserContext.UserContext | Page.Page, options?: Options | undefined) => Effect.Effect<Recording, TraceError, Scope.Scope>` (experimental)
+- `const record: (target: UserContext.UserContext | Page.Page, options?: Options | undefined) => Effect.Effect<Recording, TraceError | Target.TargetGone, Scope.Scope>` (experimental)
 
 *guards*
 
@@ -1741,16 +1744,16 @@ User contexts (the spec's term; Playwright calls them browser contexts), at two 
 - `interface GrantOptions`
   - `readonly origin?: Url.Origin | string | undefined`
 - `interface UserContext extends ObservedUserContext`
-  - `readonly newPage: Effect.Effect<Page.Page, Page.PageError, Scope.Scope>`
+  - `readonly newPage: Effect.Effect<Page.Page, Page.PageError | Target.TargetGone, Scope.Scope>`
   - `readonly pages: Watchable.Watchable<ReadonlyArray<Page.Page>>`
   - `readonly workers: Watchable.Watchable<ReadonlyArray<BrowserWorker.BrowserWorker>>`
   - `readonly cookies: CookieJar.CookieJar`
-  - `readonly exportStorageState: Effect.Effect<StorageState.StorageState, UserContextError>`
+  - `readonly exportStorageState: Effect.Effect<StorageState.StorageState, UserContextError | Target.TargetGone>`
   - `readonly clock: PageClock.PageClock`
   - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect.…`
-  - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError, Scope.Sc…`
-  - `emulate(settings: Emulation.Emulation): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope>`
-  - `grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.…`
+  - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError | Target.…`
+  - `emulate(settings: Emulation.Emulation): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>`
+  - `grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Targe…`
 - `interface Options`
   - `readonly storageState?: StorageState.StorageState | undefined`
   - `readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined`
@@ -1783,13 +1786,18 @@ Read-only views of state that changes, folded from protocol events (principle 16
 - `interface Watchable<A> extends Effect.Effect<A>`
   - `readonly [TypeId]: typeof TypeId`
   - `readonly changes: Stream.Stream<A>`
-  - `waitFor<B extends A>(refinement: Predicate.Refinement<A, B>): Effect.Effect<B, Deadline.Timeout | Target.TargetGone>`
-  - `waitFor(predicate: Predicate.Predicate<A>): Effect.Effect<A, Deadline.Timeout | Target.TargetGone>`
+  - `waitFor<B extends A>(refinement: Predicate.Refinement<A, B>): Effect.Effect<B, Deadline.Timeout | Target.TargetGone | Ended>`
+  - `waitFor(predicate: Predicate.Predicate<A>): Effect.Effect<A, Deadline.Timeout | Target.TargetGone | Ended>`
   - `map<B>(f: (a: A) => B): Watchable<B>`
 
 *guards*
 
 - `const isWatchable: (u: unknown) => u is Watchable<unknown>`
+- `const isEnded: (u: unknown) => u is Ended`
+
+*errors*
+
+- `class Ended: Schema.TaggedError "Ended" { operation, value, diagnostics }`
 
 ## `@usestrider/browser/ai`
 

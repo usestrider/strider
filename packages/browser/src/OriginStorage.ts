@@ -12,6 +12,7 @@ import type * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
+import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import * as Reason from "./Reason.ts"
 import type * as Target from "./Target.ts"
@@ -29,12 +30,12 @@ export interface ReadonlyOriginStorage {
    */
   readonly entries: Effect.Effect<
     ReadonlyArray<readonly [key: string, value: string]>,
-    OriginStorageError | Target.TargetGone
+    OriginStorageError | Target.TargetGone | Deadline.Timeout
   >
   /**
    * The value for `key`, or `None` when it is absent.
    */
-  get(key: string): Effect.Effect<Option.Option<string>, OriginStorageError | Target.TargetGone>
+  get(key: string): Effect.Effect<Option.Option<string>, OriginStorageError | Target.TargetGone | Deadline.Timeout>
 }
 
 /**
@@ -64,15 +65,15 @@ export interface OriginStorage extends ReadonlyOriginStorage {
   set(
     key: string,
     value: string | Redacted.Redacted<string>
-  ): Effect.Effect<void, OriginStorageError | Target.TargetGone>
+  ): Effect.Effect<void, OriginStorageError | Target.TargetGone | Deadline.Timeout>
   /**
    * Removes a key.
    */
-  remove(key: string): Effect.Effect<void, OriginStorageError | Target.TargetGone>
+  remove(key: string): Effect.Effect<void, OriginStorageError | Target.TargetGone | Deadline.Timeout>
   /**
    * Removes every key.
    */
-  readonly clear: Effect.Effect<void, OriginStorageError | Target.TargetGone>
+  readonly clear: Effect.Effect<void, OriginStorageError | Target.TargetGone | Deadline.Timeout>
 }
 
 /**

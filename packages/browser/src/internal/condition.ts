@@ -2,6 +2,7 @@
  * What a `Condition` is at run time: its predicate under the public TypeId, and its description, which
  * `ExpectationFailed` says, under a key of its own.
  */
+import { pipeArguments } from "effect/Pipeable"
 import type * as Condition from "../Condition.ts"
 
 export const TypeId = "~@usestrider/browser/Condition"
@@ -12,8 +13,15 @@ interface Impl<A> {
   readonly [DescriptionKey]: string
 }
 
+// `pipe`, so `condition.pipe(Condition.because("…"))` reads as the handles do (QUIRKS.md, Q85)
+const proto = {
+  pipe() {
+    return pipeArguments(this, arguments)
+  }
+}
+
 export const make = <A>(description: string, predicate: (a: A) => boolean): Condition.Condition<A> => {
-  const condition: Impl<A> = { [TypeId]: predicate, [DescriptionKey]: description }
+  const condition: Impl<A> = Object.assign(Object.create(proto), { [TypeId]: predicate, [DescriptionKey]: description })
   return condition as unknown as Condition.Condition<A>
 }
 

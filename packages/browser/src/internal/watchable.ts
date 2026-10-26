@@ -9,10 +9,9 @@ import * as Option from "effect/Option"
 import type * as Predicate from "effect/Predicate"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
-import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import * as Target from "../Target.ts"
-import type * as Watchable from "../Watchable.ts"
+import * as Watchable from "../Watchable.ts"
 import * as Operation from "./operation.ts"
 
 /** How to read a watchable from an entity's state. */
@@ -58,7 +57,7 @@ export const make = <S, A>(source: Source<S, A>): Watchable.Watchable<A> => {
     const { at, budget } = yield* Operation.budget
     const history: Array<Diagnostics.ObservedValue> = []
     const outcome = yield* states(source).pipe(
-      Stream.mapEffect((state): Effect.Effect<Option.Option<A>, Target.TargetGone | Deadline.Timeout> => {
+      Stream.mapEffect((state): Effect.Effect<Option.Option<A>, Target.TargetGone | Watchable.Ended> => {
         const value = source.project(state)
         if (Option.isSome(value)) {
           Operation.appendObservation(history, value.value)
@@ -76,13 +75,10 @@ export const make = <S, A>(source: Source<S, A>): Watchable.Watchable<A> => {
         }
         return source.final?.(state) === true
           ? Effect.fail(
-            Operation.timeout({
+            new Watchable.Ended({
               operation: source.operation,
-              id,
-              phase: "waitingForCondition",
-              budget,
-              history,
-              hint: Option.some("It reached a final value, which doesn't satisfy the predicate, so nothing else will")
+              value: Option.getOrUndefined(value),
+              diagnostics: Operation.diagnostics(id, { last: Option.fromNullishOr(history.at(-1)) })
             })
           )
           : Effect.succeed(Option.none<A>())

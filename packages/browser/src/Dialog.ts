@@ -24,7 +24,6 @@ import * as Events from "./internal/events.ts"
 import * as Handlers from "./internal/handlers.ts"
 import * as Handles from "./internal/handles.ts"
 import type * as Model from "./internal/model.ts"
-import * as Operation from "./internal/operation.ts"
 import * as Spans from "./internal/spans.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -307,31 +306,26 @@ export const history = (
 export const handle = <E, R>(
   page: Page.Page,
   handler: (dialog: Pending) => Effect.Effect<Decision, E, R>
-): Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope.Scope | R> =>
+): Effect.Effect<Declaration.HandlerRegistration, Target.TargetGone, Scope.Scope | R> =>
   Effect.suspend(() => {
     const { entry, grant } = Handles.page(page)
-    return Access.checkOr(grant, (reason) =>
-      new Declaration.DeclarationError({
-        declaration: "Dialog.handle",
-        reason,
-        diagnostics: Operation.diagnostics(Operation.operationId())
-      })).pipe(
-        Effect.andThen(Handlers.register({
-          page: entry,
-          handlers: entry.promptHandlers,
-          handler,
-          pending: toPending,
-          decision: (chosen) =>
-            isDecision(chosen) && "decision" in chosen
-              ? Effect.succeed((chosen as DecisionImpl).decision)
-              : Effect.die(new Error("Dialog.handle: the handler returned something that isn't a Dialog decision")),
-          noun: (prompt) => prompt.kind,
-          operation: "Dialog.handle.handled.waitFor",
-          name: "Dialog.handle",
-          fallback: "the context's policy"
-        })),
-        Effect.flatMap(Access.track(grant))
-      )
+    return Access.check(grant).pipe(
+      Effect.andThen(Handlers.register({
+        page: entry,
+        handlers: entry.promptHandlers,
+        handler,
+        pending: toPending,
+        decision: (chosen) =>
+          isDecision(chosen) && "decision" in chosen
+            ? Effect.succeed((chosen as DecisionImpl).decision)
+            : Effect.die(new Error("Dialog.handle: the handler returned something that isn't a Dialog decision")),
+        noun: (prompt) => prompt.kind,
+        operation: "Dialog.handle.handled.waitFor",
+        name: "Dialog.handle",
+        fallback: "the context's policy"
+      })),
+      Effect.flatMap(Access.track(grant))
+    )
   })
 
 /**

@@ -11,6 +11,7 @@ import * as Scope from "effect/Scope"
 import * as Declaration from "../Declaration.ts"
 import type * as InitScript from "../InitScript.ts"
 import * as Reason from "../Reason.ts"
+import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
@@ -68,7 +69,7 @@ export const add = (
   context: string,
   script: InitScript.Source,
   options: InitScript.Options | undefined
-): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError, Scope.Scope> =>
+): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError | Target.TargetGone, Scope.Scope> =>
   Effect.gen(function*() {
     const id = Operation.operationId()
     const fail = (reason: Declaration.DeclarationErrorReason) =>
@@ -120,16 +121,8 @@ export const add = (
       Scope.provide(scope),
       Effect.mapError((error) => {
         const mapped = Operation.fromAdapter(error, id, owner.runtime.backend)
-        return fail(
-          mapped._tag === "Gone"
-            ? new Reason.BackendFailure({
-              kind: "Rejected",
-              method: owner.operation,
-              metadata: {},
-              hint: mapped.error.message
-            })
-            : mapped.reason
-        )
+        // A target that went is TargetGone, as for every operation on it (QUIRKS.md, Q143)
+        return mapped._tag === "Gone" ? mapped.error : fail(mapped.reason)
       }),
       Effect.onError(() => Scope.close(scope, Exit.void))
     )

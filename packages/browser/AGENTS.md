@@ -61,7 +61,8 @@ member that isn't built yet fails as the defect `NotBuilt`, naming itself (a tra
   or `Firefox.layerConnect("ws://127.0.0.1:9222")`; Firefox takes one client at a time.
 - **Errors are per module, with a reason.** Recover with
   `Effect.catchReason("LocatorError", "StrictViolation", …)`. Any operation can also fail with `TargetGone` or
-  `Timeout`, which says how far it got (`timeout.phase`).
+  `Timeout`, which says how far it got (`timeout.phase`); a `waitFor` on a value that settled for good, such as a
+  finished download's status, fails with `Watchable.Ended` and the value.
 - **Secrets stay `Redacted`.** Pass `Config.Redacted("PASSWORD")` to `fill`; it is never logged or traced.
 - **Keys are UI Events names, modifiers an option.** `field.press("Enter")`,
   `field.press("a", { modifiers: ["Control"] })`; there is no `"Control+A"` syntax.

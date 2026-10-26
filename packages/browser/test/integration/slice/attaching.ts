@@ -156,7 +156,8 @@ export const attaching = (
             const routed = reasonOf(
               yield* Effect.exit(Effect.scoped(kept!.route("**", () => Effect.succeed(Route.abort()))))
             )
-            assert.strictEqual(routed?.reason?._tag, "NotPermitted")
+            // A declaration too: every member declares TargetGone (QUIRKS.md, Q143)
+            assert.deepStrictEqual((routed as unknown as Target.TargetGone).reason, { _tag: "AccessReleased" })
             assert.strictEqual((yield* first.status)._tag, "Open")
             // A grant's declarations go with it: the analytics call goes through now
             yield* Effect.scoped(Effect.gen(function*() {
@@ -201,11 +202,11 @@ export const attaching = (
             const blocked = reasonOf(yield* Effect.exit(page.getByRole("heading").readText))
             assert.strictEqual((blocked as unknown as Locator.LocatorError).reason._tag, "PromptBlocking")
           }))
-          // Released: the page the grant made closed with its scope, and the context's members refuse
-          // A page released by its scope is closed without waiting for the browser (QUIRKS.md, Q135)
+          // Released: the page the grant made closed with its scope, and the context's members fail with
+          // TargetGone; the scope waited for the page's close (QUIRKS.md, Q135 and Q143)
           yield* page!.closed.pipe(Effect.timeout("10 seconds"))
           const listed = reasonOf(yield* Effect.exit(context!.cookies.list))
-          assert.strictEqual(listed?.reason?._tag, "NotPermitted")
+          assert.deepStrictEqual((listed as unknown as Target.TargetGone).reason, { _tag: "AccessReleased" })
           yield* Effect.scoped(Effect.flatMap(browser.defaultContext.control, (again) => again.cookies.clear))
         }), timeout)
 

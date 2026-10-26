@@ -1071,6 +1071,8 @@ export const connect: (
             realm: realm.id,
             message: new ConsoleMessage.ConsoleMessage({
               level: consoleLevel("method" in params ? params.method : "log"),
+              // Firefox formats the call itself, `%f` as printf does (QUIRKS.md, Q33), and sends that text as the only
+              // argument, so it is the text
               text: params.text ?? "",
               location,
               origin,

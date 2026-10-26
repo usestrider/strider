@@ -9,6 +9,7 @@ import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Declaration from "../Declaration.ts"
 import * as Reason from "../Reason.ts"
+import type * as Target from "../Target.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
@@ -37,7 +38,7 @@ export const grant = (
   operation: string,
   permissions: ReadonlyArray<UserContext.Permission>,
   options: UserContext.GrantOptions | undefined
-): Effect.Effect<Declaration.Registration, Declaration.DeclarationError, Scope.Scope> =>
+): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope> =>
   Effect.gen(function*() {
     const id = Operation.operationId()
     const adapter = runtime.model.adapter
@@ -55,11 +56,8 @@ export const grant = (
     }
     const mapped = (error: Parameters<typeof Operation.fromAdapter>[0], name?: string) => {
       const failure = Operation.fromAdapter(error, id, runtime.backend)
-      if (failure._tag === "Gone") {
-        return fail(
-          new Reason.BackendFailure({ kind: "Rejected", method: operation, metadata: {}, hint: failure.error.message })
-        )
-      }
+      // A context that went is TargetGone, as for every operation on it (QUIRKS.md, Q143)
+      if (failure._tag === "Gone") return failure.error
       // A name the browser doesn't know is the caller's to fix
       return fail(
         name !== undefined && failure.reason._tag === "BackendFailure"

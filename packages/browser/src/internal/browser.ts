@@ -33,6 +33,7 @@ import * as PageClock from "../PageClock.ts"
 import * as Reason from "../Reason.ts"
 import * as Route from "../Route.ts"
 import * as StorageState from "../StorageState.ts"
+import * as Target from "../Target.ts"
 import * as Url from "../Url.ts"
 import * as UserContext from "../UserContext.ts"
 import * as Access from "./access.ts"
@@ -43,13 +44,13 @@ import * as DownloadImpl from "./download.ts"
 import * as Emulation from "./emulation.ts"
 import * as Evaluation from "./evaluation.ts"
 import * as Grants from "./grants.ts"
+import * as Guarded from "./guarded.ts"
 import * as Handles from "./handles.ts"
 import * as InitScripts from "./initScripts.ts"
 import * as Model from "./model.ts"
 import * as Navigation from "./navigation.ts"
 import * as Operation from "./operation.ts"
 import * as PageImpl from "./page.ts"
-import * as Refusals from "./refusals.ts"
 import * as Routes from "./routes.ts"
 import type * as Runtime from "./runtime.ts"
 import * as Spans from "./spans.ts"
@@ -65,7 +66,10 @@ const contextError = (operation: string, reason: UserContext.UserContextErrorRea
   new UserContext.UserContextError({ operation, reason, diagnostics: Operation.diagnostics(id) })
 
 /** A declaration's failure, as a context's: the reasons a context has, else a backend failure. */
-const asContextReason = (reason: Declaration.DeclarationErrorReason): UserContext.UserContextErrorReason =>
+// A context's own setup failing: a target that went is the setup's failure too, as BackendFailure
+const asContextReason = (
+  reason: Declaration.DeclarationErrorReason | Target.TargetGone
+): UserContext.UserContextErrorReason =>
   reason._tag === "InvalidInput" || reason._tag === "NotPermitted" || reason._tag === "Unsupported" ||
     reason._tag === "BackendFailure"
     ? reason
@@ -200,7 +204,7 @@ const makeContext = (
   }
   // A context granted for a scope fails above observe once the grant is released, and its declarations go with it
   const handle = Option.isSome(access.grant)
-    ? Access.guard(context, access.grant.value, Refusals.context)
+    ? Access.guard(context, access.grant.value, Guarded.context)
     : context
   Handles.registerContext(handle, { runtime, entry, grant: access.grant })
   return handle
@@ -263,7 +267,7 @@ const makeDeniedContext = (
     new Reason.NotPermitted({
       required: "control",
       hint:
-        `${member} needs control of the page's context, which this page's access doesn't give; gain it with context.control`
+        `${member} needs control of the page's context, which this page's access doesn't give; gain it with page.context.control (QUIRKS.md, Q144)`
     })
   const declaration = (member: string) =>
     Effect.fail(
@@ -559,16 +563,21 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             ? [...fields, { capability: "emulation.focus", override: { _tag: "FocusEmulation", enabled: true } }]
             : fields,
           id
-        ).pipe(Effect.mapError((error) => contextError("Browser.newContext", asContextReason(error.reason), id)))
+        ).pipe(Effect.mapError((error) =>
+          contextError("Browser.newContext", asContextReason(Target.isTargetGone(error) ? error : error.reason), id)
+        ))
       }
       if (options?.permissions !== undefined) {
         yield* Grants.grant(runtime, created, "Browser.newContext", options.permissions, undefined).pipe(
-          Effect.mapError((error) => contextError("Browser.newContext", asContextReason(error.reason), id))
+          Effect.mapError((error) =>
+            contextError("Browser.newContext", asContextReason(Target.isTargetGone(error) ? error : error.reason), id)
+          )
         )
       }
       const context: UserContext.UserContext = makeContext(runtime, entry, {
         grant: Option.none(),
-        page: (pageEntry) => Option.getOrThrow(runtime.page(pageEntry)),
+        page: (pageEntry) =>
+          Option.getOrThrow(runtime.page(pageEntry)),
         control: Effect.sync(() => context)
       })
       contexts.set(created, context)

@@ -54,6 +54,7 @@ import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
 import * as CdpWire from "./cdpWire.ts"
+import * as ConsoleFormat from "./consoleFormat.ts"
 import * as Declarations from "./declarations.ts"
 import * as Launch from "./launch.ts"
 import * as ProtocolClient from "./protocolClient.ts"
@@ -287,6 +288,16 @@ const textOf = (value: Runtime.RemoteObject): string =>
     : value.value !== undefined && value.type !== "object"
     ? String(value.value)
     : value.description ?? value.type
+
+/** A console argument, for the Console Standard's formatter (QUIRKS.md, Q33). */
+const argumentOf = (value: Runtime.RemoteObject): ConsoleFormat.Argument => ({
+  text: textOf(value),
+  value: value.type === "string" || value.type === "number"
+    ? (value.value as string | number | undefined) ??
+      (value.unserializableValue === undefined ? undefined : Number(value.unserializableValue))
+    : undefined,
+  string: value.type === "string"
+})
 
 // Windows virtual key codes for the keys whose `text` doesn't say what they are; CDP needs them to act.
 const keyCodes: Readonly<Record<string, number>> = {
@@ -1476,7 +1487,7 @@ export const connect: (
           realm: realm.id,
           message: new ConsoleMessage.ConsoleMessage({
             level: consoleLevel(params.type),
-            text: params.args.map(textOf).join(" "),
+            text: ConsoleFormat.format(params.args.map(argumentOf)),
             location: top === undefined || top.url === ""
               ? Option.none()
               // CDP's lines and columns are 0-based; a location is 1-based, as stack traces print it

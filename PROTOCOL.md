@@ -743,6 +743,22 @@ Adapter responsibilities:
   - **WebKit forgets a left document's body too** (Q179), which the review didn't foresee; it stays without one.
 - **Tests.** `test/integration/slice/recordings.ts`'s HAR test reads a response's `Set-Cookie` on every backend, and the body of a document the page left at once, on Chromium and Firefox. A full run found Q180, a crash another client causes that goes unreported under load, which fails as often without this step. Integration tests: 465, all passing in the last full run.
 
+**Built** (2026-10-25, after [review 21](reviews/21-quirks.md), its fourth step): the API before a release.
+
+- **`TargetGone` wherever it can happen** (`Page`, `UserContext`, `CookieJar`, `PageClock`, `Dialog.handle`, `FileChooser.handle`, `Har.record`, `Trace.record`, `Browser.newPage`; `internal/access.ts`, `guarded.ts`). As Target.ts says it is for every operation on a target. Declarations, cookies and the clock pass a target that went through as `TargetGone`, where they made it a `BackendFailure`; a context's own setup still reports one as its failure. A released grant fails every guarded member with `TargetGone{AccessReleased}`, so the table of module refusals is gone (Q143, Q131).
+- **Origin storage's deadline is a `Timeout`** (`dispatchedUnconfirmed`), not a `BackendFailure` (Q131).
+- **A capture's element** (`captures.ts`; `PageError`). None is `Locator.NoMatch`, several `StrictViolation` with the candidates (Q126).
+- **`Watchable.Ended`** (`Watchable`, `internal/watchable.ts`). A wait on a value that settled on one it can't satisfy fails with the final value, not a `Timeout` (Q62).
+- **`AutoResolution.policy`** is `ContextOption{ name, value }` or `Default` (Q63, Q105).
+- **`NetworkResponse.MalformedBody`** for `json` of a body that isn't JSON (Q64).
+- **`Condition` is `Pipeable`** (Q85).
+- **Console text** (`internal/consoleFormat.ts`; the CDP and WebKit adapters). The Console Standard's formatter, applied to the arguments CDP and WebKit report; Firefox applies its own (Q33).
+- **Where the build differs from the review.**
+  - **`Dialog.handle`, `FileChooser.handle`, `Har.record`, `Trace.record` and `Browser.newPage` declare `TargetGone` too:** they refused a released grant the same way, or open a page in a context, which the review's list left out.
+  - **Objects in console text read as each browser describes them,** not one way: WebDriver BiDi serializes an `Error` without its message, so one rendering would have dropped Chromium's. And Firefox's text can't be reformatted: it arrives as one argument, with `%f` written as printf writes it (Q33; reported in `upstream/`).
+  - **`AutoResolution.policy`'s option is `ContextOption`,** not `Option`, which reads as Effect's.
+- **Tests.** `test/ConsoleFormat.test.ts` checks the formatter; `modules.ts` formats a call on every backend, waits for a canceled download to complete and gets `Ended`, and reads the new policies; `contents.ts` expects `NoMatch` for a capture of no element; `attaching.ts` expects `TargetGone{AccessReleased}` from a released route and cookie jar. Integration tests: 468, all passing in one full run, a file at a time.
+
 ### Pause-on-start granularity
 
 Before-author-script setup for *new* targets needs them paused at creation. Granularity differs by backend, and the access model depends on it.

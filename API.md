@@ -237,7 +237,7 @@ interface Browser {
   readonly info: Info                                   // fixed for the connection: product, version, protocol, revision
   readonly capabilities: Watchable.Watchable<CapabilitySet>   // refined as probes complete
   newContext(options?: UserContext.Options | undefined): Effect<UserContext.UserContext, UserContext.UserContextError, Scope>   // owned; removed when the scope closes
-  newPage(options?: UserContext.Options | undefined): Effect<Page.Page, Page.PageError, Scope>   // a fresh context + page, released together
+  newPage(options?: UserContext.Options | undefined): Effect<Page.Page, Page.PageError | TargetGone, Scope>   // a fresh context + page, released together
   readonly pages: Watchable.Watchable<ReadonlyArray<Page.ObservedPage>>   // attach mode: what exists, and changes
   readonly defaultContext: UserContext.ObservedUserContext   // fixed: exists for the whole connection
 }
@@ -266,16 +266,16 @@ interface ObservedUserContext {                         // a context we don't co
   readonly control: Effect<UserContext, UserContextError, Scope>   // explicit; reading storage needs it too
 }
 interface UserContext extends ObservedUserContext {     // two levels only: reads happen on pages
-  readonly newPage: Effect<Page.Page, Page.PageError, Scope>   // closed with its unsolicited popups when the scope closes
+  readonly newPage: Effect<Page.Page, Page.PageError | TargetGone, Scope>   // closed with its unsolicited popups when the scope closes
   readonly pages: Watchable.Watchable<ReadonlyArray<Page.Page>>
   readonly workers: Watchable.Watchable<ReadonlyArray<BrowserWorker.BrowserWorker>>
   readonly cookies: CookieJar.CookieJar                 // a sub-handle bound to the context (Storage, below)
-  readonly exportStorageState: Effect<StorageState.StorageState, UserContextError>   // values Redacted in memory
+  readonly exportStorageState: Effect<StorageState.StorageState, UserContextError | TargetGone>   // values Redacted in memory
   readonly clock: PageClock.PageClock                   // context-wide timeline (opt-in)
-  route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError, Scope | R>   // asked after the page's own
-  addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, DeclarationError, Scope>
-  emulate(settings: Emulation.Emulation): Effect<Registration, DeclarationError, Scope>
-  grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect<Registration, DeclarationError, Scope>   // default every origin (not on Firefox); ANDed with Permissions Policy
+  route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError | TargetGone, Scope | R>   // asked after the page's own
+  addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, DeclarationError | TargetGone, Scope>
+  emulate(settings: Emulation.Emulation): Effect<Registration, DeclarationError | TargetGone, Scope>
+  grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect<Registration, DeclarationError | TargetGone, Scope>   // default every origin (not on Firefox); ANDed with Permissions Policy
 }
 
 interface Options {                                      // UserContext.Options; an unset option keeps the browser's own value unless a default is stated
@@ -302,7 +302,7 @@ interface Emulation {
 }
 ```
 
-- **What a connection controls** (review 19, candidate 2). A page it created, or a page in a context it created, is controlled for its life. Any other page is observed: a launched browser's own first tab, an attached browser's tabs, and their popups. `browser.pages` lists every page, as `Page`s or observed pages, and `browser.defaultContext` has `pages`, `workers` and `control`. `inspect` and `control` gain access for the caller's scope; when it closes, what they gave fails with `TargetGone{AccessReleased}` (members whose errors declare none fail with their module's `NotPermitted`, a clock with `NotInstalled`), the declarations made through them are removed, and the page stays open. Controlling a context controls its pages for the same scope; a page's `context`, when its context isn't controlled, refuses with `NotPermitted`. A context the connection didn't create has no dialog policy, so its dialogs wait for a handler or the user.
+- **What a connection controls** (review 19, candidate 2). A page it created, or a page in a context it created, is controlled for its life. Any other page is observed: a launched browser's own first tab, an attached browser's tabs, and their popups. `browser.pages` lists every page, as `Page`s or observed pages, and `browser.defaultContext` has `pages`, `workers` and `control`. `inspect` and `control` gain access for the caller's scope; when it closes, what they gave fails with `TargetGone{AccessReleased}`, every member alike since review 21 (before it, members whose errors declared no `TargetGone` failed with their module's `NotPermitted`, a clock with `NotInstalled`; QUIRKS.md, Q143), the declarations made through them are removed, and the page stays open. Controlling a context controls its pages for the same scope; a page's `context`, when its context isn't controlled, refuses with `NotPermitted`. A context the connection didn't create has no dialog policy, so its dialogs wait for a handler or the user.
 - **One concept, two lifetimes.** Creation options are declarations held for the context's whole life, made before its first page; `emulate` and `grant` are the same declarations, scoped. So viewport, locale and timezone live in `Emulation`, not as separate options. `focus: "emulated"` is the focus override, which Firefox lacks.
 - **Overrides restore only what they know.** Removing one restores the previous value when it is known and access permits; precedence is page over context (CONCEPTS.md §7). A field the backend can't apply fails with `Unsupported` naming it.
 - **One `emulate` call is one registration** (review 17, candidate 5). Removing it, or closing its scope, removes every field it set. Each field is a capability named for it: `emulation.viewport`, `emulation.viewport.mobile`, `emulation.userAgent`, `emulation.locale`, `emulation.timezone`, `emulation.geolocation`, `emulation.geolocation.unavailable`, `emulation.media`, `emulation.network.offline`, `emulation.network.throttling`, `emulation.cpuSlowdown`, `emulation.javaScript`, `emulation.touch` and `emulation.focus`. The call fails with `Unsupported` naming the first the backend can't apply, before anything is applied. Chromium applies every field. Firefox can't emulate media, touch, JavaScript, a mobile viewport, throttling, a CPU slowdown or an unavailable position. WebKit sets the locale and position per context, the locale only before the context's pages exist (which `UserContext.Options.emulation` is), and can't emulate touch, throttling, a CPU slowdown or an unavailable position. Most fields reach a loaded page at once; JavaScript, touch handlers and WebKit's `navigator.userAgent` wait for its next document.
@@ -352,9 +352,9 @@ interface Page extends ReadonlyPage {
   readonly keyboard: Keyboard.Keyboard
   readonly mouse: Mouse.Mouse
   readonly clock: PageClock.PageClock
-  route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError, Scope | R>
-  addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, Declaration.DeclarationError, Scope>
-  emulate(settings: Emulation.Emulation): Effect<Declaration.Registration, Declaration.DeclarationError, Scope>
+  route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError | TargetGone, Scope | R>
+  addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, Declaration.DeclarationError | TargetGone, Scope>
+  emulate(settings: Emulation.Emulation): Effect<Declaration.Registration, Declaration.DeclarationError | TargetGone, Scope>
   readonly activate: Effect<void, TargetGone>            // bring to front; rendering-based waits need it
   close(): Effect<void, TargetGone | Timeout>            // owned teardown: no beforeunload
   close(options: { readonly runBeforeUnload: boolean }): Effect<void, PageError | TargetGone | Timeout>
@@ -398,13 +398,13 @@ interface PdfOptions {                                   // Length is a value an
 
 // OriginStorage
 interface ReadonlyOriginStorage {
-  readonly entries: Effect<ReadonlyArray<readonly [key: string, value: string]>, OriginStorageError | TargetGone>
-  get(key: string): Effect<Option<string>, OriginStorageError | TargetGone>
+  readonly entries: Effect<ReadonlyArray<readonly [key: string, value: string]>, OriginStorageError | TargetGone | Timeout>
+  get(key: string): Effect<Option<string>, OriginStorageError | TargetGone | Timeout>
 }
 interface OriginStorage extends ReadonlyOriginStorage {
-  set(key: string, value: string | Redacted<string>): Effect<void, OriginStorageError | TargetGone>
-  remove(key: string): Effect<void, OriginStorageError | TargetGone>
-  readonly clear: Effect<void, OriginStorageError | TargetGone>
+  set(key: string, value: string | Redacted<string>): Effect<void, OriginStorageError | TargetGone | Timeout>
+  remove(key: string): Effect<void, OriginStorageError | TargetGone | Timeout>
+  readonly clear: Effect<void, OriginStorageError | TargetGone | Timeout>
 }
 ```
 
@@ -417,7 +417,7 @@ Notes:
 - **Reads of page storage follow access.** `localStorage` and `sessionStorage` belong to the current document's origin, and are read and written from the isolated world, which shares the page's storage. Reading needs inspect; writing needs control. A `Redacted` value is written as its value and never logged. An origin with no storage, such as an opaque one, is `BackendFailure`, and a value over the quota `InvalidInput`.
 - **Captures map onto every backend's options** (review 18, candidate 5). An `Element` area is the element's box in the document, its frame's included, measured now: a capture never waits, so a locator that doesn't match one element is `InvalidInput`. `scale: "css"` and `omitBackground` are `Unsupported` on Firefox (`screenshot.cssScale`, `screenshot.omitBackground`), headers, footers and `preferCssPageSize` too (`pdf.headerFooter`, `pdf.preferCssPageSize`), and WebKit has no PDF (`pdf`). `readHtml` is the doctype and the root's `outerHTML`.
 - **Navigation resolves at commit.** That is when a navigation has succeeded. Waiting for `domContentLoaded` or `load` is an extra wait you ask for with `waitUntil`, and the span records which state was waited for.
-- **Page failures are `Page.PageError`.** It covers navigation (`NavigationFailed{netError}`, `NavigationCanceled{why}`, `NavigationSuperseded{by}`, `BecameDownload`, `NoContent`, all declared in `PageNavigation`), evaluation (`EvaluationThrown`, `NotSerializable`), reads and captures, setup (`InitializationFailed{step}`), a refused close (`CloseCanceled`), and the shared `InvalidInput`, `NotPermitted`, `Unsupported` and `BackendFailure`. `operation` names the call.
+- **Page failures are `Page.PageError`.** It covers navigation (`NavigationFailed{netError}`, `NavigationCanceled{why}`, `NavigationSuperseded{by}`, `BecameDownload`, `NoContent`, all declared in `PageNavigation`), evaluation (`EvaluationThrown`, `NotSerializable`), reads and captures (a capture's element: `Locator.NoMatch` or `StrictViolation`, since review 21; before, `InvalidInput{area}`), setup (`InitializationFailed{step}`), a refused close (`CloseCanceled`), and the shared `InvalidInput`, `NotPermitted`, `Unsupported` and `BackendFailure`. `operation` names the call.
 - **Declarations are scoped registrations.** `route`, `addInitScript`, `emulate`, `grant`, `Dialog.handle`, `FileChooser.handle` and `clock.install` are removed when the caller's scope closes, and fail with `Declaration.DeclarationError` (`TimingUnsupported`, `Conflict{with}`, `DependencyReleased`, and the shared reasons). In `@effect/vitest`'s `it.effect` that scope is already present; elsewhere, use `Effect.scoped`.
 - **Init scripts keep one order everywhere** (review 17, candidate 4): the context's before the page's, then the order they were added in. `after` states a dependency, in force and of equal or broader scope, and a script runs only if each one it comes after ran in that document without throwing; a dependency removed stops its dependents. A script runs as its document starts, before `document.documentElement` exists, in every frame, cross-site ones included; added to a loaded page, it runs from the next document. One that throws is the page's `UncaughtException`. `world: "isolated"` is one isolated world of the caller's, apart from the engine's and the page's, where `page.evaluate` will run; WebKit has none for init scripts. On Firefox a script runs inside a function, so its top-level declarations aren't globals.
 
@@ -589,6 +589,7 @@ declare const make: <A>(description: string, predicate: Predicate<A>) => Conditi
 declare const not: <A>(condition: Condition<A>) => Condition<A>   // the wait is for the negation, and it passes when the element is missing
 declare const and: <A>(...conditions: ReadonlyArray<Condition<A>>) => Condition<A>   // evaluated against one observation
 declare const because: { (why: string): <A>(condition: Condition<A>) => Condition<A>; <A>(condition: Condition<A>, why: string): Condition<A> }
+// a Condition is Pipeable since review 21: condition.pipe(Condition.because("…"))
 
 // AriaPattern: matched against snapshot({ sources: "aria" }); how children match is always stated
 declare const node: (role: AriaRole.AriaRole, name: string | RegExp, children: Children) => AriaPattern   // "" means no accessible name
@@ -622,8 +623,8 @@ Two kinds of things change over time, and they get different types on purpose. R
 // Watchable
 interface Watchable<A> extends Effect<A> {               // yield* reads the current value
   readonly changes: Stream<A>                            // current value first, then each distinct change; ends after the terminal state
-  waitFor<B extends A>(refinement: Refinement<A, B>): Effect<B, Timeout | TargetGone>   // level-triggered, under the deadline
-  waitFor(predicate: Predicate<A>): Effect<A, Timeout | TargetGone>
+  waitFor<B extends A>(refinement: Refinement<A, B>): Effect<B, Timeout | TargetGone | Watchable.Ended>   // level-triggered, under the deadline; Ended: settled on a value that doesn't satisfy it (review 21)
+  waitFor(predicate: Predicate<A>): Effect<A, Timeout | TargetGone | Watchable.Ended>
   map<B>(f: (a: A) => B): Watchable<B>                   // derived from the same source, so never glitchy
 }
 
@@ -726,7 +727,7 @@ yield* page.route("https://app.example.com/api/slow", (intercepted) =>   // what
 ```
 
 - **Requests and responses are events of their page and context** (review 14). A request is published per hop when it is sent, and a response when it arrives; `NetworkRequest.toHttpClientRequest` turns a captured request into Effect's `HttpClientRequest`, redacted headers still redacted.
-- **Bodies are collected for a subscription, not always** (review 14). `NetworkResponse.next` and `stream` with a `body` declare collection for their page or context in the subscription's scope before they return, up to `NetworkResponse.BodyLimit` (10 MiB; Effect's `HttpIncomingMessage.MaxBodySize` is a separate setting, for what this program reads). The response is delivered once its hop has ended and its bytes were read and decoded. A redirect hop has no body (`BodyUnavailable{redirect}`, without asking the browser), nor does a hop over the limit (`overLimit`), one the browser no longer has (`evicted`), or one that failed after its response started (`failed`). A body that hasn't finished by the deadline, such as an event stream's, times out `next`, with a hint saying the response matched, and fails a `stream` with `BodyUnavailable{streaming}` after `Deadline.DefaultBudget`.
+- **Bodies are collected for a subscription, not always** (review 14). `NetworkResponse.next` and `stream` with a `body` declare collection for their page or context in the subscription's scope before they return, up to `NetworkResponse.BodyLimit` (10 MiB; Effect's `HttpIncomingMessage.MaxBodySize` is a separate setting, for what this program reads). The response is delivered once its hop has ended and its bytes were read and decoded. A redirect hop has no body (`BodyUnavailable{redirect}`, without asking the browser), nor does a hop over the limit (`overLimit`), one the browser no longer has (`evicted`), or one that failed after its response started (`failed`). A body that hasn't finished by the deadline, such as an event stream's, times out `next`, with a hint saying the response matched, and fails a `stream` with `BodyUnavailable{streaming}` after `Deadline.DefaultBudget`; since review 21, a response whose content type is `text/event-stream` is `BodyUnavailable{streaming}` at once (QUIRKS.md, Q40). A body that isn't what it was read as, `json` of one that isn't JSON, is `MalformedBody{expected}` (a `BackendFailure` until review 21; Q64).
 - **Requests and responses are Effect's HTTP types.** A fulfilled response is an `HttpServerResponse` and a request change is an `HttpClientRequest` transform, so everything `effect/http` offers for building them applies. What each backend can change differs (CDP: URL, method, headers and body; BiDi adds cookies), and a change it can't apply fails with `Unsupported` naming the field rather than being dropped. Effect marks its HTTP modules unstable, so `Route` can change when they do.
 
 ```ts
@@ -739,7 +740,7 @@ interface Registration extends Declaration.Registration { readonly hits: Watchab
 interface InitScript extends Declaration.Registration { readonly id: Id }   // also usable in { after: [...] }
 ```
 
-- **The handler's return type is the obligation.** A handler that fails, is interrupted, runs out of its `Deadline.DefaultBudget` (as read at `route`), or returns a decision the backend can't apply gets the default decision, `continue`; its failure is logged at Effect's `References.UnhandledLogLevel`, and the decision is published as an `AutoResolution{PausedRequest}` (`policy: 'routes: "continue"'`) on the page and its context, as it is when every matching route falls through. A paused request is never left hanging, and one no route matches continues at once. At an authentication challenge the default is the challenge's response, never the browser's own prompt, which waits forever on headless Firefox (review 17, P6).
+- **The handler's return type is the obligation.** A handler that fails, is interrupted, runs out of its `Deadline.DefaultBudget` (as read at `route`), or returns a decision the backend can't apply gets the default decision, `continue`; its failure is logged at Effect's `References.UnhandledLogLevel`, and the decision is published as an `AutoResolution{PausedRequest}` (`policy: Default`; until review 21 the string `'routes: "continue"'`, which named no option, QUIRKS.md, Q105) on the page and its context, as it is when every matching route falls through. A paused request is never left hanging, and one no route matches continues at once. At an authentication challenge the default is the challenge's response, never the browser's own prompt, which waits forever on headless Firefox (review 17, P6).
 - **Order.** Routes compose by precedence: the page's before its context's, then the most recent first; `fallthrough` asks the next. `hits` counts the requests a route was asked about. A route matches its pattern itself, with `Url.Pattern`'s rules; the browser is asked to pause what covers it.
 - **A route has one phase** (review 17, candidates 1 and 2). `"request"` unless `options.phase` says `"response"`, when the server's status and headers are in (and on Chromium its body), or `"auth"`, at a challenge. The phase types what the handler is given and may return: `provideCredentials` is no decision for a request-phase route.
 - **What the backends do differs, and is said** (review 17, candidate 3). Chromium shows a route the CORS preflight of a cross-origin request, an `OPTIONS` request, which Firefox and WebKit don't; a fulfilled cross-origin response needs CORS headers on all three. WebKit pauses only a redirect's first hop and doesn't follow a redirect a route fulfills; it has no authentication phase. Firefox can't fulfill at the response phase or send a request to a new URL, and reports one failure for every abort reason, as WebKit does. Capability entries name each: `interception.responseBody`, `interception.responseFulfill`, `interception.continueUrl`, `interception.abortReason` and `interception.redirects`.
@@ -761,7 +762,7 @@ type Pending =                                         // what a handler decides
   | Prompt & { readonly accept: Decision; respond(text: string): Decision; readonly dismiss: Decision }   // accept answers with defaultValue
   | BeforeUnload & { readonly leave: Decision; readonly stay: Decision }
 declare const handle: <E, R>(page: Page.Page, handler: (dialog: Pending) => Effect<Decision, E, R>) =>
-  Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope | R>
+  Effect<Declaration.HandlerRegistration, TargetGone, Scope | R>
 // ready-made handlers; match on _tag for anything finer
 declare const acceptAll: (dialog: Pending) => Effect<Decision>    // Alert/Confirm/Prompt: accept; BeforeUnload: leave
 declare const dismissAll: (dialog: Pending) => Effect<Decision>   // Alert: accept; Confirm/Prompt: dismiss; BeforeUnload: stay
@@ -772,7 +773,7 @@ type Pending =                                         // what a handler decides
   | { readonly _tag: "Single"; select(file: FileInput.FileInput): Decision; readonly cancel: Decision }
   | { readonly _tag: "Multiple"; select(files: ReadonlyArray<FileInput.FileInput>): Decision; readonly cancel: Decision }
 declare const handle: <E, R>(page: Page.Page, handler: (chooser: Pending) => Effect<Decision, E, R>) =>
-  Effect<Declaration.HandlerRegistration, Declaration.DeclarationError, Scope | R>
+  Effect<Declaration.HandlerRegistration, TargetGone, Scope | R>
 declare const choose: (files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>) =>
   (chooser: Pending) => Effect<Decision, FileChooserError>   // fails with InvalidInput on a Single chooser given several files, so Cancel applies
 
@@ -791,11 +792,11 @@ interface Download extends Pipeable, Inspectable {
 
 // CookieJar: context.cookies
 interface CookieJar {
-  readonly list: Effect<ReadonlyArray<Cookie>, CookieJarError>         // every cookie in the context
-  listFor(url: Url.Url | string): Effect<ReadonlyArray<Cookie>, CookieJarError>   // what a request to url would send
-  set(cookie: Input): Effect<void, CookieJarError>                     // a change, not a declaration: a scope doesn't undo it
-  remove(match: Match): Effect<void, CookieJarError>                   // name; domain and path default to any
-  readonly clear: Effect<void, CookieJarError>
+  readonly list: Effect<ReadonlyArray<Cookie>, CookieJarError | TargetGone>         // every cookie in the context
+  listFor(url: Url.Url | string): Effect<ReadonlyArray<Cookie>, CookieJarError | TargetGone>   // what a request to url would send
+  set(cookie: Input): Effect<void, CookieJarError | TargetGone>                     // a change, not a declaration: a scope doesn't undo it
+  remove(match: Match): Effect<void, CookieJarError | TargetGone>                   // name; domain and path default to any
+  readonly clear: Effect<void, CookieJarError | TargetGone>
 }
 declare const toCookie: (cookie: Cookie) => Cookies.Cookie            // to effect/http's Cookie, unredacting the value explicitly
 class Cookie extends Schema.Class<Cookie>("@usestrider/browser/CookieJar/Cookie")({   // Effect's cookie attributes plus what only browsers store
@@ -827,7 +828,7 @@ declare const Json: Schema.Codec<StorageState, string>   // Schema.fromJsonStrin
 
 - **A dialog event is data; a handler gets the decisions** (review 13). `Dialog.next`, `stream` and `history` report a `Dialog`, which observing doesn't decide; a handler receives it as `Pending`, with the decisions its kind offers.
 - **Which handler decides.** The page's latest `Dialog.handle` still in its scope, chosen when the dialog opens; removing it leaves later dialogs to the one before. It has `Deadline.DefaultBudget`, as read at `handle`, per dialog. A handler that fails, is interrupted or runs out of time leaves the dialog to the policy, and its failure is logged at Effect's `References.UnhandledLogLevel`. The decision is delivered by a resolver in the model's scope, apart from the handler's fiber, so a late handler can't contradict it. `handled` counts what a registration decided.
-- **Default dialog policy.** It is explicit and has no delay. A context's `dialogs` option (`"dismiss"`, the default for owned contexts; `"accept"`; or `"leaveOpen"`) decides immediately when no handler claims a dialog. `beforeunload` is accepted under `"dismiss"`, so closing never hangs. On attached pages there is no default unless the caller sets one. Every automatic decision is an `AutoResolution` event on the page and its context (`decision: "dismiss"`, `policy: 'dialogs: "dismiss"'`) and is recorded on the operation that was running.
+- **Default dialog policy.** It is explicit and has no delay. A context's `dialogs` option (`"dismiss"`, the default for owned contexts; `"accept"`; or `"leaveOpen"`) decides immediately when no handler claims a dialog. `beforeunload` is accepted under `"dismiss"`, so closing never hangs. On attached pages there is no default unless the caller sets one. Every automatic decision is an `AutoResolution` event on the page and its context (`decision: "dismiss"`, `policy: ContextOption{ name: "dialogs", value: "dismiss" }`, a string until review 21) and is recorded on the operation that was running.
 - **Waiting on a dialog.** An operation blocked by a dialog that a handler or the policy is resolving waits within its deadline, normally just a round trip. Under `"leaveOpen"` it fails immediately with a hint naming the dialog: the shared reason `PromptBlocking{kind, text}`, in `LocatorError` and `PageError`. That includes the click that opened it, whose dispatch `MayHaveBeenSent`, and an expectation on the page fails at once too. What blocks differs by browser (review 13): Chromium and WebKit block every evaluation while a dialog is open and Firefox doesn't, and on all three the input that opens a dialog returns only once it is decided; failing on every backend keeps one rule.
 - **A file chooser is data; a handler's argument adds the decisions** (review 14), as for dialogs. Every page of a context the library creates has its choosers reported and decided, so none is shown: the page's latest `FileChooser.handle` decides, with `Deadline.DefaultBudget` as read at `handle`, and otherwise the chooser is canceled and reported as an `AutoResolution` (`policy: 'fileChoosers: "cancel"'`, the one policy). On Firefox the input gets a `cancel` event as the chooser opens, before any decision, and the files a handler chooses still arrive after it; its `fileChooser` capability is `partial`. `FileInput.local` resolves a relative path with Effect's `Path`, which the layer needs for it. `FileInput.bytes` is made in the page (review 20): the bytes cross into the caller's isolated world and become a `File` set through a `DataTransfer`, with `input` and `change` dispatched, so it keeps its MIME type and needs no file system the browser shares; a chooser answered with made files has them set on its input and is let go. One call takes made files or paths, not both, since each replaces the other's.
 - **Downloads go to a directory each context owns** (review 14). Left to themselves, one browser cancels downloads and two save them into the user's home, so every context the library creates allows downloads into a temporary directory made before it and removed after it, recorded on its span; there is no option yet, and a route can abort a download's request. Every browser writes into a partial file and renames it when done, so `saveAs` and `stream` wait for completion, under the deadline in force. Progress is reported on CDP only (`downloads.progress`), and a download in progress when its context closes ends `Canceled`, whatever the backend says after.
@@ -841,10 +842,10 @@ declare const Json: Schema.Codec<StorageState, string>   // Schema.fromJsonStrin
 ```ts
 // PageClock
 interface PageClock {
-  install(mode: Mode): Effect<Declaration.Registration, Declaration.DeclarationError, Scope>   // needs before-author-script timing
-  adjust(duration: Duration.Input): Effect<void, PageClockError>      // controlled: advances, firing every due timer in order
-  setTime(at: DateTime.DateTime.Input): Effect<void, PageClockError>  // fixed or controlled: jumps; due timers fire at most once, like waking from sleep
-  readonly resume: Effect<void, PageClockError>                       // real time again, from now
+  install(mode: Mode): Effect<Declaration.Registration, Declaration.DeclarationError | TargetGone, Scope>   // needs before-author-script timing
+  adjust(duration: Duration.Input): Effect<void, PageClockError | TargetGone>      // controlled: advances, firing every due timer in order
+  setTime(at: DateTime.DateTime.Input): Effect<void, PageClockError | TargetGone>  // fixed or controlled: jumps; due timers fire at most once, like waking from sleep
+  readonly resume: Effect<void, PageClockError | TargetGone>                       // real time again, from now
 }
 type Mode =
   | { readonly mode: "fixed"; readonly at: DateTime.DateTime.Input }       // wall time frozen at `at`; timers run
@@ -950,7 +951,7 @@ interface Recording extends Declaration.Registration {
   - Screenshots and the screencast cost bandwidth. BiDi has no native screencast, so it is polled at the interval you choose.
   - DOM snapshots install Playwright's capture script in the page's main world, where it hooks CSSOM methods. That changes the page, so it needs control and never runs on attached or observed pages.
 - **Exports are explicit and redacted.** Both files cross a persistence boundary (`export*`). Classified fields are stripped under the active diagnostics preset, and raw content (bodies, snapshots, screenshots) is included only when asked for.
-- **Recording failures** are `Trace.TraceError` and `Har.HarError`: `WriteFailed{path}`, `NotPermitted`, `Unsupported` (a level the backend lacks) and `BackendFailure`; a HAR's `url` that doesn't compile is `InvalidInput`.
+- **Recording failures** are `Trace.TraceError` and `Har.HarError`: `WriteFailed{path}`, `NotPermitted`, `Unsupported` (a level the backend lacks) and `BackendFailure`; a HAR's `url` that doesn't compile is `InvalidInput`. A target whose grant was released is `TargetGone{AccessReleased}` since review 21.
 - **HAR recording** records requests as sent. Timings follow the HAR spec, and an entry without a body says why. On BiDi, the body collectors start when the recording scope is acquired (research/har.md).
 - **As built** (review 20). A HAR has one entry per hop, from the target's requests, with the response and its end; a body is read as its hop finishes, and an export waits for those reads but never for a hop still in flight, which is `_incomplete` unless `inFlightAtStop: "wait"`. Timings are the library's own: `send` 0, `wait` from the request to the response, `receive` to the end, and `blocked`, `dns`, `connect` and `ssl` -1, since no backend reports them alike; `startedDateTime` is wall time anchored as the recording starts. On Chromium the headers are the ones the network sent and received, cookies included (QUIRKS.md, Q158); since review 21, so are a `NetworkResponse`'s, while a `NetworkRequest`'s are still the ones Chromium's main event gives. Since review 21 too, a recording on Chromium keeps a document's body after the page has left it, which WebKit doesn't (Q160, Q179). Request bodies aren't recorded. `content: "attach"` writes one zip, `har.har` and the bodies it names by `_file`. A trace's steps are the library's operations on the target, through the span helper, nested under the caller's spans, which each span the operations recorded in them; `exportTrace` writes `trace.trace`, `trace.network` and the screenshots, frames and bodies in one zip. Entries carry Playwright's `_monotonicTime`, `_resourceType`, `_frameref`, `_transferSize`, `_failureText`, `_file` and `_webSocketMessages`, and our `_servedBy` and `_incomplete`.
 - **HAR replay is deferred.** Mocking the network is `route`'s job, and replay is test infrastructure that will be reworked with etest.

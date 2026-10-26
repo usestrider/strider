@@ -60,6 +60,7 @@ import * as Screencast from "../webkit-protocol/Screencast.ts"
 import * as Target from "../webkit-protocol/Target.ts"
 import * as Worker from "../webkit-protocol/Worker.ts"
 import * as Adapter from "./adapter.ts"
+import * as ConsoleFormat from "./consoleFormat.ts"
 import * as Declarations from "./declarations.ts"
 import * as Launch from "./launch.ts"
 import * as ProtocolClient from "./protocolClient.ts"
@@ -268,6 +269,13 @@ const textOf = (value: Runtime.RemoteObject): string =>
     : value.value !== undefined && value.type !== "object"
     ? String(value.value)
     : value.description ?? value.type
+
+/** A console argument, for the Console Standard's formatter (QUIRKS.md, Q33). */
+const argumentOf = (value: Runtime.RemoteObject): ConsoleFormat.Argument => ({
+  text: textOf(value),
+  value: value.type === "string" || value.type === "number" ? value.value as string | number | undefined : undefined,
+  string: value.type === "string"
+})
 
 // Windows virtual key codes, which WebKit needs to act on a key, as CDP does.
 const keyCodes: Readonly<Record<string, number>> = {
@@ -1014,7 +1022,7 @@ export const connect: (
         message: new ConsoleMessage.ConsoleMessage({
           level: consoleLevel(message.level),
           text: message.parameters !== undefined && message.parameters.length > 0
-            ? message.parameters.map(textOf).join(" ")
+            ? ConsoleFormat.format(message.parameters.map(argumentOf))
             : message.text,
           location: message.url === undefined || message.url === "" || message.url === "undefined"
             ? Option.none()

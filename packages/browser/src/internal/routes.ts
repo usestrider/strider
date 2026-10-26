@@ -195,7 +195,7 @@ export const register = <E, R, P extends Route.Phase>(
   pattern: Url.Pattern | string,
   handler: Route.Handler<E, R, P>,
   phase: P
-): Effect.Effect<Route.Registration, Route.RouteError, Scope.Scope | R> =>
+): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone, Scope.Scope | R> =>
   Effect.gen(function*() {
     const id = Operation.operationId()
     const adapter = owner.runtime.model.adapter
@@ -221,16 +221,8 @@ export const register = <E, R, P extends Route.Phase>(
       Scope.provide(scope),
       Effect.mapError((error) => {
         const mapped = Operation.fromAdapter(error, id, owner.runtime.backend)
-        return fail(
-          mapped._tag === "Gone"
-            ? new Reason.BackendFailure({
-              kind: "Rejected",
-              method: owner.operation,
-              metadata: {},
-              hint: mapped.error.message
-            })
-            : mapped.reason
-        )
+        // A target that went is TargetGone, as for every operation on it (QUIRKS.md, Q143)
+        return mapped._tag === "Gone" ? mapped.error : fail(mapped.reason)
       }),
       Effect.onError(() => Scope.close(scope, Exit.void))
     )

@@ -76,8 +76,9 @@ export type SourceLocation = typeof SourceLocation.Type
  *
  * **Details**
  *
- * `text` is what the browser reports, not reformatted: Firefox applies format specifiers such as `%s` and the
- * others don't, and every browser renders an object as its class name, such as `Object`.
+ * `text` has the call's format specifiers applied, such as `%s`, `%d` and `%f`, as the Console Standard's formatter
+ * applies them: Firefox applies its own, which writes `%f` as printf does (`1.250000`), and the library applies the
+ * Standard's to what Chromium and WebKit report. An object reads as its browser describes it, such as `Object`.
  *
  * @stability unstable
  * @category models

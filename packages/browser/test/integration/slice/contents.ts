@@ -636,7 +636,8 @@ export const contents = (
             const missing = reasonOf(
               yield* Effect.exit(page.screenshot({ area: { _tag: "Element", locator: page.locator("#none") } }))
             )
-            assert.strictEqual((missing as unknown as Page.PageError).reason._tag, "InvalidInput")
+            // A capture never waits: an element that isn't there is the locator's NoMatch (QUIRKS.md, Q126)
+            assert.strictEqual((missing as unknown as Page.PageError).reason._tag, "NoMatch")
           }))
         }), timeout)
 

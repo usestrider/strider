@@ -18,6 +18,7 @@ import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Diagnostics from "./Diagnostics.ts"
 import * as Reason from "./Reason.ts"
+import type * as Target from "./Target.ts"
 import * as Url from "./Url.ts"
 
 /**
@@ -199,23 +200,23 @@ export interface CookieJar {
   /**
    * Every cookie in the context.
    */
-  readonly list: Effect.Effect<ReadonlyArray<Cookie>, CookieJarError>
+  readonly list: Effect.Effect<ReadonlyArray<Cookie>, CookieJarError | Target.TargetGone>
   /**
    * The cookies a request to `url` would send.
    */
-  listFor(url: Url.Url | string): Effect.Effect<ReadonlyArray<Cookie>, CookieJarError>
+  listFor(url: Url.Url | string): Effect.Effect<ReadonlyArray<Cookie>, CookieJarError | Target.TargetGone>
   /**
    * Sets a cookie. A change, not a declaration: it isn't undone when a scope closes.
    */
-  set(cookie: Input): Effect.Effect<void, CookieJarError>
+  set(cookie: Input): Effect.Effect<void, CookieJarError | Target.TargetGone>
   /**
    * Removes the cookies that match.
    */
-  remove(match: Match): Effect.Effect<void, CookieJarError>
+  remove(match: Match): Effect.Effect<void, CookieJarError | Target.TargetGone>
   /**
    * Removes every cookie in the context.
    */
-  readonly clear: Effect.Effect<void, CookieJarError>
+  readonly clear: Effect.Effect<void, CookieJarError | Target.TargetGone>
 }
 
 /**

@@ -24,7 +24,8 @@ import {
   Popup,
   Subscription,
   Target,
-  UncaughtException
+  UncaughtException,
+  Watchable
 } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -136,6 +137,10 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
               assert(Download.isDownloadError(error), String(error))
               assert.strictEqual(error.reason._tag, "DownloadCanceled")
               assert.strictEqual((yield* file.status)._tag, "Canceled")
+              // A wait on a status it can no longer reach says it settled, with what on (QUIRKS.md, Q62)
+              const settled = yield* file.status.waitFor((status) => status._tag === "Completed").pipe(Effect.flip)
+              assert(Watchable.isEnded(settled), String(settled))
+              assert.deepInclude(settled.value, { _tag: "Canceled" })
             }))
           }),
         timeout
@@ -170,7 +175,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             const decided = yield* decisions
             assert.deepStrictEqual(decided.subject, { _tag: "FileChooser" })
             assert.strictEqual(decided.decision, "cancel")
-            assert.strictEqual(decided.policy, `fileChoosers: "cancel"`)
+            assert.deepStrictEqual(decided.policy, { _tag: "Default" })
             yield* page.getByText("nothing yet").pipe(Expect.toBeVisible)
           }))
         }), timeout)
@@ -227,6 +232,30 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           }),
         timeout
       )
+
+      it.effect("formats a console call's text from its arguments", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            button(
+              "Log",
+              `console.log("%s has %d items at %f", "cart", 3.7, 1.25); console.log("%cstyled", "color: red")`
+            )
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const formatted = yield* ConsoleMessage.next(page, { text: /cart/ })
+            const styled = yield* ConsoleMessage.next(page, { text: /styled/ })
+            yield* page.getByText("Log").click()
+            // The Console Standard's formatter: the library applies it for CDP and WebKit; Firefox applies its own,
+            // which writes %f as printf does (QUIRKS.md, Q33)
+            assert.strictEqual(
+              (yield* formatted).text,
+              `cart has 3 items at ${name === "Firefox" ? "1.250000" : "1.25"}`
+            )
+            assert.strictEqual((yield* styled).text, "styled")
+          }))
+        }), timeout)
 
       it.effect(
         "reports uncaught exceptions by message, with their kind where the backend knows it",
