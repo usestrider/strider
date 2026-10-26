@@ -1,16 +1,17 @@
 /**
- * The Vitest adapter (`@usestrider/browser/test/vitest`; optional peer dependency: `vitest` 5).
+ * The Vitest adapter (`@usestrider/vitest`, a package of its own since review 22, so `@usestrider/browser` depends on
+ * nothing but Effect; peer dependency: `vitest` 5).
  *
  * When etest ships, an etest adapter attaches the same layers with `Test.provide`.
  *
  * @stability unstable
  * @since 0.1.0
  */
+import type * as Browser from "@usestrider/browser/Browser"
+import { TestRun } from "@usestrider/browser/test"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { recordArtifact, TestRunner } from "vitest"
-import type * as Browser from "../../Browser.ts"
-import * as TestRun from "../TestRun.ts"
 
 declare module "vitest" {
   interface TestArtifactRegistry {
@@ -91,7 +92,7 @@ const testRun: TestRun.TestRun = {
  * import { Effect } from "effect"
  * import { Browser } from "@usestrider/browser"
  * import { Chromium } from "@usestrider/browser/chromium"
- * import { VitestBrowser } from "@usestrider/browser/test/vitest"
+ * import { VitestBrowser } from "@usestrider/vitest"
  *
  * const test = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage({ focus: "emulated" })

@@ -2145,16 +2145,6 @@ Runner-agnostic test support (`@usestrider/browser/test`).
 
 - `const TestArtifact = Schema.Union([Schema.TaggedStruct("Trace", { path: FilePath.Local }), Schema.TaggedStruct("Har", { path: FilePath.Local }), Schema.TaggedStruct("Screenshot", { path: FilePath.Local })])`
 
-## `@usestrider/browser/test/vitest`
-
-### VitestBrowser
-
-The Vitest adapter (`@usestrider/browser/test/vitest`; optional peer dependency: `vitest` 5).
-
-*layers*
-
-- `const layer: <E, R>(backend: Layer.Layer<Browser.Browser, E, R>) => Layer.Layer<Browser.Browser | TestRun.TestRun, E, R>`
-
 ## `@usestrider/browser/webkit`
 
 ### WebKit

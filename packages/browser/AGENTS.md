@@ -18,7 +18,7 @@ every event module (`Popup`, `Dialog`, `FileChooser`, `Download`, `ConsoleMessag
 `emulate`, `grant`, `clock`, and the context options `emulation`, `permissions` and `focus`), `FileInput.bytes`,
 `goto({ accept })`, `close({ runBeforeUnload: true })`, `Page.capability`, the span references
 (`Browser.SpanNameGenerator`, `TracerDisabledWhen`, `TraceProtocolCommands`) and `Diagnostics.withPreset`, and the
-test layers (`Browser.layerTest`, `VitestBrowser.layer`), recordings (`Har.record`, `Trace.record`), the agent toolkit
+test layers (`Browser.layerTest`, and `VitestBrowser.layer` from `@usestrider/vitest`), recordings (`Har.record`, `Trace.record`), the agent toolkit
 (`BrowserToolkit`, `CapturePolicy`) and the `strider` command (CLI.md) work on every backend. What a backend can't do or report
 fails with `Unsupported`, naming the capability: modifiers on WebKit's pointer, an HTML drag anywhere but
 Chromium, a CSS-pixel or transparent screenshot and a PDF's header on Firefox, a PDF on WebKit, a partitioned

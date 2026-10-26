@@ -1,6 +1,6 @@
 // Writes the API reference dataset, in the shape effect.website renders Effect's from:
 //
-//   .data/api-reference/
+//   .data/api-reference/<package>/
 //     manifest.json         the package, its revision, and one entry per module with its file and hash
 //     modules/<path>.json   TypeDoc's JSON for one module (schema 2.0), e.g. modules/Page.json
 //     jsdocs.json           the effect-jsdocs model: parsed sections, examples, tags and import guidance
@@ -22,8 +22,7 @@ import {
   ReflectionKind
 } from "typedoc"
 
-export const apiReference = async (repo, root) => {
-  const out = path.join(repo, ".data/api-reference")
+export const apiReference = async (repo, root, out = path.join(repo, ".data/api-reference")) => {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"))
 
   // ── Modules, from the export map ─────────────────────────────────────────────

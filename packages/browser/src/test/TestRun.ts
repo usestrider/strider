@@ -3,7 +3,7 @@
  *
  * Nothing changes because it's a test: profile, focus, diagnostics and tracing are whatever the test chose.
  * A test gets its page from `Browser.newPage()`, like any program. A runner adapter, such as
- * `@usestrider/browser/test/vitest`, provides `TestRun` so that traces and screenshots attach to the test that
+ * `@usestrider/vitest`, provides `TestRun` so that traces and screenshots attach to the test that
  * made them.
  *
  * @stability unstable

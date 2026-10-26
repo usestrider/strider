@@ -1,8 +1,10 @@
 {
-  "tsconfig": "packages/browser/tsconfig.json",
+  "tsconfig": "tsconfig.packages.json",
   "include": [
     "packages/browser/src/*.ts",
-    "packages/browser/src/**/*.ts"
+    "packages/browser/src/**/*.ts",
+    "packages/vitest/src/*.ts",
+    "packages/vitest/src/**/*.ts"
   ],
   "exclude": [
     "**/node_modules/**",

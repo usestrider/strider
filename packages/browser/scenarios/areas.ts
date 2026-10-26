@@ -2,7 +2,7 @@
 import { Browser, BrowserWorker, Deadline, Download, FileInput, NetworkConnection, Page } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
 import { Chromium } from "@usestrider/browser/chromium"
-import { VitestBrowser } from "@usestrider/browser/test/vitest"
+import { VitestBrowser } from "@usestrider/vitest"
 import { Config, Console, Effect, Option, Stream } from "effect"
 
 // Keyboard and mouse: held input is scoped, so a failed step never leaves Shift down

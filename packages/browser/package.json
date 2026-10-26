@@ -39,7 +39,6 @@
     "./firefox": "./src/firefox/index.ts",
     "./protocol": "./src/protocol/index.ts",
     "./test": "./src/test/index.ts",
-    "./test/vitest": "./src/test/vitest/index.ts",
     "./webkit": "./src/webkit/index.ts",
     "./webkit-protocol": "./src/webkit-protocol/index.ts",
     "./*": "./src/*.ts",
@@ -76,7 +75,6 @@
       "./firefox": "./dist/firefox/index.js",
       "./protocol": "./dist/protocol/index.js",
       "./test": "./dist/test/index.js",
-      "./test/vitest": "./dist/test/vitest/index.js",
       "./webkit": "./dist/webkit/index.js",
       "./webkit-protocol": "./dist/webkit-protocol/index.js",
       "./*": "./dist/*.js",
@@ -94,21 +92,16 @@
   },
   "peerDependencies": {
     "@effect/platform-node": "^4.0.6",
-    "effect": "^4.0.6",
-    "vitest": "^5.0.5"
+    "effect": "^4.0.6"
   },
   "peerDependenciesMeta": {
     "@effect/platform-node": {
-      "optional": true
-    },
-    "vitest": {
       "optional": true
     }
   },
   "devDependencies": {
     "@effect/platform-node": "^4.0.6",
     "@usestrider/utils": "workspace:^",
-    "effect": "^4.0.6",
-    "vitest": "^5.0.5"
+    "effect": "^4.0.6"
   }
 }

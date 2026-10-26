@@ -19,18 +19,14 @@ import {
   Trace
 } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
-import { TestRun } from "@usestrider/browser/test"
-import { VitestBrowser } from "@usestrider/browser/test/vitest"
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
-import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
 import * as Tracer from "effect/Tracer"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
-import { TestRunner } from "vitest"
 import * as Chromium from "../src/internal/chromiumLauncher.ts"
 import * as ExportTest from "../src/internal/cli/exportTest.ts"
 import * as CliSession from "../src/internal/cli/session.ts"
@@ -194,29 +190,6 @@ describe("Browser.layerTest", () => {
       const browser = yield* Browser.Browser
       assert.strictEqual(browser.info.protocol, "fake")
     })).pipe(Effect.provide(Browser.layerTest(""))))
-})
-
-describe("VitestBrowser", () => {
-  it.effect("describes the test running, and attaches its files", () =>
-    Effect.gen(function*() {
-      const run = yield* TestRun.TestRun
-      assert.include(run.info.id, "VitestBrowser > describes the test running, and attaches its files")
-      assert.include(run.info.file, "Tooling.test.ts")
-      assert.strictEqual(run.info.attempt, 0)
-      yield* run.attach({ _tag: "Screenshot", path: "test/Tooling.test.ts" as never })
-      const test = TestRunner.getCurrentTest()!
-      assert.deepInclude(
-        test.artifacts.map((artifact) => artifact.type),
-        "@usestrider/browser"
-      )
-    }).pipe(Effect.provide(VitestBrowser.layer(Layer.empty as unknown as Layer.Layer<Browser.Browser>))))
-
-  it("reads the current test each time", () => {
-    const { info } = Effect.runSync(
-      TestRun.TestRun.pipe(Effect.provide(VitestBrowser.layer(Layer.empty as unknown as Layer.Layer<Browser.Browser>)))
-    )
-    assert.include(info.id, "reads the current test each time")
-  })
 })
 
 /** A fresh directory for a test's files. */

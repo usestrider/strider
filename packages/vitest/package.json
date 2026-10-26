@@ -1,0 +1,63 @@
+{
+  "name": "@usestrider/vitest",
+  "version": "0.0.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "Vitest for @usestrider/browser: the current test as TestRun, and its artifacts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/usestrider/strider.git",
+    "directory": "packages/vitest"
+  },
+  "bugs": {
+    "url": "https://github.com/usestrider/strider/issues"
+  },
+  "keywords": [
+    "effect",
+    "typescript",
+    "browser",
+    "vitest"
+  ],
+  "sideEffects": [],
+  "exports": {
+    "./package.json": "./package.json",
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts",
+    "./index": null
+  },
+  "files": [
+    "src/**/*.ts",
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "INDEX.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      ".": "./dist/index.js",
+      "./*": "./dist/*.js",
+      "./index": null
+    }
+  },
+  "scripts": {
+    "codegen": "strider-utils barrel",
+    "build": "tsc -b tsconfig.json && pnpm babel",
+    "babel": "babel dist --plugins annotate-pure-calls --out-dir dist --source-maps",
+    "check": "tsc -b tsconfig.json"
+  },
+  "peerDependencies": {
+    "@usestrider/browser": "workspace:^",
+    "effect": "^4.0.6",
+    "vitest": "^5.0.5"
+  },
+  "devDependencies": {
+    "@usestrider/browser": "workspace:^",
+    "@usestrider/utils": "workspace:^",
+    "effect": "^4.0.6",
+    "vitest": "^5.0.5"
+  }
+}

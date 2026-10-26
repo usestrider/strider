@@ -19,7 +19,7 @@ The README's principles, as they apply to this layer, written the way Effect's o
 
 **Modules**
 - **Modules are namespaces.** The package exports each module as one, as Effect does: `import { Browser, Download, Page } from "@usestrider/browser"`. Types are written `Page.Page`, `Download.Download` and `Locator.Locator`, like `Deferred.Deferred`. Inside a module, names are short, because the namespace supplies the context: `UserContext.Options`, `CookieJar.Input`, `PageNavigation.Filter`, `Download.Id`. Access levels keep their full names (`Page.ReadonlyPage`, `OriginStorage.ReadonlyOriginStorage`), as Effect writes `Record.ReadonlyRecord`; a bare `Readonly` would shadow TypeScript's own.
-- **Backends and surfaces are subpaths,** each with its own barrel: `@usestrider/browser/chromium`, `/firefox`, `/webkit`, `/bidi`, `/ai`, `/test`, `/test/vitest` and `/cli`.
+- **Backends and surfaces are subpaths,** each with its own barrel: `@usestrider/browser/chromium`, `/firefox`, `/webkit`, `/bidi`, `/ai`, `/test` and `/cli`. The Vitest adapter was `/test/vitest` until review 22 moved it to a package of its own, `@usestrider/vitest`, so `@usestrider/browser` depends on nothing but Effect.
 - **Brands are Schemas in the module that owns them,** a Schema value and a type with one name, as Effect's `EntityId` is: `Download.Id`, `UserContext.Id`, `Snapshot.RefId`, `Keyboard.Key`. Values with no single owner have small modules of their own: `Url` (`Url.Url`, `Url.Pattern`, `Url.Origin`, `Url.Site`), `FilePath` (`Local`, `Remote`), `Pixels` (`Css`, `Device`), `AriaRole` and `MonotonicInstant`. URLs are stored as strings, as Effect's own `HttpClientRequest.url` is, because a `URL` object can be changed in place and compares by reference; `effect/http`'s `Url` module is how one is changed (`Url.fromString(url)`, its setters, then `href`). A file that imports both `Url` modules aliases one.
 
 **Members**
@@ -183,7 +183,7 @@ import { Firefox } from "@usestrider/browser/firefox"          // BiDi backend
 import { WebKit } from "@usestrider/browser/webkit"            // Playwright-patched builds; stock attach (iOS, WKWebView)
 import { Bidi } from "@usestrider/browser/bidi"                // any BiDi endpoint (Safari Technology Preview, remote grids)
 import { TestRun } from "@usestrider/browser/test"             // runner-agnostic test support
-import { VitestBrowser } from "@usestrider/browser/test/vitest" // the Vitest adapter; optional peer dependency: vitest 5
+import { VitestBrowser } from "@usestrider/vitest"               // the Vitest adapter, a package of its own (review 22); peer dependency: vitest 5
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"   // builds on effect/ai
 // the package's bin is the CLI (CLI.md); @usestrider/browser/cli has only what `strider run` provides to segments
 import * as Cdp from "@usestrider/browser/cdp"                 // raw generated L0 commands, for power users
@@ -965,7 +965,7 @@ import { layer } from "@effect/vitest"
 import { Config, Effect } from "effect"
 import { Browser } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
-import { VitestBrowser } from "@usestrider/browser/test/vitest"
+import { VitestBrowser } from "@usestrider/vitest"
 
 layer(VitestBrowser.layer(Chromium.layerConfig({ executablePath: Config.String("CHROMIUM_PATH") })))("checkout", (it) => {
   it.effect("adds to cart", () =>
@@ -985,7 +985,7 @@ interface TestRun {                                      // per test, from the r
 }
 declare const TestRun: Context.Service<TestRun, TestRun>
 
-// @usestrider/browser/test/vitest
+// @usestrider/vitest (review 22; before it, @usestrider/browser/test/vitest)
 declare const layer: <E, R>(backend: Layer<Browser.Browser, E, R>) => Layer<Browser.Browser | TestRun.TestRun, E, R>   // the backend you pass, unchanged, plus TestRun from the current test
 
 // Browser: the fake browser, for event and lifecycle tests

@@ -9,10 +9,11 @@ export const resolve = {
     { find: /^@usestrider\/browser$/, replacement: src("index.ts") },
     {
       find:
-        /^@usestrider\/browser\/(ai|bidi|bidi-protocol|cdp|chromium|cli|firefox|protocol|test|test\/vitest|webkit|webkit-protocol)$/,
+        /^@usestrider\/browser\/(ai|bidi|bidi-protocol|cdp|chromium|cli|firefox|protocol|test|webkit|webkit-protocol)$/,
       replacement: src("$1/index.ts")
     },
-    { find: /^@usestrider\/browser\/(.+)$/, replacement: src("$1.ts") }
+    { find: /^@usestrider\/browser\/(.+)$/, replacement: src("$1.ts") },
+    { find: /^@usestrider\/vitest$/, replacement: path.join(import.meta.dirname, "packages/vitest/src/index.ts") }
   ]
 }
 
@@ -27,6 +28,14 @@ export default defineConfig({
         include: ["test/**/*.test.ts"],
         // The browser integration tests run in the Nix environment: vitest.integration.config.ts
         exclude: ["test/integration/**"],
+        setupFiles: [path.join(import.meta.dirname, "vitest.setup.ts")]
+      }
+    }, {
+      extends: true,
+      test: {
+        name: "vitest",
+        root: "packages/vitest",
+        include: ["test/**/*.test.ts"],
         setupFiles: [path.join(import.meta.dirname, "vitest.setup.ts")]
       }
     }, {
