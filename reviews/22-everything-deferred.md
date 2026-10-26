@@ -196,9 +196,9 @@ Probed through the public API, over raw CDP and WebDriver BiDi, and against nixp
 
 ## Build
 
-In six steps, each committed and pushed when its tests pass on every backend:
+In six steps, each committed and pushed when its tests pass on every backend, after `@usestrider/vitest` is split out:
 
-1. CLI sessions and agents (candidates 3a, 3b and 4), with 3c if adopted.
+1. CLI sessions and agents (candidates 3a, 3b and 4).
 2. Network (5).
 3. Pages (6).
 4. Traces (1 and 2).
@@ -207,4 +207,11 @@ In six steps, each committed and pushed when its tests pass on every backend:
 
 ## Decision
 
-Pending the maintainer's answers to the questions above. The rest is adopted under the maintainer's direction to design everything deferred, and each step will record where its build differs.
+Adopted, 2026-10-26, under the maintainer's direction to design everything deferred. The maintainer's answers:
+
+1. **The MCP command:** asked how it would be used. Claude Desktop launches it from its configuration and speaks MCP over its standard input and output; with `-s`, it joins a session started with `strider start`. Built as a session front end unless the maintainer says otherwise.
+2. **WebMCP:** "I don't know what WebMCP is". Explained as a draft standard for pages to offer agents tools, which no pinned browser ships. Design only: built once a browser ships it.
+3. **`vitest`:** "yeah separate @usestrider/vitest or something". `VitestBrowser` moves to a package of its own, `@usestrider/vitest`, ahead of step 1, so `@usestrider/browser` names nothing but Effect.
+4. **Q180:** "another time". It stays open.
+
+Each step records where its build differs.
