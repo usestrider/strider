@@ -373,7 +373,7 @@ const collect = (
   const scope: Adapter.DeclarationScope = found._tag === "Page"
     ? { _tag: "Page", page: (entry as Model.PageEntry).id }
     : { _tag: "UserContext", context: (entry as Model.ContextEntry).id }
-  return runtime.model.adapter.declare(scope, { _tag: "BodyCollection", maxBytes: limit }).pipe(
+  return runtime.model.adapter.declare(scope, { _tag: "BodyCollection", bodies: ["response"], maxBytes: limit }).pipe(
     Effect.asVoid,
     Effect.mapError((error) => {
       const mapped = Operation.fromAdapter(error, Operation.operationId(), runtime.backend)

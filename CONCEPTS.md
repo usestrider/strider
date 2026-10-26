@@ -380,6 +380,7 @@ Cleanup groups can span sibling pages, independently of this graph.
 
 - **Requests and hops.** A request id spans the redirect chain. Each hop has its own identity, snapshot, response and body access, so a held 302 never becomes the next hop's 200. Snapshots record explicitly when information (such as CDP's extra-info events) is missing.
   Built with review 20: a hop also keeps the headers as the network sent and received them where the backend reports them apart (CDP's `ExtraInfo`, with `Cookie` and `Set-Cookie`), and the time its end was reported; recordings read them, and the request and response events keep the headers their own events gave (QUIRKS.md, Q158).
+  Built with review 22: a hop knows when its headers as sent are settled, with its first report of them or its end, and `NetworkRequest.headersSent` waits for that. The CDP adapter reports them from the request `ExtraInfo`, or the request event's once the response says none will come; BiDi's from the request event; WebKit's with the response (Q181). A hop's request body is read by hop, kept where a body collection for requests covers the page.
 - **Request lifecycle.** `Sent → ResponseStarted → Completed | Failed`.
   - A service-worker response can start without `Sent`.
   - Requests of a destroyed document may never terminate. They are tracked as detached, and no network failure is fabricated for them.
@@ -388,13 +389,14 @@ Cleanup groups can span sibling pages, independently of this graph.
   - Backend enablement is reconciled from the union of active patterns, and is never disabled while a request is paused.
   - Decisions depend on the phase:
     - **request:** `Continue{overrides} | Fulfill | Fail`;
-    - **response:** only the decisions the backend supports;
+    - **response:** only the decisions the backend supports; since review 22, `ContinueResponse{status, headers}` on CDP and BiDi;
     - **auth:** `ProvideCredentials | DefaultAuth | CancelAuth`.
   - Defaults are continue for request and response, and `DefaultAuth` for auth.
   - BiDi cannot scope intercepts to a user context, so emulating that needs browser-wide access (§3).
   - **Built** (review 17, candidates 1 to 3). A route is a handler of paused requests at one phase, registered as a dialog's handler is (§5), and asked in precedence order: the page's routes, then its context's, the most recent first, until one decides; `fallthrough` asks the next. A route declares an intercept wide enough for its pattern and matches the pattern itself. The default is continue, and at an authentication challenge `CancelAuth`, the challenge's response, not `DefaultAuth`, the browser's prompt, which waits forever headless on Firefox. When every matching route fell through or failed, or the backend refused a decision, the default is published as an automatic decision. A refused decision never leaves the request paused. Each paused request's body is readable on every backend (BiDi needs a request data collector, declared with each request-phase intercept); a paused response's only on CDP.
   - **Chromium's interceptor is kept installed** (review 17's build, QUIRKS.md Q46). The CDP adapter enables `Fetch` for every page from its start, with a pattern no request matches while nothing intercepts, and never disables it; an intercept declared on a live page changes patterns only, which takes effect at once.
 - **Bodies.** A body may be unavailable for a stated reason: not collected, evicted, a redirect, streaming, over a limit, or a request that failed after its response started (review 14).
+  - **A collection names its bodies** (review 22): requests', responses', or both. A HAR collects requests' always, and responses' unless it omits content; a response subscription collects responses'.
   - **Collected for a subscription** (review 14): up to `NetworkResponse.BodyLimit`, declared in its scope. A body is read once its hop has ended; a redirect hop has none, without asking the browser.
   - A `body` in a `next` or `stream` filter acquires collection before that call returns; BiDi needs a collector before the request starts.
   - Ordinary results are owned bytes. Large or streaming bodies use explicit caller-scoped leases.

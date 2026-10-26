@@ -270,6 +270,7 @@ export const start = Effect.fnUntraced(function*(
     ? Option.some(
       (yield* HarImpl.start(runtime, target.entry, {
         content: "attach",
+        requestBodies: false,
         matches: () => true,
         webSocketFrames: false,
         inFlightAtStop: "markIncomplete"

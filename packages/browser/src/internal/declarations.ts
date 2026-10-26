@@ -78,8 +78,11 @@ export interface Registry {
     context: UserContext.Id
   ) => Extract<Adapter.Declaration, { _tag: "Downloads" }>["behavior"] | undefined
   readonly fileChooser: (placement: Placement) => boolean
-  /** The largest body a collection in force keeps, or `undefined` where none is (QUIRKS.md, Q160). */
-  readonly bodyLimit: (placement: Placement) => number | undefined
+  /**
+   * The largest body of a kind, a request's or a response's, that a collection in force keeps, or `undefined`
+   * where none keeps that kind (QUIRKS.md, Q160 and Q164).
+   */
+  readonly bodyLimit: (placement: Placement, body: "request" | "response") => number | undefined
 }
 
 export const make = (): Registry => {
@@ -100,10 +103,12 @@ export const make = (): Registry => {
       return entry
     },
     all: () => [...registered.values()],
-    bodyLimit: (placement) => {
+    bodyLimit: (placement, body) => {
       let limit: number | undefined
       for (const entry of inScope(placement)) {
-        if (entry.declaration._tag === "BodyCollection") limit = Math.max(limit ?? 0, entry.declaration.maxBytes)
+        if (entry.declaration._tag === "BodyCollection" && entry.declaration.bodies.includes(body)) {
+          limit = Math.max(limit ?? 0, entry.declaration.maxBytes)
+        }
       }
       return limit
     },

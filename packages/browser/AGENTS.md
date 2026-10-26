@@ -75,12 +75,17 @@ member that isn't built yet fails as the defect `NotBuilt`, naming itself (a tra
 - **A route has one phase.** `page.route(pattern, handler)` sees requests before they are sent; pass
   `{ phase: "response" }` or `{ phase: "auth" }` for the others. Return a `Route` decision valid for it
   (`Route.fulfill`, `Route.continueWith`, `Route.abort()`, `Route.fallthrough`, `Route.continue`); there is no
-  `fetch` on the request. A failing handler lets the request continue, logged.
+  `fetch` on the request. A failing handler lets the request continue, logged. At the response phase,
+  `Route.continueWith({ status, headers })` changes a response but not its body (not on WebKit).
+- **Replay a HAR with a route.** `page.route("**/api/**", yield* Route.fromHar("api.har"))` answers from the
+  recording, matching method, URL and body; export it with `include: ["requestBodies"]` to match bodies.
 - **Upload generated files as bytes.** `locator.setInputFiles(FileInput.bytes("report.csv", "text/csv", data))`
   makes the file in the page; one call takes bytes or paths, not both.
 - **Record, then export.** `const har = yield* Har.record(page, { content: "embed" })`, act, then
   `har.exportHar("run.har")`; `Trace.record(page, { screenshots: "perAction" })` and `exportTrace("trace.zip")`
-  write a trace trace.playwright.dev opens. Exports are redacted unless `include` names a class of secret.
+  write a trace trace.playwright.dev opens. Exports are redacted unless `include` names a class of secret;
+  requests' bodies are left out unless it names `"requestBodies"`. A request event's `headers` can lack `Cookie`:
+  `NetworkRequest.headersSent(page, request)` gives the headers as sent.
 - **Drive a browser from a shell with `strider`.** `strider start --name s --chromium <path>`, then
   `strider -s s page new --name shop <url>`, `strider -s s -p shop snapshot`, `strider -s s -p shop click e9`; every
   command names its session and page. `strider -s s stop` ends it. `strider -s s -p shop find "Sign in"` gives refs

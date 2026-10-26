@@ -16,6 +16,7 @@ import {
   UncaughtException
 } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
+import * as Headers from "effect/http/Headers"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import type * as Layer from "effect/Layer"
@@ -160,6 +161,44 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("continues a response with a new status and headers where the backend can", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.route(
+              `${origin}/json*`,
+              ({ response }) =>
+                Effect.succeed(
+                  Route.continueWith({ status: 203, headers: Headers.set(response.headers, "x-route", "1") })
+                ),
+              { phase: "response" }
+            )
+            const result = yield* run(
+              page,
+              origin,
+              `return fetch('/json').then(async (r) => [r.status, r.headers.get('x-route'), r.headers.get('x-test'), await r.text()])`
+            )
+            // WebKit can't send a paused response on changed (interception.responseHeaders): the default continues it
+            assert.deepStrictEqual(
+              result,
+              name === "WebKit" ? [200, null, "yes", `{"hello":"world"}`] : [203, "1", "yes", `{"hello":"world"}`]
+            )
+          }))
+        }), timeout)
+
+      it.effect("matches a URLPattern route, pausing only the URLs under its fixed prefix", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.route(`${origin}/:name(json)`, () =>
+              Effect.succeed(Route.fulfill(json({ routed: true }))))
+            const result = yield* run(page, origin, `return fetch('/json').then((r) => r.json())`)
+            assert.deepStrictEqual(result, { routed: true })
+          }))
+        }), timeout)
+
       it.effect("answers an authentication challenge where the backend can", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -224,8 +263,7 @@ export const declarations = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             const error = yield* Effect.flip(
-              page.route("https://example.com/:id(", () =>
-                Effect.succeed(Route.continue))
+              page.route("https://example.com/:id(", () => Effect.succeed(Route.continue))
             )
             assert(Route.isRouteError(error) && error.reason._tag === "InvalidInput", String(error))
           }))

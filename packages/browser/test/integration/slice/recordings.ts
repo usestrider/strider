@@ -1,10 +1,12 @@
 /**
  * Review 20's recordings on every backend's layer: a HAR with its timings, bodies, statuses and redactions, as
  * one file or a zip with the bodies beside it; and a trace whose steps nest in the program's spans, with
- * screenshots, console messages, exceptions, network entries and screencast frames.
+ * screenshots, console messages, exceptions, network entries and screencast frames. Review 22's: the bodies
+ * requests sent and the headers they were sent with, and a HAR replayed as a route.
  */
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Capability, Har, NetworkResponse, Page, Trace } from "@usestrider/browser"
+import { Browser, Capability, Har, NetworkRequest, NetworkResponse, Page, Route, Trace } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
 import type * as Layer from "effect/Layer"
@@ -119,9 +121,9 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             assert.deepInclude(json.request.headers, { name: "authorization", value: "REDACTED" })
             const cookie = entries.find((entry) => entry.request.url === `${served.origin}/cookie`)!
             assert.deepInclude(cookie.response.cookies, { name: "flavor", value: "REDACTED", path: "/" })
-            // The document the page left at once still has its body: Chromium keeps it for a recording (Q160);
-            // WebKit sometimes forgets it first, with nothing to keep it by (Q179)
-            if (name !== "WebKit") assert.strictEqual(cookie.response.content.text, "<title>cookie</title>")
+            // The document the page left at once still has its body: Chromium keeps it for a recording (Q160), and
+            // the WebKit adapter reads it as its load finishes (Q179)
+            assert.strictEqual(cookie.response.content.text, "<title>cookie</title>")
             // The page's URL, and the Referer that repeats it, hold the fixture's script, so the secrets' own
             // headers are checked rather than the whole file
             for (const entry of entries) {
@@ -172,6 +174,132 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             const file = entry!.response.content._file!
             assert.isString(file)
             assert.strictEqual(text(files.get(file)), `{"hello":"world"}`)
+          }),
+        timeout
+      )
+
+      it.effect(
+        "records the bodies requests sent, written only when included, and the headers they were sent with",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const out = path.join(directory(), "bodies.har")
+            const redacted = path.join(directory(), "redacted.har")
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const har = yield* Har.record(page, { content: "embed", url: "**/*echo", inFlightAtStop: "wait" })
+              yield* page.goto(`${served.origin}/cookie`)
+              const form = yield* NetworkRequest.next(page, { url: `${served.origin}/echo`, method: "POST" })
+              yield* page.evaluateInMainWorld(async () => {
+                await fetch("/echo", {
+                  method: "POST",
+                  body: "q=shoes&size=9",
+                  headers: { "content-type": "application/x-www-form-urlencoded" }
+                })
+                // A 307 sends the body again, to the next hop
+                await fetch("/to-echo", {
+                  method: "POST",
+                  body: JSON.stringify({ q: "hats" }),
+                  headers: { "content-type": "application/json" }
+                })
+                // A file's bytes, which Chromium's event doesn't carry
+                const data = new FormData()
+                data.append("file", new Blob(["file body"], { type: "text/plain" }), "note.txt")
+                await fetch("/echo", { method: "POST", body: data })
+                return true
+              })
+              // The headers as sent have the cookie the page set, which Chromium's event leaves out (Q158)
+              const sent = yield* NetworkRequest.headersSent(page, yield* form)
+              assert.include(sent.cookie, "flavor=oat")
+              yield* har.entries.waitFor((count) => count >= 4)
+              yield* har.exportHar(out, { include: ["requestBodies"] })
+              yield* har.exportHar(redacted)
+            }))
+            interface Sent {
+              readonly request: {
+                readonly url: string
+                readonly bodySize: number
+                readonly postData?: { readonly mimeType: string; readonly text: string; readonly _encoding?: string }
+              }
+              readonly response: { readonly status: number }
+            }
+            const entries: ReadonlyArray<Sent> = JSON.parse(fs.readFileSync(out, "utf8")).log.entries
+            assert.deepStrictEqual(
+              entries.map((entry) => `${entry.request.url.replace(served.origin, "")} ${entry.response.status}`),
+              ["/echo 200", "/to-echo 307", "/echo 200", "/echo 200"]
+            )
+            const [form, redirect, redirected, upload] = entries
+            assert.deepStrictEqual(form!.request.postData, {
+              mimeType: "application/x-www-form-urlencoded",
+              text: "q=shoes&size=9",
+              params: [{ name: "q", value: "shoes" }, { name: "size", value: "9" }]
+            } as never)
+            for (const hop of [redirect!, redirected!]) {
+              assert.deepStrictEqual(hop.request.postData, { mimeType: "application/json", text: `{"q":"hats"}` })
+            }
+            assert.strictEqual(upload!.request.postData?._encoding, "base64")
+            const uploaded = Buffer.from(upload!.request.postData!.text, "base64").toString("utf8")
+            assert.include(uploaded, `filename="note.txt"`)
+            // WebKit leaves a file's bytes out of the body it reports (QUIRKS.md, Q184)
+            if (name === "WebKit") assert.notInclude(uploaded, "file body")
+            else assert.include(uploaded, "file body")
+            // Left out unless included, though their sizes are written
+            const plain: ReadonlyArray<Sent> = JSON.parse(fs.readFileSync(redacted, "utf8")).log.entries
+            assert.deepStrictEqual(plain.map((entry) => entry.request.postData), [
+              undefined,
+              undefined,
+              undefined,
+              undefined
+            ])
+            assert.strictEqual(plain[0]!.request.bodySize, 14)
+          }),
+        timeout
+      )
+
+      it.effect(
+        "replays a recorded HAR as a route, matching requests by body and following its redirects",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const file = path.join(directory(), "replay.har")
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const har = yield* Har.record(page, { content: "embed", url: "**/*echo", inFlightAtStop: "wait" })
+              yield* page.goto(`${served.origin}/cookie`)
+              yield* page.evaluateInMainWorld(async () => {
+                await fetch("/echo", { method: "POST", body: "shoes" })
+                await fetch("/echo", { method: "POST", body: "hats" })
+                await fetch("/to-echo", { method: "POST", body: "boots" })
+                return true
+              })
+              yield* har.entries.waitFor((count) => count >= 4)
+              yield* har.exportHar(file, { include: ["requestBodies"] })
+            }))
+            // The recording's answers, told apart from the site's
+            const log = JSON.parse(fs.readFileSync(file, "utf8"))
+            for (const entry of log.log.entries) {
+              if (entry.response.status === 200) entry.response.content.text = `recorded ${entry.request.postData.text}`
+            }
+            fs.writeFileSync(file, JSON.stringify(log))
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/cookie`)
+              yield* page.route("**/*echo", yield* Route.fromHar(file).pipe(Effect.provide(NodeFileSystem.layer)))
+              const answers = yield* page.evaluateInMainWorld(async () => {
+                const post = (url: string, body: string) =>
+                  fetch(url, { method: "POST", body }).then((response) => response.text(), () => "failed")
+                return [await post("/echo", "hats"), await post("/echo", "shoes"), await post("/echo", "socks")]
+              })
+              // The latest entry with the request's body answers it; none matches the last, which is aborted
+              assert.deepStrictEqual(answers, ["recorded hats", "recorded shoes", "failed"])
+              // WebKit doesn't follow a redirect a route fulfills (QUIRKS.md, Q90)
+              if (name !== "WebKit") {
+                const redirected = yield* page.evaluateInMainWorld(() =>
+                  fetch("/to-echo", { method: "POST", body: "boots" }).then((response) => response.text())
+                )
+                assert.strictEqual(redirected, "recorded boots")
+              }
+            }))
           }),
         timeout
       )

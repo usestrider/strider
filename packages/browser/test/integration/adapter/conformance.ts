@@ -751,7 +751,7 @@ export const conformance = (backend: Backend) =>
               ).pipe(Effect.forkChild)
               const opened = yield* world.facts.when("ObligationOpened", (fact) =>
                 fact.subject._tag === "PausedRequest" && fact.subject.request.url.endsWith("/echo"))
-              const body = yield* world.adapter.requestBody(opened.obligation)
+              const body = yield* world.adapter.pausedRequestBody(opened.obligation)
               assert.strictEqual(Option.getOrUndefined(Option.map(body, decode)), "hello")
               yield* world.adapter.resolve(opened.obligation, {
                 _tag: "Continue",
@@ -997,7 +997,11 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
-            yield* world.adapter.declare({ _tag: "Page", page }, { _tag: "BodyCollection", maxBytes: 1024 * 1024 })
+            yield* world.adapter.declare({ _tag: "Page", page }, {
+              _tag: "BodyCollection",
+              bodies: ["response"],
+              maxBytes: 1024 * 1024
+            })
             const { outcome } = yield* goto(world, page, `${world.site.origin}/json`)
             assert(outcome._tag === "Committed")
             const body = yield* world.adapter.responseBody(Option.getOrThrow(outcome.response))

@@ -1,8 +1,8 @@
 /**
  * HAR recordings: a page's or context's network traffic, exported as an HTTP Archive.
  *
- * Exports are redacted unless a class of secret is included by name. Replaying a HAR is deferred: mocking is
- * the job of `route`.
+ * Exports are redacted unless a class of secret is included by name. A recorded HAR is replayed by a route,
+ * `Route.fromHar` (review 22).
  *
  * @stability experimental
  * @since 0.1.0
@@ -34,13 +34,14 @@ import type * as UserContext from "./UserContext.ts"
 import type * as WatchableApi from "./Watchable.ts"
 
 /**
- * A class of secret that an export can include on request.
+ * A class of secret that an export can include on request: a URL's credentials, cookie values, `Authorization`
+ * headers, text typed into a trace, or the bodies requests sent (review 22, Q164).
  *
  * @stability experimental
  * @category models
  * @since 0.1.0
  */
-export type SecretClass = "credentials" | "cookies" | "authorizationHeaders" | "typedText"
+export type SecretClass = "credentials" | "cookies" | "authorizationHeaders" | "typedText" | "requestBodies"
 
 /**
  * What a HAR records.
@@ -123,15 +124,19 @@ export interface Recording extends Declaration.Registration {
  * Each request the target makes from now on is an entry per redirect hop, with its response and, unless
  * `content` is `omit`, the response body, read as the hop finishes. Timings come from the library's clock, so
  * they mean the same on every backend: `send` is 0, `wait` runs from the request to its response, `receive`
- * from the response to the end, and `blocked`, `dns`, `connect` and `ssl` are -1. Request bodies aren't
- * recorded. `exportHar` writes HAR 1.2, or with `content: "attach"` one zip holding `har.har` and the bodies it
- * names. Cookie values, `Authorization` and `Proxy-Authorization`, and a URL's credentials are `REDACTED`
- * unless `include` names their class.
+ * from the response to the end, and `blocked`, `dns`, `connect` and `ssl` are -1. `exportHar` writes HAR 1.2,
+ * or with `content: "attach"` one zip holding `har.har` and the bodies it names. Cookie values, `Authorization`
+ * and `Proxy-Authorization`, and a URL's credentials are `REDACTED` unless `include` names their class.
+ *
+ * The body each request sent is recorded too, whatever `content` says, and written as `postData` only when
+ * `include` names `"requestBodies"`: a body can hold a password. A textual one is `text`, with a form's
+ * `params`; another is base64 with `_encoding` when embedded, or a file beside the HAR when attached.
  *
  * **Gotchas**
  *
  * Bodies are collected for the target while it records, which WebDriver BiDi needs declared before a request;
- * `webSocketFrames` is `Unsupported` there.
+ * `webSocketFrames` is `Unsupported` there. Chromium keeps only a request's last body, so an earlier hop's that
+ * its event didn't carry, such as a file's redirected by a 307, is left out.
  *
  * **Example** (A HAR of a checkout, with its bodies)
  *
@@ -180,11 +185,17 @@ export const record = (
     const scopeOf: Adapter.DeclarationScope = found._tag === "Page"
       ? { _tag: "Page", page: found.behind.entry.id }
       : { _tag: "UserContext", context: found.behind.entry.id }
-    if (options.content !== "omit") {
-      yield* HarImpl.collect(runtime, found, yield* NetworkResponse.BodyLimit, id).pipe(Effect.mapError(fail))
-    }
+    // Requests' bodies are always kept, which an export can include; responses' unless they are omitted
+    yield* HarImpl.collect(
+      runtime,
+      found,
+      options.content === "omit" ? ["request"] : ["request", "response"],
+      yield* NetworkResponse.BodyLimit,
+      id
+    ).pipe(Effect.mapError(fail))
     const { recorder, stop } = yield* HarImpl.start(runtime, found.behind.entry, {
       content: options.content,
+      requestBodies: true,
       matches,
       webSocketFrames: options.webSocketFrames === true,
       inFlightAtStop: options.inFlightAtStop ?? "markIncomplete"
@@ -255,7 +266,25 @@ export class WriteFailed extends Schema.Error<WriteFailed>("@usestrider/browser/
 }
 
 /**
- * Schema for the reasons recording or exporting a HAR can fail.
+ * Reason for a HAR that couldn't be read for replay (review 22).
+ *
+ * @stability experimental
+ * @category reasons
+ * @since 0.1.0
+ */
+export class ReadFailed extends Schema.Error<ReadFailed>("@usestrider/browser/Har/ReadFailed")({
+  _tag: Schema.tag("ReadFailed"),
+  path: Schema.String,
+  hint: Schema.String,
+  cause: Schema.optional(Schema.Defect())
+}) {
+  override get message(): string {
+    return `Couldn't read ${this.path} (${this.hint})`
+  }
+}
+
+/**
+ * Schema for the reasons recording, exporting or replaying a HAR can fail.
  *
  * @stability experimental
  * @category schemas
@@ -263,6 +292,7 @@ export class WriteFailed extends Schema.Error<WriteFailed>("@usestrider/browser/
  */
 export const HarErrorReason = Schema.Union([
   WriteFailed,
+  ReadFailed,
   Reason.InvalidInput,
   Reason.NotPermitted,
   Reason.Unsupported,
@@ -270,7 +300,7 @@ export const HarErrorReason = Schema.Union([
 ])
 
 /**
- * The reasons recording or exporting a HAR can fail.
+ * The reasons recording, exporting or replaying a HAR can fail.
  *
  * @stability experimental
  * @category models
@@ -281,7 +311,7 @@ export type HarErrorReason = typeof HarErrorReason.Type
 const HarErrorTypeId = "~@usestrider/browser/Har/HarError"
 
 /**
- * Error for a HAR that couldn't be recorded or exported.
+ * Error for a HAR that couldn't be recorded, exported or read for replay.
  *
  * @stability experimental
  * @category errors

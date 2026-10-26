@@ -3,13 +3,14 @@
  * hop, written as HAR 1.2.
  *
  * - **What is recorded.** Each request the target's channel delivers while the recording lives, with the
- *   response its hop got and how the hop ended; a response body is read as the hop finishes, unless `content` is
- *   `omit`. A recording keeps every entry: its subscription has no bound.
+ *   response its hop got and how the hop ended; as the hop finishes, the body its request sent is read, and its
+ *   response's unless `content` is `omit`. A recording keeps every entry: its subscription has no bound.
  * - **Timings** come from the library's clock, so they mean the same on every backend (P2): `send` is 0, `wait`
  *   runs from the request to its response, and `receive` from the response to the hop's end. The phases no
  *   backend reports alike (`blocked`, `dns`, `connect`, `ssl`) are -1.
  * - **Redaction.** Cookie values, `Authorization` and `Proxy-Authorization`, and a URL's credentials are
- *   `REDACTED` unless the export includes their class.
+ *   `REDACTED` unless the export includes their class; a request's body is left out unless it includes
+ *   `requestBodies`.
  * - **Playwright's extensions**, which its trace viewer reads: `_monotonicTime`, `_resourceType`, `_frameref`,
  *   `_transferSize`, `_failureText`, `_file` and `_webSocketMessages`; and ours, `_servedBy` and `_incomplete`.
  */
@@ -42,15 +43,19 @@ export interface Recorded {
   readonly hop: Option.Option<Model.HopEntry>
   end: Option.Option<Model.HopEnd>
   body: Option.Option<Uint8Array>
+  /** The body the hop's request sent (review 22, Q164). */
+  requestBody: Option.Option<Uint8Array>
   /** A WebSocket's frames, on its handshake's entry. */
   readonly frames: Array<NetworkConnection.Frame>
-  /** Done once the hop has ended and its body, if any, was read. */
+  /** Done once the hop has ended and its bodies, if any, were read. */
   readonly done: Deferred.Deferred<void>
 }
 
 /** What a recording asks for. */
 export interface Settings {
   readonly content: "embed" | "attach" | "omit"
+  /** Whether requests' bodies are read, which only an export that can include them needs. */
+  readonly requestBodies: boolean
   readonly matches: (url: string) => boolean
   readonly webSocketFrames: boolean
   readonly inFlightAtStop: "wait" | "markIncomplete"
@@ -71,13 +76,18 @@ export interface Recorder {
 export const collect = (
   runtime: Runtime.Runtime,
   found: ReturnType<typeof Handles.target>,
+  bodies: ReadonlyArray<"request" | "response">,
   limit: ByteSize.ByteSize,
   id: Diagnostics.OperationId
 ): Effect.Effect<void, Reason.BackendFailure | Reason.Unsupported, Scope.Scope> => {
   const scope: Adapter.DeclarationScope = found._tag === "Page"
     ? { _tag: "Page", page: (found.behind.entry as Model.PageEntry).id }
     : { _tag: "UserContext", context: (found.behind.entry as Model.ContextEntry).id }
-  return runtime.model.adapter.declare(scope, { _tag: "BodyCollection", maxBytes: ByteSize.toNumberUnsafe(limit) })
+  return runtime.model.adapter.declare(scope, {
+    _tag: "BodyCollection",
+    bodies,
+    maxBytes: ByteSize.toNumberUnsafe(limit)
+  })
     .pipe(
       Effect.asVoid,
       Effect.mapError((error) => {
@@ -118,6 +128,12 @@ export const start = (
       const hop = recorded.hop.value
       const end = yield* Deferred.await(hop.end)
       recorded.end = Option.some(end)
+      // A body the browser didn't keep is left out, as a response's is
+      if (settings.requestBodies) {
+        recorded.requestBody = yield* runtime.model.adapter.requestBody(recorded.request.hop).pipe(
+          Effect.orElseSucceed(() => Option.none<Uint8Array>())
+        )
+      }
       const response = hop.response
       if (
         settings.content !== "omit" && end._tag === "Finished" && Option.isSome(response) &&
@@ -141,6 +157,7 @@ export const start = (
           hop: runtime.model.hop(entry.value.hop),
           end: Option.none(),
           body: Option.none(),
+          requestBody: Option.none(),
           frames: [],
           done: Deferred.makeUnsafe<void>()
         }
@@ -309,12 +326,49 @@ const queryOf = (url: string) => {
 const textual = (mimeType: string) =>
   /^text\/|[+/](json|xml|javascript|ecmascript)\b|^application\/(x-www-form-urlencoded|graphql)/i.test(mimeType)
 
-/** A HAR entry for one recorded hop, and the body file it names, if any. */
+/**
+ * A request's body as HAR's `postData` (review 22, Q164): text where its type is textual, with a form's `params`;
+ * otherwise base64 with `_encoding` where bodies are embedded, or a file beside the HAR where they are attached.
+ */
+const postDataOf = (
+  request: NetworkRequest.NetworkRequest,
+  body: Uint8Array,
+  headers: Readonly<Record<string, string | undefined>>,
+  writing: Writing
+): {
+  readonly postData: Record<string, unknown>
+  readonly file: Option.Option<{ path: string; content: Uint8Array }>
+} => {
+  const mimeType = (headers["content-type"] ?? "application/octet-stream").split(";")[0]!.trim()
+  if (textual(mimeType)) {
+    const text = new TextDecoder().decode(body)
+    return {
+      postData: {
+        mimeType,
+        text,
+        ...(mimeType === "application/x-www-form-urlencoded"
+          ? { params: [...new URLSearchParams(text)].map(([name, value]) => ({ name, value })) }
+          : {})
+      },
+      file: Option.none()
+    }
+  }
+  if (writing.bodies._tag === "File") {
+    const path = `${writing.bodies.prefix}${request.hop}-request.${Recordings.extension(mimeType)}`
+    return { postData: { mimeType, text: "", _file: path }, file: Option.some({ path, content: body }) }
+  }
+  return { postData: { mimeType, text: Encoding.encode(body), _encoding: "base64" }, file: Option.none() }
+}
+
+/** A HAR entry for one recorded hop, and the body files it names. */
 export const entryOf = (
   recorded: Recorded,
   clock: Recordings.Clock,
   writing: Writing
-): { readonly entry: Record<string, unknown>; readonly file: Option.Option<{ path: string; content: Uint8Array }> } => {
+): {
+  readonly entry: Record<string, unknown>
+  readonly files: ReadonlyArray<{ path: string; content: Uint8Array }>
+} => {
   const { request } = recorded
   const response = Option.flatMap(recorded.hop, (hop) => hop.response)
   const end = recorded.end
@@ -370,6 +424,9 @@ export const entryOf = (
       }
     }
   }
+  const sentBody = !minimal && writing.include.has("requestBodies") && Option.isSome(recorded.requestBody)
+    ? Option.some(postDataOf(request, recorded.requestBody.value, requestHeaders, writing))
+    : Option.none()
   const status = Option.match(response, { onNone: () => -1, onSome: (response) => response.status })
   const entry: Record<string, unknown> = {
     ...(request.initiator._tag === "Document" ? { pageref: request.initiator.navigable } : {}),
@@ -382,8 +439,9 @@ export const entryOf = (
       cookies: minimal ? [] : requestCookies(requestHeaders, writing),
       headers: minimal ? [] : headersOf(requestHeaders, writing),
       queryString: queryOf(request.url),
+      ...(Option.isSome(sentBody) ? { postData: sentBody.value.postData } : {}),
       headersSize: -1,
-      bodySize: -1
+      bodySize: Option.match(recorded.requestBody, { onNone: () => -1, onSome: (body) => body.length })
     },
     response: {
       status,
@@ -420,7 +478,13 @@ export const entryOf = (
       }))
     })
   }
-  return { entry, file }
+  return {
+    entry,
+    files: [
+      ...Option.toArray(file),
+      ...Option.toArray(Option.flatMap(sentBody, (sent) => sent.file))
+    ]
+  }
 }
 
 /** A HAR 1.2 log of entries, and the body files they name. */
@@ -432,8 +496,8 @@ export const logOf = (
 ) => {
   const files: Array<{ path: string; content: Uint8Array }> = []
   const written = entries.map((recorded) => {
-    const { entry, file } = entryOf(recorded, clock, writing)
-    if (Option.isSome(file)) files.push(file.value)
+    const { entry, files: named } = entryOf(recorded, clock, writing)
+    files.push(...named)
     return entry
   })
   const pages = [

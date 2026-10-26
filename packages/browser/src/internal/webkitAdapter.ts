@@ -189,8 +189,15 @@ interface RequestEntry {
   fulfilled: boolean
   /** What its events called it: a pause doesn't say (review 17, P11). */
   readonly resourceType: NetworkRequest.ResourceType
-  /** Its body, base64, as `Network.requestWillBeSent` carried it (review 17, P10). */
-  readonly postData: string | undefined
+  /** Each hop's body, base64, as `Network.requestWillBeSent` carried it (review 17, P10; review 22, Q164). */
+  readonly postData: Array<string | undefined>
+  /** The current hop's headers as the request event gave them, which leave its cookies out (review 22, Q158). */
+  requestHeaders: Network.Headers
+  /**
+   * A document's response body, read as its load finished where a body collection is declared: WebKit forgets it
+   * once the page navigates on (review 22, Q179).
+   */
+  kept: Deferred.Deferred<Uint8Array, Adapter.AdapterError> | undefined
 }
 
 type ObligationEntry =
@@ -557,6 +564,9 @@ const capabilities = (info: Browser.Info) => {
       // Review 17
       entry("interception.responseBody", "unsupported", ["Playwright's WebKit can't read a response paused there"]),
       entry("interception.responseFulfill", "supported"),
+      entry("interception.responseHeaders", "unsupported", [
+        "Playwright's WebKit can't read a response paused there, so it can't send it on with new headers"
+      ]),
       entry("interception.continueUrl", "supported"),
       entry("interception.abortReason", "unsupported", ["WebKit reports every reason as \"Blocked by Web Inspector\""]),
       entry("interception.redirects", "partial", ["only a redirect's first hop pauses"]),
@@ -1408,6 +1418,8 @@ export const connect: (
           request.redirects++
           request.hop = ids.hop(request.id, request.redirects)
           request.url = params.request.url
+          request.postData[request.redirects] = params.request.postData
+          request.requestHeaders = params.request.headers
           hops.set(request.hop, request)
         } else {
           const frame = frames.get(params.frameId)
@@ -1436,7 +1448,9 @@ export const connect: (
             finished: Deferred.makeUnsafe(),
             fulfilled: false,
             resourceType: resourceTypes[params.type ?? "Other"] ?? "other",
-            postData: params.request.postData
+            postData: [params.request.postData],
+            requestHeaders: params.request.headers,
+            kept: undefined
           }
           requests.set(key, request)
           hops.set(request.hop, request)
@@ -1480,6 +1494,14 @@ export const connect: (
           at: Adapter.now(),
           httpVersion: params.metrics?.protocol
         })
+        if (
+          request.resourceType === "document" && request.frame !== undefined &&
+          registry.bodyLimit(placement(request.frame.page), "response") !== undefined
+        ) {
+          const kept = Deferred.makeUnsafe<Uint8Array, Adapter.AdapterError>()
+          request.kept = kept
+          Effect.runForkWith(services)(Deferred.into(readBody(request), kept))
+        }
         Deferred.doneUnsafe(request.finished, Effect.void)
         retire(requestKey(where.session, params.requestId))
       },
@@ -1506,7 +1528,9 @@ export const connect: (
           finished: Deferred.makeUnsafe(),
           fulfilled: false,
           resourceType: resourceTypes[resource.type] ?? "other",
-          postData: undefined
+          postData: [],
+          requestHeaders: resource.response?.requestHeaders ?? ({} as Network.Headers),
+          kept: undefined
         }
         requests.set(requestKey(where.session, params.requestId), request)
         hops.set(request.hop, request)
@@ -1523,6 +1547,12 @@ export const connect: (
               : { _tag: "Unattributed" },
             at: Adapter.now()
           })
+        })
+        emit({
+          _tag: "HopHeaders",
+          hop: request.hop,
+          phase: "request",
+          headers: headersOf(resource.response?.requestHeaders)
         })
         request.responded = request.hop
         emit({
@@ -1572,7 +1602,7 @@ export const connect: (
           target,
           requestId: params.requestId,
           phase: "request",
-          postData: params.request.postData ?? request?.postData
+          postData: params.request.postData ?? request?.postData[request.redirects]
         })
         emit({
           _tag: "ObligationOpened",
@@ -1598,7 +1628,7 @@ export const connect: (
           target,
           requestId: params.requestId,
           phase: "response",
-          postData: request?.postData
+          postData: request?.postData[request.redirects]
         })
         const hop = request?.hop ?? ids.hop(ids.request(), 0)
         emit({
@@ -1656,6 +1686,15 @@ export const connect: (
     const emitResponse = (request: RequestEntry, response: Network.Response) => {
       if (request.responded === request.hop) return
       request.responded = request.hop
+      // The headers sent, cookies included, come with the response: the request event's leave cookies out, and a
+      // redirect's response has none (QUIRKS.md, Q181)
+      const sent = response.requestHeaders
+      emit({
+        _tag: "HopHeaders",
+        hop: request.hop,
+        phase: "request",
+        headers: headersOf(sent !== undefined && Object.keys(sent).length > 0 ? sent : request.requestHeaders)
+      })
       if (request.navigation !== undefined && request.navigation.documentHop === request.hop) {
         request.navigation.status = response.status
       }
@@ -2773,6 +2812,12 @@ export const connect: (
                     ...(overrides.body === undefined ? {} : { postData: base64(overrides.body) })
                   }).pipe(on)
               }
+              case "ContinueResponse":
+                return Effect.fail(
+                  new Protocol.ProtocolError({
+                    reason: new Protocol.Unsupported({ method: "interception.responseHeaders" })
+                  })
+                )
               case "Fulfill": {
                 const entry = requests.get(requestKey(obligation.target.session, obligation.requestId))
                 if (entry !== undefined) entry.fulfilled = true
@@ -3073,7 +3118,14 @@ export const connect: (
       ))
     })
 
-    const requestBody = (id: Adapter.ObligationId) => {
+    const requestBody = (hop: NetworkRequest.HopId) => {
+      const request = hops.get(hop)
+      if (request === undefined) return Effect.fail(foreign(hop))
+      const sent = request.postData[ids.redirectsOf(hop)]
+      return Effect.succeed(sent === undefined ? Option.none<Uint8Array>() : Option.some(fromBase64(sent)))
+    }
+
+    const pausedRequestBody = (id: Adapter.ObligationId) => {
       const obligation = obligations.get(id)
       if (obligation?._tag !== "PausedRequest") return Effect.fail(foreign(id))
       return Effect.succeed(
@@ -3083,6 +3135,13 @@ export const connect: (
 
     const pausedResponseBody = (_id: Adapter.ObligationId) =>
       Effect.fail(unsupported("interception.responseBody", "Playwright's WebKit can't read a response paused there"))
+
+    const readBody = (request: RequestEntry) =>
+      protocol(
+        Network.getResponseBody({ requestId: request.requestId as Network.RequestId }).pipe(
+          Protocol.on(request.session)
+        )
+      ).pipe(Effect.map(({ base64Encoded, body }) => base64Encoded ? fromBase64(body) : new TextEncoder().encode(body)))
 
     const responseBody = Effect.fnUntraced(function*(hop: NetworkRequest.HopId) {
       const request = hops.get(hop)
@@ -3094,12 +3153,7 @@ export const connect: (
       yield* Deferred.await(request.finished).pipe(
         Effect.mapError((error) => unsupported("body.failed", `The request failed (${error}), so it has no body`))
       )
-      const { body, base64Encoded } = yield* protocol(
-        Network.getResponseBody({ requestId: request.requestId as Network.RequestId }).pipe(
-          Protocol.on(request.session)
-        )
-      )
-      return base64Encoded ? fromBase64(body) : new TextEncoder().encode(body)
+      return yield* request.kept === undefined ? readBody(request) : Deferred.await(request.kept)
     })
 
     // WebKit's description of an iframe names the frame it holds (review 18, P3)
@@ -3177,6 +3231,7 @@ export const connect: (
       responseBody,
       contentFrame,
       requestBody,
+      pausedRequestBody,
       pausedResponseBody,
       setInputFiles,
       downloadPath,

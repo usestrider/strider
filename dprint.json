@@ -21,7 +21,7 @@
     "**/dist",
     "**/*.tsbuildinfo",
     "**/CHANGELOG.md",
-    "packages/browser/INDEX.md",
+    "packages/*/INDEX.md",
     "packages/tools/docs/src/jsdocs/**",
     "packages/tools/codegen/protocols/*/source/**",
     "packages/tools/codegen/protocols/*/model.json",

@@ -161,6 +161,11 @@ export interface HopEntry {
   response: Option.Option<NetworkResponse.NetworkResponse>
   /** The headers as the network sent them, where the backend reports them apart (`HopHeaders`). */
   sent: Option.Option<Headers.Headers>
+  /**
+   * Done once the headers as sent are known, which every adapter reports, or once the hop ends without them
+   * (`NetworkRequest.headersSent`, review 22).
+   */
+  readonly sentKnown: Deferred.Deferred<void>
   /** The headers as the network received them, likewise. */
   received: Option.Option<Headers.Headers>
   readonly end: Deferred.Deferred<HopEnd>
@@ -764,7 +769,9 @@ export const make = Effect.fnUntraced(function*() {
 
   const endHop = (id: NetworkRequest.HopId, end: HopEnd) => {
     const hop = hops.get(id)
-    if (hop !== undefined) Deferred.doneUnsafe(hop.end, Effect.succeed(end))
+    if (hop === undefined) return
+    Deferred.doneUnsafe(hop.end, Effect.succeed(end))
+    Deferred.doneUnsafe(hop.sentKnown, Effect.void)
   }
 
   /** The URL a navigation ended at, by its outcome's document; else where it was going. */
@@ -1050,6 +1057,7 @@ export const make = Effect.fnUntraced(function*() {
             request: fact.request,
             response: Option.none(),
             sent: Option.none(),
+            sentKnown: Deferred.makeUnsafe<void>(),
             received: Option.none(),
             end: Deferred.makeUnsafe<HopEnd>(),
             page: owner.page,
@@ -1077,8 +1085,10 @@ export const make = Effect.fnUntraced(function*() {
         case "HopHeaders": {
           const hop = hops.get(fact.hop)
           if (hop === undefined) return
-          if (fact.phase === "request") hop.sent = Option.some(fact.headers)
-          else hop.received = Option.some(fact.headers)
+          if (fact.phase === "request") {
+            hop.sent = Option.some(fact.headers)
+            Deferred.doneUnsafe(hop.sentKnown, Effect.void)
+          } else hop.received = Option.some(fact.headers)
           return
         }
         case "RequestFinished": {

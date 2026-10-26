@@ -136,7 +136,9 @@ export const record = (
       )
     }
     if (options?.network === true) {
-      yield* HarImpl.collect(runtime, found, yield* NetworkResponse.BodyLimit, id).pipe(Effect.mapError(fail))
+      yield* HarImpl.collect(runtime, found, ["response"], yield* NetworkResponse.BodyLimit, id).pipe(
+        Effect.mapError(fail)
+      )
     }
     const { exportTrace, stop } = yield* TraceImpl.start(
       runtime,

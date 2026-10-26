@@ -134,6 +134,11 @@ interface RequestEntry {
   readonly finished: Deferred.Deferred<void, string>
   /** A route fulfilled it, which Firefox reports as an ordinary response. */
   fulfilled: boolean
+  /**
+   * Each hop's request body size, `null` where Firefox doesn't say: a request's data is its first body, which a
+   * hop that sent none still answers with (QUIRKS.md, Q183).
+   */
+  readonly bodySizes: Array<number | null>
 }
 
 type ObligationEntry =
@@ -453,6 +458,7 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
         "WebDriver BiDi has no body for a response paused as it starts"
       ]),
       entry("interception.responseFulfill", "unsupported", ["Firefox doesn't implement network.provideResponse there"]),
+      entry("interception.responseHeaders", "supported"),
       entry("interception.continueUrl", "unsupported", ["Firefox aborts a request continued with a new URL"]),
       entry("interception.abortReason", "unsupported", ["WebDriver BiDi has one failure for every reason"]),
       entry("interception.redirects", "supported"),
@@ -1122,6 +1128,7 @@ export const connect: (
           // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
           request.redirects = params.redirectCount
           request.hop = ids.hop(request.id, request.redirects)
+          request.bodySizes[request.redirects] = data.bodySize
           hops.set(request.hop, request)
         } else if (request === undefined) {
           const navigation = params.navigation === null ? undefined : navigations.get(params.navigation)
@@ -1134,8 +1141,10 @@ export const connect: (
             navigable: navigableOf(params.context),
             navigation: navigation !== undefined && resourceType(data) === "document" ? navigation : undefined,
             finished: Deferred.makeUnsafe(),
-            fulfilled: false
+            fulfilled: false,
+            bodySizes: []
           }
+          request.bodySizes[params.redirectCount] = data.bodySize
           requests.set(data.request, request)
           hops.set(request.hop, request)
         }
@@ -1150,6 +1159,8 @@ export const connect: (
           at: Adapter.now()
         })
         emit({ _tag: "RequestSent", request: snapshot })
+        // The headers the request event gives are the ones sent, cookies included (review 22)
+        emit({ _tag: "HopHeaders", hop: snapshot.hop, phase: "request", headers: snapshot.headers })
         if (params.isBlocked) pause(params, "request", snapshot, Option.none())
       },
       [Network.responseStarted.method]: (params: Network.ResponseStartedParameters) => {
@@ -2037,6 +2048,12 @@ export const connect: (
                   ...(overrides?.body === undefined ? {} : { body: { type: "base64", value: base64(overrides.body) } })
                 } as Network.ContinueRequestParameters).pipe(on)
               }
+              case "ContinueResponse":
+                return Network.continueResponse({
+                  request,
+                  ...(Option.isSome(decision.status) ? { statusCode: decision.status.value } : {}),
+                  ...(Option.isSome(decision.headers) ? { headers: bidiHeaders(decision.headers.value) } : {})
+                } as Network.ContinueResponseParameters).pipe(on)
               case "Fulfill": {
                 // Firefox has no fulfill at the response phase, and leaves a refused one paused (review 17, P5)
                 if (obligation.phase === "response") {
@@ -2430,7 +2447,7 @@ export const connect: (
         case "BodyCollection": {
           const { collector } = yield* protocol(
             Network.addDataCollector({
-              dataTypes: ["response"],
+              dataTypes: [...declaration.bodies],
               maxEncodedDataSize: declaration.maxBytes,
               ...scopeParams(scope)
             } as Network.AddDataCollectorParameters).pipe(on)
@@ -2473,7 +2490,7 @@ export const connect: (
       return Option.fromUndefinedOr(frame?.id)
     })
 
-    const requestBody = Effect.fnUntraced(function*(id: Adapter.ObligationId) {
+    const pausedRequestBody = Effect.fnUntraced(function*(id: Adapter.ObligationId) {
       const obligation = obligations.get(id)
       if (obligation?._tag !== "PausedRequest") return yield* Effect.fail(foreign(id))
       const data = yield* Network.getData(
@@ -2711,6 +2728,25 @@ export const connect: (
       return bytes.type === "base64" ? fromBase64(bytes.value) : new TextEncoder().encode(bytes.value)
     })
 
+    const requestBody = Effect.fnUntraced(function*(hop: NetworkRequest.HopId) {
+      const request = hops.get(hop)
+      if (request === undefined) return yield* Effect.fail(foreign(hop))
+      const size = request.bodySizes[ids.redirectsOf(hop)]
+      if (size === 0) return Option.none<Uint8Array>()
+      const { bytes } = yield* Network.getData({ dataType: "request", request: request.bidi as Network.Request }).pipe(
+        on,
+        Effect.mapError((error) =>
+          error.reason._tag === "Rejected"
+            ? unsupported(
+              "body.notCollected",
+              "Declare BodyCollection before the request starts; BiDi keeps no body otherwise"
+            )
+            : protocolError(error)
+        )
+      )
+      return Option.some(bytes.type === "base64" ? fromBase64(bytes.value) : new TextEncoder().encode(bytes.value))
+    })
+
     const setInputFiles = Effect.fnUntraced(function*(node: Adapter.NodeBinding, files: ReadonlyArray<string>) {
       const document = documents.get(node.document)
       if (document === undefined) {
@@ -2769,6 +2805,7 @@ export const connect: (
       responseBody,
       contentFrame,
       requestBody,
+      pausedRequestBody,
       pausedResponseBody,
       setInputFiles,
       downloadPath: (id) =>

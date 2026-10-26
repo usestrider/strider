@@ -59,6 +59,8 @@ export interface Ids {
   readonly navigation: () => PageNavigation.Id
   readonly request: () => NetworkRequest.Id
   readonly hop: (request: NetworkRequest.Id, redirects: number) => NetworkRequest.HopId
+  /** How many redirects came before a hop, which its id ends with. */
+  readonly redirectsOf: (hop: NetworkRequest.HopId) => number
   readonly prompt: () => Dialog.PromptId
   readonly download: () => Download.Id
   readonly connection: () => NetworkConnection.Id
@@ -85,6 +87,7 @@ export const makeIds = (): Ids => {
     navigation: next("V"),
     request: next("Q"),
     hop: (request, redirects) => `${request}.${redirects}` as NetworkRequest.HopId,
+    redirectsOf: (hop) => Number(hop.slice(hop.lastIndexOf(".") + 1)),
     prompt: next("P"),
     download: next("DL"),
     connection: next("WS"),
@@ -522,7 +525,9 @@ export type Declaration =
   | { readonly _tag: "FileChooser" }
   | {
     readonly _tag: "BodyCollection"
-    /** Response bodies kept per request, at most; larger ones aren't kept. */
+    /** Which bodies are kept: requests' (review 22, Q164), responses', or both. */
+    readonly bodies: ReadonlyArray<"request" | "response">
+    /** Bytes kept per body, at most; larger ones aren't kept. */
     readonly maxBytes: number
   }
 
@@ -542,6 +547,16 @@ export type Decision =
     readonly status: number
     readonly headers: Readonly<Record<string, string>>
     readonly body: Uint8Array
+  }
+  /**
+   * A response paused at the response phase continues with its status or headers replaced, and its body as the
+   * server sent it (`interception.responseHeaders`, review 22, Q93). Several cookies are one `set-cookie` value,
+   * a line each.
+   */
+  | {
+    readonly _tag: "ContinueResponse"
+    readonly status: Option.Option<number>
+    readonly headers: Option.Option<Readonly<Record<string, string>>>
   }
   /**
    * The request fails. `failed` is what every backend can say; the other reasons are CDP's alone
@@ -867,8 +882,13 @@ export interface AdapterConnection {
   ) => Effect.Effect<void, AdapterError>
   readonly resetPermissions: (context: UserContext.Id) => Effect.Effect<void, AdapterError>
   readonly responseBody: (hop: NetworkRequest.HopId) => Effect.Effect<Uint8Array, AdapterError>
+  /**
+   * The body a hop's request sent; `None` without one (review 22, Q164). Kept only where `BodyCollection` was
+   * declared before the request started; `Unsupported` (`body.notCollected`, `body.redirect`) where it wasn't kept.
+   */
+  readonly requestBody: (hop: NetworkRequest.HopId) => Effect.Effect<Option.Option<Uint8Array>, AdapterError>
   /** The body of a paused request, as it was sent; `None` without one (review 17). */
-  readonly requestBody: (obligation: ObligationId) => Effect.Effect<Option.Option<Uint8Array>, AdapterError>
+  readonly pausedRequestBody: (obligation: ObligationId) => Effect.Effect<Option.Option<Uint8Array>, AdapterError>
   /**
    * The body of a response paused at the response phase; `Unsupported` where the protocol can't read it
    * (`interception.responseBody`, review 17).

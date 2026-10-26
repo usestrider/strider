@@ -17,6 +17,8 @@
  * @since 0.1.0
  */
 import type * as Effect from "effect/Effect"
+import type * as FileSystem from "effect/FileSystem"
+import * as Headers from "effect/http/Headers"
 import type * as HttpClientRequest from "effect/http/HttpClientRequest"
 import type * as HttpServerResponse from "effect/http/HttpServerResponse"
 import type * as Option from "effect/Option"
@@ -25,6 +27,9 @@ import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import type * as Declaration from "./Declaration.ts"
 import * as Diagnostics from "./Diagnostics.ts"
+import type * as FilePath from "./FilePath.ts"
+import type * as Har from "./Har.ts"
+import * as HarReplay from "./internal/harReplay.ts"
 import * as RouteDecision from "./internal/routeDecision.ts"
 import type * as NetworkRequest from "./NetworkRequest.ts"
 import type * as NetworkResponse from "./NetworkResponse.ts"
@@ -202,12 +207,36 @@ export {
 }
 
 /**
- * Lets the request continue, changed by `change`; only what changed is sent.
+ * A change to a response paused at the `response` phase: what the page sees instead of what the server sent.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface ResponseChange {
+  /**
+   * The status, with its standard phrase.
+   *
+   * @default the server's
+   */
+  readonly status?: number | undefined
+  /**
+   * The headers, which replace the server's whole: to change one, start from the paused response's.
+   *
+   * @default the server's
+   */
+  readonly headers?: Headers.Input | undefined
+}
+
+/**
+ * Lets the request continue, changed by `change`; only what changed is sent. At the `response` phase, the
+ * response continues with its status or headers changed and its body as the server sent it (review 22).
  *
  * **Gotchas**
  *
  * A change the backend can't apply fails the decision with `Unsupported`, and the default applies: Firefox
- * can't send a request to a new URL (`interception.continueUrl`).
+ * can't send a request to a new URL (`interception.continueUrl`), and WebKit can't change a response it paused
+ * (`interception.responseHeaders`).
  *
  * **Example** (Adding a header to API calls)
  *
@@ -222,13 +251,40 @@ export {
  * })
  * ```
  *
+ * **Example** (Letting a response be cached)
+ *
+ * ```ts import.meta.vitest
+ * import { Effect } from "effect"
+ * import { Headers } from "effect/http"
+ * import { Page, Route } from "@usestrider/browser"
+ *
+ * const cacheable = Effect.fn("cacheable")(function*(page: Page.Page) {
+ *   yield* page.route(
+ *     "https://shop.example.com/static/**",
+ *     ({ response }) =>
+ *       Effect.succeed(Route.continueWith({ headers: Headers.set(response.headers, "cache-control", "max-age=60") })),
+ *     { phase: "response" }
+ *   )
+ * })
+ * ```
+ *
  * @stability unstable
  * @category constructors
  * @since 0.1.0
  */
-export const continueWith = (
-  change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest
-): Decision<"request"> => RouteDecision.make({ _tag: "ContinueWith", change })
+export const continueWith: {
+  (change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest): Decision<"request">
+  (change: ResponseChange): Decision<"response">
+} = ((
+  change: ((request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest) | ResponseChange
+) =>
+  typeof change === "function"
+    ? RouteDecision.make({ _tag: "ContinueWith", change })
+    : RouteDecision.make({
+      _tag: "ContinueResponse",
+      status: change.status,
+      headers: change.headers === undefined ? undefined : Headers.fromInput(change.headers)
+    })) as never
 
 /**
  * Answers the request with a response, without contacting the server; at the `response` phase, replaces the
@@ -309,6 +365,63 @@ export const abort = (reason?: AbortReason | undefined): Decision<"request" | "r
  * @since 0.1.0
  */
 export const fallthrough: Decision<Phase> = RouteDecision.make({ _tag: "Fallthrough" })
+
+/**
+ * Settings for `fromHar`.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface FromHarOptions {
+  /**
+   * What a request no entry matches gets: a network failure, or the next matching route.
+   *
+   * @default "abort"
+   */
+  readonly notFound?: "abort" | "fallthrough" | undefined
+}
+
+/**
+ * A route handler that answers requests from a recorded HAR, read now.
+ *
+ * **Details**
+ *
+ * `path` is a HAR, or the zip `Har.record`'s `content: "attach"` writes, told apart by the zip's signature. An
+ * entry matches a request by method and URL, and by body where both have one; the latest matching entry wins.
+ * Its response is fulfilled as recorded, a redirect as a redirect, and its body decoded, so `Content-Encoding`
+ * and `Content-Length` go; so does a `Set-Cookie` whose value the export redacted. An entry that failed without
+ * a response fails the request. A request no entry matches is aborted, or falls through with
+ * `notFound: "fallthrough"`.
+ *
+ * Replay is a route like any other, so its pattern says which requests the HAR answers. Recording is
+ * `Har.record`'s.
+ *
+ * **Gotchas**
+ *
+ * Bodies are matched only where the HAR has them: an export writes requests' bodies when it includes
+ * `"requestBodies"`. A response recorded with `content: "omit"` is replayed with an empty body.
+ *
+ * **Example** (Answering a page's API calls from a recording)
+ *
+ * ```ts import.meta.vitest
+ * import { Effect } from "effect"
+ * import { Page, Route } from "@usestrider/browser"
+ *
+ * const offline = Effect.fn("offline")(function*(page: Page.Page) {
+ *   yield* page.route("https://shop.example.com/api/**", yield* Route.fromHar("api.har"))
+ *   yield* page.goto("https://shop.example.com/cart")
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category constructors
+ * @since 0.1.0
+ */
+export const fromHar: (
+  path: FilePath.Local | string,
+  options?: FromHarOptions | undefined
+) => Effect.Effect<Handler<never, never, "request">, Har.HarError, FileSystem.FileSystem> = HarReplay.fromHar
 
 /**
  * Answers an authentication challenge.

@@ -105,6 +105,14 @@ const routes: Record<string, Route> = {
       }))
     })
   },
+  // A redirect that keeps the method and body, to the echo (review 22)
+  "/to-echo": (request, response) => {
+    request.resume()
+    request.on("end", () => {
+      response.writeHead(307, { location: "/echo", "access-control-allow-origin": "*" })
+      response.end()
+    })
+  },
   // Basic authentication: "strider" and "secret" (review 17)
   "/auth": (request, response) => {
     const expected = `Basic ${Buffer.from("strider:secret").toString("base64")}`

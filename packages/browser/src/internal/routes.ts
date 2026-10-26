@@ -47,10 +47,37 @@ export interface Owner {
 
 /**
  * The L0 intercept that covers a pattern. A glob is passed as it is, since L0's `*` matches more than ours (`/`
- * included); a URL as itself; a `URLPattern`, which L0 can't read, as everything.
+ * included); a URL as itself; a `URLPattern`, which L0 can't read, as its fixed prefix (review 22, Q106).
  */
-const covering = (pattern: string): string =>
-  pattern.includes("*") || !/:[a-zA-Z_]/.test(pattern.replace(/^[a-z][a-z0-9+.-]*:/i, "")) ? pattern : "*"
+export const covering = (pattern: string): string =>
+  pattern.includes("*") || !/:[a-zA-Z_]/.test(pattern.replace(/^[a-z][a-z0-9+.-]*:/i, ""))
+    ? pattern
+    : `${fixedPrefix(pattern)}*`
+
+/**
+ * A `URLPattern`'s fixed prefix: the scheme through the path up to its first variable part, so every URL it
+ * matches starts with it. The origin is written as a URL has it (its host in lower case, a default port left
+ * out); a prefix that ends inside the origin keeps only the scheme, and one with a character a URL would encode
+ * is cut before it.
+ */
+const fixedPrefix = (pattern: string): string => {
+  // The scheme's colon is followed by `//`, never by a group's name
+  const variable = /:[A-Za-z_$]|[(){}?\\+#*]/.exec(pattern)
+  let fixed = variable === null ? pattern : pattern.slice(0, variable.index)
+  const encoded = /[^A-Za-z0-9\-._~:/@!$&'+,;=%]/.exec(fixed)
+  if (encoded !== null) fixed = fixed.slice(0, encoded.index)
+  const parts = /^([a-z][a-z0-9+.-]*):\/\/([^/@]*)(\/.*)$/i.exec(fixed)
+  if (parts === null) {
+    const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(fixed)
+    return scheme === null ? "" : scheme[0].toLowerCase()
+  }
+  try {
+    const origin = new URL(`${parts[1]}://${parts[2]}/`)
+    return `${origin.protocol}//${origin.host}${parts[3]}`
+  } catch {
+    return `${parts[1]!.toLowerCase()}://`
+  }
+}
 
 /** A header's value as the browser sends it: a redacted one unwrapped, since it is going back where it came from. */
 const plain = (headers: Readonly<Record<string, unknown>>): Record<string, string> =>
@@ -116,6 +143,21 @@ const toAdapter = (
           })
         }
       }
+      case "ContinueResponse": {
+        let headers: Record<string, string> | undefined
+        if (data.headers !== undefined) {
+          headers = {}
+          for (const [name, value] of Object.entries(plain(data.headers))) {
+            // Several cookies in one record, a line each, as a fulfilled response's are
+            headers[name] = name === "set-cookie" ? value.split(/\r?\n|, (?=[^;=]+=)/).join("\n") : value
+          }
+        }
+        return {
+          _tag: "ContinueResponse",
+          status: Option.fromUndefinedOr(data.status),
+          headers: Option.fromUndefinedOr(headers)
+        }
+      }
       case "Fulfill": {
         const context = yield* Effect.context<never>()
         const web = HttpServerResponse.toWeb(data.response, { context })
@@ -164,7 +206,7 @@ const intercepted = (
   const failed = bodyError(owner, pattern)
   const base = {
     request: paused.request,
-    requestBody: adapter.requestBody(obligation).pipe(Effect.mapError(failed))
+    requestBody: adapter.pausedRequestBody(obligation).pipe(Effect.mapError(failed))
   }
   switch (paused.phase) {
     case "request":

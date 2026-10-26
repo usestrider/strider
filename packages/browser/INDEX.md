@@ -702,7 +702,7 @@ HAR recordings: a page's or context's network traffic, exported as an HTTP Archi
 
 *models*
 
-- `type SecretClass = "credentials" | "cookies" | "authorizationHeaders" | "typedText"` (experimental)
+- `type SecretClass = "credentials" | "cookies" | "authorizationHeaders" | "typedText" | "requestBodies"` (experimental)
 - `interface Options` (experimental)
   - `readonly content: "embed" | "attach" | "omit"`
   - `readonly detail?: "full" | "minimal" | undefined`
@@ -718,7 +718,7 @@ HAR recordings: a page's or context's network traffic, exported as an HTTP Archi
 
 *schemas*
 
-- `const HarErrorReason = Schema.Union([WriteFailed, Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])` (experimental)
+- `const HarErrorReason = Schema.Union([WriteFailed, ReadFailed, Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])` (experimental)
 
 *constructors*
 
@@ -735,6 +735,7 @@ HAR recordings: a page's or context's network traffic, exported as an HTTP Archi
 *reasons*
 
 - `class WriteFailed: Schema.Error { path, hint, cause }` (experimental)
+- `class ReadFailed: Schema.Error { path, hint, cause }` (experimental)
 
 ### InitScript
 
@@ -1133,6 +1134,7 @@ Requests a page or context makes: the event, and the data every route and respon
 *getters*
 
 - `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<NetworkRequest>, Subscription.SubscriptionError>`
+- `const headersSent: (target: Page.ObservedPage | UserContext.ObservedUserContext, request: NetworkRequest) => Effect.Effect<Headers.Headers, Deadline.Timeout>`
 
 *converting*
 
@@ -1517,7 +1519,12 @@ Routes intercept requests, and their handlers decide what happens to each one.
 - `type Handler<E, R, P extends Phase = "request"> = (intercepted: Intercepted<P>) => Effect.Effect<Decision<P>, E, R>`
 - `interface Options<P extends Phase = "request">`
   - `readonly phase?: P | undefined`
+- `interface ResponseChange`
+  - `readonly status?: number | undefined`
+  - `readonly headers?: Headers.Input | undefined`
 - `type AbortReason = | "failed" | "aborted" | "timedOut" | "accessDenied" | "connectionClosed" | "connectionReset" | "connectionRefused" | "connectionAborted" | "connectionFailed" | "nameNotResolved" | "internetDisconnec…`
+- `interface FromHarOptions`
+  - `readonly notFound?: "abort" | "fallthrough" | undefined`
 - `interface Registration extends Declaration.Registration`
   - `readonly hits: Watchable.Watchable<number>`
 - `type RouteErrorReason = typeof RouteErrorReason.Type`
@@ -1529,10 +1536,13 @@ Routes intercept requests, and their handlers decide what happens to each one.
 *constructors*
 
 - `const continue: Decision<Phase>`
-- `const continueWith: (change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest) => Decision<"request">`
+- `const continueWith`
+  - `(change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest): Decision<"request">`
+  - `(change: ResponseChange): Decision<"response">`
 - `const fulfill: (response: HttpServerResponse.HttpServerResponse) => Decision<"request" | "response">`
 - `const abort: (reason?: AbortReason | undefined) => Decision<"request" | "response">`
 - `const fallthrough: Decision<Phase>`
+- `const fromHar: (path: FilePath.Local | string, options?: FromHarOptions | undefined) => Effect.Effect<Handler<never, never, "request">, Har.HarError, FileSystem.FileSystem>`
 - `const provideCredentials: (credentials: { readonly username: string readonly password: Redacted.Redacted<string> }) => Decision<"auth">`
 
 *guards*

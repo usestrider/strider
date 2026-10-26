@@ -2,6 +2,7 @@
  * What a `Route.Decision` is at run time: what was decided, under a key of its own beside the public TypeId,
  * whose type only carries the phases it is valid at (review 17, candidate 2).
  */
+import type * as Headers from "effect/http/Headers"
 import type * as HttpClientRequest from "effect/http/HttpClientRequest"
 import type * as HttpServerResponse from "effect/http/HttpServerResponse"
 import type * as Redacted from "effect/Redacted"
@@ -19,6 +20,11 @@ export type Data =
     readonly change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest
   }
   | { readonly _tag: "Fulfill"; readonly response: HttpServerResponse.HttpServerResponse }
+  | {
+    readonly _tag: "ContinueResponse"
+    readonly status: number | undefined
+    readonly headers: Headers.Headers | undefined
+  }
   | { readonly _tag: "Abort"; readonly reason: Route.AbortReason }
   | { readonly _tag: "ProvideCredentials"; readonly username: string; readonly password: Redacted.Redacted<string> }
 
@@ -27,6 +33,7 @@ export const phases: Readonly<Record<Data["_tag"], ReadonlyArray<Route.Phase>>> 
   Continue: ["request", "response", "auth"],
   Fallthrough: ["request", "response", "auth"],
   ContinueWith: ["request"],
+  ContinueResponse: ["response"],
   Fulfill: ["request", "response"],
   Abort: ["request", "response"],
   ProvideCredentials: ["auth"]

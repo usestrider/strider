@@ -176,6 +176,14 @@ interface RequestEntry {
   readonly resourceType: NetworkRequest.ResourceType
   /** The current hop's headers as received, from `responseReceivedExtraInfo` (review 20; QUIRKS.md, Q158). */
   received: Network.Headers | undefined
+  /** The current hop's headers as the request event gave them, and whether the headers sent were reported. */
+  requestHeaders: Network.Headers
+  sentReported: boolean
+  /**
+   * Each hop's request body: whether it had one, and its bytes as the event carried them, kept where a body
+   * collection covers the page (review 22, Q164).
+   */
+  readonly sentBodies: Array<{ readonly hasBody: boolean; readonly carried: Option.Option<Uint8Array> }>
   /**
    * A response that said `hasExtraInfo`, held until its `ExtraInfo` arrives, with the facts that came after it
    * (QUIRKS.md, Q158).
@@ -420,12 +428,24 @@ const fromBase64 = (text: string): Uint8Array => {
   return decoded._tag === "Success" ? decoded.success : new Uint8Array()
 }
 
-/** A request's body as `Fetch` carries it: its entries' bytes, else its text (review 17, P10). */
+/** Headers as `Fetch` sends a response's: several cookies come as one value, a line each (routes.ts). */
+const fetchHeaders = (headers: Readonly<Record<string, string>>): Array<Fetch.HeaderEntry> =>
+  Object.entries(headers).flatMap(([name, value]) =>
+    name.toLowerCase() === "set-cookie"
+      ? value.split("\n").map((cookie) => ({ name, value: cookie }))
+      : [{ name, value }]
+  )
+
+/**
+ * A request's body as an event carries it: its entries' bytes (review 17, P10). An entry without bytes, such as a
+ * file's, leaves the body to be read by the request's id (review 22, Q164).
+ */
 const postData = (request: Network.Request): Option.Option<Uint8Array> => {
-  if (request.postDataEntries !== undefined && request.postDataEntries.length > 0) {
-    const parts = request.postDataEntries.map((entry) =>
-      entry.bytes === undefined ? new Uint8Array() : fromBase64(entry.bytes)
-    )
+  if (
+    request.postDataEntries !== undefined && request.postDataEntries.length > 0 &&
+    request.postDataEntries.every((entry) => entry.bytes !== undefined)
+  ) {
+    const parts = request.postDataEntries.map((entry) => fromBase64(entry.bytes!))
     const bytes = new Uint8Array(parts.reduce((total, part) => total + part.length, 0))
     let offset = 0
     for (const part of parts) {
@@ -616,6 +636,7 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
       // Review 17
       entry("interception.responseBody", "supported"),
       entry("interception.responseFulfill", "supported"),
+      entry("interception.responseHeaders", "supported"),
       entry("interception.continueUrl", "supported"),
       entry("interception.abortReason", "supported"),
       entry("interception.redirects", "supported"),
@@ -1544,9 +1565,12 @@ export const connect: (
           // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
           request.servedFromCache = false
           request.received = undefined
+          request.requestHeaders = params.request.headers
+          request.sentReported = false
           request.redirects++
           request.hop = ids.hop(request.id, request.redirects)
           request.url = params.request.url
+          request.sentBodies[request.redirects] = sentBody(target, params.request)
           hops.set(request.hop, request)
         } else {
           const frame = frameOf(params.frameId)
@@ -1566,7 +1590,10 @@ export const connect: (
             fulfilled: false,
             resourceType: resourceTypes[params.type ?? "Other"] ?? "other",
             received: undefined,
-            held: undefined
+            held: undefined,
+            requestHeaders: params.request.headers,
+            sentReported: false,
+            sentBodies: [sentBody(target, params.request)]
           }
           requests.set(key, request)
           hops.set(request.hop, request)
@@ -1603,6 +1630,7 @@ export const connect: (
           for (const { phase, headers } of early) {
             emit({ _tag: "HopHeaders", hop: request.hop, phase, headers: headersOf(headers) })
             if (phase === "response") request.received = headers
+            else request.sentReported = true
           }
         }
       },
@@ -1625,6 +1653,12 @@ export const connect: (
         if (target === undefined) return
         const request = requests.get(requestKey(target, params.requestId))
         if (request === undefined) return
+        // A response that says no ExtraInfo will come, as one from a cache, was sent with the request event's
+        // headers, if it was sent at all (review 22)
+        if (!params.hasExtraInfo && !request.sentReported) {
+          request.sentReported = true
+          emit({ _tag: "HopHeaders", hop: request.hop, phase: "request", headers: headersOf(request.requestHeaders) })
+        }
         // The network's headers, `Set-Cookie` among them, come in an `ExtraInfo` the response says will follow;
         // it is reported with them (review 21, P6; QUIRKS.md, Q158). A response from a cache, a service worker
         // or a route can say so too and get none, so only the network's waits
@@ -1841,7 +1875,7 @@ export const connect: (
         if (phase === "response") {
           request.received = headers
           release(request)
-        }
+        } else request.sentReported = true
         return
       }
       const early = earlyHeaders.get(key) ?? []
@@ -2270,8 +2304,19 @@ export const connect: (
 
     // Chromium keeps a response's body on its own, until the page moves on: where bodies are collected, it keeps
     // them in the browser, past the next navigation (review 21, P5; QUIRKS.md, Q160)
+    // A request's body is kept as its event carried it where a body collection covers the page and it fits
+    const sentBody = (target: TargetEntry, request: Network.Request) => {
+      const limit = target.page === undefined ? undefined : registry.bodyLimit(placement(target.page), "request")
+      return {
+        hasBody: request.hasPostData === true,
+        carried: limit === undefined
+          ? Option.none<Uint8Array>()
+          : Option.filter(postData(request), (bytes) => bytes.length <= limit)
+      }
+    }
+
     const keepBodies = (target: TargetEntry, page: PageEntry) => {
-      const limit = registry.bodyLimit(placement(page))
+      const limit = registry.bodyLimit(placement(page), "response")
       return limit === undefined
         ? Effect.void
         : Network.configureDurableMessages({ maxTotalBufferSize: 10 * limit, maxResourceBufferSize: limit }).pipe(
@@ -2828,18 +2873,21 @@ export const connect: (
                     ...(overrides?.body === undefined ? {} : { postData: base64(overrides.body) })
                   }).pipe(on)
               }
+              case "ContinueResponse":
+                return Fetch.continueResponse({
+                  requestId,
+                  ...(Option.isSome(decision.status) ? { responseCode: decision.status.value } : {}),
+                  ...(Option.isSome(decision.headers)
+                    ? { responseHeaders: fetchHeaders(decision.headers.value) }
+                    : {})
+                }).pipe(on)
               case "Fulfill":
                 // The browser reports what a route made as an ordinary response
                 if (obligation.request !== undefined) obligation.request.fulfilled = true
                 return Fetch.fulfillRequest({
                   requestId,
                   responseCode: decision.status,
-                  // Several cookies come as one value, a line each (routes.ts)
-                  responseHeaders: Object.entries(decision.headers).flatMap(([name, value]) =>
-                    name.toLowerCase() === "set-cookie"
-                      ? value.split("\n").map((cookie) => ({ name, value: cookie }))
-                      : [{ name, value }]
-                  ),
+                  responseHeaders: fetchHeaders(decision.headers),
                   body: base64(decision.body)
                 }).pipe(on)
               case "Fail":
@@ -3152,12 +3200,33 @@ export const connect: (
       return base64Encoded ? fromBase64(body) : new TextEncoder().encode(body)
     })
 
+    // Chromium keeps only a request's last body, so an earlier hop's is read from what its event carried (QUIRKS.md,
+    // Q182)
+    const requestBody = Effect.fnUntraced(function*(hop: NetworkRequest.HopId) {
+      const request = hops.get(hop)
+      if (request === undefined) return yield* Effect.fail(foreign(hop))
+      const sent = request.sentBodies[ids.redirectsOf(hop)]
+      if (sent === undefined || !sent.hasBody) return Option.none<Uint8Array>()
+      if (Option.isSome(sent.carried)) return sent.carried
+      if (request.hop !== hop) {
+        return yield* Effect.fail(
+          unsupported("body.redirect", "Chromium keeps only the last hop's request body, and the event didn't carry it")
+        )
+      }
+      const { base64Encoded, postData } = yield* protocol(
+        Network.getRequestPostData({ requestId: request.requestId as Network.RequestId }).pipe(
+          Protocol.on(request.target.session)
+        )
+      )
+      return Option.some(base64Encoded === true ? fromBase64(postData) : new TextEncoder().encode(postData))
+    })
+
     const pausedObligation = (id: Adapter.ObligationId) => {
       const obligation = obligations.get(id)
       return obligation?._tag === "PausedRequest" ? Effect.succeed(obligation) : Effect.fail(foreign(id))
     }
 
-    const requestBody = Effect.fnUntraced(function*(id: Adapter.ObligationId) {
+    const pausedRequestBody = Effect.fnUntraced(function*(id: Adapter.ObligationId) {
       const obligation = yield* pausedObligation(id)
       if (Option.isSome(obligation.body) || !obligation.hasBody || obligation.networkId === undefined) {
         return obligation.body
@@ -3271,6 +3340,7 @@ export const connect: (
       responseBody,
       contentFrame,
       requestBody,
+      pausedRequestBody,
       pausedResponseBody,
       setInputFiles,
       downloadPath,

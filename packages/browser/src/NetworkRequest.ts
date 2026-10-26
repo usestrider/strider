@@ -11,9 +11,12 @@
  * @stability unstable
  * @since 0.1.0
  */
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import type * as Headers from "effect/http/Headers"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import type * as HttpMethod from "effect/http/HttpMethod"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
@@ -21,6 +24,7 @@ import type * as Deadline from "./Deadline.ts"
 import * as Events from "./internal/events.ts"
 import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
+import * as Operation from "./internal/operation.ts"
 import * as Spans from "./internal/spans.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Page from "./Page.ts"
@@ -312,3 +316,43 @@ export const history = (
  */
 export const toHttpClientRequest = (request: NetworkRequest): HttpClientRequest.HttpClientRequest =>
   HttpClientRequest.make(request.method)(request.url, { headers: request.headers })
+
+/**
+ * The headers a request was sent with, as the network sent them, once they are known.
+ *
+ * **Details**
+ *
+ * A request event's `headers` are the ones its event gives, which on Chromium and WebKit leave out what the
+ * network adds, `Cookie` among them; both report those apart, a moment later (QUIRKS.md, Q158 and Q181). This
+ * waits for them: on Chromium until the `ExtraInfo` its response promises, on WebKit until the response, and on
+ * Firefox not at all. `target` is the page or context the request was seen on. A request the model no longer
+ * keeps, past its last 1000, gives its event's headers.
+ *
+ * @stability unstable
+ * @category getters
+ * @since 0.1.0
+ */
+export const headersSent = (
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  request: NetworkRequest
+): Effect.Effect<Headers.Headers, Deadline.Timeout> =>
+  Effect.gen(function*() {
+    const { runtime } = Handles.target(target as Page.Page | UserContext.UserContext).behind
+    const hop = runtime.model.hop(request.hop)
+    if (Option.isNone(hop)) return request.headers
+    const budget = yield* Operation.budget
+    const known = yield* Deferred.await(hop.value.sentKnown).pipe(
+      Effect.timeoutOption(Operation.millisLeft(budget.at))
+    )
+    if (Option.isNone(known)) {
+      return yield* Effect.fail(Operation.timeout({
+        operation: "NetworkRequest.headersSent",
+        id: Operation.operationId(),
+        phase: "waitingForEvent",
+        budget: budget.budget,
+        history: [],
+        hint: Option.some("The browser hadn't said which headers it sent by the deadline")
+      }))
+    }
+    return Option.getOrElse(hop.value.sent, () => request.headers)
+  }).pipe(Spans.operation("NetworkRequest.headersSent", { attributes: { "browser.hop.id": request.hop } }))

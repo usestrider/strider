@@ -381,6 +381,7 @@ export const connect = (steps: ReadonlyArray<Step>) => (sink: Adapter.Sink) =>
       resetPermissions: () => Effect.void,
       responseBody: () => Effect.succeed(new Uint8Array()),
       requestBody: () => Effect.succeedNone,
+      pausedRequestBody: () => Effect.succeedNone,
       pausedResponseBody: () => unsupported("interception.responseBody", "the timeline's requests are never paused"),
       setInputFiles: () => unsupported("fileChooser"),
       downloadPath: () => Effect.succeedNone,
