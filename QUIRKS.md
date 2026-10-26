@@ -735,6 +735,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* `Capability.Screencast`, whose handle is a stream of frames, stays `Unsupported` on BiDi, and the limitation says why.
 - *Reconsider:* recording a video through it for `Trace`, or a capability of its own for a file screencast.
 - **Kept** in review 21: the *We* line is the decision.
+- **Resolved** in `d8ee372` (review 22's fourth step): `Capability.Video` records the file, into the directory the page's context downloads to (`destinationFolder`), and a trace's native screencast uses it on Firefox.
 
 **Q178. Firefox names no user context in three events about windows** (Browser). `browsingContext.create({ type: "window" })` in a user context also opens a tab in the default user context, in a window of its own, and closes it at once; its `navigationStarted` and `navigationCommitted` come before its `contextCreated`, with `userContext: null`. `contextDestroyed` for a window whose user context `browser.removeUserContext` removed has `userContext: null` too. The spec has `browser.UserContext` in both places.
 - *Seen:* review 21's build, when Firefox's pages became windows (Q71): the events failed to decode, so the adapter rebuilt its model from `browsingContext.getTree` in the middle of a navigation, and its documents went unreported. A raw BiDi client, which decodes nothing, didn't see a problem. It is what broke navigation in review 16's probe of windows.
@@ -769,6 +770,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 12's slice; `test/Modules.test.ts`.
 - *Reconsider:* goes away as modules are built.
 - **Resolved** in `a7ee8dc` (review 21's first step): the builds removed the stubs: the one `NotBuilt` left is `Trace.record`'s `domSnapshots`, which is declared and documented.
+- **Revised** in `d8ee372` (review 22's fourth step): `domSnapshots` is built, so nothing is `NotBuilt` now; the module stays for what a later review declares before building.
 
 **Q61. A `Watchable` is an effect value with members attached** (Ours). Effect 4 has no public way to subclass `Effect`.
 - *Seen:* review 12.
