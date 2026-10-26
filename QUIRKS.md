@@ -53,7 +53,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* PROTOCOL.md, History and restores.
 - *We:* send a history command it refused that way again, every 50 ms for up to a second.
 - *Reconsider:* this is a fixed retry cadence, which sits uneasily with "no magic delays" (README, principles). Waiting for the swap's evidence would be better if one exists.
-- **Resolved** in review 21's first step: a command refused while Chromium swaps documents is sent again at once, at most three times, with no spacing: the refusal covers only the swap's moment (review 21, P7).
+- **Resolved** in `a7ee8dc` (review 21's first step): a command refused while Chromium swaps documents is sent again at once, at most three times, with no spacing: the refusal covers only the swap's moment (review 21, P7).
 
 **Q7. Firefox's realms come before their commit, sometimes after a transient one** (Browser). The new document's realm is created before `navigationCommitted`, sometimes after a realm with origin `null` that is destroyed at once. Chromium and WebKit create it after the commit.
 - *Seen:* probe 1.
@@ -106,19 +106,19 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* BiDi probe findings.
 - *We:* nothing special beyond Q4's case.
 - *Reconsider:* whether the viewer's realm should be hidden from callers.
-- **Resolved** in review 21's first step: `LaunchProfile.automation` turns the JSON viewer off, so a JSON response's document is the JSON as served, as in the other browsers (review 21, P3). `stock` and an attached Firefox keep it, and so does the adapter's handling of it.
+- **Resolved** in `a7ee8dc` (review 21's first step): `LaunchProfile.automation` turns the JSON viewer off, so a JSON response's document is the JSON as served, as in the other browsers (review 21, P3). `stock` and an attached Firefox keep it, and so does the adapter's handling of it.
 
 **Q69. Firefox's traversal back from its JSON viewer went unreported under full load** (Browser). In one full integration run after review 16, the conformance test's `traverse(-1)` from `/json` removed the viewer's realm and fetched the page again, but no new realm and no end came within 10 s. Three runs of that test alone passed.
 - *Seen:* review 16's revision, one full run of three; review 17's revision, two full runs of four; review 20's second step, one full run, which three runs of the test alone passed; review 20's third step, one of two full runs.
 - *We:* nothing yet; the restore inference (Q4) waits for a realm that didn't come.
 - *Reconsider:* with Q4 and Q5, an end Firefox reports for every traversal.
-- **Resolved** in review 21's first step: traced under synthetic load, where 12 of 32 runs failed: Firefox sends no `navigationStarted` for a traversal that leaves its JSON viewer before the viewer has loaded, fetches the page again, and reports no new document. With the viewer off in `automation` (Q15), 48 of 48 passed. The viewer's own case goes into Q4's report.
+- **Resolved** in `a7ee8dc` (review 21's first step): traced under synthetic load, where 12 of 32 runs failed: Firefox sends no `navigationStarted` for a traversal that leaves its JSON viewer before the viewer has loaded, fetches the page again, and reports no new document. With the viewer off in `automation` (Q15), 48 of 48 passed. The viewer's own case goes into Q4's report.
 
 **Q149. A Chromium page closed under full load went unreported** (Browser). In one full integration run after review 19, the conformance test's `closePage` was answered, and no `NavigableRemoved` came within 10 s; three runs of that test alone passed.
 - *Seen:* review 19's revision, once.
 - *We:* nothing yet.
 - *Reconsider:* whether `Target.targetDestroyed` or `detachedFromTarget` was lost, or arrived for a target the adapter no longer tracked, if it happens again.
-- **Resolved** in review 21's first step: traced under synthetic load, where 4 of 48 runs failed: Chromium answers a `Target.closeTarget` sent as a navigation commits, and drops it; the page stays attached and alive, and a second close closes it. Raw CDP showed the same, 10 dropped closes in 120. The adapter first sends a page command, `Page.getNavigationHistory`, which Chromium refuses during the swap and accepts once it is over, and which is answered with a dialog open; with it, raw CDP dropped no close in 120, and 100 of 100 stress runs passed.
+- **Resolved** in `a7ee8dc` (review 21's first step): traced under synthetic load, where 4 of 48 runs failed: Chromium answers a `Target.closeTarget` sent as a navigation commits, and drops it; the page stays attached and alive, and a second close closes it. Raw CDP showed the same, 10 dropped closes in 120. The adapter first sends a page command, `Page.getNavigationHistory`, which Chromium refuses during the swap and accepts once it is over, and which is answered with a dialog open; with it, raw CDP dropped no close in 120, and 100 of 100 stress runs passed.
 
 ## Browsers: dialogs, popups, focus and input
 
@@ -337,13 +337,13 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 14, P13.
 - *We:* `BodyUnavailable{redirect}` without asking the browser.
 - *Reconsider:* fixing the adapters' hop tables so the error, if asked, is honest.
-- **Resolved** in review 21's first step: the adapters keep a redirect's earlier hop ids, so a body read for one answers `Unsupported{body.redirect}`, and the conformance suite asks.
+- **Resolved** in `a7ee8dc` (review 21's first step): the adapters keep a redirect's earlier hop ids, so a body read for one answers `Unsupported{body.redirect}`, and the conformance suite asks.
 
 **Q40. An event stream's body never finishes, so reading it waits forever** (Browser). On all three.
 - *Seen:* review 14, P14.
 - *We:* bound the wait by the deadline (`next`) or `Deadline.DefaultBudget` per body (`stream`), then `BodyUnavailable{streaming}`.
 - *Reconsider:* recognizing streaming responses from their headers instead of waiting.
-- **Resolved** in review 21's first step: a response whose content type is `text/event-stream` is `BodyUnavailable{streaming}` as soon as its body is asked for.
+- **Resolved** in `a7ee8dc` (review 21's first step): a response whose content type is `text/event-stream` is `BodyUnavailable{streaming}` as soon as its body is asked for.
 
 **Q41. EventSource and WebSocket support differ** (Browser). Only Chromium reports an EventSource as a connection with its messages (and only from its first message); WebKit and Firefox report only its request (`eventSource`, or Firefox's `other`). Firefox reports a WebSocket only as its handshake, an `http:` request answered 101, with no frames and no close.
 - *Seen:* review 14, P14 and P15.
@@ -552,7 +552,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 18's revision, a page without a doctype.
 - *We:* nothing; the browser's error is the capture's `BackendFailure`.
 - *Reconsider:* capturing with BiDi's `viewport` origin, translated by the scroll offset, when the clip is inside the viewport.
-- **Resolved** in review 21's first step: a clip inside the viewport is captured with BiDi's `viewport` origin, offset by the scroll position; a slice test captures one below a short page in quirks mode.
+- **Resolved** in `a7ee8dc` (review 21's first step): a clip inside the viewport is captured with BiDi's `viewport` origin, offset by the scroll position; a slice test captures one below a short page in quirks mode.
 
 **Q115. WebDriver BiDi captures device pixels only, with no background override, and prints no header or footer** (Browser). Nor a page's CSS size; Chromium's and WebKit's protocols have all of it (WebKit no PDF at all, Q52).
 - *Seen:* review 18.
@@ -582,7 +582,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 18's revision: the page that writes a storage state was released by its scope, whose close isn't awaited, and the caller's first page followed at once.
 - *We:* the storage state's page is closed with `page.close()`, which waits for the close, before the context is returned.
 - *Reconsider:* waiting for the close in a page's scope finalizer too (Q135).
-- **Resolved** in review 21's first step: every page a scope releases is waited for (Q135), so a page created right after can't meet one still closing.
+- **Resolved** in `a7ee8dc` (review 21's first step): every page a scope releases is waited for (Q135), so a page created right after can't meet one still closing.
 
 ## Browsers: attaching
 
@@ -679,7 +679,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 **Q60. Unbuilt module functions are erased, so some are odd stubs** (Ours). Node erases a `declare const`, so a module that used one as it loaded failed to load. `Deferred.await` was a `NotBuilt` function until review 13 (the module is gone since review 15), and `Route.continue` is a decision nothing reads yet.
 - *Seen:* review 12's slice; `test/Modules.test.ts`.
 - *Reconsider:* goes away as modules are built.
-- **Resolved** in review 21's first step: the builds removed the stubs: the one `NotBuilt` left is `Trace.record`'s `domSnapshots`, which is declared and documented.
+- **Resolved** in `a7ee8dc` (review 21's first step): the builds removed the stubs: the one `NotBuilt` left is `Trace.record`'s `domSnapshots`, which is declared and documented.
 
 **Q61. A `Watchable` is an effect value with members attached** (Ours). Effect 4 has no public way to subclass `Effect`.
 - *Seen:* review 12.
@@ -745,7 +745,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 16's revision.
 - *We:* fail loudly rather than act with a key that may still be down (CONCEPTS.md §5, Compensation).
 - *Reconsider:* a reset that releases every key and button the page could hold.
-- **Resolved** in review 21's first step: the next gesture sends the release that failed again first. If it gets through, the page's input is known again and the gesture runs; the gesture fails only if it fails again.
+- **Resolved** in `a7ee8dc` (review 21's first step): the next gesture sends the release that failed again first. If it gets through, the page's input is known again and the gesture runs; the gesture fails only if it fails again.
 
 **Q85. `Condition` isn't `Pipeable`, though `because` is dual** (Ours). `condition.pipe(Condition.because("…"))` doesn't compile; `Condition.because(condition, "…")` and `pipe(condition, Condition.because("…"))` do.
 - *Seen:* review 16's revision.
@@ -768,7 +768,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 16's revision; it held in every run.
 - *We:* nothing yet.
 - *Reconsider:* waiting for the page's `dragstart` after the first held move, as Playwright does, and clearing a drag the release didn't end.
-- **Resolved** in review 21's first step: a drag Chromium announces after its gesture's release is canceled (`dragCancel`) before the next gesture, which would otherwise continue it.
+- **Resolved** in `a7ee8dc` (review 21's first step): a drag Chromium announces after its gesture's release is canceled (`dragCancel`) before the next gesture, which would otherwise continue it.
 
 **Q103. Chromium's `Fetch` stays enabled for every page, with a pattern nothing matches** (Ours). It keeps the interceptor installed, so a route declared on a live page is in force when its declaration returns (Q46).
 - *Seen:* review 17's revision: one request in 40 went past a route under load before; none in 160 after.
@@ -888,7 +888,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 18's revision.
 - *We:* nothing yet, beyond the storage state's page (Q119).
 - *Reconsider:* waiting for the close in the finalizer, under a short deadline.
-- **Resolved** in review 21's first step: a page released by its scope, or a popup by its opener's, is waited for after the close is asked for, under the default budget.
+- **Resolved** in `a7ee8dc` (review 21's first step): a page released by its scope, or a popup by its opener's, is waited for after the close is asked for, under the default budget.
 
 **Q141. A launched browser's own first tab is observed** (Ours). Every backend opens one tab in the default context before any page is created (review 19, P1); no scope created it, so it is an observed page, open as long as the browser, which `inspect` and `control` gain access to.
 - *Seen:* review 19, P1.
@@ -941,7 +941,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 20's build, on WebKit.
 - *We:* the tests wait on `handled`.
 - *Reconsider:* counting the handler before its files are set.
-- **Resolved** in review 21's first step: the handler is counted when it decides, as a dialog's is, and the page sets the files after; the slice test reads the count without waiting.
+- **Resolved** in `a7ee8dc` (review 21's first step): the handler is counted when it decides, as a dialog's is, and the page sets the files after; the slice test reads the count without waiting.
 
 **Q153. One call can't mix made files with paths** (Ours). The browser sets files from paths and the page makes files from bytes, each replacing the other's, so `setInputFiles` and `FileChooser.choose` with both fail with `InvalidInput`.
 - *Seen:* review 20's build.
@@ -1061,4 +1061,4 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 21's build, fixing Q39.
 - *We:* keep a finished request answerable while there is room for 1000, as the model keeps hops (`maxHops`), and forget the oldest after (`internal/retired.ts`). A request still in flight stays until it ends.
 - *Reconsider:* ending a target's requests with it, which Q159's favicon, never ended, would need.
-- **Resolved** in review 21's first step: as above.
+- **Resolved** in `a7ee8dc` (review 21's first step): as above.
