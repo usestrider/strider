@@ -297,7 +297,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 14, P9.
 - *We:* report the browser's text and level as they are.
 - *Reconsider:* formatting from the arguments ourselves, which needs their handles.
-- **Resolved** in review 21's fourth step: the library applies the Console Standard's formatter (`%s`, `%d`, `%i`, `%f`, `%o`, `%O`, `%c`) to the arguments CDP and WebKit report (`internal/consoleFormat.ts`), as Firefox applies its own. Two differences stay. Firefox writes `%f` as printf does (`1.250000`, not `parseFloat`'s `1.25`) and sends its formatted text as the call's only argument, so nothing can reformat it (reported: `upstream/firefox-console-args-formatted.md`). And objects read as each browser describes them: review 21 meant to render them one way, but WebDriver BiDi serializes an `Error` without its message, so one rendering would have dropped Chromium's error messages.
+- **Resolved** in `c790129` (review 21's fourth step): the library applies the Console Standard's formatter (`%s`, `%d`, `%i`, `%f`, `%o`, `%O`, `%c`) to the arguments CDP and WebKit report (`internal/consoleFormat.ts`), as Firefox applies its own. Two differences stay. Firefox writes `%f` as printf does (`1.250000`, not `parseFloat`'s `1.25`) and sends its formatted text as the call's only argument, so nothing can reformat it (reported: `upstream/firefox-console-args-formatted.md`). And objects read as each browser describes them: review 21 meant to render them one way, but WebDriver BiDi serializes an `Error` without its message, so one rendering would have dropped Chromium's error messages.
 
 **Q34. Console locations have different bases and columns** (Browser). Chromium's and Firefox's lines and columns are 0-based, WebKit's 1-based; the column points at the call's property on Chromium and its parenthesis on WebKit.
 - *Seen:* review 14, P9.
@@ -711,17 +711,17 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 **Q62. A wait on a final value fails at once with `Timeout`** (Ours). A download's `status` ends in a final value, not with its target; `waitFor` a value it can no longer reach fails at once with `Timeout{waitingForCondition}` and a hint, which isn't a timeout.
 - *Seen:* review 14's revision.
 - *Reconsider:* a reason of its own for "can never happen", or `TargetGone` with a download as a target.
-- **Resolved** in review 21's fourth step: `Watchable.waitFor` fails with `Watchable.Ended`, carrying the final value, when the value settled on one that can't satisfy it; a watchable whose entity ended keeps `TargetGone`. A canceled download's `status.waitFor(Completed)` checks it.
+- **Resolved** in `c790129` (review 21's fourth step): `Watchable.waitFor` fails with `Watchable.Ended`, carrying the final value, when the value settled on one that can't satisfy it; a watchable whose entity ended keeps `TargetGone`. A canceled download's `status.waitFor(Completed)` checks it.
 
 **Q63. `AutoResolution.policy` names a setting that doesn't exist** (Ours). A canceled file chooser reads `policy: 'fileChoosers: "cancel"'`, though no `fileChoosers` option exists; there is one policy.
 - *Seen:* review 14.
 - *Reconsider:* an option, or a different way to say "the only policy".
-- **Resolved** in review 21's fourth step: `AutoResolution.policy` is a union: `ContextOption{ name: "dialogs", value }` for a context option, `Default` for the library's one rule, which a canceled file chooser gets.
+- **Resolved** in `c790129` (review 21's fourth step): `AutoResolution.policy` is a union: `ContextOption{ name: "dialogs", value }` for a context option, `Default` for the library's one rule, which a canceled file chooser gets.
 
 **Q64. A body that isn't JSON is a `BackendFailure`** (Ours). `CapturedResponse.json` fails with `BackendFailure{IncompatibleResponse, method: "json"}`; no reason of `ResponseError` fits a page's malformed body.
 - *Seen:* review 14's revision.
 - *Reconsider:* a reason for it.
-- **Resolved** in review 21's fourth step: `ResponseError` gains `MalformedBody{ expected: "json" }`, which `json` of a body that isn't JSON fails with.
+- **Resolved** in `c790129` (review 21's fourth step): `ResponseError` gains `MalformedBody{ expected: "json" }`, which `json` of a body that isn't JSON fails with.
 
 **Q65. `BodyLimit` is compared with the encoded size** (Ours). The size the browser reports when a hop ends is encoded (compressed), which is what BiDi's collector bounds, so a 10 MiB limit admits a larger decoded body.
 - *Seen:* review 14's revision.
@@ -776,7 +776,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 16's revision.
 - *We:* nothing.
 - *Reconsider:* making it `Pipeable`, like the handles.
-- **Resolved** in review 21's fourth step: `Condition` extends `Pipeable`; conditions are made with `pipe` on their prototype.
+- **Resolved** in `c790129` (review 21's fourth step): `Condition` extends `Pipeable`; conditions are made with `pipe` on their prototype.
 
 **Q86. Keys are the US layout's** (Ours). Shift turns `1` into `!` as on a US keyboard, and a character outside the table is a key with `code: ""`.
 - *Seen:* review 16.
@@ -811,7 +811,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 17's revision.
 - *We:* nothing.
 - *Reconsider:* with Q63.
-- **Resolved** in review 21's fourth step: a request no route decides is `policy: Default`, as Q63.
+- **Resolved** in `c790129` (review 21's fourth step): a request no route decides is `policy: Default`, as Q63.
 
 **Q106. A route with a `URLPattern` pauses every request** (Ours). L0 can't read a `URLPattern`, so the intercept covers everything and the route matches itself; requests it doesn't match continue at once, a round trip each.
 - *Seen:* review 17's revision.
@@ -864,7 +864,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 18's revision.
 - *We:* as above; a capture never waits.
 - *Reconsider:* the locator reasons in `PageError`.
-- **Resolved** in review 21's fourth step: `PageError` gains Locator's `NoMatch` and `StrictViolation`, which an element capture of none, or of several, fails with; `InvalidInput{area}` stays for a frame on its way that went.
+- **Resolved** in `c790129` (review 21's fourth step): `PageError` gains Locator's `NoMatch` and `StrictViolation`, which an element capture of none, or of several, fails with; `InvalidInput{area}` stays for a frame on its way that went.
 
 **Q127. Sites are approximated without the public suffix list** (Ours). A storage partition's top-level site is the URL's scheme and its host's last two labels, or the host itself for an IP address or a one-label name; `example.co.uk`'s is `co.uk`.
 - *Seen:* review 18's revision.
@@ -894,7 +894,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 18's revision.
 - *We:* as above.
 - *Reconsider:* the error channels, with the next API revision.
-- **Resolved** in review 21's fourth step: cookie jar operations declare `TargetGone`, and a context that ended is one; origin storage declares `Timeout`, which its deadline is (`dispatchedUnconfirmed`: a write may have happened).
+- **Resolved** in `c790129` (review 21's fourth step): cookie jar operations declare `TargetGone`, and a context that ended is one; origin storage declares `Timeout`, which its deadline is (`dispatchedUnconfirmed`: a write may have happened).
 
 **Q132. Handles are released one at a time** (Ours). The review's batches aren't built: each handle's scope finalizer releases it alone.
 - *Seen:* review 18's revision.
@@ -935,7 +935,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 19's revision.
 - *We:* as above; every other member fails with `TargetGone{AccessReleased}`.
 - *Reconsider:* `TargetGone` in those signatures, with the next API revision.
-- **Resolved** in review 21's fourth step: `route`, `addInitScript`, `emulate`, `grant`, `newPage`, `exportStorageState`, the cookie jar, the page clock, `Dialog.handle`, `FileChooser.handle`, `Har.record`, `Trace.record` and `Browser.newPage` declare `TargetGone`, and a released grant fails every guarded member with `TargetGone{AccessReleased}`. The refusal table went with it (`internal/refusals.ts` is `guarded.ts`, which lists only the members observing gives and the declarations a grant removes). A clock never installed is still `NotInstalled`.
+- **Resolved** in `c790129` (review 21's fourth step): `route`, `addInitScript`, `emulate`, `grant`, `newPage`, `exportStorageState`, the cookie jar, the page clock, `Dialog.handle`, `FileChooser.handle`, `Har.record`, `Trace.record` and `Browser.newPage` declare `TargetGone`, and a released grant fails every guarded member with `TargetGone{AccessReleased}`. The refusal table went with it (`internal/refusals.ts` is `guarded.ts`, which lists only the members observing gives and the declarations a grant removes). A clock never installed is still `NotInstalled`.
 
 **Q144. A page's `context`, when its context isn't controlled, refuses** (Ours). `Page.context` is a `UserContext`, but controlling a page doesn't control its context, so it is a handle whose members needing control fail with `NotPermitted`, and whose `control` gains it.
 - *Seen:* review 19's revision.
