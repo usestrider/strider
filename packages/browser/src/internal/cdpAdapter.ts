@@ -173,6 +173,13 @@ interface RequestEntry {
   fulfilled: boolean
   /** What the `Network` domain calls it: `Fetch` calls a `fetch()` an `XHR` (review 17, P11). */
   readonly resourceType: NetworkRequest.ResourceType
+  /** The current hop's headers as received, from `responseReceivedExtraInfo` (review 20; QUIRKS.md, Q158). */
+  received: Network.Headers | undefined
+  /**
+   * A response that said `hasExtraInfo`, held until its `ExtraInfo` arrives, with the facts that came after it
+   * (QUIRKS.md, Q158).
+   */
+  held: { readonly response: Network.Response; readonly after: Array<Adapter.Fact> } | undefined
 }
 
 type ObligationEntry =
@@ -672,6 +679,8 @@ export const connect: (
     const retire = Retired.make((key: string) => {
       const request = requests.get(key)
       if (request === undefined) return
+      // A response still waiting for its headers goes with the ones it has
+      release(request)
       requests.delete(key)
       for (let hop = 0; hop <= request.redirects; hop++) hops.delete(ids.hop(request.id, hop))
     })
@@ -735,6 +744,7 @@ export const connect: (
 
     const endNavigation = (navigation: NavigationEntry, outcome: Adapter.NavigationOutcome, evidence: string) => {
       if (navigation.ended) return
+      releaseDocument(navigation)
       navigation.ended = true
       navigation.frame.navigations.delete(navigation.loaderId)
       // A later commit under the same loader id, such as a restore, mustn't find this one
@@ -808,6 +818,7 @@ export const connect: (
       navigation: NavigationEntry | undefined,
       evidence: string
     ): DocumentEntry => {
+      releaseDocument(navigation)
       // Children of the document being replaced end with it: CDP doesn't say so (probe 8)
       for (const child of Array.from(frame.children)) {
         removeFrame(child, { _tag: "FrameDetached" }, "cdp: the parent's document was replaced")
@@ -1521,6 +1532,7 @@ export const connect: (
           emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
           // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
           request.servedFromCache = false
+          request.received = undefined
           request.redirects++
           request.hop = ids.hop(request.id, request.redirects)
           request.url = params.request.url
@@ -1541,7 +1553,9 @@ export const connect: (
             finished: Deferred.makeUnsafe(),
             servedFromCache: false,
             fulfilled: false,
-            resourceType: resourceTypes[params.type ?? "Other"] ?? "other"
+            resourceType: resourceTypes[params.type ?? "Other"] ?? "other",
+            received: undefined,
+            held: undefined
           }
           requests.set(key, request)
           hops.set(request.hop, request)
@@ -1577,6 +1591,7 @@ export const connect: (
           earlyHeaders.delete(key)
           for (const { phase, headers } of early) {
             emit({ _tag: "HopHeaders", hop: request.hop, phase, headers: headersOf(headers) })
+            if (phase === "response") request.received = headers
           }
         }
       },
@@ -1598,13 +1613,29 @@ export const connect: (
       [Network.responseReceived.method]: (target, params: Network.ResponseReceivedParams) => {
         if (target === undefined) return
         const request = requests.get(requestKey(target, params.requestId))
-        if (request !== undefined) emitResponse(request, params.response)
+        if (request === undefined) return
+        // The network's headers, `Set-Cookie` among them, come in an `ExtraInfo` the response says will follow;
+        // it is reported with them (review 21, P6; QUIRKS.md, Q158). A response from a cache, a service worker
+        // or a route can say so too and get none, so only the network's waits
+        if (params.hasExtraInfo && request.received === undefined && servedBy(request, params.response) === "network") {
+          request.held = { response: params.response, after: [] }
+          return
+        }
+        emitResponse(request, params.response)
       },
       [Network.loadingFinished.method]: (target, params: Network.LoadingFinishedParams) => {
         if (target === undefined) return
         const request = requests.get(requestKey(target, params.requestId))
         if (request === undefined) return
-        emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: params.encodedDataLength, at: Adapter.now() })
+        const finished: Adapter.Fact = {
+          _tag: "RequestFinished",
+          hop: request.hop,
+          encodedBytes: params.encodedDataLength,
+          at: Adapter.now()
+        }
+        // An image's `ExtraInfo` can come after its load finished (review 21, P6)
+        if (request.held !== undefined) request.held.after.push(finished)
+        else emit(finished)
         Deferred.doneUnsafe(request.finished, Effect.void)
         retire(requestKey(target, params.requestId))
       },
@@ -1613,6 +1644,8 @@ export const connect: (
         const routed = routeFailed.delete(requestKey(target, params.requestId))
         const request = requests.get(requestKey(target, params.requestId))
         if (request === undefined) return
+        // A request that fails after its response gets no more: the response goes with the headers it has
+        release(request)
         emit({
           _tag: "RequestFailed",
           hop: request.hop,
@@ -1794,12 +1827,33 @@ export const connect: (
       const request = requests.get(key)
       if (request !== undefined) {
         emit({ _tag: "HopHeaders", hop: request.hop, phase, headers: headersOf(headers) })
+        if (phase === "response") {
+          request.received = headers
+          release(request)
+        }
         return
       }
       const early = earlyHeaders.get(key) ?? []
       early.push({ phase, headers })
       earlyHeaders.set(key, early)
       if (earlyHeaders.size > 500) earlyHeaders.delete(earlyHeaders.keys().next().value!)
+    }
+
+    // Reports a held response, then what came after it
+    const release = (request: RequestEntry) => {
+      const held = request.held
+      if (held === undefined) return
+      request.held = undefined
+      emitResponse(request, held.response)
+      for (const fact of held.after) emit(fact)
+    }
+
+    // A navigation's response comes before its end and its document's commit, as the model expects: a response
+    // still waiting for its headers then goes with the ones it has (QUIRKS.md, Q158)
+    const releaseDocument = (navigation: NavigationEntry | undefined) => {
+      const hop = navigation?.documentHop
+      const request = hop === undefined ? undefined : hops.get(hop)
+      if (request !== undefined) release(request)
     }
 
     const emitResponse = (request: RequestEntry, response: Network.Response) => {
@@ -1814,7 +1868,8 @@ export const connect: (
           status: Math.min(599, Math.max(100, response.status || 200)) as NetworkResponse.StatusCode,
           statusText: response.statusText,
           httpVersion: Option.fromUndefinedOr(response.protocol || undefined),
-          headers: headersOf(response.headers),
+          // The headers as received, where `ExtraInfo` said them: the main event leaves out cookies (Q158)
+          headers: headersOf(request.received ?? response.headers),
           servedBy: servedBy(request, response),
           at: Adapter.now()
         })
@@ -2196,10 +2251,22 @@ export const connect: (
       })
       yield* applyScripts(target, page)
       yield* applyIntercepts(target, page)
+      yield* keepBodies(target, page)
       if (registry.fileChooser(placement(page)) && target.kind === "page") {
         yield* Page.setInterceptFileChooserDialog({ enabled: true }).pipe(Protocol.on(target.session))
       }
     })
+
+    // Chromium keeps a response's body on its own, until the page moves on: where bodies are collected, it keeps
+    // them in the browser, past the next navigation (review 21, P5; QUIRKS.md, Q160)
+    const keepBodies = (target: TargetEntry, page: PageEntry) => {
+      const limit = registry.bodyLimit(placement(page))
+      return limit === undefined
+        ? Effect.void
+        : Network.configureDurableMessages({ maxTotalBufferSize: 10 * limit, maxResourceBufferSize: limit }).pipe(
+          Protocol.on(target.session)
+        )
+    }
 
     const targetsInScope = (scope: Adapter.DeclarationScope) =>
       [...targets.values()].filter((target) =>
@@ -2223,9 +2290,9 @@ export const connect: (
                 Protocol.on(target.session)
               )
               : Effect.void
-          case "Downloads":
           case "BodyCollection":
-            // Chromium keeps response bodies on its own, so there is nothing to collect
+            return keepBodies(target, page)
+          case "Downloads":
             return Effect.void
         }
       }, { concurrency: "unbounded", discard: true })
@@ -2390,15 +2457,15 @@ export const connect: (
     })
 
     // Chromium says a page isn't attached for a moment while it swaps documents, as just after a navigation
-    // commits (recorded 2026-10-20); a command refused for that never ran, so it is sent again, at once: the
-    // refusal covers only the swap's moment, and the command sent again is accepted (review 21, P7; QUIRKS.md,
-    // Q6)
+    // commits (recorded 2026-10-20); a command refused for that never ran, so it is sent again as the refusal
+    // comes back, with no delay of ours: the browser's answers pace it. After a commit the moment is a fraction of a
+    // millisecond (review 21, P7); a back/forward-cache restore's is longer (QUIRKS.md, Q6)
     const whileSwapping = <A>(effect: Effect.Effect<A, Protocol.ProtocolError>) =>
       effect.pipe(Effect.retry({
         while: (error) =>
           error.reason._tag === "Rejected" && error.reason.reason === "Unrecognized" &&
           error.reason.description === "Not attached to an active page",
-        times: 3
+        times: 10_000
       }))
 
     const closePage = Effect.fnUntraced(

@@ -732,6 +732,17 @@ Adapter responsibilities:
 - **Probes** (review 21, What the browsers do, P1 and P2; and, for the build, the events of a window's creation and of its user context's removal, over raw BiDi and through the adapter's recorded traffic).
 - **Tests.** `test/integration/slice/events.ts` adds a popup's opener acted on without `activate`: on Firefox as launched, on Chromium and WebKit with focus emulated, and on Chromium without it a timeout whose hint names focus emulation. `interaction.ts` acts on a page behind another on every backend without `activate`. The CLI test checks the session's focus and the exported context. Integration tests: 465, all passing in one full run.
 
+**Built** (2026-10-25, after [review 21](reviews/21-quirks.md), its third step): network headers and bodies on Chromium.
+
+- **Held responses** (the CDP adapter). A response whose `responseReceived` says `hasExtraInfo` waits for its `responseReceivedExtraInfo`, holding the hop's end if that comes first (an image's or a favicon's did, review 21, P6), and is reported with the headers received, `Set-Cookie` among them; the current hop remembers them (`received`), and a redirect's next hop starts without. Only a response from the network waits: one from a cache, a service worker or a route can say `hasExtraInfo` and get no `ExtraInfo`, as a cache hit announced by `requestServedFromCache` did. A failure, a navigation's end or commit, and the request's retirement (Q177) release a held response with the headers it has (Q158).
+- **Durable bodies** (the CDP adapter; `Registry.bodyLimit`). Where a body collection is declared, the page's session gets `Network.configureDurableMessages` with the collection's limit per body and ten times it in all, on the declaration and on each new target in scope, so a document's body outlives the next navigation (review 21, P5; Q160).
+- **The swap's refusals, again** (the CDP adapter, `whileSwapping`). Step 1's three resends ran out once in a full run, on a back/forward-cache restore, which refuses for longer than a commit: a refused command is now sent again as each refusal comes back, paced by the browser's answers alone (Q6).
+- **Where the build differs from the review.**
+  - **Durable messages are configured where bodies are collected,** not for every page the adapter attaches, so a page nobody reads bodies from keeps none in the browser.
+  - **Only the network's responses are held:** the review took `hasExtraInfo` as reliable, and a cache hit proved it isn't.
+  - **WebKit forgets a left document's body too** (Q179), which the review didn't foresee; it stays without one.
+- **Tests.** `test/integration/slice/recordings.ts`'s HAR test reads a response's `Set-Cookie` on every backend, and the body of a document the page left at once, on Chromium and Firefox. A full run found Q180, a crash another client causes that goes unreported under load, which fails as often without this step. Integration tests: 465, all passing in the last full run.
+
 ### Pause-on-start granularity
 
 Before-author-script setup for *new* targets needs them paused at creation. Granularity differs by backend, and the access model depends on it.

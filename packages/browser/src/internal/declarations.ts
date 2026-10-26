@@ -78,6 +78,8 @@ export interface Registry {
     context: UserContext.Id
   ) => Extract<Adapter.Declaration, { _tag: "Downloads" }>["behavior"] | undefined
   readonly fileChooser: (placement: Placement) => boolean
+  /** The largest body a collection in force keeps, or `undefined` where none is (QUIRKS.md, Q160). */
+  readonly bodyLimit: (placement: Placement) => number | undefined
 }
 
 export const make = (): Registry => {
@@ -98,6 +100,13 @@ export const make = (): Registry => {
       return entry
     },
     all: () => [...registered.values()],
+    bodyLimit: (placement) => {
+      let limit: number | undefined
+      for (const entry of inScope(placement)) {
+        if (entry.declaration._tag === "BodyCollection") limit = Math.max(limit ?? 0, entry.declaration.maxBytes)
+      }
+      return limit
+    },
     overrides: (placement) => {
       const effective = new Map<Adapter.Override["_tag"], Adapter.Override>()
       // Least specific and oldest first, so the winner is written last

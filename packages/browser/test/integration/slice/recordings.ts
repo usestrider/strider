@@ -91,7 +91,10 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* Browser.newPage()
               const har = yield* Har.record(page, { content: "embed" })
+              const cookieResponse = yield* NetworkResponse.next(page, { url: `${served.origin}/cookie` })
               yield* page.goto(`${served.origin}/cookie`)
+              // The response carries the cookie it sets on every backend: Chromium's in an ExtraInfo (QUIRKS.md, Q158)
+              assert.include((yield* cookieResponse).headers["set-cookie"], "flavor=oat")
               yield* page.goto(url)
               // The response's body, read once its hop has finished: an export then has it
               const fetched = yield* NetworkResponse.next(page, { url: "**/json", body: (message) => message.text })
@@ -116,6 +119,9 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             assert.deepInclude(json.request.headers, { name: "authorization", value: "REDACTED" })
             const cookie = entries.find((entry) => entry.request.url === `${served.origin}/cookie`)!
             assert.deepInclude(cookie.response.cookies, { name: "flavor", value: "REDACTED", path: "/" })
+            // The document the page left at once still has its body: Chromium keeps it for a recording (Q160);
+            // WebKit sometimes forgets it first, with nothing to keep it by (Q179)
+            if (name !== "WebKit") assert.strictEqual(cookie.response.content.text, "<title>cookie</title>")
             // The page's URL, and the Referer that repeats it, hold the fixture's script, so the secrets' own
             // headers are checked rather than the whole file
             for (const entry of entries) {
