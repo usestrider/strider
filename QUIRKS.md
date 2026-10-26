@@ -54,7 +54,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* send a history command it refused that way again, every 50 ms for up to a second.
 - *Reconsider:* this is a fixed retry cadence, which sits uneasily with "no magic delays" (README, principles). Waiting for the swap's evidence would be better if one exists.
 - **Resolved** in `a7ee8dc` (review 21's first step): a command refused while Chromium swaps documents is sent again at once, at most three times, with no spacing: the refusal covers only the swap's moment (review 21, P7).
-- **Revised** in review 21's third step: three resends weren't enough once, under a full run, for a back/forward-cache restore, which refuses longer than a commit. A refused command is now sent again each time its refusal comes back, with no delay of the library's, up to 10,000 times; under synthetic load the history test then passed 40 of 40.
+- **Revised** in `fa0a3a9` (review 21's third step): three resends weren't enough once, under a full run, for a back/forward-cache restore, which refuses longer than a commit. A refused command is now sent again each time its refusal comes back, with no delay of the library's, up to 10,000 times; under synthetic load the history test then passed 40 of 40.
 
 **Q7. Firefox's realms come before their commit, sometimes after a transient one** (Browser). The new document's realm is created before `navigationCommitted`, sometimes after a realm with origin `null` that is destroyed at once. Chromium and WebKit create it after the commit.
 - *Seen:* probe 1.
@@ -447,7 +447,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 20's build: a HAR of a page that set a cookie had none on Chromium.
 - *We:* the CDP adapter reports them as a hop's own headers (`HopHeaders`), which recordings prefer; `NetworkRequest` and `NetworkResponse` keep the headers the main events give. An `ExtraInfo` that comes before its request waits for it; one for a redirect's next hop that comes before that hop starts is given to the hop before.
 - *Reconsider:* holding a response until its `ExtraInfo` arrives, as Playwright does, so every event has the headers sent.
-- **Resolved** in review 21's third step: the CDP adapter holds a response whose `responseReceived` says `hasExtraInfo` until its `ExtraInfo` arrives, with the hop's end if it comes first, and reports it with the headers received, so `NetworkResponse.headers` has `Set-Cookie` on every backend (review 21, P6). Only a response from the network waits: one from a cache announced by `requestServedFromCache` said `hasExtraInfo` and got none. A request that fails, a navigation that ends or commits, and a request retired from the table (Q177) release what was held. Requests keep the headers their main event gives: nothing says an `ExtraInfo` will follow one.
+- **Resolved** in `fa0a3a9` (review 21's third step): the CDP adapter holds a response whose `responseReceived` says `hasExtraInfo` until its `ExtraInfo` arrives, with the hop's end if it comes first, and reports it with the headers received, so `NetworkResponse.headers` has `Set-Cookie` on every backend (review 21, P6). Only a response from the network waits: one from a cache announced by `requestServedFromCache` said `hasExtraInfo` and got none. A request that fails, a navigation that ends or commits, and a request retired from the table (Q177) release what was held. Requests keep the headers their main event gives: nothing says an `ExtraInfo` will follow one.
 
 **Q159. Chromium never ends a favicon request cut off by the next navigation** (Browser). The page's favicon request, started as one document loaded and cut off by a `goto`, gets no response, no `loadingFinished` and no `loadingFailed`.
 - *Seen:* review 20's build, in a HAR on Chromium.
@@ -458,7 +458,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 20's build, a HAR recording two navigations in a row.
 - *We:* a HAR records that entry without its body.
 - *Reconsider:* reading a document's body as its response finishes, before the next commit, if recordings need them.
-- **Resolved** in review 21's third step: where a body collection is declared, as a recording or a body read declares one, the CDP adapter configures durable messages for the page (`Network.configureDurableMessages`, ten bodies' worth at the collection's limit each), which keep a document's body past the next navigation (review 21, P5). WebKit forgets it too, with nothing to keep it by (Q179).
+- **Resolved** in `fa0a3a9` (review 21's third step): where a body collection is declared, as a recording or a body read declares one, the CDP adapter configures durable messages for the page (`Network.configureDurableMessages`, ten bodies' worth at the collection's limit each), which keep a document's body past the next navigation (review 21, P5). WebKit forgets it too, with nothing to keep it by (Q179).
 
 **Q161. A page can read a response before the browser reports its hop finished** (Browser). A `fetch` resolved and its text shown in the page, and Chromium's `loadingFinished` for it hadn't arrived yet.
 - *Seen:* review 20's build, a HAR exported right after the page showed what it fetched.
