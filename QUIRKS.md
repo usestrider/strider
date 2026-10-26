@@ -1276,4 +1276,5 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 22's fifth step, noticed after its commit.
 - *We:* each source names its own directory (`Emit.Source.directory`).
 - *Reconsider:* nothing.
+- **Resolved** in `251796e` (review 23's first step): as above, which corrected the stock protocol's headers.
 
