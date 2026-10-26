@@ -421,7 +421,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* refuse it up front (`interception.responseFulfill`), so the default continues the request.
 - *Reconsider:* a response-phase decision that changes headers only, which Firefox and CDP can do.
 - **Kept** in review 21: a response-phase decision that changes headers only is among the declared pieces still unbuilt.
-- **Resolved** in review 22's second step: `Route.continueWith({ status, headers })` at the response phase sends the response on with its status or headers replaced, on CDP and BiDi (`interception.responseHeaders`); WebKit can't, since it can't read the paused response. Fulfilling there stays CDP's and WebKit's.
+- **Resolved** in `f223b83` (review 22's second step): `Route.continueWith({ status, headers })` at the response phase sends the response on with its status or headers replaced, on CDP and BiDi (`interception.responseHeaders`); WebKit can't, since it can't read the paused response. Fulfilling there stays CDP's and WebKit's.
 
 **Q94. Only CDP can read a response paused at the response phase** (Browser). WebDriver BiDi has no body as a response starts, and Playwright's WebKit no command for it.
 - *Seen:* review 17, P5.
@@ -458,7 +458,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* the CDP adapter reports them as a hop's own headers (`HopHeaders`), which recordings prefer; `NetworkRequest` and `NetworkResponse` keep the headers the main events give. An `ExtraInfo` that comes before its request waits for it; one for a redirect's next hop that comes before that hop starts is given to the hop before.
 - *Reconsider:* holding a response until its `ExtraInfo` arrives, as Playwright does, so every event has the headers sent.
 - **Resolved** in `fa0a3a9` (review 21's third step): the CDP adapter holds a response whose `responseReceived` says `hasExtraInfo` until its `ExtraInfo` arrives, with the hop's end if it comes first, and reports it with the headers received, so `NetworkResponse.headers` has `Set-Cookie` on every backend (review 21, P6). Only a response from the network waits: one from a cache announced by `requestServedFromCache` said `hasExtraInfo` and got none. A request that fails, a navigation that ends or commits, and a request retired from the table (Q177) release what was held. Requests keep the headers their main event gives: nothing says an `ExtraInfo` will follow one.
-- **Resolved** in review 22's second step: `NetworkRequest.headersSent(target, request)` waits for a request's headers as sent, cookies included, which on Chromium come in the `ExtraInfo` a response's `hasExtraInfo` promises, or are the request event's when it promises none; elsewhere they are known with the response (Q181) or at once. A request event's `headers` stay what it gave.
+- **Resolved** in `f223b83` (review 22's second step): `NetworkRequest.headersSent(target, request)` waits for a request's headers as sent, cookies included, which on Chromium come in the `ExtraInfo` a response's `hasExtraInfo` promises, or are the request event's when it promises none; elsewhere they are known with the response (Q181) or at once. A request event's `headers` stay what it gave.
 
 **Q159. Chromium never ends a favicon request cut off by the next navigation** (Browser). The page's favicon request, started as one document loaded and cut off by a `goto`, gets no response, no `loadingFinished` and no `loadingFailed`.
 - *Seen:* review 20's build, in a HAR on Chromium.
@@ -488,7 +488,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 21's build, when the HAR test began asking for that body on every backend.
 - *We:* the entry has no body.
 - *Reconsider:* reading a document's body in the adapter as its load finishes, where a body collection is declared, before the next commit can clear it.
-- **Resolved** in review 22's second step: where a body collection covers the page, the WebKit adapter reads a document's body as its load finishes, and a recording's read gets that.
+- **Resolved** in `f223b83` (review 22's second step): where a body collection covers the page, the WebKit adapter reads a document's body as its load finishes, and a recording's read gets that.
 
 **Q181. WebKit leaves `Cookie` out of its request events, and a redirect's response has no request headers** (Browser). As Chromium does (Q158), `Network.requestWillBeSent` carries the headers the page set; the ones sent, cookies included, come as the response's `requestHeaders`, which a redirect's response has empty.
 - *Seen:* review 22's build, when `NetworkRequest.headersSent` was asked for a cookie on every backend.
@@ -853,7 +853,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 17's revision.
 - *We:* a glob or an exact URL is passed to L0 as it is.
 - *Reconsider:* translating a `URLPattern`'s fixed parts into a glob.
-- **Resolved** in review 22's second step: the intercept is the pattern's fixed prefix, from the scheme through the path up to its first variable part, with the origin as a URL writes it, and `*`; a prefix that ends inside the origin keeps the scheme only.
+- **Resolved** in `f223b83` (review 22's second step): the intercept is the pattern's fixed prefix, from the scheme through the path up to its first variable part, with the origin as a URL writes it, and `*`; a prefix that ends inside the origin keeps the scheme only.
 
 **Q107. A removed init script's dependents stay registered** (Ours). They don't run once their dependency is gone, since L0 runs a script only after what it comes after ran, but they are still declared until their own scope closes.
 - *Seen:* review 17's revision; the review said they would be removed.
@@ -1059,7 +1059,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* entries have no `postData`.
 - *Reconsider:* keeping bodies for recordings, through `requestBody` where the backend has it.
 - **Kept** in review 21: a declared piece still unbuilt, built when a use needs it.
-- **Resolved** in review 22's second step: a recording reads each hop's request body as the hop ends, kept where its body collection, which now names the bodies it keeps, covers the page: from the event on Chromium, or `Network.getRequestPostData` for the last hop's (Q182), a request data collector on Firefox (Q183), the event on WebKit (Q184). An export writes them as `postData` only when `include` names `"requestBodies"`.
+- **Resolved** in `f223b83` (review 22's second step): a recording reads each hop's request body as the hop ends, kept where its body collection, which now names the bodies it keeps, covers the page: from the event on Chromium, or `Network.getRequestPostData` for the last hop's (Q182), a request data collector on Firefox (Q183), the event on WebKit (Q184). An export writes them as `postData` only when `include` names `"requestBodies"`.
 
 **Q165. A caller's span in a trace spans the operations inside it** (Ours). Its own start and end are on Effect's clock, which `TestClock` freezes, so its step runs from its first recorded operation's start to its last one's end.
 - *Seen:* review 20's build.
