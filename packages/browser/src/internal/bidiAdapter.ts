@@ -491,7 +491,13 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
       entry("capability.axTree", "unsupported", ["WebDriver BiDi has no accessibility tree"]),
       entry("capability.screencast", "unsupported", [
         "Firefox's browsingContext.startScreencast records a WebM file on the browser's host, and streams no frames"
-      ])
+      ]),
+      // Review 22
+      ownership === "launched"
+        ? entry("capability.video", "supported", ["written where the page's context downloads to"])
+        : entry("capability.video", "unsupported", [
+          "Firefox writes the file on its own host, out of the program's reach"
+        ])
     ]
   })
 }
@@ -2529,6 +2535,41 @@ export const connect: (
         unsupported("interception.responseBody", "WebDriver BiDi has no body for a response paused as it starts")
       )
 
+    // A WebM file Firefox writes where the context downloads to, which a launched browser shares with the program
+    // (review 22, P2)
+    const video = Effect.fnUntraced(function*(id: L1Target.NavigableId) {
+      const navigable = yield* navigableById(id)
+      if (options.ownership !== "launched") {
+        return yield* Effect.fail(
+          unsupported("capability.video", "Firefox writes the file on its own host, out of the program's reach")
+        )
+      }
+      const behavior = registry.downloads(navigable.context.id)
+      if (behavior === undefined || behavior._tag === "Deny") {
+        return yield* Effect.fail(unsupported(
+          "capability.video",
+          behavior === undefined
+            ? "The page's context declares no downloads directory, where the file would go"
+            : "The page's context denies downloads, and the file would go where they do"
+        ))
+      }
+      const started = yield* protocol(
+        BrowsingContext.startScreencast({
+          context: navigable.bidi as BrowsingContext.BrowsingContext,
+          destinationFolder: behavior.directory
+        }).pipe(on)
+      )
+      const written = Deferred.makeUnsafe<string, Adapter.AdapterError>()
+      yield* Effect.addFinalizer(() =>
+        protocol(BrowsingContext.stopScreencast({ screencast: started.screencast }).pipe(on)).pipe(
+          Effect.map((stopped) => stopped.path),
+          Effect.exit,
+          Effect.flatMap((exit) => Deferred.done(written, exit))
+        )
+      )
+      return Deferred.await(written)
+    })
+
     const applyDownloads = (scope: Adapter.DeclarationScope) => {
       const context = scope._tag === "UserContext" ? scope.context : defaultContext
       const behavior = registry.downloads(context)
@@ -2807,6 +2848,7 @@ export const connect: (
             "Firefox's browsingContext.startScreencast records a WebM file on the browser's host, and streams no frames"
           )
         ),
+      video,
       cookies,
       setCookies,
       clearCookies,

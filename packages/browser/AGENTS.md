@@ -89,7 +89,8 @@ member that isn't built yet fails as the defect `NotBuilt`, naming itself (a tra
   makes the file in the page; one call takes bytes or paths, not both.
 - **Record, then export.** `const har = yield* Har.record(page, { content: "embed" })`, act, then
   `har.exportHar("run.har")`; `Trace.record(page, { screenshots: "perAction" })` and `exportTrace("trace.zip")`
-  write a trace trace.playwright.dev opens. Exports are redacted unless `include` names a class of secret;
+  write a trace trace.playwright.dev opens; `domSnapshots: true` with `network: true` adds DOM snapshots before and
+  after each action, which the viewer renders. Exports are redacted unless `include` names a class of secret;
   requests' bodies are left out unless it names `"requestBodies"`. A request event's `headers` can lack `Cookie`:
   `NetworkRequest.headersSent(page, request)` gives the headers as sent.
 - **Drive a browser from a shell with `strider`.** `strider start --name s --chromium <path>`, then

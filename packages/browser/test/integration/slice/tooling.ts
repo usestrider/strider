@@ -20,6 +20,7 @@ import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import * as Tracer from "effect/Tracer"
+import * as fs from "node:fs"
 import { site } from "../adapter/harness.ts"
 
 const timeout = 60_000
@@ -208,6 +209,51 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               assert.isAbove(frame.width, 0)
               assert.isAbove(frame.height, 0)
             }
+          }))
+        }), timeout)
+
+      it.effect("records the page to a video file where the browser writes one", () =>
+        Effect.gen(function*() {
+          const { info } = yield* Browser.Browser
+          const url = yield* fixture(`<p id="t"></p><script>setInterval(() => t.textContent = Date.now(), 50)</script>`)
+          const recorded = yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            return yield* Effect.scoped(Effect.gen(function*() {
+              const recording = yield* page.capability(Capability.Video)
+              yield* Effect.sleep("800 millis")
+              return recording
+            })).pipe(Effect.exit)
+          }))
+          if (info.protocol !== "bidi") {
+            const error = yield* Effect.flip(recorded)
+            assert(Capability.isCapabilityError(error), String(error))
+            assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "capability.video" })
+            return
+          }
+          assert(recorded._tag === "Success", String(recorded))
+          // Written into the context's downloads, which go with it: read before then, so here the file is gone
+          const file = yield* recorded.value.file
+          assert.match(file, /\.webm$/)
+        }), timeout)
+
+      it.effect("writes a WebM file Firefox's page records, while its context lives", () =>
+        Effect.gen(function*() {
+          const { info } = yield* Browser.Browser
+          if (info.protocol !== "bidi") return
+          const url = yield* fixture(`<p id="t"></p><script>setInterval(() => t.textContent = Date.now(), 50)</script>`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const recording = yield* Effect.scoped(Effect.gen(function*() {
+              const recording = yield* page.capability(Capability.Video)
+              yield* Effect.sleep("800 millis")
+              return recording
+            }))
+            const file = yield* recording.file
+            const bytes = fs.readFileSync(file)
+            // WebM is EBML
+            assert.deepStrictEqual(Array.from(bytes.subarray(0, 4)), [0x1a, 0x45, 0xdf, 0xa3])
           }))
         }), timeout)
 

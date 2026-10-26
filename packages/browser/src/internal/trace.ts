@@ -6,7 +6,10 @@
  *   attributes as params, its duration and its error. A span of the caller's that encloses one is a step too, so
  *   the trace nests as the program did; it spans the operations recorded inside it.
  * - **Events.** Console messages, uncaught exceptions as `pageError`s, a screenshot after each action, and
- *   screencast frames, native or polled.
+ *   screencast frames, native or polled, or on Firefox its video of each page (review 22).
+ * - **DOM snapshots** (review 22, `capture.ts`): every frame of the action's page captured before and after each
+ *   action, the target, resolved by the action's locator, marked in the one after. A snapshot's secret values
+ *   are redacted at export under the strict preset.
  * - **Network.** The HAR's entries, in `trace.network`, with their bodies in `resources/`.
  *
  * Times come from the library's monotonic clock, never Effect's `Clock` (review 20); params are redacted under
@@ -31,12 +34,15 @@ import type * as Target from "../Target.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
 import * as Adapter from "./adapter.ts"
 import * as Capabilities from "./capabilities.ts"
+import * as Capture from "./capture.ts"
 import * as Events from "./events.ts"
+import * as Filters from "./filters.ts"
 import * as HarImpl from "./har.ts"
 import type * as Model from "./model.ts"
+import * as Operation from "./operation.ts"
 import * as Recorders from "./recorders.ts"
 import * as Recordings from "./recordings.ts"
-import type * as Runtime from "./runtime.ts"
+import * as Runtime from "./runtime.ts"
 import * as Spans from "./spans.ts"
 
 /** What a recording asks for. */
@@ -44,6 +50,7 @@ export interface Settings {
   readonly screenshots: "perAction" | "off"
   readonly screencast: "native" | { readonly polled: Duration.Input } | "off"
   readonly network: boolean
+  readonly domSnapshots: boolean
 }
 
 /** What a trace records about. */
@@ -68,6 +75,24 @@ interface Shot {
   readonly page: Target.NavigableId
   readonly at: MonotonicInstant.MonotonicInstant
   readonly png: Uint8Array
+}
+
+/** One action's capture of its page, before or after it. */
+interface Snapshot {
+  readonly callId: string
+  readonly phase: "before" | "after"
+  readonly page: Target.NavigableId
+  readonly at: MonotonicInstant.MonotonicInstant
+  readonly captures: ReadonlyArray<Capture.FrameCapture>
+}
+
+/** Firefox's video of a page: recording until the first export, which reads its file. */
+interface Video {
+  readonly page: Target.NavigableId
+  readonly at: MonotonicInstant.MonotonicInstant
+  readonly scope: Scope.Closeable
+  readonly recording: Capability.VideoRecording
+  read: Option.Option<{ readonly bytes: Uint8Array; readonly width: number; readonly height: number }>
 }
 
 interface Frame {
@@ -127,6 +152,76 @@ const png: Adapter.ScreenshotOptions = {
   omitBackground: false
 }
 
+/** A text's SHA-1, in hex: the name of a stylesheet's file in the trace, as the viewer's own traces name theirs. */
+const digest = (text: string) =>
+  Effect.promise(() => crypto.subtle.digest("SHA-1", new TextEncoder().encode(text))).pipe(
+    Effect.map((hash) => Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join(""))
+  )
+
+/**
+ * A snapshot with its secret values flagged by the capture: unflagged, and under the strict preset redacted, a
+ * password input's value or a field's filled with `Redacted` text (review 22).
+ */
+const redactSecrets = (node: unknown, preset: Diagnostics.Preset): unknown => {
+  if (!Array.isArray(node) || typeof node[0] !== "string") return node
+  const [name, attributes, ...children] = node as [string, Record<string, string> | undefined, ...Array<unknown>]
+  if (attributes === undefined) return node
+  let written = attributes
+  if (Capture.secretAttribute in attributes) {
+    const { [Capture.secretAttribute]: _flag, ...rest } = attributes
+    written = preset === "strict"
+      ? {
+        ...rest,
+        "__playwright_value_": "REDACTED",
+        ...("value" in rest ? { value: "REDACTED" } : {})
+      }
+      : rest
+  }
+  return [name, written, ...children.map((child) => redactSecrets(child, preset))]
+}
+
+/** A WebM file's frame size, from its first video track's `PixelWidth` and `PixelHeight`; 0 where it has none. */
+const webmSize = (bytes: Uint8Array): { readonly width: number; readonly height: number } => {
+  const size = { width: 0, height: 0 }
+  // An EBML variable-length integer at `at`: its value, its length, and whether it is all ones (unknown size)
+  const vint = (at: number, keepMarker: boolean) => {
+    const first = bytes[at] ?? 0
+    let length = 1
+    while (length <= 8 && (first & (0x80 >> (length - 1))) === 0) length++
+    let value = keepMarker ? first : first & (0xff >> length)
+    let ones = value === (0xff >> length)
+    for (let index = 1; index < length; index++) {
+      const byte = bytes[at + index] ?? 0
+      value = value * 256 + byte
+      ones = ones && byte === 0xff
+    }
+    return { value, length, unknown: !keepMarker && ones }
+  }
+  // Segment, Tracks, TrackEntry and Video, the masters on the way to the size
+  const masters = new Set([0x18538067, 0x1654ae6b, 0xae, 0xe0])
+  const walk = (start: number, end: number) => {
+    let at = start
+    while (at < end && at < bytes.length && (size.width === 0 || size.height === 0)) {
+      const id = vint(at, true)
+      const length = vint(at + id.length, false)
+      const body = at + id.length + length.length
+      const stop = length.unknown ? end : Math.min(end, body + length.value)
+      if (masters.has(id.value)) walk(body, stop)
+      else if (id.value === 0xb0 || id.value === 0xba) {
+        let value = 0
+        for (let index = body; index < body + length.value; index++) value = value * 256 + (bytes[index] ?? 0)
+        if (id.value === 0xb0) size.width = value
+        else size.height = value
+      }
+      if (length.unknown && !masters.has(id.value)) return
+      at = length.unknown ? body : body + length.value
+    }
+  }
+  // The EBML header comes first; the segment after it
+  walk(0, bytes.length)
+  return size
+}
+
 /** Starts recording for the scope: a child scope of it, which `stop` closes. */
 export const start = Effect.fnUntraced(function*(
   runtime: Runtime.Runtime,
@@ -142,6 +237,11 @@ export const start = Effect.fnUntraced(function*(
   const frames: Array<Frame> = []
   const consoles: Array<{ readonly message: ConsoleMessage.ConsoleMessage }> = []
   const exceptions: Array<UncaughtException.UncaughtException> = []
+  const snapshots: Array<Snapshot> = []
+  const videos: Array<Video> = []
+  // The recording's captures in each document are one stream, numbered apart from any other recording's
+  const stream = `trace-${crypto.randomUUID()}`
+  const failedCaptures = new Set<Target.DocumentId>()
   let calls = 0
 
   const pageOf = (id: unknown): Option.Option<Model.PageEntry> =>
@@ -174,9 +274,37 @@ export const start = Effect.fnUntraced(function*(
     return Option.some(callId)
   }
 
+  /** Every frame of the page, captured for the step; a page with a prompt open can't be read, so it isn't. */
+  const snapshot = (
+    callId: string,
+    phase: Snapshot["phase"],
+    page: Model.PageEntry,
+    target: Option.Option<Capture.CaptureTarget>
+  ) =>
+    Effect.flatMap(Capture.capturePage(runtime, page, stream, target, failedCaptures), (captures) =>
+      Effect.sync(() => {
+        if (captures.length > 0) snapshots.push({ callId, phase, page: page.id, at: Adapter.now(), captures })
+      }))
+
+  /** The action's target, by its locator, now: `None` where it matches no one element. */
+  const targetOf = (page: Model.PageEntry, subject: Recorders.Subject) =>
+    Runtime.element(
+      runtime,
+      page,
+      subject.steps,
+      Operation.operationId(),
+      // A second, in the monotonic clock's nanoseconds
+      (Adapter.now() + 1e9) as MonotonicInstant.MonotonicInstant
+    ).pipe(
+      Effect.map((found): Option.Option<Capture.CaptureTarget> =>
+        found._tag === "Found" ? Option.some({ node: found.node, secret: subject.secret }) : Option.none()
+      ),
+      Effect.orElseSucceed(() => Option.none<Capture.CaptureTarget>())
+    )
+
   const recorder: Recorders.Recorder = {
     covers,
-    begin: (started) => {
+    begin: Effect.fnUntraced(function*(started) {
       const callId = `c${++calls}`
       let parentId: Option.Option<string>
       if (started.own && Option.isSome(started.span)) {
@@ -198,18 +326,40 @@ export const start = Effect.fnUntraced(function*(
         group: false
       }
       steps.push(step)
+      const page = Option.flatMap(
+        pageOf(started.attributes["browser.page.id"]),
+        (page) => actions.has(started.name) ? Option.some(page) : Option.none()
+      )
+      // The target is resolved as the action starts, where it is now, and again after it, if it wasn't there yet
+      let target = Option.none<Capture.CaptureTarget>()
+      if (settings.domSnapshots && Option.isSome(page)) {
+        yield* snapshot(callId, "before", page.value, Option.none())
+        if (Option.isSome(started.subject)) {
+          target = yield* targetOf(page.value, started.subject.value)
+        }
+      }
       return (exit) =>
         Effect.gen(function*() {
           step.end = Option.some(Adapter.now())
           step.error = errorOf(exit)
-          const page = started.attributes["browser.page.id"]
-          if (settings.screenshots !== "perAction" || !actions.has(started.name) || typeof page !== "string") return
-          const shot = yield* runtime.model.adapter.screenshot(page as Target.NavigableId, png).pipe(Effect.option)
+          if (Option.isNone(page)) {
+            return
+          }
+          if (settings.domSnapshots) {
+            if (Option.isNone(target) && Option.isSome(started.subject)) {
+              target = yield* targetOf(page.value, started.subject.value)
+            }
+            yield* snapshot(callId, "after", page.value, target)
+          }
+          if (settings.screenshots !== "perAction") {
+            return
+          }
+          const shot = yield* runtime.model.adapter.screenshot(page.value.id, png).pipe(Effect.option)
           if (Option.isSome(shot)) {
-            shots.push({ callId, page: page as Target.NavigableId, at: Adapter.now(), png: shot.value })
+            shots.push({ callId, page: page.value.id, at: Adapter.now(), png: shot.value })
           }
         })
-    }
+    })
   }
   yield* Recorders.register(recorder).pipe(Scope.provide(own))
 
@@ -225,10 +375,22 @@ export const start = Effect.fnUntraced(function*(
 
   // Screencast frames, from each page of the target as it appears
   const screencast = settings.screencast
+  // Firefox has a video of its own where the other backends stream frames (review 22)
+  const video = screencast === "native" && (yield* Filters.supported(runtime, "capability.video"))
   if (screencast !== "off") {
     const seen = new Set<Target.NavigableId>()
+    const record = Effect.fnUntraced(function*(page: Model.PageEntry) {
+      const scope = yield* Scope.fork(own)
+      const recording = yield* Capabilities.acquire(runtime, page, Capability.Video).pipe(
+        Scope.provide(scope),
+        Effect.onError(() => Scope.close(scope, Exit.void))
+      )
+      videos.push({ page: page.id, at: Adapter.now(), scope, recording, read: Option.none() })
+    })
     const cast = (page: Model.PageEntry) =>
-      screencast === "native"
+      video
+        ? record(page)
+        : screencast === "native"
         ? Capabilities.acquire(runtime, page, Capability.Screencast).pipe(
           Effect.flatMap((control) =>
             Stream.runForEach(control.frames, (frame) =>
@@ -405,6 +567,72 @@ export const start = Effect.fnUntraced(function*(
             }
           },
           ...(exception.origin._tag === "Page" ? { pageId: exception.origin.page } : {})
+        }
+      })
+    }
+    // DOM snapshots, their changed stylesheets written once each, by their text's digest
+    const written = new Set<string>()
+    for (const shot of snapshots) {
+      for (const { captured, frame, main } of shot.captures) {
+        const overrides: Array<Record<string, unknown>> = []
+        for (const override of captured.overrides) {
+          if (typeof override.content === "number") {
+            overrides.push({ url: override.url, ref: override.content })
+            continue
+          }
+          const file = `resources/${yield* digest(override.content)}.css`
+          if (!written.has(file)) {
+            written.add(file)
+            files.push({ path: file, content: override.content })
+          }
+          overrides.push({ url: override.url, file })
+        }
+        events.push({
+          time: shot.at,
+          event: {
+            type: "frame-snapshot",
+            snapshot: {
+              callId: shot.callId,
+              phase: shot.phase,
+              pageId: shot.page,
+              frameId: frame,
+              frameUrl: captured.url,
+              timestamp: Recordings.millis(shot.at),
+              wallTime: captured.wallTime,
+              collectionTime: captured.collectionTime,
+              ...(captured.doctype === null ? {} : { doctype: captured.doctype }),
+              html: redactSecrets(captured.html, preset),
+              resourceOverrides: overrides,
+              viewport: captured.viewport,
+              isMainFrame: main
+            }
+          }
+        })
+      }
+    }
+    // Firefox's videos end here, the first time, and their files are read
+    for (const video of videos) {
+      if (Option.isNone(video.read)) {
+        yield* Scope.close(video.scope, Exit.void)
+        const file = yield* video.recording.file.pipe(Effect.option)
+        const bytes = Option.isSome(file) && Option.isSome(runtime.fileSystem)
+          ? yield* runtime.fileSystem.value.readFile(file.value).pipe(Effect.option)
+          : Option.none<Uint8Array>()
+        if (Option.isSome(bytes)) video.read = Option.some({ bytes: bytes.value, ...webmSize(bytes.value) })
+      }
+      if (Option.isNone(video.read)) continue
+      const read = video.read.value
+      const file = `resources/${video.page}.webm`
+      files.push({ path: file, content: read.bytes })
+      events.push({
+        time: video.at,
+        event: {
+          type: "video",
+          pageId: video.page,
+          file,
+          width: read.width,
+          height: read.height,
+          timestamp: Recordings.millis(video.at)
         }
       })
     }

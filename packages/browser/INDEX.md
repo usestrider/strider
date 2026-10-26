@@ -217,6 +217,8 @@ Specialized features that not every backend offers, reached through a handle bou
   - `readonly jpeg: Uint8Array`
 - `interface ScreencastControl`
   - `readonly frames: Stream.Stream<ScreencastFrame, Target.TargetGone>`
+- `interface VideoRecording`
+  - `readonly file: Effect.Effect<FilePath.Local, CapabilityError | Target.TargetGone>`
 - `type CapabilityErrorReason = typeof CapabilityErrorReason.Type`
 
 *schemas*
@@ -227,6 +229,7 @@ Specialized features that not every backend offers, reached through a handle bou
 
 - `const AxTree: Capability<AxTreeReader>`
 - `const Screencast: Capability<ScreencastControl>`
+- `const Video: Capability<VideoRecording>`
 
 *guards*
 
@@ -1715,7 +1718,7 @@ Trace recordings, exported in the format Playwright's trace viewer reads.
 
 *schemas*
 
-- `const TraceErrorReason = Schema.Union([WriteFailed, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])` (experimental)
+- `const TraceErrorReason = Schema.Union([WriteFailed, Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])` (experimental)
 
 *constructors*
 

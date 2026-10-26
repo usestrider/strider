@@ -43,6 +43,7 @@ import * as Input from "./input.ts"
 import * as Keys from "./keys.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
+import * as Recorders from "./recorders.ts"
 import * as Runtime from "./runtime.ts"
 import * as Snapshots from "./snapshot.ts"
 import * as Spans from "./spans.ts"
@@ -1417,7 +1418,12 @@ export class LocatorImpl implements Locator.Locator {
           ...(options?.checks === undefined ? {} : { "browser.action.checks": JSON.stringify(options.checks) }),
           ...(extra.redacted === true ? { "browser.action.redacted": true } : {})
         }
-      })
+      }),
+      // What a recording's DOM snapshots mark as the action's target (review 22)
+      Effect.provideService(
+        Recorders.CurrentSubject,
+        Option.some({ steps: this.steps, secret: extra.redacted === true })
+      )
     )
   }
 

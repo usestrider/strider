@@ -883,6 +883,14 @@ export interface AdapterConnection {
   readonly screencast: (
     page: Target.NavigableId
   ) => Effect.Effect<Stream.Stream<ScreencastFrame, AdapterError>, AdapterError, Scope.Scope>
+  /**
+   * Records a page to a video file while the scope lives, where its context's downloads go: what it returns
+   * completes with the file's path once the scope has closed and the browser has written it (`capability.video`,
+   * review 22).
+   */
+  readonly video: (
+    page: Target.NavigableId
+  ) => Effect.Effect<Effect.Effect<string, AdapterError>, AdapterError, Scope.Scope>
   readonly cookies: (context: UserContext.Id) => Effect.Effect<ReadonlyArray<Cookie>, AdapterError>
   readonly setCookies: (context: UserContext.Id, cookies: ReadonlyArray<Cookie>) => Effect.Effect<void, AdapterError>
   readonly clearCookies: (context: UserContext.Id) => Effect.Effect<void, AdapterError>

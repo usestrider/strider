@@ -669,8 +669,9 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
       entry("cookies.partitioned", "supported"),
       entry("snapshot.clickListeners", "unsupported", ["not built: it would take a command per element"]),
       // Review 20
-      entry("capability.axTree", "supported", ["the main frame's document"]),
-      entry("capability.screencast", "supported")
+      entry("capability.axTree", "supported"),
+      entry("capability.screencast", "supported"),
+      entry("capability.video", "unsupported", ["Chromium streams frames, and writing a video file needs an encoder"])
     ]
   })
 }
@@ -3405,6 +3406,10 @@ export const connect: (
       pdf,
       accessibilityTree,
       screencast,
+      video: () =>
+        Effect.fail(
+          unsupported("capability.video", "Chromium streams frames, and writing a video file needs an encoder")
+        ),
       cookies,
       setCookies,
       clearCookies,

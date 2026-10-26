@@ -21,7 +21,6 @@ import * as Access from "./internal/access.ts"
 import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
 import * as HarImpl from "./internal/har.ts"
-import * as NotBuilt from "./internal/notBuilt.ts"
 import * as Operation from "./internal/operation.ts"
 import * as Spans from "./internal/spans.ts"
 import * as TraceImpl from "./internal/trace.ts"
@@ -46,14 +45,15 @@ export interface Options {
    */
   readonly screenshots?: "perAction" | "off" | undefined
   /**
-   * Frames as the browser renders them, or polled screenshots at an interval. BiDi has no native
-   * screencast.
+   * Frames as the browser renders them, or polled screenshots at an interval. On Firefox, `"native"` is the
+   * browser's own video of each page (`Capability.Video`, review 22).
    *
    * @default "off"
    */
   readonly screencast?: "native" | { readonly polled: Duration.Input } | "off" | undefined
   /**
-   * DOM snapshots per action. Installs a main-world script, so it needs control.
+   * DOM snapshots of every frame of the page before and after each action and navigation, which the trace viewer
+   * renders (review 22). They render with the recorded network, so they need `network: true`.
    *
    * @default false
    */
@@ -89,15 +89,21 @@ export interface Recording extends Declaration.Registration {
  * duration and its error. A span of the caller's that encloses one, such as an `Effect.fn`'s, is a step too,
  * spanning the operations recorded inside it, so the trace nests as the program did. Console messages and
  * uncaught exceptions are recorded; `screenshots: "perAction"` adds one after each action and navigation;
- * `screencast` adds frames, the browser's own where `Capability.Screencast` has them or polled screenshots;
- * `network` adds the requests a `Har` would record, with their bodies. Times come from the library's clock,
- * never Effect's, so a trace made under `TestClock` still has a timeline. `exportTrace` writes a zip that
- * trace.playwright.dev opens (format 9), with params redacted under `Diagnostics.CurrentPreset`.
+ * `screencast` adds frames, the browser's own where `Capability.Screencast` has them, Firefox's video
+ * (`Capability.Video`), or polled screenshots; `network` adds the requests a `Har` would record, with their
+ * bodies; `domSnapshots` adds a snapshot of each frame of the page before and after each action and navigation,
+ * which the viewer renders with the recorded network, its target highlighted. Times come from the library's
+ * clock, never Effect's, so a trace made under `TestClock` still has a timeline. `exportTrace` writes a zip that
+ * trace.playwright.dev opens (format 9), with params redacted under `Diagnostics.CurrentPreset`, and under the
+ * strict preset, the values of password inputs and of fields filled with `Redacted` text in snapshots too.
  *
  * **Gotchas**
  *
- * `screencast: "native"` is `Unsupported` on WebDriver BiDi. `domSnapshots` isn't built: it needs Playwright's
- * capture script in the page's main world, and fails as the defect `NotBuilt`.
+ * `domSnapshots` without `network: true` is `InvalidInput`: a snapshot's images, fonts and cross-origin styles
+ * come from the network recording. Snapshots are captured in the engine's world, apart from the page's, which
+ * keeps no hooks in the page: each capture reads every stylesheet again. The viewer draws a snapshot's canvas
+ * from the action's screenshot, so canvases need `screenshots: "perAction"`. Firefox's video ends at the first
+ * `exportTrace`, which reads its file.
  *
  * **Example** (A trace of a failing checkout)
  *
@@ -122,7 +128,6 @@ export const record = (
   options?: Options | undefined
 ): Effect.Effect<Recording, TraceError | Target.TargetGone, Scope.Scope> =>
   Effect.gen(function*() {
-    if (options?.domSnapshots === true) return yield* NotBuilt.effect("Trace.record with domSnapshots")
     const scope = yield* Effect.scope
     const found = Handles.target(target)
     const { runtime, grant } = found.behind
@@ -130,10 +135,19 @@ export const record = (
     const fail = (reason: TraceErrorReason) => new TraceError({ reason, diagnostics: Operation.diagnostics(id) })
     yield* Access.check(grant)
     const screencast = options?.screencast ?? "off"
-    if (screencast === "native") {
+    if (screencast === "native" && !(yield* Filters.supported(runtime, "capability.video"))) {
       yield* Filters.requires(runtime, "Trace.record", "capability.screencast").pipe(
         Effect.mapError((error) => fail(error.reason as TraceErrorReason))
       )
+    }
+    if (options?.domSnapshots === true && options.network !== true) {
+      return yield* Effect.fail(fail(
+        new Reason.InvalidInput({
+          input: "domSnapshots",
+          expected: "network: true beside it",
+          hint: "A snapshot's images, fonts and cross-origin styles come from the network recording"
+        })
+      ))
     }
     if (options?.network === true) {
       yield* HarImpl.collect(runtime, found, ["response"], yield* NetworkResponse.BodyLimit, id).pipe(
@@ -145,7 +159,12 @@ export const record = (
       found._tag === "Page"
         ? { _tag: "Page", entry: found.behind.entry }
         : { _tag: "UserContext", entry: found.behind.entry },
-      { screenshots: options?.screenshots ?? "off", screencast, network: options?.network === true },
+      {
+        screenshots: options?.screenshots ?? "off",
+        screencast,
+        network: options?.network === true,
+        domSnapshots: options?.domSnapshots === true
+      },
       scope
     )
     const recording: Recording = {
@@ -197,6 +216,7 @@ export class WriteFailed extends Schema.Error<WriteFailed>("@usestrider/browser/
  */
 export const TraceErrorReason = Schema.Union([
   WriteFailed,
+  Reason.InvalidInput,
   Reason.NotPermitted,
   Reason.Unsupported,
   Reason.BackendFailure

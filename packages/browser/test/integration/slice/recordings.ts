@@ -6,10 +6,21 @@
  */
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Capability, Har, NetworkRequest, NetworkResponse, Page, Route, Trace } from "@usestrider/browser"
+import {
+  Browser,
+  Capability,
+  Diagnostics,
+  Har,
+  NetworkRequest,
+  NetworkResponse,
+  Page,
+  Route,
+  Trace
+} from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
 import type * as Layer from "effect/Layer"
+import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
 import * as fs from "node:fs"
 import * as os from "node:os"
@@ -47,6 +58,46 @@ const unzip = (file: string) =>
   )
 
 const text = (bytes: Uint8Array | undefined) => new TextDecoder().decode(bytes)
+
+// A frame's snapshots, expanded as the trace viewer reads them: a reference `[[capturesAgo, index]]` is the node at
+// `index`, counting text and elements in post-order, of the frame's snapshot that many before, read in that one
+const nodesOf = (snapshot: Record<string, any>): Array<unknown> => {
+  const nodes: Array<unknown> = []
+  const visit = (node: unknown) => {
+    if (typeof node === "string") nodes.push(node)
+    else if (Array.isArray(node) && typeof node[0] === "string") {
+      for (const child of node.slice(2)) visit(child)
+      nodes.push(node)
+    }
+  }
+  visit(snapshot.html)
+  return nodes
+}
+const expand = (all: ReadonlyArray<Record<string, any>>, snapshot: Record<string, any>): any => {
+  const frames = all.filter((each) => each.frameId === snapshot.frameId)
+  const visit = (node: unknown, index: number): any => {
+    if (typeof node === "string") return node
+    const array = node as Array<any>
+    if (Array.isArray(array[0])) {
+      const [ago, at] = array[0] as [number, number]
+      return visit(nodesOf(frames[index - ago]!)[at], index - ago)
+    }
+    const [name, attributes, ...children] = array
+    return [name, attributes ?? {}, ...children.map((child) => visit(child, index))]
+  }
+  return visit(snapshot.html, frames.indexOf(snapshot))
+}
+const find = (node: any, matches: (node: any) => boolean): any => {
+  if (!Array.isArray(node)) return undefined
+  if (matches(node)) return node
+  for (const child of node.slice(2)) {
+    const found = find(child, matches)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+const textOf = (node: any): string =>
+  typeof node === "string" ? node : Array.isArray(node) ? node.slice(2).map(textOf).join("") : ""
 
 const lines = (bytes: Uint8Array | undefined) =>
   text(bytes).trim().split("\n").filter((line) => line !== "").map((line) => JSON.parse(line))
@@ -347,6 +398,84 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
       )
 
       it.effect(
+        "records DOM snapshots of every frame before and after each action, its target marked and its secrets redacted",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const inner = `${served.origin}/fixture?html=${encodeURIComponent(`<p id="inner">inner</p>`)}`
+            const url = yield* fixture(
+              `<style>p { color: red }</style><p>hello</p><input id="name"><input id="secret" type="password"><iframe src="${inner}"></iframe><div id="host"></div><button onclick="this.textContent = 'Done'">Go</button><script>
+                const sheet = new CSSStyleSheet()
+                sheet.replaceSync("button { font-weight: bold }")
+                document.adoptedStyleSheets = [sheet]
+                document.getElementById("host").attachShadow({ mode: "open" }).innerHTML = "<span>shadow</span>"
+              </script>`
+            )
+            const strict = path.join(directory(), "strict.zip")
+            const local = path.join(directory(), "local.zip")
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const trace = yield* Trace.record(page, { domSnapshots: true, network: true })
+              yield* page.goto(url, { waitUntil: "load" })
+              yield* page.locator("#name").fill("Ada")
+              yield* page.locator("#secret").fill(Redacted.make("hunter2"))
+              yield* page.getByRole("button", { name: "Go" }).click()
+              yield* trace.exportTrace(strict)
+              yield* trace.exportTrace(local).pipe(Diagnostics.withPreset("local"))
+            }))
+            const events = lines((yield* unzip(strict)).get("trace.trace"))
+            const snapshots = events.filter((event) => event.type === "frame-snapshot").map((event) => event.snapshot)
+            const click = events.find((event) => event.type === "before" && event.title === "Locator.click")!
+            const main = (phase: string) =>
+              snapshots.find((each) => each.callId === click.callId && each.phase === phase && each.isMainFrame)
+            const before = main("before")
+            const after = main("after")
+            assert.isDefined(before, JSON.stringify(snapshots.map((each) => [each.callId, each.phase])))
+            assert.isDefined(after)
+            const tree = (snapshot: Record<string, any>) => expand(snapshots, snapshot)
+            const button = (snapshot: Record<string, any>) => find(tree(snapshot), (node) => node[0] === "BUTTON")!
+            assert.strictEqual(textOf(button(before)), "Go")
+            assert.strictEqual(textOf(button(after)), "Done")
+            assert.strictEqual(button(after)[1]["__playwright_target__"], "")
+            assert.isUndefined(button(before)[1]["__playwright_target__"])
+            // Live state, in the viewer's attributes
+            const input = (id: string) => find(tree(after), (node) => node[0] === "INPUT" && node[1].id === id)!
+            assert.strictEqual(input("name")[1]["__playwright_value_"], "Ada")
+            assert.strictEqual(input("secret")[1]["__playwright_value_"], "REDACTED")
+            assert.notInclude(JSON.stringify(snapshots), "__strider_secret__")
+            assert.notInclude(JSON.stringify(snapshots), "hunter2")
+            assert.isDefined(find(tree(after), (node) =>
+              node[0] === "template" && node[1]["__playwright_shadow_root_"] === "open" && textOf(node) === "shadow"))
+            assert.isDefined(find(tree(after), (node) =>
+              node[0] === "template" && String(node[1]["__playwright_style_sheet_"]).includes("font-weight")))
+            assert.include(
+              textOf(
+                find(tree(after), (node) =>
+                  node[0] === "STYLE")!
+              ),
+              "color"
+            )
+            // The iframe points at its frame's own snapshot, for the same call and phase
+            const iframe = find(tree(after), (node) =>
+              node[0] === "IFRAME")!
+            const frameId = String(iframe[1].src).replace("/snapshot/", "")
+            const framed = snapshots.find((each) =>
+              each.callId === click.callId && each.phase === "after" && each.frameId === frameId
+            )
+            assert.isDefined(framed, String(iframe[1].src))
+            assert.isDefined(find(expand(snapshots, framed), (node) =>
+              node[0] === "P" && node[1].id === "inner"))
+            // What didn't change since the frame's last capture is a reference to it
+            assert.include(JSON.stringify(after.html), "[[")
+            // A local export keeps the secret
+            const kept = lines((yield* unzip(local)).get("trace.trace"))
+              .filter((event) => event.type === "frame-snapshot").map((event) => event.snapshot)
+            assert.include(JSON.stringify(kept), "hunter2")
+          }),
+        timeout
+      )
+
+      it.effect(
         "records screencast frames, the browser's own where it has them, or polled",
         () =>
           Effect.gen(function*() {
@@ -363,14 +492,17 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
                 yield* Effect.sleep("1 second")
                 return yield* trace.exportTrace(out)
               })).pipe(Effect.exit)
-              if (screencast === "native" && info.protocol === "bidi") {
-                const error = yield* Effect.flip(recorded)
-                assert(Trace.isTraceError(error), String(error))
-                assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "capability.screencast" })
-                continue
-              }
               assert(recorded._tag === "Success", String(recorded))
               const files = yield* unzip(out)
+              if (screencast === "native" && info.protocol === "bidi") {
+                // Firefox's own video of the page (review 22), WebM, with its size read from the file
+                const videos = lines(files.get("trace.trace")).filter((event) => event.type === "video")
+                assert.strictEqual(videos.length, 1)
+                assert.deepStrictEqual(Array.from(files.get(videos[0].file)!.slice(0, 4)), [0x1a, 0x45, 0xdf, 0xa3])
+                assert.isAbove(videos[0].width, 0)
+                assert.isAbove(videos[0].height, 0)
+                continue
+              }
               const frames = lines(files.get("trace.trace")).filter((event) => event.type === "screencast-frame")
               assert.isAtLeast(frames.length, 2, JSON.stringify(screencast))
               assert.deepStrictEqual(Array.from(files.get(frames[0].file)!.slice(0, 2)), [0xff, 0xd8])

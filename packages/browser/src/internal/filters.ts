@@ -57,6 +57,13 @@ export const among = <A>(wanted: A | ReadonlyArray<A> | undefined): (value: A) =
 }
 
 /** Fails when the backend reports a capability as unsupported, with its limitations as the hint. */
+/** Whether the backend has a capability: one its table doesn't call unsupported. */
+export const supported = (runtime: Runtime.Runtime, capability: string): Effect.Effect<boolean> =>
+  Effect.map(SubscriptionRef.get(runtime.model.adapter.capabilities), (capabilities) => {
+    const entry = capabilities.entries.find((each) => each.name === capability)
+    return entry === undefined || entry.status !== "unsupported"
+  })
+
 export const requires = (
   runtime: Runtime.Runtime,
   operation: string,

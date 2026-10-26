@@ -118,7 +118,8 @@ const capabilities = () => {
       entry("pdf", "unsupported", ["nothing is painted"]),
       entry("workers.evaluate", "unsupported", ["the timeline has no workers"]),
       entry("capability.axTree", "unsupported", [noDom]),
-      entry("capability.screencast", "unsupported", ["nothing is painted"])
+      entry("capability.screencast", "unsupported", ["nothing is painted"]),
+      entry("capability.video", "unsupported", ["nothing is painted"])
     ]
   })
 }
@@ -366,6 +367,7 @@ export const connect = (steps: ReadonlyArray<Step>) => (sink: Adapter.Sink) =>
       pdf: () => unsupported("pdf", "nothing is painted"),
       accessibilityTree: () => unsupported("capability.axTree"),
       screencast: () => unsupported("capability.screencast", "nothing is painted"),
+      video: () => unsupported("capability.video", "nothing is painted"),
       cookies: (context) => Effect.succeed(cookies.get(context) ?? []),
       setCookies: (context, added) =>
         Effect.sync(() => {

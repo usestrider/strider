@@ -1,0 +1,10 @@
+{
+  "note": "research/playwright-trace-snapshots.md: the trace viewer's snapshot contract our capture writes to, read from these files",
+  "release": "v1.64.1",
+  "files": {
+    "packages/playwright-core/src/server/trace/recorder/snapshotterInjected.ts": "5b636b83b0f3cdf327d0c68872d9fe9f84577330d256404159eec236531c052b",
+    "packages/playwright-core/src/server/trace/recorder/snapshotter.ts": "39f30f20c404f344078d1ccc626023861a941fe9f1523917871c17636da95a1c",
+    "packages/isomorphic/trace/snapshotRenderer.ts": "c3525d9c47113f6160ab4de8ff454756813f9c7fc5adededbfe1fc2e01584662",
+    "packages/isomorphic/trace/versions/traceV10.ts": "d5d9df491c6f88fdcfa40c2059b62b643deea4dc178f5a92a91091935e07aa52"
+  }
+}

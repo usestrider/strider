@@ -14,6 +14,7 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as Stream from "effect/Stream"
 import * as Diagnostics from "./Diagnostics.ts"
+import type * as FilePath from "./FilePath.ts"
 import type * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Pixels from "./Pixels.ts"
 import * as Reason from "./Reason.ts"
@@ -98,6 +99,20 @@ export interface ScreencastControl {
 }
 
 /**
+ * A page recorded to a video file while the capability's scope lives.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface VideoRecording {
+  /**
+   * The file, once the capability's scope has closed and the browser has written it.
+   */
+  readonly file: Effect.Effect<FilePath.Local, CapabilityError | Target.TargetGone>
+}
+
+/**
  * The browser's own accessibility tree.
  *
  * @stability unstable
@@ -114,6 +129,42 @@ export const AxTree: Capability<AxTreeReader> = make("AxTree")
  * @since 0.1.0
  */
 export const Screencast: Capability<ScreencastControl> = make("Screencast")
+
+/**
+ * A video file of the page, recorded by the browser; Firefox's (review 22).
+ *
+ * **Details**
+ *
+ * Firefox writes a WebM file while the capability's scope lives, into the directory the page's context
+ * downloads to, so the file goes with a context's temporary downloads unless they go to a directory of the
+ * caller's (`UserContext.Options.downloads`).
+ *
+ * **Gotchas**
+ *
+ * `Unsupported` on Chromium and WebKit, which stream frames rather than write a file (`Screencast`), and where
+ * Firefox wasn't launched by the program, or its context denies downloads: the file would be out of reach.
+ *
+ * **Example** (Recording a checkout)
+ *
+ * ```ts import.meta.vitest
+ * import { Effect } from "effect"
+ * import { Capability, Page } from "@usestrider/browser"
+ *
+ * const recorded = Effect.fn("recorded")(function*(page: Page.Page) {
+ *   const video = yield* Effect.scoped(Effect.gen(function*() {
+ *     const recording = yield* page.capability(Capability.Video)
+ *     yield* page.getByRole("button", { name: "Pay" }).click()
+ *     return recording
+ *   }))
+ *   return yield* video.file
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category constants
+ * @since 0.1.0
+ */
+export const Video: Capability<VideoRecording> = make("Video")
 
 /**
  * Schema for the reasons acquiring or using a capability can fail.

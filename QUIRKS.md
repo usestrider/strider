@@ -649,6 +649,11 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Reconsider:* waiting for the close in a page's scope finalizer too (Q135).
 - **Resolved** in `a7ee8dc` (review 21's first step): every page a scope releases is waited for (Q135), so a page created right after can't meet one still closing.
 
+**Q191. Chromium's isolated worlds have no `customElements`** (Browser). In Strider's isolated world, `customElements` is `null` on Chromium; Firefox and WebKit give the page's registry. A capture can't ask which custom elements are defined.
+- *Seen:* review 22, P1.
+- *We:* a DOM snapshot takes an element as a defined custom element when its name has a hyphen and it matches `:defined`, which every world can ask.
+- *Reconsider:* nothing.
+
 ## Browsers: attaching
 
 **Q136. Headless Chromium takes one URL on its command line** (Browser). A second fails the launch: "Multiple targets are not supported in headless mode". Firefox opens each as a tab.
@@ -1167,3 +1172,13 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 22's third step, in a full run: call site 3 on WebKit, once.
 - *We:* both take a world that exists as made, and a world asked for is waited for until its realm is reported or its document ends.
 - *Reconsider:* nothing.
+
+**Q192. A snapshot's canvas is drawn from screenshots** (Ours). The trace viewer draws a canvas in a DOM snapshot from the action's screenshot, cropped by the canvas's box, so a trace without `screenshots: "perAction"` shows its canvases empty; the capture writes only where each canvas is.
+- *Seen:* review 22's build, from the viewer's renderer (research/playwright-trace-snapshots.md, Canvases).
+- *We:* as the viewer does; `Trace.record`'s documentation says so.
+- *Reconsider:* nothing, while the viewer draws them so.
+
+**Q193. Firefox's video in a trace ends at the first export** (Ours). The file is written when the screencast stops, and an export needs it, so the first `exportTrace` stops each page's video and later exports reuse what it read.
+- *Seen:* review 22's build.
+- *We:* as above, documented on `Trace.record`.
+- *Reconsider:* recording a new segment after each export, if a use exports more than once while recording.

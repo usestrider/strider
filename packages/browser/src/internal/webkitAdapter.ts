@@ -600,7 +600,10 @@ const capabilities = (info: Browser.Info) => {
       entry("snapshot.clickListeners", "unsupported", ["Playwright's WebKit can't list event listeners"]),
       // Review 20
       entry("capability.axTree", "unsupported", ["Playwright's WebKit reads accessibility one node at a time"]),
-      entry("capability.screencast", "supported", ["frames are the viewport's size when the screencast starts"])
+      entry("capability.screencast", "supported", ["frames are the viewport's size when the screencast starts"]),
+      entry("capability.video", "unsupported", [
+        "Playwright's WebKit streams frames, and writing a video file needs an encoder"
+      ])
     ]
   })
 }
@@ -3280,6 +3283,13 @@ export const connect: (
       accessibilityTree: () =>
         Effect.fail(unsupported("capability.axTree", "Playwright's WebKit reads accessibility one node at a time")),
       screencast,
+      video: () =>
+        Effect.fail(
+          unsupported(
+            "capability.video",
+            "Playwright's WebKit streams frames, and writing a video file needs an encoder"
+          )
+        ),
       cookies,
       setCookies,
       clearCookies,

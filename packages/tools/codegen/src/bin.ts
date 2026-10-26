@@ -9,6 +9,9 @@
  *                                                  each roll (`--check` fails if any has)
  *   strider-codegen keyboards [--check]            packages/browser/src/internal/keyboardLayouts.ts, from
  *                                                  CLDR's keyboard data in keyboards/source (review 22)
+ *   strider-codegen trace-contract <checkout>      whether a Playwright checkout's snapshot files are the ones the
+ *                                                  trace capture's contract was read from (trace-contract.json;
+ *                                                  research/playwright-trace-snapshots.md); run on each roll
  *
  * Run from the repository root. `--check` regenerates in memory and fails if anything differs from what is
  * committed, so CI never regenerates.
@@ -21,6 +24,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import { execFileSync } from "node:child_process"
+import { createHash } from "node:crypto"
 import { CodegenError, fromThrown } from "./CodegenError.ts"
 import { emit } from "./Emit.ts"
 import * as Keyboards from "./Keyboards.ts"
@@ -141,8 +145,33 @@ const keyboards = Command.make("keyboards", { check }, ({ check }) =>
     )
   }))
 
+const traceContract = Command.make(
+  "trace-contract",
+  { checkout: Argument.String("checkout") },
+  ({ checkout }) =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const contract = JSON.parse(
+        yield* fs.readFileString(path.join(process.cwd(), "packages/tools/codegen/trace-contract.json"))
+      ) as { readonly release: string; readonly files: Readonly<Record<string, string>> }
+      const changed: Array<string> = []
+      for (const [file, expected] of Object.entries(contract.files)) {
+        const bytes = yield* fs.readFile(path.join(checkout, file))
+        const actual = createHash("sha256").update(bytes).digest("hex")
+        if (actual !== expected) changed.push(file)
+        yield* Console.log(`${file}: ${actual === expected ? "as read" : "changed"}`)
+      }
+      if (changed.length > 0) {
+        return yield* new CodegenError({
+          message: `Changed since ${contract.release}: reread them for the contract, then update trace-contract.json`
+        })
+      }
+    })
+)
+
 const cli = Command.make("strider-codegen").pipe(
-  Command.withSubcommands([model, generate, auditCommand, keyboards])
+  Command.withSubcommands([model, generate, auditCommand, keyboards, traceContract])
 )
 
 Command.run(cli, { version: "0.0.0" }).pipe(Effect.provide(NodeServices.layer), NodeRuntime.runMain)

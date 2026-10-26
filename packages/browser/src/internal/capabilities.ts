@@ -11,6 +11,7 @@ import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Capability from "../Capability.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
+import type * as FilePath from "../FilePath.ts"
 import type * as Pixels from "../Pixels.ts"
 import * as Reason from "../Reason.ts"
 import * as Target from "../Target.ts"
@@ -23,7 +24,8 @@ import * as Spans from "./spans.ts"
 /** Each capability: its support table entry, and the backends that have it. */
 const known: Readonly<Record<string, { readonly entry: string; readonly backends: string }>> = {
   AxTree: { entry: "capability.axTree", backends: "Chromium's (CDP)" },
-  Screencast: { entry: "capability.screencast", backends: "Chromium's (CDP) and WebKit's" }
+  Screencast: { entry: "capability.screencast", backends: "Chromium's (CDP) and WebKit's" },
+  Video: { entry: "capability.video", backends: "Firefox's, launched by the program" }
 }
 
 const capabilityError = (capability: string, reason: Capability.CapabilityErrorReason, id: Diagnostics.OperationId) =>
@@ -91,6 +93,16 @@ export const acquire = <H>(
           }).pipe(Spans.operation("Capability.AxTree.read", { attributes }))
         }
         return reader as H
+      }
+      case "Video": {
+        const file = yield* adapter.video(page.id).pipe(Effect.mapError(fromAdapter(runtime, capability.name, id)))
+        const recording: Capability.VideoRecording = {
+          file: file.pipe(
+            Effect.map((path) => path as FilePath.Local),
+            Effect.mapError(fromAdapter(runtime, capability.name, Operation.operationId()))
+          )
+        }
+        return recording as H
       }
       default: {
         const frames = yield* adapter.screencast(page.id).pipe(
