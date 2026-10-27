@@ -1,13 +1,16 @@
 ---
 title: Expectations and reads
-description: Expectations wait for the page to be right; reads say what it is now.
+description: Expectations wait for the page to be right, reads say what it is now, state that changes can be watched, and code can run in the page.
 order: 3
 ---
+
+A check that reads the page once can run before the page catches up, and pass or fail by timing. An expectation
+waits until the page is right, so a read after it gets the value you meant.
 
 ## Expect, then read
 
 - **An expectation** (`Expect.to*`) retries on each change to the page until it passes or the deadline does.
-- **A read** (`readText`, `count`, `isVisible`, `page.title`) says what's true now. It never waits or retries.
+- **A read** (`readText`, `count`, `isChecked`, [`page.title`](/docs/first-program#reads)) says what's true now. It never waits or retries.
 
 Expect the state you need, then read the value:
 
@@ -24,6 +27,8 @@ const cartTotal = Effect.fn("cartTotal")(function*(page: Page.Page) {
 
 ## Expectations
 
+Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take the page:
+
 | Matcher                                        | Passes when                                                      |
 | ---------------------------------------------- | ---------------------------------------------------------------- |
 | `toBeVisible`, `toBeHidden`                    | exactly one element matches and is visible; or none is, or it's hidden |
@@ -37,8 +42,23 @@ const cartTotal = Effect.fn("cartTotal")(function*(page: Page.Page) {
 | `toMatchAria(pattern)`                         | its accessibility tree matches a pattern                         |
 | `toHaveURL(expected)`, `toHaveTitle(expected)` | the page's URL or title matches                                  |
 
-A string `toHaveText` matches the whole text; a `RegExp` is tested. `toBeHidden` also passes when nothing matches,
-so it waits for something to go away.
+A string `toHaveText` matches the whole text; a `RegExp` is tested; an array matches each match's text, in order.
+`toBeHidden` also passes when nothing matches, so it waits for something to go away:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const searchHerons = Effect.fn("searchHerons")(function*(page: Page.Page) {
+  yield* page.getByRole("searchbox").fill("heron")
+  yield* page.getByRole("searchbox").press("Enter")
+  yield* page.getByRole("progressbar").pipe(Expect.toBeHidden)
+  const results = page.getByRole("list", { name: "Results" }).getByRole("listitem")
+  yield* results.pipe(Expect.toHaveText(["Grey heron", /^Great blue heron/]))
+  yield* page.pipe(Expect.toHaveTitle(/heron/))
+  yield* page.pipe(Expect.toHaveURL(/[?&]q=heron/))
+})
+```
 
 A matcher without arguments is the function itself; one with arguments is dual:
 
@@ -57,11 +77,13 @@ const visible = badge.pipe(Expect.toBeVisible)
 
 A locator's expectation re-checks in the page on each DOM change, input or focus event and animation frame, in
 rounds of up to a second, until the deadline. Nothing is missed between checks; there's no polling interval or
-backoff. An expectation on `page.url` re-checks when the URL changes.
+backoff.
 
 ## Expecting anything
 
-`Expect.that` takes an effect and a `Condition`, a predicate whose description the failure shows:
+When no matcher fits, such as a count of at least ten, expect any effect to meet a condition. `Expect.that` takes
+an effect and a `Condition`, a predicate whose description the failure shows. `Condition.and` and `Condition.not`
+combine conditions, and `Condition.because` says why in the failure:
 
 ```ts
 import { Condition, Expect, Page } from "@usestrider/browser"
@@ -70,20 +92,24 @@ import { Effect } from "effect"
 const atLeast = (n: number) =>
   Condition.make<number>(`at least ${n}`, (count) => count >= n)
 
+const onePage = Condition.and(atLeast(10), Condition.not(atLeast(21))).pipe(
+  Condition.because("a page shows 10 to 20 results")
+)
+
 const resultsLoaded = Effect.fn("resultsLoaded")(function*(page: Page.Page) {
-  yield* Expect.that(page.getByRole("listitem").count, atLeast(10))
-  const onPage2 = Condition.make("on page 2", (url: string) => url.includes("page=2"))
-  yield* Expect.that(page.url, onPage2)
+  const results = page.getByRole("listitem").count
+  yield* Expect.that(results, onePage).pipe(Expect.withCheckInterval("250 millis"))
 })
 ```
 
-A `Watchable` such as `page.url` re-checks on each change; any other effect re-runs every 100 ms
-(`Expect.withCheckInterval`). `Condition.not`, `Condition.and` and `Condition.because` combine conditions.
+A [`Watchable`](#state-that-changes) such as `page.url` re-checks on each change; any other effect re-runs every
+100 ms, or as `Expect.withCheckInterval` sets.
 
 ## Structure
 
-`toMatchAria` matches an element's accessibility tree against a pattern. Each node says how its children compare:
-`exactly`, `including` (in order, others allowed between) or `unchecked`:
+Expecting each element alone can't check their order, or that nothing else is there. `toMatchAria` matches a
+region's accessibility tree, its roles, names and order, against a pattern in one expectation. Each node says how
+its children compare: `exactly`, `including` (in order, others allowed between) or `unchecked`:
 
 ```ts
 import { AriaPattern, Expect, Page } from "@usestrider/browser"
@@ -93,8 +119,16 @@ const link = (name: string) => AriaPattern.node("link", name, AriaPattern.unchec
 const links = AriaPattern.including(link("Orders"), link("Account"))
 const mainNav = AriaPattern.node("navigation", "Main", links)
 
-const mainNavigation = Effect.fn("mainNavigation")(function*(page: Page.Page) {
+const tab = (name: string) => AriaPattern.node("tab", name, AriaPattern.unchecked)
+const productTabs = AriaPattern.node(
+  "tablist",
+  "Product",
+  AriaPattern.exactly(tab("Details"), tab("Reviews"))
+)
+
+const productPage = Effect.fn("productPage")(function*(page: Page.Page) {
   yield* page.getByRole("navigation").pipe(Expect.toMatchAria(mainNav))
+  yield* page.getByRole("tablist").pipe(Expect.toMatchAria(productTabs))
 })
 ```
 
@@ -102,7 +136,7 @@ const mainNavigation = Effect.fn("mainNavigation")(function*(page: Page.Page) {
 
 | Read                                  | Gives                                                            |
 | ------------------------------------- | ---------------------------------------------------------------- |
-| `readText`                            | the element's text: the text `getByText` matches                 |
+| `readText`                            | the element's text: the text [`getByText`](/docs/pages/locators#the-queries) matches |
 | `readValue`                           | a form control's value                                           |
 | `readAttribute(name)`                 | an attribute, as an `Option`                                     |
 | `readHtml`                            | the element's `outerHTML`                                        |
@@ -110,20 +144,26 @@ const mainNavigation = Effect.fn("mainNavigation")(function*(page: Page.Page) {
 | `count`, `all`                        | how many elements match, and a locator for each                  |
 | `page.title`, `page.readHtml`         | the document's title, and its HTML                               |
 
-Reads need exactly one match: several fail with `StrictViolation`, none fails at once with `NoMatch`. `count` and
-`all` take any number.
-
-A `NoMatch` from an element that hasn't rendered yet means: expect first, then read.
+Reads need exactly one match, as in [Strictness](/docs/pages/locators#strictness); one that hasn't rendered yet
+fails with `NoMatch`, so expect it first. `count` and `all` take any number, so count what may not be there:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
 import { Effect, Option } from "effect"
 
-const orderNumber = Effect.fn("orderNumber")(function*(page: Page.Page) {
-  const confirmation = page.getByRole("status")
-  yield* confirmation.pipe(Expect.toContainText("Order"))
-  const id = yield* confirmation.readAttribute("data-order-id")
-  return Option.getOrElse(id, () => "unknown")
+const savedSettings = Effect.fn("savedSettings")(function*(page: Page.Page) {
+  const form = page.getByRole("form", { name: "Settings" })
+  yield* form.pipe(Expect.toBeVisible)
+  const name = yield* form.getByLabel("Display name").readValue
+  const newsletter = yield* form.getByLabel("Send me the newsletter").isChecked
+  const avatar = yield* form.getByRole("img", { name: "Avatar" }).readAttribute("src")
+  const warnings = yield* page.getByRole("alert").count
+  return {
+    name,
+    newsletter,
+    avatar: Option.getOrElse(avatar, () => "none"),
+    warned: warnings > 0
+  }
 })
 ```
 
@@ -146,30 +186,40 @@ const summary = Effect.fn("summary")(function*(page: Page.Page) {
 
 ## State that changes
 
-A page's status, URL and frames, a download's progress and a browser's pages are `Watchable`s: an `Effect` that
-reads the current value, with `changes`, a stream of the latest values, and `waitFor`, which waits for a predicate:
+A URL read once misses the redirect after it. A page's status, URL and frames, a download's progress and a
+browser's pages are `Watchable`s, which read the value now, stream its `changes`, or wait for one with `waitFor`:
 
 ```ts
 import { Page } from "@usestrider/browser"
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
 
-const fullyLoaded = Effect.fn("fullyLoaded")(function*(page: Page.Page) {
-  const url = yield* page.url
+const signIn = Effect.fn("signIn")(function*(page: Page.Page) {
+  yield* page.url.changes.pipe(
+    Stream.runForEach((url) => Effect.log(`At ${url}`)),
+    Effect.forkScoped
+  )
+  yield* page.getByRole("button", { name: "Sign in" }).click()
   yield* page.status.waitFor((status) =>
     status._tag === "Open" && status.document.readiness === "complete"
   )
-  return url
+  return yield* page.url
 })
 ```
 
+- `changes` gives the current value, then the latest each time the consumer takes one, so a slow consumer sees the
+  newest value, not every one.
+- Use `waitFor` to go on once a state comes, such as the load; use `Expect.that` when the state not coming is a
+  failure, so the error says what was expected and what was seen.
 - `waitFor` checks the current value first.
 - It fails with `Watchable.Ended` when the value settles on one that doesn't match, such as a completed download's
   status, and with `TargetGone` when what it watches ends, such as a closed page.
 
 ## Evaluating in the page
 
+When no read gives what you need, such as the viewport's size or a global the app sets, run a function in the page.
 `page.evaluate` runs a function in an isolated world, which sees the DOM but not the page's globals.
-`evaluateInMainWorld` runs it among the page's scripts, and needs control:
+`evaluateInMainWorld` runs it among the page's scripts, and needs
+[control](/docs/pages/attaching#access-is-typed), which a `Page` you opened has:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -189,4 +239,5 @@ const viewport = Effect.fn("viewport")(function*(page: Page.Page) {
 - The function must be self-contained; pass values as arguments:
   `page.evaluate((id) => document.getElementById(id)?.textContent, "total")`.
 - The result comes back by value, typed as what arrives.
-- A DOM node can't come back by value: `evaluateHandle` gives a handle, released with its scope.
+- A DOM node can't come back by value: [`evaluateHandle`](/docs/api/browser/Page#Page.evaluateHandle) gives a
+  handle, released with its scope.
