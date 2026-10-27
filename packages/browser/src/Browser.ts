@@ -329,8 +329,8 @@ export interface LaunchOptions {
    */
   readonly profile?: LaunchProfile.LaunchProfile | undefined
   /**
-   * A profile directory you own: never deleted, and locked while the browser uses it. On WebKit, it's the default
-   * context's only.
+   * A profile directory you own, never deleted. Chromium and Firefox lock it while they run, so two browsers can't
+   * share one. On WebKit, it's the default context's only.
    *
    * @default a temporary profile, deleted after the browser exits
    */
