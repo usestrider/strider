@@ -34,10 +34,12 @@ A context and its pages close with the scope that made them, popups included.
 
 ## Settings for the whole session
 
-Options to `newContext` or `newPage` hold for the context's life, and apply before its first page loads:
+A page reads its viewport, locale and time zone as it loads, so settings applied after it opens can miss what it
+rendered first. Options to `newContext` or `newPage` hold for the context's life, and apply before its first page
+loads:
 
 ```ts
-import { Browser } from "@usestrider/browser"
+import { Browser, Expect } from "@usestrider/browser"
 import { Effect } from "effect"
 
 const berlinPhone = Effect.scoped(Effect.gen(function*() {
@@ -46,12 +48,16 @@ const berlinPhone = Effect.scoped(Effect.gen(function*() {
       viewport: { width: 390, height: 844, deviceScaleFactor: 3, mobile: true },
       locale: "de-DE",
       timezone: "Europe/Berlin",
+      geolocation: { latitude: 52.52, longitude: 13.405 },
+      userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)",
+      touch: true,
+      cpuSlowdown: 4,
       media: { colorScheme: "dark" }
     },
-    permissions: ["geolocation"],
-    dialogs: "accept"
+    permissions: ["geolocation"]
   })
   yield* page.goto("https://maps.example.com")
+  yield* page.getByRole("button", { name: "Route berechnen" }).pipe(Expect.toBeVisible)
 }))
 ```
 
@@ -60,19 +66,21 @@ const berlinPhone = Effect.scoped(Effect.gen(function*() {
 | `emulation`      | viewport, user agent, locale, time zone, position, media features, network, CPU     |
 | `permissions`    | permissions granted to every origin                                                |
 | `storageState`   | cookies and storage to start from (below)                                          |
-| `dialogs`        | what happens to a dialog no handler decides: `"dismiss"` (the default), `"accept"`, `"leaveOpen"` |
-| `downloads`      | a temporary directory (the default), `"deny"`, or `{ directory }`                  |
-| `focus`          | `"emulated"` makes every page behave as if focused, for many pages at once          |
-| `keyboardLayout` | the layout typing uses: `us` (the default), `uk`, `de`, `fr`, `es`, `it`           |
-| `eventLog`       | how many past events of each kind `history` keeps per page; 100 unless set           |
+| `dialogs`        | what happens to a dialog no [handler](/docs/events/events#dialogs) decides: `"dismiss"` (the default), `"accept"`, `"leaveOpen"` |
+| [`downloads`](/docs/events/events#downloads) | a temporary directory (the default), `"deny"`, or `{ directory }`                  |
+| [`focus`](/docs/tools/testing#many-pages-at-once) | `"emulated"` makes every page behave as if focused; otherwise only one has focus, and `toBeFocused` fails on the rest |
+| [`keyboardLayout`](/docs/pages/actions#keys) | the layout typing uses: `us` (the default), `uk`, `de`, `fr`, `es`, `it`           |
+| `eventLog`       | how many past events of each kind [`history`](/docs/events/events#history) keeps per page; 100 unless set           |
 
 A field the browser can't apply, such as touch on Firefox, fails with `Unsupported` naming it, before anything is
-applied. `browser.capabilities` lists what a backend can do.
+applied. [`browser.capabilities`](/docs/browsers/choosing#what-each-can-do) lists what a backend can do.
 
 ## Settings for a while
 
-`emulate` and `grant`, on a page or a context, apply settings until their scope closes, then restore what was
-there:
+Some states come and go within a session, such as the network dropping or a permission granted after a prompt.
+Set as an option, they'd hold for every step; set for a scope, only the steps that test them see them. `emulate`
+and `grant` apply settings until their scope closes, then restore what was there. `emulate` works on a context, for
+every page in it, popups included, or on a page, for that page alone; `grant` works only on a context:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -85,10 +93,20 @@ const offlineBanner = Effect.fn("offlineBanner")(function*(page: Page.Page) {
   }))
   yield* page.getByText("You're offline").pipe(Expect.toBeHidden)
 })
+
+const nearestStore = Effect.fn("nearestStore")(function*(page: Page.Page) {
+  yield* Effect.scoped(Effect.gen(function*() {
+    yield* page.context.grant(["geolocation"], { origin: "https://shop.example.com" })
+    yield* page.context.emulate({ geolocation: { latitude: 52.52, longitude: 13.405 } })
+    yield* page.getByRole("button", { name: "Use my location" }).click()
+    yield* page.getByText("Nearest store: Mitte").pipe(Expect.toBeVisible)
+  }))
+})
 ```
 
 ## Logging in once
 
+Signing in through the form before every task is slow, and fails every task when only the login page is broken.
 Storage state is a context's cookies, and the `localStorage` and IndexedDB of each origin it has open.
 `exportStorageState` reads it; the `storageState` option starts a context from it, already signed in:
 
@@ -120,29 +138,65 @@ const signedIn = Effect.gen(function*() {
 - In memory, its secrets are `Redacted`. `StorageState.Json` writes them out in full: keep the file out of version
   control.
 - It doesn't carry `sessionStorage`, service workers or logins bound to a device. For those, use a profile
-  directory: `Chromium.layer({ executablePath, userDataDir })`.
-- A profile's logins are in the default context, not the one `Browser.newPage()` makes. Open the page there:
-  `(yield* browser.defaultContext.control).newPage`, with [`control`](/docs/pages/attaching#access-is-typed).
+  directory: `userDataDir` keeps the profile in a directory of yours instead of a temporary one, so a login made
+  there once, by hand in a headed run, is there at the next launch.
+
+A browser's default context is the session it starts with, the one its profile's cookies and storage are in. A
+profile's logins are there, not in the context `Browser.newPage()` makes, so open the page in it, taking
+[`control`](/docs/pages/attaching#access-is-typed) of it first:
+
+```ts
+import { Browser, Expect } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Effect } from "effect"
+
+const AdasProfile = Chromium.layer({
+  executablePath: "/usr/bin/chromium",
+  userDataDir: "./profiles/ada"
+})
+
+const profileInbox = Effect.scoped(Effect.gen(function*() {
+  const browser = yield* Browser.Browser
+  const context = yield* browser.defaultContext.control
+  const page = yield* context.newPage
+  yield* page.goto("https://mail.example.com")
+  yield* page.getByRole("heading", { name: "Inbox" }).pipe(Expect.toBeVisible)
+})).pipe(Effect.provide(AdasProfile))
+```
 
 ## Cookies and storage
 
-`context.cookies` reads and changes a context's cookies; `page.localStorage` and `page.sessionStorage`, the current
+Reaching a state through the UI, such as a feature flag or a dismissed banner, adds steps the task isn't about;
+setting the cookie or storage entry does it in one. `context.cookies` reads and changes a context's cookies; `page.localStorage` and `page.sessionStorage`, the current
 origin's storage:
 
 ```ts
-import { Page } from "@usestrider/browser"
+import { Expect, Page } from "@usestrider/browser"
 import { Effect, Option } from "effect"
 
-const betaFlag = Effect.fn("betaFlag")(function*(page: Page.Page) {
-  yield* page.context.cookies.set({
-    name: "beta",
-    value: "1",
-    scope: { _tag: "Url", url: "https://app.example.com" }
-  })
+const asReturningBetaUser = Effect.fn("asReturningBetaUser")(
+  function*(page: Page.Page) {
+    yield* page.context.cookies.set({
+      name: "beta",
+      value: "1",
+      scope: { _tag: "Url", url: "https://app.example.com" }
+    })
+    yield* page.localStorage.set("theme", "dark")
+    yield* page.sessionStorage.set("tourDone", "true")
+    yield* page.reload()
+    yield* page.getByRole("region", { name: "Beta features" }).pipe(Expect.toBeVisible)
+    yield* page.getByRole("dialog", { name: "Welcome tour" }).pipe(Expect.toBeHidden)
+  }
+)
+
+const betaCookieSent = Effect.fn("betaCookieSent")(function*(page: Page.Page) {
   const sent = yield* page.context.cookies.listFor("https://app.example.com/api")
-  yield* page.localStorage.set("theme", "dark")
-  const theme = yield* page.localStorage.get("theme")
-  return { cookies: sent.length, theme: Option.getOrElse(theme, () => "light") }
+  return sent.some((cookie) => cookie.name === "beta")
+})
+
+const lastVisit = Effect.fn("lastVisit")(function*(page: Page.Page) {
+  const visited = yield* page.localStorage.get("lastVisited")
+  return Option.getOrElse(visited, () => "never")
 })
 ```
 
