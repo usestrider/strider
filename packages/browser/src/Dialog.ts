@@ -1,11 +1,11 @@
 /**
- * Dialogs: `alert`, `confirm`, `prompt` and `beforeunload`.
+ * The dialogs a page opens: `alert`, `confirm`, `prompt` and `beforeunload`.
  *
- * A dialog blocks its page until something decides it. Events report and handlers decide: `next`, `stream`
- * and `history` report a `Dialog`, which is data, and `handle` registers the scoped handler that answers a
- * `Pending` dialog, which adds the decisions valid for its kind, so a handler can't dismiss an alert. A
- * dialog no handler decides is decided by the context's policy (`UserContext.Options.dialogs`), and the
- * decision is reported as an `AutoResolution`.
+ * A dialog blocks its page until something decides it. Events report and handlers decide: `next`, `stream` and
+ * `history` report a `Dialog`, which is data, and `handle` registers a scoped handler that answers each one. The
+ * handler gets the dialog as `Pending`, with only the decisions valid for its kind, so it can't dismiss an alert. A
+ * dialog no handler decides is decided by the context's policy (`UserContext.Options.dialogs`), and the decision is
+ * reported as an `AutoResolution`.
  *
  * @stability unstable
  * @since 0.1.0
@@ -89,9 +89,9 @@ export const Dialog = Schema.Union([
  *
  * **Details**
  *
- * It is data, so a dialog's history encodes like other data events'. `id` is the `PromptId` that
- * `Page.Status` shows while the dialog is open. Observing a dialog doesn't decide it; a handler does, and
- * receives it as a `Pending` dialog.
+ * It is data, so a history of dialogs can be encoded with `Subscription.History`. `id` is the `PromptId` that
+ * `Page.Status` shows while the dialog is open. Seeing a dialog doesn't decide it; a handler does, and receives
+ * it as a `Pending` dialog.
  *
  * @stability unstable
  * @category models
@@ -233,7 +233,8 @@ const kind = (operation: string): Events.Kind<Model.PromptEvent, Dialog> => ({
 })
 
 /**
- * Subscribes to dialogs and returns the first match, latched. Observing doesn't decide it.
+ * Subscribes to dialogs and returns the wait: an effect that gives the first match, the same each time it runs.
+ * Waiting for a dialog doesn't decide it.
  *
  * @stability unstable
  * @category subscriptions
@@ -253,7 +254,7 @@ export const next = <PE = never, PR = never>(
   ).pipe(Operation.named("Dialog.next"))
 
 /**
- * Subscribes to dialogs and emits every match from now on. Observing doesn't decide them.
+ * Subscribes to dialogs and emits every match from now on. Seeing a dialog doesn't decide it.
  *
  * @stability unstable
  * @category subscriptions
@@ -273,7 +274,7 @@ export const stream = <PE = never, PR = never>(
   )
 
 /**
- * Reads the dialogs a page's log retained; never waits.
+ * Reads the dialogs still in the page's event log; never waits.
  *
  * @stability unstable
  * @category getters
@@ -292,9 +293,10 @@ export const history = (
  *
  * **Details**
  *
- * The page's latest handler decides each dialog, chosen when the dialog opens; removing it, or closing its
- * scope, leaves the dialogs that open after to the one before. A handler has `Deadline.DefaultBudget`, as it
- * is when `handle` is called, to decide each dialog. `handled` counts the dialogs it decided.
+ * Each dialog goes to the page's most recent handler at the moment the dialog opens. Removing a handler, or
+ * closing its scope, leaves later dialogs to the handler registered before it. A handler has
+ * `Deadline.DefaultBudget`, read when `handle` is called, to decide each dialog. `handled` counts the dialogs it
+ * has decided.
  *
  * **Gotchas**
  *

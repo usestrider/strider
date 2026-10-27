@@ -1,7 +1,7 @@
 /**
- * A raw WebDriver BiDi connection (L0): one session over one `Transport`.
+ * A raw WebDriver BiDi connection, for working with the protocol directly: one session over one `Transport`.
  *
- * A BiDi endpoint serves one session per connection. Connecting to a browser's `/session` endpoint, start it
+ * A BiDi endpoint serves one session per connection. Connected to a browser's `/session` endpoint, start the session
  * with `Session.new_` before anything else; a connection made for an existing session needs no `session.new`.
  * Events arrive for the session only after `Session.subscribe` names them.
  *
@@ -47,9 +47,9 @@ export interface BidiConnection {
  * **Details**
  *
  * One reader, running in the scope, routes replies to their commands and queues events, which one worker
- * publishes to subscriptions in the order they arrived; the limits are `CdpConnection`'s. Closing the scope, or
- * losing the transport, ends the session: pending commands fail at once, and subscriptions end with
- * `SessionEnded` after the events received before.
+ * publishes to subscriptions in the order they arrived, with the same limits as `CdpConnection.make`. Closing
+ * the scope, or losing the transport, ends the session: pending commands fail at once, and subscriptions end
+ * with `SessionEnded` after the events received before.
  *
  * **Example** (Starting a session and opening a tab)
  *

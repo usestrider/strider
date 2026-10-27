@@ -1,20 +1,20 @@
 /**
- * What every event module shares: the three verbs, caller predicates, history and their errors.
+ * What every event module shares: `next`, `stream` and `history`, the `where` predicate, and their errors.
  *
- * Each event type is its own module (`Download`, `Popup`, `NetworkResponse`, …) with the same three verbs
- * (principle 5, "Waits look forward; reads look back"):
+ * Each kind of event is a module of its own (`Download`, `Popup`, `NetworkResponse`, …) with the same three
+ * functions. Waits look forward, and reads look back:
  *
- * - `next(target, filter?, where?)` subscribes by the time its effect returns and hands back the wait: an
- *   effect whose value is the first match, the same each time it runs. Code order is subscription order, so call
- *   it before the action that causes the event. It keeps what arrives until its first match or its deadline,
- *   which starts at `next`.
- * - `stream(target, filter?, where?)` subscribes the same way and emits every match from then on, buffering
- *   at most `Capacity` events for a consumer that falls behind.
- * - `history(target, filter?)` reads what already happened from a bounded log and never waits. Its filter is
+ * - `next(target, filter?, where?)` subscribes by the time it returns, and gives back the wait: an effect whose
+ *   value is the first match, the same each time it runs. Code order is subscription order, so call it before the
+ *   action that causes the event. It keeps what arrives until its first match or its deadline, which starts at
+ *   `next`.
+ * - `stream(target, filter?, where?)` subscribes the same way and emits every match from then on, buffering at most
+ *   `Capacity` events for a consumer that falls behind.
+ * - `history(target, filter?)` reads what already happened from a bounded log, and never waits. Its filter is
  *   checked as the others' are, so a filter it can't apply fails it with `SubscriptionError` too.
  *
- * Events report; handlers decide (`Dialog.handle`, `FileChooser.handle`, `route`). Seeing an event acquires
- * nothing: a popup belongs to the scope that acquired its opener, and a download's file to its context.
+ * Events report and handlers decide (`Dialog.handle`, `FileChooser.handle`, `route`). Seeing an event doesn't make
+ * anything yours: a popup belongs to the scope that owns its opener, and a download's file to its context.
  *
  * @stability unstable
  * @since 0.1.0
@@ -30,13 +30,13 @@ import * as MonotonicInstant from "./MonotonicInstant.ts"
 import * as Reason from "./Reason.ts"
 
 /**
- * A caller predicate over events, applied after the filter.
+ * The `where` predicate: an effect that checks each event the filter let through.
  *
  * **Details**
  *
- * The filter is data and is applied before buffering. `where` runs after it, in the subscriber and never on
- * the ingestion path, so a slow or failing predicate can't hold up other subscribers. Its failure `PE` and
- * requirements `PR` join the subscription's.
+ * The filter is data and is applied before buffering. `where` runs after it, in the fiber that runs the wait or
+ * the stream, never as events arrive, so a slow or failing predicate can't hold up other subscribers. Its failure
+ * `PE` and requirements `PR` join the wait's or the stream's.
  *
  * **Gotchas**
  *
@@ -129,9 +129,10 @@ const SubscriptionErrorTypeId = "~@usestrider/browser/Subscription/SubscriptionE
  *
  * **Details**
  *
- * It fails the call that took the filter, `next`, `stream` or `history`, before any event, never the awaited
- * result: a filter that doesn't compile is `InvalidInput`, and one that asks for events the backend can't
- * report is `Unsupported`, naming the capability. `operation` names the call, such as `NetworkResponse.next`.
+ * It fails the call that took the filter (`next`, `stream` or `history`) before any event, never the wait or
+ * the stream that call returns. An invalid filter, such as a malformed URL pattern, is `InvalidInput`, and one
+ * that asks for events the backend can't report is `Unsupported`, naming the capability. `operation` names the
+ * call, such as `NetworkResponse.next`.
  *
  * @stability unstable
  * @category errors
@@ -169,8 +170,8 @@ export const isSubscriptionError = (u: unknown): u is SubscriptionError =>
  *
  * **Details**
  *
- * It is read when a stream subscribes. A consumer that falls further behind fails with `EventOverflow` rather
- * than losing events silently. `next` keeps what arrives until its first match or its deadline, so it needs
+ * It is read when a stream subscribes. A stream whose consumer falls further behind fails with `EventOverflow`
+ * rather than losing events silently. `next` keeps what arrives until its first match or its deadline, so it needs
  * no bound.
  *
  * @stability unstable
@@ -183,7 +184,7 @@ export const Capacity: Context.Reference<number> = Context.Reference<number>(
 )
 
 /**
- * Sets how many events every stream subscribed inside an effect buffers.
+ * Sets the buffer size of every stream that subscribes inside an effect.
  *
  * @see {@link Capacity} for the reference it sets
  *

@@ -1,13 +1,18 @@
 // Writes the API reference dataset, in the shape effect.website renders Effect's from:
 //
 //   .data/api-reference/<package>/
-//     manifest.json         the package, its revision, and one entry per module with its file and hash
+//     manifest.json         the package, its revision and repository, the order of @category groups, and one
+//                           entry per module with its file and hash
 //     modules/<path>.json   TypeDoc's JSON for one module (schema 2.0), e.g. modules/Page.json
 //     jsdocs.json           the effect-jsdocs model: parsed sections, examples, tags and import guidance
 //
 // Modules are found from package.json's export map, as Effect's website finds them: every source file a
 // pattern matches, except barrels and internal modules. Run with `pnpm api-reference` (after `pnpm jsdocs`).
 // A site renders the dataset however it likes; nothing here is tied to one.
+//
+// One change from TypeDoc's defaults: a type the source writes is converted as written. TypeDoc converts the type
+// the checker resolved, which has lost the name of an alias such as `type PageNavigation = typeof
+// PageNavigation.Type`, so `Effect.Effect<PageNavigation.PageNavigation, …>` became four object types.
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import * as fs from "node:fs"
@@ -16,11 +21,15 @@ import {
   Application,
   Comment,
   CommentTag,
+  Converter,
   MinimalSourceFile,
   normalizePath,
   OptionDefaults,
-  ReflectionKind
+  ReflectionKind,
+  UnionType
 } from "typedoc"
+import ts from "typescript"
+import { categoryOrder } from "./categories.mjs"
 
 export const apiReference = async (repo, root, out = path.join(repo, ".data/api-reference")) => {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"))
@@ -74,6 +83,7 @@ export const apiReference = async (repo, root, out = path.join(repo, ".data/api-
     validation: { invalidLink: false, notDocumented: false, notExported: false },
     logLevel: "Warn"
   })
+  convertWrittenTypes(app)
   const entryPoints = app.getEntryPoints()
   if (entryPoints === undefined) throw new Error("TypeDoc could not resolve the entry points")
   const bySource = new Map(entryPoints.map((entry) => [path.resolve(entry.sourceFile.fileName), entry]))
@@ -139,6 +149,8 @@ export const apiReference = async (repo, root, out = path.join(repo, ".data/api-
         package: pkg.name,
         version: pkg.version,
         revision,
+        repository: repositoryUrl(pkg),
+        categoryOrder,
         typedocVersion: Application.VERSION,
         typedocSchemaVersion: "2.0",
         barrels: barrels.map(([exportPath, file]) => ({ export: exportPath, source: file.slice(2) })),
@@ -149,4 +161,51 @@ export const apiReference = async (repo, root, out = path.join(repo, ".data/api-
     ) + "\n"
   )
   process.stdout.write(`Wrote ${entries.length} modules to ${path.relative(repo, out)}\n`)
+}
+
+// The repository's web address, from package.json's `repository`, for source links: `git@github.com:o/r.git`,
+// `git+https://github.com/o/r.git` and `https://github.com/o/r` all give `https://github.com/o/r`
+const repositoryUrl = (pkg) => {
+  const url = typeof pkg.repository === "string" ? pkg.repository : pkg.repository?.url
+  if (url === undefined) return null
+  return url.replace(/^git\+/, "").replace(/^git@([^:]+):/, "https://$1/").replace(/\.git$/, "")
+}
+
+// Converts the types the source writes from their type nodes, in place of the types the checker resolved: a
+// signature's return and parameter types, as each signature is created, and a property's type, as it is. What the source leaves to inference keeps TypeDoc's conversion. As TypeDoc does,
+// an optional member or parameter drops the `undefined` that `?: T | undefined` writes.
+const convertWrittenTypes = (app) => {
+  const convert = (context, node, optional) => {
+    const type = context.converter.convertType(context, node)
+    if (!optional || !(type instanceof UnionType)) return type
+    const types = type.types.filter((member) => !(member.type === "intrinsic" && member.name === "undefined"))
+    return types.length === 1 ? types[0] : new UnionType(types)
+  }
+  // A context scoped to `reflection`, through each of its parents, as TypeDoc's own conversion scopes it
+  const scopedTo = (context, reflection) => {
+    const chain = []
+    for (let r = reflection; r !== undefined && r !== context.scope; r = r.parent) chain.unshift(r)
+    return chain.reduce((scoped, r) => scoped.withScope(r), context)
+  }
+  const written = (node) => node?.type !== undefined && !ts.isTypePredicateNode(node.type) ? node.type : undefined
+  app.converter.on(Converter.EVENT_CREATE_SIGNATURE, (context, signature, declaration) => {
+    if (declaration === undefined || !ts.isFunctionLike(declaration)) return
+    const scoped = scopedTo(context, signature)
+    const returns = written(declaration)
+    if (returns !== undefined) signature.type = convert(scoped, returns, false)
+    for (const parameter of signature.parameters ?? []) {
+      const node = declaration.parameters.find((p) => ts.isIdentifier(p.name) && p.name.text === parameter.name)
+      const type = written(node)
+      if (type !== undefined) parameter.type = convert(scoped, type, parameter.flags.isOptional)
+    }
+  })
+  // Variables already convert a written type from its node; properties don't
+  app.converter.on(Converter.EVENT_CREATE_DECLARATION, (context, reflection) => {
+    if (!reflection.kindOf(ReflectionKind.Property) || reflection.type === undefined) return
+    const declaration = context.getSymbolFromReflection(reflection)?.declarations?.find((node) =>
+      (ts.isPropertySignature(node) || ts.isPropertyDeclaration(node)) && node.type !== undefined
+    )
+    if (declaration === undefined) return
+    reflection.type = convert(scopedTo(context, reflection), declaration.type, reflection.flags.isOptional)
+  })
 }

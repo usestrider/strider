@@ -1,8 +1,8 @@
 /**
- * Pointer input by coordinates, for canvas-like interfaces that locators can't reach.
+ * Pointer input at coordinates, for interfaces such as canvases that locators can't reach.
  *
- * Input to one page is serialized. Holding a button is a scoped acquisition, released on failure and
- * interruption like a held key.
+ * Input to one page is sent in order, one gesture at a time. Holding a button is scoped, and the button is released
+ * on failure and interruption, as a held key is.
  *
  * @stability unstable
  * @since 0.1.0
@@ -49,7 +49,7 @@ export type Button = "left" | "right" | "middle"
  */
 export interface MoveOptions {
   /**
-   * Intermediate pointer events along the way.
+   * How many move events to send on the way, the last of them at the point.
    *
    * @default 1
    */
@@ -93,7 +93,7 @@ export interface ClickOptions {
  */
 export interface HeldButton {
   /**
-   * Releases the button early. Idempotent; the scope's finalizer becomes a no-op.
+   * Releases the button early. Running it again does nothing, and neither does closing the scope.
    */
   readonly release: Effect.Effect<void>
 }

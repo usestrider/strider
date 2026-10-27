@@ -1,13 +1,13 @@
 /**
- * Long-lived connections a page opens: WebSockets and EventSource streams.
+ * The WebSockets and event sources a page opens: connections that stay open and carry messages.
  *
- * A connection is reported when it opens, to its page and context. Its frames are a separate subscription,
- * because most tests care that a socket opened and only some care what crossed it.
+ * A connection is reported when it opens, to its page and context. Its frames are a separate subscription, because
+ * most tests care that a socket opened, and only some care what crossed it.
  *
  * **Gotchas**
  *
- * Connections are a capability, `networkConnections`. CDP reports both kinds with their frames; patched WebKit
- * reports WebSockets, and an `EventSource` only as its request; BiDi reports a WebSocket's handshake as a
+ * Connections are a capability, `networkConnections`. CDP reports both kinds, with their frames. Playwright's
+ * WebKit reports WebSockets, and an `EventSource` only as its request. BiDi reports a WebSocket's handshake as a
  * request and nothing after it, so subscribing there fails with `Unsupported`, as asking WebKit for
  * `kind: "eventSource"` does.
  *
@@ -107,19 +107,19 @@ export interface NetworkConnection extends Pipeable.Pipeable, Inspectable.Inspec
   readonly [TypeId]: typeof TypeId
   readonly id: Id
   /**
-   * Which kind of connection; fixed at open.
+   * Which kind of connection it is.
    */
   readonly kind: Kind
   /**
-   * The URL it connected to; fixed at open.
+   * The URL it connected to.
    */
   readonly url: Url.Url
   /**
-   * When it opened, in wall-clock time; fixed at open.
+   * When it opened, in wall-clock time.
    */
   readonly openedAt: DateTime.Utc
   /**
-   * Frames from now on; subscribed when this returns.
+   * Subscribes to the frames that cross the connection, and gives a stream of every one from then on.
    */
   readonly frames: Effect.Effect<
     Stream.Stream<Frame, Subscription.EventOverflow | Target.TargetGone>,
@@ -199,7 +199,8 @@ const subscription = (
   })
 
 /**
- * Subscribes to connections and returns the first match, latched.
+ * Subscribes to connections and returns the wait: an effect whose value is the first match, the same each time it
+ * runs.
  *
  * @stability unstable
  * @category subscriptions
@@ -241,7 +242,7 @@ export const stream = <PE = never, PR = never>(
   )
 
 /**
- * Reads the connections a log retained; never waits.
+ * Reads the connections the target's event log kept (`UserContext.Options.eventLog`); never waits.
  *
  * @stability unstable
  * @category getters

@@ -399,7 +399,7 @@ const routing = <A>(
             Effect.fail<SendFailure>({
               _tag: "Deadline",
               hint:
-                "The page reported no document before the deadline; a page attached while a dialog is open reports none until the dialog closes (QUIRKS.md)"
+                "The page reported no document before the deadline; a page attached while a dialog is open reports none until the dialog closes"
             }),
           onSome: Effect.succeed
         }))

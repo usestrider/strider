@@ -1,0 +1,19 @@
+---
+// Rendered Markdown: prose as HTML, code through Expressive Code, as guides render it
+import { Code } from "astro-expressive-code/components"
+import type { Block } from "../features/reference/markdown.ts"
+
+interface Props {
+  readonly blocks: ReadonlyArray<Block>
+}
+
+const { blocks } = Astro.props
+---
+
+{
+  blocks.map((block) =>
+    block._tag === "Html"
+      ? <div class="prose" set:html={block.html} />
+      : <Code code={block.code} lang={block.lang} title={block.title} />
+  )
+}

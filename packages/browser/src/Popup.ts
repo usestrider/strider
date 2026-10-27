@@ -1,11 +1,10 @@
 /**
  * Pages opened by another page, such as with `window.open` or a `target="_blank"` link.
  *
- * A popup arrives with its opener's access: waiting on a `Page` gives a `Page`, and waiting on an observed
- * page gives an observed one. Seeing a popup acquires nothing, because it belongs to the scope that acquired
- * its opener, which closes it. A popup is reported as soon as it appears, before it loads, so a handler or a
- * route registered on it then is in place for its first document. `next`, `history` and the context's
- * `pages` give the same `Page` for it.
+ * A popup comes with its opener's access: waiting on a `Page` gives a `Page`, and waiting on an observed page gives
+ * an observed one. Seeing a popup doesn't make it yours: it belongs to the scope that owns its opener, which closes
+ * it. A popup is reported as soon as it appears, before it loads, so a handler or a route registered on it then is
+ * in place for its first document. `next`, `history` and the context's `pages` give the same `Page` for it.
  *
  * @stability unstable
  * @since 0.1.0
@@ -75,7 +74,8 @@ const subscribe = <A, R>(
   })
 
 /**
- * Subscribes to the popups a page opens and returns the first match, latched, with the opener's access.
+ * Subscribes to the popups a page opens and returns the wait: an effect that gives the first match, with its
+ * opener's access, the same each time it runs.
  *
  * **Example** (A popup with a dialog inside it)
  *
@@ -170,7 +170,7 @@ export const stream: {
   )) as typeof stream
 
 /**
- * Reads the popups a page's log retained; never waits.
+ * Reads the popups still in the page's event log; never waits.
  *
  * @stability unstable
  * @category getters

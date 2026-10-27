@@ -1,14 +1,14 @@
 /**
  * URLs, URL patterns, origins and sites, as branded strings.
  *
- * A `Url` is an absolute URL after WHATWG parsing. Unlike `URL`, it is immutable and equal by value, so it
- * works as a key and in `Equal`. Outputs are always branded; inputs such as `goto(url)` also take a plain
- * string, parsed at the boundary, which fails at once when it is bad.
+ * A `Url` is an absolute URL after WHATWG parsing. Unlike `URL`, it's immutable and equal by value, so it works as
+ * a key and with `Equal`. Outputs are always branded; inputs such as `goto(url)` also take a plain string, parsed
+ * when it's used, which fails at once when it's bad.
  *
  * **Gotchas**
  *
- * `effect/http` also exports a `Url` module, for working with `URL` objects, which is how a `Url` is changed.
- * A file that needs both aliases one of them.
+ * `effect/http` also exports a `Url` module, for working with `URL` objects, which is how a `Url` is changed. A
+ * file that needs both aliases one of them.
  *
  * @stability unstable
  * @since 0.1.0

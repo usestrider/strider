@@ -1,0 +1,24 @@
+---
+// The masthead: the mark and the name, then the sections and the version. It's the same bar on every page, the
+// cover included, so moving between pages never moves it.
+import { versionLabel } from "../features/site.ts"
+import Mark from "./Mark.astro"
+
+interface Props {
+  readonly area?: "guides" | "reference" | undefined
+}
+
+const { area } = Astro.props
+const version = await versionLabel()
+---
+
+<header class="flex h-14 items-center gap-4 border-b border-ink px-6 sm:gap-7">
+  <a class="flex items-center gap-2.5 text-[1.05rem]" href="/"><Mark size={22} /> Strider</a>
+  <span class="flex-1"></span>
+  <nav class="flex items-center gap-4 sm:gap-6">
+    <a class="nav-link" href="/docs" aria-current={area === "guides" ? "page" : undefined}>Guide</a>
+    <a class="nav-link" href="/docs/api" aria-current={area === "reference" ? "page" : undefined}>API</a>
+    <a class="nav-link" href="https://github.com/usestrider/strider">GitHub</a>
+  </nav>
+  <span class="badge hidden sm:inline">{version}</span>
+</header>

@@ -1,8 +1,9 @@
 /**
- * The generic BiDi backend (`@usestrider/browser/bidi`): any WebDriver BiDi endpoint, such as Safari Technology
- * Preview or a remote grid.
+ * The generic WebDriver BiDi backend: connects to any BiDi endpoint, such as Safari Technology Preview or a remote
+ * grid.
  *
- * Protocol failures carry the BiDi error under `metadata.bidi`.
+ * A protocol failure's `BackendFailure` carries the WebDriver BiDi error as its `cause`: the `ProtocolError`, with
+ * the browser's own code and message.
  *
  * @stability unstable
  * @since 0.1.0

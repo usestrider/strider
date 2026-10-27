@@ -439,7 +439,7 @@ const withBindings = (
  * `Emulation` or `Screencast` domain, no navigate command, no worlds of its own and no `DOM.describeNode`, and no
  * events for a frame's attachment, a same-document navigation, a file chooser or a download.
  */
-const attachedCapabilities = (info: Browser.Info) => {
+export const attachedCapabilities = (info: Browser.Info) => {
   const evidence = `WebKit adapter, attached, ${info.product} ${info.revision}`
   const noInput = "stock WebKit's inspector protocol has no Input domain"
   const noEmulation = "stock WebKit's inspector has no Emulation domain"
@@ -601,7 +601,7 @@ const overrideCapability = (override: Adapter.Override): string | undefined => {
  * session drives: contexts as browser processes, pages, history, trusted input, dialogs whose kind it doesn't say,
  * the window's size as the viewport, and file inputs.
  */
-const launchedCapabilities = (info: Browser.Info) => {
+export const launchedCapabilities = (info: Browser.Info) => {
   const evidence = `WebKit adapter, launched, ${info.product} ${info.revision}`
   const differ: Readonly<Record<string, readonly [Browser.CapabilityEntry["status"], ReadonlyArray<string>]>> = {
     userContexts: ["supported", ["each context is a browser process of its own"]],

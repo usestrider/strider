@@ -17,7 +17,7 @@ import * as Schema from "effect/Schema"
  * - `screenshots`: whether images may be sent at all.
  * - `snapshotText`: `"redacted"` masks the text inside an editable field (a textbox, searchbox, combobox or
  *   spinbutton) as `•••`.
- * - `consoleText`: console messages in full, masked, or left out.
+ * - `consoleText`: console messages in full, masked or left out.
  *
  * @stability experimental
  * @category models
@@ -30,7 +30,7 @@ export class CapturePolicy extends Schema.Class<CapturePolicy>("@usestrider/brow
 }) {}
 
 /**
- * No screenshots, redacted snapshots, and no console text: for production and untrusted pages.
+ * No screenshots, redacted snapshots and no console text: for production and untrusted pages.
  *
  * @stability experimental
  * @category constants

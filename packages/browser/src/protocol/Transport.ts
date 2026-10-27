@@ -1,11 +1,11 @@
 /**
- * Transports carry a browser connection's messages (L0): framed text in both directions, read by one consumer,
- * never reconnected.
+ * The transports that carry a raw browser connection's messages: framed text in both directions, read by one
+ * consumer, and never reconnected.
  *
  * `pipe` talks to a browser launched with `--remote-debugging-pipe`, over file descriptors 3 and 4 with
  * NUL-framed messages. `webSocket` dials an endpoint through the `Socket.WebSocketConstructor` in context.
  * Either way, a write after the connection is lost fails at once instead of waiting for a reconnection: a new
- * connection is a new browser model (CONCEPTS.md §1), so nothing reconnects.
+ * connection starts over, so nothing reconnects.
  *
  * **Gotchas**
  *

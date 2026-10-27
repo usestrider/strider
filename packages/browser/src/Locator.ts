@@ -1,15 +1,15 @@
 /**
- * Locators find elements, and act on them or read them.
+ * Locators: how to find elements on a page, and the actions and reads that use them.
  *
- * A locator is a value: a description of how to find elements, resolved again on every attempt, so it never
- * goes stale. Chained queries are relative to their parent. Reads are one-shot and never retry; retrying
- * assertions are `Expect`. A ref from a snapshot is the one exception to re-resolution: it is pinned to one
- * node and fails with `StaleRef` rather than rebinding.
+ * A locator is a value that describes how to find elements, and it's resolved again on every attempt, so it never
+ * goes stale. A query on a locator searches inside its matches. Reads happen once and never retry; the expectations
+ * that retry are `Expect`. A ref from a snapshot is the one exception to resolving again: it's pinned to one node,
+ * and fails with `StaleRef` rather than finding another.
  *
- * Before acting, a locator checks actionability: the CONCEPTS.md §8 predicates, checked in one injected round
- * trip per attempt. The checks are named, adjustable per call with `checks`, and reported in errors. An
- * action needs exactly one match, so ambiguity fails at once with the candidates and a suggested locator. An
- * action dispatches at most once.
+ * Before acting, a locator checks that its element is ready: visible, stable, enabled and the rest of the action's
+ * checks, all tested in the page together on each attempt. The checks are named, can be turned off per call with
+ * `checks`, and are reported in errors. An action needs exactly one match, so an ambiguous locator fails at once,
+ * listing what it matched. An action dispatches at most once.
  *
  * @stability unstable
  * @since 0.1.0
@@ -100,7 +100,7 @@ export interface Queries<L> {
    *
    * **Details**
    *
-   * An element's role is the first token of its `role` attribute that the library knows, or else its implicit
+   * An element's role is the first token of its `role` attribute that Strider knows, or else its implicit
    * role under HTML-AAM, and its name is computed under accname 1.2. Elements outside the accessibility tree
    * (`aria-hidden`, `display: none`, `visibility: hidden`, the `hidden` attribute) aren't matched unless
    * `includeHidden` is set. A name matches as text does in `getByText`.
@@ -140,7 +140,8 @@ export interface Queries<L> {
    */
   getByTestId(id: string): L
   /**
-   * Elements matching a CSS selector. A malformed selector fails with `InvalidInput` when used, at once.
+   * Elements matching a CSS selector. A malformed selector fails with `InvalidInput` as soon as the locator is
+   * used, without waiting.
    */
   locator(css: string): L
 }
@@ -191,7 +192,7 @@ export interface ReadonlyLocator
 {
   readonly [TypeId]: typeof TypeId
   /**
-   * Enters an iframe, found by this locator's query for its element.
+   * Enters an iframe inside this locator's matches, found by `iframe`'s query.
    */
   frame(iframe: ReadonlyLocator): ReadonlyFrameLocator
   /**
@@ -207,7 +208,7 @@ export interface ReadonlyLocator
    */
   or(other: ReadonlyLocator): ReadonlyLocator
   /**
-   * The match at `index`, counting from 0. Positional, and says so in errors.
+   * The match at `index`, counting from 0. Errors name it by its position, as `nth(index)`.
    */
   nth(index: number): ReadonlyLocator
   /**
@@ -219,7 +220,7 @@ export interface ReadonlyLocator
    */
   readonly last: ReadonlyLocator
   /**
-   * A label used in errors and traces instead of the query.
+   * Gives the locator a label, which errors and traces show instead of the query.
    */
   describe(label: string): ReadonlyLocator
   /**
@@ -227,8 +228,8 @@ export interface ReadonlyLocator
    */
   readonly count: Effect.Effect<number, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
-   * The text of the one match: the text `getByText` matches, its text content with whitespace collapsed, not
-   * `innerText`, which depends on layout and differs between engines.
+   * The text of the one match: the text `getByText` matches, its text content with whitespace collapsed. It isn't
+   * `innerText`, which depends on layout and differs between browsers.
    */
   readonly readText: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
@@ -276,13 +277,13 @@ export interface ReadonlyLocator
 }
 
 /**
- * The actionability checks an action runs before it dispatches.
+ * The checks an action runs on its element before it dispatches.
  *
  * **Details**
  *
- * Each action documents which checks it runs. Turning one off is explicit and is recorded in the action's
- * span. `stable` waits for the element's box to stay put for some animation frames; the default count is per
- * backend and shown in spans and errors.
+ * Each action documents which checks it runs. An override is recorded in the action's span. `stable` waits for
+ * the element's box to stay the same for 2 animation frames, or as many as `{ frames }` says, and a timeout says
+ * how many.
  *
  * @stability unstable
  * @category models
@@ -329,7 +330,7 @@ export interface ActionOptions {
  */
 export interface PointerOptions extends ActionOptions {
   /**
-   * Where to point, from the element's padding box.
+   * Where to point, from the top left of the element's padding box.
    *
    * @default the centre of the padding box
    */
@@ -367,7 +368,7 @@ export interface ClickOptions extends PointerOptions {
  */
 export interface DragOptions extends PointerOptions {
   /**
-   * Where to drop, from the target's padding box.
+   * Where to drop, from the top left of the target's padding box.
    *
    * @default the centre of the target's padding box
    */
@@ -379,10 +380,10 @@ export interface DragOptions extends PointerOptions {
    */
   readonly steps?: number | undefined
   /**
-   * How an HTML drag (the element or an ancestor `draggable`) is made: by the browser from input, where its
-   * protocol can finish one (`input.dragAndDrop`), or by the page itself, `dragstart` to `dragend` sharing one
-   * `DataTransfer`, whose events are untrusted. An element that isn't draggable is dragged by pointer events
-   * either way.
+   * How an HTML drag (the element or an ancestor is `draggable`) is made. With `"native"`, the browser makes it
+   * from input, where its protocol can finish one (`input.dragAndDrop`). With `"synthetic"`, the page dispatches
+   * the events itself, `dragstart` to `dragend`, sharing one `DataTransfer`, and the events are untrusted. An
+   * element that isn't draggable is dragged with pointer events either way.
    *
    * @default "native"
    */
@@ -408,7 +409,7 @@ export interface PressOptions extends ActionOptions, Keyboard.PressOptions {}
 export interface TypeOptions extends ActionOptions, Keyboard.TypeOptions {}
 
 /**
- * Which option of a `<select>` to choose, by value, label or index; which one is always stated.
+ * Which option of a `<select>` to choose, by its value, its label or its index; the object names which.
  *
  * @stability unstable
  * @category models
@@ -426,8 +427,8 @@ type ActionEffect = Effect.Effect<void, LocatorError | Target.TargetGone | Deadl
  *
  * **Details**
  *
- * Each action checks actionability, then dispatches at most once. Every action takes a trailing `options`,
- * whose `checks` override the documented checks.
+ * Each action checks that its element is ready, then dispatches at most once. Every action takes a trailing
+ * `options`, whose `checks` override the documented checks.
  *
  * **Example** (Filling and submitting a form)
  *
@@ -473,12 +474,12 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
-   * A move to the action point, then a press and a release, carrying the keys and buttons the page holds. The
-   * first of the gesture's pointer, mouse, touch and click events must land in the element: if the page covered it
-   * between the checks and the input, that event and the rest of the gesture are stopped before the page's
-   * handlers see them, and the action checks again. `modifiers` are pressed before the gesture and released after
-   * it; on WebKit, whose pointer events can't carry them, an action with modifiers fails with
-   * `Unsupported{capability: "input.pointerModifiers"}` before anything is sent.
+   * The click is a move to the action point, then a press and a release, carrying the keys and buttons the page
+   * holds. The gesture is guarded: the first of its pointer, mouse, touch and click events must land in the
+   * element. If the page covered it between the checks and the input, that event and the rest of the gesture are
+   * stopped before the page's handlers see them, and the action checks again. `modifiers` are pressed before the
+   * gesture and released after it; on WebKit, whose pointer events can't carry them, an action with modifiers
+   * fails with `Unsupported{capability: "input.pointerModifiers"}` before anything is sent.
    */
   click(options?: ClickOptions | undefined): ActionEffect
   /**
@@ -501,25 +502,25 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
-   * Unguarded: a move has no event to stop, and hover effects are what it is for.
+   * Unlike `click`, it isn't guarded: a move has no event to stop, and the hover effects it causes are its point.
    */
   hover(options?: PointerOptions | undefined): ActionEffect
   /**
-   * Checks a checkbox, a radio or an ARIA checkable, and confirms it became checked. Checks as `click`.
+   * Checks a checkbox, a radio or an ARIA checkable, and confirms it became checked. Checks: the same as `click`.
    *
    * **Details**
    *
-   * Already checked, it sends nothing. Otherwise it clicks, then reads the state again: a click that didn't check
-   * it fails with `StateUnchanged{expected: "checked"}`. Any other element fails at once with `WrongElement`.
+   * If it's already checked, nothing is sent. Otherwise it clicks, then reads the state again: a click that didn't
+   * check it fails with `StateUnchanged{expected: "checked"}`. Any other element fails at once with `WrongElement`.
    */
   check(options?: PointerOptions | undefined): ActionEffect
   /**
-   * Unchecks a checkbox or an ARIA checkable, and confirms it became unchecked. Checks as `click`; otherwise as
-   * `check`, with `StateUnchanged{expected: "unchecked"}`.
+   * Unchecks a checkbox or an ARIA checkable, and confirms it became unchecked. Checks: the same as `click`. It
+   * works as `check` does, failing with `StateUnchanged{expected: "unchecked"}`.
    */
   uncheck(options?: PointerOptions | undefined): ActionEffect
   /**
-   * Focuses the one match, from the utility world. Checks: visible, notInert.
+   * Focuses the one match, from an isolated world of Strider's. Checks: visible, notInert.
    */
   focus(options?: ActionOptions | undefined): ActionEffect
   /**
@@ -527,11 +528,11 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
-   * As `fill("")`: the contents selected and deleted with a key, or a value that isn't typed set to empty.
+   * It's `fill("")`: the contents are selected and deleted with a key, or a value that isn't typed is set to empty.
    */
   clear(options?: ActionOptions | undefined): ActionEffect
   /**
-   * Scrolls the one match into view, from the utility world. Checks: visible, stable.
+   * Scrolls the one match into view, from an isolated world of Strider's. Checks: visible, stable.
    */
   scrollIntoView(options?: ActionOptions | undefined): ActionEffect
   /**
@@ -539,11 +540,12 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
-   * - A text input, a textarea or a `contenteditable` element is focused and its contents selected from the
-   *   utility world, then the value is inserted as text, as an input method would.
-   * - An input whose value isn't typed (`date`, `time`, `color`, `range` and their kin) has it set from the
-   *   utility world, with `input` and `change` dispatched; a value it refuses fails with `InvalidInput`.
-   * - An element that can't be edited fails at once with `NotEditable`; a read-only one waits, as `ReadOnly`.
+   * - A text input, a textarea or a `contenteditable` element is focused and its contents selected from an
+   *   isolated world of Strider's, then the value is inserted as text, as an input method would.
+   * - An input whose value isn't typed (`date`, `time`, `color`, `range` and their kin) has it set from that
+   *   world, with `input` and `change` dispatched; a value it refuses fails with `InvalidInput`.
+   * - An element that can't be edited fails at once with `NotEditable`. A read-only one is waited for, and a
+   *   timeout reports it as `ReadOnly`.
    * - A `Redacted` value is typed into the page but never shown in spans, traces or errors.
    */
   fill(value: string | Redacted.Redacted<string>, options?: ActionOptions | undefined): ActionEffect
@@ -570,9 +572,10 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
-   * Chosen from the utility world, with `input` and `change` dispatched, as a user's choice would be: a select's
-   * popup isn't something input can drive headless. An option that isn't there yet is waited for, as
-   * `NoSuchOption`; any element but a `<select>` fails at once with `WrongElement`.
+   * The options are chosen from an isolated world of Strider's, with `input` and `change` dispatched as for a
+   * user's choice, because input can't drive a select's popup in a headless browser. An option that isn't there
+   * yet is waited for, and a timeout reports it as `NoSuchOption`. Any element but a `<select>` fails at once with
+   * `WrongElement`.
    */
   selectOption(
     choice: SelectOption | ReadonlyArray<SelectOption>,
@@ -591,23 +594,23 @@ export interface Locator extends ReadonlyLocator {
     options?: ActionOptions | undefined
   ): ActionEffect
   /**
-   * Drags the one match onto `target`, with the same checks and guard as `click`; the target is checked visible,
-   * enabled, notInert and inViewport.
+   * Drags the one match onto `target`, with the same checks and guard as `click`. The target's checks are
+   * visible, enabled, notInert and inViewport.
    *
    * **Details**
    *
-   * A press at the element's action point, `steps` moves with the button held, and the release at the target's,
-   * which drives pages that drag with pointer events. An HTML drag (`draggable="true"` on the element or an
-   * ancestor) needs `input.dragAndDrop`: Chromium finishes it; elsewhere it fails with `Unsupported` before
+   * The drag is a press at the element's action point, `steps` moves with the button held, and a release at the
+   * target's, which drives pages that drag with pointer events. An HTML drag (`draggable="true"` on the element or
+   * an ancestor) needs `input.dragAndDrop`: Chromium finishes it; elsewhere it fails with `Unsupported` before
    * anything is sent. With `html: "synthetic"`, the page dispatches the drag's events itself, on every backend:
-   * `dragstart` and `drag` on the element, `dragenter` and `dragover` where the target's point is, then
-   * `drop` there if a `dragover` handler accepted it, or `dragleave`, and `dragend` on the element. The element and
-   * the target must be in one document.
+   * `dragstart` and `drag` on the element, `dragenter` and `dragover` where the target's point is, then `drop`
+   * there if a `dragover` handler accepted it, or `dragleave`, and `dragend` on the element. The element and the
+   * target must be in one document.
    *
    * **Gotchas**
    *
-   * In a synthetic drag, `dragend` sees the `dropEffect` the target set only on Firefox: Chromium and WebKit
-   * ignore one set on a `DataTransfer` a script made, so it is `"none"` there.
+   * In a synthetic drag, only Firefox lets `dragend` see the `dropEffect` the target set: Chromium and WebKit
+   * ignore a `dropEffect` set on a `DataTransfer` that a script made, so `dragend` sees `"none"` there.
    */
   dragTo(target: ReadonlyLocator, options?: DragOptions | undefined): ActionEffect
 }
@@ -629,11 +632,12 @@ export const isLocator = (u: unknown): u is ReadonlyLocator => Predicate.hasProp
 const RelativeLocatorTypeId = "~@usestrider/browser/Locator/RelativeLocator"
 
 /**
- * A query relative to the element being filtered, valid only inside `filter({ has })`.
+ * A query relative to the element being filtered, valid only in `filter`'s `has` and `hasNot`.
  *
  * **Details**
  *
- * A page-rooted locator in `has` would match anywhere on the page, so it is a type error.
+ * A locator that starts from the page would match anywhere on the page, so passing one to `has` or `hasNot` is a
+ * type error.
  *
  * @stability unstable
  * @category models
@@ -742,8 +746,8 @@ export class StrictViolation extends Schema.Error<StrictViolation>("@usestrider/
  * - `Replaced`: the document was replaced by a navigation.
  * - `Detached`: the node was removed.
  * - `Suspended`: the document is in the back/forward cache.
- * - `BindingLost`: the page re-rendered the node.
- * - `OtherSnapshot`: the ref belongs to a different snapshot's generation.
+ * - `BindingLost`: Strider's script in the page was installed again, and the refs it gave went with it.
+ * - `OtherSnapshot`: no snapshot of this document gave the ref.
  *
  * @stability unstable
  * @category reasons
@@ -776,8 +780,8 @@ export class NoMatch extends Schema.Error<NoMatch>("@usestrider/browser/Locator/
 }
 
 /**
- * Reason for an action or read the one match's kind of element doesn't support, such as `readValue` of a
- * `div` or `check` of a button.
+ * Reason for an action or read that the matched element's kind doesn't support, such as `readValue` of a `div`
+ * or `check` of a button.
  *
  * @stability unstable
  * @category reasons

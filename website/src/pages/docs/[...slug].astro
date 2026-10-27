@@ -1,0 +1,45 @@
+---
+import { getCollection, render } from "astro:content"
+import Aside from "../../components/Aside.astro"
+import BrowserLimits from "../../components/BrowserLimits.astro"
+import Capabilities from "../../components/Capabilities.astro"
+import GuideNav from "../../components/GuideNav.astro"
+import Rail from "../../components/Rail.astro"
+import { guideRoute, placeOf } from "../../features/docs/navigation.ts"
+import { editUrl } from "../../features/site.ts"
+import DocShell from "../../layouts/DocShell.astro"
+
+export const getStaticPaths = async () =>
+  (await getCollection("docs")).map((guide) => ({
+    params: { slug: guideRoute(guide).replace(/^\/docs\/?/, "") || undefined },
+    props: { guide }
+  }))
+
+const { guide } = Astro.props
+const place = placeOf(await getCollection("docs"), guide)
+const { Content, headings } = await render(guide)
+const edit = editUrl(guide.filePath)
+---
+
+<DocShell
+  title={guide.data.title}
+  description={guide.data.description}
+  area="guides"
+  crumbs={[
+    { label: "Guide", href: "/docs" },
+    ...(place === undefined ? [] : [{ label: `Chapter ${place.chapter}` }, { label: place.label }])
+  ]}
+>
+  <GuideNav slot="sidebar" current={guide.id} />
+  <Rail
+    slot="rail"
+    groups={headings.filter((heading) => heading.depth === 2).map((heading) => ({ label: heading.text, href: `#${heading.slug}` }))}
+    link={edit === undefined ? undefined : { label: "Edit", title: "Suggest a change on GitHub", href: edit }}
+  />
+  {place !== undefined && <p class="label">Chapter {place.chapter} · § {place.section}</p>}
+  <h1 class="mt-2 font-display text-[3rem] leading-tight font-normal">{guide.data.title}</h1>
+  <p class="deck mt-3 mb-10 text-[1.3rem] leading-snug">{guide.data.description}</p>
+  <article class="prose">
+    <Content components={{ Aside, BrowserLimits, Capabilities }} />
+  </article>
+</DocShell>

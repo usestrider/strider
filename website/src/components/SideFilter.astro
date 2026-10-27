@@ -1,0 +1,37 @@
+---
+// Narrows a sidebar's links to those whose name holds what's typed, opening the groups that still have matches.
+// `/` focuses it, as the design's search hint suggests.
+interface Props {
+  readonly placeholder: string
+}
+
+const { placeholder } = Astro.props
+---
+
+<div class="sticky top-0 z-10 -mx-1 mb-4 bg-paper px-1 pt-6 pb-3">
+  <input class="side-filter" type="search" placeholder={placeholder} aria-label={placeholder} data-side-filter />
+</div>
+
+<script>
+  const input = document.querySelector<HTMLInputElement>("[data-side-filter]")
+  const groups = [...document.querySelectorAll<HTMLDetailsElement>("[data-side-group]")]
+  const initial = new Map(groups.map((group) => [group, group.open]))
+  input?.addEventListener("input", () => {
+    const query = input.value.trim().toLowerCase()
+    for (const group of groups) {
+      let matches = 0
+      for (const item of group.querySelectorAll<HTMLElement>("[data-side-item]")) {
+        const shown = query === "" || (item.dataset["sideItem"] ?? "").includes(query)
+        item.hidden = !shown
+        if (shown) matches++
+      }
+      group.hidden = matches === 0
+      group.open = query === "" ? (initial.get(group) ?? false) : true
+    }
+  })
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "/" || document.activeElement instanceof HTMLInputElement) return
+    event.preventDefault()
+    input?.focus()
+  })
+</script>

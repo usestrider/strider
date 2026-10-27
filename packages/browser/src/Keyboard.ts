@@ -1,9 +1,9 @@
 /**
- * Keys sent to whatever has focus, for what locators can't express.
+ * Keys sent to whatever has focus, for what an action on a locator can't express.
  *
- * Input to one page is serialized. Holding a key is a scoped acquisition: the key is released when the
- * handle's `release` runs or its scope closes, including on failure and interruption, so a failed step
- * never leaves Shift held down.
+ * Input to one page is sent in order, one gesture at a time. Holding a key is scoped: the key is released when the
+ * handle's `release` runs or its scope closes, on failure and interruption too, so a step that fails never leaves
+ * Shift held down.
  *
  * @stability unstable
  * @since 0.1.0
@@ -48,15 +48,15 @@ export type Key = typeof Key.Type
 export type Modifier = "Alt" | "Control" | "Meta" | "Shift"
 
 /**
- * A keyboard layout, from Unicode CLDR's Windows layouts: which key, with which modifiers, types each
- * character.
+ * A keyboard layout, from Unicode CLDR's Windows layouts: which key, with which modifiers, types each character.
  *
  * **Details**
  *
- * `us` is the default; `uk`, `de`, `fr`, `es` and `it` are the common European ones. A character a layout types
- * with Shift or AltGr is typed with them held, one only a dead key reaches as the dead key and then its other
- * key, and one the layout has no key for as a key of its own with an empty `code`. The page sees the layout's
- * `key` and `code`; the browser's own layout doesn't change.
+ * `us` is the default (`UserContext.Options.keyboardLayout`); `uk`, `de`, `fr`, `es` and `it` are the common
+ * European ones. A character the layout types with Shift or AltGr is typed with them held. One that only a dead
+ * key reaches is typed as the dead key, then the key it combines with. One the layout has no key for is typed as
+ * a key of its own, with an empty `code`. The page sees the layout's `key` and `code` (on Firefox, only the
+ * `key`); the browser's own layout doesn't change.
  *
  * @stability unstable
  * @category models
@@ -105,7 +105,7 @@ export interface TypeOptions {
  */
 export interface HeldKey {
   /**
-   * Releases the key early. Idempotent; the scope's finalizer becomes a no-op.
+   * Releases the key early. Running it again does nothing, and neither does closing the scope.
    */
   readonly release: Effect.Effect<void>
 }

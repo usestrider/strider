@@ -1,0 +1,52 @@
+---
+import { Font } from "astro:assets"
+import "../styles/global.css"
+
+interface Props {
+  readonly title: string
+  readonly description?: string | undefined
+}
+
+const { title, description } = Astro.props
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title === "Strider" ? title : `${title} · Strider`}</title>
+    {description !== undefined && description !== "" && <meta name="description" content={description} />}
+    <link rel="icon" href="/heron.svg" type="image/svg+xml" />
+    <Font cssVariable="--font-garamond" preload />
+    <Font cssVariable="--font-source-serif" preload />
+    <Font cssVariable="--font-plex-sans" preload />
+    <Font cssVariable="--font-plex" preload />
+    <script is:inline>
+      // Before first paint, the band: the color of the browser the page is read in, by its brand. Chrome on iOS is
+      // Chromium blue, though it runs on WebKit. The site is light only for now; dark mode returns with a toggle.
+      const root = document.documentElement
+      root.dataset.theme = "light"
+      const ua = navigator.userAgent
+      root.dataset.engine = /\bOPR\//.test(ua)
+        ? "opera"
+        : /\bEdg(A|iOS)?\//.test(ua)
+        ? "edge"
+        : /\b(Firefox|FxiOS)\//.test(ua)
+        ? "firefox"
+        : /AppleWebKit\//.test(ua) && !/(Chrome|Chromium|CriOS)\//.test(ua)
+        ? "webkit"
+        : "chromium"
+    </script>
+  </head>
+  <body>
+    <slot />
+    <script>
+      document.addEventListener("click", (event) => {
+        const target = event.target instanceof Element ? event.target : null
+        const copy = target?.closest<HTMLElement>("[data-copy-text]")
+        if (copy?.dataset["copyText"] !== undefined) void navigator.clipboard.writeText(copy.dataset["copyText"])
+      })
+    </script>
+  </body>
+</html>

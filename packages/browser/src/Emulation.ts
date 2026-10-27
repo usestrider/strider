@@ -1,10 +1,10 @@
 /**
  * Emulated settings: viewport, locale, time zone, media features, network conditions and more.
  *
- * One concept, two lifetimes. `UserContext.Options.emulation` holds these settings for the context's whole
- * life; `emulate(settings)` on a page or context holds them while its registration lives. Unset fields are
- * untouched. Removing an override restores the previous value when it is known and access permits, and page
- * overrides beat context ones (CONCEPTS.md §7).
+ * The same settings have two lifetimes. `UserContext.Options.emulation` holds them for a context's whole life, and
+ * `emulate(settings)` on a page or context holds them until its registration is removed. Fields you leave unset are
+ * untouched. Removing an override restores the previous value when it's known and your access allows, and a page's
+ * overrides win over its context's.
  *
  * @stability unstable
  * @since 0.1.0

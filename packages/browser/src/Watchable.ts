@@ -1,9 +1,9 @@
 /**
- * Read-only views of state that changes, folded from protocol events (principle 16).
+ * Read-only views of state that changes, kept up to date from the browser's events.
  *
- * `yield*` reads the current value. `changes` streams it, starting with the current value. `waitFor` waits
- * until it satisfies a predicate. Reads that need a round trip to the page, such as DOM reads or `title`, are
- * plain effects, never watchables, because there is no event to fold them from.
+ * `yield*` reads the current value, `changes` streams it, starting with the current value, and `waitFor` waits
+ * until it satisfies a predicate. Reads that need a round trip to the page, such as DOM reads or `title`, are plain
+ * effects, never watchables, because no event keeps them up to date.
  *
  * @stability unstable
  * @since 0.1.0
@@ -26,8 +26,8 @@ const TypeId = "~@usestrider/browser/Watchable"
  *
  * - `changes` starts with the current value, conflates (a slow consumer sees the latest value, not every
  *   intermediate one), and ends after the terminal state, which is emitted as data.
- * - `waitFor` is level-triggered: it checks the current value first, so stages skipped between checks don't
- *   matter. It runs under the deadline.
+ * - `waitFor` checks the current value first, then each change, so values skipped in between don't matter. It
+ *   runs under the deadline.
  * - `map` derives a watchable from the same source, so derived values never disagree with their source.
  *
  * **Example** (Waiting for a page to finish loading)
@@ -79,13 +79,13 @@ export const isWatchable = (u: unknown): u is Watchable<unknown> => P.hasPropert
 const EndedTypeId = "~@usestrider/browser/Watchable/Ended"
 
 /**
- * Error for a wait on a value that settled on one it doesn't satisfy, such as a download's status once it
- * completed: nothing else will come, though the entity lives on (QUIRKS.md, Q62).
+ * Error for a wait whose value settled on one that doesn't satisfy it, such as a download's status once the
+ * download completed: no other value will come, though the download is still there.
  *
  * **Details**
  *
- * `value` is the final value. A watchable whose entity ended fails a wait with `TargetGone` instead, since its
- * end is its target's.
+ * `value` is the final value. When what the watchable describes ends instead, such as a page that closed, the
+ * wait fails with `TargetGone`.
  *
  * @stability unstable
  * @category errors

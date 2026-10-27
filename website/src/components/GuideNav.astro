@@ -1,0 +1,24 @@
+---
+// The guides' sidebar: each chapter and its pages, then the appendix
+import { getCollection } from "astro:content"
+import { guideRoute, navigation } from "../features/docs/navigation.ts"
+import SideNav from "./SideNav.astro"
+
+interface Props {
+  readonly current?: string | undefined
+}
+
+const { current } = Astro.props
+const chapters = navigation(await getCollection("docs"))
+---
+
+<div class="pt-6"></div>
+{
+  chapters.map((chapter) => (
+    <SideNav
+      label={`Chapter ${chapter.number} · ${chapter.label}`}
+      links={chapter.pages.map((page) => ({ label: page.data.title, href: guideRoute(page), current: page.id === current }))}
+    />
+  ))
+}
+<SideNav label="Appendix" links={[{ label: "API reference", href: "/docs/api", current: false }]} />

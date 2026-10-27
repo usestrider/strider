@@ -1,12 +1,11 @@
 /**
- * The agent toolkit (`@usestrider/browser/ai`): one definition that serves an in-process model, an MCP server and
- * the CLI.
+ * The agent toolkit: browser tools for a model, defined once, and served in your program, over MCP and by the CLI.
  *
- * Every page tool names its page; there is no current tab. No tool waits after it acts: each result carries
- * the call's outcome, then a digest of what the event logs recorded since the previous call. Tools are
- * `effect/ai` tools with failure mode `"return"`, so a `LocatorError`, `Timeout` or stale ref reaches the
- * model as data, hint included. Parameters are Schemas: a model's `"e12"` is decoded to a `Snapshot.RefId` and
- * checked against that page's latest snapshot.
+ * Every page tool names its page; there is no current tab. No tool waits after it acts: each result has the call's
+ * outcome, then a digest of what happened since the previous call. Tools are `effect/ai` tools whose failures are
+ * returned to the model, so a `LocatorError`, a `Timeout` or a stale ref reaches the model as data, hint included.
+ * Parameters are Schemas: a model's `"e12"` is decoded to a `Snapshot.RefId` and checked against that page's latest
+ * snapshot.
  *
  * @stability experimental
  * @since 0.1.0
@@ -32,7 +31,7 @@ import type * as CapturePolicy from "./CapturePolicy.ts"
 export const SecretName = Schema.String.pipe(Schema.brand("~@usestrider/browser/ai/BrowserToolkit/SecretName"))
 
 /**
- * The name of a secret an agent refers to as `%name%`; the value is substituted only at dispatch.
+ * The name of a secret an agent refers to as `%name%`; Strider puts in the value only as the tool call runs.
  *
  * @stability experimental
  * @category models
@@ -41,7 +40,7 @@ export const SecretName = Schema.String.pipe(Schema.brand("~@usestrider/browser/
 export type SecretName = typeof SecretName.Type
 
 /**
- * The toolkit's tools.
+ * The names of the toolkit's tools.
  *
  * @stability experimental
  * @category models
@@ -80,8 +79,8 @@ export type ToolName =
 export type Tools = ToolsImpl.Tools
 
 /**
- * Why a tool call failed, as the model sees it: the library error's tag, its reason's, and its message, hint
- * included. A tool's failure mode is `"return"`, so it reaches the model as a result.
+ * Why a tool call failed, as the model sees it: the error's tag and its reason's, with its message, hint included.
+ * Each tool's failure mode is `"return"`, so a failure reaches the model as a result.
  *
  * @stability experimental
  * @category models
@@ -99,7 +98,7 @@ export const ToolFailure = ToolsImpl.ToolFailure
 export type ToolFailure = ToolsImpl.ToolFailure
 
 /**
- * The tool definitions alone, for the CLI and MCP surfaces to serve.
+ * The tool definitions without handlers, as the CLI and its MCP server serve them.
  *
  * @stability experimental
  * @category constants
@@ -120,7 +119,7 @@ export interface MakeOptions {
    */
   readonly context: UserContext.UserContext
   /**
-   * Secrets the model may use by name; it sees `%name%`, and the value is substituted at dispatch.
+   * Secrets the model may use by name: it sees `%name%`, and Strider puts in the value as the tool call runs.
    */
   readonly secrets: Readonly<Record<SecretName | string, Redacted.Redacted<string>>>
   /**
@@ -138,7 +137,7 @@ export interface MakeOptions {
 }
 
 /**
- * Binds the toolkit to a context, with handlers, for an in-process model.
+ * Binds the toolkit to a context, with handlers, for a model your program calls.
  *
  * **Details**
  *
@@ -146,8 +145,8 @@ export interface MakeOptions {
  * target is a ref from the page's latest snapshot (`e12`), or `role=button[name="Save"]`, `text="Add to cart"`,
  * `label=Email`, `testid=cart` or `css=…`; a bad one fails at once. Each result is the call's outcome and
  * `sinceLast`: navigations, popups, dialogs and who decided them, downloads, uncaught exceptions, console
- * errors and failed requests since the previous call. A `%name%` in a parameter is the secret's value at
- * dispatch, and results carry it back as `%name%`. Waits, routes and dialog handlers end with the scope.
+ * errors and failed requests since the previous call. A `%name%` in a parameter becomes the secret's value as the
+ * call runs, and results show the value as `%name%` again. Waits, routes and dialog handlers end with the scope.
  *
  * **Example** (A toolkit for one context)
  *

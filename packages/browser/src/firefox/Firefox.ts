@@ -1,8 +1,9 @@
 /**
- * The Firefox backend (`@usestrider/browser/firefox`): Firefox over WebDriver BiDi.
+ * The Firefox backend: Firefox, over WebDriver BiDi.
  *
- * A launch runs the executable it names, and nothing is looked up or downloaded: `strider browsers` lists the
- * browsers it can find. Protocol failures carry the BiDi error under `metadata.bidi`.
+ * A launch runs the executable you name, and nothing is looked up or downloaded; `strider browsers` lists the
+ * browsers it can find. A protocol failure's `BackendFailure` carries the WebDriver BiDi error as its `cause`: the
+ * `ProtocolError`, with the browser's own code and message.
  *
  * @stability unstable
  * @since 0.1.0
@@ -29,7 +30,7 @@ declare module "../Reason.ts" {
 }
 
 /**
- * Launches the Firefox executable it names and provides it as `Browser`.
+ * Launches the Firefox executable at `executablePath` and provides it as `Browser`.
  *
  * **Details**
  *
@@ -68,8 +69,8 @@ export const layer = (
   )
 
 /**
- * Launches the Firefox executable it names with options read from configuration, such as the executable path
- * from each machine's environment.
+ * Launches Firefox as `layer` does, with options read from configuration, such as the executable path from each
+ * machine's environment.
  *
  * **Example** (The executable from each machine's environment)
  *
@@ -112,7 +113,7 @@ export const layerConfig = (
  *
  * Firefox allows one session at a time, and keeps a session after its connection closes until something ends it:
  * a connect while another client holds it fails with `ConnectionFailed`. An attached session leaves file choosers
- * to the browser, since its prompt settings are the whole browser's.
+ * to the browser, because a session's prompt settings apply to the whole browser.
  *
  * @stability unstable
  * @category layers

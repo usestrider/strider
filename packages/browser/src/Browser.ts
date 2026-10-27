@@ -1,18 +1,18 @@
 /**
- * The `Browser` service, its accessors, and the settings every backend shares.
+ * The `Browser` service, which every backend provides, with its accessors and the settings every backend shares.
  *
- * A backend layer provides `Browser`: `Chromium.layer({ executablePath })` launches the browser it names,
- * `Chromium.layerConnect(endpoint)` attaches to one. Backends are imports, not option values (`@usestrider/browser/chromium`, `/firefox`, `/webkit`,
- * `/bidi`), so only the protocol code you import is loaded. A launch uses a temporary profile, acquired with
- * `FileSystem.makeTempDirectoryScoped` before the browser starts and deleted after it exits.
+ * A backend's layer provides `Browser`: `Chromium.layer({ executablePath })` launches the browser at that path, and
+ * `Chromium.layerConnect(endpoint)` attaches to one that's already running. Each backend is an import of its own
+ * (`@usestrider/browser/chromium`, `/firefox`, `/webkit` and `/bidi`), so a program loads only the protocol code it
+ * uses. A launched browser gets a temporary profile, made before it starts and deleted after it exits.
  *
  * **Tracing**
  *
- * Every user-visible operation opens one span, named like `Locator.click`, with attributes in OpenTelemetry's
- * style: `browser.operation`, `browser.page.id`, `url.full` (redacted by the current preset) and
- * `error.type`. Everything beneath an operation is untraced, unless `TraceProtocolCommands` turns on a child
- * span per protocol command. `SpanNameGenerator` and `TracerDisabledWhen` rename or suppress spans, as their
- * namesakes do for Effect's `HttpClient`.
+ * Every operation you call opens one span, named like `Locator.click`, with attributes in OpenTelemetry's style:
+ * `browser.operation`, `browser.page.id`, `url.full` (redacted under the current diagnostics preset) and
+ * `error.type`. What happens inside an operation isn't traced, unless `TraceProtocolCommands` adds a span for each
+ * protocol command. `SpanNameGenerator` and `TracerDisabledWhen` rename or suppress spans, as their namesakes do
+ * for Effect's `HttpClient`.
  *
  * @stability unstable
  * @since 0.1.0
@@ -84,7 +84,7 @@ export const CapabilityEntry = Schema.Struct({
 export type CapabilityEntry = typeof CapabilityEntry.Type
 
 /**
- * What the connected browser supports, with evidence; refined as probes complete.
+ * What the connected browser supports, as its backend describes it, with the `evidence` for each entry.
  *
  * @stability unstable
  * @category models
@@ -115,7 +115,7 @@ export interface Browser {
    */
   readonly info: Info
   /**
-   * What it supports; refined as probes complete.
+   * What it supports, as its backend describes it.
    */
   readonly capabilities: Watchable.Watchable<CapabilitySet>
   /**
@@ -131,9 +131,10 @@ export interface Browser {
     options?: UserContext.Options | undefined
   ): Effect.Effect<Page.Page, Page.PageError | Target.TargetGone, Scope.Scope>
   /**
-   * Every page of the browser, as they open and close: a `Page` for one this connection controls for its life, and
-   * an observed page for any other, such as a launched browser's own first tab or an attached browser's tabs, whose
-   * `inspect` and `control` gain access for a scope.
+   * Every page of the browser, kept up to date as pages open and close. A page this connection controls for its
+   * whole life, because it created the page or its context, is a `Page`. Any other, such as a launched browser's
+   * first tab or an attached browser's tabs, is an observed page, whose `inspect` and `control` give access for a
+   * scope.
    */
   readonly pages: Watchable.Watchable<ReadonlyArray<Page.ObservedPage>>
   /**
@@ -214,7 +215,7 @@ export const newContext = (
  *
  * **Gotchas**
  *
- * The library never downloads or installs a browser. Install it as you would any program (an operating
+ * Strider never downloads or installs a browser. Install it as you would any program (an operating
  * system's package, a vendor's installer, a Nix package, Playwright's installer for its WebKit), and name its
  * executable here. `strider browsers` lists the ones it can find on this machine, with their versions.
  *
@@ -270,7 +271,7 @@ export interface ConnectOptions {
 }
 
 /**
- * Provides a fake `Browser` whose pages replay a scripted timeline, for event and lifecycle tests.
+ * Provides a fake `Browser` whose first page plays a scripted timeline, for event and lifecycle tests.
  *
  * **Details**
  *
@@ -282,19 +283,19 @@ export interface ConnectOptions {
  * - `-` is a tick of 10 ms;
  * - `commit` commits a document at `https://example.test/`, and `load` makes it interactive, then complete;
  * - `resp(name)` is a request for `https://example.test/name`, answered with 200 and finished;
- * - `dialog(kind)` opens an `alert`, `confirm`, `prompt` or `beforeunload` prompt, decided as any is;
+ * - `dialog(kind)` opens an `alert`, `confirm`, `prompt` or `beforeunload` prompt, decided as any dialog is;
  * - `popup` opens a popup with the page as its opener;
  * - `crash` ends the page as crashed, and `|` as closed by its script.
  *
- * Its facts are folded by the same model as a real backend's, so events, waits and lifetimes behave as they
- * do with a browser. `goto` and `reload` commit at once; `info.protocol` is `"fake"`.
+ * The same model that follows a real browser's events follows the fake's, so events, waits and lifetimes behave
+ * as they do with a browser. `goto` and `reload` commit at once; `info.protocol` is `"fake"`.
  *
  * **Gotchas**
  *
  * The fake has no DOM: locator actions and reads fail with `Unsupported`. It tests what happens around
  * events and lifetimes, not page content. A timeline it can't read fails the layer as a defect, naming where.
  *
- * **Example** (A response latched before it is awaited)
+ * **Example** (A response that arrives before its wait runs)
  *
  * ```ts import.meta.vitest
  * import { Effect } from "effect"
@@ -346,8 +347,8 @@ export interface Operation extends Tracing.Operation {
  * **Details**
  *
  * Every operation opens one span. Its attributes are `browser.operation`, the id of what it acts on
- * (`browser.page.id`, `browser.context.id` or `browser.realm.id`), its own, such as `browser.locator`, and a
- * URL as `url.full`, shown as `Diagnostics.CurrentPreset` allows.
+ * (`browser.page.id`, `browser.context.id` or `browser.realm.id`), attributes of its own, such as
+ * `browser.locator`, and a URL as `url.full`, shown as `Diagnostics.CurrentPreset` allows.
  *
  * @stability unstable
  * @category references
@@ -381,7 +382,7 @@ export const TracerDisabledWhen: Context.Reference<Predicate.Predicate<Operation
 export const TraceProtocolCommands: Context.Reference<boolean> = Tracing.TraceProtocolCommands
 
 /**
- * Reason for a launch that couldn't find a browser executable.
+ * Reason for a launch whose `executablePath` names no file.
  *
  * @stability unstable
  * @category reasons
@@ -418,7 +419,7 @@ export class ProcessExited extends Schema.Error<ProcessExited>("@usestrider/brow
 }
 
 /**
- * Reason for a browser whose protocol revision this version doesn't support.
+ * Reason for a browser whose protocol revision this version of Strider doesn't support.
  *
  * @stability unstable
  * @category reasons

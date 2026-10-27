@@ -1,0 +1,31 @@
+---
+// A sidebar's group: its label, and its links, the current one marked in the band's color. Module names are set in
+// mono, as code; guides' titles in sans.
+interface Props {
+  readonly label: string
+  readonly links: ReadonlyArray<{ readonly label: string; readonly href: string; readonly current: boolean }>
+  /** Shown closed until opened, unless it holds the current page */
+  readonly collapsed?: boolean
+  readonly mono?: boolean
+}
+
+const { label, links, collapsed = false, mono = false } = Astro.props
+const open = !collapsed || links.some((link) => link.current)
+const font = mono ? "font-mono text-[0.8rem]" : "font-sans text-[0.9rem]"
+---
+
+<details class="group mb-5" open={open} data-side-group>
+  <summary class="label mb-1.5 flex cursor-pointer list-none items-baseline justify-between gap-3">
+    <span>{label}</span>
+    <span class="shrink-0 font-mono font-normal tracking-normal normal-case opacity-70">{links.length}</span>
+  </summary>
+  <ul class={font}>
+    {
+      links.map((link) => (
+        <li data-side-item={link.label.toLowerCase()}>
+          <a class="side-link" href={link.href} aria-current={link.current ? "page" : undefined}>{link.label}</a>
+        </li>
+      ))
+    }
+  </ul>
+</details>

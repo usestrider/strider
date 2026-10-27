@@ -1,11 +1,11 @@
 /**
- * A record of what a program owns outside itself: the browsers it launched and the directories it made for them
- * (CONCEPTS.md §3, Ownership ledger). A program that ends normally removes what it made and its
- * record; one that dies leaves both, and `strider prune` reads the records whose program is gone and reclaims
- * what they name.
+ * A record of what a program owns outside itself: the browsers it launched, and the directories it made for them.
  *
- * Nothing is recorded unless a program provides `Ledger.layer`: writing files a program didn't ask for would be
- * implicit. The CLI's sessions always do.
+ * A program that ends normally removes what it made, and its record. One that dies leaves both, and `strider prune`
+ * reads the records of programs that are gone and reclaims what they name.
+ *
+ * Nothing is recorded unless a program provides `Ledger.layer`, because writing files a program didn't ask for
+ * would be implicit. The CLI's sessions always provide it.
  *
  * @stability experimental
  * @since 0.1.0
@@ -36,8 +36,8 @@ export const Item = Schema.Union([
  *
  * **Details**
  *
- * A browser is known by its profile directory, which its command line names and which is the program's alone, so
- * a process id the system has given to another process since can't be mistaken for it.
+ * A browser is identified by its profile directory, which its command line names and which only this program
+ * uses, so another process that later gets the same id can't be mistaken for it.
  *
  * @stability experimental
  * @category models
@@ -50,8 +50,8 @@ export type Item = typeof Item.Type
  *
  * **Details**
  *
- * `startedAt` is when the program's process started, in milliseconds since the epoch, so a reused process id is
- * told from the program.
+ * `startedAt` is when the program's process started, in milliseconds since the epoch, so a later process given
+ * the same id isn't taken for the program.
  *
  * @stability experimental
  * @category models
@@ -75,7 +75,7 @@ export interface Ledger {
 }
 
 /**
- * The ledger in force: by default one that records nothing.
+ * The ledger in use: by default, one that records nothing.
  *
  * @stability experimental
  * @category references
@@ -92,12 +92,13 @@ const host = globalThis as {
 }
 
 /**
- * A ledger that records the program in `directory`, one file per program, removed when the layer's scope closes.
+ * Provides a ledger that keeps the program's record in `directory`, one file per program, and removes the file when
+ * the layer's scope closes.
  *
  * **Details**
  *
- * The file is `<pid>-<startedAt>.json`, rewritten as items come and go. A write that fails is logged, never
- * failed: a program goes on without its record.
+ * The file is `<pid>-<startedAt>.json`, rewritten as items come and go. A write that fails is logged as a warning
+ * and fails nothing: the program goes on without its record.
  *
  * @stability experimental
  * @category layers
@@ -144,7 +145,8 @@ export const layer = (directory: string): Layer.Layer<never, never, FileSystem.F
   }))
 
 /**
- * The records in `directory`: every program's that has one, ended or not. A file that isn't a record is skipped.
+ * Reads the records in `directory`, one for each program that has one, ended or not. A file that isn't a record
+ * is skipped.
  *
  * @stability experimental
  * @category getters

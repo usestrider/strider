@@ -1,9 +1,10 @@
 /**
- * Launch profiles: a browser's flags and preferences, as values you can inspect.
+ * The flags and preferences a browser is launched with, as values you can inspect.
  *
- * A profile is never a hidden flag (rule 23). The arguments and preferences a launch actually used are
- * recorded in its span and trace. No profile turns off the back/forward cache, third-party storage
- * partitioning or popup blocking, because the model handles those explicitly.
+ * A profile is never a hidden flag: it's a value whose `args` and `prefs` you can read, and a launch's span records
+ * which profile it used. `args` are Chromium's switches and `prefs` Firefox's preferences; Playwright's WebKit takes
+ * neither. No profile turns off the back/forward cache, third-party storage partitioning or popup blocking, because
+ * Strider handles each of those itself.
  *
  * @stability unstable
  * @since 0.1.0

@@ -1,0 +1,68 @@
+{
+  "name": "strider-paper",
+  "type": "light",
+  "colors": {
+    "editor.background": "#F1EEE6",
+    "editor.foreground": "#1A1A1A",
+    "editorLineNumber.foreground": "#5A5750",
+    "editor.selectionBackground": "#E2DED3"
+  },
+  "tokenColors": [
+    { "settings": { "foreground": "#1A1A1A" } },
+    {
+      "scope": ["comment", "punctuation.definition.comment"],
+      "settings": { "foreground": "#6A645A" }
+    },
+    {
+      "scope": [
+        "keyword",
+        "storage",
+        "storage.type",
+        "storage.modifier",
+        "keyword.control",
+        "keyword.operator.new",
+        "keyword.operator.expression",
+        "keyword.operator.of",
+        "keyword.operator.in",
+        "variable.language.this",
+        "variable.language.super"
+      ],
+      "settings": { "foreground": "#A2341C" }
+    },
+    {
+      "scope": ["keyword.operator", "punctuation", "meta.brace", "meta.delimiter"],
+      "settings": { "foreground": "#5A5750" }
+    },
+    {
+      "scope": ["keyword.operator.new", "keyword.operator.expression", "keyword.operator.of", "keyword.operator.in"],
+      "settings": { "foreground": "#A2341C" }
+    },
+    {
+      "scope": ["string", "string.template", "string.regexp", "punctuation.definition.string"],
+      "settings": { "foreground": "#3D6B21" }
+    },
+    {
+      "scope": ["constant.numeric", "constant.language", "constant.character.escape"],
+      "settings": { "foreground": "#975000" }
+    },
+    {
+      "scope": ["entity.name.function", "support.function"],
+      "settings": { "foreground": "#1D54A6" }
+    },
+    {
+      "scope": [
+        "entity.name.type",
+        "entity.name.class",
+        "entity.other.inherited-class",
+        "support.type",
+        "support.class",
+        "support.type.primitive"
+      ],
+      "settings": { "foreground": "#74398A" }
+    },
+    {
+      "scope": ["meta.object-literal.key", "variable.other.property", "support.variable.property"],
+      "settings": { "foreground": "#2B5866" }
+    }
+  ]
+}

@@ -1,10 +1,10 @@
 /**
- * A context's cookies.
+ * A context's cookies: reading, setting and removing them.
  *
- * The jar is a sub-handle bound to its context (`context.cookies`). A `Cookie` is what a browser stores:
- * Effect's cookie attributes plus the browser-only fields, partition key and priority. Cookie values are
- * classified, so they arrive `Redacted`; `toCookie` converts to `effect/http`'s `Cookie`, unredacting the
- * value explicitly.
+ * The jar belongs to its context (`context.cookies`). A `Cookie` is what a browser stores: Effect's cookie
+ * attributes, plus the two fields only browsers have, a partition key and a priority. Cookie values are classified,
+ * so they arrive `Redacted`; `toCookie` converts a cookie to `effect/http`'s `Cookie`, unredacting its value as it
+ * does.
  *
  * @stability unstable
  * @since 0.1.0
@@ -117,7 +117,8 @@ export interface Input {
   readonly name: Name | string
   readonly value: string | Redacted.Redacted<string>
   /**
-   * Where the cookie applies, stated as a URL or as a domain and path; which one is always stated.
+   * Where the cookie applies: a URL, or a domain and path. It's required, so which of them you mean is never
+   * guessed.
    */
   readonly scope:
     | { readonly _tag: "Url"; readonly url: Url.Url | string }

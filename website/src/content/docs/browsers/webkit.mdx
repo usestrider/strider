@@ -1,0 +1,123 @@
+---
+title: WebKit
+description: Safari's engine, through Playwright's WebKit build. Getting the one build Strider needs, how its pages change process, and what WebKit does differently.
+order: 4
+---
+
+## Safari's engine, as Playwright builds it
+
+WebKit is the engine Safari runs on. Safari itself can't be automated the way Chromium and Firefox can, so to test
+what Safari's users will see, Strider launches Playwright's WebKit build: WebKit with the protocol Playwright adds
+for automation, built for Linux, macOS and Windows. It's the closest a test can get to Safari outside an Apple
+device.
+
+To look into a WebKitGTK or WPE browser that's already running, such as a device's, see
+[Stock WebKit](/docs/browsers/stock-webkit).
+
+## The one build Strider needs
+
+Playwright's WebKit protocol changes often between builds, so Strider is built for one: **build 2359**, the one
+Playwright 1.63 installs. Install it with that Playwright:
+
+```sh
+npx playwright@1.63 install webkit
+```
+
+The build goes into Playwright's browser cache: `~/.cache/ms-playwright` on Linux, `~/Library/Caches/ms-playwright`
+on macOS, `%LOCALAPPDATA%\ms-playwright` on Windows, or `PLAYWRIGHT_BROWSERS_PATH` if it's set. `npx strider
+browsers` looks there, and says of each build whether it's the one Strider needs. The executable to give the layer
+is the build's `pw_run.sh`, or `Playwright.exe` on Windows:
+
+```ts
+import { NodeServices } from "@effect/platform-node"
+import { WebKit } from "@usestrider/browser/webkit"
+import { Config, Layer } from "effect"
+
+const WebKitLive = WebKit.layerConfig({
+  executablePath: Config.String("WEBKIT_PATH") // …/ms-playwright/webkit-2359/pw_run.sh
+}).pipe(Layer.provide(NodeServices.layer))
+```
+
+Before it starts anything, a launch checks the build's `protocol.json` against the one Strider was generated from.
+Any other build fails with `IncompatibleRevision`, saying which build is needed, rather than failing later in some
+command it doesn't know.
+
+Strider's tests run build 2359 on Linux. Playwright builds it for macOS and Windows too, which aren't tested.
+
+## Launching
+
+A launch runs the build with `--inspector-pipe`, so Strider talks to it over a pipe as it does to Chromium, and
+with `--headless` unless you say otherwise. On Linux, Playwright's script runs WebKit's WPE port headless and its
+GTK port headed, so a headed run needs a display. The browser gets a temporary profile, deleted after it exits, or
+the `userDataDir` you name.
+
+Launch profiles don't apply: their switches are Chromium's and their preferences Firefox's, and Playwright's build
+takes neither. There's no endpoint to attach to, either: Playwright's build can only be launched.
+
+## Pages change process
+
+A WebKit page has two halves. Its page proxy lives in the browser's UI process, holds the window and takes input,
+and lasts for the page's whole life; the page itself runs in a web process, and a navigation to another site moves
+it to a new one. Strider follows the move, so the same `Page` handle goes on working across it, and every new web
+process starts paused until Strider has set it up: routes, init scripts and its own isolated world are in place
+before the page's first script runs.
+
+What a new process means for you is small. A locale reaches only a new web process, so it's set when a context is
+made, not later, and a document reads its user agent once, when it loads.
+
+## What WebKit can't do
+
+Generated from the backend's capability list: each entry is something WebKit lacks or does only partly, with the
+reason the backend gives.
+
+<BrowserLimits browser="webkit" />
+
+Supported, with a caveat:
+
+<BrowserLimits browser="webkit" caveats />
+
+## What's different
+
+**Modifiers don't reach pointer events.** WebKit's mouse events can't carry Shift, Control, Alt or Meta, so a
+click with `modifiers`, or one made while a key is held, fails with `Unsupported` before anything is sent. Key
+events have a similar gap: typing with Shift held gives the right text, but the events say `shiftKey` is false.
+
+**Set the locale when making the context.** WebKit applies a locale per context, and only before its pages exist.
+Pass it at creation, `Browser.newPage({ emulation: { locale: "de-DE" } })`; `page.emulate({ locale })` is refused.
+Geolocation is per context too.
+
+**Routes miss pages a service worker controls.** WebKit sends such a page's requests past the interceptor, even the
+ones the worker passes on to the network, so no route sees them.
+
+**Redirects pause once.** Only a redirect's first hop reaches a route, and a redirect a route fulfills isn't
+followed.
+
+**The response phase can fulfill, but not read.** A route at the response phase can replace a response, but can't
+read its body or send it on with new headers. Every abort is the same failure, `"failed"`.
+
+**No back/forward cache.** Going back loads the page again rather than restoring it, so a navigation from `back`
+is `Committed`, never `Restored`.
+
+**No PDF.** Playwright's WebKit has no print-to-PDF.
+
+**A response's protocol comes late.** WebKit reports the HTTP version when a response ends, so `httpVersion` on a
+`NetworkResponse` event is `None`; a HAR has it.
+
+**Init scripts run in the page's world only.** One for an isolated world is refused. A script's top-level `var`
+becomes a global, as in Chromium.
+
+**Only dedicated workers are reported.** Shared and service workers aren't.
+
+## The raw protocol
+
+`@usestrider/browser/webkit-protocol` has build 2359's protocol as typed values, Playwright's own domains included,
+and `WebKitConnection` runs it over a pipe to a build you start yourself, with `--inspector-pipe`. It hands out the
+browser's session, each page proxy's, and each target's inside it.
+
+It's the protocol and nothing more, and WebKit's is unforgiving. Every target starts paused until you send
+`Target.resume`. Two commands abort the browser instead of failing: `Playwright.navigate` with a frame id the page
+doesn't have, and `Dialog.handleJavaScriptDialog` with no dialog open. And starting the build yourself skips the
+launch's check that it's build 2359.
+
+When WebKit rejects a command in an ordinary Strider call, the operation fails with `BackendFailure`, whose `cause`
+is the `ProtocolError`, with WebKit's own error code and message.

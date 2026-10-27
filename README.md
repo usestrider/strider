@@ -22,6 +22,7 @@ Each layer document has the same shape: purpose, top data models, interface sket
 | L1 | [CONCEPTS.md](CONCEPTS.md) | the native browser model: identities, data models, lifetimes, contracts |
 | — | [packages/browser/](packages/browser/) | the package: the whole public API as declarations (the sketch), 48 modules plus subpaths, Effect's JSDoc contract on every declaration, type tests, runtime tests, type-checked examples and acceptance scenarios; [INDEX.md](packages/browser/INDEX.md) lists every declaration (`pnpm all`) |
 | — | [packages/tools/](packages/tools/) | private tools: the vendored JSDoc checker, the example check, the API reference dataset, barrel codegen |
+| — | [website/](website/) | the documentation site, in Astro as effect.website is: guides, and the API reference rendered from the packages' sources and JSDoc |
 | — | [.agents/AGENTS.md](.agents/AGENTS.md) | instructions for agents working in this repository: layout, checks, conventions |
 | — | [CLI.md](CLI.md) | the command line: named sessions, commands, files, storage and forks, export |
 | L0 | [PROTOCOL.md](PROTOCOL.md) | transports, protocol clients, code generation, ingestion, backend adapters, capabilities |

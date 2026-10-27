@@ -1,11 +1,13 @@
 /**
- * Init scripts: code that runs in every new document of a page or context, before the page's own scripts.
+ * Init scripts: code that runs at the start of every new document of a page or context, before the page's own
+ * scripts.
  *
  * Adding one is a declaration (`page.addInitScript`, `context.addInitScript`), removed with its scope.
  *
  * - **Order** is the same on every backend: a context's scripts before a page's, then the order they were
- *   added in. `after` doesn't change it: it states a dependency, which must be in force and of equal or
- *   broader scope, and a script runs only if each script it comes after ran in that document without
+ *   added in. `after` doesn't change the order. It makes a script depend on another, which must still be in
+ *   force and belong to the same page or context or to a broader one: a page's script can come after its
+ *   context's, not the reverse. A script runs only if each script it comes after ran in that document without
  *   throwing.
  * - **When.** A script runs as its document starts, before `document.documentElement` exists, in every frame
  *   of the page, cross-site ones included. Added to a loaded page, it runs from the next document; removed, it
@@ -80,32 +82,34 @@ export type Source =
  */
 export interface Options {
   /**
-   * The JavaScript world it runs in: the page's own, or one isolated world of the caller's, apart from the
-   * engine's, where the page's globals are invisible. An isolated script is `Unsupported` on WebKit.
+   * The JavaScript world the script runs in: the page's own, or the isolated world `page.evaluate` runs in, which
+   * is separate from Strider's own and can't see the page's globals. An isolated script fails with `Unsupported`
+   * on WebKit.
    *
    * @default "main"
    */
   readonly world?: "main" | "isolated" | undefined
   /**
-   * Scripts that must run first, in the same world. A dependency must be in force and have equal or broader
-   * scope: a page script can follow a context script, not the reverse. One already removed fails with
-   * `DependencyReleased`.
+   * Scripts that must run first, in the same world: this one runs in a document only if each of them ran there
+   * without throwing. Each must belong to the same page or context or to a broader one: a page's script can come
+   * after its context's, not the reverse. One already removed fails with `DependencyReleased`.
    *
    * @default none
    */
   readonly after?: ReadonlyArray<InitScript> | undefined
   /**
-   * Whether running before the page's own scripts is required. A backend that can't guarantee it fails with
-   * `TimingUnsupported` unless `"bestEffort"` is chosen. Every backend guarantees it for the pages the library
+   * Whether the script must run before the page's own scripts. A backend that can't guarantee it fails with
+   * `TimingUnsupported`, unless you choose `"bestEffort"`. Every backend guarantees it for the pages Strider
    * creates.
    *
    * @default "beforeAuthorScript"
    */
   readonly timing?: "beforeAuthorScript" | "bestEffort" | undefined
   /**
-   * Whether it also runs in the dedicated workers of the scope's pages started from now on, before their own
-   * script. It must run in the main world, after only scripts that run in workers too. `Unsupported`
-   * on Firefox (`initScripts.workers`): WebDriver BiDi's preload scripts run in documents only.
+   * Whether the script also runs in the dedicated workers that the page, or the context's pages, start from now
+   * on, before the worker's own script. It must run in the main world, and come after only scripts that run in
+   * workers too. Fails with `Unsupported` on Firefox (`initScripts.workers`): WebDriver BiDi's preload scripts run
+   * in documents only.
    *
    * @default false
    */

@@ -4,32 +4,11 @@
 import * as fs from "node:fs"
 import * as path from "node:path"
 import ts from "typescript"
+import { categoryOrder } from "./categories.mjs"
 
 export const index = (root) => {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"))
 
-  const categoryOrder = [
-    "services",
-    "tags",
-    "accessors",
-    "layers",
-    "models",
-    "schemas",
-    "constructors",
-    "constants",
-    "combinators",
-    "subscriptions",
-    "getters",
-    "handlers",
-    "matchers",
-    "converting",
-    "references",
-    "configuration",
-    "guards",
-    "errors",
-    "reasons",
-    "utility types"
-  ]
   const squash = (s) =>
     s.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ").replace(/\( /g, "(")
       .replace(/ \)/g, ")").replace(/\[ /g, "[").replace(/ \]/g, "]").replace(/,\)/g, ")").replace(/, \}/g, " }").trim()

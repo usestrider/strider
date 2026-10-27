@@ -1,8 +1,8 @@
 /**
- * The Vitest adapter (`@usestrider/vitest`, a package of its own, so `@usestrider/browser` depends on nothing but
- * Effect; peer dependency: `vitest` 5).
+ * The Vitest adapter: a browser layer for `@effect/vitest`, with `TestRun` for the test that's running.
  *
- * When etest ships, an etest adapter attaches the same layers with `Test.provide`.
+ * `VitestBrowser.layer` passes the backend's layer through unchanged and adds `TestRun`, which attaches files to
+ * the running test. Its peer dependency is `vitest` 5.
  *
  * @stability unstable
  * @since 0.1.0
@@ -84,7 +84,8 @@ const testRun: TestRun.TestRun = {
 }
 
 /**
- * The backend you pass, unchanged, plus `TestRun` for the current test. One browser per layer block.
+ * Provides the backend you pass, unchanged, plus `TestRun` for the current test. Each `@effect/vitest` `layer`
+ * block gets one browser.
  *
  * **Example** (A test with an emulated-focus page)
  *

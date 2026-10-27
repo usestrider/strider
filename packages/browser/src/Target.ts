@@ -1,10 +1,10 @@
 /**
- * What operations act on: how targets are identified, and how they end.
+ * What operations act on, how each one is identified, and how it ends.
  *
- * A target is a page, a frame, a document, a JavaScript realm, a user context or the browser. Each has a
- * spec id, minted by the browser and meaningful only relative to where it came from, so ids are accepted
- * only in branded form and checked against their origin when used. When a target ends, every operation on
- * it fails with `TargetGone`, which says what ended and why.
+ * A target is a page, a frame, a document, a JavaScript realm, a user context or the browser. Strider gives each an
+ * id, which only means something where it came from, so ids are accepted only in branded form and checked against
+ * their origin when used. When a target ends, every operation on it fails with `TargetGone`, which says what ended
+ * and why.
  *
  * @stability unstable
  * @since 0.1.0
@@ -14,7 +14,7 @@ import * as Schema from "effect/Schema"
 import * as Diagnostics from "./Diagnostics.ts"
 
 /**
- * Schema for the id of a navigable: a page or a frame (the spec's term).
+ * Schema for the id of a page or a frame, which the HTML spec calls a navigable.
  *
  * @stability unstable
  * @category schemas
@@ -23,7 +23,7 @@ import * as Diagnostics from "./Diagnostics.ts"
 export const NavigableId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/NavigableId"))
 
 /**
- * Id of a navigable: a page or a frame.
+ * Id of a page or a frame.
  *
  * @stability unstable
  * @category models
@@ -32,7 +32,7 @@ export const NavigableId = Schema.String.pipe(Schema.brand("~@usestrider/browser
 export type NavigableId = typeof NavigableId.Type
 
 /**
- * Schema for the id of one document. A navigation that replaces the document mints a new id.
+ * Schema for the id of one document. A navigation that replaces the document gives the new one a new id.
  *
  * @stability unstable
  * @category schemas
@@ -72,9 +72,10 @@ export type RealmId = typeof RealmId.Type
  *
  * **Details**
  *
- * - Browser-wide: `BrowserClosed`, `BrowserCrashed`, `ConnectionLost`, `ModelUnavailable`.
+ * - Browser-wide: `BrowserClosed`, `BrowserCrashed`, `ConnectionLost`, `ModelUnavailable` (Strider lost track
+ *   of the browser's state).
  * - Context and access: `UserContextRemoved`, `AccessReleased`, `PrerenderActivated`.
- * - Pages and frames: `PageClosed` (with who closed it), `PageCrashed`, `FrameDetached`.
+ * - Pages and frames: `PageClosed` (with what closed it), `PageCrashed`, `FrameDetached`.
  * - Documents and realms: `DocumentReplaced`, `DocumentEvicted`, `DocumentDestroyed`, `DocumentUnloaded`,
  *   `RealmDestroyed`.
  * - Connections: `NetworkConnectionClosed`, for a WebSocket or EventSource the page or the server closed.

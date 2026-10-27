@@ -1,18 +1,17 @@
 /**
- * File choosers: what a page opens when a file input is clicked.
+ * File choosers: the file picker a page opens when a file input is clicked.
  *
- * A file chooser doesn't pause the page, but it is an obligation: something must choose files or cancel.
- * `handle` registers the scoped handler that decides; a chooser no handler decides is canceled, and the
- * cancellation is reported as an `AutoResolution`. Setting files directly with `locator.setInputFiles` needs
- * no chooser at all.
+ * A file chooser doesn't pause the page, but something must answer it, by choosing files or canceling. `handle`
+ * registers the scoped handler that answers; a chooser no handler answers is canceled, and the cancellation is
+ * reported as an `AutoResolution`. Setting files directly with `locator.setInputFiles` needs no chooser at all.
  *
- * Every page of a context the library creates has its choosers reported and decided, so none is shown. What
- * `next`, `stream` and `history` report is data; a handler receives it as `Pending`, with the decisions.
+ * Every page of a context Strider creates has its choosers reported and answered, so none is ever shown. `next`,
+ * `stream` and `history` report a chooser as data; a handler receives it as `Pending`, with the decisions.
  *
  * **Gotchas**
  *
- * On Firefox the input gets a `cancel` event as the chooser opens, before any decision; files a handler
- * chooses still arrive after it, with `input` and `change`. Its `fileChooser` capability says so.
+ * On Firefox the input gets a `cancel` event as the chooser opens, before any decision; the files a handler chooses
+ * still arrive after it, with `input` and `change`. Firefox's `fileChooser` capability says so.
  *
  * @stability unstable
  * @since 0.1.0
@@ -75,7 +74,7 @@ export const isDecision = (u: unknown): u is Decision => Predicate.hasProperty(u
 export const FileChooser = Schema.Union([Schema.TaggedStruct("Single", {}), Schema.TaggedStruct("Multiple", {})])
 
 /**
- * A file chooser, as events report it; observing it doesn't decide it.
+ * A file chooser, as events report it. Seeing one doesn't decide it.
  *
  * @stability unstable
  * @category models
@@ -84,7 +83,7 @@ export const FileChooser = Schema.Union([Schema.TaggedStruct("Single", {}), Sche
 export type FileChooser = typeof FileChooser.Type
 
 /**
- * A file chooser as a handler receives it: each shape with the decisions it offers.
+ * A file chooser as a handler receives it, with the decisions it offers: `select` and `cancel`.
  *
  * @stability unstable
  * @category models
@@ -154,7 +153,8 @@ const subscription = (target: Page.ObservedPage, filter: Filter | undefined, ope
   })
 
 /**
- * Subscribes to file choosers and returns the first match, latched. Observing doesn't decide it.
+ * Subscribes to file choosers and returns the wait: an effect that gives the first match, the same each time it
+ * runs. Waiting for a chooser doesn't decide it.
  *
  * @stability unstable
  * @category subscriptions
@@ -175,7 +175,7 @@ export const next = <PE = never, PR = never>(
   ).pipe(Operation.named("FileChooser.next"))
 
 /**
- * Subscribes to file choosers and emits every match from now on. Observing doesn't decide them.
+ * Subscribes to file choosers and emits every match from now on. Seeing a chooser doesn't decide it.
  *
  * @stability unstable
  * @category subscriptions
@@ -196,7 +196,7 @@ export const stream = <PE = never, PR = never>(
   )
 
 /**
- * Reads the file choosers a page's log retained; never waits.
+ * Reads the file choosers still in the page's event log; never waits.
  *
  * @stability unstable
  * @category getters
@@ -216,9 +216,10 @@ export const history = (
  *
  * **Details**
  *
- * The page's latest handler decides each chooser, chosen when the chooser opens; removing it, or closing its
- * scope, leaves the choosers that open after to the one before. A handler has `Deadline.DefaultBudget`, as it
- * is when `handle` is called, to decide each chooser. `handled` counts the choosers it decided.
+ * Each chooser goes to the page's most recent handler at the moment the chooser opens. Removing a handler, or
+ * closing its scope, leaves later choosers to the handler registered before it. A handler has
+ * `Deadline.DefaultBudget`, read when `handle` is called, to decide each chooser. `handled` counts the choosers it
+ * has decided.
  *
  * **Gotchas**
  *

@@ -6,7 +6,7 @@ Generated from `src/` by `pnpm index`; don't edit by hand. One line per declarat
 
 ### AriaPattern
 
-Patterns over the accessibility tree, for `Expect.toMatchAria`.
+Patterns that describe part of the accessibility tree, for `Expect.toMatchAria`.
 
 *models*
 
@@ -32,7 +32,7 @@ Patterns over the accessibility tree, for `Expect.toMatchAria`.
 
 ### AriaRole
 
-WAI-ARIA roles, as used by `getByRole`, snapshots and `AriaPattern`.
+The WAI-ARIA roles that `getByRole`, snapshots and `AriaPattern` use.
 
 *models*
 
@@ -48,7 +48,7 @@ WAI-ARIA roles, as used by `getByRole`, snapshots and `AriaPattern`.
 
 ### AutoResolution
 
-Obligations decided by a default policy because no handler decided them.
+Dialogs, file choosers and paused requests that a default policy decided, because no handler did.
 
 *models*
 
@@ -74,7 +74,7 @@ Obligations decided by a default policy because no handler decided them.
 
 ### Browser
 
-The `Browser` service, its accessors, and the settings every backend shares.
+The `Browser` service, which every backend provides, with its accessors and the settings every backend shares.
 
 *services*
 
@@ -149,7 +149,7 @@ The `Browser` service, its accessors, and the settings every backend shares.
 
 ### BrowserWorker
 
-Workers: dedicated workers of a page, and shared and service workers of a context.
+Workers that pages and contexts start: a page's dedicated workers, and a context's shared and service workers.
 
 *models*
 
@@ -198,7 +198,7 @@ Workers: dedicated workers of a page, and shared and service workers of a contex
 
 ### Capability
 
-Specialized features that not every backend offers, reached through a handle bound to one page.
+Features that only some backends have, each reached through a handle bound to one page.
 
 *models*
 
@@ -270,7 +270,7 @@ Conditions for `Expect.that`: predicates with a description, so a failure says w
 
 ### ConsoleMessage
 
-Messages a page or its workers write to the console.
+The messages that a page or its workers write to the console.
 
 *models*
 
@@ -297,7 +297,7 @@ Messages a page or its workers write to the console.
 
 ### CookieJar
 
-A context's cookies.
+A context's cookies: reading, setting and removing them.
 
 *models*
 
@@ -348,7 +348,7 @@ A context's cookies.
 
 ### Deadline
 
-One deadline per operation (README, "One deadline per operation").
+Time limits for operations: one deadline covers everything an operation does.
 
 *combinators*
 
@@ -378,7 +378,7 @@ One deadline per operation (README, "One deadline per operation").
 
 ### Declaration
 
-Declarations: scoped registrations that change how a page or context behaves while they live (principle 19).
+Declarations: settings and handlers that change how a page or context behaves for as long as their scope lasts.
 
 *models*
 
@@ -409,7 +409,7 @@ Declarations: scoped registrations that change how a page or context behaves whi
 
 ### Diagnostics
 
-The evidence every failure carries, and the preset that decides how much of it is shown.
+The record of what happened that every failure carries, and the preset that decides how much of a URL is shown.
 
 *models*
 
@@ -442,7 +442,7 @@ The evidence every failure carries, and the preset that decides how much of it i
 
 ### Dialog
 
-Dialogs: `alert`, `confirm`, `prompt` and `beforeunload`.
+The dialogs a page opens: `alert`, `confirm`, `prompt` and `beforeunload`.
 
 *models*
 
@@ -481,7 +481,7 @@ Dialogs: `alert`, `confirm`, `prompt` and `beforeunload`.
 
 ### Download
 
-Downloads a page starts.
+The files a page or context downloads: waiting for one, following its progress, and saving it.
 
 *models*
 
@@ -577,7 +577,7 @@ Emulated settings: viewport, locale, time zone, media features, network conditio
 
 ### Expect
 
-Retrying expectations: each `Expect.to*` checks until it passes or the deadline ends.
+Expectations that retry: each `Expect.to*` checks until it passes or the deadline passes.
 
 *models*
 
@@ -625,7 +625,7 @@ Retrying expectations: each `Expect.to*` checks until it passes or the deadline 
 
 ### FileChooser
 
-File choosers: what a page opens when a file input is clicked.
+File choosers: the file picker a page opens when a file input is clicked.
 
 *models*
 
@@ -668,7 +668,7 @@ File choosers: what a page opens when a file input is clicked.
 
 ### FileInput
 
-Files to upload, saying where their bytes come from.
+Files to upload, each saying where its bytes come from.
 
 *models*
 
@@ -694,7 +694,7 @@ Files to upload, saying where their bytes come from.
 
 ### FilePath
 
-File paths, branded by whose machine they are on.
+File paths, branded by which machine they're on.
 
 *models*
 
@@ -750,7 +750,7 @@ HAR recordings: a page's or context's network traffic, exported as an HTTP Archi
 
 ### InitScript
 
-Init scripts: code that runs in every new document of a page or context, before the page's own scripts.
+Init scripts: code that runs at the start of every new document of a page or context, before the page's own scripts.
 
 *models*
 
@@ -770,7 +770,7 @@ Init scripts: code that runs in every new document of a page or context, before 
 
 ### JSHandle
 
-Values that cross into and out of the page.
+Handles to values in the page, and the type of what an evaluation returns by value.
 
 *models*
 
@@ -805,7 +805,7 @@ Values that cross into and out of the page.
 
 ### Keyboard
 
-Keys sent to whatever has focus, for what locators can't express.
+Keys sent to whatever has focus, for what an action on a locator can't express.
 
 *models*
 
@@ -841,7 +841,7 @@ Keys sent to whatever has focus, for what locators can't express.
 
 ### LaunchProfile
 
-Launch profiles: a browser's flags and preferences, as values you can inspect.
+The flags and preferences a browser is launched with, as values you can inspect.
 
 *models*
 
@@ -855,7 +855,7 @@ Launch profiles: a browser's flags and preferences, as values you can inspect.
 
 ### Ledger
 
-A record of what a program owns outside itself: the browsers it launched and the directories it made for them (CONCEPTS.md §3, Ownership ledger). A program that ends normally removes what it made and its record; one that dies leaves both, and `strider prune` reads the records whose program is gone and reclaims what they name.
+A record of what a program owns outside itself: the browsers it launched, and the directories it made for them.
 
 *layers*
 
@@ -883,7 +883,7 @@ A record of what a program owns outside itself: the browsers it launched and the
 
 ### Locator
 
-Locators find elements, and act on them or read them.
+Locators: how to find elements on a page, and the actions and reads that use them.
 
 *models*
 
@@ -1033,7 +1033,7 @@ Locators find elements, and act on them or read them.
 
 ### MonotonicInstant
 
-Points on the live monotonic clock, used for deadlines and event timestamps.
+Instants on the real monotonic clock, used for deadlines and event timestamps.
 
 *models*
 
@@ -1045,7 +1045,7 @@ Points on the live monotonic clock, used for deadlines and event timestamps.
 
 ### Mouse
 
-Pointer input by coordinates, for canvas-like interfaces that locators can't reach.
+Pointer input at coordinates, for interfaces such as canvases that locators can't reach.
 
 *models*
 
@@ -1084,7 +1084,7 @@ Pointer input by coordinates, for canvas-like interfaces that locators can't rea
 
 ### NetworkConnection
 
-Long-lived connections a page opens: WebSockets and EventSource streams.
+The WebSockets and event sources a page opens: connections that stay open and carry messages.
 
 *models*
 
@@ -1122,7 +1122,7 @@ Long-lived connections a page opens: WebSockets and EventSource streams.
 
 ### NetworkRequest
 
-Requests a page or context makes: the event, and the data every route and response refers to.
+The requests a page or context sends: the event, and the data that routes and responses refer to.
 
 *models*
 
@@ -1160,7 +1160,7 @@ Requests a page or context makes: the event, and the data every route and respon
 
 ### NetworkResponse
 
-Responses a page or context receives: the event, and, when asked for, their bodies.
+The responses a page or context receives: the event, and, when asked for, their bodies.
 
 *models*
 
@@ -1221,7 +1221,7 @@ Responses a page or context receives: the event, and, when asked for, their bodi
 
 ### OriginStorage
 
-`localStorage` and `sessionStorage` of a page's current document's origin.
+`localStorage` and `sessionStorage`, for the origin of a page's current document.
 
 *models*
 
@@ -1378,7 +1378,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
 
 ### PageClock
 
-Page time: the clock a page's scripts see, under your control.
+Page time: the clock a page's scripts read, under your control.
 
 *models*
 
@@ -1412,7 +1412,7 @@ Page time: the clock a page's scripts see, under your control.
 
 ### PageNavigation
 
-Navigations of a page: the event, and the success value of `goto`, `reload`, `back` and `forward`.
+Navigations of a page: the event, and what `goto`, `reload`, `back` and `forward` return.
 
 *models*
 
@@ -1518,7 +1518,7 @@ Failure reasons that more than one module's error can carry.
 
 ### Route
 
-Routes intercept requests, and their handlers decide what happens to each one.
+Routes intercept the requests of a page or context, and their handlers decide what happens to each one.
 
 *models*
 
@@ -1583,7 +1583,7 @@ Routes intercept requests, and their handlers decide what happens to each one.
 
 ### Snapshot
 
-Accessibility snapshots, for agents and for structural expectations.
+Accessibility snapshots of a page, for agents and for checking a page's structure.
 
 *models*
 
@@ -1637,7 +1637,7 @@ Accessibility snapshots, for agents and for structural expectations.
 
 ### StorageState
 
-A context's saved storage: cookies, `localStorage` and IndexedDB, per partition.
+A context's saved storage: cookies, `localStorage` and IndexedDB, for each origin and partition.
 
 *models*
 
@@ -1655,7 +1655,7 @@ A context's saved storage: cookies, `localStorage` and IndexedDB, per partition.
 
 ### Subscription
 
-What every event module shares: the three verbs, caller predicates, history and their errors.
+What every event module shares: `next`, `stream` and `history`, the `where` predicate, and their errors.
 
 *models*
 
@@ -1693,7 +1693,7 @@ What every event module shares: the three verbs, caller predicates, history and 
 
 ### Target
 
-What operations act on: how targets are identified, and how they end.
+What operations act on, how each one is identified, and how it ends.
 
 *models*
 
@@ -1723,7 +1723,7 @@ What operations act on: how targets are identified, and how they end.
 
 ### Trace
 
-Trace recordings, exported in the format Playwright's trace viewer reads.
+Recordings of what happened on a page, exported as traces that Playwright's trace viewer opens.
 
 *models*
 
@@ -1796,7 +1796,7 @@ URLs, URL patterns, origins and sites, as branded strings.
 
 ### UserContext
 
-User contexts (the spec's term; Playwright calls them browser contexts), at two access levels.
+User contexts: isolated browser sessions, at two access levels.
 
 *models*
 
@@ -1850,7 +1850,7 @@ User contexts (the spec's term; Playwright calls them browser contexts), at two 
 
 ### Watchable
 
-Read-only views of state that changes, folded from protocol events (principle 16).
+Read-only views of state that changes, kept up to date from the browser's events.
 
 *models*
 
@@ -1874,7 +1874,7 @@ Read-only views of state that changes, folded from protocol events (principle 16
 
 ### BrowserToolkit
 
-The agent toolkit (`@usestrider/browser/ai`): one definition that serves an in-process model, an MCP server and the CLI.
+The agent toolkit: browser tools for a model, defined once, and served in your program, over MCP and by the CLI.
 
 *models*
 
@@ -1918,7 +1918,7 @@ What page content may reach a model.
 
 ### Bidi
 
-The generic BiDi backend (`@usestrider/browser/bidi`): any WebDriver BiDi endpoint, such as Safari Technology Preview or a remote grid.
+The generic WebDriver BiDi backend: connects to any BiDi endpoint, such as Safari Technology Preview or a remote grid.
 
 *layers*
 
@@ -1936,7 +1936,7 @@ The generic BiDi backend (`@usestrider/browser/bidi`): any WebDriver BiDi endpoi
 
 ### Chromium
 
-The Chromium backend (`@usestrider/browser/chromium`): Chromium, Chrome and Edge over the Chrome DevTools Protocol.
+The Chromium backend: Chromium, Chrome and Edge, over the Chrome DevTools Protocol.
 
 *layers*
 
@@ -1948,7 +1948,7 @@ The Chromium backend (`@usestrider/browser/chromium`): Chromium, Chrome and Edge
 
 ### CurrentSession
 
-What `strider run` provides to a segment (`@usestrider/browser/cli`).
+What `strider run` gives a segment: the live CLI session, and its pages by name.
 
 *services*
 
@@ -1983,7 +1983,7 @@ What `strider run` provides to a segment (`@usestrider/browser/cli`).
 
 ### Firefox
 
-The Firefox backend (`@usestrider/browser/firefox`): Firefox over WebDriver BiDi.
+The Firefox backend: Firefox, over WebDriver BiDi.
 
 *layers*
 
@@ -1995,7 +1995,7 @@ The Firefox backend (`@usestrider/browser/firefox`): Firefox over WebDriver BiDi
 
 ### BidiConnection
 
-A raw WebDriver BiDi connection (L0): one session over one `Transport`.
+A raw WebDriver BiDi connection, for working with the protocol directly: one session over one `Transport`.
 
 *models*
 
@@ -2009,7 +2009,7 @@ A raw WebDriver BiDi connection (L0): one session over one `Transport`.
 
 ### CdpConnection
 
-A raw CDP connection (L0): the browser's own session, plus each target session the browser announces, over one `Transport`.
+A raw Chrome DevTools Protocol connection, for working with the protocol directly: the browser's own session, and each target session the browser announces, over one `Transport`.
 
 *models*
 
@@ -2024,7 +2024,7 @@ A raw CDP connection (L0): the browser's own session, plus each target session t
 
 ### Protocol
 
-The protocol layer's client contract (L0): commands and events as data, the session they run on, and the errors a session reports.
+The raw protocol client: commands and events as data, the session they run on, and the errors a session reports.
 
 *services*
 
@@ -2171,7 +2171,7 @@ Opens scoped socket connections to endpoints chosen at run time, such as the ins
 
 ### Transport
 
-Transports carry a browser connection's messages (L0): framed text in both directions, read by one consumer, never reconnected.
+The transports that carry a raw browser connection's messages: framed text in both directions, read by one consumer, and never reconnected.
 
 *models*
 
@@ -2211,7 +2211,7 @@ Transports carry a browser connection's messages (L0): framed text in both direc
 
 ### TestRun
 
-Runner-agnostic test support (`@usestrider/browser/test`).
+Test support that works with any test runner: the running test, and the files attached to it.
 
 *services*
 

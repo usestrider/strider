@@ -1,11 +1,11 @@
 /**
- * Messages a page or its workers write to the console.
+ * The messages that a page or its workers write to the console.
  *
- * A message's `text` is raw page content. Capture policy applies before it leaves the process, as it does for
- * every page-derived value an agent or an exported trace receives.
+ * A message's `text` is the page's own content, so a capture policy applies to it before it leaves the process, as
+ * it does to everything from the page that an agent or an exported trace receives.
  *
- * A message is reported to its page and its context. A dedicated worker's messages reach its page, and a shared
- * or service worker's only its context; what each backend reports from workers is in its `console` capability.
+ * A message is reported to its page and its context. A dedicated worker's messages reach its page, and a shared or
+ * service worker's reach only its context; each backend's `console` capability says what it reports from workers.
  *
  * @stability unstable
  * @since 0.1.0
@@ -76,9 +76,10 @@ export type SourceLocation = typeof SourceLocation.Type
  *
  * **Details**
  *
- * `text` has the call's format specifiers applied, such as `%s`, `%d` and `%f`, as the Console Standard's formatter
- * applies them: Firefox applies its own, which writes `%f` as printf does (`1.250000`), and the library applies the
- * Standard's to what Chromium and WebKit report. An object reads as its browser describes it, such as `Object`.
+ * `text` has the call's format specifiers, such as `%s`, `%d` and `%f`, applied as the Console Standard's formatter
+ * applies them. Firefox applies its own formatter, which writes `%f` as printf does (`1.250000`), and Strider
+ * applies the Standard's to what Chromium and WebKit report. An object reads as its browser describes it, such as
+ * `Object`.
  *
  * @stability unstable
  * @category models
@@ -138,7 +139,8 @@ const subscription = (
   })
 
 /**
- * Subscribes to console messages and returns the first match, latched.
+ * Subscribes to console messages and returns the wait: an effect that gives the first match, the same each time
+ * it runs.
  *
  * @stability unstable
  * @category subscriptions
@@ -180,7 +182,7 @@ export const stream = <PE = never, PR = never>(
   )
 
 /**
- * Reads the console messages a log retained; never waits.
+ * Reads the console messages still in the event log; never waits.
  *
  * @stability unstable
  * @category getters

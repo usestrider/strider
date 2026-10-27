@@ -586,7 +586,8 @@ const plain = (value: Adapter.RemoteValue): unknown => {
 
 // ── Capabilities ──────────────────────────────────────────────────────────────────────────────────────────
 
-const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["ownership"]) => {
+/** The backend's capabilities, for a browser it connected to; the documentation tools read them too. */
+export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["ownership"]) => {
   const evidence = `CDP adapter static profile, ${info.product}`
   const entry = (
     name: string,
@@ -604,7 +605,9 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
       entry(
         "pauseOnStart.popups",
         ownership === "launched" ? "supported" : "unsupported",
-        ownership === "launched" ? [] : ["only browser-wide on CDP (probe 22); an attached browser isn't paused"]
+        ownership === "launched"
+          ? []
+          : ["Chromium pauses popups only browser-wide, so an attached browser's popups aren't paused"]
       ),
       entry("input.native", "supported"),
       entry("interception.request", "supported"),
@@ -636,7 +639,7 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
       entry("evaluation.userActivation", "supported"),
       entry("input.insertText", "supported"),
       entry("input.pointerModifiers", "supported"),
-      entry("input.dragAndDrop", "supported", ["the adapter intercepts the drag Chromium starts, and finishes it"]),
+      entry("input.dragAndDrop", "supported", ["Strider catches the drag Chromium starts, and finishes it"]),
       entry("webSocketFrames", "supported"),
       entry("networkConnections", "supported"),
       entry("networkConnections.eventSource", "supported"),
@@ -675,7 +678,9 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
       entry("pdf.headerFooter", "supported"),
       entry("pdf.preferCssPageSize", "supported"),
       entry("cookies.partitioned", "supported"),
-      entry("snapshot.clickListeners", "unsupported", ["not built: it would take a command per element"]),
+      entry("snapshot.clickListeners", "unsupported", [
+        "Strider doesn't read them yet: it would take a command per element"
+      ]),
       entry("capability.axTree", "supported"),
       entry("capability.screencast", "supported"),
       entry("capability.video", "unsupported", ["Chromium streams frames, and writing a video file needs an encoder"])

@@ -1,9 +1,9 @@
 /**
- * Obligations decided by a default policy because no handler decided them.
+ * Dialogs, file choosers and paused requests that a default policy decided, because no handler did.
  *
- * A dialog nobody handled, a file chooser nobody answered, a paused request whose handler failed: each is
- * decided by a stated policy, never silently. This event reports each such decision, so a test can assert
- * that none happened, and an agent can see why a dialog vanished.
+ * A dialog no handler answered, a file chooser no handler answered, or a paused request whose route failed is
+ * decided by a stated policy, never silently. This event reports each such decision, so a test can check that none
+ * happened, and an agent can see why a dialog disappeared.
  *
  * @stability unstable
  * @since 0.1.0
@@ -26,7 +26,7 @@ import type * as Target from "./Target.ts"
 import type * as UserContext from "./UserContext.ts"
 
 /**
- * Schema for what was decided.
+ * Schema for what was decided: a dialog, a file chooser or a paused request.
  *
  * @stability unstable
  * @category schemas
@@ -42,7 +42,7 @@ export const Subject = Schema.Union([
 ])
 
 /**
- * What was decided.
+ * What was decided: a dialog, a file chooser or a paused request.
  *
  * @stability unstable
  * @category models
@@ -51,7 +51,7 @@ export const Subject = Schema.Union([
 export type Subject = typeof Subject.Type
 
 /**
- * Schema for what chose an automatic decision: a context option, or the library's one rule for its kind.
+ * Schema for what chose an automatic decision: a context option, or Strider's fixed rule for its kind.
  *
  * @stability unstable
  * @category schemas
@@ -68,7 +68,7 @@ export const Policy = Schema.Union([
  * **Details**
  *
  * - `ContextOption`: an option the context was made with, such as `dialogs: "dismiss"`.
- * - `Default`: the library's one rule for the kind, which no option sets: a file chooser nothing decides is
+ * - `Default`: Strider's fixed rule for the kind, which no option changes: a file chooser nothing decides is
  *   canceled, and a request no route decides continues.
  *
  * @stability unstable
@@ -78,7 +78,7 @@ export const Policy = Schema.Union([
 export type Policy = typeof Policy.Type
 
 /**
- * One obligation decided by a default policy.
+ * One dialog, file chooser or paused request that a default policy decided.
  *
  * **Details**
  *
@@ -104,7 +104,7 @@ export class AutoResolution extends Schema.Class<AutoResolution>("@usestrider/br
  */
 export interface Filter {
   /**
-   * Match decisions about these kinds of obligation.
+   * Match decisions about these kinds of subject: `"Dialog"`, `"FileChooser"` or `"PausedRequest"`.
    *
    * @default any kind
    */
@@ -167,7 +167,8 @@ const accepts = (filter: Filter | undefined) => {
 }
 
 /**
- * Subscribes to automatic decisions and returns the first match, latched.
+ * Subscribes to automatic decisions and returns the wait: an effect that gives the first match, the same each
+ * time it runs.
  *
  * @stability unstable
  * @category subscriptions
@@ -204,7 +205,7 @@ export const stream = <PE = never, PR = never>(
 > => Effect.suspend(() => Events.stream(kind("AutoResolution.stream"), channel(target), accepts(filter), where))
 
 /**
- * Reads the automatic decisions a log retained; never waits.
+ * Reads the automatic decisions still in the event log; never waits.
  *
  * @stability unstable
  * @category getters

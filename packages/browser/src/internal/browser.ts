@@ -268,7 +268,7 @@ const makeDeniedContext = (
     new Reason.NotPermitted({
       required: "control",
       hint:
-        `${member} needs control of the page's context, which this page's access doesn't give; gain it with page.context.control (QUIRKS.md, Q144)`
+        `${member} needs control of the page's context, which this page's access doesn't give; gain it with page.context.control`
     })
   const declaration = (member: string) =>
     Effect.fail(
@@ -407,7 +407,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
               reason: new Page.InitializationFailed({
                 step: "install the isolated world",
                 hint: failure._tag === "Deadline"
-                  ? "The page had no document to install it in before the deadline; a page attached with a dialog open reports none until it closes (QUIRKS.md)"
+                  ? "The page had no document to install it in before the deadline; a page attached with a dialog open reports none until it closes"
                   : failure._tag === "Gone"
                   ? failure.error.message
                   : failure.reason.message

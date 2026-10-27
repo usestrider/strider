@@ -1,0 +1,143 @@
+---
+title: A first program
+description: Launch a browser, open a page, act on it and check the result, then turn the steps into functions you can reuse.
+order: 2
+---
+
+## The whole program
+
+This program opens a shop, adds a product to the cart and checks that the cart says so. It runs as it is, with
+Node and a Chromium:
+
+```ts title="checkout.ts"
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
+import { Browser, Expect } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Config, Effect, Layer } from "effect"
+
+const program = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage()
+  yield* page.goto("https://shop.example.com")
+  yield* page.getByRole("button", { name: "Add to cart" }).click()
+  yield* page.getByText("1 item").pipe(Expect.toBeVisible)
+  yield* Effect.log(`Added to the cart on "${yield* page.title}"`)
+}))
+
+const BrowserLive = Chromium.layerConfig({
+  executablePath: Config.String("CHROMIUM_PATH")
+}).pipe(Layer.provide(NodeServices.layer))
+
+program.pipe(Effect.provide(BrowserLive), NodeRuntime.runMain)
+```
+
+```sh
+CHROMIUM_PATH=/usr/bin/chromium node checkout.ts
+```
+
+Each line does one thing, and each is worth a closer look.
+
+## Opening a page
+
+`Browser.newPage()` uses the `Browser` service the layer provides. It makes a fresh context, an isolated session
+with its own cookies and storage, and opens a page in it. Both belong to the `Scope` around them, here the one
+`Effect.scoped` makes, and both close when it ends: when the program finishes, when a step fails, or when it's
+interrupted. There is no `close` to forget.
+
+`page.goto(url)` navigates and returns once the navigation has committed: the browser has the response and the
+new document has started, which is the moment a navigation has succeeded or failed. To wait for more, ask:
+`page.goto(url, { waitUntil: "load" })`. A 404 still commits, so `goto` succeeds and returns the navigation, with
+its response, for you to check.
+
+## Locators and actions
+
+`page.getByRole("button", { name: "Add to cart" })` is a locator: a description of how to find an element, not
+the element itself. Making one does nothing. Each time it's used, it finds the element again, so a locator made
+before the page re-renders still works after.
+
+`click()` is an action. Before it clicks, it waits until there is exactly one matching element and that element
+is visible, enabled, not moving and not covered by anything, scrolling it into view if needed. Then it clicks
+once.
+If something covers the button just as the click is sent, such as a toast that slides in, the page never sees
+the click, and the action checks again. [Actions](/docs/pages/actions) lists each action's checks.
+
+## Expectations
+
+`Expect.toBeVisible` is an expectation. It checks now, and again each time the page changes, until the element is
+visible or the deadline passes. That is the only kind of waiting in the program: no sleeps, and nothing that
+guesses when the page is ready.
+
+An expectation can be written either way round. With no arguments the matcher is the function, so
+`locator.pipe(Expect.toBeVisible)` and `Expect.toBeVisible(locator)` are the same. Matchers with arguments are
+dual, as Effect's own functions are: `locator.pipe(Expect.toHaveText("1 item"))` or
+`Expect.toHaveText(locator, "1 item")`.
+
+## Reads
+
+`page.title` is a read. It's a value, not a function, because there is nothing to configure: an `Effect` that
+reads the title at the moment it runs. Reads never wait and never retry. That is the line the API draws
+everywhere: actions are calls, reads are values, and `Expect.to*` is what retries.
+
+## The layer
+
+`Chromium.layerConfig` launches the executable that `CHROMIUM_PATH` names, headless, with a temporary profile.
+`NodeServices.layer` gives it what it needs to start a process and make that profile. `Effect.provide` runs the
+program with the browser, and when the program ends the browser exits and its profile is deleted.
+`NodeRuntime.runMain` runs it all, and turns Ctrl-C into an interruption, which closes the page and the browser
+on the way out.
+
+Swap the layer to run the same program somewhere else. Everything above it stays as it is.
+
+## Steps as functions
+
+As a program grows, its steps become functions. Write them with `Effect.fn`, which names each one. The name becomes
+the step's span, so a trace shows `addToCart` with its clicks inside it.
+
+```ts title="checkout.ts"
+import { Browser, Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const addToCart = Effect.fn("addToCart")(function*(page: Page.Page, product: string) {
+  const card = page.getByRole("article").filter({ hasText: product })
+  yield* card.getByRole("button", { name: "Add to cart" }).click()
+  yield* page.getByRole("status").pipe(Expect.toContainText(product))
+})
+
+const checkout = Effect.fn("checkout")(function*(page: Page.Page) {
+  yield* page.getByRole("link", { name: "Cart" }).click()
+  yield* page.getByRole("button", { name: "Check out" }).click()
+  yield* page.pipe(Expect.toHaveURL(/\/checkout$/))
+})
+
+const program = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage()
+  yield* page.goto("https://shop.example.com")
+  yield* addToCart(page, "Field guide to herons")
+  yield* checkout(page)
+}))
+```
+
+A step takes the page as an argument and needs nothing else, so it works the same in a script, in a test, or in a
+segment the `strider` command runs. A step that only reads can take a `Page.ReadonlyPage` instead, and then works on pages you're only allowed
+to inspect.
+
+## Many pages at once
+
+Pages are values and steps are effects, so running several at once is Effect's job. Each `newPage` here gets a
+context of its own, so the pages share no cookies, and each is closed when its own scope ends:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const title = Effect.fn("title")(function*(url: string) {
+  const page = yield* Browser.newPage()
+  yield* page.goto(url)
+  return yield* page.title
+}, Effect.scoped)
+
+const titles = Effect.fn("titles")(function*(urls: ReadonlyArray<string>) {
+  return yield* Effect.forEach(urls, title, { concurrency: 4 })
+})
+```
+
+Next: what happens when a step fails.

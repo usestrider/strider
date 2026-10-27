@@ -393,7 +393,8 @@ const localOf = (value: Adapter.RemoteValue): Script.LocalValue => {
 
 // ── Capabilities ──────────────────────────────────────────────────────────────────────────────────────────
 
-const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["ownership"]) => {
+/** The backend's capabilities, for a browser it connected to; the documentation tools read them too. */
+export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["ownership"]) => {
   const evidence = `BiDi adapter static profile, ${info.product} ${info.version}`
   const entry = (
     name: string,
@@ -404,10 +405,14 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
     entries: [
       entry("userContexts", "supported"),
       entry("isolatedWorlds", "supported"),
-      entry("pauseOnStart.frames", "supported", ["declarative: preload scripts and overrides scoped by context"]),
+      entry("pauseOnStart.frames", "supported", [
+        "nothing is paused: WebDriver BiDi applies the context's scripts and settings to each new document itself"
+      ]),
       entry("pauseOnStart.workers", "unsupported", ["preload scripts don't run in workers"]),
       entry("initScripts.workers", "unsupported", ["WebDriver BiDi's preload scripts run in documents only"]),
-      entry("pauseOnStart.popups", "supported", ["declarative: preload scripts and overrides scoped by user context"]),
+      entry("pauseOnStart.popups", "supported", [
+        "nothing is paused: WebDriver BiDi applies the context's scripts and settings to each new popup itself"
+      ]),
       entry("input.native", "unsupported", ["WebDriver actions, not native input"]),
       entry("input.webdriver", "supported"),
       entry("interception.request", "supported"),
@@ -1483,7 +1488,7 @@ export const connect: (
         new Browser.ConnectionFailed({
           stage: "handshake",
           hint: error.message.includes("Maximum number of active sessions")
-            ? `${error.message}: Firefox allows one WebDriver BiDi session at a time, and another client holds it; a session ends with session.end, not when its connection closes, or with the browser (QUIRKS.md)`
+            ? `${error.message}: Firefox allows one WebDriver BiDi session at a time, and another client holds it; a session ends with session.end, not when its connection closes, or with the browser`
             : error.message
         }),
         "connect"

@@ -1,13 +1,13 @@
 /**
- * Downloads a page starts.
+ * The files a page or context downloads: waiting for one, following its progress, and saving it.
  *
- * Seeing a download acquires nothing: its file belongs to its context. Every context the library creates
- * allows downloads into a temporary directory it owns, made before the context and removed after it, so the
- * file is deleted when the context closes. Copy it out with `saveAs` or read it as a stream before then.
+ * Seeing a download doesn't make it yours: its file belongs to its context. Every context Strider creates saves
+ * downloads into a temporary directory of its own, made before the context and removed after it, so a file is
+ * deleted when its context closes. Copy it out with `saveAs`, or read its bytes as a stream, before then.
  *
- * Every browser writes a download into a partial file and renames it when it completes, so its bytes are read
- * once it has. Progress is reported where the backend reports it (`downloads.progress`: CDP only), and
- * `cancel` where it can (`downloads.cancel`: not on BiDi).
+ * Browsers write a download to a partial file and rename it when it's complete, so its bytes can be read only once
+ * it is. Progress is reported where the backend reports it (`downloads.progress`: CDP only), and `cancel` works
+ * where the backend can cancel (`downloads.cancel`: not on BiDi).
  *
  * @stability unstable
  * @since 0.1.0
@@ -82,7 +82,7 @@ export type Status = typeof Status.Type
 const TypeId = "~@usestrider/browser/Download"
 
 /**
- * A download.
+ * A file a page downloads: where it came from, its progress and the ways to read, save or cancel it.
  *
  * **Example** (Exporting a CSV)
  *
@@ -118,18 +118,18 @@ export interface Download extends Pipeable.Pipeable, Inspectable.Inspectable {
    */
   readonly status: Watchable.Watchable<Status>
   /**
-   * Waits until the download completes, under the deadline; `status.waitFor` for a terminal state. A download
-   * that was canceled or failed fails it with `DownloadCanceled` or `DownloadFailed`.
+   * Waits until the download completes, under the deadline in force. If the download is canceled or fails,
+   * `finished` fails with `DownloadCanceled` or `DownloadFailed`.
    */
   readonly finished: Effect.Effect<void, DownloadError | Target.TargetGone | Deadline.Timeout>
   /**
-   * The bytes, once the download completes: it waits for that under the deadline in force when it runs. The
-   * file is gone once its context closes, which fails it with `TargetGone`.
+   * The file's bytes, as a stream that first waits, under the deadline in force, for the download to complete.
+   * The file is deleted when its context closes, and reading it after that fails with `TargetGone`.
    */
   readonly stream: Stream.Stream<Uint8Array, DownloadError | Target.TargetGone | Deadline.Timeout>
   /**
-   * Copies the file to a path on this machine once the download completes, waiting for that under the deadline
-   * in force. The file is gone once its context closes, which fails it with `TargetGone`.
+   * Copies the file to a path on this machine, waiting under the deadline in force for the download to complete.
+   * The file is deleted when its context closes, and saving it after that fails with `TargetGone`.
    */
   saveAs(path: FilePath.Local | string): Effect.Effect<void, DownloadError | Target.TargetGone | Deadline.Timeout>
   /**
@@ -188,7 +188,7 @@ const subscription = (target: Page.Page | UserContext.UserContext, filter: Filte
   })
 
 /**
- * Subscribes to downloads and returns the first match, latched.
+ * Subscribes to downloads and returns the wait: an effect that gives the first match, the same each time it runs.
  *
  * **Gotchas**
  *
@@ -234,7 +234,7 @@ export const stream = <PE = never, PR = never>(
   )
 
 /**
- * Reads the downloads a log retained; never waits.
+ * Reads the downloads still in the event log; never waits.
  *
  * @stability unstable
  * @category getters

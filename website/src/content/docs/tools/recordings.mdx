@@ -1,0 +1,102 @@
+---
+title: Traces and HAR files
+description: Every operation is already a span. A trace adds what the page looked like, for Playwright's trace viewer; a HAR records the traffic.
+order: 2
+---
+
+## Spans first
+
+Every operation Strider performs opens one span, named for it: `Locator.click`, `Page.goto`, with attributes such
+as the page's id, the locator and a redacted URL. Steps you write with `Effect.fn` are spans too, so Strider's
+operations nest under your own. Whatever tracer you give Effect receives them: `effect/observability` exports them
+over OTLP to any OpenTelemetry backend, and Effect's DevTools shows them live.
+
+So a program already has a record of what it did. The two recordings add what spans can't carry: what the page
+looked like, and what went over the network.
+
+## Traces
+
+`Trace.record` records a page or a context in the format Playwright's trace viewer reads. Open the file at
+[trace.playwright.dev](https://trace.playwright.dev): each operation is a step, under your own spans, with the
+console, errors and, if you ask, screenshots, the network and the page's DOM before and after each action.
+
+```ts
+import { Browser, Trace } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const recorded = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage()
+  const trace = yield* Trace.record(page, {
+    screenshots: "perAction",
+    network: true,
+    domSnapshots: true
+  })
+  yield* page.goto("https://shop.example.com")
+  yield* page.getByRole("button", { name: "Add to cart" }).click()
+  yield* page.getByRole("link", { name: "Cart" }).click()
+  yield* trace.exportTrace("traces/cart.zip")
+}))
+```
+
+What a trace captures is opt-in, because each level costs something:
+
+| Option                       | Adds                                                                  |
+| ---------------------------- | --------------------------------------------------------------------- |
+| none                         | operations, logs, errors and console output                           |
+| `screenshots: "perAction"`   | a screenshot after each action                                        |
+| `screencast`                 | frames of the page as it renders: `"native"`, or `{ polled: interval }` |
+| `network: true`              | the page's requests and responses                                     |
+| `domSnapshots: true`         | each frame's DOM before and after every action, which the viewer renders; needs `network` |
+
+DOM snapshots are taken in Strider's own isolated world, so recording changes nothing in the page and works on a
+page you can only inspect.
+
+## HAR files
+
+`Har.record` records a page's or a context's requests as an HTTP Archive, HAR 1.2, one entry per redirect hop.
+Where bodies go is required, never guessed from a file name: `"embed"` puts them in the file, `"attach"` writes a
+zip with the bodies beside it, and `"omit"` leaves them out:
+
+```ts
+import { Browser, Har } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const traffic = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage()
+  const har = yield* Har.record(page, { content: "embed", url: "**/api/**" })
+  yield* page.goto("https://shop.example.com")
+  yield* page.getByRole("button", { name: "Add to cart" }).click()
+  yield* har.exportHar("fixtures/api.har", { include: ["requestBodies"] })
+}))
+```
+
+Timings come from Strider's own clock, so they mean the same on every browser. A recording stops when its scope
+closes; `entries` counts what it has so far. A request still in flight at the export is marked incomplete rather
+than waited for, unless the recording says `inFlightAtStop: "wait"`.
+
+A HAR recorded with its request bodies can answer the same requests later, as a route:
+`page.route("**/api/**", yield* Route.fromHar("fixtures/api.har"))`. [Routes](/docs/events/routes#replaying-a-recording)
+covers replay.
+
+## What exports leave out
+
+A recording holds what the page did, and that includes secrets. An export is where they could leave the process,
+so a HAR's export redacts each class of secret unless `include` names it:
+
+| Class                    | Redacted unless included                                   |
+| ------------------------ | ---------------------------------------------------------- |
+| `"credentials"`          | credentials in URLs                                        |
+| `"cookies"`              | cookie values, in `Cookie` and `Set-Cookie`                |
+| `"authorizationHeaders"` | `Authorization` headers                                    |
+| `"requestBodies"`        | the bodies requests sent, which can hold a password        |
+
+A trace is redacted under the diagnostics preset. Under the default, `strict`, its DOM snapshots write a password
+field's value, and any field filled with a `Redacted` value, as `REDACTED`.
+
+Screenshots, bodies and DOM snapshots can contain anything the page showed. Strider can't tell which parts are
+secret, so think of a trace with captures as you would a screen recording.
+
+## In tests
+
+Attach a trace to the test that made it with `TestRun`, and Vitest keeps it with the test's results. [Testing with
+Vitest](/docs/tools/testing#attaching-files) has the example.

@@ -1,10 +1,9 @@
 /**
- * Declarations: scoped registrations that change how a page or context behaves while they live
- * (principle 19).
+ * Declarations: settings and handlers that change how a page or context behaves for as long as their scope lasts.
  *
- * Routes, dialog and file-chooser handlers, init scripts, emulation overrides, permission grants and page
- * clocks are all declarations. Each requires `Scope`, returns a handle with an idempotent `remove`, and is
- * undone when its scope closes. Removing one early makes the scope's finalizer a no-op.
+ * Routes, dialog and file-chooser handlers, init scripts, emulation, permission grants and page clocks are all
+ * declarations. Each needs a `Scope`, returns a handle whose `remove` is safe to call more than once, and is undone
+ * when its scope closes. Removing one early leaves nothing for the scope to undo.
  *
  * @stability unstable
  * @since 0.1.0
@@ -26,7 +25,7 @@ import type * as Watchable from "./Watchable.ts"
  */
 export interface Registration {
   /**
-   * Removes the declaration early. Idempotent; the scope's finalizer becomes a no-op.
+   * Removes the declaration early. Running it again does nothing, and neither does closing the scope.
    */
   readonly remove: Effect.Effect<void>
 }
@@ -40,7 +39,7 @@ export interface Registration {
  */
 export interface HandlerRegistration extends Registration {
   /**
-   * How many obligations this handler has decided.
+   * How many dialogs or file choosers this handler has decided.
    */
   readonly handled: Watchable.Watchable<number>
 }
@@ -129,11 +128,11 @@ export type DeclarationErrorReason = typeof DeclarationErrorReason.Type
 const DeclarationErrorTypeId = "~@usestrider/browser/Declaration/DeclarationError"
 
 /**
- * Error for a declaration that couldn't be put in force.
+ * Error for a declaration that couldn't take effect.
  *
  * **Details**
  *
- * `declaration` names it, such as `addInitScript` or `Dialog.handle`. A declaration either takes effect as
+ * `declaration` names it, such as `Page.addInitScript` or `Page.emulate`. A declaration either takes effect as
  * stated or fails; it never applies partly.
  *
  * @stability unstable

@@ -1,10 +1,9 @@
 /**
- * Runner-agnostic test support (`@usestrider/browser/test`).
+ * Test support that works with any test runner: the running test, and the files attached to it.
  *
- * Nothing changes because it's a test: profile, focus, diagnostics and tracing are whatever the test chose.
- * A test gets its page from `Browser.newPage()`, like any program. A runner adapter, such as
- * `@usestrider/vitest`, provides `TestRun` so that traces and screenshots attach to the test that
- * made them.
+ * Nothing changes because it's a test: profile, focus, diagnostics and tracing are whatever the test chose, and a
+ * test gets its page from `Browser.newPage()`, like any program. A runner's adapter, such as `@usestrider/vitest`,
+ * provides `TestRun`, so that traces and screenshots attach to the test that made them.
  *
  * @stability unstable
  * @since 0.1.0
@@ -56,7 +55,7 @@ export const TestArtifact = Schema.Union([
 export type TestArtifact = typeof TestArtifact.Type
 
 /**
- * The running test, provided per test by a runner adapter.
+ * The running test, provided by a test runner's adapter such as `@usestrider/vitest`.
  *
  * @stability unstable
  * @category services

@@ -1,9 +1,9 @@
 /**
- * What `strider run` provides to a segment (`@usestrider/browser/cli`).
+ * What `strider run` gives a segment: the live CLI session, and its pages by name.
  *
- * A segment is a file whose default export is an effect, run against a live CLI session (CLI.md). Programs
- * and tests never construct a session; they pass pages as values. Pages are found by name only: generated
- * handles such as `p2` are tokens, not names.
+ * A segment is a file whose default export is an effect, run in a live CLI session. Programs and tests never make a
+ * session; they pass pages around as values. A segment finds the session's pages by the names they have there, such
+ * as the `shop` that `page new --name shop` gave one.
  *
  * @stability experimental
  * @since 0.1.0
@@ -46,14 +46,14 @@ export interface CurrentSession {
    */
   readonly context: UserContext.UserContext
   /**
-   * The page with this name; fails at once when there is none.
+   * Gets the page with this name, or fails at once with `PageNotFound` when there is none.
    */
   page(name: PageName | string): Effect.Effect<Page.Page, PageNotFound>
   /**
-   * Keeps a page the segment opened once the segment ends: its ownership moves from the segment's scope to the
-   * session's, and it is named into the session, `name` or the next `p1`, `p2`…, whose name it returns.
-   * A page the segment returns is named without being kept, so it closes with the segment unless
-   * something else owns it, such as a session page that opened it as a popup.
+   * Keeps a page the segment opened, so it stays open after the segment ends: the session's scope owns it from
+   * then on, and it is named `name`, or else the next of `p1`, `p2`…, which `keep` returns. A page the
+   * segment returns is named without being kept, so it closes with the segment unless something else owns it,
+   * such as a session page that opened it as a popup.
    */
   keep(page: Page.Page, name?: PageName | string): Effect.Effect<PageName, NameTaken>
 }
@@ -118,7 +118,7 @@ export const isPageNotFound = (u: unknown): u is PageNotFound => Predicate.hasPr
 const NameTakenTypeId = "~@usestrider/browser/cli/CurrentSession/NameTaken"
 
 /**
- * Error for a name another of the session's pages has. Its hint lists the session's page names.
+ * Error for a name another page of the session already has. Its hint lists the session's page names.
  *
  * @stability experimental
  * @category errors

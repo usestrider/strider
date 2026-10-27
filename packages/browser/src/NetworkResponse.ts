@@ -1,13 +1,13 @@
 /**
- * Responses a page or context receives: the event, and, when asked for, their bodies.
+ * The responses a page or context receives: the event, and, when asked for, their bodies.
  *
- * A `NetworkResponse` is metadata for one redirect hop: data, immutable, with Effect's `Headers`. A body is
- * collected only when a subscription asks for it with a decoder, because collecting bodies costs memory and
- * needs inspect access. A collected body becomes a `CapturedResponse`: owned bytes that outlive the page, read
- * with Effect's own `HttpIncomingMessage` decoders.
+ * A `NetworkResponse` is the status and headers of one redirect hop: data, immutable, with Effect's `Headers`. A
+ * body is collected only when a subscription asks for it with a decoder, because collecting bodies costs memory and
+ * needs read access to the page. A collected body becomes a `CapturedResponse`: bytes of your own that outlive the
+ * page, read with Effect's own `HttpIncomingMessage` decoders.
  *
- * A response is reported when it arrives, to the page and context whose request it answers. With a `body`, it
- * is delivered once its body has loaded, up to `BodyLimit`, and been decoded.
+ * A response is reported when it arrives, to the page and context whose request it answers. With a `body`, it's
+ * delivered once its body has loaded, up to `BodyLimit`, and been decoded.
  *
  * @stability unstable
  * @since 0.1.0
@@ -80,7 +80,7 @@ export type StatusCode = typeof StatusCode.Type
  * - `cache`: the browser's HTTP cache, in memory or on disk.
  * - `serviceWorker`: a service worker's `respondWith`, whether the worker made the response or fetched it.
  * - `cacheOrServiceWorker`: not the network, and the browser doesn't say which. Firefox reports both the same
- *   way, which its `network.servedBy` capability says.
+ *   way, as its `network.servedBy` entry in `browser.capabilities` says.
  * - `route`: a route that fulfilled the request.
  * - `unknown`: the browser says it doesn't know, as WebKit can.
  *
@@ -112,14 +112,15 @@ export const ServedBy = Schema.Literals([
 export type ServedBy = typeof ServedBy.Type
 
 /**
- * The metadata of one redirect hop's response.
+ * The status and headers of one redirect hop's response.
  *
  * **Details**
  *
- * `servedBy` says what answered: the network, a cache, a service worker or a route. A request that fails has
- * no response, so nothing to say. `statusText` is the status line's reason phrase as the browser reports it,
- * empty for HTTP/2 and later. `httpVersion` is the protocol as the browser names it, such as `http/1.1` or
- * `h2`; `None` where the backend doesn't say with the response: WebKit reports it when the response ends.
+ * `servedBy` says what answered: the network, a cache, a service worker or a route. A request that fails gets
+ * no response, so it has no `servedBy`. `statusText` is the status line's reason phrase as the browser reports
+ * it, empty for HTTP/2 and later. `httpVersion` is the protocol as the browser names it, such as `http/1.1` or
+ * `h2`; it's `None` where the backend doesn't report it with the response: WebKit reports it only when the
+ * response ends.
  *
  * @stability unstable
  * @category models
@@ -145,8 +146,8 @@ export class NetworkResponse extends Schema.Class<NetworkResponse>("@usestrider/
  *
  * **Details**
  *
- * It is also an `HttpIncomingMessage`, so Effect's decoders read the owned bytes again if needed. `body` is
- * what the subscription's decoder produced.
+ * It's also an `HttpIncomingMessage`, so Effect's decoders can read its bytes again if needed. `body` is what
+ * the subscription's decoder produced.
  *
  * @stability unstable
  * @category models
@@ -201,8 +202,8 @@ export interface Filter {
  *
  * **Details**
  *
- * It is read when a subscription with a `body` starts, and declared to the browser with it. A larger body
- * fails with `BodyUnavailable{overLimit}`. Effect's `HttpIncomingMessage.MaxBodySize` bounds what this program
+ * It's read when a subscription with a `body` starts, and declared to the browser with it. A larger body fails
+ * with `BodyUnavailable`, `why: "overLimit"`. Effect's `HttpIncomingMessage.MaxBodySize` bounds what this program
  * reads, and is a separate setting.
  *
  * @stability unstable
@@ -402,13 +403,15 @@ const collect = (
 }
 
 /**
- * Subscribes to responses and returns the first match, latched.
+ * Subscribes to responses and returns the wait: an effect whose value is the first match, the same each time it
+ * runs.
  *
  * **Details**
  *
- * With `body`, collection is set up before this returns, which needs inspect access: a `ReadonlyPage` or a
- * `UserContext`. Without it, only metadata is delivered. `url` is required either way. A response with a body
- * matches once the body has loaded and been decoded, within the deadline in force here.
+ * With `body`, body collection is set up before this returns, which needs inspect access: a `ReadonlyPage` or a
+ * `UserContext`. Without it, only the status and headers are delivered. `url` is required either way. A response
+ * with a body matches once the body has loaded and been decoded, within the deadline in force when `next` is
+ * called.
  *
  * **Example** (A response body, decoded and filtered)
  *
@@ -487,8 +490,8 @@ export const next: {
  *
  * **Details**
  *
- * Each body has `Deadline.DefaultBudget`, as read here, to finish loading; one that doesn't, such as an event
- * stream's, fails the stream with `BodyUnavailable{streaming}`.
+ * Each body has `Deadline.DefaultBudget`, as read when `stream` is called, to finish loading. One that doesn't,
+ * such as an event stream's, fails the stream with `BodyUnavailable`, `why: "streaming"`.
  *
  * @stability unstable
  * @category subscriptions
@@ -537,7 +540,8 @@ export const stream: {
   })) as typeof stream
 
 /**
- * Reads the responses a log retained; metadata only, never bodies, and never waits.
+ * Reads the responses the target's event log kept (`UserContext.Options.eventLog`), without their bodies; never
+ * waits.
  *
  * @stability unstable
  * @category getters
@@ -558,7 +562,8 @@ export const history = (
  * **Details**
  *
  * - `notCollected`: no subscription asked for it.
- * - `evicted`: the browser discarded it before it was read.
+ * - `evicted`: the browser discarded it, or too many requests were in flight for Strider to keep it, before it
+ *   was read.
  * - `redirect`: redirect hops have no body.
  * - `streaming`: the response is a stream, such as server-sent events.
  * - `overLimit`: it exceeded the collection limit, `BodyLimit`.
@@ -582,7 +587,7 @@ export class BodyUnavailable
 
 /**
  * Reason for a body that was read but isn't what it was read as, such as `json` of a body that isn't JSON: the
- * page's response, not the browser, is at fault (QUIRKS.md, Q64).
+ * page's response is at fault, not the browser.
  *
  * @stability unstable
  * @category reasons

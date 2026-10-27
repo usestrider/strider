@@ -1,0 +1,166 @@
+---
+title: Routes, scripts and time
+description: Declarations change what a page sees while their scope lasts. Routes decide requests, init scripts run before the page's own, and the page clock moves when you say.
+order: 3
+---
+
+## Declarations
+
+Events report; declarations decide. A declaration is a setting held for a scope: a route that answers requests,
+a script that runs in every new document, a clock the page's scripts read, an emulated setting or a granted
+permission. The browser confirms each one before the call returns, so it applies from the next line, and each is
+removed when its scope closes, or earlier with its handle's `remove`.
+
+`Dialog.handle` and `FileChooser.handle`, on the [events page](/docs/events/events), are declarations too.
+
+## Routes
+
+`page.route(pattern, handler)` sends each matching request to the handler before it leaves the browser. The
+handler returns a decision. Responses and request changes are Effect's own HTTP types, from `effect/http`:
+
+```ts
+import { Page, Route } from "@usestrider/browser"
+import { Effect } from "effect"
+import { HttpClientRequest, HttpServerResponse } from "effect/http"
+
+const fakeBackend = Effect.fn("fakeBackend")(function*(page: Page.Page) {
+  yield* page.route(
+    "https://app.example.com/api/user",
+    () => Effect.succeed(Route.fulfill(HttpServerResponse.jsonUnsafe({ name: "Ada" })))
+  )
+  yield* page.route(
+    "https://app.example.com/api/**",
+    () => Effect.succeed(Route.continueWith(HttpClientRequest.setHeader("x-test", "1")))
+  )
+  yield* page.route("**/analytics/**", () => Effect.succeed(Route.abort()))
+  yield* page.goto("https://app.example.com")
+})
+```
+
+| Decision                    | What happens to the request                                              |
+| --------------------------- | ------------------------------------------------------------------------ |
+| `Route.fulfill(response)`   | answered with `response`; it never reaches the server                    |
+| `Route.continueWith(change)` | sent on, changed: a function of Effect's `HttpClientRequest`             |
+| `Route.continue`            | sent on as it is                                                         |
+| `Route.abort(reason?)`      | fails, as a network error would                                          |
+| `Route.fallthrough`         | asks the next route that matches, or lets the request continue           |
+
+A pattern is a glob, a URL or a `URLPattern`. Routes are asked in order of precedence: the page's before its
+context's, and the most recently added first, with `fallthrough` passing to the next. A route's handle counts the
+requests it was asked about in `hits`, a watchable number.
+
+A request is never left hanging. A handler that fails, is interrupted or runs out of time lets the request
+continue; its failure is logged, and the decision is reported as an `AutoResolution` event.
+
+## The response phase
+
+A route can wait for the server's answer instead, with `{ phase: "response" }`. Its handler sees the response's
+status and headers, and can pass it on changed or replace it. The phase sets the types of what the handler gets
+and may return, so a decision that makes no sense at a phase doesn't compile:
+
+```ts
+import { Page, Route } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const markResponses = Effect.fn("markResponses")(function*(page: Page.Page) {
+  yield* page.route(
+    "https://app.example.com/api/**",
+    (intercepted) => {
+      const headers = { ...intercepted.response.headers, "x-seen": "1" }
+      return Effect.succeed(Route.continueWith({ headers }))
+    },
+    { phase: "response" }
+  )
+})
+```
+
+Changing a response's status and headers this way works on Chromium and Firefox. A handler at this phase can also
+read the body, `intercepted.responseBody`, and fulfill with a patched copy; that is Chromium's alone, and WebKit can
+do neither. `{ phase: "auth" }` answers an HTTP authentication challenge with
+`Route.provideCredentials({ username, password })`, the password `Redacted`.
+
+## Replaying a recording
+
+A HAR file recorded earlier, by `Har.record` or another tool, can answer a page's requests. `Route.fromHar` reads
+it once and makes a handler that answers each request from the matching entry, by method, URL and body:
+
+```ts
+import { Page, Route } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const fromRecording = Effect.fn("fromRecording")(function*(page: Page.Page) {
+  const replay = yield* Route.fromHar("./fixtures/api.har")
+  yield* page.route("https://shop.example.com/api/**", replay)
+  yield* page.goto("https://shop.example.com/cart")
+})
+```
+
+A request nothing in the file matches is aborted, unless `{ notFound: "fallthrough" }` lets it through. Reading the
+file needs Effect's `FileSystem` in the program's context. `NodeServices.layer` provides it: build the backend's
+layer with `Layer.provideMerge(NodeServices.layer)` instead of `Layer.provide`, and the program gets both.
+
+## Init scripts
+
+`addInitScript` runs a function at the start of every new document of the page, in every frame, before the page's
+own scripts. It's the place for test hooks, stubs and anything the page should find already there:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const installHooks = () => {
+  Object.assign(window, { __clicks: [] as Array<string> })
+}
+
+const recordClicks = () => {
+  const clicks = (window as unknown as { __clicks: Array<string> }).__clicks
+  addEventListener("click", (event) => clicks.push((event.target as Element).tagName))
+}
+
+const testHooks = Effect.fn("testHooks")(function*(page: Page.Page) {
+  const hooks = yield* page.addInitScript(installHooks)
+  yield* page.addInitScript(recordClicks, { after: [hooks] })
+  yield* page.goto("https://app.example.com")
+})
+```
+
+The function crosses into the page, so it must be self-contained. Scripts run in one order on every browser: the
+context's before the page's, then in the order they were added. `after` makes a script depend on others: it runs
+only if each one it comes after ran in that document without throwing. One that throws is reported as the
+page's `UncaughtException`.
+
+A script runs in the page's own world unless `world: "isolated"` says otherwise, and `workers: true` runs it in the
+page's dedicated workers too, on Chromium and WebKit. Added to a page that has already loaded, a script runs from
+its next document.
+
+## The page clock
+
+A page's scripts read time from `Date`, `performance.now` and their timers. `page.clock` replaces them with a
+clock of Strider's, so a test can stop time, set it, or move it forward without waiting:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const sessionExpires = Effect.fn("sessionExpires")(function*(page: Page.Page) {
+  yield* page.clock.install({ mode: "controlled", at: "2026-01-01T09:00:00Z" })
+  yield* page.goto("https://app.example.com/session")
+  yield* page.getByRole("button", { name: "Start" }).click()
+  yield* page.clock.adjust("5 minutes")
+  yield* page.getByText("Session expired").pipe(Expect.toBeVisible)
+})
+```
+
+| Mode         | Wall time                 | Timers and animation frames    |
+| ------------ | ------------------------- | ------------------------------ |
+| `fixed`      | frozen at `at`            | run in real time               |
+| `offset`     | shifted `by` a duration   | run in real time               |
+| `controlled` | starts at `at`, moves only when told | run only when time moves |
+
+`adjust` moves a controlled clock forward, firing every timer that comes due, in order. `setTime` jumps, firing due
+timers at most once, as a laptop waking from sleep does. `resume` goes back to real time from where the clock
+stands. The words are Effect's, from `TestClock`, so a test reads the same whichever clock it moves.
+
+The page clock is one timeline across the page's documents and frames, so navigating doesn't reset it. It never
+touches Strider's own deadlines, and Effect's `TestClock` never touches the page, so a click still works while the
+page's time is stopped.

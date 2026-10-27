@@ -1,12 +1,12 @@
 /**
- * Accessibility snapshots, for agents and for structural expectations.
+ * Accessibility snapshots of a page, for agents and for checking a page's structure.
  *
- * A snapshot is a structured tree; its `text` is one rendering of it, the YAML agents already read. The
- * default `snapshot` adds inferred interactivity and names for sites that aren't accessible, and every
- * inference is tagged with its evidence. `ariaSnapshot` is the accessibility tree alone. Within one document
- * generation, the same node keeps the same ref.
+ * A snapshot is a tree, and its `text` is one rendering of it, the YAML agents already read. By default `snapshot`
+ * adds what it can infer for pages that aren't fully accessible, interactivity and names, and tags every inference
+ * with its evidence; `snapshot({ sources: "aria" })` is the accessibility tree alone. While a document lives, the
+ * same node keeps the same ref.
  *
- * The tree is data (a Schema), so it can be encoded for the CLI, an MCP result or a trace. The refs are not:
+ * The tree is data (a Schema), so it can be encoded for the CLI, an MCP result or a trace. The refs aren't:
  * `ref(id)` returns a locator bound to the page the snapshot came from, with that page's access.
  *
  * @stability unstable
@@ -36,8 +36,8 @@ export const RefId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Snaps
  *
  * **Details**
  *
- * A ref is meaningful only for the document and generation it came from. Decoding a model's `"e12"` gives a
- * `RefId`, which is then checked against that page's latest snapshot.
+ * A ref is meaningful only for the document and generation it came from. The agent toolkit decodes a model's
+ * `"e12"` to a `RefId` and checks it against that page's latest snapshot.
  *
  * @stability unstable
  * @category models
@@ -46,7 +46,8 @@ export const RefId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Snaps
 export type RefId = typeof RefId.Type
 
 /**
- * Schema for a document generation, which advances when the document changes enough to invalidate refs.
+ * Schema for a ref generation: the id of the table of refs Strider keeps in a document. It changes only when
+ * Strider has to rebuild that table, which leaves every earlier ref stale.
  *
  * @stability unstable
  * @category schemas
@@ -55,7 +56,7 @@ export type RefId = typeof RefId.Type
 export const Generation = Schema.Number.pipe(Schema.brand("~@usestrider/browser/Snapshot/Generation"))
 
 /**
- * A document generation.
+ * A ref generation: the id of the table of refs Strider keeps in a document.
  *
  * @stability unstable
  * @category models
@@ -93,7 +94,7 @@ export type InteractivityEvidence = typeof InteractivityEvidence.Type
  * **Details**
  *
  * Where a role or name came from is always visible: `Aria` and `Accessible` come from the accessibility
- * tree, and `Inferred` carries its evidence.
+ * tree. An `Inferred` role carries its `evidence`, and an `Inferred` name says what it came `from`.
  *
  * @stability unstable
  * @category models
@@ -165,7 +166,7 @@ export const Node: Schema.Codec<Node, NodeEncoded> = Schema.Struct({
 })
 
 /**
- * The data of a snapshot: which document it describes, its tree, and its text rendering.
+ * The data of a snapshot: which document it describes, its generation, its tree and its text rendering.
  *
  * @stability unstable
  * @category models
@@ -229,8 +230,8 @@ export interface Snapshot<L extends Locator.ReadonlyLocator = Locator.ReadonlyLo
    *
    * **Gotchas**
    *
-   * Acting on it fails with `StaleRef` once the document or generation moves on. Use a locator built from
-   * roles and names for anything that must survive a re-render.
+   * Acting on it fails with `StaleRef` once its node is removed, or its document or generation moves on. Use a
+   * locator built from roles and names for anything that must survive a re-render.
    */
   ref(id: RefId): L
   /**

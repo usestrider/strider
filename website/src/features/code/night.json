@@ -1,0 +1,17 @@
+{
+  "name": "strider-night",
+  "type": "dark",
+  "colors": {
+    "editor.background": "#2A2925",
+    "editor.foreground": "#F2EEE6",
+    "editorLineNumber.foreground": "#ACA69A",
+    "editor.selectionBackground": "#3B3934"
+  },
+  "tokenColors": [
+    { "settings": { "foreground": "#F2EEE6" } },
+    {
+      "scope": ["comment", "punctuation.definition.comment"],
+      "settings": { "foreground": "#ACA69A", "fontStyle": "italic" }
+    }
+  ]
+}

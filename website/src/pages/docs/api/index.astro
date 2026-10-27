@@ -1,0 +1,66 @@
+---
+// The reference's index: every module by section, with the first sentence of what it is
+import { getCollection } from "astro:content"
+import Rail from "../../../components/Rail.astro"
+import ReferenceNav from "../../../components/ReferenceNav.astro"
+import { renderInline } from "../../../features/reference/markdown.ts"
+import { sectionOrder, sections } from "../../../features/reference/sections.ts"
+import { routeOf, summaryOf } from "../../../features/reference/view.ts"
+import DocShell from "../../../layouts/DocShell.astro"
+
+const entries = await getCollection("reference")
+const bySection = sectionOrder.map((key) => ({
+  key,
+  ...sections[key],
+  entries: entries.filter((entry) => entry.data.section === key).sort((a, b) => a.data.path.localeCompare(b.data.path))
+})).filter((section) => section.entries.length > 0)
+const none = () => undefined
+---
+
+<DocShell
+  title="API reference"
+  description="The API reference, generated from Strider's packages"
+  area="reference"
+  crumbs={[{ label: "API" }]}
+>
+  <ReferenceNav slot="sidebar" />
+  <Rail slot="rail" groups={bySection.map((section) => ({ label: section.title, href: `#${section.key}` }))} />
+  <p class="label">Appendix</p>
+  <h1 class="mt-2 font-display text-[3rem] leading-tight font-normal">API reference</h1>
+  <p class="deck mt-3 mb-10 text-[1.3rem] leading-snug">
+    Every module of @usestrider/browser and @usestrider/vitest, generated from their sources and JSDoc.
+  </p>
+  {
+    bySection.map((section) => (
+      <section class="mb-12" id={section.key}>
+        <h2 class="border-b border-ink pb-2 font-display text-[2rem] font-normal">{section.title}</h2>
+        <p class="prose mt-3 !text-[1rem] text-labels" set:html={renderInline(section.description, none)} />
+        {section.collapsed
+          ? (
+            <details class="mt-3">
+              <summary class="label cursor-pointer">{section.entries.length} modules</summary>
+              <ul class="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 font-mono text-[0.82rem]">
+                {section.entries.map((entry) => (
+                  <li>
+                    <a href={routeOf(entry)}>{entry.data.path}</a>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )
+          : (
+            <dl class="mt-4 space-y-2.5">
+              {section.entries.map((entry) => (
+                <div class="grid gap-x-6 md:grid-cols-[11rem_minmax(0,1fr)]">
+                  <dt class="font-mono text-[0.88rem]">
+                    <a class="underline underline-offset-2" href={routeOf(entry)}>{entry.data.name}</a>
+                  </dt>
+                  <dd class="prose !text-[1rem]" set:html={renderInline(summaryOf(entry), none)} />
+                </div>
+              ))}
+            </dl>
+          )}
+      </section>
+    ))
+  }
+</DocShell>

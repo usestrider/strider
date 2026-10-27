@@ -1,11 +1,11 @@
 /**
  * Failure reasons that more than one module's error can carry.
  *
- * Every module has one error, and its detail lives in a `reason` (principle 10). Reasons that belong to one
- * module are declared there, such as `Locator.StrictViolation` or `Page.NavigationFailed`. The reasons in
- * this module are shared: a bad argument, missing access, an unsupported capability, a protocol failure, and
- * the two ways an evaluated function can fail. Match them with `Effect.catchReason`; each one carries a
- * one-line `hint` that its `message` includes.
+ * Every module has one error, and what went wrong is its `reason`. Reasons that belong to one module are declared
+ * there, such as `Locator.StrictViolation` or `PageNavigation.NavigationFailed`. The ones here are shared: a bad
+ * argument, missing access, a capability the backend lacks, a protocol failure and the two ways an evaluated
+ * function can fail. Match them with `Effect.catchReason`; each carries a one-line `hint`, which its `message`
+ * includes.
  *
  * @stability unstable
  * @since 0.1.0
@@ -82,8 +82,8 @@ export class NotPermitted extends Schema.Error<NotPermitted>("@usestrider/browse
  *
  * **Details**
  *
- * The hint lists the backends that do support it, such as "supported on: chromium (CDP)". Nothing is
- * emulated in its place.
+ * The hint says what is missing, such as which backends do have the capability. Nothing is emulated in its
+ * place.
  *
  * @see {@link Capability.Capability} for features reached through a typed handle
  *
@@ -126,8 +126,8 @@ export type Metadata = typeof Metadata.Type
  * **Details**
  *
  * A backend declares its key with `declare module`, so CDP error codes are typed where the Chromium backend
- * is imported, and the ergonomic layer never has to know them. Its keys are optional, and its index admits
- * `undefined`, so the declarations type-check with `exactOptionalPropertyTypes` on or off.
+ * is imported, and the modules every backend shares never have to know them. Its keys are optional, and its index
+ * admits `undefined`, so the declarations type-check with `exactOptionalPropertyTypes` on or off.
  *
  * @stability unstable
  * @category configuration
@@ -142,8 +142,9 @@ export interface BackendMetadata {
  *
  * **Details**
  *
- * `method` is the protocol command, such as `Input.dispatchMouseEvent`. Backend detail, such as a CDP error
- * code, is in `metadata` under the backend's key.
+ * `method` is the protocol command, such as `Input.dispatchMouseEvent`. A failure the browser reported carries
+ * its `ProtocolError` as `cause`, with the browser's own code and message. `metadata` is where a backend can add
+ * detail under its own key; none does yet, so it's empty.
  *
  * @stability unstable
  * @category reasons
@@ -189,12 +190,13 @@ export class EvaluationThrown extends Schema.Error<EvaluationThrown>("@usestride
 }
 
 /**
- * Reason for an evaluation result that can't cross back by value.
+ * Reason for an evaluation's argument or result that can't cross by value.
  *
  * **Details**
  *
- * `path` locates the offending value inside the result, such as `$.items[3].element`. The types catch DOM
- * nodes and functions; this covers what only shows at run time, such as a cycle through a getter.
+ * `path` locates the offending value, such as `args[0]` or `result.items[3].element`. The types catch DOM nodes
+ * in a result; this covers what only shows at run time, such as an argument that refers to itself or a handle
+ * from another realm.
  *
  * @see {@link JSHandle.Serialized} for what does cross
  *
@@ -218,10 +220,10 @@ export class NotSerializable extends Schema.Error<NotSerializable>("@usestrider/
  * **Details**
  *
  * A dialog pauses its page: on some backends every evaluation waits for it, and on all of them the input that
- * opened it does. A dialog a handler or the context's policy is deciding is waited for within the deadline.
- * This reason is for one nothing will decide: its context's policy is `"leaveOpen"` and no `Dialog.handle`
- * was registered when it opened, so the operation fails at once rather than at its deadline. `text` is the
- * dialog's message, empty for a `beforeunload`.
+ * opened it does. When a handler or the context's `dialogs` policy will decide the dialog, the operation waits
+ * for it within its deadline. This reason is for a dialog nothing will decide: the context's policy is
+ * `"leaveOpen"` and no `Dialog.handle` was registered when it opened, so the operation fails at once rather than
+ * at its deadline. `text` is the dialog's message, empty for a `beforeunload`.
  *
  * @stability unstable
  * @category reasons

@@ -1,0 +1,214 @@
+---
+title: Contexts and access
+description: Contexts keep sessions apart and hold their settings, storage state lets you log in once, and a page you didn't open can only be watched until you ask for more.
+order: 4
+---
+
+## Contexts
+
+A context is an isolated session in a browser: its own cookies, storage, cache and permissions, as a fresh profile
+would have. Strider calls it a user context, the WebDriver BiDi spec's term; Playwright calls it a browser context.
+
+`Browser.newPage()` makes a context with one page in it, and that's what most programs need. When pages should
+share a session, such as two tabs of the same signed-in user, make the context yourself and open pages in it:
+
+```ts
+import { Browser, Expect } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const twoTabs = Effect.scoped(Effect.gen(function*() {
+  const context = yield* Browser.newContext()
+  const inbox = yield* context.newPage
+  const settings = yield* context.newPage
+  yield* inbox.goto("https://mail.example.com")
+  yield* settings.goto("https://mail.example.com/settings")
+  yield* settings.getByLabel("Display name").fill("Ada")
+  yield* settings.getByRole("button", { name: "Save" }).click()
+  yield* inbox.reload()
+  yield* inbox.getByText("Ada").pipe(Expect.toBeVisible)
+}))
+```
+
+A context and its pages close with the scope that made them. Popups the pages open belong to the same scope.
+
+## Settings for the whole session
+
+The options you give `newContext` or `newPage` hold for the context's whole life, and are set before its first page
+loads:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const berlinPhone = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage({
+    emulation: {
+      viewport: { width: 390, height: 844, deviceScaleFactor: 3, mobile: true },
+      locale: "de-DE",
+      timezone: "Europe/Berlin",
+      media: { colorScheme: "dark" }
+    },
+    permissions: ["geolocation"],
+    dialogs: "accept"
+  })
+  yield* page.goto("https://maps.example.com")
+}))
+```
+
+| Option           | Sets                                                                               |
+| ---------------- | ---------------------------------------------------------------------------------- |
+| `emulation`      | viewport, user agent, locale, time zone, position, media features, network, CPU     |
+| `permissions`    | permissions granted to every origin                                                |
+| `storageState`   | cookies and storage to start from (below)                                          |
+| `dialogs`        | what happens to a dialog no handler decides: `"dismiss"` (the default), `"accept"`, `"leaveOpen"` |
+| `downloads`      | a temporary directory (the default), `"deny"`, or `{ directory }`                  |
+| `focus`          | `"emulated"` makes every page behave as if focused, for many pages at once          |
+| `keyboardLayout` | the layout typing uses: `us` (the default), `uk`, `de`, `fr`, `es`, `it`           |
+| `eventLog`       | how many past events of each kind `history` keeps per page; 100 unless set           |
+
+Emulation is checked, not best-effort. A field the browser can't apply, such as touch on Firefox, fails with
+`Unsupported` naming it, before anything is applied. `browser.capabilities` says in advance what a backend can do.
+
+## Settings for a while
+
+The same settings can also apply to just part of a program, on a page or a context. `emulate` and `grant` are
+removed when their scope closes, and what they changed goes back to what it was:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const offlineBanner = Effect.fn("offlineBanner")(function*(page: Page.Page) {
+  yield* Effect.scoped(Effect.gen(function*() {
+    yield* page.emulate({ network: "offline" })
+    yield* page.getByText("You're offline").pipe(Expect.toBeVisible)
+  }))
+  yield* page.getByText("You're offline").pipe(Expect.toBeHidden)
+})
+```
+
+## Logging in once
+
+A context's storage state is its cookies and the `localStorage` and IndexedDB of each origin it has open.
+`exportStorageState` reads it, and the `storageState` option starts a new context from it, already signed in. So a
+suite logs in once and every test after starts from there:
+
+```ts
+import { Browser, Expect, StorageState } from "@usestrider/browser"
+import { Config, Effect, FileSystem, Schema } from "effect"
+
+const saveLogin = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage()
+  yield* page.goto("https://app.example.com/login")
+  yield* page.getByLabel("Email").fill("ada@example.com")
+  yield* page.getByLabel("Password").fill(yield* Config.Redacted("APP_PASSWORD"))
+  yield* page.getByRole("button", { name: "Sign in" }).click()
+  yield* page.getByText("Welcome").pipe(Expect.toBeVisible)
+  const state = yield* page.context.exportStorageState
+  const json = yield* Schema.encodeEffect(StorageState.Json)(state)
+  const fs = yield* FileSystem.FileSystem
+  yield* fs.writeFileString("auth/app.json", json, { mode: 0o600 })
+}))
+
+const signedIn = Effect.gen(function*() {
+  const fs = yield* FileSystem.FileSystem
+  const json = yield* fs.readFileString("auth/app.json")
+  const storageState = yield* Schema.decodeEffect(StorageState.Json)(json)
+  return yield* Browser.newPage({ storageState })
+})
+```
+
+In memory, the state's secrets are `Redacted`, so logging it shows nothing. Encoding it with `StorageState.Json` is
+the deliberate step that writes them out in full, because that's what a saved login is for; keep the file out of
+version control. Storage state doesn't carry `sessionStorage`, service workers or logins bound to a device. A site
+that needs those needs a profile directory of your own, `Chromium.layer({ executablePath, userDataDir })`. A
+profile's logins are in the browser's default context, not in the fresh one `Browser.newPage()` makes, so open the
+page there: `(yield* browser.defaultContext.control).newPage`.
+
+## Cookies and storage
+
+`context.cookies` reads and changes a context's cookies, and `page.localStorage` and `page.sessionStorage` the
+current origin's storage:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect, Option } from "effect"
+
+const betaFlag = Effect.fn("betaFlag")(function*(page: Page.Page) {
+  yield* page.context.cookies.set({
+    name: "beta",
+    value: "1",
+    scope: { _tag: "Url", url: "https://app.example.com" }
+  })
+  const sent = yield* page.context.cookies.listFor("https://app.example.com/api")
+  yield* page.localStorage.set("theme", "dark")
+  const theme = yield* page.localStorage.get("theme")
+  return { cookies: sent.length, theme: Option.getOrElse(theme, () => "light") }
+})
+```
+
+`listFor` gives the cookies a request to that URL would send. Cookie values are `Redacted`. Setting a cookie is a
+change, like a click: a scope closing doesn't undo it.
+
+## Attaching to a browser
+
+`layerConnect` attaches to a browser something else started, such as a Chrome run with
+`--remote-debugging-port=9222`, and leaves it running when the program ends:
+
+```ts
+import { NodeSocket } from "@effect/platform-node"
+import { Browser } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Effect, Layer } from "effect"
+
+const Attached = Chromium.layerConnect("http://127.0.0.1:9222").pipe(
+  Layer.provide(NodeSocket.layerWebSocketConstructor)
+)
+
+const firstHeading = Effect.scoped(Effect.gen(function*() {
+  const browser = yield* Browser.Browser
+  const [first] = yield* browser.pages
+  if (first === undefined) return "no tabs"
+  const tab = yield* first.inspect
+  return yield* tab.getByRole("heading").first.readText
+})).pipe(Effect.provide(Attached))
+```
+
+`Firefox.layerConnect` takes Firefox's remote agent, `Bidi.layerConnect` any WebDriver BiDi endpoint, and
+`WebKit.layerAttach` the inspector server of a WebKitGTK or WPE browser, which can be read and navigated but not
+typed into.
+
+## Access is typed
+
+A page is one of three types, each with more than the last:
+
+| Type                | Can                                                                            |
+| ------------------- | ------------------------------------------------------------------------------ |
+| `Page.ObservedPage` | report its state and events                                                    |
+| `Page.ReadonlyPage` | also locate and read, take snapshots and screenshots, and evaluate in isolation |
+| `Page.Page`         | also act, navigate, evaluate among the page's own scripts, and declare routes    |
+
+A page you opened is a `Page` for its whole life. A page you didn't open, such as an attached browser's tab or the
+first tab a launched browser starts with, is only observed: you can watch its state and events. `inspect` gives you
+read access to it and `control` full access, each for as long as the scope it's called in lasts:
+
+```ts
+import { Browser, Route } from "@usestrider/browser"
+import { Console, Effect } from "effect"
+
+const blockAnalytics = Effect.scoped(Effect.gen(function*() {
+  const [, second] = yield* (yield* Browser.Browser).pages
+  if (second === undefined) return
+  const tab = yield* second.control
+  const blocked = yield* tab.route(
+    "**/analytics/**",
+    () => Effect.succeed(Route.abort())
+  )
+  yield* tab.getByRole("button", { name: "Refresh" }).click()
+  yield* Console.log(`blocked ${yield* blocked.hits} analytics calls`)
+}))
+```
+
+When the scope closes, its access ends: the route is removed, the tab stays open, and using `tab` again fails with
+`TargetGone`, whose reason is `AccessReleased`. Calling an action on a page you only inspected is a compile error,
+so a helper that only reads should take a `Page.ReadonlyPage`; it then works with either.

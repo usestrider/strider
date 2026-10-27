@@ -83,7 +83,8 @@ const subscription = (
   })
 
 /**
- * Subscribes to uncaught exceptions and returns the first match, latched.
+ * Subscribes to uncaught exceptions and returns the wait: an effect that gives the first match, the same each
+ * time it runs.
  *
  * @stability unstable
  * @category subscriptions
@@ -125,7 +126,7 @@ export const stream = <PE = never, PR = never>(
   )
 
 /**
- * Reads the uncaught exceptions a log retained; never waits.
+ * Reads the uncaught exceptions still in the event log; never waits.
  *
  * **Example** (Errors so far, and whether the log dropped any)
  *

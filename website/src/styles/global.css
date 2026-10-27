@@ -1,0 +1,604 @@
+/*
+ * The site's design, after O'Reilly's engineering books: an inked animal, paper and ink, and one band color per page.
+ * The only other fills are engine labels, and they mean something. Structure is drawn with 1px rules, never with
+ * shadows, rounded cards or tints.
+ *
+ * Type is set for reading on a screen: EB Garamond for titles, where its cover feel carries; Source Serif 4 for
+ * prose; IBM Plex Sans for navigation and labels; IBM Plex Mono for code. Sizes are on a 16px root; prose runs at
+ * 18px on a 1.65 leading.
+ *
+ * The band is the color of the browser the page is read in (BaseLayout sets `data-engine`), and Chromium blue
+ * otherwise: each engine's signature hue, darkened until white type passes 4.5:1 on it and the color itself passes
+ * on paper. The site is light only for now; the night palette below waits for a toggle to set `.dark`.
+ */
+@import "tailwindcss";
+
+@plugin "@tailwindcss/typography";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --paper: #fbfaf6;
+  --ground: #f1eee6;
+  --ink: #1a1a1a;
+  --labels: #5a5750;
+  --hairline: #e2ded3;
+  --engine-chromium: #1558c8;
+  --engine-firefox: #c43e0a;
+  --engine-webkit: #0b7a8a;
+  --engine-edge: #117a65;
+  --engine-opera: #b51a2b;
+  --band: var(--engine-chromium);
+  /* What the band lifts to as text on night paper, the smallest lift to 4.5:1 */
+  --band-lift: #5988d8;
+  --band-text: var(--band);
+  --warning: #b51a2b;
+  --warning-text: var(--warning);
+  --display: var(--font-garamond), Garamond, Georgia, serif;
+  --serif: var(--font-source-serif), Georgia, serif;
+  --sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --mono: var(--font-plex), ui-monospace, SFMono-Regular, monospace;
+  color-scheme: light;
+}
+
+:root[data-engine="firefox"] {
+  --band: var(--engine-firefox);
+  --band-lift: #d26a42;
+}
+
+:root[data-engine="webkit"] {
+  --band: var(--engine-webkit);
+  --band-lift: #3c95a1;
+}
+
+:root[data-engine="edge"] {
+  --band: var(--engine-edge);
+  --band-lift: #439685;
+}
+
+:root[data-engine="opera"] {
+  --band: var(--engine-opera);
+  --band-lift: #cf6a75;
+}
+
+/* Night paper: ink and paper swap, the band keeps its color as a fill and is lifted as text */
+:root.dark {
+  --paper: #201f1c;
+  --ground: #2a2925;
+  --ink: #f2eee6;
+  --labels: #aca69a;
+  --hairline: #3b3934;
+  --band-text: var(--band-lift);
+  --warning-text: #cf6a75;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-ground: var(--ground);
+  --color-ink: var(--ink);
+  --color-labels: var(--labels);
+  --color-hairline: var(--hairline);
+  --color-band: var(--band);
+  --color-band-text: var(--band-text);
+  --font-display: var(--display);
+  --font-serif: var(--serif);
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+}
+
+html {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.6;
+  scroll-padding-top: 1.5rem;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+}
+
+/* In Tailwind's components layer, so a utility on the same element wins */
+@layer components {
+  /* Small capitals for structure: CHAPTER 1 · § 1.1, ON THIS PAGE */
+  .label {
+    font-family: var(--sans);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    line-height: 1.5;
+    text-transform: uppercase;
+    color: var(--labels);
+  }
+
+  .nav-link {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink);
+    padding-block: 0.2rem;
+    border-bottom: 2px solid transparent;
+  }
+
+  .nav-link[aria-current="page"] {
+    color: var(--band-text);
+    border-bottom-color: var(--band);
+  }
+
+  /* A version: v0.4.2 */
+  .badge {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    border: 1px solid var(--ink);
+    padding: 0.15rem 0.5rem;
+  }
+
+  /* UNSTABLE, DEPRECATED: ink filled */
+  .tag {
+    font-family: var(--sans);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    background: var(--ink);
+    color: var(--paper);
+    padding: 0.15rem 0.45rem;
+  }
+
+  /* A declaration's kind, in the rail and beside its name: I, T, C, V, f */
+  .kind {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.05rem;
+    height: 1.05rem;
+    flex-shrink: 0;
+    border: 1px solid var(--hairline);
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    color: var(--labels);
+  }
+
+  /* An engine's label, the only fill besides the band */
+  .engine {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #fff;
+    padding: 0.15rem 0.4rem;
+  }
+
+  .engine-chromium {
+    background: var(--engine-chromium);
+  }
+
+  .engine-firefox {
+    background: var(--engine-firefox);
+  }
+
+  .engine-webkit {
+    background: var(--engine-webkit);
+  }
+
+  .btn {
+    display: inline-block;
+    font-family: var(--sans);
+    font-size: 0.95rem;
+    padding: 0.6rem 1.2rem;
+    border: 1px solid var(--ink);
+    color: var(--ink);
+  }
+
+  /* Begin here → */
+  .more {
+    color: var(--band-text);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  /* A title's deck, upright: italics are kept for emphasis in prose */
+  .deck {
+    font-family: var(--serif);
+    color: var(--labels);
+  }
+}
+
+/* ── Navigation ─────────────────────────────────────────────────────────────── */
+
+/* A sidebar's link; the current one is in the band's color, marked by a rule at its left */
+.side-link {
+  display: block;
+  padding: 0.28rem 0.6rem;
+  margin-left: -0.6rem;
+  border-left: 2px solid transparent;
+  color: var(--ink);
+  line-height: 1.35;
+}
+
+.side-link:hover {
+  border-left-color: var(--hairline);
+}
+
+.side-link[aria-current="page"] {
+  border-left-color: var(--band);
+  color: var(--band-text);
+  font-weight: 500;
+}
+
+.side-filter {
+  width: 100%;
+  border: 1px solid var(--hairline);
+  background: var(--paper);
+  padding: 0.4rem 0.6rem;
+  font-family: var(--sans);
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+
+.side-filter:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
+/* The rail: a page's categories, and their declarations */
+.rail-link {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.12rem 0;
+  color: var(--ink);
+}
+
+.rail-link:hover,
+.rail-link[aria-current="true"] {
+  color: var(--band-text);
+}
+
+.rail-link[aria-current="true"] .kind {
+  border-color: var(--band);
+  color: var(--band-text);
+}
+
+/* ── Prose ──────────────────────────────────────────────────────────────────── */
+
+.prose {
+  --tw-prose-body: var(--ink);
+  --tw-prose-headings: var(--ink);
+  --tw-prose-lead: var(--labels);
+  --tw-prose-links: var(--band-text);
+  --tw-prose-bold: var(--ink);
+  --tw-prose-counters: var(--labels);
+  --tw-prose-bullets: var(--labels);
+  --tw-prose-hr: var(--hairline);
+  --tw-prose-quotes: var(--ink);
+  --tw-prose-quote-borders: var(--hairline);
+  --tw-prose-captions: var(--labels);
+  --tw-prose-code: var(--ink);
+  --tw-prose-th-borders: var(--ink);
+  --tw-prose-td-borders: var(--hairline);
+  font-family: var(--serif);
+  font-size: 1.125rem;
+  line-height: 1.65;
+  max-width: none;
+}
+
+.prose :where(h1, h2, h3, h4):not(:where([class~="not-prose"] *)) {
+  font-family: var(--display);
+  font-weight: 500;
+}
+
+.prose :where(h2):not(:where([class~="not-prose"] *)) {
+  font-size: 1.75rem;
+  margin-top: 2.2em;
+}
+
+.prose :where(a):not(:where([class~="not-prose"] *)) {
+  text-underline-offset: 3px;
+  font-weight: inherit;
+}
+
+/* Inline code on code ground, without the backticks the typography plugin adds */
+.prose :where(code):not(:where(pre *, [class~="not-prose"] *)) {
+  font-family: var(--mono);
+  font-size: 0.82em;
+  font-weight: 400;
+  background: var(--ground);
+  padding: 0.1em 0.35em;
+}
+
+.prose :where(code):not(:where(pre *))::before,
+.prose :where(code):not(:where(pre *))::after {
+  content: none;
+}
+
+.prose :where(table):not(:where([class~="not-prose"] *)) {
+  font-family: var(--sans);
+  font-size: 0.9rem;
+}
+
+.prose :where(thead th):not(:where([class~="not-prose"] *)) {
+  font-weight: 600;
+}
+
+.prose :where(caption):not(:where([class~="not-prose"] *)) {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--labels);
+  text-align: left;
+  caption-side: top;
+  margin-bottom: 0.75rem;
+}
+
+/* ── Capabilities ───────────────────────────────────────────────────────────── */
+
+/* The browsers side by side: a sans table drawn in 1px rules, a group's row a label, and a status that isn't
+   "Yes" set apart by weight and color, never a fill */
+.capabilities {
+  margin-block: 2rem;
+  overflow-x: auto;
+  font-family: var(--sans);
+  font-size: 0.86rem;
+}
+
+.capabilities table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.capabilities th,
+.capabilities td {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--hairline);
+  text-align: left;
+  vertical-align: top;
+}
+
+.capabilities thead th {
+  border-bottom: 1px solid var(--ink);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.capabilities tbody th[scope="row"] {
+  font-weight: 400;
+}
+
+.capabilities tr.group th {
+  padding-top: 1.4rem;
+  font-family: var(--sans);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--labels);
+  border-bottom: 1px solid var(--ink);
+}
+
+.capabilities code,
+.browser-limits code {
+  font-family: var(--mono);
+  font-size: 0.82em;
+  background: var(--ground);
+  padding: 0.05em 0.3em;
+}
+
+.capabilities td {
+  white-space: nowrap;
+}
+
+.capabilities td[data-status="unsupported"],
+.capabilities td[data-status="absent"] {
+  color: var(--labels);
+}
+
+.capabilities td[data-status="partial"],
+.capabilities td[data-status="unknown"] {
+  font-weight: 600;
+}
+
+.capabilities td[title] {
+  cursor: help;
+  text-decoration: underline dotted var(--labels);
+  text-underline-offset: 3px;
+}
+
+.capabilities .attached {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--labels);
+  font-weight: 400;
+}
+
+/* One browser's limits: a capability, its status, and the adapter's reason */
+.browser-limits {
+  margin-block: 1.5rem 2rem;
+}
+
+.browser-limits > .label {
+  margin-top: 1.4rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--ink);
+}
+
+.prose .browser-limits ul {
+  list-style: none;
+  padding-left: 0;
+  margin-block: 0;
+}
+
+.prose .browser-limits li {
+  padding: 0.55rem 0;
+  margin: 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.browser-limits li strong {
+  font-weight: 600;
+}
+
+.browser-limits .status {
+  margin-left: 0.6rem;
+  font-family: var(--sans);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--labels);
+}
+
+.browser-limits .why {
+  display: block;
+  color: var(--labels);
+}
+
+/* ── Callouts ───────────────────────────────────────────────────────────────── */
+
+/* A framed box with a label; a warning swaps the label's color, nothing else */
+.callout {
+  border: 1px solid var(--ink);
+  padding: 0.9rem 1.2rem;
+  margin-block: 1.5rem;
+}
+
+.callout > .label {
+  color: var(--band-text);
+  margin-bottom: 0.3rem;
+}
+
+.callout-warning > .label,
+.callout-caution > .label {
+  color: var(--warning-text);
+}
+
+.callout > :last-child {
+  margin-bottom: 0;
+}
+
+/* The engraving is ink on white: multiplied, its white takes the paper's color; on night paper it's printed
+   inverted, its lines light, as ink and paper swap. Its white is a level or two short of pure, and brightening it
+   2% first leaves no edge where the image ends. */
+.engraving {
+  filter: brightness(1.02);
+  mix-blend-mode: multiply;
+}
+
+.dark .engraving {
+  filter: brightness(1.02) invert(1);
+  mix-blend-mode: screen;
+}
+
+/* ── Code ───────────────────────────────────────────────────────────────────── */
+
+.expressive-code {
+  margin-block: 1.25rem;
+}
+
+/* The title bar: the file on the left, the language on the right (ec.config.mjs) */
+.expressive-code .frame figcaption.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.expressive-code .frame figcaption.header .language {
+  color: var(--labels);
+  padding-inline-end: 1rem;
+}
+
+.expressive-code .frame figcaption.header .title {
+  font-family: var(--mono);
+}
+
+/* A terminal's title sits at the left, as a file's does */
+:root .expressive-code .frame.is-terminal .header {
+  justify-content: flex-start;
+  padding-inline: 1rem;
+}
+
+/* Copy is a word, not an icon: in a terminal's title bar, and at the foot of other code, shown on hover */
+:root .expressive-code .copy button {
+  width: auto;
+  height: auto;
+  padding: 0.15rem 0.45rem;
+  background: transparent;
+  border-radius: 0;
+}
+
+:root .expressive-code .copy button div {
+  display: none;
+}
+
+:root .expressive-code .copy button::before {
+  border: none;
+}
+
+:root .expressive-code .copy button::after {
+  content: "Copy";
+  position: static;
+  margin: 0;
+  background: none;
+  -webkit-mask-image: none;
+  mask-image: none;
+  font-family: var(--sans);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--labels);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+:root .expressive-code .frame.is-terminal .copy button {
+  opacity: 1;
+}
+
+:root .expressive-code .frame:not(.is-terminal) .copy {
+  inset-block-start: auto;
+  inset-block-end: 0.35rem;
+}
+
+:root .expressive-code .copy .feedback {
+  border-radius: 0;
+}
+
+/* In the reference, code is framed in hairline, so a page of a hundred declarations isn't a page of black boxes */
+:root .reference .expressive-code {
+  --ec-brdCol: var(--hairline);
+}
+
+/* A signature: highlighted on code ground, as code blocks are (features/reference/html.ts) */
+pre.signature {
+  margin: 0.75rem 0;
+  padding: 0.85rem 1.1rem;
+  overflow-x: auto;
+  border: 1px solid var(--hairline);
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.84rem;
+  line-height: 1.6;
+}
+
+pre.signature a {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-underline-offset: 2px;
+}
+
+pre.signature a:hover {
+  text-decoration-color: currentColor;
+}
+
+/* A member's signature sits closer to its name, without a frame */
+.member pre.signature {
+  margin: 0.35rem 0 0.5rem;
+  padding: 0.5rem 0.8rem;
+  border: none;
+  font-size: 0.8rem;
+}

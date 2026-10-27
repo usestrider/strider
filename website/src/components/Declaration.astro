@@ -1,0 +1,102 @@
+---
+// One declaration of a module, ruled off from the next: its name and kind, its summary and signature, its JSDoc
+// sections and examples, its `@see` links, then the value that shares its name (a type's Schema, a service's tag),
+// folded to a line, and its members, as a compact list.
+import { Code } from "astro-expressive-code/components"
+import type { DeclarationView } from "../features/reference/view.ts"
+import Blocks from "./Blocks.astro"
+
+interface Props {
+  readonly declaration: DeclarationView
+  /** A member is set smaller and closer, without a rule */
+  readonly member?: boolean
+}
+
+const { declaration: d, member = false } = Astro.props
+const sections = [
+  ["When to use", d.description.whenToUse],
+  ["Details", d.description.details],
+  ["Gotchas", d.description.gotchas]
+] as const
+const companionLabel = (c: DeclarationView) =>
+  c.category === "schemas" ? "Schema" : c.category === "tags" ? "Tag" : c.kind
+// The companion's summary as a line of text, for its folded summary
+const firstLine = (c: DeclarationView) => {
+  const html = c.description.summary.find((block) => block._tag === "Html")
+  return html === undefined ? "" : html.html.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim()
+}
+---
+
+<section class:list={[member ? "member py-4" : "border-t border-hairline pt-9 pb-4"]} id={d.anchor}>
+  <header class="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+    {
+      member
+        ? <h4 class="font-mono text-[0.95rem] font-medium"><a href={`#${d.anchor}`}>{d.name}</a></h4>
+        : <h3 class="font-mono text-[1.2rem] font-medium"><a href={`#${d.anchor}`}>{d.name}</a></h3>
+    }
+    <span class="label !normal-case !tracking-normal">{d.kind}</span>
+    {d.stability !== undefined && <span class="tag">{d.stability}</span>}
+    {d.deprecated !== undefined && <span class="tag">deprecated</span>}
+    <span class="ml-auto flex items-baseline gap-4 font-sans text-[0.78rem] text-labels">
+      {d.since !== undefined && <span>Since {d.since}</span>}
+      {d.sourceUrl !== undefined && <a class="underline underline-offset-2" href={d.sourceUrl}>Source</a>}
+    </span>
+  </header>
+  <Blocks blocks={d.description.summary} />
+  {d.signatures.map((signature) => <Fragment set:html={signature} />)}
+  {
+    d.defaultValue !== undefined && (
+      <p class="mt-2 font-sans text-[0.9rem]">
+        <span class="label mr-2">Default</span>
+        <code class="bg-ground px-1.5 py-0.5 font-mono text-[0.8rem]">{d.defaultValue}</code>
+      </p>
+    )
+  }
+  {
+    d.deprecated !== undefined && d.deprecated !== "" && (
+      <p class="mt-2 font-sans text-[0.9rem]"><span class="label mr-2">Deprecated</span> {d.deprecated}</p>
+    )
+  }
+  {
+    sections.map(([title, blocks]) =>
+      blocks.length > 0 && (
+        <>
+          <p class="label mt-6 mb-1">{title}</p>
+          <Blocks blocks={blocks} />
+        </>
+      )
+    )
+  }
+  {d.examples.map((example) => <Code code={example.code} lang="ts" title={example.title ?? "Example"} />)}
+  {
+    d.see.length > 0 && (
+      <>
+        <p class="label mt-6 mb-1">See</p>
+        <ul class="prose !text-[1rem]">{d.see.map((see) => <li set:html={see} />)}</ul>
+      </>
+    )
+  }
+  {
+    d.companion !== undefined && (
+      <details class="mt-4 border border-hairline px-4 py-2.5">
+        <summary class="flex cursor-pointer items-baseline gap-3 font-sans text-[0.9rem]">
+          <span class="label">{companionLabel(d.companion)}</span>
+          <span class="font-mono text-[0.82rem] whitespace-nowrap">{d.companion.kind} {d.companion.name}</span>
+          <span class="min-w-0 truncate text-labels">{firstLine(d.companion)}</span>
+        </summary>
+        {d.companion.signatures.map((signature) => <Fragment set:html={signature} />)}
+        {d.companion.examples.map((example) => <Code code={example.code} lang="ts" title={example.title ?? "Example"} />)}
+      </details>
+    )
+  }
+  {
+    d.members.length > 0 && (
+      <div class="mt-6">
+        <p class="label mb-1">Members</p>
+        <div class="divide-y divide-hairline border-y border-hairline">
+          {d.members.map((m) => <Astro.self declaration={m} member />)}
+        </div>
+      </div>
+    )
+  }
+</section>

@@ -1,9 +1,9 @@
 /**
- * File paths, branded by whose machine they are on.
+ * File paths, branded by which machine they're on.
  *
- * When the browser runs elsewhere (a remote grid, a container), a path means different things on each side.
- * `Local` is on the machine running your program; `Remote` is on the browser's host. The two are never
- * interchangeable, which is why `FileInput.local` and `FileInput.remote` are separate constructors.
+ * When the browser runs elsewhere, such as on a remote grid or in a container, a path means different things on
+ * each side. `Local` is on the machine running your program, and `Remote` is on the browser's machine. The two are
+ * never interchangeable, which is why `FileInput.local` and `FileInput.remote` are separate constructors.
  *
  * @stability unstable
  * @since 0.1.0

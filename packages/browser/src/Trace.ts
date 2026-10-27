@@ -1,10 +1,10 @@
 /**
- * Trace recordings, exported in the format Playwright's trace viewer reads.
+ * Recordings of what happened on a page, exported as traces that Playwright's trace viewer opens.
  *
- * Spans are the record: every operation is a span, so any installed tracer (OTLP through
- * `effect/observability`, or `effect/devtools`) already receives the trace. `record` adds what spans can't
- * carry, page-side captures as attachments, and the export. Exports cross a persistence boundary, so they are
- * explicit and redacted. Archives are written with Effect's Zip module.
+ * Spans are the record: every operation is a span, so any tracer you install (OTLP through `effect/observability`,
+ * or `effect/devtools`) already receives it. `record` adds what spans can't carry, captures from the page such as
+ * screenshots, and the export. An export leaves the process, so it's explicit and redacted. Archives are written
+ * with Effect's `Zip` module.
  *
  * @stability experimental
  * @since 0.1.0
@@ -39,7 +39,7 @@ import type * as UserContext from "./UserContext.ts"
  */
 export interface Options {
   /**
-   * A screenshot after each action.
+   * A screenshot after each action and navigation.
    *
    * @default "off"
    */
@@ -81,29 +81,29 @@ export interface Recording extends Declaration.Registration {
 }
 
 /**
- * Starts recording a trace of a page or context while its scope lives.
+ * Starts recording a trace of a page or context, until `remove` or until the scope it runs in closes.
  *
  * **Details**
  *
- * Each library operation on the target is a step, with its name, its span's attributes as params, its
- * duration and its error. A span of the caller's that encloses one, such as an `Effect.fn`'s, is a step too,
- * spanning the operations recorded inside it, so the trace nests as the program did. Console messages and
- * uncaught exceptions are recorded; `screenshots: "perAction"` adds one after each action and navigation;
- * `screencast` adds frames, the browser's own where `Capability.Screencast` has them, Firefox's video
- * (`Capability.Video`), or polled screenshots; `network` adds the requests a `Har` would record, with their
- * bodies; `domSnapshots` adds a snapshot of each frame of the page before and after each action and navigation,
- * which the viewer renders with the recorded network, its target highlighted. Times come from the library's
- * clock, never Effect's, so a trace made under `TestClock` still has a timeline. `exportTrace` writes a zip that
- * trace.playwright.dev opens (format 9), with params redacted under `Diagnostics.CurrentPreset`, and under the
- * strict preset, the values of password inputs and of fields filled with `Redacted` text in snapshots too.
+ * Each Strider operation on the target is a step, with its name, its span's attributes as params, its duration
+ * and its error. A span of the caller's that encloses one, such as an `Effect.fn`'s, is a step too, spanning the
+ * operations recorded inside it, so the trace nests as the program did. Console messages and uncaught exceptions
+ * are recorded. `screenshots: "perAction"` adds a screenshot after each action and navigation. `screencast` adds
+ * frames: the browser's own where `Capability.Screencast` has them, Firefox's video (`Capability.Video`), or
+ * polled screenshots. `network` adds the requests a `Har` would record, with their bodies. `domSnapshots` adds a
+ * snapshot of each frame of the page before and after each action and navigation, which the viewer renders with
+ * the recorded network and the action's target highlighted. Times come from Strider's clock, never Effect's, so
+ * a trace made under `TestClock` still has a timeline. `exportTrace` writes a zip that trace.playwright.dev opens
+ * (format 9), with params redacted under `Diagnostics.CurrentPreset`; under the strict preset, so are the values
+ * of password inputs, and of fields filled with `Redacted` text, in snapshots.
  *
  * **Gotchas**
  *
- * `domSnapshots` without `network: true` is `InvalidInput`: a snapshot's images, fonts and cross-origin styles
- * come from the network recording. Snapshots are captured in the engine's world, apart from the page's, which
- * keeps no hooks in the page: each capture reads every stylesheet again. The viewer draws a snapshot's canvas
- * from the action's screenshot, so canvases need `screenshots: "perAction"`. Firefox's video ends at the first
- * `exportTrace`, which reads its file.
+ * `domSnapshots` without `network: true` fails with `InvalidInput`: a snapshot's images, fonts and cross-origin
+ * styles come from the network recording. Snapshots are captured in an isolated world of Strider's, which the
+ * page can't see, and nothing hooks the page's styles, so each capture reads every stylesheet again. The viewer
+ * draws a snapshot's canvas from the action's screenshot, so canvases need `screenshots: "perAction"`. Firefox's
+ * video ends at the first `exportTrace`, which reads its file.
  *
  * **Example** (A trace of a failing checkout)
  *

@@ -1,0 +1,56 @@
+---
+// Every backend's capabilities side by side, from the adapters' own tables (src/features/browsers/capabilities.ts).
+// A browser Strider launched is shown; where one it attached to differs, the cell says so on a second line.
+//
+//   <Capabilities />
+import { allGroups, backends, runs, statusLabel, type Entry } from "../features/browsers/capabilities.ts"
+
+const all = backends()
+const shown = all.map((backend) => ({
+  backend,
+  main: new Map((backend.launched ?? backend.attached ?? []).map((entry) => [entry.name, entry])),
+  attached: backend.launched === null || backend.attached === null
+    ? undefined
+    : new Map(backend.attached.map((entry) => [entry.name, entry]))
+}))
+const title = (entry: Entry | undefined) => entry?.limitations.join(" ") || undefined
+---
+
+<div class="capabilities not-prose">
+  <table>
+    <thead>
+      <tr>
+        <th scope="col">Capability</th>
+        {shown.map(({ backend }) => <th scope="col">{backend.label}</th>)}
+      </tr>
+    </thead>
+    {
+      allGroups(all).map((group) => (
+        <tbody>
+          <tr class="group">
+            <th scope="colgroup" colspan={shown.length + 1}>{group.label}</th>
+          </tr>
+          {Object.entries(group.names).map(([name, label]) => (
+            <tr>
+              <th scope="row">
+                {runs(label).map((run, i) => (i % 2 === 1 ? <code>{run}</code> : run))}
+              </th>
+              {shown.map(({ main, attached }) => {
+                const entry = main.get(name)
+                const other = attached?.get(name)
+                return (
+                  <td data-status={entry?.status ?? "absent"} title={title(entry)}>
+                    {entry === undefined ? "—" : statusLabel[entry.status]}
+                    {other !== undefined && entry !== undefined && other.status !== entry.status && (
+                      <span class="attached" title={title(other)}>attached: {statusLabel[other.status]}</span>
+                    )}
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      ))
+    }
+  </table>
+</div>

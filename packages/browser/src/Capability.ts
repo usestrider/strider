@@ -1,10 +1,9 @@
 /**
- * Specialized features that not every backend offers, reached through a handle bound to one page.
+ * Features that only some backends have, each reached through a handle bound to one page.
  *
- * A capability handle is acquired from a page (`page.capability(Capability.Screencast)`), so a feature from one
- * browser can't authorize an operation on another. A backend without the feature fails with `Unsupported`,
- * naming the backends that have it. `Browser.capabilities` lists what the connected browser supports, with
- * the evidence for each entry.
+ * A capability handle is acquired from a page (`page.capability(Capability.Screencast)`), so a feature of one
+ * browser can't be used on another. A backend without the feature fails with `Unsupported`, naming the backends
+ * that have it. `browser.capabilities` lists what the connected browser supports, with each entry's `evidence`.
  *
  * @stability unstable
  * @since 0.1.0
@@ -24,7 +23,7 @@ import type * as Target from "./Target.ts"
 const TypeId = "~@usestrider/browser/Capability"
 
 /**
- * A specialized feature, whose handle has type `H`.
+ * A feature that only some backends have, whose handle has type `H`.
  *
  * @stability unstable
  * @category models
@@ -94,7 +93,7 @@ export interface ScreencastFrame {
  */
 export interface ScreencastControl {
   /**
-   * Frames from now on; subscribed when the capability is acquired.
+   * The frames rendered from when the capability was acquired.
    */
   readonly frames: Stream.Stream<ScreencastFrame, Target.TargetGone>
 }
@@ -114,7 +113,7 @@ export interface VideoRecording {
 }
 
 /**
- * The browser's own accessibility tree.
+ * The browser's own accessibility tree; Chromium only.
  *
  * @stability unstable
  * @category constants
@@ -123,7 +122,7 @@ export interface VideoRecording {
 export const AxTree: Capability<AxTreeReader> = make("AxTree")
 
 /**
- * Native screencast frames; CDP and patched WebKit.
+ * The browser's own screencast frames; Chromium and Playwright's WebKit builds.
  *
  * @stability unstable
  * @category constants
@@ -132,18 +131,19 @@ export const AxTree: Capability<AxTreeReader> = make("AxTree")
 export const Screencast: Capability<ScreencastControl> = make("Screencast")
 
 /**
- * A video file of the page, recorded by the browser; Firefox's.
+ * A video file of the page, recorded by Firefox.
  *
  * **Details**
  *
  * Firefox writes a WebM file while the capability's scope lives, into the directory the page's context
- * downloads to, so the file goes with a context's temporary downloads unless they go to a directory of the
- * caller's (`UserContext.Options.downloads`).
+ * downloads to. So the file is removed with the context's temporary downloads, unless
+ * `UserContext.Options.downloads` names a directory of yours.
  *
  * **Gotchas**
  *
- * `Unsupported` on Chromium and WebKit, which stream frames rather than write a file (`Screencast`), and where
- * Firefox wasn't launched by the program, or its context denies downloads: the file would be out of reach.
+ * It fails with `Unsupported` on Chromium and WebKit, which stream frames (`Screencast`) rather than write a
+ * file. It fails on Firefox too when Strider didn't launch it, or when the page's context denies downloads,
+ * because the file would be out of reach.
  *
  * **Example** (Recording a checkout)
  *

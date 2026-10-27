@@ -1,0 +1,205 @@
+---
+title: Chromium
+description: Chromium, Chrome and Edge over the Chrome DevTools Protocol, the backend that does the most. How a launch is set up, what attaching changes, and the Chromium behaviours worth knowing.
+order: 2
+---
+
+## Chromium and CDP
+
+The Chromium backend drives Chromium, Google Chrome and Microsoft Edge over the Chrome DevTools Protocol, the
+protocol Chrome's own developer tools use. It reaches nearly everything Strider offers, from network throttling to
+the browser's own accessibility tree, which makes it the place to start and the backend the others are measured
+against.
+
+Strider's protocol code is generated from the protocol Chrome 155 speaks, and its tests run against Chromium
+155.0.8059.79. Nothing checks a browser's version at launch, so a nearby Chrome or Edge works the same as far as
+the protocol hasn't changed; other versions aren't tested.
+
+## Launching
+
+`Chromium.layer` runs the executable you name and talks to it over a pipe, a pair of file descriptors, so it needs
+nothing but the services every launch does, and no message is too large for it:
+
+```ts
+import { NodeServices } from "@effect/platform-node"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Config, Layer } from "effect"
+
+const ChromiumLive = Chromium.layerConfig({
+  executablePath: Config.String("CHROMIUM_PATH")
+}).pipe(Layer.provide(NodeServices.layer))
+```
+
+The browser starts with the launch profile's switches, `--headless` unless you say otherwise, your `args`,
+`--remote-debugging-pipe`, a temporary profile in `--user-data-dir`, and `about:blank`. Don't put a URL in `args`:
+headless Chromium accepts only the one page it starts with. When the layer's scope closes, the pipe closes, the
+browser exits, and its profile is deleted.
+
+`LaunchProfile.automation`, the default, turns off what a person's browser does on its own: the first-run page,
+the default-browser check, sync, component updates, background networking, translation and the like. It changes
+nothing a page can observe. `LaunchProfile.concurrent` also stops Chromium from slowing down background pages'
+timers and rendering, which pages can notice, so it's opt-in. `LaunchProfile.stock` adds nothing.
+
+Headless Chromium's user agent says `HeadlessChrome`, and pages can read it. To look like a person's browser, set
+`emulation: { userAgent }` on the context.
+
+**A profile of your own.** With `userDataDir`, the browser uses a profile directory you keep, which Strider never
+deletes. Its cookies and logins are in the browser's default context, and `Browser.newPage()` makes a fresh
+context, so open a page in the default one instead:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const signedIn = Effect.gen(function*() {
+  const browser = yield* Browser.Browser
+  const everyday = yield* browser.defaultContext.control
+  return yield* everyday.newPage
+})
+```
+
+## Background pages and popups
+
+Chromium renders nothing for a page that isn't in front of its window. An action waits for the page to render
+before it acts, so an action on such a page would wait forever. Strider opens each page in a window of its own, so
+the pages you open never hide each other.
+
+Popups are the exception. When a page opens one, Chromium puts the popup in front of its opener, and the opener
+stops rendering. An action on the opener then times out, with a hint that says so. Bring the opener back with
+`page.activate`, or make the context with `focus: "emulated"`, which keeps every page rendering, and is what you
+want when many pages act at once:
+
+```ts
+import { Browser, Expect, Popup } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const signInWithPopup = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage({ focus: "emulated" })
+  yield* page.goto("https://app.example.com")
+  const popups = yield* Popup.next(page)
+  yield* page.getByRole("button", { name: "Sign in with Example" }).click()
+  const popup = yield* popups
+  yield* popup.getByRole("button", { name: "Allow" }).click()
+  yield* page.getByText("Signed in").pipe(Expect.toBeVisible)
+}))
+```
+
+`focus: "emulated"` makes every page report that it has focus, which is why it isn't the default: a page that
+checks for focus sees it on every page. `LaunchProfile.concurrent` doesn't help here.
+
+## Attaching
+
+Start Chrome with a debugging port, and `Chromium.layerConnect` attaches to it, by its HTTP endpoint or its
+WebSocket:
+
+```sh
+google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug
+```
+
+```ts
+import { NodeSocket } from "@effect/platform-node"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Layer } from "effect"
+
+const Attached = Chromium.layerConnect("http://127.0.0.1:9222").pipe(
+  Layer.provide(NodeSocket.layerWebSocketConstructor)
+)
+```
+
+Recent versions of Chrome won't open a debugging port on your everyday profile, so give the browser a
+`--user-data-dir` of its own. Given the HTTP endpoint, Strider reads the browser's WebSocket from `/json/version`;
+`headers` go with both requests, such as a remote browser's token.
+
+The tabs already open are observed, and `inspect` or `control` gains access to one for a scope. When the program
+ends, the browser and everything Strider didn't create stay as they were; the contexts Strider created go with the
+connection. Several clients can attach to one browser at once.
+
+Some things only apply to contexts Strider creates, so an attached browser's own tabs keep Chromium's behaviour:
+no dialog policy, downloads canceled, no focus emulation. Popups aren't paused when they open, since Chromium can
+pause them only browser-wide and a person's browser isn't Strider's to pause. And a dialog an earlier client left
+open goes unreported, so that page never becomes ready: `inspect` fails, with a hint saying a dialog may be open.
+
+## What Chromium can't do
+
+Generated from the backend's capability list: each entry is something Chromium lacks, does only partly or can't
+promise, with the reason the backend gives.
+
+<BrowserLimits browser="chromium" />
+
+Supported, with a caveat:
+
+<BrowserLimits browser="chromium" caveats />
+
+When Strider attaches rather than launches, these differ:
+
+<BrowserLimits browser="chromium" when="attached" />
+
+<Aside type="note">
+PDF is listed as unknown because Chromium can print only when headless, and the check for headless doesn't
+recognize how Chromium names itself today. A headless launch, the default, prints PDFs.
+</Aside>
+
+## What's different
+
+**Request events leave out cookies.** Chromium reports a request's `Cookie` header, and a response's `Set-Cookie`,
+separately and a moment later. Strider waits for them on responses, so `NetworkResponse.headers` has `Set-Cookie`.
+A `NetworkRequest`'s `headers` still lack `Cookie`: `NetworkRequest.headersSent` waits for the headers as they were
+actually sent.
+
+**A page's body is forgotten when it navigates.** Once a page has moved on, Chromium drops the body of the
+document it left. Strider keeps bodies while something collects them, a HAR recording or a subscription with
+`body`, and not otherwise.
+
+**Routes see CORS preflights.** A cross-origin request that needs a preflight shows routes its `OPTIONS` request
+on Chromium, and on no other backend. A route for such a URL must answer it, or let it continue.
+
+**Some requests never end.** A favicon request that a navigation cuts off never finishes, so a HAR marks it
+incomplete, and `inFlightAtStop: "wait"` waits for it until the deadline.
+
+**Back and forward restore pages.** Chromium keeps recent pages in its back/forward cache, so `back` can bring a
+page back as it was, reported as `Restored` rather than `Committed`.
+
+**Error pages are documents.** A navigation that fails shows Chromium's error page, which Strider reports as the
+failed navigation's document rather than as a navigation of its own.
+
+**HTML drag and drop works natively.** Chromium is the one browser that finishes an HTML drag from input; Strider
+catches the drag Chromium starts and drops it on the target. `html: "synthetic"` works too, though Chromium
+ignores the `dropEffect` a script sets in it.
+
+**Cross-site frames render only in view.** Chromium renders nothing in a cross-site iframe scrolled out of view,
+so an action scrolls each iframe on its way into view first.
+
+## The raw protocol
+
+`@usestrider/browser/cdp` has every CDP domain, command and event as typed values, 56 domains generated from the
+protocol definition Chrome 155 ships, and `CdpConnection` runs them over a transport:
+
+```ts
+import { Page, Target } from "@usestrider/browser/cdp"
+import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol"
+import { Effect, Stream } from "effect"
+
+const visit = Effect.fn("visit")(function*(endpoint: string, url: string) {
+  const transport = yield* Transport.webSocket(endpoint)
+  const cdp = yield* CdpConnection.make(transport)
+  const { targetId } = yield* Target.createTarget({ url: "about:blank" }).pipe(
+    Protocol.on(cdp.browser)
+  )
+  const attached = Target.attachToTarget({ targetId, flatten: true })
+  const { sessionId } = yield* attached.pipe(Protocol.on(cdp.browser))
+  const page = yield* cdp.session(sessionId)
+  const loaded = yield* page.subscribe(Page.loadEventFired)
+  yield* Page.enable().pipe(Protocol.on(page))
+  yield* Page.navigate({ url }).pipe(Protocol.on(page))
+  yield* Stream.runHead(loaded)
+})
+```
+
+It's the protocol and nothing more: no domains enabled, no targets tracked, no waiting for anything to be ready.
+Each command waits up to 30 seconds for its reply, which `Protocol.withCommandTimeout` changes. A Strider page
+doesn't hand out its CDP session, but Chromium accepts several clients, so a raw connection can attach to the same
+browser beside Strider's, through its debugging port. To see what Strider itself sends, turn on
+`Browser.TraceProtocolCommands`, which adds a span for each command.
+
+When Chromium rejects a command in an ordinary Strider call, the operation fails with `BackendFailure`, whose
+`cause` is the `ProtocolError`, with Chromium's own error code and message.

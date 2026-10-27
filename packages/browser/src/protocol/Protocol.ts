@@ -1,6 +1,6 @@
 /**
- * The protocol layer's client contract (L0): commands and events as data, the session they run on, and the
- * errors a session reports.
+ * The raw protocol client: commands and events as data, the session they run on, and the errors a session
+ * reports.
  *
  * Generated modules (`@usestrider/browser/cdp`) declare each command and event with `command` and `event`:
  * a method name, codecs and traits, and no behavior. Behavior lives in the session, so a change to how
@@ -25,7 +25,7 @@ import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 
 /**
- * What the spec says about a command or event, plus our own annotations.
+ * What the spec says about a command or event, plus Strider's own annotations.
  *
  * **Details**
  *
@@ -37,6 +37,8 @@ import type * as Stream from "effect/Stream"
  *   owner that adopts or releases it.
  * - `release`: the commands that release what the reply hands out, each taking one parameter from the
  *   result. `from` is a JSON pointer into the result as sent, where `*` stands for every element of a list.
+ * - `redirect`: the domain the spec points to for this command instead, such as `Overlay` for
+ *   `DOM.hideHighlight`.
  *
  * @stability experimental
  * @category models
@@ -166,8 +168,8 @@ export const event = <M extends string, A>(
 ): EventDef<M, A> => ({ method, Params, traits })
 
 /**
- * Schema for the key that routes messages to a session: a CDP `sessionId`, a BiDi routing key, a WebKit
- * target id.
+ * Schema for the key that routes messages to a session: a CDP `sessionId`, or, on WebKit, the page proxy, target
+ * and worker ids on the session's path.
  *
  * @stability experimental
  * @category schemas
@@ -341,8 +343,8 @@ export interface ProtocolSession {
     options?: SubscribeOptions<A> | undefined
   ): Effect.Effect<Stream.Stream<A, ProtocolError>, never, Scope.Scope>
   /**
-   * Waits until every event this session received before the call has been processed: folded into the model,
-   * where there is one, and published to subscriptions.
+   * Waits until every event this session received before the call has been processed: applied to Strider's
+   * model of the browser, where there is one, and published to subscriptions.
    *
    * **Gotchas**
    *
@@ -388,8 +390,8 @@ export const on: {
  *
  * **Details**
  *
- * This is the fallback for raw protocol use. The API in `@usestrider/browser` runs commands under the
- * operation's deadline instead. `Duration.infinity` waits until the reply arrives or the session ends.
+ * It applies to every command, including those the API in `@usestrider/browser` sends under an operation's
+ * deadline. `Duration.infinity` waits until the reply arrives or the session ends.
  *
  * @stability experimental
  * @category references
@@ -476,10 +478,9 @@ export const withValidation: {
  *
  * **Details**
  *
- * A command whose `createsResource` trait is set keeps listening after its caller is interrupted or times
- * out. When the reply arrives, the handler in the caller's context at send time receives it, in a fiber of
- * its own; the default runs `release`. The API in `@usestrider/browser` sets a handler that adopts the
- * resource into its owner, or releases it.
+ * For a command whose `createsResource` trait is set, the session keeps waiting for the reply after its caller
+ * is interrupted or times out. When the reply arrives, the handler in the caller's context at send time
+ * receives it, in a fiber of its own; the default runs `release`.
  *
  * @stability experimental
  * @category references
@@ -537,8 +538,8 @@ export type RejectReason = "NoSuchTarget" | "NoSuchFrame" | "NoSuchNode" | "Inva
  *
  * **Details**
  *
- * Each backend's error matcher table maps the reply onto `reason`; a reply that nothing matches is
- * `Unrecognized`, never a guess. `code` and `message` are the browser's, sanitized and kept as evidence.
+ * Each backend's error table maps the reply onto `reason`; a reply that nothing matches is `Unrecognized`,
+ * never a guess. `code` and `description` are the browser's own code and message, as it sent them.
  *
  * @stability experimental
  * @category reasons
@@ -591,13 +592,15 @@ export class Encode extends Schema.Error<Encode>("@usestrider/browser/protocol/P
 }
 
 /**
- * Reason for a session that ended before the reply arrived.
+ * Reason for a session that ended, which fails the commands still waiting for replies and ends its
+ * subscriptions.
  *
  * **Details**
  *
- * `why` is `detached` when the browser detached the session or its target went away, `connectionLost` when
- * the connection ended, `swapped` when the target moved to a new session, and `modelUnavailable` when the
- * session's events could no longer be followed and a fresh snapshot of its state couldn't be taken.
+ * `why` is `detached` when the browser detached the session or no longer knows it, `targetDestroyed` when its
+ * target went away, `connectionLost` when the connection ended, `swapped` when the target moved to a new
+ * session, and `modelUnavailable` when the session's events could no longer be followed and a fresh snapshot of
+ * its state couldn't be taken.
  *
  * @stability experimental
  * @category reasons
@@ -657,7 +660,7 @@ export class EventOverflow extends Schema.Error<EventOverflow>("@usestrider/brow
 }
 
 /**
- * Reason for a command the connected browser doesn't implement.
+ * Reason for a command, or an argument of one, that the connected browser doesn't implement.
  *
  * @stability experimental
  * @category reasons

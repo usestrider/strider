@@ -1,11 +1,11 @@
 /**
- * Requests a page or context makes: the event, and the data every route and response refers to.
+ * The requests a page or context sends: the event, and the data that routes and responses refer to.
  *
- * A `NetworkRequest` is one redirect hop, immutable, with Effect's `Headers`; classified header values, such
- * as cookies and authorization, are redacted. It is data (a Schema), so it can be encoded for export.
+ * A `NetworkRequest` is one redirect hop, immutable, with Effect's `Headers`; header values that carry credentials,
+ * such as cookies and authorization, are redacted. It's data (a Schema), so it can be encoded for export.
  *
- * A request is reported when it is sent, to the page and context that made it: a frame's requests reach its
- * page, and a worker's its page or context. Firefox and WebKit attribute a dedicated worker's requests to its
+ * A request is reported when it's sent, to the page and context that made it: a frame's requests reach its page,
+ * and a worker's reach its page or context. Firefox and WebKit attribute a dedicated worker's requests to its
  * page's document, as `initiator` says.
  *
  * @stability unstable
@@ -232,7 +232,8 @@ const subscription = (
   })
 
 /**
- * Subscribes to requests and returns the first match, latched.
+ * Subscribes to requests and returns the wait: an effect whose value is the first match, the same each time it
+ * runs.
  *
  * **Gotchas**
  *
@@ -293,7 +294,7 @@ export const stream = <PE = never, PR = never>(
   )
 
 /**
- * Reads the requests a log retained; never waits.
+ * Reads the requests the target's event log kept (`UserContext.Options.eventLog`); never waits.
  *
  * @stability unstable
  * @category getters
@@ -324,15 +325,15 @@ export const toHttpClientRequest = (request: NetworkRequest): HttpClientRequest.
   HttpClientRequest.make(request.method)(request.url, { headers: request.headers })
 
 /**
- * The headers a request was sent with, as the network sent them, once they are known.
+ * Gives the headers a request was sent with, as the network sent them, once the browser has reported them.
  *
  * **Details**
  *
- * A request event's `headers` are the ones its event gives, which on Chromium and WebKit leave out what the
- * network adds, `Cookie` among them; both report those apart, a moment later (QUIRKS.md, Q158 and Q181). This
- * waits for them: on Chromium until the `ExtraInfo` its response promises, on WebKit until the response, and on
- * Firefox not at all. `target` is the page or context the request was seen on. A request the model no longer
- * keeps, past its last 1000, gives its event's headers.
+ * A request's `headers` are the ones its event gives, which on Chromium and WebKit leave out what the network
+ * adds, `Cookie` among them; both browsers report those separately, a moment later. This waits for them: on
+ * Chromium until the `ExtraInfo` event its response promises, on WebKit until the response, and on Firefox not at
+ * all. `target` is the page or context the request was seen on. Strider keeps the last 1000 redirect hops; for a
+ * request older than those, this gives its event's headers.
  *
  * @stability unstable
  * @category getters

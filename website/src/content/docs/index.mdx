@@ -1,0 +1,68 @@
+---
+title: Introduction
+description: Effect-native browser automation over the Chrome DevTools Protocol, WebDriver BiDi and the WebKit inspector protocol.
+order: 0
+---
+
+Strider is browser automation for [Effect](https://effect.website). It speaks the Chrome DevTools Protocol,
+WebDriver BiDi and the WebKit inspector protocol itself, with no other driver in between, and gives you pages whose
+lifetimes are scopes, errors that say what happened, events you subscribe to before you act, and tools for agents.
+
+**Status:** pre-release. Everything in the API works on Chromium, Firefox and WebKit; what one browser can't do
+fails with `Unsupported`, naming the capability. The API can still change before 1.0.
+
+```ts
+import { Browser, Expect } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Effect } from "effect"
+
+const program = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage()
+  yield* page.goto("https://shop.example.com")
+  yield* page.getByRole("button", { name: "Add to cart" }).click()
+  yield* page.getByText("1 item").pipe(Expect.toBeVisible)
+})).pipe(Effect.provide(Chromium.layer({ executablePath: "/usr/bin/chromium" })))
+```
+
+A launch runs the executable you name; Strider never looks for a browser or installs one. To find the paths on your
+machine, run `npx strider browsers` in a project that has the package. It lists each browser it finds, with its
+version.
+
+## What it's like to use
+
+If you have used Playwright, most of a Strider program will look familiar: pages, locators, `click`, `fill` and
+expectations that retry. The differences are in what the types and the runtime promise.
+
+- **Lifetimes are scopes.** A page, a route or a dialog handler belongs to the `Scope` that acquired it and ends
+  with it, even when a step fails or the program is interrupted. Nothing is left open, and nothing is closed behind
+  your back.
+- **Waits look forward.** To catch what an action causes, such as a popup, a download or a response, you subscribe
+  first and act second. A subscription sees everything after it starts and nothing before, so the order of your code
+  is the order of events.
+- **Errors say what happened.** Each module has one error, with a `reason` that says why and a `hint` that says
+  what to do next, such as `Another element covers the element's action point: div.toast "Saved"`. Every operation can
+  also end with `TargetGone` or `Timeout`, and both are in its type.
+- **One deadline per operation.** Everything an action does, from finding the element to confirming the result,
+  shares one budget. `Deadline.within("5 seconds")` sets it for any block of code.
+- **Access is typed.** A page you opened is a `Page`. A tab in a browser you attached to can only be watched until you
+  ask for more access, and calling an action on a page you may only read doesn't compile.
+- **Nothing is implicit.** No hidden sleeps, grace periods or retries of an action that may have reached the page.
+  Every default is written down where it is declared.
+
+## Reading this guide
+
+The guide has five chapters. The first four are meant to be read in order; the fifth is for when you need it:
+
+1. **Getting started:** [installation](/docs/installation), [a first program](/docs/first-program), and
+   [errors and deadlines](/docs/errors).
+2. **Pages and locators:** [finding elements](/docs/pages/locators), [acting on them](/docs/pages/actions),
+   [expectations](/docs/pages/expectations), and [contexts](/docs/pages/contexts), which keep sessions apart.
+3. **Events and the network:** [events](/docs/events/events), [requests and responses](/docs/events/network), and
+   [routes, init scripts and the page clock](/docs/events/routes).
+4. **Testing and tools:** [tests with Vitest](/docs/tools/testing), [traces and HAR files](/docs/tools/recordings),
+   and [agents and the `strider` command](/docs/tools/agents).
+5. **Browsers:** [choosing one](/docs/browsers/choosing), then what's particular to [Chromium](/docs/browsers/chromium),
+   [Firefox](/docs/browsers/firefox), [WebKit](/docs/browsers/webkit) and [stock WebKit](/docs/browsers/stock-webkit).
+
+The [API reference](/docs/api) documents every declaration, generated from Strider's source. Every example in this
+guide is type-checked against Strider, so the code you read compiles.

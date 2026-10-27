@@ -1,0 +1,197 @@
+---
+title: Acting on a page
+description: Clicking, typing, choosing and uploading; the checks each action makes first; and the keyboard and mouse for what locators can't reach.
+order: 2
+---
+
+## Actions are calls
+
+An action is a method on a locator that you call, with its settings as an optional last argument:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const editProfile = Effect.fn("editProfile")(function*(page: Page.Page) {
+  yield* page.getByLabel("Name").fill("Ada Lovelace")
+  yield* page.getByLabel("Country").selectOption({ label: "United Kingdom" })
+  yield* page.getByLabel("Send me the newsletter").check()
+  yield* page.getByRole("button", { name: "Save" }).click()
+  const row = page.getByRole("row").filter({ hasText: "Ada Lovelace" })
+  yield* row.click({ button: "right" })
+})
+```
+
+| Action                       | Does                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------- |
+| `click()`, `dblclick()`      | moves the pointer to the element, presses and releases                     |
+| `tap()`                      | a touch start and end                                                      |
+| `hover()`                    | moves the pointer over the element                                         |
+| `check()`, `uncheck()`       | clicks a checkbox or radio if it isn't already in that state, and confirms it changed |
+| `fill(value)`                | focuses a field, selects its contents and inserts the value; `""` empties it |
+| `clear()`                    | empties a field                                                            |
+| `press(key)`                 | focuses the element and presses a key                                      |
+| `pressSequentially(text)`    | focuses the element and types the text key by key                         |
+| `selectOption(choice)`       | chooses a `<select>`'s option by `value`, `label` or `index`                |
+| `setInputFiles(files)`       | sets a file input's files                                                  |
+| `dragTo(target)`             | presses on the element, moves to the target with the button held, and releases |
+| `focus()`, `scrollIntoView()` | what they say                                                             |
+
+An action sends its input at most once per call. If something fails after the input may have reached the page, the
+error says so, and the action is never repeated behind your back.
+
+## Checks before acting
+
+Before it sends anything, an action waits until its element is ready. It checks in the page, at each animation
+frame, until the deadline. Each action has its own checks:
+
+| Action                                                   | Checks                                                                   |
+| -------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `click`, `dblclick`, `tap`, `check`, `uncheck`, `dragTo`, `hover` | visible, stable, enabled, not inert, in the viewport, receives the pointer |
+| `fill`, `clear`                                          | visible, enabled, editable, not inert                                    |
+| `focus`, `press`, `pressSequentially`                    | visible, not inert                                                       |
+| `scrollIntoView`                                         | visible, stable                                                          |
+| `selectOption`                                           | visible, enabled                                                         |
+| `setInputFiles`                                          | none                                                                     |
+
+"Stable" means the element has stopped moving, "in the viewport" scrolls it there, and "receives the pointer"
+means nothing else is on top of the point the action will use. When the checks pass, the action waits its turn
+at the page's input, checks once more, and sends. A click also guards its first event: if a toast slides over the
+button between the check and the click, the page never sees the click, and the action starts checking again.
+
+A timeout explains the last check that failed, such as
+`Another element covers the element's action point: div.toast "Saved"`.
+
+You can turn individual checks off for one call, and the span records it. There is no blanket `force`:
+
+```ts
+import { Page } from "@usestrider/browser"
+
+declare const page: Page.Page
+
+const close = page.getByRole("button", { name: "Close" })
+const behindOverlay = close.click({ checks: { receivesPointer: false } })
+const dryRun = page.getByRole("button", { name: "Delete" }).click({ trial: true })
+```
+
+`trial: true` runs every check and sends nothing: a way to ask "could I click this now?".
+
+## Typing
+
+`fill` is the usual way to enter text. It inserts the value as text, as pasting or an input method would, so the
+page sees the input but no key presses. An input whose value isn't typed, such as a date, a color or a range, has
+its value set directly, with `input` and `change` events, and a value it refuses fails with `InvalidInput`.
+
+`pressSequentially` sends a key for each character, for fields that react to each keystroke, like search boxes
+that suggest as you type. `delay` spaces them out.
+
+Pass secrets as `Redacted`. A `Redacted` value is typed into the page and never written to an error, a span, a log
+or a trace:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Config, Effect } from "effect"
+
+const logIn = Effect.fn("logIn")(function*(page: Page.Page) {
+  yield* page.getByLabel("Email").fill("ada@example.com")
+  yield* page.getByLabel("Password").fill(yield* Config.Redacted("APP_PASSWORD"))
+  yield* page.getByRole("button", { name: "Sign in" }).click()
+})
+```
+
+## Keys
+
+Keys are named as the UI Events spec names them, the same names a page sees in `event.key`: `"Enter"`, `"Tab"`,
+`"ArrowDown"`, `"Escape"`, `"a"`. Modifiers are an option, not part of the name, so there is no `"Control+A"`:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const copyAll = Effect.fn("copyAll")(function*(page: Page.Page) {
+  const editor = page.getByRole("textbox", { name: "Notes" })
+  yield* editor.press("a", { modifiers: ["Control"] })
+  yield* editor.press("c", { modifiers: ["Control"] })
+  yield* editor.press("Enter")
+})
+```
+
+Characters are typed as a US keyboard would type them unless the context says otherwise:
+`Browser.newPage({ keyboardLayout: "de" })` types on a German layout, with Shift, AltGr and dead keys pressed
+as a person's would be. `us`, `uk`, `de`, `fr`, `es` and `it` are available.
+
+## Files
+
+`setInputFiles` takes `FileInput`s, which say where a file's bytes come from:
+
+```ts
+import { FileInput, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const upload = Effect.fn("upload")(function*(page: Page.Page, csv: string) {
+  yield* page.getByLabel("Avatar").setInputFiles(FileInput.local("./avatar.png"))
+  yield* page.getByLabel("Report").setInputFiles(
+    FileInput.bytes("report.csv", "text/csv", new TextEncoder().encode(csv))
+  )
+})
+```
+
+`FileInput.local` reads a file on this machine. `FileInput.bytes` makes the file in the page from bytes you have,
+keeping its name and type, so it works even on a browser on another machine. When an upload goes through a file
+chooser rather than an input you can locate, answer the chooser with `FileChooser.handle`, covered in
+[Events](/docs/events/events).
+
+## Dragging
+
+`dragTo` drags one element onto another. By default it's a real drag of the pointer, which HTML drag and drop
+(`draggable="true"`) finishes only on Chromium. `html: "synthetic"` has the page dispatch the drag's events
+itself instead, which works on every browser; the events are untrusted, as the option's name says:
+
+```ts
+import { Page } from "@usestrider/browser"
+
+declare const page: Page.Page
+
+const card = page.getByRole("listitem").filter({ hasText: "Write the guide" })
+const done = page.getByRole("list", { name: "Done" })
+const moved = card.dragTo(done, { html: "synthetic" })
+```
+
+## The keyboard and the mouse
+
+`page.keyboard` sends keys to whatever has focus, and `page.mouse` acts at coordinates, for canvases and maps that
+have no elements to locate. Neither checks anything first.
+
+Holding input is scoped: a held key or button is released when its scope closes, so a step that fails halfway
+never leaves Shift held down for the rest of the program:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const selectRange = Effect.fn("selectRange")(function*(page: Page.Page) {
+  yield* page.getByRole("option", { name: "Apples" }).click()
+  yield* Effect.scoped(Effect.gen(function*() {
+    yield* page.keyboard.hold("Shift")
+    yield* page.getByRole("option", { name: "Pears" }).click()
+  }))
+})
+
+const sketch = Effect.fn("sketch")(function*(page: Page.Page) {
+  yield* page.mouse.move({ x: 100, y: 100 })
+  yield* Effect.scoped(Effect.gen(function*() {
+    yield* page.mouse.hold("left")
+    yield* page.mouse.move({ x: 220, y: 140 }, { steps: 12 })
+  }))
+  yield* page.mouse.wheel({ x: 0, y: 400 })
+})
+```
+
+While Shift is held, the click is a Shift-click; while the button is held, the moves are a drag. Input to a page
+goes one gesture at a time, so two fibers acting on the same page take turns rather than mixing their keys.
+
+## What a browser can't do
+
+A few actions depend on the browser. WebKit's pointer events can't carry modifiers, so a click with `modifiers`
+fails there with `Unsupported` before anything is sent, and a native HTML drag is Chromium's alone. A failure
+names the capability, so the message says what to change.

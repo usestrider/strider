@@ -1,12 +1,12 @@
 /**
- * Workers: dedicated workers of a page, and shared and service workers of a context.
+ * Workers that pages and contexts start: a page's dedicated workers, and a context's shared and service workers.
  *
- * Like popups, a worker arrives with its owner's access: waiting on a `Page` or a `UserContext` gives a
- * `BrowserWorker` you can evaluate in, and waiting on something you only observe gives an observed one.
+ * A worker comes with its owner's access, as a popup does: waiting on a `Page` or a `UserContext` gives a
+ * `BrowserWorker` you can evaluate in, and waiting on a page or context you only observe gives an observed one.
  *
- * A worker is reported when its realm starts: a dedicated one to its page and context, and a shared or service
- * one to its context. Not every backend reports every kind: asking for shared or service workers where the
- * backend can't say whose they are (`workers.shared`, `workers.service`) fails with `Unsupported`.
+ * A worker is reported when it starts: a dedicated worker to its page and context, and a shared or service worker
+ * to its context. Not every backend can say whose a shared or service worker is, and asking for them there
+ * (`workers.shared`, `workers.service`) fails with `Unsupported`.
  *
  * @stability unstable
  * @since 0.1.0
@@ -168,7 +168,8 @@ const subscription = (
   })
 
 /**
- * Subscribes to workers and returns the first match, latched, with its owner's access.
+ * Subscribes to workers and returns the wait: an effect that gives the first match, with its owner's access, and
+ * gives the same worker each time it runs.
  *
  * @stability unstable
  * @category subscriptions
@@ -204,7 +205,7 @@ export const next: {
   ).pipe(Operation.named("BrowserWorker.next"))) as typeof next
 
 /**
- * Subscribes to workers and emits every match from now on, with their owner's access.
+ * Subscribes to workers and returns a stream of every match from now on, with their owner's access.
  *
  * @stability unstable
  * @category subscriptions
@@ -240,7 +241,7 @@ export const stream: {
   )) as typeof stream
 
 /**
- * Reads the workers a log retained; never waits.
+ * Reads the workers already reported, from the page's or context's event log; never waits.
  *
  * @stability unstable
  * @category getters

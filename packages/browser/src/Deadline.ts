@@ -1,14 +1,13 @@
 /**
- * One deadline per operation (README, "One deadline per operation").
+ * Time limits for operations: one deadline covers everything an operation does.
  *
- * An operation inside `within(duration)` shares that deadline with everything else inside, and nesting can
- * only shorten it. An operation with no enclosing deadline gets `DefaultBudget`, counted from when it starts.
- * Deadlines run on the clock the browser runs on: for a real browser, the live monotonic clock, even under
- * `TestClock`.
+ * Inside `within(duration)`, every operation shares that one deadline, and a deadline nested inside it can only be
+ * shorter. An operation with no deadline around it gets `DefaultBudget`, counted from when it starts. Deadlines run
+ * on the clock the browser runs on: for a real browser, the real monotonic clock, even under `TestClock`.
  *
- * This isn't `Effect.timeout`. An operation reads its remaining budget and fails with its own evidence
- * (`Timeout`, with the phase it reached) instead of being interrupted from outside, so a click that timed
- * out after dispatching says so.
+ * This isn't `Effect.timeout`. An operation reads the time it has left and, when it runs out, fails with its own
+ * `Timeout`, which says how far it got, instead of being interrupted from outside. So a click that timed out after
+ * it was sent says so.
  *
  * @stability unstable
  * @since 0.1.0
@@ -143,11 +142,11 @@ export const DefaultBudget: Context.Reference<Duration.Duration> = Context.Refer
 const TimeoutTypeId = "~@usestrider/browser/Deadline/Timeout"
 
 /**
- * Error for an operation that ran out of budget, with where it got to.
+ * Error for an operation that ran out of time, saying how far it got.
  *
  * **Details**
  *
- * `phase` answers the question a timeout always raises:
+ * `phase` says how far the operation got:
  *
  * - `"resolving"`: the target was never found.
  * - `"waitingForCondition"`: found, but a check such as `visible` never passed.
@@ -155,8 +154,8 @@ const TimeoutTypeId = "~@usestrider/browser/Deadline/Timeout"
  * - `"postcondition"`: the operation happened, and what it waits for afterwards didn't.
  * - `"waitingForEvent"`: an event wait (`next`) saw no matching event.
  *
- * `last` and `history` are the de-duplicated observations, and `hint` explains common causes, such as a
- * download that started before `Download.next` subscribed.
+ * `history` is what the operation observed, with consecutive repeats dropped, and `last` is the latest of it.
+ * `hint` explains common causes, such as a download that started before `Download.next` subscribed.
  *
  * **Example** (Recovering when a click may have happened)
  *

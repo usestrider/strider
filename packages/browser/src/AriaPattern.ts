@@ -1,8 +1,8 @@
 /**
- * Patterns over the accessibility tree, for `Expect.toMatchAria`.
+ * Patterns that describe part of the accessibility tree, for `Expect.toMatchAria`.
  *
- * A pattern is matched against `snapshot({ sources: "aria" })`, the accessibility tree alone. How children
- * match is always stated: exactly these, these among others, or not compared.
+ * A pattern is matched against `snapshot({ sources: "aria" })`, the accessibility tree alone. It always says how a
+ * node's children are compared: exactly these children, these among others, or not at all.
  *
  * @stability unstable
  * @since 0.1.0
@@ -54,8 +54,8 @@ const matcher = (value: string | RegExp): Engine.TextMatcher =>
 export const isAriaPattern = (u: unknown): u is AriaPattern => Predicate.hasProperty(u, TypeId)
 
 /**
- * A node with a role, an accessible name, and children matched as stated. An empty name means no accessible
- * name.
+ * A node with a role, an accessible name and children compared as `children` says. A string name is matched whole
+ * after collapsing whitespace, and an empty one means no accessible name.
  *
  * @stability unstable
  * @category constructors
@@ -70,7 +70,7 @@ export const node = (role: AriaRole.AriaRole, name: string | RegExp, children: C
   })
 
 /**
- * A text node.
+ * A text node; a string `value` is matched whole after collapsing whitespace.
  *
  * @stability unstable
  * @category constructors

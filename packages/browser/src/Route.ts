@@ -1,17 +1,16 @@
 /**
- * Routes intercept requests, and their handlers decide what happens to each one.
+ * Routes intercept the requests of a page or context, and their handlers decide what happens to each one.
  *
- * A route registers one phase: a request before it is sent (the default), its response before the page sees
- * it, or its authentication challenge. A handler returns a `Decision` valid at its phase, so a paused request
- * is never left hanging. A handler that fails, is interrupted, runs out of time, or returns a decision the
- * backend can't apply gets the default decision, `continue`, and its failure is logged. Requests and responses
- * are Effect's HTTP types: a fulfilled response is an `HttpServerResponse`, and a change to a request is a
- * function over `HttpClientRequest`. Routes compose by precedence: the page's before its context's, and the
- * most recent first.
+ * A route works at one phase: a request before it's sent (the default), its response before the page sees it, or
+ * its authentication challenge. A handler returns a `Decision` valid at its phase, so a paused request is never
+ * left hanging: a handler that fails, is interrupted, runs out of time, or returns a decision the backend can't
+ * apply gets the default, `continue`, and its failure is logged. Requests and responses are Effect's HTTP types: a
+ * fulfilled response is an `HttpServerResponse`, and a change to a request is a function of `HttpClientRequest`.
+ * Routes are asked in order of precedence: the page's before its context's, and the most recent first.
  *
  * **Gotchas**
  *
- * This module exposes `effect/http` types, which Effect marks unstable, so it can change when they do.
+ * This module uses `effect/http`'s types, which Effect marks unstable, so it can change when they do.
  *
  * @stability unstable
  * @since 0.1.0
@@ -76,7 +75,7 @@ export interface Decision<in P extends Phase = Phase> {
 export const isDecision = (u: unknown): u is Decision<never> => Predicate.hasProperty(u, DecisionTypeId)
 
 /**
- * An authentication challenge, as the server sent it, its scheme lowercased (`"basic"`).
+ * An authentication challenge as the server sent it, with its scheme lowercased (`"basic"`).
  *
  * @stability unstable
  * @category models
@@ -97,11 +96,11 @@ export interface Challenge {
  */
 export interface Paused {
   /**
-   * The request as paused; fixed.
+   * The request as it was when paused, which doesn't change.
    */
   readonly request: NetworkRequest.NetworkRequest
   /**
-   * The request's body, as it was sent; `None` without one.
+   * The request's body as it was sent, or `None` if it has none.
    */
   readonly requestBody: Effect.Effect<Option.Option<Uint8Array>, RouteError | Target.TargetGone>
 }
@@ -127,11 +126,11 @@ export interface RequestPhase extends Paused {
 export interface ResponsePhase extends Paused {
   readonly phase: "response"
   /**
-   * The response's status and headers; fixed.
+   * The response's status and headers, which don't change.
    */
   readonly response: NetworkResponse.NetworkResponse
   /**
-   * The response's body; `Unsupported` where the backend can't read a paused response
+   * The response's body. It fails with `Unsupported` where the backend can't read a paused response
    * (`interception.responseBody`: CDP only).
    */
   readonly responseBody: Effect.Effect<Uint8Array, RouteError | Target.TargetGone>
@@ -198,7 +197,8 @@ export {
    *
    * **Details**
    *
-   * At the `auth` phase, the browser's own prompt is never shown: headless, it waits forever.
+   * At the `auth` phase, Strider never lets the browser show its own prompt, which a headless browser would wait
+   * on forever.
    *
    * @stability unstable
    * @category constructors
@@ -222,7 +222,7 @@ export interface ResponseChange {
    */
   readonly status?: number | undefined
   /**
-   * The headers, which replace the server's whole: to change one, start from the paused response's.
+   * The headers, which replace all of the server's: to change one, start from the paused response's `headers`.
    *
    * @default the server's
    */
@@ -230,8 +230,9 @@ export interface ResponseChange {
 }
 
 /**
- * Lets the request continue, changed by `change`; only what changed is sent. At the `response` phase, the
- * response continues with its status or headers changed and its body as the server sent it.
+ * Lets the request continue, changed by `change`. Only the parts the change altered are sent to the browser, so
+ * adding a header doesn't send the body again. At the `response` phase, the response continues with its status or
+ * headers changed, and its body as the server sent it.
  *
  * **Gotchas**
  *
@@ -348,8 +349,8 @@ export type AbortReason =
  *
  * **Gotchas**
  *
- * A reason other than `"failed"` is CDP's alone (`interception.abortReason`): Firefox and WebKit report one
- * failure for every reason.
+ * A reason other than `"failed"` is CDP's alone (`interception.abortReason`): Firefox and WebKit report the same
+ * failure for every reason, so on them the decision fails with `Unsupported`, and the default applies.
  *
  * @stability unstable
  * @category constructors
@@ -376,7 +377,8 @@ export const fallthrough: Decision<Phase> = RouteDecision.make({ _tag: "Fallthro
  */
 export interface FromHarOptions {
   /**
-   * What a request no entry matches gets: a network failure, or the next matching route.
+   * What happens to a request that no entry matches: it fails with a network error, or passes to the next
+   * matching route.
    *
    * @default "abort"
    */
@@ -384,19 +386,19 @@ export interface FromHarOptions {
 }
 
 /**
- * A route handler that answers requests from a recorded HAR, read now.
+ * Reads a recorded HAR, and gives a route handler that answers requests from it.
  *
  * **Details**
  *
- * `path` is a HAR, or the zip `Har.record`'s `content: "attach"` writes, told apart by the zip's signature. An
- * entry matches a request by method and URL, and by body where both have one; the latest matching entry wins.
- * Its response is fulfilled as recorded, a redirect as a redirect, and its body decoded, so `Content-Encoding`
- * and `Content-Length` go; so does a `Set-Cookie` whose value the export redacted. An entry that failed without
- * a response fails the request. A request no entry matches is aborted, or falls through with
- * `notFound: "fallthrough"`.
+ * `path` names a HAR, or the zip that `Har.record` writes with `content: "attach"`; Strider tells them apart by
+ * the zip's signature. An entry matches a request by method and URL, and by body where both have one; the latest
+ * matching entry wins. Its response is fulfilled as recorded, a redirect as a redirect. Its body is replayed
+ * decoded, so the headers that describe its encoding or length are dropped, as is a `Set-Cookie` whose value the
+ * export redacted. An entry that failed without a response fails the request. A request no entry matches is
+ * aborted, or falls through with `notFound: "fallthrough"`.
  *
- * Replay is a route like any other, so its pattern says which requests the HAR answers. Recording is
- * `Har.record`'s.
+ * Replay is a route like any other, so the route's pattern says which requests the HAR answers. `Har.record`
+ * makes the recording.
  *
  * **Gotchas**
  *

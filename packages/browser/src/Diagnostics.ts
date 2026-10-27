@@ -1,11 +1,11 @@
 /**
- * The evidence every failure carries, and the preset that decides how much of it is shown.
+ * The record of what happened that every failure carries, and the preset that decides how much of a URL is shown.
  *
- * Each operation records what it sent and what it saw. When it fails, that record travels with the error as
- * `diagnostics`, so "did my click happen?" has an answer: not sent, maybe sent, or acknowledged. The preset
- * decides how a URL shows: in an operation's span attributes, and wherever Effect's logger, formatter or
- * inspection renders a `NetworkRequest` or `NetworkResponse`, which implement Effect's `Redactable` and read
- * `CurrentPreset` from the fiber's context, in user code as well as ours.
+ * A failure carries its operation's record as `diagnostics`. For an action it says whether the input was sent, so
+ * "did my click happen?" has an answer: not sent, maybe sent or acknowledged. `CurrentPreset` decides how much of a
+ * URL is shown: in an operation's span attributes, and wherever Effect's logger, formatter or inspection shows a
+ * `NetworkRequest` or `NetworkResponse`, in your code as well as Strider's. Under `"strict"`, the default, a URL
+ * keeps its origin and path with each query value redacted, and under `"local"` it's shown whole.
  *
  * @stability unstable
  * @since 0.1.0
@@ -35,12 +35,12 @@ export const OperationId = Schema.String.pipe(Schema.brand("~@usestrider/browser
 export type OperationId = typeof OperationId.Type
 
 /**
- * Schema for whether an operation's effect reached the browser.
+ * Schema for whether an operation's command reached the browser.
  *
  * **Details**
  *
- * `MayHaveBeenSent` means the command left but no answer came back, so the effect may or may not have
- * happened. Nothing is replayed automatically, because a second click is not the same as one click.
+ * `MayHaveBeenSent` means the command left but no answer came back, so it may or may not have taken effect.
+ * Nothing is replayed automatically, because a second click is not the same as one click.
  *
  * @stability unstable
  * @category schemas
@@ -53,7 +53,7 @@ export const DispatchState = Schema.Union([
 ])
 
 /**
- * Whether an operation's effect reached the browser.
+ * Whether an operation's command reached the browser.
  *
  * @stability unstable
  * @category models
@@ -137,7 +137,7 @@ export const CleanupState = Schema.Union([
 export type CleanupState = typeof CleanupState.Type
 
 /**
- * The evidence envelope every failure carries.
+ * The record of what an operation sent and saw, which every failure carries as `diagnostics`.
  *
  * **Details**
  *
@@ -157,7 +157,7 @@ export class Diagnostics extends Schema.Class<Diagnostics>("@usestrider/browser/
 }) {}
 
 /**
- * Schema for how much detail `Redactable` values show.
+ * Schema for how much of a URL Strider shows in its spans, logs and exported traces.
  *
  * **Details**
  *
@@ -174,7 +174,7 @@ export class Diagnostics extends Schema.Class<Diagnostics>("@usestrider/browser/
 export const Preset = Schema.Literals(["local", "strict"])
 
 /**
- * How much detail `Redactable` values show.
+ * How much of a URL Strider shows in its spans, logs and exported traces.
  *
  * @stability unstable
  * @category models
@@ -183,7 +183,7 @@ export const Preset = Schema.Literals(["local", "strict"])
 export type Preset = typeof Preset.Type
 
 /**
- * Reference to the preset that `Redactable` values read when they render.
+ * Reference to the preset in effect, which Strider reads when it shows a URL.
  *
  * **Details**
  *

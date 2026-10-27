@@ -1,13 +1,13 @@
 /**
- * Navigations of a page: the event, and the success value of `goto`, `reload`, `back` and `forward`.
+ * Navigations of a page: the event, and what `goto`, `reload`, `back` and `forward` return.
  *
- * A navigation either commits a new document, changes the current one (a fragment or the History API),
- * restores one from the back/forward cache, or activates a prerendered one. An HTTP 404 or 500 still commits:
- * the status is in the response. Failures are reasons of `Page.PageError`, so recovery reads the same whether
- * the navigation came from `goto` or was awaited with `next`.
+ * A navigation commits a new document, changes the current one (a fragment or the History API), restores one from
+ * the back/forward cache, or activates a prerendered one. An HTTP 404 or 500 still commits: the status is in the
+ * response. Failures are reasons of `Page.PageError`, so recovering reads the same whether the navigation came from
+ * `goto` or was awaited with `next`.
  *
- * A navigation is an event when it ends, including those `goto` starts. A page's own navigations are its events,
- * and with `frames: "all"` its frames' too, each naming the navigable it happened in.
+ * A navigation is reported when it ends, including those `goto` starts. A page's own navigations are its events,
+ * and with `frames: "all"` its frames' are too, each naming the frame it happened in.
  *
  * @stability unstable
  * @since 0.1.0
@@ -64,8 +64,8 @@ export type Id = typeof Id.Type
  *   `accept: ["noContent"]` returns it; otherwise it fails with the `NoContent` reason.
  *
  * `url` is where the page went: the committed document's URL, after any redirects, or the URL a same-document
- * navigation set; for `BecameDownload` and `NoContent`, the URL it was going to. `frame` is the navigable it
- * happened in: the page's own id, or a frame's.
+ * navigation set; for `BecameDownload` and `NoContent`, the URL it was going to. `frame` is where it happened:
+ * the page's own id, or a frame's.
  *
  * @stability unstable
  * @category schemas
@@ -135,7 +135,7 @@ export interface Filter {
    */
   readonly url?: Url.Pattern | string | undefined
   /**
-   * Whose navigations: the page's own, or its frames' too.
+   * Whose navigations to match: the page's own (`"main"`), or its frames' too (`"all"`).
    *
    * @default "main"
    */
@@ -194,14 +194,15 @@ const subscription = (target: Page.ObservedPage, filter: Filter | undefined, ope
   })
 
 /**
- * Subscribes to a page's navigations and returns the first match, latched.
+ * Subscribes to a page's navigations and returns the wait: an effect that gives the first match, the same each
+ * time it runs.
  *
  * **Details**
  *
- * It settles on the first navigation matching the filter to end, as `goto` would: one that got somewhere
- * latches its `PageNavigation`, after its document reaches `waitUntil`, and one that didn't fails the deferred
- * with the `PageError` `goto` gives, such as `NavigationFailed`. `url` matches where the page went, after any
- * redirects; for a navigation that failed, where it was going.
+ * The wait settles on the first matching navigation to end, as `goto` would. If that navigation succeeded,
+ * the wait gives its `PageNavigation` once its document reaches `waitUntil`; if it didn't, the wait fails with the
+ * `PageError` that `goto` would give, such as `NavigationFailed`. `url` matches where the page went, after any
+ * redirects, or, for a navigation that failed, where it was going.
  *
  * **Example** (Waiting for the navigation a click causes)
  *
@@ -257,7 +258,8 @@ export const next = <PE = never, PR = never>(
   )
 
 /**
- * Subscribes to a page's navigations and emits every match from now on: the ones that got somewhere.
+ * Subscribes to a page's navigations and emits every match from now on that succeeded: `Committed`,
+ * `SameDocument`, `Restored` or `Activated`.
  *
  * @stability unstable
  * @category subscriptions
@@ -278,7 +280,7 @@ export const stream = <PE = never, PR = never>(
   )
 
 /**
- * Reads the navigations a page's log retained that got somewhere; never waits.
+ * Reads the navigations still in the page's event log that succeeded, as `stream` emits them; never waits.
  *
  * @stability unstable
  * @category getters
@@ -376,7 +378,7 @@ export class BecameDownload extends Schema.Error<BecameDownload>("@usestrider/br
 }
 
 /**
- * Reason for a navigation answered with 204 No Content, unless the call accepted it.
+ * Reason for a navigation the server answered without content (204 or 205), unless the call accepted it.
  *
  * @stability unstable
  * @category reasons

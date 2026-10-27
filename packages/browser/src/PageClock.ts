@@ -1,23 +1,23 @@
 /**
- * Page time: the clock a page's scripts see, under your control.
+ * Page time: the clock a page's scripts read, under your control.
  *
- * One timeline per scope, a page or a whole context, covers every document and frame across navigations,
- * because a test's time must not reset when the page navigates: each operation reaches every current document,
- * and a new one starts where the timeline is. Readiness checks use native rendering, so a paused clock never
- * stalls `click`, and nothing advances page time implicitly. Page time never touches library deadlines, and
- * `TestClock` never touches the page. `adjust` and `setTime` mean what they mean on `TestClock`.
+ * One timeline covers a page, or a whole context, across every document and frame, because a test's time must not
+ * reset when the page navigates: each operation reaches every current document, and a new document starts where the
+ * timeline is. Readiness checks use the browser's own rendering, so a paused clock never stalls `click`, and
+ * nothing advances page time unless you do. Page time never touches Strider's deadlines, and `TestClock` never
+ * touches the page. `adjust` and `setTime` mean what they mean on `TestClock`.
  *
  * **Details**
  *
- * No backend has a clock to drive, so this one is the library's: a script in each document's main world, before
- * the page's own, that replaces `Date`, `performance.now`, and in controlled mode the timers and animation
- * frames. Its controls are on a symbol a page that enumerates the window's symbols can find.
+ * No backend has a clock to drive, so this one is Strider's: a script in each document's main world, run before the
+ * page's own, that replaces `Date`, `performance.now`, and in controlled mode the timers and animation frames. Its
+ * controls are on a symbol, which a page that lists the window's symbols can find.
  *
  * **Gotchas**
  *
- * - Workers keep real time unless the clock is installed with `workers: true`, which Firefox can't
- *   do; CSS animations and `document.timeline` always do.
- * - A document loaded before `install` gets the clock then; what its scripts captured before keeps real time.
+ * - Workers keep real time unless the clock is installed with `workers: true`, which Firefox can't do. CSS
+ *   animations and `document.timeline` always keep real time.
+ * - A document loaded before `install` gets the clock then; what its scripts read before that keeps real time.
  * - A page's clock and its context's can't both be installed: one timeline covers a page.
  *
  * @stability unstable
@@ -42,7 +42,8 @@ import type * as Target from "./Target.ts"
  *
  * - `fixed`: wall time frozen at `at`; timers still run.
  * - `offset`: wall time shifted by `by`; everything else real.
- * - `controlled`: wall time, monotonic time, timers and animation frames move only when told.
+ * - `controlled`: wall time, monotonic time, timers and animation frames move only when you call `adjust` or
+ *   `setTime`.
  *
  * @stability unstable
  * @category models
@@ -62,9 +63,9 @@ export type Mode =
  */
 export interface InstallOptions {
   /**
-   * Whether dedicated workers started from now on get the clock too, before their own script, on the same
-   * timeline: `adjust`, `setTime` and `resume` reach them as they reach documents. `Unsupported` on
-   * Firefox (`initScripts.workers`).
+   * Whether the pages' dedicated workers get the clock too, on the same timeline: a running worker gets it at
+   * once, and a later one before its own script. `adjust`, `setTime` and `resume` reach workers as they reach
+   * documents. Fails with `Unsupported` on Firefox (`initScripts.workers`).
    *
    * @default false
    */
@@ -95,9 +96,10 @@ export interface InstallOptions {
  */
 export interface PageClock {
   /**
-   * Installs the clock while the registration lives, in every current document of the scope and every later one.
-   * Removing it affects later documents only. A clock already installed on the page or its context is a
-   * `Conflict`.
+   * Installs the clock in every current document of the page or context, and in every later one, until the
+   * registration is removed or its scope closes. Removing it affects later documents only: a document it reached
+   * keeps the clock. Fails with `Conflict` when a clock already covers any of the same pages, whether it was
+   * installed on a page or on its context.
    */
   install(
     mode: Mode,
@@ -112,8 +114,8 @@ export interface PageClock {
    */
   setTime(at: DateTime.DateTime.Input): Effect.Effect<void, PageClockError | Target.TargetGone>
   /**
-   * Returns to real time, from the time the clock shows now: the clock becomes an offset, and the timers waiting
-   * on a controlled clock move to real ones.
+   * Lets the clock run in real time again, from the time it shows now: it becomes an `offset` clock, and the
+   * timers waiting on a controlled clock become real timers.
    */
   readonly resume: Effect.Effect<void, PageClockError | Target.TargetGone>
 }

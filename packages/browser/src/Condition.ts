@@ -13,7 +13,7 @@ import * as ConditionImpl from "./internal/condition.ts"
 const TypeId = ConditionImpl.TypeId
 
 /**
- * A described predicate over `A`.
+ * A predicate on `A` with a description, which a failure reports.
  *
  * @stability unstable
  * @category models
@@ -43,7 +43,7 @@ export const make = <A>(description: string, predicate: P.Predicate<A>): Conditi
   ConditionImpl.make(description, predicate)
 
 /**
- * Negates a condition: the wait is for it to stop holding.
+ * Negates a condition, so `Expect.that` waits for it to stop holding.
  *
  * @stability unstable
  * @category combinators

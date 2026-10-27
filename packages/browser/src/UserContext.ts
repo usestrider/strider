@@ -1,16 +1,17 @@
 /**
- * User contexts (the spec's term; Playwright calls them browser contexts), at two access levels.
+ * User contexts: isolated browser sessions, at two access levels.
  *
- * A context isolates storage, cookies, permissions and emulation from every other context. An
- * `ObservedUserContext` is one you don't control, such as a browser's default context when attached; a
- * `UserContext` is one you control. There are two levels only, because reads happen on pages.
+ * User context is the WebDriver BiDi spec's term; Playwright calls them browser contexts. A context keeps its
+ * storage, cookies, permissions and emulation apart from every other context. An `ObservedUserContext` is one you
+ * don't control, such as an attached browser's default context; a `UserContext` is one you do. There are only two
+ * levels, because reads happen on pages.
  *
- * Options at creation are declarations held for the context's whole life. Members such as `emulate` and
- * `grant` are the same declarations, scoped: `Options.emulation` is `emulate(…)` held for the context's life.
+ * The options a context is created with are declarations held for its whole life. Members such as `emulate` and
+ * `grant` make the same declarations for a scope: `Options.emulation` is `emulate(…)` held for the context's life.
  *
- * A context the library creates also decides two things a browser left alone wouldn't: where downloads go, a
- * temporary directory the context owns unless `Options.downloads` says otherwise (its path is on the context's span,
- * `browser.context.downloads`), and file choosers, reported and decided, canceled when no handler answers.
+ * A context Strider creates also saves downloads into a temporary directory of its own, made before it and removed
+ * after it, unless its `downloads` option says otherwise; the directory's path is on the context's span, as
+ * `browser.context.downloads`. And it reports and answers file choosers, canceling those no handler answers.
  *
  * @stability unstable
  * @since 0.1.0
@@ -60,7 +61,7 @@ export type Id = typeof Id.Type
 const TypeId = "~@usestrider/browser/UserContext"
 
 /**
- * A context you can observe but not control, such as the default context when attached.
+ * A context you can observe but not control, such as an attached browser's default context.
  *
  * @stability unstable
  * @category models
@@ -82,7 +83,8 @@ export interface ObservedUserContext extends Pipeable.Pipeable, Equal.Equal, Ins
    */
   readonly closed: Effect.Effect<Target.CloseReason>
   /**
-   * Gains control for the scope. Reading storage needs it too.
+   * Gains control of the context for the scope. Even reading its storage, with `exportStorageState`, needs
+   * control.
    */
   readonly control: Effect.Effect<UserContext, UserContextError, Scope.Scope>
 }
@@ -126,7 +128,8 @@ export type Permission =
  */
 export interface GrantOptions {
   /**
-   * The origin the permissions apply to; every origin is `Unsupported` on Firefox (`permissions.anyOrigin`).
+   * The origin the permissions apply to. Granting to every origin is `Unsupported` on Firefox
+   * (`permissions.anyOrigin`).
    *
    * @default every origin
    */
@@ -160,8 +163,8 @@ export interface UserContext extends ObservedUserContext {
    */
   readonly clock: PageClock.PageClock
   /**
-   * Intercepts requests matching `pattern` from every page of the context, its workers included, at one
-   * phase while the registration lives; a page's own routes are asked first. As `Page.route` otherwise.
+   * Intercepts requests matching `pattern` from every page and worker of the context, at one phase, while the
+   * registration lives. A page's own routes are asked first; otherwise it works as `Page.route` does.
    */
   route<E, R, P extends Route.Phase = "request">(
     pattern: Url.Pattern | string,
@@ -234,7 +237,7 @@ export interface Options {
    */
   readonly storageState?: StorageState.StorageState | undefined
   /**
-   * What happens to a dialog no handler claims.
+   * What happens to a dialog no handler decides.
    *
    * @default "dismiss"
    */
@@ -247,22 +250,22 @@ export interface Options {
    */
   readonly focus?: "system" | "emulated" | undefined
   /**
-   * The keyboard layout `type` and `press` use for its pages. On Firefox the page sees the layout's
-   * `key`, but the `code` Firefox gives that key on a US keyboard, and no AltGr or dead-key presses
-   * (`input.keyboardLayout`).
+   * The keyboard layout that key presses and typing use on the context's pages: `press`, `pressSequentially` and
+   * `page.keyboard`. On Firefox a key event's `key` follows the layout, but its `code` is the one Firefox gives that
+   * key on a US keyboard, and there are no AltGr or dead keys (`input.keyboardLayout`).
    *
    * @default "us"
    */
   readonly keyboardLayout?: Keyboard.Layout | undefined
   /**
-   * Events retained per event module and page, for `history`; 0 keeps none.
+   * Events kept for `history`, per event module, for each page and for the context; 0 keeps none.
    *
    * @default 100
    */
   readonly eventLog?: number | undefined
   /**
-   * Where the context's downloads go: `"temporary"`, a directory the library makes for the context and removes
-   * after it; `"deny"`, none is allowed; or `{ directory }`, one the caller owns, which is never removed.
+   * Where the context's downloads go: `"temporary"`, a directory Strider makes for the context and removes after
+   * it; `"deny"`, no downloads are allowed; or `{ directory }`, one the caller owns, which is never removed.
    *
    * **Details**
    *

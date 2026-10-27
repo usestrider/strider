@@ -1,10 +1,9 @@
 /**
- * A context's saved storage: cookies, `localStorage` and IndexedDB, per partition.
+ * A context's saved storage: cookies, `localStorage` and IndexedDB, for each origin and partition.
  *
- * Export a logged-in context's state with `context.exportStorageState`, persist it with the `Json` codec, and
- * start new contexts from it with `UserContext.Options.storageState`. It crosses a persistence boundary and
- * carries secrets: values are `Redacted` in memory, and encoding writes them out in full, because that is the
- * point of saving them.
+ * Export a signed-in context's state with `context.exportStorageState`, save it with the `Json` codec, and start
+ * new contexts from it with `UserContext.Options.storageState`. It carries secrets: values are `Redacted` in
+ * memory, and encoding writes them out in full, because that's the point of saving them.
  *
  * @stability unstable
  * @since 0.1.0
@@ -35,7 +34,7 @@ export const IndexedDbDatabase = Schema.Struct({
       multiEntry: Schema.Boolean
     })),
     /**
-     * Each record's key and value in the library's JSON-safe encoding, which keeps a `Date`, `RegExp`, `Map`,
+     * Each record's key and value in Strider's JSON-safe encoding, which keeps a `Date`, `RegExp`, `Map`,
      * `Set`, `ArrayBuffer`, typed array, `bigint`, `undefined` and the numbers JSON can't write.
      */
     records: Schema.Array(Schema.Struct({

@@ -1,11 +1,11 @@
 /**
- * Values that cross into and out of the page.
+ * Handles to values in the page, and the type of what an evaluation returns by value.
  *
- * A function's result crosses by value, and `Serialized<A>` is what actually arrives. It is defined once,
- * next to the serializer, which is the same on every backend (BiDi's remote-value types), so the type says
- * what arrives: a `Date` survives, a class instance arrives as its data, and a DOM node doesn't cross at all.
- * Handles are the opt-in alternative: references to values that stay in one realm, owned by the caller's
- * scope.
+ * An evaluated function's result comes back by value, and `Serialized<A>` is the type of what actually arrives.
+ * It's defined once, next to the serializer, which is the same on every backend, so the type says what arrives: a
+ * `Date` survives, a class instance arrives as its data, and a DOM node doesn't come back at all. A handle is the
+ * alternative you opt into: a reference to a value that stays in the page, in one realm, released when the caller's
+ * scope closes.
  *
  * @stability unstable
  * @since 0.1.0
@@ -25,7 +25,7 @@ import type * as Target from "./Target.ts"
 declare const NotSerializableTypeId: unique symbol
 
 /**
- * A compile error with a message: the type can't cross by value.
+ * A compile error with a message, for a type that can't cross by value.
  *
  * **Details**
  *
@@ -70,8 +70,8 @@ const TypeId = "~@usestrider/browser/JSHandle"
  *
  * **Details**
  *
- * A handle is owned by the scope that acquired it and released with it, in batches unless the realm already
- * ended. Using it after its realm ends fails with `TargetGone` (`RealmDestroyed`).
+ * A handle belongs to the scope that acquired it, and is released when that scope closes, in one command with the
+ * scope's other handles in its realm. Using it after its realm ends fails with `TargetGone` (`RealmDestroyed`).
  *
  * **Example** (Reading from a DOM node)
  *
@@ -114,7 +114,8 @@ export interface JSHandle<A = unknown> extends Pipeable.Pipeable, Inspectable.In
    */
   readonly read: Effect.Effect<Serialized<A>, JSHandleError | Target.TargetGone | Deadline.Timeout>
   /**
-   * Releases the handle early. Idempotent; the scope's finalizer becomes a no-op.
+   * Releases the handle before its scope closes. Releasing it again does nothing, and neither does the scope when
+   * it closes.
    */
   readonly release: Effect.Effect<void>
 }

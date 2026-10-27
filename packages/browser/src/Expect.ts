@@ -1,14 +1,14 @@
 /**
- * Retrying expectations: each `Expect.to*` checks until it passes or the deadline ends.
+ * Expectations that retry: each `Expect.to*` checks until it passes or the deadline passes.
  *
- * A locator's expectation waits in the page: it checks once, then again on each change
- * the page makes (a DOM mutation, an `input`, `change` or focus event, an animation frame), so there is no
- * polling cadence and no change is missed between checks. A page's URL is a `Watchable`, checked on each
- * change. `Expect.that` checks a `Watchable` on each change, and runs any other effect again at
- * `CheckInterval`. Everything runs on the live clock, within the deadline. Collecting several failures is
- * Effect's job: `Effect.validate`, or `Effect.all(…, { mode: "result" })`.
+ * A locator's expectation waits in the page: it checks once, then again on each change the page makes (a DOM
+ * mutation, an `input`, `change` or focus event, an animation frame), so there is no polling interval and no change
+ * is missed between checks. A page's URL is a `Watchable`, checked on each change. `Expect.that` checks a
+ * `Watchable` on each change, and runs any other effect again every `CheckInterval`. Everything runs on the real
+ * clock, within the deadline. To collect several failures, use Effect: `Effect.validate`, or
+ * `Effect.all(…, { mode: "result" })`.
  *
- * Matchers that take arguments are duals: `locator.pipe(Expect.toHaveText("1 item"))` or
+ * Matchers that take arguments are dual: `locator.pipe(Expect.toHaveText("1 item"))` or
  * `Expect.toHaveText(locator, "1 item")`. Matchers without arguments are the function itself:
  * `locator.pipe(Expect.toBeVisible)`.
  *
@@ -45,7 +45,7 @@ import type * as Target from "./Target.ts"
 import type * as Watchable from "./Watchable.ts"
 
 /**
- * A matcher with no arguments: the expectation itself.
+ * A matcher that takes no arguments: the function is the expectation, as in `locator.pipe(Expect.toBeVisible)`.
  *
  * @stability unstable
  * @category models
@@ -87,7 +87,7 @@ export const toBeVisible: Matcher<Locator.ReadonlyLocator> = (locator) =>
   expectLocator(locator, { _tag: "Visible" }, "toBeVisible", "to be visible")
 
 /**
- * Expects the element to be hidden; passes when it is missing too.
+ * Expects no match to be visible: passes when every match is hidden, or when nothing matches.
  *
  * @stability unstable
  * @category matchers
@@ -147,7 +147,8 @@ export const toBeEditable: Matcher<Locator.ReadonlyLocator> = (locator) =>
   expectLocator(locator, { _tag: "Editable" }, "toBeEditable", "to be editable")
 
 /**
- * Expects the rendered text to match: of the one match, or of each match in order when given a list.
+ * Expects the one match's text to match `expected`, or, given a list, as many matches as the list has entries,
+ * each matching its entry in order. A string is matched whole after collapsing whitespace.
  *
  * @stability unstable
  * @category matchers
@@ -168,7 +169,7 @@ export const toHaveText: DualMatcher<
 })
 
 /**
- * Expects the rendered text of the one match to contain `expected`.
+ * Expects the text of the one match to contain `expected`.
  *
  * @stability unstable
  * @category matchers
@@ -316,12 +317,11 @@ export const toHaveTitle: DualMatcher<Page.ReadonlyPage, [expected: string | Reg
 )
 
 /**
- * Expects any subject to satisfy a condition, checking until it does or the deadline ends.
+ * Expects an effect's value to satisfy a condition, checking until it does or the deadline passes.
  *
  * **Details**
  *
- * A `Watchable` subject is checked again on each change. Any other effect is run again at the check
- * interval.
+ * A `Watchable` subject is checked again on each change. Any other effect is run again every `CheckInterval`.
  *
  * **Example** (A download that finishes)
  *
@@ -352,7 +352,7 @@ export const that = <A, E, R>(
     : polling(subject, condition)
 
 /**
- * Reference to how often a subject with no change signal is checked again; 100 ms unless set.
+ * Reference to how often `Expect.that` runs a subject that isn't a `Watchable` again; 100 ms unless set.
  *
  * @stability unstable
  * @category references
@@ -364,7 +364,7 @@ export const CheckInterval: Context.Reference<Duration.Duration> = Context.Refer
 )
 
 /**
- * Sets the check interval for every expectation inside an effect.
+ * Sets `CheckInterval` for every `Expect.that` inside an effect.
  *
  * @see {@link CheckInterval} for the reference it sets
  *
@@ -388,10 +388,12 @@ const ExpectationFailedTypeId = "~@usestrider/browser/Expect/ExpectationFailed"
  *
  * **Details**
  *
- * - `last` and `history` are the de-duplicated observations, which answer "was it ever right?".
+ * - `last` is the last value seen, and `history` every value seen, with repeats in a row dropped.
  * - `checks` says how many checks ran and what triggered them.
- * - `nearest` is a snapshot of the nearest existing ancestor when nothing matched.
- * - `suggestions` are locators that would have matched.
+ * - `nearest`, when nothing matched, is an accessibility snapshot of what the longest start of the locator that
+ *   still matches found.
+ * - `suggestions`, when nothing matched a `getByRole` with a name, are locators for elements with that role and a
+ *   similar name.
  *
  * @stability unstable
  * @category errors

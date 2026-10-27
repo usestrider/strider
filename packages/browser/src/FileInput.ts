@@ -1,8 +1,9 @@
 /**
- * Files to upload, saying where their bytes come from.
+ * Files to upload, each saying where its bytes come from.
  *
- * Which machine a path is on is always stated, because a browser on a remote grid can't read your local
- * paths and you can't read its. A plain string is not accepted for this reason.
+ * `local` reads a file on this machine, `remote` names one on the browser's machine, and `bytes` makes one from
+ * data you already have. Which machine a path is on is always stated, because a browser on a remote grid can't read
+ * your local paths, and you can't read its; that's why a plain string isn't accepted.
  *
  * @stability unstable
  * @since 0.1.0
@@ -66,8 +67,9 @@ export interface FileInput {
  *
  * **Details**
  *
- * The file is read here and uploaded when the browser is remote. A relative path is resolved against the
- * working directory with Effect's `Path`, which the browser's layer needs for it.
+ * The browser is given the path and reads the file itself, so it must see this machine's files, as a launched
+ * browser does; for one that doesn't, use `bytes`. A relative path is resolved against the working directory with
+ * Effect's `Path`, so the browser's layer must be built with `Path` to accept one.
  *
  * **Example** (Uploading an avatar)
  *
@@ -104,9 +106,10 @@ export const remote = (path: FilePath.Remote): FileInput => FileInputImpl.make({
  *
  * **Details**
  *
- * The file is made in the page: its bytes cross into the caller's isolated world and become a `File`, set on
- * the input through a `DataTransfer`, with `input` and `change` dispatched as a choice does. Its MIME type is
- * kept, and no file system is shared with the browser, so it works with a browser the program attached to.
+ * The file is made in the page: its bytes are copied into the isolated world `page.evaluate` runs in and become a
+ * `File`, which is set on the input through a `DataTransfer`, with `input` and `change` dispatched as when a user
+ * chooses files. It keeps its MIME type and needs no file system shared with the browser, so it works with a
+ * browser on another machine too.
  *
  * **Gotchas**
  *

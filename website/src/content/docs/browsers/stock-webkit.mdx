@@ -1,0 +1,131 @@
+---
+title: Stock WebKit
+description: Attaching to a WebKitGTK or WPE browser through its inspector server, to look rather than drive. What works, what can't, and how to act on a page without input.
+order: 5
+---
+
+## For looking, not driving
+
+WebKitGTK and WPE are the WebKit ports that Linux desktops and embedded devices run: GNOME's browser, kiosks, set-top
+boxes, in-car screens. Their remote inspector lets Strider attach to a running browser and see its pages as they
+are: read them, locate elements, take snapshots and screenshots, navigate, route requests, and follow the console
+and the network.
+
+What the inspector can't do is drive. It has no input, so there's no clicking or typing, and no dialogs, new pages,
+emulation or isolated worlds. Strider says so with `Unsupported`, naming the capability, before anything is sent.
+For WebKit you can drive, launch [Playwright's build](/docs/browsers/webkit).
+
+Strider's stock WebKit support is generated from WebKitGTK 2.54.1's inspector protocol and tested with its
+MiniBrowser. WPE and other apps aren't tested, and Safari's inspector, on macOS or iOS, works differently and isn't
+supported.
+
+## Starting a browser to attach to
+
+A WebKitGTK or WPE browser opens its inspector server when `WEBKIT_INSPECTOR_HTTP_SERVER` names an address. With
+WebKitGTK's MiniBrowser, which needs a display:
+
+```sh
+WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9333 /usr/libexec/webkitgtk-6.0/MiniBrowser https://example.com
+```
+
+The MiniBrowser's path depends on the distribution. Other apps may also need WebKit's developer extras turned on
+before they open the server.
+
+## Attaching
+
+`WebKit.layerAttach` takes the inspector server's address. It needs a `WebSocketConstructor`, since each page has a
+WebSocket of its own:
+
+```ts
+import { NodeSocket } from "@effect/platform-node"
+import { Browser, Expect } from "@usestrider/browser"
+import { WebKit } from "@usestrider/browser/webkit"
+import { Effect, Layer } from "effect"
+
+const Device = WebKit.layerAttach("http://127.0.0.1:9333").pipe(
+  Layer.provide(NodeSocket.layerWebSocketConstructor)
+)
+
+const menuShows = Effect.scoped(Effect.gen(function*() {
+  const [first] = yield* (yield* Browser.Browser).pages
+  if (first === undefined) return
+  const page = yield* first.control
+  yield* page.goto("http://localhost:8080/menu")
+  yield* page.getByRole("heading", { name: "Menu" }).pipe(Expect.toBeVisible)
+  return yield* page.screenshot()
+})).pipe(Effect.provide(Device))
+```
+
+Strider reads the server's list of pages when it connects and every 250 ms after, so pages the browser opens later
+appear in `browser.pages` too. Every page is observed, in one default context: `inspect` or `control` gains access
+to one for a scope. The pages stay open when the program ends, and another client can attach after it.
+
+The browser doesn't say what it is, so `browser.info` is `WebKit (stock)`, with its version `unknown`.
+
+## Acting without input
+
+With no input, the way to press a button is to have the page's own script do it. `evaluateInMainWorld` runs a
+function among the page's scripts, and needs control:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const refresh = Effect.fn("refresh")(function*(page: Page.Page) {
+  yield* page.evaluateInMainWorld(() => {
+    document.querySelector<HTMLButtonElement>("button#refresh")?.click()
+  })
+})
+```
+
+A click made this way is the page's own, not a person's: it fires the button's handlers, but nothing a real click
+would do before them, such as focus or a `pointerdown`.
+
+`page.evaluate` isn't available, because it runs in an isolated world and the inspector can't make one. That's
+also why an `inspect` handle can't evaluate at all: evaluating among the page's scripts needs `control`.
+
+## What runs in the page's world
+
+The inspector makes no isolated worlds, so Strider's own code runs in the page's main world: the engine that finds
+elements, its init scripts and its reads. The page's scripts can see it there, and a page that replaces the
+built-in methods it uses can change what it finds, on stock WebKit and nowhere else.
+
+## Navigating
+
+`goto` navigates by script, setting `location.href`, so the navigation carries the document's own referrer. One that
+only changes the URL's fragment is refused, because stock WebKit doesn't report a navigation within a document; for
+the same reason, `page.url` doesn't follow `history.pushState`, and `back` and `forward` aren't available.
+
+When a load fails, the browser shows its error page as `about:blank`, a navigation of its own. A `goto` that fails
+says so, and the next `goto` should wait for the page to reach `about:blank` first, or the error page's
+navigation can overtake it.
+
+## What stock WebKit can't do
+
+Generated from the backend's capability list: everything stock WebKit lacks or does only partly, with the reason
+the backend gives. Most of it is one missing piece of the inspector: there's no input, dialog, emulation or
+screencast domain.
+
+<BrowserLimits browser="webkit-stock" />
+
+Supported, with a caveat:
+
+<BrowserLimits browser="webkit-stock" caveats />
+
+## What's different
+
+**Dialogs block, unreported.** The inspector says nothing when a page opens an `alert`, so the page's scripts stop
+until a person dismisses it, and Strider's operations on the page wait until their deadline.
+
+**Downloads aren't seen.** A navigation that turns into a download ends as `BecameDownload`, but no `Download` is
+reported, and there's no file to read.
+
+**Frames are only partly known.** The inspector can't say which frame an iframe holds, so a locator that enters a
+frame fails with `Unsupported`, and a page's readiness is its main frame's.
+
+**Screenshots are PNG,** in device pixels, the only format the inspector writes.
+
+**Cookies need a page.** Stock WebKit sets cookies through an open page, so with no page open, setting one fails.
+
+**The `strider` command can't attach.** Its `--attach` takes an HTTP endpoint to be Chromium's, so use
+`WebKit.layerAttach` from a program.

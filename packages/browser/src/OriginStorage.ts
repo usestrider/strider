@@ -1,8 +1,8 @@
 /**
- * `localStorage` and `sessionStorage` of a page's current document's origin.
+ * `localStorage` and `sessionStorage`, for the origin of a page's current document.
  *
- * Both are sub-handles bound to their page (`page.localStorage`, `page.sessionStorage`). They act on whatever
- * origin the page is on when the operation runs. Reading needs inspect access, and writing needs control.
+ * Both belong to their page (`page.localStorage`, `page.sessionStorage`), and act on whatever origin the page is on
+ * when the operation runs. Reading needs inspect access, and writing needs control.
  *
  * @stability unstable
  * @since 0.1.0

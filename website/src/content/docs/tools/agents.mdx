@@ -1,0 +1,188 @@
+---
+title: Agents and the strider command
+description: Snapshots with refs for a model to act on, a toolkit of tools for effect/ai, and a command that drives a live browser from a shell.
+order: 3
+---
+
+## Snapshots
+
+A snapshot is a page's accessibility tree as data: the tree a screen reader would read, with a ref for each node
+that can be acted on. Its `text` is the rendering agents already know how to read:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Console, Effect, Option } from "effect"
+
+const clickByName = Effect.fn("clickByName")(function*(page: Page.Page, name: string) {
+  const snapshot = yield* page.snapshot({ interactiveOnly: true })
+  yield* Console.log(snapshot.text)
+  for (const [id, node] of snapshot.refs) {
+    if (node.name._tag !== "None" && node.name.value === name) {
+      return yield* snapshot.ref(id).click().pipe(Effect.as(Option.some(id)))
+    }
+  }
+  return Option.none()
+})
+```
+
+Many sites aren't fully accessible: a clickable `<div>` has no role and an icon button no name. So by default a
+snapshot adds what it can infer, interactivity from `cursor: pointer`, `tabindex`, `contenteditable` or `onclick`,
+and names from visible text, `title`, `placeholder`, `alt` or a nearby label, and tags every inference with what
+it was inferred from. A reader can tell `button "Save"` from `clickable "Save" [inferred: cursorPointer]`.
+`snapshot({ sources: "aria" })` is the accessibility tree alone, which is what `Expect.toMatchAria` matches.
+
+A ref is a locator pinned to one node. Unlike every other locator, it's never resolved again: if its node is
+removed or its document replaced, acting on it fails with `StaleRef`, saying which, rather than quietly finding
+something else. A node keeps its ref while its document lives, even if its name changes. `snapshot.diff(previous)`
+says what changed between two snapshots of a document.
+
+## The toolkit
+
+`BrowserToolkit` gives a model tools over one context, as `effect/ai` tools. The same definitions serve a model in
+your program, an MCP server and the `strider` command:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
+import { Config, Effect } from "effect"
+import { LanguageModel } from "effect/ai"
+
+const agent = Effect.scoped(Effect.gen(function*() {
+  const context = yield* Browser.newContext()
+  const toolkit = yield* BrowserToolkit.make({
+    context,
+    secrets: { password: yield* Config.Redacted("APP_PASSWORD") },
+    capture: CapturePolicy.strict
+  })
+  const response = yield* LanguageModel.generateText({
+    prompt: "On app.example.com, sign in as ada@example.com with %password%.",
+    toolkit
+  })
+  return response.text
+}))
+```
+
+The tools are `pages`, `newPage`, `tabs`, `control`, `release`, `goto`, `back`, `snapshot`, `find`, `screenshot`,
+`click`, `fill`, `press`, `select`, `scroll`, `next`, `await`, `expect`, `history`, `route` and `dialog`. They follow
+the same rules as the rest of Strider:
+
+- **Every tool names its page.** There is no current tab to get wrong. Pages are named when they're created,
+  `p1`, `p2` or a name the model chose, or when first seen, as a popup is.
+- **Targets are refs or locators.** A target is a ref from the page's latest snapshot, `e12`, or a string such as
+  `role=button[name="Save"]`, `text="Add to cart"`, `label=Email`, `testid=cart` or `css=…`. A ref from another
+  page's snapshot is refused, with a hint naming the page it came from.
+- **No tool waits after it acts.** Waiting is a tool like any other: `next` subscribes and `await` collects, as in
+  a program, and `expect` waits for a condition. Each result carries the call's outcome, then a digest of what
+  happened since the previous call: navigations, popups, dialogs and who decided them, downloads, uncaught
+  exceptions, console errors and failed requests.
+- **Failures go back to the model.** A `LocatorError`, a `Timeout` or a stale ref returns to the model as data,
+  hint included, instead of ending the conversation.
+- **Secrets are named, never seen.** The model writes `%password%`, the value is substituted as the tool runs, and
+  results carry it back as `%password%`.
+
+`capture` is required, because it decides what page content reaches the model. `CapturePolicy.strict` sends no
+screenshots, masks the text of editable fields in snapshots as `•••`, and leaves console text out.
+`CapturePolicy.local` allows all three.
+
+Give the toolkit `browser` as well, and `tabs` and `control` can reach the browser's other pages, such as the tabs
+of a browser it attached to. Without it, the model stays in its context.
+
+## The strider command
+
+`strider` drives a live browser from a shell, for a person or an agent. A session holds one browser and survives
+between commands, so you can stop, look at something, and carry on with nothing restarted:
+
+```sh
+strider start --name shop --chromium /usr/bin/chromium
+strider -s shop page new --name main https://shop.example.com
+strider -s shop -p main snapshot
+strider -s shop -p main click e9
+strider -s shop -p main fill 'label=Email' "ada@example.com"
+strider -s shop -p main find "Add to cart" --role button
+strider -s shop stop
+```
+
+Every command names its session with `-s` and its page with `-p`. There is no default session and no current
+page, even when there is only one: with several agents on a machine, an implicit choice is how one acts on
+another's tab. The commands are the toolkit's tools, so they answer as the tools do, with the outcome and what
+happened since the last command:
+
+```
+clicked e9 on main · 412 ms
+since last: main navigated to https://shop.example.com/cart · GET https://shop.example.com/api/offers answered 503
+```
+
+Events work across commands. `next` subscribes and prints a wait handle, and `await` collects it later:
+
+```sh
+strider -s shop -p main next download --within 2m
+strider -s shop -p main click 'role=button[name="Export CSV"]'
+strider -s shop await w1
+```
+
+A failure prints its error's tag, message and hint, and exits with a code per error: 10 for `LocatorError`, 12 for
+`Timeout`, 14 for `ExpectationFailed`, and so on.
+
+### Sessions and state
+
+| Command                                          | Does                                                          |
+| ------------------------------------------------ | ------------------------------------------------------------- |
+| `strider browsers`                               | lists the browsers on the machine, by path                     |
+| `strider start --name s --chromium <path>`       | starts a session; also `--firefox`, `--webkit` or `--attach <endpoint>` |
+| `strider sessions`                               | lists sessions, with their pages, idle time and owner          |
+| `strider -s s state save ./auth/shop.state`      | saves the session's storage state                              |
+| `strider start --name t --chromium <path> --state ./auth/shop.state` | starts another session from it          |
+| `strider start --name t --chromium <path> --fork s` | starts one from a running session's state                   |
+| `strider -s s tabs`, `control <id> --name mail`  | lists the browser's other tabs, and takes one by name          |
+| `strider -s s export test checkout.test.ts`      | writes what the session did as a Vitest test                   |
+| `strider -s s stop`                              | ends the session and deletes its directory                     |
+| `strider prune`                                  | lists what crashed programs left behind; `--yes` cleans it up  |
+
+A session's directory, with its profile, downloads and artifacts, is in `$XDG_RUNTIME_DIR/strider/<name>/`, and is
+deleted when the session stops. Secrets are named at start, `--secret password=APP_PASSWORD`, read from the
+environment, and used as `%password%`, never echoed or recorded.
+
+### Segments
+
+For a step that needs logic, write it in TypeScript and run it in the live session. A segment is a file whose
+default export is an `Effect` that finds the session's pages by name:
+
+```ts title="pay.ts"
+import { Popup } from "@usestrider/browser"
+import { CurrentSession } from "@usestrider/browser/cli"
+import { Effect } from "effect"
+
+export default Effect.gen(function*() {
+  const session = yield* CurrentSession.CurrentSession
+  const shop = yield* session.page("main")
+  const popups = yield* Popup.next(shop)
+  yield* shop.getByText("Pay").click()
+  const popup = yield* popups
+  yield* popup.getByLabel("Card number").fill("4242 4242 4242 4242")
+  return { popup }
+})
+```
+
+```sh
+npx tsc --noEmit && strider -s shop run pay.ts
+```
+
+A segment runs in its own scope, so its routes, handlers and waits end with it, and the pages it returns join the
+session, under their names. The CLI doesn't type-check a segment; your project's `tsc` does, against the same version of
+Strider the session runs.
+
+### MCP
+
+`strider mcp` serves a session's tools over the Model Context Protocol, so a client such as Claude Desktop shares
+the session with your shell:
+
+```json
+{
+  "mcpServers": {
+    "strider": { "command": "strider", "args": ["mcp", "-s", "shop"] }
+  }
+}
+```
+
+With `["mcp", "--start", "--chromium", "/usr/bin/chromium"]` instead, the client starts a session of its own, which
+ends when the client stops it.

@@ -1,0 +1,73 @@
+---
+// What one backend can't do, or does only partly, each with the reason its adapter gives; what it does with a
+// caveat; and, for a backend that both launches and attaches, what's different about a browser it attached to.
+//
+//   <BrowserLimits browser="firefox" />
+//   <BrowserLimits browser="firefox" caveats />
+//   <BrowserLimits browser="firefox" when="attached" />
+import { allGroups, backends, runs, statusLabel, type Backend, type Entry } from "../features/browsers/capabilities.ts"
+
+interface Props {
+  readonly browser: Backend["id"]
+  /** `attached` lists only what differs when Strider attaches rather than launches */
+  readonly when?: "launched" | "attached" | undefined
+  /** List what's supported with a caveat, instead of what isn't supported */
+  readonly caveats?: boolean | undefined
+}
+
+const { browser, when = "launched", caveats = false } = Astro.props
+const all = backends()
+const backend = all.find((each) => each.id === browser)
+if (backend === undefined) throw new Error(`BrowserLimits: no backend "${browser}"`)
+const main = backend.launched ?? backend.attached ?? []
+const byName = new Map(main.map((entry) => [entry.name, entry]))
+const attached = new Map((backend.attached ?? []).map((entry) => [entry.name, entry]))
+const differs = (entry: Entry) => {
+  const launched = byName.get(entry.name)
+  return launched === undefined || launched.status !== entry.status ||
+    launched.limitations.join() !== entry.limitations.join()
+}
+// What to list: what isn't fully supported, or what is with a caveat; or, attached, what's different
+const listed = (name: string): Entry | undefined => {
+  if (when === "attached") {
+    const entry = attached.get(name)
+    return entry !== undefined && backend.launched !== null && differs(entry) ? entry : undefined
+  }
+  const entry = byName.get(name)
+  if (entry === undefined) return undefined
+  return caveats
+    ? entry.status === "supported" && entry.limitations.length > 0 ? entry : undefined
+    : entry.status !== "supported" ? entry : undefined
+}
+// The adapters write a reason as a clause; here it's a sentence
+const sentence = (reasons: ReadonlyArray<string>) =>
+  reasons.map((reason) => reason.charAt(0).toUpperCase() + reason.slice(1) + ".").join(" ")
+const sections = allGroups(all)
+  .map((group) => ({
+    label: group.label,
+    items: Object.entries(group.names).flatMap(([name, label]) => {
+      const entry = listed(name)
+      return entry === undefined ? [] : [{ label, entry }]
+    })
+  }))
+  .filter((section) => section.items.length > 0)
+---
+
+<div class="browser-limits">
+  {
+    sections.map((section) => (
+      <>
+        <p class="label">{section.label}</p>
+        <ul>
+          {section.items.map(({ label, entry }) => (
+            <li>
+              <strong>{runs(label).map((run, i) => (i % 2 === 1 ? <code>{run}</code> : run))}</strong>
+              {!caveats && <span class="status" data-status={entry.status}>{statusLabel[entry.status]}</span>}
+              {entry.limitations.length > 0 && <span class="why">{sentence(entry.limitations)}</span>}
+            </li>
+          ))}
+        </ul>
+      </>
+    ))
+  }
+</div>

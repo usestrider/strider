@@ -1,0 +1,120 @@
+---
+// The cover: the engraving, the band with what Strider is, the contents, and a first example
+import { Image } from "astro:assets"
+import { getCollection } from "astro:content"
+import { Code } from "astro-expressive-code/components"
+import SiteHeader from "../components/SiteHeader.astro"
+import { guideRoute, navigation } from "../features/docs/navigation.ts"
+import { versionLabel } from "../features/site.ts"
+import BaseLayout from "../layouts/BaseLayout.astro"
+
+const version = await versionLabel()
+const chapters = navigation(await getCollection("docs"))
+const counts = ["One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"]
+const chapterCount = `${counts[chapters.length - 1] ?? chapters.length} ${chapters.length === 1 ? "chapter" : "chapters"}`
+// The engraving, from design/strider/heron/: here, and only here
+const engravings = import.meta.glob<{ default: ImageMetadata }>("../assets/heron-engraving.{png,jpg,webp,avif,svg}", {
+  eager: true
+})
+const engraving = Object.values(engravings)[0]?.default
+const install = "npm install @usestrider/browser"
+const example = `import { Browser, Expect } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Effect } from "effect"
+
+const program = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage()
+  yield* page.goto("https://shop.example.com")
+  yield* page.getByRole("button", { name: "Add to cart" }).click()
+  yield* page.getByText("1 item").pipe(Expect.toBeVisible)
+})).pipe(Effect.provide(Chromium.layer({ executablePath: "/usr/bin/chromium" })))`
+---
+
+<BaseLayout
+  title="Strider"
+  description="Effect-native browser automation over the Chrome DevTools Protocol, WebDriver BiDi and the WebKit inspector protocol"
+>
+  <SiteHeader />
+
+  <section class="mx-auto max-w-3xl px-6 pt-12 pb-14 text-center">
+    {
+      engraving !== undefined && (
+        <Image
+          class="engraving mx-auto w-[min(26rem,100%)]"
+          src={engraving}
+          widths={[468, 936]}
+          sizes="(min-width: 520px) 468px, 100vw"
+          alt="An engraving of a great blue heron, stepping"
+          loading="eager"
+        />
+      )
+    }
+    <p class="deck mx-auto mt-6 max-w-lg text-[1rem]">
+      A heron crosses the shallows one deliberate step at a time, then strikes once. That is the whole philosophy of
+      the tool.
+    </p>
+    <p class="label mt-6">Browser automation · TypeScript · Effect</p>
+    <p class="mt-3 flex justify-center gap-6 font-mono text-[0.75rem]">
+      <span class="flex items-center gap-2"><span class="size-2 bg-[var(--engine-chromium)]"></span>Chromium</span>
+      <span class="flex items-center gap-2"><span class="size-2 bg-[var(--engine-firefox)]"></span>Firefox</span>
+      <span class="flex items-center gap-2"><span class="size-2 bg-[var(--engine-webkit)]"></span>WebKit</span>
+    </p>
+  </section>
+
+  <section class="bg-band text-white">
+    <div class="mx-auto max-w-6xl px-6 pt-16 pb-8 md:px-14">
+      <h1 class="max-w-xl font-display text-[2.8rem] leading-[1.08] font-normal sm:text-[3.8rem]">Browser automation, typed end to end.</h1>
+      <p class="mt-5 max-w-lg text-[1.2rem] leading-relaxed">
+        Drive Chromium, Firefox and WebKit from TypeScript, with typed errors that say what happened, lifetimes tied to
+        scopes, and events you subscribe to before you act.
+      </p>
+      <p class="mt-8 flex flex-wrap gap-4">
+        <a class="btn border-white bg-white text-band" href="/docs">Read the guide</a>
+        <button class="btn border-white font-mono text-[0.8rem] text-white" type="button" data-copy-text={install}>
+          {install}
+        </button>
+      </p>
+      <div class="mt-12 flex justify-between border-t border-white/60 pt-4">
+        <span class="label !text-white">Documentation · {version}</span>
+        <span class="label !text-white">MIT license</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-6xl px-6 py-20 md:px-14">
+    <div class="flex items-baseline justify-between border-b border-ink pb-3">
+      <h2 class="font-display text-[2.2rem] font-normal">Contents</h2>
+      <span class="label">{chapterCount}</span>
+    </div>
+    <div class="mt-8 grid gap-10 md:grid-cols-2 xl:grid-cols-3">
+      {
+        chapters.map((chapter) => (
+          <div>
+            <p class="label">Chapter {chapter.number}</p>
+            <h3 class="mt-2 font-display text-[1.45rem] font-medium">{chapter.label}</h3>
+            <p class="mt-2 text-[1rem] text-labels">{chapter.description}</p>
+            <a class="more mt-3 inline-block text-[1rem]" href={guideRoute(chapter.pages[0]!)}>
+              {chapter.number === 1 ? "Begin here" : "Read the chapter"} →
+            </a>
+          </div>
+        ))
+      }
+    </div>
+
+    <div class="mt-20 grid items-start gap-10 md:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+      <div>
+        <p class="label">Example 1-1</p>
+        <h2 class="mt-2 font-display text-[2rem] leading-tight font-normal">Open a page and click</h2>
+        <p class="mt-4 text-[1.05rem]">
+          Every operation is an <code>Effect</code>: it describes what to do, names what can go wrong in its type, and
+          runs only when you ask.
+        </p>
+        <p class="mt-3 text-[1.05rem]">
+          The page is a scoped resource: opened at the top, and closed when the scope closes, whether the program
+          succeeds or fails.
+        </p>
+      </div>
+      <Code code={example} lang="ts" title="example.ts" />
+    </div>
+  </section>
+</BaseLayout>

@@ -1,6 +1,6 @@
 /**
- * A raw CDP connection (L0): the browser's own session, plus each target session the browser announces, over
- * one `Transport`.
+ * A raw Chrome DevTools Protocol connection, for working with the protocol directly: the browser's own session,
+ * and each target session the browser announces, over one `Transport`.
  *
  * Sessions are flat: every session shares the connection, and messages carry their `sessionId`. Attach with
  * `Target.attachToTarget({ targetId, flatten: true })` or `Target.setAutoAttach({ …, flatten: true })`; the

@@ -1,7 +1,7 @@
 /**
- * WAI-ARIA roles, as used by `getByRole`, snapshots and `AriaPattern`.
+ * The WAI-ARIA roles that `getByRole`, snapshots and `AriaPattern` use.
  *
- * Shaped like `effect/http`'s `HttpMethod`: a type, the set of known values, and a guard.
+ * Like `effect/http`'s `HttpMethod`, the module has a type, the set of known values and a guard.
  *
  * @stability unstable
  * @since 0.1.0
@@ -12,8 +12,8 @@
  *
  * **Details**
  *
- * The open string keeps roles added after this list usable before the list catches up. Known roles still
- * autocomplete.
+ * It also accepts any string, so a role newer than this list can be used before Strider adds it. Known roles
+ * still autocomplete.
  *
  * @stability unstable
  * @category models
@@ -105,7 +105,7 @@ export type AriaRole =
   | (string & {})
 
 /**
- * The roles this version knows.
+ * The roles this version of Strider knows.
  *
  * @stability unstable
  * @category constants
@@ -197,7 +197,7 @@ export const all: ReadonlySet<AriaRole> = new Set<AriaRole>([
 ])
 
 /**
- * Checks whether a value is a role this version knows.
+ * Checks whether a value is a role this version of Strider knows.
  *
  * @stability unstable
  * @category guards

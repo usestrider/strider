@@ -1,0 +1,64 @@
+---
+// One module's reference page
+import { getCollection } from "astro:content"
+import { Code } from "astro-expressive-code/components"
+import Blocks from "../../../../components/Blocks.astro"
+import Declaration from "../../../../components/Declaration.astro"
+import Rail from "../../../../components/Rail.astro"
+import ReferenceNav from "../../../../components/ReferenceNav.astro"
+import type { SectionKey } from "../../../../features/reference/sections.ts"
+import { sections } from "../../../../features/reference/sections.ts"
+import type { Entry } from "../../../../features/reference/view.ts"
+import { kindLetter, moduleView } from "../../../../features/reference/view.ts"
+import DocShell from "../../../../layouts/DocShell.astro"
+
+export const getStaticPaths = async () =>
+  (await getCollection("reference")).map((entry) => ({
+    params: { package: entry.data.slug, module: entry.data.path },
+    props: { entry }
+  }))
+
+const { entry } = Astro.props as { readonly entry: Entry }
+const view = await moduleView(entry, await getCollection("reference"))
+const section = sections[entry.data.section as SectionKey]
+---
+
+<DocShell
+  title={view.module}
+  description={view.description}
+  area="reference"
+  crumbs={[
+    { label: "API", href: "/docs/api" },
+    { label: entry.data.slug },
+    ...entry.data.path.split("/").map((segment) => ({ label: segment }))
+  ]}
+>
+  <ReferenceNav slot="sidebar" current={entry.id} />
+  <Rail
+    slot="rail"
+    groups={view.categories.map((category) => ({
+      label: category.title,
+      href: `#${category.anchor}`,
+      items: category.declarations.map((d) => ({ label: d.name, href: `#${d.anchor}`, kind: kindLetter(d.kind) }))
+    }))}
+    link={view.sourceUrl === undefined ? undefined : { label: "Source", title: "Read it on GitHub", href: view.sourceUrl }}
+  />
+  <p class="label">Module · {section.title}</p>
+  <h1 class="mt-2 font-display text-[3rem] leading-tight font-normal">{view.name}</h1>
+  <p class="mt-1 mb-6 flex flex-wrap items-center gap-x-4 gap-y-2 font-sans text-[0.85rem] text-labels">
+    <span class="font-mono text-[0.8rem] text-ink">{view.module}</span>
+    {view.stability !== undefined && view.stability !== "stable" && <span class="tag">{view.stability}</span>}
+    <span>{view.count} exports</span>
+    {view.since !== undefined && <span>Since {view.since}</span>}
+  </p>
+  {view.importLine !== undefined && <Code code={view.importLine} lang="ts" title="Import" />}
+  <Blocks blocks={view.summary} />
+  {
+    view.categories.map((category) => (
+      <section class="mt-16" id={category.anchor}>
+        <h2 class="mb-2 font-display text-[2rem] font-normal">{category.title}</h2>
+        {category.declarations.map((declaration) => <Declaration declaration={declaration} />)}
+      </section>
+    ))
+  }
+</DocShell>

@@ -1,0 +1,179 @@
+---
+title: Testing with Vitest
+description: A test is a program with a browser layer. Strider adds no fixtures of its own, only a way to attach files to the test, and a fake browser for testing events.
+order: 1
+---
+
+## Setting up
+
+Tests run under Vitest with Effect's `@effect/vitest`, and `@usestrider/vitest` connects the two:
+
+```sh
+npm install --save-dev vitest @effect/vitest @usestrider/vitest
+```
+
+## A test is a program
+
+A test opens its page the way a script does, with `Browser.newPage()`. There's no test-only way to get a page,
+and nothing changes because it's a test: the layer launches exactly the backend you give it.
+
+```ts title="checkout.test.ts"
+import { NodeServices } from "@effect/platform-node"
+import { layer } from "@effect/vitest"
+import { Browser, Expect } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { VitestBrowser } from "@usestrider/vitest"
+import { Config, Effect, Layer } from "effect"
+
+const ChromiumLive = Chromium.layerConfig({
+  executablePath: Config.String("CHROMIUM_PATH")
+}).pipe(Layer.provide(NodeServices.layer))
+
+const BrowserLive = VitestBrowser.layer(ChromiumLive)
+
+layer(BrowserLive, { excludeTestServices: true })("checkout", (it) => {
+  it.effect("adds a product to the cart", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      yield* page.goto("https://shop.example.com")
+      yield* page.getByRole("button", { name: "Add to cart" }).click()
+      yield* page.getByText("1 item").pipe(Expect.toBeVisible)
+    }))
+
+  it.effect("empties the cart", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      yield* page.goto("https://shop.example.com/cart")
+      yield* page.getByRole("button", { name: "Empty cart" }).click()
+      yield* page.getByText("Your cart is empty").pipe(Expect.toBeVisible)
+    }))
+})
+```
+
+`layer` from `@effect/vitest` builds the layer once for the block, so the file's tests share one browser, and each
+test's `Browser.newPage()` gives it a fresh context and page, closed when the test ends. Tests in different files
+run in parallel, each file with its own browser.
+
+`VitestBrowser.layer` passes the backend through unchanged and adds `TestRun`, the running test, so files can be
+attached to it. `excludeTestServices: true` runs the tests on the real clock. Strider's deadlines run on the real
+clock either way, but a test driving a real browser waits in real time, and an `Effect.sleep` of your own on a
+`TestClock` nobody moves would never end.
+
+An expectation that fails fails the test with `ExpectationFailed`, whose message says what was expected, what was
+seen and what was nearest.
+
+## Steps shared with scripts
+
+A step written with `Effect.fn` that takes a page works the same in a test as in a script, so the steps a script
+uses are the steps its tests check:
+
+```ts
+import { NodeServices } from "@effect/platform-node"
+import { layer } from "@effect/vitest"
+import { Browser, Expect, Page } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { VitestBrowser } from "@usestrider/vitest"
+import { Config, Effect, Layer } from "effect"
+
+const signIn = Effect.fn("signIn")(function*(page: Page.Page) {
+  yield* page.goto("https://app.example.com/login")
+  yield* page.getByLabel("Email").fill("ada@example.com")
+  yield* page.getByLabel("Password").fill(yield* Config.Redacted("APP_PASSWORD"))
+  yield* page.getByRole("button", { name: "Sign in" }).click()
+})
+
+const ChromiumLive = Chromium.layerConfig({
+  executablePath: Config.String("CHROMIUM_PATH")
+}).pipe(Layer.provide(NodeServices.layer))
+
+const BrowserLive = VitestBrowser.layer(ChromiumLive)
+
+layer(BrowserLive, { excludeTestServices: true })("account", (it) => {
+  it.effect("greets a signed-in user", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      yield* signIn(page)
+      const welcome = page.getByRole("heading", { name: "Welcome, Ada" })
+      yield* welcome.pipe(Expect.toBeVisible)
+    }))
+})
+```
+
+To sign in once per file rather than once per test, save the storage state and start each test's page from it,
+as [Contexts and access](/docs/pages/contexts#logging-in-once) shows.
+
+## Many pages at once
+
+The defaults suit a test or two at a time. A suite that runs many pages at once in one browser says so, in
+code, as anywhere else:
+
+```ts
+import { Browser, LaunchProfile } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Effect } from "effect"
+
+const BrowserLive = Chromium.layer({
+  executablePath: "/usr/bin/chromium",
+  profile: LaunchProfile.concurrent
+})
+
+const busyPage = Browser.newPage({ focus: "emulated" })
+```
+
+`LaunchProfile.concurrent` turns off the throttling a browser applies to background timers and renderers, and
+`focus: "emulated"` keeps every page behaving as if it had focus. Both change what pages observe, so neither is a
+default. Concurrent tests within a file are opt-in too: `layer(BrowserLive, { concurrent: true })`.
+
+## Attaching files
+
+`TestRun` attaches files to the running test, which Vitest records as the test's artifacts. A trace is the most
+useful thing to attach to a test that fails; [Recordings](/docs/tools/recordings) shows how to make one:
+
+```ts
+import { Browser, Trace } from "@usestrider/browser"
+import { TestRun } from "@usestrider/browser/test"
+import { Effect } from "effect"
+
+const traced = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage()
+  const trace = yield* Trace.record(page, { screenshots: "perAction" })
+  yield* page.goto("https://shop.example.com")
+  yield* page.getByRole("button", { name: "Add to cart" }).click()
+  const path = yield* trace.exportTrace("traces/add-to-cart.zip")
+  const run = yield* TestRun.TestRun
+  yield* run.attach({ _tag: "Trace", path })
+}))
+```
+
+## A fake browser for events
+
+Some code is about what happens around a page rather than on it: waiting for the right response, handling a
+dialog, giving up when a page crashes. `Browser.layerTest` is a fake browser for testing that code without
+launching anything. Its first page plays a timeline, written as a string, on Effect's clock, so under `TestClock`
+it moves only as the test moves it:
+
+```ts
+import { assert, it } from "@effect/vitest"
+import { Browser, NetworkResponse, PageNavigation } from "@usestrider/browser"
+import { Effect } from "effect"
+import { TestClock } from "effect/testing"
+
+const Timeline = Browser.layerTest("--resp(cart)--commit--load--|")
+
+it.effect("sees the cart's response before the page commits", () =>
+  Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const cart = yield* NetworkResponse.next(page, { url: "https://example.test/cart" })
+    const navigation = yield* PageNavigation.next(page, { waitUntil: "load" })
+    yield* TestClock.adjust("20 millis")
+    assert.strictEqual((yield* cart).status, 200)
+    yield* TestClock.adjust("40 millis")
+    assert.strictEqual((yield* navigation)._tag, "Committed")
+  }).pipe(Effect.provide(Timeline)))
+```
+
+In the timeline, `-` is 10 ms, `resp(name)` answers a request for `https://example.test/name`, `commit` commits a
+document at `https://example.test/`, `load` finishes loading it, `dialog(kind)` opens a dialog, `popup` a popup,
+and `crash` and `|` end the page. The fake's events go through the same code as a real browser's, so
+subscriptions, handlers and waits behave as they would. It has no DOM: locators fail with `Unsupported`. It's
+experimental for now.

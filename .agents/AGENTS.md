@@ -41,8 +41,9 @@ and stock WebKit, and every member the API declares is built. One declared befor
   environment's Chromium. `pnpm scenarios` writes its `RESULTS.md`; `pnpm scenarios --record` visits
   the public demo sites once, live, into `.data/scenarios/`. Playwright (`playwright-core`) is this package's
   dependency alone: never import it elsewhere.
-- `packages/tools/docs`: the JSDoc checker (vendored from Effect; don't edit it), the example check, `INDEX.md` and
-  the API reference dataset.
+- `packages/tools/docs`: the JSDoc checker (vendored from Effect; don't edit it), the example check, which checks
+  the guides' TypeScript too, `INDEX.md` and the API reference dataset, with what TypeScript reads in every example
+  and guide block (`code.json`).
 - `packages/tools/utils`: barrel codegen; `clean`, which `pnpm build` runs first, so no earlier build's output is
   published; and `pack-check`, which checks what the published packages would be: each one packed, installed in a
   project of its own with only its peers, imported under Node and type-checked under `nodenext`.
@@ -58,6 +59,11 @@ and stock WebKit, and every member the API declares is built. One declared befor
 - `.github/workflows/`: CI. `checks.yml` runs `pnpm all`, `pnpm build` and `pnpm pack-check` on every push and
   pull request, in the Nix environment's default shell; `integration.yml` runs the integration tests nightly when
   `main` has changed, and on demand, keeping the log of a failed run.
+- `website/`: the documentation site, built as effect.website is: Astro, MDX, Expressive Code, remark and Tailwind, in
+  the design `website/README.md` describes. Guides are MDX in `website/src/content/docs/`, and their TypeScript is
+  type-checked as the JSDoc examples are. The API reference is rendered from the dataset `pnpm api-reference` writes,
+  which isn't committed, so run `pnpm reference` before `pnpm website` (the dev server) or `pnpm website:build`.
+  `website/README.md` says how it fits together.
 - `.repos/`: read-only references cloned by `scripts/worktree-setup.sh`, such as Effect's sources and its
   `.agents/skills`. Never import from them.
 
@@ -79,6 +85,8 @@ Use the narrowest check that covers the change:
 | Access rules or other type behavior   | `pnpm test-types`                                                                                                                        |
 | JSDoc text, categories or links       | `pnpm jsdocs`                                                                                                                            |
 | JSDoc examples                        | `pnpm jsdocs`, then `pnpm examples`                                                                                                      |
+| A guide's code                        | `pnpm lint-fix`, which formats its blocks, then `pnpm examples`, then `pnpm api-reference` to link it                                    |
+| The website or the reference's tools  | `pnpm reference`, then `pnpm website:check` and `pnpm website:build`                                                                     |
 | The packages' exports, files or peers | `pnpm build`, then `pnpm pack-check`                                                                                                     |
 | Before a commit that touches `src/`   | `pnpm all`, and `pnpm test:integration` if it touches what drives a browser                                                              |
 
@@ -116,6 +124,12 @@ then `**Example** (Title)` sections, each one `` ```ts import.meta.vitest `` fen
 `"@usestrider/browser"`; then `@see`, `@stability`, `@category` and `@since`, in that order. Until 1.0, `@stability`
 is `unstable`, or `experimental` for what rests on an upstream proposal or an in-flight module, and `@since` is
 `0.1.0`.
+
+JSDoc is what the API reference and editors show, so write it for someone using Strider, who has none of the design
+documents. Say what a declaration does and what happens, in plain words; cite no review, principle, rule, quirk
+number or section of a design document, and leave out how the API got here. A summary must read right the first
+time: "The files a page downloads", not "Downloads a page starts". Words of the design's own, such as obligation,
+fold, latched or navigable, become what they mean, unless they are the API's names.
 
 ## Design changes
 

@@ -51,6 +51,12 @@
       "runOnWorktreeCreate": false
     },
     {
+      "name": "Website",
+      "command": "pnpm reference && pnpm website",
+      "icon": "play",
+      "runOnWorktreeCreate": false
+    },
+    {
       "name": "All checks",
       "command": "pnpm all",
       "icon": "play",

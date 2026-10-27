@@ -1,0 +1,80 @@
+---
+// The right rail: what's on the page, grouped as it is (a module's categories and their declarations, with each one's
+// kind; a guide's sections), then a link out. The entry being read is marked as the page scrolls.
+export interface RailItem {
+  readonly label: string
+  readonly href: string
+  /** I, T, C, V or f */
+  readonly kind?: string | undefined
+}
+
+export interface RailGroup {
+  readonly label: string
+  readonly href: string
+  readonly items?: ReadonlyArray<RailItem> | undefined
+}
+
+interface Props {
+  readonly groups: ReadonlyArray<RailGroup>
+  readonly link?: { readonly label: string; readonly title: string; readonly href: string } | undefined
+}
+
+const { groups, link } = Astro.props
+---
+
+{
+  groups.length > 0 && (
+    <nav aria-label="On this page" data-rail>
+      <p class="label mb-3">On this page</p>
+      <ul class="mb-8 space-y-4">
+        {groups.map((group) => (
+          <li>
+            <a class="rail-link font-sans text-[0.85rem] font-medium" href={group.href}>{group.label}</a>
+            {group.items !== undefined && group.items.length > 0 && (
+              <ul class="mt-1 space-y-0.5">
+                {group.items.map((item) => (
+                  <li>
+                    <a class="rail-link font-mono text-[0.74rem]" href={item.href}>
+                      {item.kind !== undefined && <span class="kind">{item.kind}</span>}
+                      <span class="truncate">{item.label}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
+    </nav>
+  )
+}
+{
+  link !== undefined && (
+    <>
+      <p class="label mb-2">{link.label}</p>
+      <a class="rail-link font-sans text-[0.85rem]" href={link.href}>{link.title}</a>
+    </>
+  )
+}
+
+<script>
+  // Marks the rail's link to the entry nearest the top of the window
+  const links = [...document.querySelectorAll<HTMLAnchorElement>("[data-rail] a[href^='#']")]
+  const targets = links.flatMap((link) => {
+    const target = document.getElementById(decodeURIComponent(link.hash.slice(1)))
+    return target === null ? [] : [{ link, target }]
+  })
+  const mark = () => {
+    let current = targets[0]
+    for (const entry of targets) {
+      if (entry.target.getBoundingClientRect().top > 120) break
+      current = entry
+    }
+    for (const { link } of targets) link.removeAttribute("aria-current")
+    current?.link.setAttribute("aria-current", "true")
+  }
+  if (targets.length > 0) {
+    addEventListener("scroll", mark, { passive: true })
+    mark()
+  }
+</script>

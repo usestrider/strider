@@ -1,0 +1,36 @@
+---
+// The reference's sidebar: every module, by section, the generated protocol domains closed until opened
+import { getCollection } from "astro:content"
+import { sectionOrder, sections } from "../features/reference/sections.ts"
+import { routeOf } from "../features/reference/view.ts"
+import SideFilter from "./SideFilter.astro"
+import SideNav from "./SideNav.astro"
+
+interface Props {
+  readonly current?: string | undefined
+}
+
+const { current } = Astro.props
+const entries = await getCollection("reference")
+const bySection = sectionOrder.map((key) => ({
+  key,
+  ...sections[key],
+  entries: entries.filter((entry) => entry.data.section === key).sort((a, b) => a.data.path.localeCompare(b.data.path))
+})).filter((section) => section.entries.length > 0)
+---
+
+<SideFilter placeholder="Filter modules" />
+{
+  bySection.map((section) => (
+    <SideNav
+      label={section.title}
+      collapsed={section.collapsed}
+      mono
+      links={section.entries.map((entry) => ({
+        label: section.key === "core" || section.key === "testing" ? entry.data.name : entry.data.path,
+        href: routeOf(entry),
+        current: entry.id === current
+      }))}
+    />
+  ))
+}

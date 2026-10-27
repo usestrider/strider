@@ -1,14 +1,14 @@
 /**
  * Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, like `ReadonlyArray` ⊂ `Array`.
  *
- * - An `ObservedPage` offers state and events only.
- * - A `ReadonlyPage` adds reads in the isolated world, where the page's own globals are invisible, and never
- *   scrolls, focuses or dispatches input.
- * - A `Page` adds input, navigation, main-world evaluation and declarations.
+ * - An `ObservedPage` reports its state and events, and nothing more.
+ * - A `ReadonlyPage` adds reads, run in an isolated world where the page's own globals are invisible; it never
+ *   scrolls, focuses or sends input.
+ * - A `Page` adds input, navigation, evaluation among the page's own scripts, and declarations.
  *
- * Access is a grant held by a `Scope`: `inspect` and `control` are the only ways up, and no type guard
- * narrows it. A subtype never changes what an inherited member does: `evaluate` is the isolated world on every
- * page, and the main world is only `evaluateInMainWorld`, on a `Page`.
+ * Access is granted for a `Scope`: `inspect` and `control` are the only ways up, and no type guard narrows a page's
+ * access. A subtype never changes what an inherited member does: `evaluate` runs in the isolated world on every
+ * page, and only `evaluateInMainWorld`, on a `Page`, runs among the page's own scripts.
  *
  * @stability unstable
  * @since 0.1.0
@@ -285,11 +285,11 @@ export interface PdfOptions {
    */
   readonly preferCssPageSize?: boolean | undefined
   /**
-   * An HTML template for the header; unsupported on BiDi.
+   * An HTML template for the header. `Unsupported` over WebDriver BiDi (`pdf.headerFooter`).
    */
   readonly header?: string | undefined
   /**
-   * An HTML template for the footer; unsupported on BiDi.
+   * An HTML template for the footer. `Unsupported` over WebDriver BiDi (`pdf.headerFooter`).
    */
   readonly footer?: string | undefined
 }
@@ -309,9 +309,10 @@ export interface GotoOptions {
    */
   readonly waitUntil?: PageNavigation.LoadState | undefined
   /**
-   * Outcomes to accept as navigations: a download is returned as `PageNavigation`'s `BecameDownload`, and a 204
-   * or 205 as its `NoContent`, with the response. Otherwise a download fails with the `BecameDownload` reason and
-   * a 204 with `NoContent`. Either way the page stays where it was.
+   * Outcomes that `goto` returns instead of failing: with `"download"`, a download is returned as
+   * `PageNavigation`'s `BecameDownload`, and with `"noContent"`, a 204 or 205 is returned as its `NoContent`, with
+   * the response. Otherwise they fail with the `BecameDownload` and `NoContent` reasons. Either way the page stays
+   * where it was.
    *
    * @default none
    */
@@ -392,11 +393,12 @@ export interface ObservedPage extends Pipeable.Pipeable, Equal.Equal, Inspectabl
    */
   readonly closed: Effect.Effect<Target.CloseReason>
   /**
-   * Gains inspect access for the scope: installs the isolated world. The page stays open after.
+   * Gets inspect access for the caller's scope, installing the isolated world. The page stays open when the scope
+   * closes.
    */
   readonly inspect: Effect.Effect<ReadonlyPage, PageError, Scope.Scope>
   /**
-   * Gains control for the scope. The page stays open after.
+   * Gets control for the caller's scope. The page stays open when the scope closes.
    */
   readonly control: Effect.Effect<Page, PageError, Scope.Scope>
 }
@@ -448,7 +450,7 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
   /**
    * Calls `fn` in the isolated world, where page globals are invisible, and returns the result by value.
    *
-   * **Example** (The result type is what arrives)
+   * **Example** (A `Date` comes back as a `Date`)
    *
    * ```ts import.meta.vitest
    * import { Effect } from "effect"
@@ -512,7 +514,7 @@ export interface Page extends ReadonlyPage {
   readonly localStorage: OriginStorage.OriginStorage
   readonly sessionStorage: OriginStorage.OriginStorage
   /**
-   * The page's context; fixed, because a page never changes context.
+   * The page's user context, which never changes.
    */
   readonly context: UserContext.UserContext
   /**
@@ -553,7 +555,7 @@ export interface Page extends ReadonlyPage {
     ...args: Args
   ): Effect.Effect<JSHandle.Serialized<A>, PageError | Target.TargetGone | Deadline.Timeout>
   /**
-   * Calls `fn` in the isolated world and returns its result as a handle, for values that can't cross.
+   * Calls `fn` in the isolated world and returns its result as a handle, for values that can't come back by value.
    */
   evaluateHandle<Args extends ReadonlyArray<unknown>, A>(
     fn: (...args: Args) => A | Promise<A>,
@@ -576,10 +578,10 @@ export interface Page extends ReadonlyPage {
    *
    * **Details**
    *
-   * The page's routes are asked before its context's, the most recent first; one that falls through passes
-   * the request on. Each handler runs in a fiber of the registration's scope, with `Deadline.DefaultBudget`
-   * as read here, per request. The phase is `"request"` unless `options.phase` says `"response"` or
-   * `"auth"`, and decides what the handler is given and may decide.
+   * The page's routes are asked before its context's, the most recent first; one whose handler decides
+   * `Route.fallthrough` passes the request on. Each request's handler runs in a fiber of the registration's scope,
+   * with the `Deadline.DefaultBudget` in effect where `route` was called. The phase is `"request"` unless
+   * `options.phase` says `"response"` or `"auth"`, and decides what the handler is given and may decide.
    *
    * **Gotchas**
    *
@@ -596,9 +598,9 @@ export interface Page extends ReadonlyPage {
    *
    * **Details**
    *
-   * The context's scripts run first, then the page's, in the order they were added; `after` makes a script
-   * depend on others, which it runs only after. Added to a loaded page, a script runs from the next document.
-   * See `InitScript` for the rest.
+   * The context's scripts run first, then the page's, in the order they were added; `after` names scripts that
+   * must run before this one. A script added to a page that has already loaded runs from the next document. See
+   * `InitScript` for the rest.
    *
    * **Example** (Ordered setup scripts)
    *
@@ -617,8 +619,9 @@ export interface Page extends ReadonlyPage {
     options?: InitScript.Options | undefined
   ): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>
   /**
-   * Overrides the given settings while the registration lives; page overrides beat context ones. One call is
-   * one registration, and a field the backend can't apply fails it before anything is applied (`Emulation`).
+   * Overrides the given settings while the registration lives; a page's overrides take precedence over its
+   * context's. One call is one registration: if the backend can't apply a field, the call fails before anything is
+   * applied (see `Emulation`).
    */
   emulate(
     settings: Emulation.Emulation
@@ -628,14 +631,14 @@ export interface Page extends ReadonlyPage {
    */
   readonly activate: Effect.Effect<void, Target.TargetGone>
   /**
-   * Closes the page as its owner: no `beforeunload` prompt.
+   * Closes the page without running `beforeunload`, so no prompt opens.
    */
   close(): Effect.Effect<void, Target.TargetGone | Deadline.Timeout>
   /**
-   * Closes the page, running `beforeunload` when asked. Its prompt is decided as any dialog is: by the page's
-   * `Dialog.handle`, or else its context's policy, which leaves. A handler's stay fails the close with
-   * `CloseCanceled` and leaves the page usable. Browsers prompt only once the user has interacted with the page,
-   * so an untouched page closes at once.
+   * Closes the page, running `beforeunload` when `runBeforeUnload` is `true`. Its prompt is decided as any dialog
+   * is: by the page's `Dialog.handle`, or else by its context's `dialogs` policy, which leaves unless it's
+   * `"leaveOpen"`. A handler that decides `stay` fails the close with `CloseCanceled`, and the page stays usable.
+   * Browsers prompt only once the user has interacted with the page, so a page nobody has touched closes at once.
    */
   close(options: {
     readonly runBeforeUnload: boolean
@@ -657,7 +660,7 @@ export interface Page extends ReadonlyPage {
 export const isPage = (u: unknown): u is ObservedPage => Predicate.hasProperty(u, TypeId)
 
 /**
- * Reference to whether main-world evaluation runs with a user gesture.
+ * Reference to whether `evaluateInMainWorld` runs with a user gesture.
  *
  * @stability unstable
  * @category references
@@ -669,8 +672,8 @@ export const UserGesture: Context.Reference<boolean> = Context.Reference<boolean
 )
 
 /**
- * Runs main-world evaluation inside an effect with a user gesture, for pages that require one, such as to
- * open a popup or start media.
+ * Makes each `evaluateInMainWorld` inside an effect run with a user gesture, for pages that require one, such as
+ * to open a popup or start media.
  *
  * @see {@link UserGesture} for the reference it sets
  *
@@ -759,7 +762,7 @@ export type PageErrorReason = typeof PageErrorReason.Type
 const PageErrorTypeId = "~@usestrider/browser/Page/PageError"
 
 /**
- * Error for a page operation that failed: navigation, evaluation, capture, reads, or setting the page up.
+ * Error for a page operation that failed: navigation, evaluation, capture, reads or setting the page up.
  *
  * **Example** (Accepting a failed navigation)
  *

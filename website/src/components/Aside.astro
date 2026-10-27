@@ -1,0 +1,16 @@
+---
+// A callout, for guides: a framed box with a mono label. A warning swaps the label's color, and nothing else.
+//
+//   <Aside type="note">The page closes with its scope.</Aside>
+interface Props {
+  readonly type?: "note" | "tip" | "caution" | "warning"
+  readonly title?: string | undefined
+}
+
+const { type = "note", title } = Astro.props
+---
+
+<aside class:list={["callout", `callout-${type}`]}>
+  <p class="label">{title ?? type}</p>
+  <slot />
+</aside>
