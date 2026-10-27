@@ -9,7 +9,7 @@
     "check": "astro sync && tsc --noEmit",
     "build": "astro build",
     "preview": "astro preview --port 4390",
-    "deploy": "sops exec-env deploy.sops.env 'alchemy deploy --stage prod'"
+    "deploy": "sops exec-env deploy.sops.env 'alchemy deploy --stage prod --yes'"
   },
   "dependencies": {
     "@astrojs/markdown-remark": "^7.3.4",
