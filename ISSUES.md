@@ -86,7 +86,8 @@ implement Effect's `Redactable`; nothing does.
 is never produced, so an action the browser rejected after sending reports `NotSent`. `progress` is filled only by
 launch failures (`launch.ts:38`), `lastObserved` at 2 of 46 call sites, and `cleanup` is always `NotNeeded`
 (`operation.ts:62`).
-- Partly settled on main in `7b3c783`: a navigation records `Acknowledged` once the browser answers it, and an error built while its operation runs takes `lastObserved` from the operation's record. Open: no other action records `Acknowledged`, `progress` is still filled only by launch failures, and `cleanup` is always `NotNeeded` (`operation.ts:67`).
+- Partly settled on main in `7b3c783`: a navigation records `Acknowledged` once the browser answers it, and an error built while its operation runs takes `lastObserved` from the operation's record.
+- Partly settled in `418ba36`: an operation's steps fill its `progress`, and a step that sent and succeeded is `Acknowledged` in the operation around it. Open: an action's own record reaches `Acknowledged` only for a navigation, so a click that times out after the browser answered still says `MayHaveBeenSent`, and `cleanup` is always `NotNeeded` (`operation.ts:68`).
 
 **I18. `BackendMetadata` is declared but always empty.** Each backend declares its key (`Chromium.ts:27`,
 `Firefox.ts:27`, `Bidi.ts:22`, `WebKit.ts:31`), but `BackendFailure.metadata` is always `{}` (`operation.ts:100`); the
