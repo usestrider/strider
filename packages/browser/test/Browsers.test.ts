@@ -84,10 +84,13 @@ describe("strider browsers", () => {
         yield* fs.makeDirectory(`${root}/.nix-profile/libexec`, { recursive: true })
         yield* fs.symlink(store, `${root}/.nix-profile/libexec/webkitgtk-6.0`)
 
-        // Only what this machine of scripts has: the real one's own browsers are left out
-        const found = (yield* Browsers.find("linux", { PATH: `${root}/bin`, HOME: root })).filter((browser) =>
-          browser.path.startsWith(root)
-        )
+        // Only what this machine of scripts has: the real one's install locations aren't searched, so its
+        // browsers are never run, and its WebKit packages, never run either, are left out
+        const env = { PATH: `${root}/bin`, HOME: root }
+        const found = (yield* Browsers.among("linux", [
+          ...Browsers.pathCandidates("linux", env),
+          ...Browsers.webkitCandidates("linux", env)
+        ])).filter((browser) => browser.path.startsWith(root))
         const real = yield* fs.realPath(`${root}/store/chromium`)
         const miniBrowser = yield* fs.realPath(`${root}/.nix-profile/libexec/webkitgtk-6.0/MiniBrowser`)
         assert.deepStrictEqual(found, [

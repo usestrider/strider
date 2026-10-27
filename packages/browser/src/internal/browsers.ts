@@ -216,16 +216,19 @@ const versionOf = (platform: string, path: string) =>
  * to, then vendors' install locations, then WebKit's packages'. A path that leads where an earlier one did, for
  * the same backend, is left out.
  */
-export const find = Effect.fnUntraced(function*(
-  platform: string,
-  env: Readonly<Record<string, string | undefined>>
-) {
-  const fs = yield* FileSystem.FileSystem
-  const candidates = [
+export const find = (platform: string, env: Readonly<Record<string, string | undefined>>) =>
+  among(platform, [
     ...pathCandidates(platform, env),
     ...installerCandidates(platform, env),
     ...webkitCandidates(platform, env)
-  ]
+  ])
+
+/**
+ * The browsers among `candidates` that exist, in their order, each asked its version. `find` looks in every
+ * place; a test passes only its own, so the machine's browsers are never run.
+ */
+export const among = Effect.fnUntraced(function*(platform: string, candidates: ReadonlyArray<Candidate>) {
+  const fs = yield* FileSystem.FileSystem
   const kept: Array<{ readonly candidate: Candidate; readonly resolved: string }> = []
   const seen = new Set<string>()
   for (const candidate of candidates) {

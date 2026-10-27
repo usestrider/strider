@@ -1356,3 +1356,9 @@ An entry with no marker is open.
 - *Seen:* writing the test of `error.type`, first against a `goto` of a URL that doesn't parse.
 - *We:* nothing yet; the error still carries its diagnostics.
 - *Reconsider:* checking arguments inside the operation, so every failure has its span.
+
+**Q246. The browser-finding test ran the machine's own browsers** (Ours). Its search included Linux's install locations, so on a machine with Chrome or Edge in `/opt`, as GitHub's runners have, it ran each with `--version`, one after another, before leaving them out; on a cold runner that passed the test's 5 seconds.
+- *Seen:* CI, once, on `9806fe2`, which changed nothing it reaches; it passed locally in milliseconds.
+- *We:* `Browsers.among` searches given candidates, and `find` is it over every place; the test passes only `PATH`'s and WebKit's, and WebKit's are never run.
+- *Reconsider:* nothing.
+- **Resolved**, in the commit that adds this entry.
