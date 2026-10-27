@@ -39,6 +39,7 @@ import * as Devices from "./devices.ts"
 import type * as Engine from "./engine.ts"
 import * as Evaluation from "./evaluation.ts"
 import * as FileInputImpl from "./fileInput.ts"
+import * as Filters from "./filters.ts"
 import * as Input from "./input.ts"
 import * as Keys from "./keys.ts"
 import type * as Model from "./model.ts"
@@ -100,8 +101,8 @@ const checksFor = (defaults: CheckSet, checks: Locator.Checks | undefined): Engi
   receivesPointer: checks?.receivesPointer ?? defaults.receivesPointer
 })
 
-/** What a `NotReady` reason says, as a timeout's hint. */
-const explain = (reason: Engine.NotReady, frames: number): string => {
+/** What a `NotReady` reason says, as a timeout's hint, suggesting focus emulation only where the backend has it. */
+const explain = (reason: Engine.NotReady, frames: number, emulatesFocus: boolean): string => {
   switch (reason._tag) {
     case "NoMatch":
       return "Nothing matched the locator"
@@ -118,7 +119,10 @@ const explain = (reason: Engine.NotReady, frames: number): string => {
     case "NotStable":
       return `The element kept moving: its box changed within ${frames} frames`
     case "NoRenderingOpportunity":
-      return "The page rendered no frame: a page in the background, such as the opener of a popup on Chromium, may render none; page.activate brings it to the front, and a context made with newContext({ focus: \"emulated\" }) keeps every page rendering"
+      return "The page rendered no frame: a page in the background, such as the opener of a popup on Chromium, may render none; page.activate brings it to the front" +
+        (emulatesFocus
+          ? ", and a context made with newContext({ focus: \"emulated\" }) keeps every page rendering"
+          : "")
     case "Covered":
       return `Another element covers the element's action point: ${reason.by}`
     case "Intercepted":
@@ -1216,6 +1220,7 @@ export class LocatorImpl implements Locator.Locator {
       const id = record.id
       const budget = record.budget
       const checks = checksFor(defaults, options?.checks)
+      const emulatesFocus = yield* Filters.supported(owner.runtime, "emulation.focus")
       const round = (cap: number, apply: boolean) =>
         Runtime.sendRouted(
           owner.runtime,
@@ -1246,7 +1251,7 @@ export class LocatorImpl implements Locator.Locator {
         const starved = last?._tag === "NotStable" && reasons.some((reason) => reason._tag === "NoRenderingOpportunity")
         return Option.map(
           Option.fromNullishOr(starved ? { _tag: "NoRenderingOpportunity" } as const : last),
-          (reason) => explain(reason, checks.stable)
+          (reason) => explain(reason, checks.stable, emulatesFocus)
         ).pipe(Option.orElse(() => Option.fromUndefinedOr(noDocument)))
       }
       const timedOut = (noDocument?: string) => record.timeout(hint(noDocument))
