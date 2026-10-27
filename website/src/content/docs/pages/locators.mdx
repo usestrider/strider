@@ -4,10 +4,13 @@ description: Locators describe how to find an element, by role, text or label, a
 order: 1
 ---
 
+An element found once goes stale when the page re-renders it, and a selector of classes breaks when the markup
+changes; a locator, by what a user sees, survives both.
+
 ## Locators are descriptions
 
-A locator is how to find an element, not the element. Making one does nothing and can't fail. Each use looks at
-the page as it is then, so a locator survives a re-render.
+A locator is how to find an element, not the element. Making one does nothing and can't fail; each use looks at
+the page as it is then.
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -21,7 +24,8 @@ const signIn = Effect.fn("signIn")(function*(page: Page.Page) {
 })
 ```
 
-Queries run in Strider's own engine in each document, so they mean the same on every browser.
+Queries, the `getBy…` methods and `locator`, run in Strider's own engine in each document, so they mean the same
+on every browser.
 
 ## The queries
 
@@ -37,10 +41,12 @@ Queries run in Strider's own engine in each document, so they mean the same on e
 | `locator(css)`                       | elements matching a CSS selector                               |
 
 Prefer `getByRole`: roles and names are what assistive technology sees, and they survive changes to markup and
-classes. They're computed by HTML-AAM and accname 1.2. Hidden elements match only with `includeHidden: true`.
+classes. An accessible name is what a screen reader announces for an element: a button's text, a field's label, or
+its `aria-label`. They're computed by [HTML-AAM](https://www.w3.org/TR/html-aam-1.0/) and
+[accname 1.2](https://www.w3.org/TR/accname-1.2/).
 
 A string matches as a case-insensitive substring; `exact: true` matches the whole text, case-sensitively; a `RegExp`
-is tested as given:
+is tested as given. A role's hidden elements match only with `includeHidden: true`:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -50,16 +56,21 @@ declare const page: Page.Page
 page.getByRole("button", { name: "Save" }) // "Save" and "Save draft"
 page.getByRole("button", { name: "Save", exact: true }) // only "Save"
 page.getByText(/^\d+ items?$/) // "1 item", "12 items"
+page.getByLabel("Email", { exact: true }) // not "Email confirmation"
+page.getByRole("dialog", { name: "Cookie settings", includeHidden: true }) // even while hidden
 ```
 
 Text is text content with whitespace collapsed, through open shadow roots, not `innerText`. `getByText` finds the
 smallest element that has it: `"1 item"` finds the `<p>` in `<p>1 <b>item</b></p>`.
 
-A malformed CSS selector fails with `InvalidInput` when used, without waiting.
+A malformed CSS selector fails with [`InvalidInput`](/docs/errors#three-kinds-of-failure) when used, without
+waiting.
 
 ## Narrowing
 
-Each query in a chain searches inside the previous one's matches:
+A query over the whole page can match the same link in the header and the footer, and acting on it fails with
+`StrictViolation`. Narrowing searches one region, or keeps only the matches you mean. Each query in a chain
+searches inside the previous one's matches:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -70,41 +81,66 @@ const nav = page.getByRole("navigation", { name: "Main" })
 const orders = nav.getByRole("link", { name: "Orders" })
 ```
 
-`filter` keeps matches by `hasText`, `hasNotText`, `visible`, or what they contain, `has` and `hasNot`:
+`filter` keeps matches by `hasText`, `hasNotText`, `visible`, or what they contain, `has` and `hasNot`.
+
+Use `has` and `hasNot` to test for an element rather than for text. They take a `Locator.relative` locator, which
+starts at the element being tested; a page locator there is a type error. A filter keeps the matches that meet all
+it's given:
 
 ```ts
 import { Locator, Page } from "@usestrider/browser"
+import { Effect } from "effect"
 
-declare const page: Page.Page
-
-const adasRow = page.getByRole("row").filter({ hasText: "Ada Lovelace" })
-
-const deletable = page.getByRole("row").filter({
-  has: Locator.relative.getByRole("button", { name: "Delete" })
-})
+const cancelOrder = Effect.fn("cancelOrder")(
+  function*(page: Page.Page, customer: string) {
+    const order = page.getByRole("row").filter({
+      hasText: customer,
+      hasNotText: "Shipped",
+      has: Locator.relative.getByRole("button", { name: "Cancel order" }),
+      hasNot: Locator.relative.getByRole("img", { name: "On hold" }),
+      visible: true
+    })
+    yield* order.getByRole("button", { name: "Cancel order" }).click()
+  }
+)
 ```
 
-`has` takes a `Locator.relative` locator, which starts at the element being tested; a page locator there is a type
-error.
-
-`and` and `or` combine locators; `first`, `last` and `nth(index)` pick by position:
+`or` matches either locator, for a control whose label changes with its state; `and` keeps the elements both
+match. `first`, `last` and `nth(index)` pick by position, for a list whose order means something:
 
 ```ts
 import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
 
-declare const page: Page.Page
+const confirm = Effect.fn("confirm")(function*(page: Page.Page) {
+  const ok = page.getByRole("button", { name: "OK" })
+  yield* ok.or(page.getByRole("button", { name: "Continue" })).click()
+})
 
-const primary = page.getByRole("button").and(page.locator(".primary"))
-const ok = page.getByRole("button", { name: "OK" })
-const confirm = ok.or(page.getByRole("button", { name: "Continue" }))
-const newest = page.getByRole("listitem").first
+const saveToAccount = Effect.fn("saveToAccount")(function*(page: Page.Page) {
+  const save = page.getByRole("button", { name: "Save" })
+  yield* save.and(page.getByTitle("Save to your account")).click()
+})
+
+// The inbox lists the newest message first
+const inbox = (page: Page.Page) =>
+  page.getByRole("list", { name: "Inbox" }).getByRole("listitem")
+
+const archiveOldest = Effect.fn("archiveOldest")(function*(page: Page.Page) {
+  yield* inbox(page).last.getByRole("button", { name: "Archive" }).click()
+})
+
+const openMessage = Effect.fn("openMessage")(function*(page: Page.Page, index: number) {
+  yield* inbox(page).nth(index).click() // counting from 0: nth(0) is first, the newest
+})
 ```
 
 Pick by position last: it breaks when the order changes.
 
 ## Labels
 
-`describe` labels a locator in errors and traces:
+A failure names a locator by its queries, and `header .cart > span` doesn't say which element was meant.
+`describe` names it as you would, in errors and [traces](/docs/tools/recordings#traces):
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -116,7 +152,9 @@ const badge = page.locator("header .cart > span").describe("cart badge")
 
 ## Frames
 
-`page.frame` takes a locator for an iframe and gives a frame locator, with the same queries:
+A query searches one document, and an iframe holds a document of its own, so `page.getByLabel` finds nothing
+inside an embedded payment form. `page.frame` takes a locator for an iframe and gives a frame locator, with the
+same queries:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -134,17 +172,22 @@ element. Cross-site frames work the same, and frames nest: `payment.frame(paymen
 
 ## Strictness
 
-Actions and reads need exactly one match. Several fail at once with `StrictViolation`. None is waited for by an
-action or expectation, and fails a read at once with `NoMatch`.
+Actions and reads need exactly one match. Several fail at once with
+[`StrictViolation`](/docs/errors#strict-by-default). None is waited for by an
+action or expectation, and fails a read at once with [`NoMatch`](/docs/api/browser/Locator#NoMatch).
 
-`count` and `all` take any number. `all` gives a locator per current match:
+`count` and `all` take any number, and read once without waiting, so expect the list first. `all` gives a locator
+per current match:
 
 ```ts
-import { Page } from "@usestrider/browser"
+import { Expect, Page } from "@usestrider/browser"
 import { Effect } from "effect"
 
 const productNames = Effect.fn("productNames")(function*(page: Page.Page) {
-  const cards = yield* page.getByRole("article").all
-  return yield* Effect.forEach(cards, (card) => card.getByRole("heading").readText)
+  const cards = page.getByRole("article")
+  yield* cards.first.pipe(Expect.toBeVisible)
+  yield* Effect.log(`${yield* cards.count} products`)
+  const each = yield* cards.all
+  return yield* Effect.forEach(each, (card) => card.getByRole("heading").readText)
 })
 ```
