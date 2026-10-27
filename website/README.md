@@ -35,6 +35,7 @@ for now; the night palette waits in `global.css` for a toggle.
 | `src/layouts/DocShell.astro`          | the masthead, the band with breadcrumbs, the sidebar, the page and the rail           |
 | `src/components/SideNav.astro`        | a sidebar's groups; `SideFilter.astro` narrows the reference's modules as you type    |
 | `src/components/Rail.astro`           | what's on the page: a module's categories and declarations, the one being read marked |
+| `src/components/BackToTop.astro`      | on every page, a button back to the masthead, shown once the reader is a screen down  |
 | `ec.config.mjs`, `src/features/code/` | code: highlighted in inks that pass 4.5:1 on code ground, a mono title bar with the file and the language |
 | `src/components/Mark.astro`           | the silhouette, for the masthead and anything under 64px                              |
 | `src/assets/heron-engraving.png`      | the engraving, on the home page only, from `design/strider/heron/`                    |

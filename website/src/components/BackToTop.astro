@@ -1,0 +1,31 @@
+---
+// Back to the masthead, which doesn't stick: shown once the reader is a screen down, so never on a page that fits in one
+---
+
+<button
+  class="fixed right-6 bottom-6 z-20 border border-ink bg-paper px-3 py-1.5 font-mono text-[0.72rem] tracking-[0.1em] uppercase print:hidden"
+  type="button"
+  aria-label="Back to top"
+  hidden
+  data-back-to-top
+>
+  <span class="hidden sm:inline">Back to</span> top ↑
+</button>
+
+<script>
+  // Scrolls to the top and moves focus to the masthead, so a keyboard reader starts from the top too
+  const button = document.querySelector<HTMLButtonElement>("[data-back-to-top]")
+  if (button !== null) {
+    const show = () => {
+      button.hidden = scrollY < innerHeight
+    }
+    addEventListener("scroll", show, { passive: true })
+    addEventListener("resize", show, { passive: true })
+    show()
+    button.addEventListener("click", () => {
+      const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches
+      scrollTo({ top: 0, behavior: reduced ? "auto" : "smooth" })
+      document.querySelector<HTMLElement>("header a")?.focus({ preventScroll: true })
+    })
+  }
+</script>
