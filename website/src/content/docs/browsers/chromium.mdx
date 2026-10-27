@@ -4,98 +4,109 @@ description: Chromium, Chrome and Edge over the Chrome DevTools Protocol. Launch
 order: 2
 ---
 
-## Chromium and CDP
-
-The Chromium backend drives Chromium, Chrome and Edge over the Chrome DevTools Protocol, and supports nearly every
-capability Strider has. The protocol code is generated from Chrome 155; the tests run Chromium 155.0.8059.79.
-Nothing checks the version at launch.
+A program written against `Browser` runs on Chromium unchanged, but Chromium's popups, launch switches and attached
+tabs have rules of their own, and a step that ignores them times out or misses a login. Knowing them, a program
+works around each, and can send CDP itself for what Strider doesn't wrap.
 
 ## Launching
 
-`Chromium.layer` talks to the browser over a pipe, which has no message size limit:
+Launching works as in [Installation](/docs/installation#backends); this section is what Strider passes Chromium,
+and the options that change it. A launch profile, the `profile` option, is a set of switches for automation, not
+the user profile `userDataDir` keeps. To reproduce a user's bug in Chromium as they run it:
 
 ```ts
 import { NodeServices } from "@effect/platform-node"
+import { LaunchProfile } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
-import { Config, Layer } from "effect"
+import { Layer } from "effect"
 
-const ChromiumLive = Chromium.layerConfig({
-  executablePath: Config.String("CHROMIUM_PATH")
+const LikeAUser = Chromium.layer({
+  executablePath: "/usr/bin/chromium",
+  headless: false,
+  profile: LaunchProfile.stock,
+  args: ["--window-size=1440,900"]
 }).pipe(Layer.provide(NodeServices.layer))
 ```
 
-- Arguments, in order: the launch profile's switches, `--headless` (unless `headless: false`), your `args`,
-  `--remote-debugging-pipe`, `--user-data-dir` with a temporary profile, `about:blank`.
+- The protocol code is generated from Chrome 155; the tests run Chromium 155.0.8059.79. Nothing checks the version
+  at launch.
+- Arguments, in order: the launch profile's switches, `--headless` (unless
+  [`headless: false`](/docs/installation#backends)), your `args`,
+  `--remote-debugging-pipe`, `--user-data-dir` with a temporary profile, `about:blank`. Strider talks over the pipe,
+  with no message size limit and no debugging port ([the raw protocol](#the-raw-protocol)).
 - Don't put a URL in `args`: headless Chromium opens one page only.
 - `LaunchProfile.automation`, the default, turns off first-run pages, sync, updates and background networking.
-  Pages can't tell. `LaunchProfile.concurrent` also stops throttling background pages, which pages can tell.
-  `LaunchProfile.stock` adds nothing.
-- Headless Chromium's user agent says `HeadlessChrome`. Set `emulation: { userAgent }` to change it.
-- With `userDataDir`, the profile's logins are in the default context, not the new one `Browser.newPage()` makes.
-  Open a page there:
-
-```ts
-import { Browser } from "@usestrider/browser"
-import { Effect } from "effect"
-
-const signedIn = Effect.gen(function*() {
-  const browser = yield* Browser.Browser
-  const everyday = yield* browser.defaultContext.control
-  return yield* everyday.newPage
-})
-```
+  Pages can't tell. [`LaunchProfile.concurrent`](/docs/tools/testing#many-pages-at-once) also stops throttling
+  background pages, which pages can tell. `LaunchProfile.stock` adds nothing, to run Chromium as a person does,
+  first-run pages, sync and updates included.
+- Headless Chromium's user agent says `HeadlessChrome`. Set the context's
+  [`emulation: { userAgent }`](/docs/pages/contexts#settings-for-the-whole-session) to change it.
+- With `userDataDir`, the profile's logins are in the default context, not the new one `Browser.newPage()` makes:
+  open the page there, as [Logging in once](/docs/pages/contexts#logging-in-once) shows.
 
 ## Popups
 
 Chromium renders nothing for a page behind another in its window, so each page Strider opens gets its own window.
 A popup, though, goes in front of its opener, which stops rendering, and actions on the opener time out. Call
-`page.activate` on the opener, or make the context with `focus: "emulated"`:
+[`activate`](/docs/api/browser/Page#Page.activate) on the opener before going back to it:
 
 ```ts
 import { Browser, Expect, Popup } from "@usestrider/browser"
 import { Effect } from "effect"
 
 const signInWithPopup = Effect.scoped(Effect.gen(function*() {
-  const page = yield* Browser.newPage({ focus: "emulated" })
+  const page = yield* Browser.newPage()
   yield* page.goto("https://app.example.com")
   const popups = yield* Popup.next(page)
   yield* page.getByRole("button", { name: "Sign in with Example" }).click()
   const popup = yield* popups
   yield* popup.getByRole("button", { name: "Allow" }).click()
+  yield* page.activate
   yield* page.getByText("Signed in").pipe(Expect.toBeVisible)
 }))
 ```
 
-`focus: "emulated"` makes every page report that it has focus, so it isn't the default.
+For a flow that goes back and forth between pages, or runs several at once, make the context with
+[`focus: "emulated"`](/docs/tools/testing#many-pages-at-once) instead: every page then behaves as if focused. Pages
+can tell, so it isn't the default.
 
 ## Attaching
+
+Attaching works as [Attaching to a browser](/docs/pages/attaching) shows; on Chromium, start the browser with a
+debugging port and a profile of its own, since recent Chrome won't open a debugging port on the everyday profile:
 
 ```sh
 google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug
 ```
 
+A Chrome behind an authenticating proxy takes `headers` with the connection:
+
 ```ts
 import { NodeSocket } from "@effect/platform-node"
 import { Chromium } from "@usestrider/browser/chromium"
-import { Layer } from "effect"
+import { Config, Effect, Layer } from "effect"
 
-const Attached = Chromium.layerConnect("http://127.0.0.1:9222").pipe(
-  Layer.provide(NodeSocket.layerWebSocketConstructor)
-)
+const SharedChrome = Layer.unwrap(Effect.gen(function*() {
+  const token = yield* Config.Redacted("CHROME_PROXY_TOKEN")
+  return Chromium.layerConnect("https://chrome.internal.example.com", {
+    headers: { authorization: token }
+  })
+})).pipe(Layer.provide(NodeSocket.layerWebSocketConstructor))
 ```
 
-- Recent Chrome won't open a debugging port on the everyday profile: give it its own `--user-data-dir`.
 - An HTTP endpoint is read for its WebSocket at `/json/version`. `headers` go with both requests.
-- Existing tabs are observed; `inspect` or `control` gives access for a scope. The browser and its tabs stay as
+- Existing tabs are observed; [`inspect` or `control`](/docs/pages/attaching#access-is-typed) gives access for a
+  scope. The browser and its tabs stay as
   they were after the program; contexts Strider created close with the connection.
 - Several clients can attach at once.
-- The browser's own tabs keep Chromium's behaviour: no dialog policy, downloads canceled, no focus emulation.
-- Popups aren't paused when they open.
+- The browser's own tabs keep Chromium's behaviour: no [dialog policy](/docs/pages/contexts#settings-for-the-whole-session),
+  downloads canceled, no focus emulation.
+- Popups aren't paused when they open, so a route or handler registered on a popup may miss its first document.
 - A dialog an earlier client left open goes unreported, and `inspect` on that page fails with a hint saying so.
 
 ## What Chromium can't do
 
-From the backend's capability list:
+Chromium supports nearly every capability Strider has. From the backend's capability list:
 
 <BrowserLimits browser="chromium" />
 
@@ -110,35 +121,67 @@ What changes when attached:
 ## What's different
 
 **Request events lack `Cookie`.** `NetworkResponse.headers` include `Set-Cookie`, but `NetworkRequest.headers` don't
-include `Cookie`. Use `NetworkRequest.headersSent`.
+include `Cookie`. Use [`NetworkRequest.headersSent`](/docs/events/network#the-headers-as-sent).
 
-**A navigated-away page's body is dropped,** unless a HAR recording or a subscription with `body` collects it.
+**A navigated-away page's body is dropped,** unless a [HAR recording](/docs/tools/recordings#har-files) or a
+subscription with [`body`](/docs/events/network#bodies-decoded) collects it.
 
-**Routes see CORS preflights,** the `OPTIONS` requests, on Chromium only. A route for such a URL must answer or
-continue them.
+**[Routes](/docs/events/routes) see CORS preflights,** the `OPTIONS` requests, on Chromium only. A route that fakes a
+cross-origin API must let them through, and answer with the headers CORS needs:
 
-**A cut-off favicon request never ends.** A HAR marks it incomplete; `inFlightAtStop: "wait"` waits until the
+```ts
+import { Page, Route } from "@usestrider/browser"
+import { Effect } from "effect"
+import { HttpServerResponse } from "effect/http"
+
+const noPrices = HttpServerResponse.jsonUnsafe([], {
+  headers: { "access-control-allow-origin": "https://shop.example.com" }
+})
+
+const mockPrices = Effect.fn("mockPrices")(function*(page: Page.Page) {
+  yield* page.route(
+    "https://api.example.com/prices",
+    ({ request }) =>
+      Effect.succeed(
+        request.method === "OPTIONS" ? Route.continue : Route.fulfill(noPrices)
+      )
+  )
+})
+```
+
+**A cut-off favicon request never ends.** A HAR marks it incomplete; [`inFlightAtStop: "wait"`](/docs/tools/recordings#har-files) waits until the
 deadline.
 
-**`back` can restore a cached page,** reported as `Restored`, not `Committed`.
+**[`back`](/docs/api/browser/Page#Page.back) can restore a cached page,** reported as
+[`Restored`, not `Committed`](/docs/events/events#navigations).
 
 **A failed navigation's document is Chromium's error page,** not a navigation of its own.
 
-**Native HTML drag and drop works.** `html: "synthetic"` works too, but Chromium ignores a script's `dropEffect`.
+**Native HTML drag and drop works.** [`html: "synthetic"`](/docs/pages/actions#dragging) works too, but Chromium ignores a script's `dropEffect`.
 
 **Cross-site frames render only in view,** so actions scroll each iframe into view first.
 
 ## The raw protocol
 
-`@usestrider/browser/cdp` has 56 CDP domains as typed values, generated from Chrome 155; `CdpConnection` runs them:
+What Strider doesn't wrap, you can send yourself: `@usestrider/browser/cdp`'s commands are values, and
+`Protocol.on(target)` sends one to the browser or a page's session. A raw connection needs a debugging port, as in
+[Attaching](#attaching), which a launched `Chromium.layer` doesn't have. To read a page's performance metrics after
+it loads:
 
 ```ts
-import { Page, Target } from "@usestrider/browser/cdp"
+import { Page, Performance, Target } from "@usestrider/browser/cdp"
 import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol"
-import { Effect, Stream } from "effect"
+import { Effect, Schema, Stream } from "effect"
+import { HttpClient, HttpIncomingMessage } from "effect/http"
 
-const visit = Effect.fn("visit")(function*(endpoint: string, url: string) {
-  const transport = yield* Transport.webSocket(endpoint)
+const Version = Schema.Struct({ webSocketDebuggerUrl: Schema.String })
+
+const loadMetrics = Effect.fn("loadMetrics")(function*(port: number, url: string) {
+  const version = yield* HttpClient.get(`http://127.0.0.1:${port}/json/version`)
+  const { webSocketDebuggerUrl } = yield* HttpIncomingMessage.schemaBodyJson(Version)(
+    version
+  )
+  const transport = yield* Transport.webSocket(webSocketDebuggerUrl)
   const cdp = yield* CdpConnection.make(transport)
   const { targetId } = yield* Target.createTarget({ url: "about:blank" }).pipe(
     Protocol.on(cdp.browser)
@@ -148,14 +191,49 @@ const visit = Effect.fn("visit")(function*(endpoint: string, url: string) {
   const page = yield* cdp.session(sessionId)
   const loaded = yield* page.subscribe(Page.loadEventFired)
   yield* Page.enable().pipe(Protocol.on(page))
+  yield* Performance.enable({}).pipe(Protocol.on(page))
   yield* Page.navigate({ url }).pipe(Protocol.on(page))
   yield* Stream.runHead(loaded)
+  const { metrics } = yield* Performance.getMetrics().pipe(
+    Protocol.on(page),
+    Protocol.withCommandTimeout("5 seconds")
+  )
+  return metrics.map((metric) => `${metric.name}: ${metric.value}`)
 })
 ```
 
+- `cdp.browser` sends commands to the browser, such as `Target`'s; `cdp.session(sessionId)` to a page attached with
+  `flatten: true`.
 - No domains are enabled and nothing is tracked or waited for.
 - Commands wait 30 seconds for a reply; `Protocol.withCommandTimeout` changes it.
 - A Strider page doesn't expose its CDP session. Attach a raw connection to the same browser's debugging port.
-- `Browser.TraceProtocolCommands` adds a span for each command Strider sends.
+- [`Browser.TraceProtocolCommands`](/docs/api/browser/Browser#TraceProtocolCommands), provided as `true` around a step, adds a span
+  for each command Strider sends.
 
-A rejected command fails with `BackendFailure`; its `cause` is the `ProtocolError`, with Chromium's code and message.
+A raw command Chromium rejects fails with a `ProtocolError` whose reason, `Rejected`, has Chromium's `code` and
+`description`; a command Strider sends fails its operation with
+[`BackendFailure`](/docs/errors#three-kinds-of-failure), the `ProtocolError` as its `cause`. A raw step can recover
+from a rejection it expects, such as a tab that closed before it attached:
+
+```ts
+import { Target } from "@usestrider/browser/cdp"
+import { CdpConnection, Protocol } from "@usestrider/browser/protocol"
+import { Effect, Option } from "effect"
+
+const attachIfOpen = Effect.fn("attachIfOpen")(
+  function*(cdp: CdpConnection.CdpConnection, targetId: Target.TargetID) {
+    return yield* Target.attachToTarget({ targetId, flatten: true }).pipe(
+      Protocol.on(cdp.browser),
+      Effect.map(({ sessionId }) => Option.some(sessionId)),
+      Effect.catchReason(
+        "ProtocolError",
+        "Rejected",
+        (rejected) =>
+          rejected.reason === "NoSuchTarget"
+            ? Effect.succeedNone
+            : Effect.fail(rejected)
+      )
+    )
+  }
+)
+```
