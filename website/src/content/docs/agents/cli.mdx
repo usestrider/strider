@@ -4,68 +4,217 @@ description: A command line that drives a live browser from a shell, a script or
 order: 2
 ---
 
-`strider` is Strider's command-line tool. It keeps a browser open in a named session between commands, so a shell,
-a script or an agent can drive it one step at a time.
+`strider` is the command-line tool that comes with `@usestrider/browser`; in a project, run it as `npx strider`, and
+these examples write `strider`. A program's browser closes when the program ends; `strider` keeps one open in a
+named session between commands, so a shell, a script or an agent can drive it one step at a time.
 
 ## Commands
 
-A session holds one browser between commands:
+A session holds one browser between commands. A target is a ref from the page's latest snapshot, such as `e3`, or
+a locator, such as `label=Email`, as the [toolkit's](/docs/agents/toolkit#the-toolkit) are:
 
 ```sh
 strider start --name shop --chromium /usr/bin/chromium
 strider -s shop page new --name main https://shop.example.com
 strider -s shop -p main snapshot
-strider -s shop -p main click e9
-strider -s shop -p main fill 'label=Email' "ada@example.com"
-strider -s shop -p main find "Add to cart" --role button
-strider -s shop stop
 ```
 
-Every command names its session with `-s` and its page with `-p`; there's no default, so agents on one machine
-can't act on each other's tabs. Commands are the [toolkit's tools](/docs/agents/toolkit#the-toolkit), and answer the same way:
-
 ```
-clicked e9 on main · 412 ms
-since last: main navigated to https://shop.example.com/cart · GET https://shop.example.com/api/offers answered 503
+- document "Shop":
+  - heading "Field guides" [ref=e1]
+  - article [ref=e4]:
+    - heading "Field guide to herons" [ref=e2]
+    - button "Add to cart" [ref=e3]
+  - status [ref=e5]
+  - link "Cart" [ref=e6]
+(main · 16 ms)
 ```
 
-`next` subscribes and prints a wait handle; `await` collects it in a later command:
+`find` gives a ref without the whole tree; then act on it, check the result and go on:
 
 ```sh
-strider -s shop -p main next download --within 2m
+strider -s shop -p main find "Add to cart" --role button
+strider -s shop -p main click e3
+strider -s shop -p main expect 'role=status' visible
+strider -s shop -p main goto https://shop.example.com/cart
+strider -s shop -p main fill 'label=Email' "ada@example.com"
+```
+
+```
+e3  button "Add to cart"  (article) on main · 1 ms
+clicked e3 on main · 95 ms
+role=status is visible on main · 4 ms
+at https://shop.example.com/cart (200) on main · 8 ms
+since last: GET https://shop.example.com/api/offers answered 503
+filled label=Email on main · 17 ms
+```
+
+- Every command names its session with `-s`, and a command on a page names its page with `-p`; there's no default,
+  so agents on one machine can't act on each other's tabs.
+- Commands are the toolkit's tools, and answer the same way: the outcome, then what happened since the last
+  command.
+- `strider --help` lists the commands, and `strider <command> --help` each one's arguments.
+
+## Waits across commands
+
+A download the click starts can arrive before the click's command returns, so subscribe in a command before it, as
+a [program does](/docs/events/events#subscribe-act-collect). `next` prints a wait's name; `await` collects it in a
+later command. Durations are written as Effect's are, such as `"2 minutes"`:
+
+```sh
+strider -s shop -p main goto https://shop.example.com/orders
+strider -s shop -p main next download --within "2 minutes"
 strider -s shop -p main click 'role=button[name="Export CSV"]'
 strider -s shop await w1
 ```
 
-A failure prints its tag, message and hint, and exits with the error's code: 10 for `LocatorError`, 12 for
-`Timeout`, 14 for `ExpectationFailed`, and others.
+```
+at https://shop.example.com/orders (200) on main · 9 ms
+w1: waiting for the next download from now, for at most 2 minutes on main · 1 ms
+clicked role=button[name="Export CSV"] on main · 107 ms
+since last: download "orders.csv" on main from https://shop.example.com/export/orders.csv
+download "orders.csv" from https://shop.example.com/export/orders.csv · 0 ms
+```
+
+## Failures
+
+A failure prints its error's tag and message, hint included, and exits with the error's code, so a script can
+branch on it:
+
+```sh
+if ! strider -s shop -p main expect 'role=status' visible; then
+  strider -s shop -p main snapshot > failure.txt
+fi
+```
+
+```
+ExpectationFailed: Expected page.getByRole("status") to be visible
+```
+
+| Code | Error                                                         |
+| ---- | ------------------------------------------------------------- |
+| 2    | the command line itself, such as an unknown flag              |
+| 10   | [`LocatorError`](/docs/errors#three-kinds-of-failure)         |
+| 11   | [`PageError`](/docs/errors#three-kinds-of-failure)            |
+| 12   | [`Timeout`](/docs/deadlines#timeouts)                         |
+| 13   | [`TargetGone`](/docs/errors#three-kinds-of-failure)           |
+| 14   | [`ExpectationFailed`](/docs/errors#failed-expectations)       |
+| 15   | [`InvalidInput`](/docs/errors#three-kinds-of-failure) the command itself can't use, such as `"2m"` for a duration |
+| 16   | `PageNotFound`: no page by that name                          |
+| 17   | [`NotPermitted`](/docs/errors#three-kinds-of-failure): access the session lacks |
+| 20   | no session by that name                                       |
+
+The code is the error's, not its reason's: a locator's `InvalidInput` exits with `LocatorError`'s 10.
+
+## Exporting a test
+
+A session's refs mean nothing outside it, so rewriting a session as a test by hand means finding each element again.
+`export test` writes each command the session ran, expectations included, as a step of a
+[Vitest test](/docs/tools/testing), with refs turned into the locators they stood for. For the session in
+[Commands](#commands) and [Waits across commands](#waits-across-commands):
+
+```sh
+strider -s shop export test checkout.test.ts
+```
+
+```ts title="checkout.test.ts"
+// Exported from the strider session shop. Each statement is one command the session ran.
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import { describe, layer } from "@effect/vitest"
+import { Browser, Download, Expect } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Effect, Layer } from "effect"
+
+const browser = Chromium.layer({ executablePath: "/usr/bin/chromium" }).pipe(
+  Layer.provide(NodeServices.layer)
+)
+
+describe("shop", () => {
+  layer(browser, { excludeTestServices: true })((it) => {
+    it.effect("shop", () =>
+      Effect.scoped(Effect.gen(function*() {
+        const context = yield* Browser.newContext({ focus: "emulated" })
+        const main = yield* context.newPage
+        yield* main.goto("https://shop.example.com")
+        yield* main.getByRole("button", { name: "Add to cart", exact: true }).click()
+        yield* main.getByRole("status").pipe(Expect.toBeVisible)
+        yield* main.goto("https://shop.example.com/cart")
+        yield* main.getByLabel("Email").fill("ada@example.com")
+        yield* main.goto("https://shop.example.com/orders")
+        const w1 = yield* Download.next(main)
+        yield* main.getByRole("button", { name: "Export CSV", exact: true }).click()
+        yield* w1
+      })))
+  })
+})
+```
 
 ## Sessions and state
 
-| Command                                          | Does                                                          |
-| ------------------------------------------------ | ------------------------------------------------------------- |
-| `strider browsers`                               | lists the browsers on the machine, by path                     |
-| `strider start --name s --chromium <path>`       | starts a session; also `--firefox`, `--webkit` or `--attach <endpoint>` |
-| `strider sessions`                               | lists sessions, with their pages, idle time and owner          |
-| `strider -s s state save ./auth/shop.state`      | saves the session's storage state                              |
-| `strider start --name t --chromium <path> --state ./auth/shop.state` | starts another session from it          |
-| `strider start --name t --chromium <path> --fork s` | starts one from a running session's state                   |
-| `strider -s s tabs`, `control <id> --name mail`  | lists the browser's other tabs, and takes one by name          |
-| `strider -s s export test checkout.test.ts`      | writes what the session did as a Vitest test                   |
-| `strider -s s stop`                              | ends the session and deletes its directory                     |
-| `strider prune`                                  | lists what crashed programs left behind; `--yes` cleans it up  |
+Starting a session from saved [storage state](/docs/pages/contexts#logging-in-once) skips the login form. `--state`
+starts from a saved file; `--fork` from a running session's state, with no file written. A secret given with
+`--secret` is read from the environment and used as `%name%`, never echoed or recorded:
 
-- A session's profile, downloads and artifacts are in `$XDG_RUNTIME_DIR/strider/<name>/`, deleted when it stops.
-- `--secret password=APP_PASSWORD` at start reads a secret from the environment, used as `%password%` and never
-  echoed or recorded.
+```sh
+export APP_PASSWORD=…
+strider start --name login --chromium /usr/bin/chromium --secret password=APP_PASSWORD
+strider -s login page new --name main https://shop.example.com/login
+strider -s login -p main fill 'label=Email' "ada@example.com"
+strider -s login -p main fill 'label=Password' '%password%'
+strider -s login -p main click 'role=button[name="Sign in"]'
+strider -s login -p main expect 'text=Welcome' visible
+mkdir -p auth && strider -s login state save ./auth/shop.state
+strider start --name later --chromium /usr/bin/chromium --state ./auth/shop.state
+strider start --name twin --chromium /usr/bin/chromium --fork login
+```
+
+```
+saved the session's state to ./auth/shop.state, readable by you alone
+```
+
+## Managing sessions
+
+A session's browser runs until the session stops, so list what's running and stop what you're done with:
+
+| Command                                        | Does                                                                         |
+| ---------------------------------------------- | ---------------------------------------------------------------------------- |
+| [`strider browsers`](/docs/installation#a-browser) | lists the browsers on the machine, by path                               |
+| `strider start --name s --chromium <path>`     | starts a session; also `--firefox`, `--webkit` or `--attach <endpoint>`      |
+| `strider sessions`                             | lists sessions, with their pages and idle time: `shop  chromium · pages main · idle 0 s of 1h` |
+| `strider -s s stop`                            | ends the session and deletes its directory                                   |
+| `strider prune`                                | lists browsers and profile directories left by programs that were killed; `--yes` removes them |
+
+A session's profile, downloads and artifacts are in `$XDG_RUNTIME_DIR/strider/<name>/`, deleted when it stops. A
+session idle for an hour stops itself; `start --idle "30 minutes"` changes that.
+
+
+## Attaching
+
+A session can [attach](/docs/pages/attaching) to a browser that's already running. `tabs` lists the tabs it didn't
+open, and `control` takes one under a name:
+
+```sh
+strider start --name mine --attach http://127.0.0.1:9222
+strider -s mine tabs
+strider -s mine control N1 --name mail
+strider -s mine -p mail snapshot
+```
+
+```
+N1  https://mail.example.com/inbox · 2 ms
+mail at https://mail.example.com/inbox, controlled until strider release -p mail · 2 ms
+```
+
+Stopping an attached session leaves the browser and its tabs running.
 
 ## Segments
 
-A segment is a TypeScript file run in the live session. Its default export is an `Effect` that finds pages by
-name:
+A command does one thing and returns. A segment is a program, so it can decide as it goes: catch a failure, loop
+over a list, or work in a popup the moment it opens. It runs in the live session: a TypeScript file whose default
+export is an `Effect` that finds pages by name through [`CurrentSession`](/docs/api/browser/cli/CurrentSession):
 
 ```ts title="pay.ts"
-import { Popup } from "@usestrider/browser"
+import { Deadline, Popup } from "@usestrider/browser"
 import { CurrentSession } from "@usestrider/browser/cli"
 import { Effect } from "effect"
 
@@ -76,29 +225,64 @@ export default Effect.gen(function*() {
   yield* shop.getByText("Pay").click()
   const popup = yield* popups
   yield* popup.getByLabel("Card number").fill("4242 4242 4242 4242")
+  yield* popup.getByRole("button", { name: "Pay" }).click()
+  // Some cards ask the bank to confirm; most don't
+  yield* popup.getByRole("button", { name: "Confirm with my bank" }).click().pipe(
+    Deadline.within("5 seconds"),
+    Effect.catchTag("Timeout", () => Effect.void)
+  )
   return { popup }
 })
 ```
 
+`strider run` doesn't type-check, so run your project's `tsc` first, against the same `@usestrider/browser` version
+as the `strider` running the session:
+
 ```sh
 npx tsc --noEmit && strider -s shop run pay.ts
+strider -s shop pages
+strider -s shop -p popup snapshot
 ```
 
-- A segment runs in its own scope: its routes, handlers and waits end with it.
-- Pages it returns are named into the session under their keys. A popup of a session page stays open; a page the
-  segment opened itself closes with it unless `session.keep(page)` keeps it.
-- `strider run` doesn't type-check; run your project's `tsc`, against the version the session runs.
+```
+ran /home/ada/shop/pay.ts
+main  https://shop.example.com/cart
+popup  https://pay.example.com/card
+(0 ms)
+```
+
+- A segment runs in its own scope: its [routes](/docs/events/routes),
+  [handlers](/docs/events/events#dialogs) and waits end with it.
+- Pages it returns are named into the session under their keys, but not kept: a popup of a session page stays open,
+  since its opener owns it, and a page the segment opened itself closes with the segment.
+- To keep a page it opened, call [`session.keep`](/docs/api/browser/cli/CurrentSession#CurrentSession.keep). For a
+  page you know you want, `page new --name orders <url>` is simpler; a segment keeps one it opens partway through:
+
+```ts title="orders.ts"
+import { CurrentSession } from "@usestrider/browser/cli"
+import { Effect } from "effect"
+
+export default Effect.gen(function*() {
+  const session = yield* CurrentSession.CurrentSession
+  const orders = yield* session.context.newPage
+  yield* orders.goto("https://shop.example.com/orders")
+  yield* session.keep(orders, "orders")
+})
+```
 
 ## MCP
 
-`strider mcp` serves a session's tools over the Model Context Protocol, sharing the session with your shell:
+An MCP client, such as an editor's agent, calls tools, not a shell. `strider mcp` serves a session's commands as
+tools over the Model Context Protocol; add it to your MCP client's servers:
 
 ```json
 {
   "mcpServers": {
-    "strider": { "command": "strider", "args": ["mcp", "-s", "shop"] }
+    "strider": { "command": "npx", "args": ["strider", "mcp", "-s", "shop"] }
   }
 }
 ```
 
-`["mcp", "--start", "--chromium", "/usr/bin/chromium"]` starts a session of the client's own, ending with it.
+With `-s`, the agent shares a session with your shell, so you can watch and act on its pages. With
+`["strider", "mcp", "--start", "--chromium", "/usr/bin/chromium"]`, the client gets a session of its own, ending
+with it.
