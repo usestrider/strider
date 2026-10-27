@@ -83,3 +83,12 @@ In three steps, each committed and pushed when its checks pass:
 1. The package checks, and CI's checks workflow (candidates 1 and 2).
 2. The reference site, built by CI (3).
 3. The comparison scripts and their report (4).
+
+## Decision
+
+Adopted, 2026-10-26, with the maintainer's answers:
+
+1. **Integration in CI:** nightly when `main` has changed, and on demand.
+2. **The reference site:** "nowhere, but eventually cloudflare pages probably". CI builds it, to keep it working, and publishes it nowhere; Cloudflare Pages is the likely host once it's published.
+3. **Sites:** public demo sites made for automation practice, recorded once, beside the local fixtures.
+4. **Automation tells:** compared, as a part of the report.

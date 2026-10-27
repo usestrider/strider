@@ -775,6 +775,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 23's third step: the slices' call site 1 restored a cross-site frame's storage, which its page at the test server's port didn't see; under a page at port 80 it did.
 - *We:* `storageState.partitioned` is `partial` on stock WebKit, saying so; a partition at a site's default port, as a deployed site's is, round-trips.
 - *Reconsider:* recording a partition's top-level origin beside its site, so a backend that keys by origin can restore it at its port.
+- **Resolved** in `8431901` (review 24): a storage state records a partitioned origin's top-level origin, and a restore writes it from a page there, so stock WebKit's partition is the one its pages find; a state saved without one is restored at the site's default port.
 
 ## Browsers: attaching
 
