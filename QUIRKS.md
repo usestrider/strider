@@ -35,6 +35,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* nothing: a `PageNavigation.next` waiting for it times out.
 - *Reconsider:* reporting the console message's evidence as a failed navigation, or a hint on the timeout.
 - **Kept** in review 21: the *We* line is the decision.
+- **Revised** in `9c8280c` (review 23's last step): Playwright's build is no longer driven. On stock WebKit, a load refused before any request shows only its error page, and the `goto` waiting in the frame fails with it (Q199).
 
 **Q4. Back/forward-cache restores look different on every backend** (Browser).
 - Chromium restores under the restored document's *original* loader id (`frameNavigated{type: BackForwardCacheRestore}`), creating its context before the commit, and refuses a page's commands with "Not attached to an active page" for a moment while it swaps documents.
@@ -200,12 +201,14 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* never send either outside what the model has seen; a frame that goes between the check and the command is a race we can't close.
 - *Reconsider:* when the build is rolled.
 - **Reported** in review 21's fifth step: drafted in `upstream/playwright-webkit-crashes.md`, not sent.
+- **Resolved** in `9c8280c` (review 23's last step): neither command is in stock WebKit, which the adapter now drives alone.
 
 **Q23. A raw WebKit dialog answer left the page blocked once** (Browser). In a scratch probe, the same answer the adapter sends left the dialog open; the difference was never traced.
 - *Seen:* WebKit probe findings.
 - *We:* nothing; the adapter's answers work.
 - *Reconsider:* trace it before relying on raw-protocol access to WebKit.
 - **Kept** in review 21: the *We* line is the decision.
+- **Resolved** in `9c8280c` (review 23's last step): the `Dialog` domain was Playwright's build's; stock WebKit's dialogs are answered through Automation (Q206).
 
 **Q24. A second client can crash a page another client created** (Browser). On Chromium, a second CDP client attached to a page the first had created and crashed it.
 - *Seen:* probe 25.
@@ -229,6 +232,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 16, P1.
 - *We:* `input.pointerModifiers` is `unsupported` on WebKit. A pointer action or `mouse.click` with modifiers, or while one is held, fails with `Unsupported` before anything is sent.
 - *Reconsider:* when the build is rolled.
+- **Resolved** in `9c8280c` (review 23's last step): Playwright's build is no longer driven. Launched stock WebKit's Automation holds a modifier as a key through the click, and a Shift-click reaches the page with `shiftKey` true (`input.pointerModifiers`, `supported`; the slices' interaction case).
 
 **Q73. WebDriver's pointer actions carry no modifier flags** (Browser). Firefox takes modifiers only from keys held in the same actions; Shift held as a key reaches `shiftKey`.
 - *Seen:* review 16, P1.
@@ -260,6 +264,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* nothing; `tap` sends the touch, and the page decides.
 - *Reconsider:* nothing.
 - **Kept** in review 21: the *We* line is the decision.
+- **Resolved** in `9c8280c` (review 23's last step): stock WebKit's Automation has no touch (Q214), so `tap` is refused (`input.touch`).
 
 **Q78. Firefox on the desktop has no touch event interface, yet dispatches touch events** (Browser). `TouchEvent` is undefined and `'ontouchstart' in window` is false, so an `ontouchstart` attribute never runs, but `touchstart` and `touchend` reach `addEventListener` listeners.
 - *Seen:* review 16's revision; P6 had listened with `addEventListener`.
@@ -288,6 +293,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 22's build, when a German layout's `Y` was typed on every backend.
 - *We:* nothing: the text is right, and the flags are WebKit's.
 - *Reconsider:* whether WebKit's `Input.dispatchKeyEvent` takes its modifiers another way.
+- **Revised** in `9c8280c` (review 23's last step): Playwright's build is no longer driven. Launched stock WebKit holds Shift as a key in Automation's sequences; whether its key events then say `shiftKey` wasn't checked. A layout's keys are refused (`input.keyboardLayout`).
 
 **Q189. A WebDriver key action names a key value, never a key's place** (Browser). Firefox picks the `code` for the value as a US keyboard would, and WebDriver has no AltGr and no dead key, so a layout's `z` on `KeyY` arrives as `z` on `KeyZ`.
 - *Seen:* review 22's build, when a German layout was typed on every backend.
@@ -341,24 +347,28 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Reconsider:* a `downloads: "deny"` option, and what attached browsers' contexts should do.
 - **Kept** in review 21: the *We* line is the decision.
 - **Resolved** in `6ff530c` (review 22's first step): `UserContext.Options.downloads` is `"temporary"` (as before), `"deny"`, or `{ directory }` the caller owns; the CLI's sessions download into their own `downloads/`.
+- **Revised** in `9c8280c` (review 23's last step): WebKit's part was Playwright's build's. Stock WebKit reports no downloads, and its contexts get no download directory (`downloads`, `unsupported`; Q220).
 
 **Q26. Every browser writes a download into a partial file of its own naming** (Browser). `<guid>.crdownload` (Chromium), `<name>.<random>.bin.part` beside an empty `<name>` (Firefox), `<uuid>.wkdownload` beside an empty `<uuid>` (WebKit), renamed when done.
 - *Seen:* review 14, P2.
 - *We:* read a download's bytes only once it completes; `Download.stream` can't deliver them as they arrive.
 - *Reconsider:* streaming from the partial file per backend.
 - **Kept** in review 21: the *We* line is the decision.
+- **Revised** in `9c8280c` (review 23's last step): WebKit's part was Playwright's build's; stock WebKit reports no downloads.
 
 **Q27. Only Chromium reports a download's progress, and only CDP and WebKit can cancel one** (Browser).
 - *Seen:* review 14, P2 and P4.
 - *We:* capabilities `downloads.progress` and `downloads.cancel`; `cancel` fails with `Unsupported` on BiDi.
 - *Reconsider:* when BiDi adds them.
 - **Kept** in review 21: the *We* line is the decision.
+- **Revised** in `9c8280c` (review 23's last step): stock WebKit reports no downloads, so only CDP cancels one (`downloads.cancel`, `unsupported` on WebKit).
 
 **Q28. A download in progress when its context goes is reported three ways** (Browser). Chromium: canceled. Firefox: nothing at all. WebKit: *completed*, with an empty file.
 - *Seen:* review 14, P3.
 - *We:* the context's end makes it `Canceled`, and the fold ignores what the backend says after.
 - *Reconsider:* nothing; WebKit's report is wrong.
 - **Kept** in review 21: the *We* line is the decision.
+- **Revised** in `9c8280c` (review 23's last step): WebKit's part was Playwright's build's; stock WebKit reports no downloads.
 
 **Q29. Firefox leaves a canceled file chooser open** (Browser). With `unhandledPromptBehavior.file: "ignore"`, a chooser nothing decides stays open, and the page's later clicks open nothing.
 - *Seen:* review 14, P5.
@@ -383,6 +393,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* attribute the download to the page.
 - *Reconsider:* nothing yet.
 - **Kept** in review 21: the *We* line is the decision.
+- **Resolved** in `9c8280c` (review 23's last step): `downloadCreated` was Playwright's build's; stock WebKit reports no downloads.
 
 ## Browsers: console, exceptions and workers
 
@@ -625,18 +636,21 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* a locale declared for pages that exist is `Unsupported`; a user-agent override reaches a document only at its next navigation.
 - *Reconsider:* when emulation is built at L2.
 - **Kept** in review 21: the *We* line is the decision.
+- **Revised** in `9c8280c` (review 23's last step): Playwright's build is no longer driven. Stock WebKit refuses a locale (`emulation.locale`, Q218) and a user agent (`emulation.userAgent`, Q209) as they're declared.
 
 **Q49. WebKit's viewport is a resize with nothing to clear** (Browser). `setDeviceMetricsOverride` resizes the view (0 by 0 empties it); WPE headless starts at 1024 by 768.
 - *Seen:* WebKit probe findings.
 - *We:* measure the size before the first resize and restore it.
 - *Reconsider:* nothing yet.
 - **Kept** in review 21: the *We* line is the decision.
+- **Revised** in `9c8280c` (review 23's last step): launched stock WebKit's viewport is its window's size (Automation's `setWindowFrameOfBrowsingContext`): the window's size before the first resize is kept, and restored when the viewport is released; attached, a viewport is refused.
 
 **Q50. Firefox's permissions have no reset; WebKit's are per page** (Browser).
 - *Seen:* PROTOCOL.md, Built for BiDi and WebKit.
 - *We:* set the ones granted back to `prompt` on Firefox; reset clears every grant in the context on WebKit.
 - *Reconsider:* when grants are built at L2.
 - **Kept** in review 21: the *We* line is the decision.
+- **Revised** in `9c8280c` (review 23's last step): WebKit's part was Playwright's build's; stock WebKit grants no permissions (`permissions`, `unsupported`).
 
 **Q51. Firefox lacks several commands** (Browser). A navigation referrer, media-feature overrides and focus emulation answer `unknown command`.
 - *Seen:* PROTOCOL.md, Built for BiDi.
@@ -661,6 +675,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* refuse touch and an unavailable position; say the rest in the capability entries' limitations.
 - *Reconsider:* when the build is rolled.
 - **Kept** in review 21: the *We* line is the decision.
+- **Revised** in `9c8280c` (review 23's last step): Playwright's build is no longer driven. Stock WebKit applies media and JavaScript emulation, and launched a viewport as its window, and refuses every other override under its capability as it's declared.
 
 **Q101. An init script runs before the document has an element, and on Firefox inside a function** (Browser). `document.documentElement` is null on every backend; WebDriver BiDi's preload scripts are functions, so a script's top-level `var` and function declarations aren't globals there, as they are on CDP and WebKit.
 - *Seen:* review 17, P12, and its revision.
@@ -845,6 +860,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* when the page already has the world, the WebKit adapter waits for its report for the document, or the document's end.
 - *Reconsider:* nothing.
 - **Kept** in review 21: the *We* line is the decision.
+- **Resolved** in `9c8280c` (review 23's last step): stock WebKit makes no worlds (Q194), and the adapter asks for none.
 
 **Q120. CDP and WebKit report a document's main-world realm a moment after it commits** (Browser). Asking for it right after `goto` returned found none, and the adapters answered `Unsupported{mainWorld}`, so `evaluateInMainWorld` failed on a page just loaded.
 - *Seen:* review 18's revision, on Chromium.
@@ -1348,6 +1364,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 22's third step, in a full run: call site 3 on WebKit, once.
 - *We:* both take a world that exists as made, and a world asked for is waited for until its realm is reported or its document ends.
 - *Reconsider:* nothing.
+- **Resolved** in `9c8280c` (review 23's last step): stock WebKit makes no worlds (Q194), and the adapter creates none.
 
 **Q192. A snapshot's canvas is drawn from screenshots** (Ours). The trace viewer draws a canvas in a DOM snapshot from the action's screenshot, cropped by the canvas's box, so a trace without `screenshots: "perAction"` shows its canvases empty; the capture writes only where each canvas is.
 - *Seen:* review 22's build, from the viewer's renderer (research/playwright-trace-snapshots.md, Canvases).
