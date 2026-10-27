@@ -95,6 +95,7 @@ protocol error is in `cause`. Fill the keys or remove them.
 
 **I19. The library never sets `CommandTimeout` or `CurrentLateReplyHandler`.** Its commands get the 30-second default
 whatever the operation's deadline, and late replies are released, not adopted (`protocolClient.ts:679`).
+- Partly settled in `8b3c8ac`: inside an operation, each command waits for its reply until the operation's deadline, in place of `CommandTimeout`, and a page or context created after the deadline is closed. Open: late replies are still released by the default handler, never adopted into their owner.
 
 **I20. `session.page("p2")` accepts a generated name.** CLI.md:46 says a segment finds pages by name only, and a
 generated handle like `p2` is a token.
