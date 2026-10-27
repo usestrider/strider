@@ -59,8 +59,9 @@ The chapters are the groups in `src/features/docs/navigation.ts`, each a directo
 | 1. Getting started        | (top)     | introduction, installation, a first program, errors, deadlines |
 | 2. Pages and locators     | `pages/`  | finding elements, actions, expectations and reads, contexts, attaching to a browser |
 | 3. Events and the network | `events/` | events, requests and responses, routes, scripts and time      |
-| 4. Testing and tools      | `tools/`  | Vitest, traces and HAR files, agents and the `strider` command |
-| 5. Browsers               | `browsers/` | choosing a browser, Chromium, Firefox, WebKit                |
+| 4. Testing and recordings | `tools/`  | Vitest, traces and HAR files |
+| 5. Agents and the command line | `agents/` | snapshots and the toolkit, the `strider` CLI |
+| 6. Browsers               | `browsers/` | choosing a browser, Chromium, Firefox, WebKit                |
 
 The browser pages render each backend's capabilities with `<Capabilities />` (every backend, side by side) and
 `<BrowserLimits browser="firefox" />` (one backend's limits, `when="attached"` for what attaching changes). Both read

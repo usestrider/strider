@@ -1,0 +1,84 @@
+---
+title: Snapshots and the toolkit
+description: Snapshots with refs for a model to act on, and a toolkit of effect/ai tools over a context.
+order: 1
+---
+
+A model can't act on a page it can't read, and a selector it guesses breaks on the next render. A snapshot gives it
+the page as text, with a ref for each element it can act on, and the toolkit gives it tools that act through them.
+
+## Snapshots
+
+A snapshot is a page's accessibility tree as data, with a ref for each node that can be acted on. `text` renders
+it for a model:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Console, Effect, Option } from "effect"
+
+const clickByName = Effect.fn("clickByName")(function*(page: Page.Page, name: string) {
+  const snapshot = yield* page.snapshot({ interactiveOnly: true })
+  yield* Console.log(snapshot.text)
+  for (const [id, node] of snapshot.refs) {
+    if (node.name._tag !== "None" && node.name.value === name) {
+      return yield* snapshot.ref(id).click().pipe(Effect.as(Option.some(id)))
+    }
+  }
+  return Option.none()
+})
+```
+
+- By default a snapshot also infers what the accessibility tree misses: interactivity from `cursor: pointer`,
+  `tabindex`, `contenteditable` or `onclick`, and names from text, `title`, `placeholder`, `alt` or a nearby label.
+  Each inference is tagged: `clickable "Save" [inferred: cursorPointer]`.
+- `snapshot({ sources: "aria" })` is the accessibility tree alone, as `Expect.toMatchAria` matches.
+- A ref is a locator pinned to one node, never resolved again. If the node is removed or its document replaced,
+  acting on it fails with `StaleRef`, saying which.
+- A node keeps its ref while its document lives, even if its name changes.
+- `snapshot.diff(previous)` says what changed between two snapshots of a document.
+
+## The toolkit
+
+`BrowserToolkit` gives a model `effect/ai` tools over one context. The same tools serve your program, an MCP server
+and the [`strider` CLI](/docs/agents/cli):
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
+import { Config, Effect } from "effect"
+import { LanguageModel } from "effect/ai"
+
+const agent = Effect.scoped(Effect.gen(function*() {
+  const context = yield* Browser.newContext()
+  const toolkit = yield* BrowserToolkit.make({
+    context,
+    secrets: { password: yield* Config.Redacted("APP_PASSWORD") },
+    capture: CapturePolicy.strict
+  })
+  const response = yield* LanguageModel.generateText({
+    prompt: "On app.example.com, sign in as ada@example.com with %password%.",
+    toolkit
+  })
+  return response.text
+}))
+```
+
+The tools: `pages`, `newPage`, `tabs`, `control`, `release`, `goto`, `back`, `snapshot`, `find`, `screenshot`,
+`click`, `fill`, `press`, `select`, `scroll`, `next`, `await`, `expect`, `history`, `route` and `dialog`.
+
+- **Every tool names its page.** There's no current tab. Pages are named when created (`p1`, `p2`, or the model's
+  name) or when first seen, as a popup is.
+- **A target is a ref or a locator:** `e12` from the page's latest snapshot, or `role=button[name="Save"]`,
+  `text="Add to cart"`, `label=Email`, `testid=cart`, `css=…`. A ref from another page's snapshot is refused.
+- **No tool waits after it acts.** `next` subscribes and `await` collects; `expect` waits for a condition.
+- **Each result has the outcome and what happened since the last call:** navigations, popups, dialogs and who
+  decided them, downloads, uncaught exceptions, console errors, failed requests.
+- **Failures go back to the model** as data, hint included.
+- **Secrets are named.** The model writes `%password%`; the value is substituted as the tool runs, and results show
+  `%password%`.
+
+`capture` is required. `CapturePolicy.strict` sends no screenshots, masks editable fields' text in snapshots as
+`•••`, and leaves out console text. `CapturePolicy.local` allows all three.
+
+With `browser` also given, `tabs` and `control` reach the browser's other pages, such as an attached browser's
+tabs. Without it, the model stays in its context.

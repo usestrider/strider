@@ -29,9 +29,15 @@ export const groups: ReadonlyArray<Group> = [
     description: "Subscribing before you act, watching requests and responses, and routes, scripts and time."
   },
   {
-    label: "Testing and tools",
+    label: "Testing and recordings",
     directory: "tools",
-    description: "Tests under Vitest, traces and HAR recordings, and the agent toolkit and the strider command."
+    description: "Tests under Vitest, and traces and HAR recordings of what a page did."
+  },
+  {
+    label: "Agents and the command line",
+    directory: "agents",
+    description:
+      "Snapshots and a toolkit of tools for a model, and the strider CLI, which drives a live browser from a shell."
   },
   {
     label: "Browsers",

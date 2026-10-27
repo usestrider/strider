@@ -1,0 +1,104 @@
+---
+title: The strider CLI
+description: A command line that drives a live browser from a shell, a script or an agent, with named sessions, TypeScript segments run in them, and an MCP server.
+order: 2
+---
+
+`strider` is Strider's command-line tool. It keeps a browser open in a named session between commands, so a shell,
+a script or an agent can drive it one step at a time.
+
+## Commands
+
+A session holds one browser between commands:
+
+```sh
+strider start --name shop --chromium /usr/bin/chromium
+strider -s shop page new --name main https://shop.example.com
+strider -s shop -p main snapshot
+strider -s shop -p main click e9
+strider -s shop -p main fill 'label=Email' "ada@example.com"
+strider -s shop -p main find "Add to cart" --role button
+strider -s shop stop
+```
+
+Every command names its session with `-s` and its page with `-p`; there's no default, so agents on one machine
+can't act on each other's tabs. Commands are the [toolkit's tools](/docs/agents/toolkit#the-toolkit), and answer the same way:
+
+```
+clicked e9 on main · 412 ms
+since last: main navigated to https://shop.example.com/cart · GET https://shop.example.com/api/offers answered 503
+```
+
+`next` subscribes and prints a wait handle; `await` collects it in a later command:
+
+```sh
+strider -s shop -p main next download --within 2m
+strider -s shop -p main click 'role=button[name="Export CSV"]'
+strider -s shop await w1
+```
+
+A failure prints its tag, message and hint, and exits with the error's code: 10 for `LocatorError`, 12 for
+`Timeout`, 14 for `ExpectationFailed`, and others.
+
+## Sessions and state
+
+| Command                                          | Does                                                          |
+| ------------------------------------------------ | ------------------------------------------------------------- |
+| `strider browsers`                               | lists the browsers on the machine, by path                     |
+| `strider start --name s --chromium <path>`       | starts a session; also `--firefox`, `--webkit` or `--attach <endpoint>` |
+| `strider sessions`                               | lists sessions, with their pages, idle time and owner          |
+| `strider -s s state save ./auth/shop.state`      | saves the session's storage state                              |
+| `strider start --name t --chromium <path> --state ./auth/shop.state` | starts another session from it          |
+| `strider start --name t --chromium <path> --fork s` | starts one from a running session's state                   |
+| `strider -s s tabs`, `control <id> --name mail`  | lists the browser's other tabs, and takes one by name          |
+| `strider -s s export test checkout.test.ts`      | writes what the session did as a Vitest test                   |
+| `strider -s s stop`                              | ends the session and deletes its directory                     |
+| `strider prune`                                  | lists what crashed programs left behind; `--yes` cleans it up  |
+
+- A session's profile, downloads and artifacts are in `$XDG_RUNTIME_DIR/strider/<name>/`, deleted when it stops.
+- `--secret password=APP_PASSWORD` at start reads a secret from the environment, used as `%password%` and never
+  echoed or recorded.
+
+## Segments
+
+A segment is a TypeScript file run in the live session. Its default export is an `Effect` that finds pages by
+name:
+
+```ts title="pay.ts"
+import { Popup } from "@usestrider/browser"
+import { CurrentSession } from "@usestrider/browser/cli"
+import { Effect } from "effect"
+
+export default Effect.gen(function*() {
+  const session = yield* CurrentSession.CurrentSession
+  const shop = yield* session.page("main")
+  const popups = yield* Popup.next(shop)
+  yield* shop.getByText("Pay").click()
+  const popup = yield* popups
+  yield* popup.getByLabel("Card number").fill("4242 4242 4242 4242")
+  return { popup }
+})
+```
+
+```sh
+npx tsc --noEmit && strider -s shop run pay.ts
+```
+
+- A segment runs in its own scope: its routes, handlers and waits end with it.
+- Pages it returns are named into the session under their keys. A popup of a session page stays open; a page the
+  segment opened itself closes with it unless `session.keep(page)` keeps it.
+- `strider run` doesn't type-check; run your project's `tsc`, against the version the session runs.
+
+## MCP
+
+`strider mcp` serves a session's tools over the Model Context Protocol, sharing the session with your shell:
+
+```json
+{
+  "mcpServers": {
+    "strider": { "command": "strider", "args": ["mcp", "-s", "shop"] }
+  }
+}
+```
+
+`["mcp", "--start", "--chromium", "/usr/bin/chromium"]` starts a session of the client's own, ending with it.
