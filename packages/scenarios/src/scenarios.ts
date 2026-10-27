@@ -28,6 +28,8 @@ export type StriderNeeds = Browser.Browser | Scope.Scope | FileSystem.FileSystem
 export interface Scenario {
   readonly name: string
   readonly title: string
+  /** What the Strider program shows, for its page on the documentation site. */
+  readonly description: string
   /** The value both implementations must return. */
   readonly expected: string
   /** A public demo site, replayed from `.data/scenarios/<recording>.har`; none for the local site. */
@@ -376,6 +378,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
   {
     name: "readme",
     title: "The README's program",
+    description: "Opens a page, clicks a button, waits for what it shows, and reads it: the README's first program.",
     expected: "Added to cart",
     strider: readmeStrider,
     playwright: readmePlaywright
@@ -383,6 +386,8 @@ export const scenarios: ReadonlyArray<Scenario> = [
   {
     name: "login",
     title: "A login reused through storage state",
+    description:
+      "Signs in once, keeps the context's storage state, and opens a later page in a new context already signed in.",
     expected: "Signed in",
     strider: loginStrider,
     playwright: loginPlaywright
@@ -390,6 +395,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
   {
     name: "popup",
     title: "A popup with a dialog inside it",
+    description: "Waits for the popup a click opens, accepts every dialog in it, and acts in it.",
     expected: "Allowed",
     strider: popupStrider,
     playwright: popupPlaywright
@@ -397,6 +403,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
   {
     name: "block",
     title: "A route that blocks analytics",
+    description: "Aborts every request to the page's analytics with a route, declared before the page loads.",
     expected: "analytics blocked",
     strider: blockStrider,
     playwright: blockPlaywright
@@ -404,6 +411,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
   {
     name: "upload",
     title: "A file upload, from bytes",
+    description: "Sets a file input from bytes the program makes, with no file on disk.",
     expected: "receipt.txt:4",
     strider: uploadStrider,
     playwright: uploadPlaywright
@@ -411,6 +419,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
   {
     name: "response",
     title: "A response's body, from a click",
+    description: "Subscribes to the response a click causes, before the click, and decodes its JSON body.",
     expected: `{"items":[{"sku":"tea","quantity":1}]}`,
     strider: responseStrider,
     playwright: responsePlaywright
@@ -418,6 +427,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
   {
     name: "navigation",
     title: "Waiting for the navigation a click causes",
+    description: "Subscribes to the navigation a click causes, before the click, then waits for it.",
     expected: "Orders",
     strider: navigationStrider,
     playwright: navigationPlaywright
@@ -425,6 +435,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
   {
     name: "har",
     title: "A HAR recorded, then replayed",
+    description: "Records a page's traffic to a HAR, then serves a new page entirely from the recording.",
     expected: "42 sold",
     strider: harStrider,
     playwright: harPlaywright
@@ -432,6 +443,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
   {
     name: "todomvc",
     title: "TodoMVC's demo, replayed",
+    description: "Adds three todos to TodoMVC's demo and completes one, against a recording of the site.",
     expected: "2 items left",
     recording: "todomvc",
     note:
@@ -442,6 +454,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
   {
     name: "the-internet",
     title: "The Internet's login, replayed",
+    description: "Logs in on The Internet's demo login page, against a recording of the site.",
     expected: "Secure Area",
     recording: "the-internet",
     strider: theInternetStrider,

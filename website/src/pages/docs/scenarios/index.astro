@@ -1,0 +1,33 @@
+---
+// The scenarios' index: each one, with what it shows
+import ScenarioNav from "../../../components/ScenarioNav.astro"
+import { scenarioRoute, scenarios } from "../../../features/scenarios/scenarios.ts"
+import DocShell from "../../../layouts/DocShell.astro"
+
+const all = scenarios()
+---
+
+<DocShell
+  title="Scenarios"
+  description="Complete Strider programs, each run against a real browser"
+  area="scenarios"
+  crumbs={[{ label: "Scenarios" }]}
+>
+  <ScenarioNav slot="sidebar" />
+  <h1 class="font-display text-[3rem] leading-tight font-normal">Scenarios</h1>
+  <p class="deck mt-3 mb-10 text-[1.3rem] leading-snug">
+    Complete programs, each a task from start to finish. Every one runs against Chromium, and checks what it reads.
+  </p>
+  <dl class="space-y-5">
+    {
+      all.map((scenario) => (
+        <div>
+          <dt class="font-display text-[1.35rem]">
+            <a class="underline underline-offset-2" href={scenarioRoute(scenario)}>{scenario.title}</a>
+          </dt>
+          <dd class="mt-1 text-[1rem] text-labels">{scenario.description}</dd>
+        </div>
+      ))
+    }
+  </dl>
+</DocShell>

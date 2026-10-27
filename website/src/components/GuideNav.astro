@@ -21,4 +21,10 @@ const chapters = navigation(await getCollection("docs"))
     />
   ))
 }
-<SideNav label="Appendix" links={[{ label: "API reference", href: "/docs/api", current: false }]} />
+<SideNav
+  label="Appendix"
+  links={[
+    { label: "Scenarios", href: "/docs/scenarios", current: false },
+    { label: "API reference", href: "/docs/api", current: false }
+  ]}
+/>

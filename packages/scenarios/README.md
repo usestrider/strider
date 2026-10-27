@@ -5,7 +5,9 @@ and with Playwright against the same stock Chromium, the one the integration env
 found to [RESULTS.md](RESULTS.md):
 
 - **Scenarios:** API.md's call sites that both libraries can do, each written twice, as each library's own
-  documentation would write it (`src/scenarios.ts`), with their outcomes and wall times;
+  documentation would write it (`src/scenarios.ts`), with their outcomes and wall times. The documentation site's
+  Scenarios section shows each Strider program, read from its `#region <name>/strider` markers, with its title and
+  `description`;
 - **Two costs Strider chose** (QUIRKS.md): Q82, an expectation that evaluates at every animation frame while it
   waits, as the renderers' CPU time; and Q103, Chromium's request interceptor always installed, as page loads;
 - **The automation tells:** what a page's own script can read about the library driving it (`/tells` in
