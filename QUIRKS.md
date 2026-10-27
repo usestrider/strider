@@ -1361,4 +1361,4 @@ An entry with no marker is open.
 - *Seen:* CI, once, on `9806fe2`, which changed nothing it reaches; it passed locally in milliseconds.
 - *We:* `Browsers.among` searches given candidates, and `find` is it over every place; the test passes only `PATH`'s and WebKit's, and WebKit's are never run.
 - *Reconsider:* nothing.
-- **Resolved**, in the commit that adds this entry.
+- **Resolved** in `1bafdf0`.
