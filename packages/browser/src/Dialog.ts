@@ -21,6 +21,7 @@ import * as Declaration from "./Declaration.ts"
 import * as Access from "./internal/access.ts"
 import type * as Adapter from "./internal/adapter.ts"
 import * as Events from "./internal/events.ts"
+import * as Filters from "./internal/filters.ts"
 import * as Handlers from "./internal/handlers.ts"
 import * as Handles from "./internal/handles.ts"
 import type * as Model from "./internal/model.ts"
@@ -226,6 +227,19 @@ const accepts = (filter: Filter | undefined) => {
   return (entry: Events.Entry<Model.PromptEvent>) => wanted === undefined || wanted.has(kinds[entry.value.kind])
 }
 
+// A backend that reports no dialogs, as attached stock WebKit's inspector doesn't, refuses to wait for one
+const subscribe = <A, E, R>(
+  target: Page.ObservedPage,
+  operation: string,
+  subscribe: (events: Events.Channel<Model.PromptEvent>) => Effect.Effect<A, E, R>
+): Effect.Effect<A, E | Subscription.SubscriptionError, R> =>
+  Effect.suspend(() => {
+    const behind = Handles.page(target)
+    return Filters.requires(behind.runtime, operation, "prompts").pipe(
+      Effect.andThen(subscribe(behind.entry.events.dialog))
+    )
+  })
+
 const kind = (operation: string): Events.Kind<Model.PromptEvent, Dialog> => ({
   operation,
   noun: "a dialog",
@@ -235,6 +249,11 @@ const kind = (operation: string): Events.Kind<Model.PromptEvent, Dialog> => ({
 /**
  * Subscribes to dialogs and returns the wait: an effect that gives the first match, the same each time it runs.
  * Waiting for a dialog doesn't decide it.
+ *
+ * **Gotchas**
+ *
+ * On a backend without the `prompts` capability, such as attached WebKit, it fails at once with `SubscriptionError`,
+ * reason `Unsupported`.
  *
  * **Example** (Reading the alert a form shows)
  *
@@ -263,12 +282,17 @@ export const next = <PE = never, PR = never>(
   Subscription.SubscriptionError,
   Scope.Scope | PR
 > =>
-  Effect.suspend(() =>
-    Events.next(kind("Dialog.next"), Handles.page(target).entry.events.dialog, accepts(filter), where)
-  ).pipe(Operation.named("Dialog.next"))
+  subscribe(target, "Dialog.next", (events) => Events.next(kind("Dialog.next"), events, accepts(filter), where)).pipe(
+    Operation.named("Dialog.next")
+  )
 
 /**
  * Subscribes to dialogs and emits every match from now on. Seeing a dialog doesn't decide it.
+ *
+ * **Gotchas**
+ *
+ * On a backend without the `prompts` capability, such as attached WebKit, it fails at once with `SubscriptionError`,
+ * reason `Unsupported`.
  *
  * **Example** (Logging every dialog)
  *
@@ -298,12 +322,15 @@ export const stream = <PE = never, PR = never>(
   Subscription.SubscriptionError,
   Scope.Scope | PR
 > =>
-  Effect.suspend(() =>
-    Events.stream(kind("Dialog.stream"), Handles.page(target).entry.events.dialog, accepts(filter), where)
-  )
+  subscribe(target, "Dialog.stream", (events) => Events.stream(kind("Dialog.stream"), events, accepts(filter), where))
 
 /**
  * Reads the dialogs still in the page's event log; never waits.
+ *
+ * **Gotchas**
+ *
+ * On a backend without the `prompts` capability, such as attached WebKit, it fails with `SubscriptionError`,
+ * reason `Unsupported`.
  *
  * **Example** (The messages of the dialogs so far)
  *
@@ -327,9 +354,7 @@ export const history = (
   target: Page.ObservedPage,
   filter?: Filter | undefined
 ): Effect.Effect<Subscription.History<Dialog>, Subscription.SubscriptionError> =>
-  Effect.suspend(() =>
-    Events.history(kind("Dialog.history"), Handles.page(target).entry.events.dialog, accepts(filter))
-  )
+  subscribe(target, "Dialog.history", (events) => Events.history(kind("Dialog.history"), events, accepts(filter)))
 
 /**
  * Registers a handler that decides the page's dialogs while its scope lives.

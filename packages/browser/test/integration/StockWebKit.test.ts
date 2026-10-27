@@ -6,7 +6,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, ConsoleMessage, Expect, Route, Target } from "@usestrider/browser"
+import { Browser, ConsoleMessage, Dialog, Expect, Route, Target } from "@usestrider/browser"
 import { WebKit } from "@usestrider/browser/webkit"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -233,6 +233,10 @@ describe("Stock WebKit, attached through its remote inspector", () => {
             const activated = reasonOf(yield* Effect.exit(tab.activate))
             assert.strictEqual(activated?._tag, "PageError")
             assert.strictEqual(activated?.reason?.capability, "emulation.focus")
+            // Its inspector reports no dialogs, so nothing waits for one
+            const dialogs = reasonOf(yield* Effect.exit(Dialog.next(tab)))
+            assert.strictEqual(dialogs?._tag, "SubscriptionError")
+            assert.strictEqual(dialogs?.reason?.capability, "prompts")
           }))
         }).pipe(Effect.provide(attach(endpoint)))
       }))
