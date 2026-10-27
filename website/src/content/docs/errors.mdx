@@ -1,40 +1,34 @@
 ---
 title: Errors and deadlines
-description: What a failure tells you, how to recover from the ones you expect, and one budget for everything an operation does.
+description: What a failure tells you, recovering from the ones you expect, and one budget per operation.
 order: 3
 ---
 
 ## Three kinds of failure
 
-Every operation's error type says what it can fail with, and there are only three kinds:
+| Error                  | Means                                                         | Carries                                 |
+| ---------------------- | ------------------------------------------------------------- | --------------------------------------- |
+| the module's own error | the operation couldn't do what it was asked                    | a `reason`, a class with its own fields |
+| `TargetGone`           | something it needed ended: the page closed, the frame detached | `reason`: why it ended                  |
+| `Timeout`              | the deadline passed                                            | `phase`: how far it got                 |
 
-| Error                      | Means                                                              | Carries                                    |
-| -------------------------- | ------------------------------------------------------------------ | ------------------------------------------ |
-| the module's own error     | the operation couldn't do what it was asked                        | a `reason`, a class with its own fields     |
-| `TargetGone`               | something it needed ended: the page closed, the frame detached      | `reason`: why it ended                      |
-| `Timeout`                  | the deadline passed                                                 | `phase`: how far it got                     |
-
-Each module has one error: a click fails with `LocatorError`, a navigation with `PageError`, a download with
-`DownloadError`, an expectation with `ExpectationFailed`. What went wrong is the error's `reason`, and every reason
-has a `hint` that says what to do next. The message puts them together:
+Each module has one error: `LocatorError` for a click, `PageError` for a navigation, `DownloadError`,
+`ExpectationFailed`. Every reason has a `hint`, and the message includes it:
 
 ```
 click page.getByRole("button", { name: "Save" }): 2 matches (2 elements match and 1 of them is visible; add .filter({ visible: true }))
 ```
 
-Some reasons belong to one module, such as `Locator.StrictViolation` or `PageNavigation.NavigationFailed`. Others
-are shared by every module, in `Reason`:
+Some reasons belong to one module, such as `Locator.StrictViolation`. These are shared, in `Reason`:
 
-- `InvalidInput`: an argument the operation can't use, such as a selector that doesn't parse. It fails at once.
-- `Unsupported`: this backend can't do it. The fix is a different browser, and the reason names the capability.
-- `NotPermitted`: you don't hold the access this needs, such as acting on a page you may only inspect. The fix is
-  a different call.
-- `BackendFailure`: the browser refused or broke, with its own error attached.
+- `InvalidInput`: an argument the operation can't use, such as a malformed selector. Fails at once.
+- `Unsupported`: this backend can't do it. The reason names the capability.
+- `NotPermitted`: you don't have the access it needs, such as acting on a page you may only inspect.
+- `BackendFailure`: the browser refused or broke; its error is the `cause`.
 
-## Recovering from what you expect
+## Recovering
 
-Errors are Effect errors, so everything Effect has for them applies. `Effect.catchReason` matches a module's error
-and one of its reasons together, which is how you recover from a failure you expect without swallowing the others:
+`Effect.catchReason` matches a module's error and one of its reasons:
 
 ```ts
 import { Locator, Page } from "@usestrider/browser"
@@ -51,18 +45,14 @@ const dismissBanner = Effect.fn("dismissBanner")(function*(page: Page.Page) {
 })
 ```
 
-A reason is the same class wherever it appears, so one check works across modules: `Effect.catchReason(tag,
-"Unsupported", …)` for any module's tag.
+A shared reason is the same class in every module: `Effect.catchReason(tag, "Unsupported", …)` works for any tag.
 
 ## Strict by default
 
-An action needs exactly one element. If the locator matches two, it fails at once with `StrictViolation`, listing
-what it matched, and suggests `.filter({ visible: true })` when only one of them is visible. It doesn't wait to see
-whether one goes away, because an ambiguous locator is a bug in the program, not a state of the page. Reads are
-strict the same way.
+An action or read needs exactly one element. Two or more fail at once with `StrictViolation`, which lists them and
+suggests `.filter({ visible: true })` when only one is visible. Ambiguity doesn't wait: it's a bug in the locator.
 
-If duplicates are expected to be brief, such as a toast fading out while the next one fades in, say so in the code
-with an expectation before acting:
+When duplicates are brief, such as overlapping toasts, wait for them to settle first:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -77,12 +67,10 @@ const dismissToast = Effect.fn("dismissToast")(function*(page: Page.Page) {
 
 ## Deadlines
 
-Each operation has one deadline, which covers everything it does: waiting for its turn at the page's input,
-finding the element, waiting for it to be ready, sending the input and confirming the result. With no deadline
-around it, an operation gets the default budget, 30 seconds.
+An operation has one deadline for everything it does, from waiting its turn at the page's input to confirming the
+result. Without one around it, it gets the default budget, 30 seconds.
 
-`Deadline.within` sets one deadline for everything inside it. The budget is shared, not per step: in this block,
-the click, the navigation it causes and the expectation together have five seconds.
+`Deadline.within` sets one deadline for everything inside, shared rather than per step:
 
 ```ts
 import { Deadline, Expect, Page } from "@usestrider/browser"
@@ -94,26 +82,23 @@ const pay = Effect.fn("pay")(function*(page: Page.Page) {
 }, Deadline.within("5 seconds"))
 ```
 
-A deadline inside another can only shorten it, never extend it. To change what operations get when nothing
-encloses them, set the default budget for a program: `program.pipe(Deadline.withDefaultBudget("1 minute"))`.
-`Deadline.remaining` reads the time left.
+- A nested deadline can only be shorter.
+- `Deadline.withDefaultBudget("1 minute")` changes the default for a program.
+- `Deadline.remaining` reads the time left.
+- Deadlines run on the real clock, even under `TestClock`.
 
-Deadlines run on a real clock, even inside a test that uses Effect's `TestClock`, so a test can move its own time
-without making the browser's waits pass early or never.
+## Timeouts
 
-## Timeouts say how far they got
+A `Timeout`'s `phase` says how far the operation got:
 
-A `Timeout` names its operation and its `phase`:
+| Phase                   | The operation                                                              |
+| ----------------------- | -------------------------------------------------------------------------- |
+| `resolving`             | never found a matching element                                              |
+| `waitingForCondition`   | found it, but it never became ready: hidden, disabled, covered, moving      |
+| `dispatchedUnconfirmed` | sent the input, but couldn't confirm the result                             |
+| `postcondition`         | acted, and what should follow never did, such as a navigation committing    |
 
-| Phase                   | The operation                                                                   |
-| ----------------------- | ------------------------------------------------------------------------------- |
-| `resolving`             | never found a matching element                                                   |
-| `waitingForCondition`   | found it, but it never became ready: hidden, disabled, covered, moving           |
-| `dispatchedUnconfirmed` | sent the input, and the page may have acted on it, but the result wasn't confirmed |
-| `postcondition`         | acted, and what should follow never did, such as a navigation never committing    |
-
-The phase matters most for deciding what to do next. Before `dispatchedUnconfirmed`, nothing reached the page,
-and trying again is safe. After it, the click may have happened, so check the page's state before acting again:
+Before `dispatchedUnconfirmed`, nothing reached the page and retrying is safe. After it, check the page first:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -132,28 +117,36 @@ const submitOnce = Effect.fn("submitOnce")(function*(page: Page.Page) {
 })
 ```
 
-Strider never retries an action whose input may have reached the page. It does try again when it stopped a gesture
-before the page's own handlers saw it, such as a click that would have landed on a toast.
+Strider never retries input that may have reached the page. It retries only a gesture it stopped before the page
+saw it, such as a click that would have hit a toast.
 
-## When expectations fail
+## Failed expectations
 
-`ExpectationFailed` says what was expected, what was seen last, and the history of what was seen, so a failure
-answers "was it ever right?". When the locator found nothing, it also says what was nearest: what the page has
-where the locator stopped matching, and locators for elements there whose names are close to the one asked for. A
-typo in a button's name is usually obvious from the message alone.
+`ExpectationFailed` has what was expected, the last value seen and every value seen. When the locator matched
+nothing, `nearest` shows the page where the locator stopped matching, and `suggestions` are locators for elements
+with similar names.
 
-## What a failure records
+## Diagnostics
 
-Every failure carries diagnostics: the operation's id and, for an action, its dispatch state, which answers "did my
-click happen?":
+Every failure carries `diagnostics`: the operation's id and, for an action, whether its input may have reached the
+page, `dispatch`: `NotSent` or `MayHaveBeenSent`.
 
-- `NotSent`: nothing reached the browser.
-- `MayHaveBeenSent`: the input was sent and its result is unknown.
-- `Acknowledged`: the browser answered, `ok` or `rejected`.
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
 
-Errors are Schemas, so they encode as data. The `strider` command and the agent toolkit return failures as data
-too, hint and diagnostics included.
+const mayHavePaid = Effect.fn("mayHavePaid")(function*(page: Page.Page) {
+  return yield* page.getByRole("button", { name: "Pay" }).click().pipe(
+    Effect.as(true),
+    Effect.catchTag(
+      "LocatorError",
+      (error) => Effect.succeed(error.diagnostics.dispatch._tag === "MayHaveBeenSent")
+    )
+  )
+})
+```
 
-Diagnostics never show secrets. A value passed as `Redacted`, a cookie or a typed password is treated as secret,
-and left out of messages, spans and logs. Under the default preset, `strict`, a URL keeps its origin and path with
-each query value redacted; `Diagnostics.withPreset("local")` shows URLs whole while you're debugging.
+- Errors are Schemas, so they encode as data; the `strider` command and the agent toolkit return them that way.
+- Secrets never appear: `Redacted` values, cookies and typed passwords are left out of messages, spans and logs.
+- Under the default preset, `strict`, a URL keeps its origin and path with query values redacted.
+  `Diagnostics.withPreset("local")` shows URLs whole.

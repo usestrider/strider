@@ -1,14 +1,13 @@
 ---
 title: Finding elements
-description: A locator describes how to find an element, the way a person would, and finds it again every time it's used.
+description: Locators describe how to find an element, by role, text or label, and find it again each time they're used.
 order: 1
 ---
 
 ## Locators are descriptions
 
-A locator says how to find an element: "the button named Add to cart", "the row that mentions Ada". It isn't the
-element. Making one does nothing and can't fail, and every time it's used, it looks at the page as it is then. A
-locator made before the page re-renders still finds the new element after.
+A locator is how to find an element, not the element. Making one does nothing and can't fail. Each use looks at
+the page as it is then, so a locator survives a re-render.
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -22,12 +21,9 @@ const signIn = Effect.fn("signIn")(function*(page: Page.Page) {
 })
 ```
 
-Every query runs in Strider's own query engine, which it adds to each document, so a query means the same thing in
-Chromium, Firefox and WebKit.
+Queries run in Strider's own engine in each document, so they mean the same on every browser.
 
 ## The queries
-
-Find elements the way a person using the page would: by what they are and what they say.
 
 | Query                                | Finds                                                         |
 | ------------------------------------ | ------------------------------------------------------------- |
@@ -40,13 +36,11 @@ Find elements the way a person using the page would: by what they are and what t
 | `getByTestId(id)`                    | elements whose `data-testid` is `id`                           |
 | `locator(css)`                       | elements matching a CSS selector                               |
 
-Prefer `getByRole`. A role and a name are what assistive technology sees, so a locator written that way checks
-that the page is usable, and it survives a redesign that changes classes and markup. Roles and names are computed
-by the standards browsers use for assistive technology, HTML-AAM and accname 1.2. Elements hidden from the
-accessibility tree aren't matched unless you pass `includeHidden: true`.
+Prefer `getByRole`: roles and names are what assistive technology sees, and they survive changes to markup and
+classes. They're computed by HTML-AAM and accname 1.2. Hidden elements match only with `includeHidden: true`.
 
-A string matches as a case-insensitive substring. Pass `exact: true` to match the whole text, case-sensitively, or
-a `RegExp` to test it your own way:
+A string matches as a case-insensitive substring; `exact: true` matches the whole text, case-sensitively; a `RegExp`
+is tested as given:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -58,15 +52,14 @@ page.getByRole("button", { name: "Save", exact: true }) // only "Save"
 page.getByText(/^\d+ items?$/) // "1 item", "12 items"
 ```
 
-Text is an element's text content with whitespace collapsed, through open shadow roots, without scripts and
-styles. It isn't `innerText`, which depends on layout and differs between browsers. `getByText` finds the smallest
-element that says it, so `<p>1 <b>item</b></p>` is found by `"1 item"`, as the paragraph.
+Text is text content with whitespace collapsed, through open shadow roots, not `innerText`. `getByText` finds the
+smallest element that has it: `"1 item"` finds the `<p>` in `<p>1 <b>item</b></p>`.
 
-A CSS selector that doesn't parse fails with `InvalidInput` as soon as it's used, without waiting.
+A malformed CSS selector fails with `InvalidInput` when used, without waiting.
 
 ## Narrowing
 
-Queries chain: each one searches inside the matches of the one before.
+Each query in a chain searches inside the previous one's matches:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -77,8 +70,7 @@ const nav = page.getByRole("navigation", { name: "Main" })
 const orders = nav.getByRole("link", { name: "Orders" })
 ```
 
-`filter` keeps the matches that satisfy a condition. `hasText` and `hasNotText` test an element's text;
-`visible` keeps only visible or only hidden matches; `has` and `hasNot` test what an element contains:
+`filter` keeps matches by `hasText`, `hasNotText`, `visible`, or what they contain, `has` and `hasNot`:
 
 ```ts
 import { Locator, Page } from "@usestrider/browser"
@@ -92,12 +84,10 @@ const deletable = page.getByRole("row").filter({
 })
 ```
 
-`has` takes a relative locator, built from `Locator.relative`, which starts from the element being tested rather
-than from the page. Passing a locator that starts from the page is a type error, so a filter can't silently search
-the whole document.
+`has` takes a `Locator.relative` locator, which starts at the element being tested; a page locator there is a type
+error.
 
-`and` keeps elements both locators match, `or` elements either matches. `first`, `last` and `nth(index)` pick by
-position:
+`and` and `or` combine locators; `first`, `last` and `nth(index)` pick by position:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -110,12 +100,11 @@ const confirm = ok.or(page.getByRole("button", { name: "Continue" }))
 const newest = page.getByRole("listitem").first
 ```
 
-Use position as a last resort: a positional locator breaks as soon as the order changes. Errors say when a locator
-picked by position.
+Pick by position last: it breaks when the order changes.
 
 ## Labels
 
-`describe` gives a locator a label for errors and traces, in place of the code that built it:
+`describe` labels a locator in errors and traces:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -127,8 +116,7 @@ const badge = page.locator("header .cart > span").describe("cart badge")
 
 ## Frames
 
-An iframe's document is entered through its element. `page.frame` takes a locator for the iframe and gives a frame
-locator, which has the same queries:
+`page.frame` takes a locator for an iframe and gives a frame locator, with the same queries:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -141,18 +129,15 @@ const payByCard = Effect.fn("payByCard")(function*(page: Page.Page) {
 })
 ```
 
-Like any locator, a frame locator finds its iframe again on every attempt, so a frame that reloads or arrives late
-is treated like an element that isn't there yet. Cross-site frames work the same way, and frames
-nest: `payment.frame(payment.locator("iframe"))`.
+It finds the iframe again on every attempt, so a frame that reloads or arrives late is waited for like any
+element. Cross-site frames work the same, and frames nest: `payment.frame(payment.locator("iframe"))`.
 
 ## Strictness
 
-An action or a read needs exactly one match. A locator that matches several fails at once with `StrictViolation`,
-listing what it found. One that matches nothing is waited for by an action or an expectation, and fails a read at
-once with `NoMatch`. [Errors and deadlines](/docs/errors#strict-by-default) says why ambiguity doesn't wait.
+Actions and reads need exactly one match. Several fail at once with `StrictViolation`. None is waited for by an
+action or expectation, and fails a read at once with `NoMatch`.
 
-`count` and `all` are the reads that take any number of matches. `all` gives a locator for each current match,
-pinned to its position:
+`count` and `all` take any number. `all` gives a locator per current match:
 
 ```ts
 import { Page } from "@usestrider/browser"

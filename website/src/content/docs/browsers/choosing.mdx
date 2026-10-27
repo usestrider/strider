@@ -1,49 +1,40 @@
 ---
 title: Choosing a browser
-description: Three engines and four ways to drive them, what each can do, and how to run one program on all of them.
+description: Three engines, what each can do, and how to run one program on all of them.
 order: 1
 ---
 
-## Four backends
+## Three backends
 
-Strider drives three browser engines, through four backends:
+| Backend  | Engine | Protocol                              | Launches                       | Attaches to                                  |
+| -------- | ------ | ------------------------------------- | ------------------------------ | -------------------------------------------- |
+| Chromium | Blink  | Chrome DevTools Protocol              | Chromium, Chrome, Edge         | a browser started with a debugging port      |
+| Firefox  | Gecko  | WebDriver BiDi                        | Firefox                        | Firefox's remote agent, or any BiDi endpoint |
+| WebKit   | WebKit | WebKit's Automation and inspector protocols | WebKitGTK's or WPE's MiniBrowser | a WebKitGTK or WPE browser's inspector server |
 
-| Backend         | Engine       | Protocol                  | Launches                    | Attaches to                         |
-| --------------- | ------------ | ------------------------- | --------------------------- | ----------------------------------- |
-| Chromium        | Blink        | Chrome DevTools Protocol  | Chromium, Chrome, Edge      | a browser started with a debugging port |
-| Firefox         | Gecko        | WebDriver BiDi            | Firefox                     | Firefox's remote agent, or any BiDi endpoint |
-| WebKit          | WebKit       | Playwright's WebKit protocol | Playwright's WebKit build | —                                   |
-| Stock WebKit    | WebKit       | WebKit's inspector protocol | —                          | a WebKitGTK or WPE browser's inspector server |
+The rest of the guide works on all three, except where a browser lacks a capability. That fails with
+`Unsupported`, naming it, before anything is sent.
 
-The rest of this guide works on Chromium, Firefox and WebKit alike. The backends differ in what they can do,
-because each protocol offers different things: what one can't do fails with `Unsupported`, naming the capability,
-before anything is sent. The
-pages after this one go through each browser: how to launch it, how to attach to it, and what to expect.
-
-- **[Chromium](/docs/browsers/chromium)** has the widest support. The Chrome DevTools Protocol reaches nearly
-  everything Strider offers, so it's the place to start, and the backend to reach for when a test needs network
-  throttling, media emulation or a PDF.
-- **[Firefox](/docs/browsers/firefox)** runs over WebDriver BiDi, the W3C's protocol for browser automation. It
-  does less than CDP today, mostly in emulation and interception, and everything it does is standard.
-- **[WebKit](/docs/browsers/webkit)** is Safari's engine, as Playwright builds it for Linux, macOS and Windows. It's
-  how to test what Safari users will see.
-- **[Stock WebKit](/docs/browsers/stock-webkit)** attaches to a real WebKitGTK or WPE browser, such as an embedded
-  device's, to look at it: read, locate, screenshot and navigate, but not type or click.
+- **[Chromium](/docs/browsers/chromium)** supports the most: start here, and use it for throttling, media emulation
+  or PDFs.
+- **[Firefox](/docs/browsers/firefox)** runs over WebDriver BiDi, the W3C standard, which covers less emulation and
+  interception than CDP.
+- **[WebKit](/docs/browsers/webkit)** is stock WebKitGTK and WPE, Linux only. It supports the least: no popups'
+  openers, downloads, file choosers or history.
 
 ## What each can do
 
-The table is generated from each backend's own list of what it supports, the same one `browser.capabilities`
-returns at run time. Hover over a cell, or see the browser's page, for the reason a capability is missing or partial.
-A dash means the backend doesn't list the capability at all: the rows only stock WebKit lists are things the others
-do as a matter of course, and Firefox alone lists WebDriver input, its way of sending input.
+Generated from each backend's capability list, the one `browser.capabilities` returns. Hover a cell for the reason
+it's missing or partial. Columns are launched browsers; a second line says when attaching differs. A dash means the
+backend doesn't list that capability: WebKit alone lists some things the others simply have, and Firefox alone
+lists WebDriver input.
 
 <Capabilities />
 
 ## One program, every browser
 
-A program doesn't name a browser: it needs a `Browser`, and a layer provides one. So the same program, or the same
-tests, run on every backend by swapping the layer. Give every backend both of Effect's platform services it may
-need, and the layers are interchangeable:
+A program needs a `Browser`, which a layer provides, so the same program or tests run on every backend by changing
+the layer. Provide all the platform services the three need, and the layers are interchangeable:
 
 ```ts
 import { NodeServices, NodeSocket } from "@effect/platform-node"
@@ -51,27 +42,31 @@ import { layer } from "@effect/vitest"
 import { Browser, Expect } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
 import { Firefox } from "@usestrider/browser/firefox"
+import { SocketConnector } from "@usestrider/browser/protocol"
 import { WebKit } from "@usestrider/browser/webkit"
 import { VitestBrowser } from "@usestrider/vitest"
 import { Config, Effect, Layer } from "effect"
 
-const path = (name: string) => ({ executablePath: Config.String(name) })
-
-const backends = {
-  chromium: Chromium.layerConfig(path("CHROMIUM_PATH")),
-  firefox: Firefox.layerConfig(path("FIREFOX_PATH")),
-  webkit: WebKit.layerConfig(path("WEBKIT_PATH"))
-}
+const Sockets = SocketConnector.layer((endpoint) =>
+  NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port })
+)
 
 const Platform = Layer.mergeAll(
   NodeServices.layer,
-  NodeSocket.layerWebSocketConstructor
+  NodeSocket.layerWebSocketConstructor,
+  Sockets
 )
 
-for (const [name, backend] of Object.entries(backends)) {
-  const BrowserLive = VitestBrowser.layer(backend).pipe(Layer.provide(Platform))
+const path = (name: string) => ({ executablePath: Config.String(name) })
 
-  layer(BrowserLive, { excludeTestServices: true })(name, (it) => {
+const backends = {
+  chromium: Chromium.layerConfig(path("CHROMIUM_PATH")).pipe(Layer.provide(Platform)),
+  firefox: Firefox.layerConfig(path("FIREFOX_PATH")).pipe(Layer.provide(Platform)),
+  webkit: WebKit.layerConfig(path("WEBKIT_PATH")).pipe(Layer.provide(Platform))
+}
+
+for (const [name, backend] of Object.entries(backends)) {
+  layer(VitestBrowser.layer(backend), { excludeTestServices: true })(name, (it) => {
     it.effect("adds a product to the cart", () =>
       Effect.gen(function*() {
         const page = yield* Browser.newPage()
@@ -83,13 +78,12 @@ for (const [name, backend] of Object.entries(backends)) {
 }
 ```
 
-Each `layer` block launches its own browser. Blocks in one file run one after another; to run the browsers in
-parallel, give each its own file, as Vitest runs files in parallel.
+Each `layer` block launches its own browser. Blocks in one file run in turn; put each backend in its own file to
+run them in parallel.
 
 ## Checking what a browser can do
 
-When code depends on something only some browsers have, check before relying on it. `browser.capabilities` is
-the connected browser's list, and `has` says whether one entry is fully supported:
+`browser.capabilities` is the connected browser's list, and `has` says whether an entry is fully supported:
 
 ```ts
 import { Browser, Page } from "@usestrider/browser"
@@ -104,6 +98,19 @@ const darkMode = Effect.fn("darkMode")(function*(page: Page.Page) {
 })
 ```
 
-Or try it and recover: `Unsupported` is a reason every module's error can carry, so one `Effect.catchReason`
-covers it wherever it comes from. Prefer checking when the alternative is a different path through the program,
-and recovering when it's only something to skip.
+Or try it and recover from `Unsupported`, which any module's error can carry:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const darkModeIfSupported = Effect.fn("darkModeIfSupported")(
+  function*(page: Page.Page) {
+    yield* page.emulate({ media: { colorScheme: "dark" } }).pipe(
+      Effect.catchReason("DeclarationError", "Unsupported", () => Effect.void)
+    )
+  }
+)
+```
+
+Check when the result changes what the program does; recover when the step can be skipped.

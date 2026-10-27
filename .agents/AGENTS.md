@@ -84,7 +84,7 @@ Use the narrowest check that covers the change:
 | The `strider` command                 | `pnpm test --run packages/browser/test/Browsers.test.ts`, `pnpm test:integration packages/browser/test/integration/Cli.test.ts`          |
 | Access rules or other type behavior   | `pnpm test-types`                                                                                                                        |
 | JSDoc text, categories or links       | `pnpm jsdocs`                                                                                                                            |
-| JSDoc examples                        | `pnpm jsdocs`, then `pnpm examples`                                                                                                      |
+| JSDoc examples                        | `pnpm lint-fix`, which formats them, then `pnpm jsdocs` and `pnpm examples`                                                              |
 | A guide's code                        | `pnpm lint-fix`, which formats its blocks, then `pnpm examples`, then `pnpm api-reference` to link it                                    |
 | The website or the reference's tools  | `pnpm reference`, then `pnpm website:check` and `pnpm website:build`                                                                     |
 | The packages' exports, files or peers | `pnpm build`, then `pnpm pack-check`                                                                                                     |

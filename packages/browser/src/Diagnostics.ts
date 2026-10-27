@@ -1,11 +1,10 @@
 /**
  * The record of what happened that every failure carries, and the preset that decides how much of a URL is shown.
  *
- * A failure carries its operation's record as `diagnostics`. For an action it says whether the input was sent, so
- * "did my click happen?" has an answer: not sent, maybe sent or acknowledged. `CurrentPreset` decides how much of a
- * URL is shown: in an operation's span attributes, and wherever Effect's logger, formatter or inspection shows a
- * `NetworkRequest` or `NetworkResponse`, in your code as well as Strider's. Under `"strict"`, the default, a URL
- * keeps its origin and path with each query value redacted, and under `"local"` it's shown whole.
+ * Every failure carries its operation's record as `diagnostics`, which says, for an action, whether the input was
+ * sent. `CurrentPreset` decides how much of a URL is shown: in an operation's span attributes, and wherever Effect's
+ * logger, formatter or inspection shows a `NetworkRequest` or `NetworkResponse`. Under `"strict"`, the default, a URL
+ * keeps its origin and path with each query value redacted; under `"local"` it's shown whole.
  *
  * @stability unstable
  * @since 0.1.0
@@ -39,8 +38,8 @@ export type OperationId = typeof OperationId.Type
  *
  * **Details**
  *
- * `MayHaveBeenSent` means the command left but no answer came back, so it may or may not have taken effect.
- * Nothing is replayed automatically, because a second click is not the same as one click.
+ * `MayHaveBeenSent`: the command left and no answer came back, so it may have taken effect. Strider never sends
+ * it again, since a second click isn't the same as one.
  *
  * @stability unstable
  * @category schemas
@@ -165,7 +164,8 @@ export class Diagnostics extends Schema.Class<Diagnostics>("@usestrider/browser/
  *   fragment. For production, exported traces and agents.
  * - `"local"`: a URL is shown whole. For a developer's own machine.
  *
- * Classified fields, such as typed text, are `Redacted` under both.
+ * Text passed as `Redacted` stays redacted under both, except in an exported trace's DOM snapshots: there,
+ * `"local"` shows the values of password inputs and of fields filled with `Redacted` text.
  *
  * @stability unstable
  * @category schemas
@@ -187,8 +187,8 @@ export type Preset = typeof Preset.Type
  *
  * **Details**
  *
- * The default is `"strict"`, tests included. `withPreset` is `Effect.provideService` on this reference.
- * Each operation's span reads it as it opens, for its `url.full` and a connection's `browser.endpoint`.
+ * The default is `"strict"`, tests included; set it with `withPreset`. Each operation's span reads it as it
+ * opens, for its `url.full` and a connection's `browser.endpoint`.
  *
  * @stability unstable
  * @category references
@@ -204,13 +204,13 @@ export const CurrentPreset: Context.Reference<Preset> = Context.Reference<Preset
  *
  * **When to use**
  *
- * Use to see full URLs and titles while developing locally, without changing what production logs show.
+ * Use to see whole URLs while developing locally, without changing what production shows.
  *
  * **Example** (Showing local detail while debugging)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Diagnostics, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const openCart = Effect.fn("openCart")(function*(page: Page.Page) {
  *   yield* page.goto("https://shop.example.com/cart?session=abc")

@@ -2,12 +2,13 @@
  * Navigations of a page: the event, and what `goto`, `reload`, `back` and `forward` return.
  *
  * A navigation commits a new document, changes the current one (a fragment or the History API), restores one from
- * the back/forward cache, or activates a prerendered one. An HTTP 404 or 500 still commits: the status is in the
- * response. Failures are reasons of `Page.PageError`, so recovering reads the same whether the navigation came from
- * `goto` or was awaited with `next`.
+ * the back/forward cache, or activates a prerendered one. An HTTP 404 or 500 still commits, with the status in its
+ * response. A failed navigation is a reason of `Page.PageError`, whether it came from `goto` or was awaited with
+ * `next`.
  *
- * A navigation is reported when it ends, including those `goto` starts. A page's own navigations are its events,
- * and with `frames: "all"` its frames' are too, each naming the frame it happened in.
+ * A navigation is reported when it ends, including one `goto` started. The events are the page's own navigations,
+ * and with `frames: "all"` its frames' too, each naming its frame. WebKit reports no same-document navigations
+ * (`navigation.sameDocument`).
  *
  * @stability unstable
  * @since 0.1.0
@@ -99,6 +100,19 @@ export const PageNavigation = Schema.Union([
 
 /**
  * A navigation of a page.
+ *
+ * **Example** (The status a page loaded with)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const loadStatus = Effect.fn("loadStatus")(function*(page: Page.Page) {
+ *   const navigation = yield* page.goto("https://shop.example.com/products/42")
+ *   if (navigation._tag !== "Committed") return Option.none()
+ *   return Option.map(navigation.response, (response) => response.status)
+ * })
+ * ```
  *
  * @stability unstable
  * @category models
@@ -207,11 +221,13 @@ const subscription = (target: Page.ObservedPage, filter: Filter | undefined, ope
  * **Example** (Waiting for the navigation a click causes)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Page, PageNavigation } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const openOrders = Effect.fn("openOrders")(function*(page: Page.Page) {
- *   const orders = yield* PageNavigation.next(page, { url: "https://shop.example.com/orders" })
+ *   const orders = yield* PageNavigation.next(page, {
+ *     url: "https://shop.example.com/orders"
+ *   })
  *   yield* page.getByRole("link", { name: "Orders" }).click()
  *   return yield* orders
  * })
@@ -258,8 +274,23 @@ export const next = <PE = never, PR = never>(
   )
 
 /**
- * Subscribes to a page's navigations and emits every match from now on that succeeded: `Committed`,
- * `SameDocument`, `Restored` or `Activated`.
+ * Subscribes to a page's navigations and emits every successful match from now on: `Committed`, `SameDocument`,
+ * `Restored` or `Activated`.
+ *
+ * **Example** (Logging every URL a single-page app visits)
+ *
+ * ```ts import.meta.vitest
+ * import { Page, PageNavigation } from "@usestrider/browser"
+ * import { Effect, Stream } from "effect"
+ *
+ * const logRoutes = Effect.fn("logRoutes")(function*(page: Page.ObservedPage) {
+ *   const navigations = yield* PageNavigation.stream(page)
+ *   yield* navigations.pipe(
+ *     Stream.runForEach((navigation) => Effect.log(navigation.url)),
+ *     Effect.forkScoped
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category subscriptions
@@ -280,7 +311,19 @@ export const stream = <PE = never, PR = never>(
   )
 
 /**
- * Reads the navigations still in the page's event log that succeeded, as `stream` emits them; never waits.
+ * Reads the successful navigations still in the page's event log, as `stream` emits them; never waits.
+ *
+ * **Example** (The URLs a page has visited)
+ *
+ * ```ts import.meta.vitest
+ * import { Page, PageNavigation } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const visited = Effect.fn("visited")(function*(page: Page.ObservedPage) {
+ *   const navigations = yield* PageNavigation.history(page)
+ *   return navigations.entries.map((navigation) => navigation.url)
+ * })
+ * ```
  *
  * @stability unstable
  * @category getters

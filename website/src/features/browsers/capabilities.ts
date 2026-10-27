@@ -14,7 +14,7 @@ export interface Entry {
 }
 
 export interface Backend {
-  readonly id: "chromium" | "firefox" | "webkit" | "webkit-stock"
+  readonly id: "chromium" | "firefox" | "webkit"
   readonly label: string
   readonly layers: string
   /** As a browser Strider launched reports it; `null` for a backend that only attaches */
@@ -45,7 +45,8 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
       "frames.readiness": "Each frame's load state",
       "navigation.traverse": "`back` and `forward`",
       "navigation.sameDocument": "Same-document navigations: fragments and the History API",
-      "navigation.referrer": "A navigation's referrer"
+      "navigation.referrer": "A navigation's referrer",
+      "close.runBeforeUnload": "Closing with `runBeforeUnload`"
     }
   },
   {
@@ -57,6 +58,7 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
       "input.keyboardLayout": "Keyboard layouts",
       "input.pointerModifiers": "Modifiers on pointer actions",
       "input.dragAndDrop": "Native HTML drag and drop",
+      "input.touch": "Touch input, `tap`",
       "evaluation.userActivation": "Evaluating as a user gesture, `Page.withUserGesture`"
     }
   },
@@ -66,10 +68,12 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
       console: "Console messages",
       "exceptions.kind": "Telling a throw from an unhandled rejection",
       prompts: "Dialogs",
+      "prompts.kind": "Which kind a dialog is",
       fileChooser: "File choosers",
       downloads: "Downloads",
       "downloads.progress": "A download's progress",
       "downloads.cancel": "Canceling a download",
+      "popups.opener": "Which page opened a popup, `Popup.next`",
       "workers.shared": "Shared workers",
       "workers.service": "Service workers",
       "workers.evaluate": "Evaluating in a worker",
@@ -82,6 +86,7 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
     label: "Network",
     names: {
       bodies: "Response bodies",
+      "network.headersSent": "The headers a request was sent with, `headersSent`",
       "network.servedBy": "What served a response, `servedBy`",
       "interception.request": "Routes at the request phase",
       "interception.response": "Routes at the response phase",
@@ -94,6 +99,7 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
       "interception.redirects": "Pausing every redirect hop",
       cookies: "Cookies",
       "cookies.partitioned": "Partitioned cookies",
+      "storageState.partitioned": "Partitioned storage in a saved storage state",
       permissions: "Permission grants",
       "permissions.anyOrigin": "Granting to every origin at once"
     }

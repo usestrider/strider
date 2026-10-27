@@ -456,7 +456,7 @@ export const attachedCapabilities = (info: Browser.Info) => {
         "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"
       ]),
       entry("isolatedWorlds", "unsupported", [
-        "stock WebKit's inspector makes no worlds: the engine runs in the page's (QUIRKS.md, Q194)"
+        "stock WebKit's inspector makes no worlds, so Strider's engine runs in the page's own"
       ]),
       entry("pauseOnStart.frames", "supported", ["frames run in their page's process, which is paused"]),
       entry("pauseOnStart.workers", "supported"),
@@ -486,28 +486,28 @@ export const attachedCapabilities = (info: Browser.Info) => {
       entry("bodies", "supported"),
       entry("console", "supported", ["a message with only primitive arguments is attributed to the main frame"]),
       entry("prompts", "unsupported", [
-        "stock WebKit's inspector has no Dialog domain: a dialog blocks the page unreported (QUIRKS.md, Q197)"
+        "stock WebKit's inspector has no Dialog domain: a dialog blocks the page unreported"
       ]),
       entry("prompts.kind", "unsupported", ["stock WebKit's inspector has no Dialog domain"]),
       entry("popups.opener", "unsupported", [
-        "stock WebKit names no page's opener: a page another opens is reported as the browser's (QUIRKS.md, Q212)"
+        "stock WebKit names no page's opener: a page another opens is reported as the browser's"
       ]),
       entry("close.runBeforeUnload", "unsupported", ["stock WebKit's inspector closes no pages"]),
       entry("navigation.referrer", "unsupported", [
         "stock WebKit navigates by script, with the document's own referrer"
       ]),
       entry("navigation.traverse", "unsupported", [
-        "stock WebKit's inspector reports a traversal under the old document's URL, with no realm (QUIRKS.md, Q215)"
+        "stock WebKit's inspector reports going back or forward under the old document's URL"
       ]),
       entry("navigation.sameDocument", "unsupported", [
-        "stock WebKit's inspector reports no same-document navigation (QUIRKS.md, Q200)"
+        "stock WebKit's inspector reports no same-document navigation"
       ]),
       entry("frames.contentFrame", "unsupported", ["stock WebKit's inspector can't say which frame an iframe holds"]),
       entry("frames.readiness", "partial", [
-        "a frame's load is reported for the page's main frame only (QUIRKS.md, Q201)"
+        "a frame's load is reported for the page's main frame only"
       ]),
       entry("fileChooser", "unsupported", ["stock WebKit's inspector reports no file chooser"]),
-      entry("downloads", "unsupported", [`${noDownloads}: a navigation that became one ends so (QUIRKS.md, Q198)`]),
+      entry("downloads", "unsupported", [`${noDownloads}: a navigation that becomes one ends as BecameDownload`]),
       entry("downloads.progress", "unsupported", [noDownloads]),
       entry("downloads.cancel", "unsupported", [noDownloads]),
       entry("screenshot", "supported"),
@@ -525,18 +525,18 @@ export const attachedCapabilities = (info: Browser.Info) => {
         "a script or stylesheet reused from the memory cache within one document produces no request"
       ]),
       entry("network.headersSent", "partial", [
-        "without the Cookie header, which WebKitGTK's network process doesn't report (QUIRKS.md, Q226)"
+        "without the Cookie header, which WebKitGTK's network process doesn't report"
       ]),
       entry("workers.shared", "unsupported", ["WebKit doesn't report shared workers"]),
       entry("workers.service", "unsupported", ["WebKit doesn't report service workers"]),
       entry("workers.evaluate", "supported"),
       entry("exceptions.kind", "supported"),
       entry("cookies", "partial", [
-        "a context's list is the cookies its pages' documents and resources are sent (QUIRKS.md, Q225)"
+        "a context's list is the cookies its pages' documents and resources are sent"
       ]),
       entry("cookies.partitioned", "unsupported", ["WebKit doesn't report partitioned cookies"]),
       entry("storageState.partitioned", "supported", [
-        "stock WebKit keys a frame's storage by its top-level origin, port included (QUIRKS.md, Q232): a state saved without one is restored at its site's default port"
+        "stock WebKit keys a frame's storage by its top-level origin, port included: a state saved without one is restored at its site's default port"
       ]),
       entry("permissions", "unsupported", [noEmulation]),
       entry("permissions.anyOrigin", "unsupported", [noEmulation]),
@@ -614,11 +614,11 @@ export const launchedCapabilities = (info: Browser.Info) => {
       "Automation types characters and named keys, not a layout's physical keys"
     ]],
     "input.pointerModifiers": ["supported", []],
-    "input.dragAndDrop": ["unsupported", ["not checked against Automation's pointer"]],
-    "input.touch": ["unsupported", ["WebKitGTK builds its Automation without touch (QUIRKS.md, Q214)"]],
-    prompts: ["partial", ["a dialog's kind and default text aren't reported (QUIRKS.md, Q206)"]],
+    "input.dragAndDrop": ["unsupported", ["untested with Automation's pointer"]],
+    "input.touch": ["unsupported", ["WebKitGTK builds its Automation without touch"]],
+    prompts: ["partial", ["a dialog's kind and default text aren't reported"]],
     "prompts.kind": ["unsupported", [
-      "every dialog is Unknown: stock WebKit's Automation says one is open, not which kind (QUIRKS.md, Q206)"
+      "every dialog is Unknown: stock WebKit's Automation says one is open, not which kind"
     ]],
     "close.runBeforeUnload": ["unsupported", ["stock WebKit's Automation closes a page without asking it"]],
     fileChooser: ["unsupported", [
@@ -629,15 +629,15 @@ export const launchedCapabilities = (info: Browser.Info) => {
     "emulation.javaScript": ["supported", []],
     "emulation.media": ["supported", []],
     "emulation.focus": ["unsupported", ["each page is a window of its own"]],
-    "emulation.timezone": ["unsupported", ["taken at launch, before a context's options reach it (QUIRKS.md, Q218)"]],
+    "emulation.timezone": ["unsupported", ["taken at launch, before a context's options reach it"]],
     "emulation.locale": ["unsupported", [
-      "the MiniBrowser takes its language from nothing it's given (QUIRKS.md, Q218)"
+      "the MiniBrowser takes its language from nothing it's given"
     ]],
     "cookies": ["partial", [
-      "a context's list is the cookies its open pages' documents and resources are sent (QUIRKS.md, Q225), and a host's cookie is set as its domain's (Q230)"
+      "a context's list is the cookies its open pages' documents and resources are sent, and a host's cookie is set as its domain's"
     ]],
     "frames.contentFrame": ["supported", [
-      "the frame Automation resolves, matched to the inspector's by its document's time origin and URL"
+      "found through Automation, by its document"
     ]]
   }
   const base = attachedCapabilities(info).entries

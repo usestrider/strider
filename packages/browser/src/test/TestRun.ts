@@ -3,7 +3,7 @@
  *
  * Nothing changes because it's a test: profile, focus, diagnostics and tracing are whatever the test chose, and a
  * test gets its page from `Browser.newPage()`, like any program. A runner's adapter, such as `@usestrider/vitest`,
- * provides `TestRun`, so that traces and screenshots attach to the test that made them.
+ * provides `TestRun`, through which a test attaches its traces and screenshots.
  *
  * @stability unstable
  * @since 0.1.0
@@ -70,12 +70,40 @@ export interface TestRun {
   /**
    * Attaches a file to the test running now; in Vitest, `recordArtifact`. Outside a test, or in a runner that
    * keeps no artifacts, nothing is attached and a warning is logged.
+   *
+   * **Example** (Attaching a trace of a checkout)
+   *
+   * ```ts import.meta.vitest
+   * import { Page, Trace } from "@usestrider/browser"
+   * import { TestRun } from "@usestrider/browser/test"
+   * import { Effect } from "effect"
+   *
+   * const tracedCheckout = Effect.fn("tracedCheckout")(function*(page: Page.Page) {
+   *   const trace = yield* Trace.record(page, { screenshots: "perAction" })
+   *   yield* page.getByRole("button", { name: "Checkout" }).click()
+   *   const path = yield* trace.exportTrace("traces/checkout.zip")
+   *   const run = yield* TestRun.TestRun
+   *   yield* run.attach({ _tag: "Trace", path })
+   * })
+   * ```
    */
   attach(artifact: TestArtifact): Effect.Effect<void>
 }
 
 /**
  * The service tag for `TestRun`.
+ *
+ * **Example** (Naming a file after the running test)
+ *
+ * ```ts import.meta.vitest
+ * import { TestRun } from "@usestrider/browser/test"
+ * import { Effect } from "effect"
+ *
+ * const tracePath = Effect.gen(function*() {
+ *   const { info } = yield* TestRun.TestRun
+ *   return `traces/${info.id.replace(/\W+/g, "-")}-attempt-${info.attempt}.zip`
+ * })
+ * ```
  *
  * @stability unstable
  * @category tags

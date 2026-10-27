@@ -166,20 +166,22 @@ const TargetGoneTypeId = "~@usestrider/browser/Target/TargetGone"
  *
  * **Details**
  *
- * Every operation on a page, frame, document, realm, context or browser can fail this way, so it is not part
- * of any module's error. A page that closes normally ends event streams normally instead; only operations
- * that needed the target fail.
+ * Every operation on a page, frame, document, realm, context or browser can fail this way, so it isn't part of
+ * any module's error. When a page closes normally, its event streams end instead of failing; its waits and other
+ * operations still fail.
  *
  * **Example** (Treating a closed popup as done)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const dismiss = Effect.fn("dismiss")(function*(popup: Page.Page) {
  *   yield* popup.getByRole("button", { name: "Close" }).click().pipe(
- *     Effect.catchTag("TargetGone", (gone) =>
- *       gone.reason._tag === "PageClosed" ? Effect.void : Effect.fail(gone))
+ *     Effect.catchTag(
+ *       "TargetGone",
+ *       (gone) => gone.reason._tag === "PageClosed" ? Effect.void : Effect.fail(gone)
+ *     )
  *   )
  * })
  * ```

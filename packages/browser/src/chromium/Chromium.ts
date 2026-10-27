@@ -37,12 +37,12 @@ declare module "../Reason.ts" {
  * The browser gets a temporary profile, created before it starts and deleted after it exits, unless
  * `userDataDir` names one you own. It exits when the layer's scope closes.
  *
- * **Example** (A headless browser for a program)
+ * **Example** (Launching headless Chromium)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Browser } from "@usestrider/browser"
  * import { Chromium } from "@usestrider/browser/chromium"
+ * import { Effect } from "effect"
  *
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
@@ -72,17 +72,21 @@ export const layer = (
  * Launches Chromium, Chrome or Edge as `layer` does, with options read from configuration, such as the
  * executable path from each machine's environment.
  *
- * **Example** (The executable from each machine's environment)
+ * **Example** (Reading the executable's path from the environment)
  *
  * ```ts import.meta.vitest
- * import { Config, Effect } from "effect"
  * import { Browser } from "@usestrider/browser"
  * import { Chromium } from "@usestrider/browser/chromium"
+ * import { Config, Effect } from "effect"
  *
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
  *   yield* page.goto("https://example.com")
- * })).pipe(Effect.provide(Chromium.layerConfig({ executablePath: Config.String("CHROMIUM_PATH") })))
+ * })).pipe(
+ *   Effect.provide(
+ *     Chromium.layerConfig({ executablePath: Config.String("CHROMIUM_PATH") })
+ *   )
+ * )
  * ```
  *
  * @see {@link layer}
@@ -100,22 +104,21 @@ export const layerConfig = (
 > => LaunchOptions.fromConfig(options, layer)
 
 /**
- * Connects to a running Chromium, Chrome or Edge at `endpoint` and provides it as `Browser`. Pages and contexts that
- * were already open stay open after the layer's scope closes.
+ * Connects to a running Chromium, Chrome or Edge at `endpoint` and provides it as `Browser`.
  *
  * **Details**
  *
  * `endpoint` is the browser's WebSocket (`ws://127.0.0.1:9222/devtools/browser/…`), or its HTTP endpoint
  * (`http://127.0.0.1:9222`), whose `/json/version` names the WebSocket. The pages that were open are observed:
- * `browser.pages` lists them, and `inspect` and `control` gain access to one for a scope. `options.headers` go with
- * the handshake and the lookup.
+ * `browser.pages` lists them, and `inspect` and `control` give access to one for a scope. `options.headers` go with
+ * the handshake and the lookup. Pages and contexts that were already open stay open after the layer's scope closes.
  *
  * **Example** (Inspecting a tab of a browser started with `--remote-debugging-port=9222`)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Browser } from "@usestrider/browser"
  * import { Chromium } from "@usestrider/browser/chromium"
+ * import { Effect } from "effect"
  *
  * const firstHeading = Effect.scoped(Effect.gen(function*() {
  *   const [first] = yield* (yield* Browser.Browser).pages

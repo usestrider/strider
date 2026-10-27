@@ -57,6 +57,23 @@ export const isAriaPattern = (u: unknown): u is AriaPattern => Predicate.hasProp
  * A node with a role, an accessible name and children compared as `children` says. A string name is matched whole
  * after collapsing whitespace, and an empty one means no accessible name.
  *
+ * **Example** (Matching a heading whose name varies)
+ *
+ * ```ts import.meta.vitest
+ * import { AriaPattern, Expect, Page } from "@usestrider/browser"
+ *
+ * const orderSummary = (page: Page.ReadonlyPage) =>
+ *   page.getByRole("region", { name: "Order summary" }).pipe(Expect.toMatchAria(
+ *     AriaPattern.node(
+ *       "region",
+ *       "Order summary",
+ *       AriaPattern.including(
+ *         AriaPattern.node("heading", /^Order #\d+$/, AriaPattern.unchecked)
+ *       )
+ *     )
+ *   ))
+ * ```
+ *
  * @stability unstable
  * @category constructors
  * @since 0.1.0
@@ -72,6 +89,18 @@ export const node = (role: AriaRole.AriaRole, name: string | RegExp, children: C
 /**
  * A text node; a string `value` is matched whole after collapsing whitespace.
  *
+ * **Example** (Matching a status that says only Saved)
+ *
+ * ```ts import.meta.vitest
+ * import { AriaPattern } from "@usestrider/browser"
+ *
+ * const saved = AriaPattern.node(
+ *   "status",
+ *   "",
+ *   AriaPattern.exactly(AriaPattern.text("Saved"))
+ * )
+ * ```
+ *
  * @stability unstable
  * @category constructors
  * @since 0.1.0
@@ -82,6 +111,21 @@ export const text = (value: string | RegExp): AriaPattern =>
 /**
  * These children, in this order, and no others.
  *
+ * **Example** (Matching a cart with exactly two items)
+ *
+ * ```ts import.meta.vitest
+ * import { AriaPattern } from "@usestrider/browser"
+ *
+ * const item = (name: string) =>
+ *   AriaPattern.node("listitem", "", AriaPattern.exactly(AriaPattern.text(name)))
+ *
+ * const cart = AriaPattern.node(
+ *   "list",
+ *   "Cart",
+ *   AriaPattern.exactly(item("Headphones"), item("Charger"))
+ * )
+ * ```
+ *
  * @stability unstable
  * @category constructors
  * @since 0.1.0
@@ -91,6 +135,21 @@ export const exactly = (...children: ReadonlyArray<AriaPattern>): Children =>
 
 /**
  * These children in this order; others may come between.
+ *
+ * **Example** (Matching a form's field and button among others)
+ *
+ * ```ts import.meta.vitest
+ * import { AriaPattern } from "@usestrider/browser"
+ *
+ * const signIn = AriaPattern.node(
+ *   "form",
+ *   "Sign in",
+ *   AriaPattern.including(
+ *     AriaPattern.node("textbox", "Email", AriaPattern.unchecked),
+ *     AriaPattern.node("button", "Sign in", AriaPattern.unchecked)
+ *   )
+ * )
+ * ```
  *
  * @stability unstable
  * @category constructors
@@ -104,6 +163,17 @@ export const including = (...children: ReadonlyArray<AriaPattern>): Children =>
 
 /**
  * Children are not compared.
+ *
+ * **Example** (Matching a dialog without its contents)
+ *
+ * ```ts import.meta.vitest
+ * import { AriaPattern, Expect, Page } from "@usestrider/browser"
+ *
+ * const dialogOpen = (page: Page.ReadonlyPage) =>
+ *   page.getByRole("dialog").pipe(
+ *     Expect.toMatchAria(AriaPattern.node("dialog", "Sign in", AriaPattern.unchecked))
+ *   )
+ * ```
  *
  * @stability unstable
  * @category constants

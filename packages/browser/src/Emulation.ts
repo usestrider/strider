@@ -51,6 +51,18 @@ export type TimeZoneId = typeof TimeZoneId.Type
 /**
  * The viewport, in CSS pixels.
  *
+ * **Example** (A phone-sized page)
+ *
+ * ```ts import.meta.vitest
+ * import { Browser } from "@usestrider/browser"
+ *
+ * const phonePage = Browser.newPage({
+ *   emulation: {
+ *     viewport: { width: 390, height: 844, deviceScaleFactor: 3, mobile: true }
+ *   }
+ * })
+ * ```
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
@@ -90,6 +102,20 @@ export interface Media {
 /**
  * Emulated network conditions: throughput in bytes per second, and added latency.
  *
+ * **Example** (Loading over a slow connection)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const slowLoad = Effect.fn("slowLoad")(function*(page: Page.Page) {
+ *   yield* page.emulate({
+ *     network: { download: 50_000, upload: 20_000, latency: "400 millis" }
+ *   })
+ *   yield* page.goto("https://shop.example.com")
+ * })
+ * ```
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
@@ -102,6 +128,20 @@ export interface NetworkConditions {
 
 /**
  * An emulated position, in degrees and metres.
+ *
+ * **Example** (Finding stores near Berlin)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const nearBerlin = Effect.fn("nearBerlin")(function*(page: Page.Page) {
+ *   yield* page.context.grant(["geolocation"], { origin: "https://shop.example.com" })
+ *   yield* page.emulate({ geolocation: { latitude: 52.52, longitude: 13.405 } })
+ *   yield* page.goto("https://shop.example.com/stores")
+ *   yield* page.getByRole("button", { name: "Stores near me" }).click()
+ * })
+ * ```
  *
  * @stability unstable
  * @category models
@@ -124,22 +164,21 @@ export interface Geolocation {
  * **Details**
  *
  * One call is one registration: removing it, or closing its scope, removes every field it set. Each field is
- * a capability named for it (`emulation.viewport`, `emulation.media`, …), and the call fails with `Unsupported`
+ * a capability named for it (`emulation.viewport`, `emulation.media`, …); the call fails with `Unsupported`
  * naming the first the backend can't apply, before anything is applied. Most fields apply to a loaded page at
- * once; JavaScript, touch handlers and WebKit's `navigator.userAgent` apply at its next document.
+ * once; JavaScript and touch handlers apply at its next document.
  *
  * - Firefox can't emulate `media`, `touch`, `javaScript`, a mobile `viewport`, network throttling, a CPU
  *   slowdown or an unavailable position.
- * - WebKit sets `locale` and `geolocation` per context, and its `locale` only before the context's pages exist,
- *   as `UserContext.Options.emulation` does; it can't emulate `touch`, throttling, a CPU slowdown or an
- *   unavailable position.
+ * - WebKit can emulate only `media`, `javaScript` and a `viewport`, which sizes the window, at a device scale of
+ *   1 and not mobile. Attached, it can emulate nothing.
  * - Chromium can emulate every field.
  *
- * **Example** (Dark mode, offline, for one test step)
+ * **Example** (Going dark and offline for one step)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const offlineDark = Effect.fn("offlineDark")(function*(page: Page.Page) {
  *   yield* page.emulate({ media: { colorScheme: "dark" }, network: "offline" })

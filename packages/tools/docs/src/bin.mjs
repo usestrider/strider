@@ -2,8 +2,8 @@
 // strider-docs <command>: documentation tools, run from the repository root.
 //   jsdocs          Effect's JSDoc checker (vendored), writing .data/jsdocs.json
 //   examples        type-check every JSDoc example against the package, and every guide's TypeScript block
-//   format          format every guide's TypeScript and JSON blocks with dprint, at the site's column width;
-//                   with --check, write nothing and fail if one isn't formatted
+//   format          format every guide's TypeScript and JSON blocks, and every JSDoc example, with dprint, at the
+//                   site's column width; with --check, write nothing and fail if one isn't formatted
 //   index           write each public package's INDEX.md
 //   api-reference   write each public package's API reference dataset to .data/api-reference/<package>/, what
 //                   TypeScript reads in every example and guide block to .data/api-reference/code.json, and each
@@ -28,7 +28,12 @@ switch (command) {
     process.exitCode = (await import("./examples.mjs")).examples(root, guides)
     break
   case "format":
-    process.exitCode = (await import("./format.mjs")).format(root, guides, { check: args.includes("--check") })
+    process.exitCode = (await import("./format.mjs")).format(
+      root,
+      guides,
+      packages.map((pkg) => path.join(pkg.dir, "src")),
+      { check: args.includes("--check") }
+    )
     break
   case "index":
     for (const pkg of packages) (await import("./index.mjs")).index(pkg.dir)

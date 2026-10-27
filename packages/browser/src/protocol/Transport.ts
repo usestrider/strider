@@ -4,8 +4,8 @@
  *
  * `pipe` talks to a browser launched with `--remote-debugging-pipe`, over file descriptors 3 and 4 with
  * NUL-framed messages. `webSocket` dials an endpoint through the `Socket.WebSocketConstructor` in context.
- * Either way, a write after the connection is lost fails at once instead of waiting for a reconnection: a new
- * connection starts over, so nothing reconnects.
+ * Either way, a write after the connection is lost fails at once, and nothing reconnects: a new connection starts
+ * over.
  *
  * **Gotchas**
  *
@@ -45,15 +45,54 @@ import * as Stream from "effect/Stream"
 export interface Transport {
   /**
    * Sends one message. Fails at once after the connection is lost.
+   *
+   * **Example** (Sending a raw CDP command)
+   *
+   * ```ts import.meta.vitest
+   * import type { Transport } from "@usestrider/browser/protocol"
+   * import { Effect } from "effect"
+   *
+   * const askVersion = Effect.fn("askVersion")(function*(transport: Transport.Transport) {
+   *   yield* transport.send(JSON.stringify({ id: 1, method: "Browser.getVersion" }))
+   * })
+   * ```
    */
   readonly send: (message: string) => Effect.Effect<void, TransportError>
   /**
    * The messages received, in order. Fails with the reason when the connection is lost, after delivering what
    * arrived before. Exactly one consumer.
+   *
+   * **Example** (Logging a connection's traffic)
+   *
+   * ```ts import.meta.vitest
+   * import type { Transport } from "@usestrider/browser/protocol"
+   * import { Effect, Stream } from "effect"
+   *
+   * const logged = (transport: Transport.Transport): Transport.Transport => ({
+   *   send: (message) =>
+   *     Effect.logDebug("sent", message).pipe(Effect.andThen(transport.send(message))),
+   *   messages: transport.messages.pipe(
+   *     Stream.tap((message) => Effect.logDebug("received", message))
+   *   ),
+   *   closed: transport.closed
+   * })
+   * ```
    */
   readonly messages: Stream.Stream<string, TransportError>
   /**
    * Waits as long as the connection lives, then gives the reason it was lost.
+   *
+   * **Example** (Logging why a connection was lost)
+   *
+   * ```ts import.meta.vitest
+   * import type { Transport } from "@usestrider/browser/protocol"
+   * import { Effect } from "effect"
+   *
+   * const watch = Effect.fn("watch")(function*(transport: Transport.Transport) {
+   *   const lost = yield* transport.closed
+   *   yield* Effect.logWarning(`Closed by the ${lost.initiator} side: ${lost.description}`)
+   * })
+   * ```
    */
   readonly closed: Effect.Effect<ConnectionLost>
 }
@@ -69,16 +108,20 @@ export interface Transport {
  * **Example** (Launching Chromium with a pipe)
  *
  * ```ts import.meta.vitest
+ * import { Transport } from "@usestrider/browser/protocol"
  * import { Effect } from "effect"
  * import { ChildProcess } from "effect/process"
- * import { Transport } from "@usestrider/browser/protocol"
  *
  * const launch = Effect.fn("launch")(function*(executable: string, userDataDir: string) {
  *   const browser = yield* ChildProcess.make(executable, [
  *     "--headless",
  *     "--remote-debugging-pipe",
  *     `--user-data-dir=${userDataDir}`
- *   ], { additionalFds: Transport.pipeFds, stderr: "ignore", forceKillAfter: "5 seconds" })
+ *   ], {
+ *     additionalFds: Transport.pipeFds,
+ *     stderr: "ignore",
+ *     forceKillAfter: "5 seconds"
+ *   })
  *   return yield* Transport.pipe(browser)
  * })
  * ```
@@ -201,6 +244,21 @@ const describe = (cause: unknown): string =>
  * - Spawn with `forceKillAfter`. Without it, a browser that ignores `SIGTERM` holds its scope open forever.
  * - Ignore or drain the browser's `stderr`. A chatty browser fills an unread pipe and stalls.
  *
+ * **Example** (Connecting over a launched browser's pipe)
+ *
+ * ```ts import.meta.vitest
+ * import { CdpConnection, Transport } from "@usestrider/browser/protocol"
+ * import { Effect } from "effect"
+ * import type { ChildProcessSpawner } from "effect/process"
+ *
+ * const connect = Effect.fn("connect")(
+ *   function*(browser: ChildProcessSpawner.ChildProcessHandle) {
+ *     const transport = yield* Transport.pipe(browser)
+ *     return yield* CdpConnection.make(transport)
+ *   }
+ * )
+ * ```
+ *
  * @see {@link pipeFds} for the spawn options
  * @stability experimental
  * @category constructors
@@ -303,8 +361,8 @@ const decoder = new TextDecoder()
  * **Example** (Connecting to a running Chrome)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Transport } from "@usestrider/browser/protocol"
+ * import { Effect } from "effect"
  *
  * const connect = Effect.fn("connect")(function*(endpoint: string) {
  *   return yield* Transport.webSocket(endpoint, { openTimeout: "5 seconds" })
@@ -450,6 +508,23 @@ const TransportErrorTypeId = "~@usestrider/browser/protocol/Transport/TransportE
 
 /**
  * Error for a transport that couldn't connect or lost its connection.
+ *
+ * **Example** (Falling back to a second endpoint)
+ *
+ * ```ts import.meta.vitest
+ * import { Transport } from "@usestrider/browser/protocol"
+ * import { Effect } from "effect"
+ *
+ * const connect = Effect.fn("connect")(function*(primary: string, fallback: string) {
+ *   return yield* Transport.webSocket(primary).pipe(
+ *     Effect.catchReason(
+ *       "TransportError",
+ *       "ConnectFailed",
+ *       () => Transport.webSocket(fallback)
+ *     )
+ *   )
+ * })
+ * ```
  *
  * @stability experimental
  * @category errors

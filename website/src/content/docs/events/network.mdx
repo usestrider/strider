@@ -6,12 +6,12 @@ order: 2
 
 ## Requests and responses are events
 
-What a page sends and receives is reported through two event modules, `NetworkRequest` and `NetworkResponse`,
-with the same `next`, `stream` and `history` as every other event. A request is reported when it's sent and a response when it arrives, one of
-each per redirect hop. Both are Schemas, and use Effect's HTTP types: headers are Effect's `Headers`, methods its
-`HttpMethod`.
+`NetworkRequest` and `NetworkResponse` are event modules, with `next`, `stream` and `history`.
 
-Waiting for a response follows the rule for every event, subscribe and then act:
+- A request is reported when sent and a response when it arrives, one of each per redirect hop.
+- Both are Schemas, with Effect's `Headers` and `HttpMethod`.
+
+Subscribe, then act:
 
 ```ts
 import { NetworkResponse, Page } from "@usestrider/browser"
@@ -25,14 +25,13 @@ const saveSettings = Effect.fn("saveSettings")(function*(page: Page.Page) {
 })
 ```
 
-`next` for requests and responses needs a `url`, a glob such as `"**/api/**"`, a URL, or a `URLPattern`. A filter
-can also name a `method`, and for responses a `status` or a predicate over it, such as `(status) => status >= 400`.
+`next` needs a `url`: a glob such as `"**/api/**"`, a URL, or a `URLPattern`. A filter can also name a `method`,
+and for responses a `status` or a predicate, such as `(status) => status >= 400`.
 
 ## Bodies, decoded
 
-A response's body is collected only when a subscription asks for it, with `body`: any decoder of an Effect
-`HttpIncomingMessage`, such as `HttpIncomingMessage.schemaBodyJson` and a Schema. The response arrives with the
-body decoded, and `where` is typed by it:
+A body is collected only when a subscription asks with `body`: a decoder of an Effect `HttpIncomingMessage`, such
+as `HttpIncomingMessage.schemaBodyJson`. The response arrives decoded, and `where` is typed by it:
 
 ```ts
 import { NetworkResponse, Page } from "@usestrider/browser"
@@ -55,18 +54,16 @@ const addToCart = Effect.fn("addToCart")(function*(page: Page.Page) {
 })
 ```
 
-The body is copied out of the browser, so it outlives the subscription and even the page. Bodies are collected up
-to 10 MiB unless `NetworkResponse.withBodyLimit` says otherwise. A response with no body to give fails the wait
-with `BodyUnavailable`, which says why: a redirect, a body over the limit, one the browser already let go of, a
-transfer that failed, or a stream that never ends, such as server-sent events. A body that isn't what it was
-decoded as fails with `MalformedBody`.
-
-Reading a body needs read access to the page, which a page you opened always has.
+- The body is copied out of the browser, so it outlives the page.
+- Bodies are collected up to 10 MiB; `NetworkResponse.withBodyLimit` changes it.
+- No body fails the wait with `BodyUnavailable`, saying why: a redirect, over the limit, already let go, a failed
+  transfer, or a stream that never ends, such as server-sent events.
+- A body that doesn't decode fails with `MalformedBody`.
+- Reading a body needs read access to the page.
 
 ## Watching all of it
 
-`stream` gives every match from now on. Here every `fetch` the page makes is logged, in the background, until the
-scope closes:
+`stream` gives every match from now on. This logs each `fetch` until the scope closes:
 
 ```ts
 import { NetworkRequest, Page } from "@usestrider/browser"
@@ -81,8 +78,7 @@ const logFetches = Effect.fn("logFetches")(function*(page: Page.Page) {
 })
 ```
 
-A context's requests and responses can be watched the same way, by passing the context: every page in it, and its
-shared and service workers.
+Pass a context instead of a page to watch every page in it, and its shared and service workers.
 
 ## What already happened
 
@@ -103,14 +99,14 @@ const failedCalls = Effect.fn("failedCalls")(function*(page: Page.Page) {
 
 ## Who answered
 
-A response says what answered it in `servedBy`: `network`, `cache`, `serviceWorker`, `route` when one of your
-routes fulfilled it, or `cacheOrServiceWorker` where Firefox can't tell the two apart.
+`servedBy` is `network`, `cache`, `serviceWorker`, `route` when a route fulfilled it, or `cacheOrServiceWorker` on
+Firefox, which can't tell them apart.
 
 ## The headers as sent
 
-A request event's headers are what the browser reported when it sent the request, and Chromium and WebKit leave
-out some that the network stack adds, `Cookie` among them. `NetworkRequest.headersSent` waits until the headers as
-actually sent are known:
+A request event's headers are what the browser reported on sending. Chromium and WebKit leave out some the network
+stack adds, such as `Cookie`. `NetworkRequest.headersSent` waits for the headers as sent (WebKit's still lack
+`Cookie`):
 
 ```ts
 import { NetworkRequest, Page } from "@usestrider/browser"
@@ -126,12 +122,25 @@ const sentCookies = Effect.fn("sentCookies")(function*(page: Page.Page) {
 })
 ```
 
-Header values that carry credentials, such as cookies and authorization, are treated as secret, and redacted
-wherever they're shown: in logs, errors and spans.
+Credential headers, such as cookies and authorization, are redacted in logs, errors and spans.
 
 ## Sending it yourself
 
-There is no `fetch` on a captured request, because a request sent from outside the browser wouldn't have the
-browser's cookies, cache, proxy or service workers. When that is what you want, say so:
-`NetworkRequest.toHttpClientRequest(request)` turns it into Effect's `HttpClientRequest`, for your own
-`HttpClient` to send. To change what the browser sends or receives, use a route, on the next page.
+A captured request has no `fetch`: sent from outside, it wouldn't have the browser's cookies, cache, proxy or
+service workers. `NetworkRequest.toHttpClientRequest` turns it into an Effect `HttpClientRequest` for your own
+`HttpClient`:
+
+```ts
+import { NetworkRequest, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+import { HttpClient } from "effect/http"
+
+const replay = Effect.fn("replay")(function*(page: Page.Page) {
+  const call = yield* NetworkRequest.next(page, { url: "**/api/report" })
+  yield* page.getByRole("button", { name: "Refresh" }).click()
+  const request = NetworkRequest.toHttpClientRequest(yield* call)
+  return yield* HttpClient.execute(request)
+})
+```
+
+To change what the browser sends or receives, use a [route](/docs/events/routes).

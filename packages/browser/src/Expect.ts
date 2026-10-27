@@ -3,10 +3,9 @@
  *
  * A locator's expectation waits in the page: it checks once, then again on each change the page makes (a DOM
  * mutation, an `input`, `change` or focus event, an animation frame), so there is no polling interval and no change
- * is missed between checks. A page's URL is a `Watchable`, checked on each change. `Expect.that` checks a
- * `Watchable` on each change, and runs any other effect again every `CheckInterval`. Everything runs on the real
- * clock, within the deadline. To collect several failures, use Effect: `Effect.validate`, or
- * `Effect.all(…, { mode: "result" })`.
+ * is missed between checks. `toHaveURL` checks the page's URL on each change. `Expect.that` checks a `Watchable` on
+ * each change, and runs any other effect again every `CheckInterval`. Everything runs on the real clock, within the
+ * deadline. To collect several failures, use `Effect.validate` or `Effect.all(…, { mode: "result" })`.
  *
  * Matchers that take arguments are dual: `locator.pipe(Expect.toHaveText("1 item"))` or
  * `Expect.toHaveText(locator, "1 item")`. Matchers without arguments are the function itself:
@@ -71,8 +70,8 @@ export interface DualMatcher<S, Args extends ReadonlyArray<unknown>> {
  * **Example** (Waiting for a welcome message)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const welcomed = Effect.fn("welcomed")(function*(page: Page.ReadonlyPage) {
  *   yield* page.getByText("Welcome").pipe(Expect.toBeVisible)
@@ -89,6 +88,17 @@ export const toBeVisible: Matcher<Locator.ReadonlyLocator> = (locator) =>
 /**
  * Expects no match to be visible: passes when every match is hidden, or when nothing matches.
  *
+ * **Example** (Waiting for a spinner to go)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const loaded = Effect.fn("loaded")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByRole("progressbar").pipe(Expect.toBeHidden)
+ * })
+ * ```
+ *
  * @stability unstable
  * @category matchers
  * @since 0.1.0
@@ -98,6 +108,18 @@ export const toBeHidden: Matcher<Locator.ReadonlyLocator> = (locator) =>
 
 /**
  * Expects the one match to be enabled.
+ *
+ * **Example** (Checking that a complete form can be submitted)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const orderReady = Effect.fn("orderReady")(function*(page: Page.Page) {
+ *   yield* page.getByLabel("Card number").fill("4242 4242 4242 4242")
+ *   yield* page.getByRole("button", { name: "Place order" }).pipe(Expect.toBeEnabled)
+ * })
+ * ```
  *
  * @stability unstable
  * @category matchers
@@ -109,6 +131,17 @@ export const toBeEnabled: Matcher<Locator.ReadonlyLocator> = (locator) =>
 /**
  * Expects the one match to be disabled.
  *
+ * **Example** (Checking that a sold-out item can't be added)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const soldOut = Effect.fn("soldOut")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByRole("button", { name: "Add to cart" }).pipe(Expect.toBeDisabled)
+ * })
+ * ```
+ *
  * @stability unstable
  * @category matchers
  * @since 0.1.0
@@ -118,6 +151,21 @@ export const toBeDisabled: Matcher<Locator.ReadonlyLocator> = (locator) =>
 
 /**
  * Expects the one match to be checked.
+ *
+ * **Example** (Checking the default shipping option)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const standardShipping = Effect.fn("standardShipping")(
+ *   function*(page: Page.ReadonlyPage) {
+ *     yield* page.getByRole("radio", { name: "Standard shipping" }).pipe(
+ *       Expect.toBeChecked
+ *     )
+ *   }
+ * )
+ * ```
  *
  * @stability unstable
  * @category matchers
@@ -129,6 +177,18 @@ export const toBeChecked: Matcher<Locator.ReadonlyLocator> = (locator) =>
 /**
  * Expects the one match to have focus.
  *
+ * **Example** (Checking that a dialog focuses its first field)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const openSignIn = Effect.fn("openSignIn")(function*(page: Page.Page) {
+ *   yield* page.getByRole("button", { name: "Sign in" }).click()
+ *   yield* page.getByLabel("Email").pipe(Expect.toBeFocused)
+ * })
+ * ```
+ *
  * @stability unstable
  * @category matchers
  * @since 0.1.0
@@ -139,6 +199,18 @@ export const toBeFocused: Matcher<Locator.ReadonlyLocator> = (locator) =>
 /**
  * Expects the one match to accept input.
  *
+ * **Example** (Waiting for an address field to unlock)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const editAddress = Effect.fn("editAddress")(function*(page: Page.Page) {
+ *   yield* page.getByRole("button", { name: "Edit address" }).click()
+ *   yield* page.getByLabel("Street").pipe(Expect.toBeEditable)
+ * })
+ * ```
+ *
  * @stability unstable
  * @category matchers
  * @since 0.1.0
@@ -148,7 +220,24 @@ export const toBeEditable: Matcher<Locator.ReadonlyLocator> = (locator) =>
 
 /**
  * Expects the one match's text to match `expected`, or, given a list, as many matches as the list has entries,
- * each matching its entry in order. A string is matched whole after collapsing whitespace.
+ * each matching its entry in order.
+ *
+ * **Details**
+ *
+ * A string must equal the whole text, case-sensitively, after whitespace is collapsed; a `RegExp` is tested as
+ * given.
+ *
+ * **Example** (Checking the cart's items in order)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const cartItems = Effect.fn("cartItems")(function*(page: Page.ReadonlyPage) {
+ *   const items = page.getByRole("list", { name: "Cart" }).getByRole("listitem")
+ *   yield* items.pipe(Expect.toHaveText(["Headphones", /^Charger/]))
+ * })
+ * ```
  *
  * @stability unstable
  * @category matchers
@@ -169,7 +258,19 @@ export const toHaveText: DualMatcher<
 })
 
 /**
- * Expects the text of the one match to contain `expected`.
+ * Expects the text of the one match to contain `expected`. A string is matched case-sensitively, after whitespace
+ * is collapsed.
+ *
+ * **Example** (Waiting for a save to be confirmed)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const saved = Effect.fn("saved")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByRole("status").pipe(Expect.toContainText("Saved"))
+ * })
+ * ```
  *
  * @stability unstable
  * @category matchers
@@ -189,6 +290,18 @@ export const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: stri
 /**
  * Expects the value of the one matching form control to match.
  *
+ * **Example** (Checking a quantity after a click)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const addOne = Effect.fn("addOne")(function*(page: Page.Page) {
+ *   yield* page.getByRole("button", { name: "Increase quantity" }).click()
+ *   yield* page.getByLabel("Quantity").pipe(Expect.toHaveValue("2"))
+ * })
+ * ```
+ *
  * @stability unstable
  * @category matchers
  * @since 0.1.0
@@ -206,6 +319,19 @@ export const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string
 
 /**
  * Expects the one match to have the attribute, with a matching value when one is given.
+ *
+ * **Example** (Checking that a menu opened)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const openMenu = Effect.fn("openMenu")(function*(page: Page.Page) {
+ *   const menu = page.getByRole("button", { name: "Menu" })
+ *   yield* menu.click()
+ *   yield* menu.pipe(Expect.toHaveAttribute("aria-expanded", "true"))
+ * })
+ * ```
  *
  * @stability unstable
  * @category matchers
@@ -228,6 +354,17 @@ export const toHaveAttribute: DualMatcher<
 /**
  * Expects exactly `count` matches.
  *
+ * **Example** (Checking how many results a search gave)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const threeResults = Effect.fn("threeResults")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByRole("listitem").pipe(Expect.toHaveCount(3))
+ * })
+ * ```
+ *
  * @stability unstable
  * @category matchers
  * @since 0.1.0
@@ -246,16 +383,20 @@ export const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]> 
 /**
  * Expects the one match's accessibility tree to match a pattern.
  *
- * **Example** (A navigation with an Orders link)
+ * **Example** (Checking the navigation for an Orders link)
  *
  * ```ts import.meta.vitest
  * import { AriaPattern, Expect, Page } from "@usestrider/browser"
  *
  * const hasOrdersLink = (page: Page.ReadonlyPage) =>
  *   page.getByRole("navigation").pipe(Expect.toMatchAria(
- *     AriaPattern.node("navigation", "Main", AriaPattern.including(
- *       AriaPattern.node("link", "Orders", AriaPattern.unchecked)
- *     ))
+ *     AriaPattern.node(
+ *       "navigation",
+ *       "Main",
+ *       AriaPattern.including(
+ *         AriaPattern.node("link", "Orders", AriaPattern.unchecked)
+ *       )
+ *     )
  *   ))
  * ```
  *
@@ -277,7 +418,19 @@ export const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPat
 )
 
 /**
- * Expects the page's URL to match.
+ * Expects the page's URL to match. A string must equal the whole URL; use a `RegExp` to match part of it.
+ *
+ * **Example** (Landing on the account page after signing in)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const signIn = Effect.fn("signIn")(function*(page: Page.Page) {
+ *   yield* page.getByRole("button", { name: "Sign in" }).click()
+ *   yield* page.pipe(Expect.toHaveURL(/\/account$/))
+ * })
+ * ```
  *
  * @stability unstable
  * @category matchers
@@ -298,6 +451,17 @@ export const toHaveURL: DualMatcher<Page.ReadonlyPage, [expected: string | RegEx
 
 /**
  * Expects the page's title to match.
+ *
+ * **Example** (Checking the confirmation page's title)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const confirmed = Effect.fn("confirmed")(function*(page: Page.ReadonlyPage) {
+ *   yield* Expect.toHaveTitle(page, "Order confirmed | Shop")
+ * })
+ * ```
  *
  * @stability unstable
  * @category matchers
@@ -323,14 +487,17 @@ export const toHaveTitle: DualMatcher<Page.ReadonlyPage, [expected: string | Reg
  *
  * A `Watchable` subject is checked again on each change. Any other effect is run again every `CheckInterval`.
  *
- * **Example** (A download that finishes)
+ * **Example** (Waiting for a download to complete)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Condition, Download, Expect } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const completed = (download: Download.Download) =>
- *   Expect.that(download.status, Condition.make("completed", (status) => status._tag === "Completed"))
+ *   Expect.that(
+ *     download.status,
+ *     Condition.make("completed", (status) => status._tag === "Completed")
+ *   )
  * ```
  *
  * @stability unstable
@@ -366,6 +533,22 @@ export const CheckInterval: Context.Reference<Duration.Duration> = Context.Refer
 /**
  * Sets `CheckInterval` for every `Expect.that` inside an effect.
  *
+ * **Example** (Polling saved state less often)
+ *
+ * ```ts import.meta.vitest
+ * import { Condition, Expect, Page } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const cartSaved = Effect.fn("cartSaved")(function*(page: Page.ReadonlyPage) {
+ *   yield* Expect.that(
+ *     page.localStorage.get("cart"),
+ *     Condition.make("saved", Option.isSome)
+ *   ).pipe(
+ *     Expect.withCheckInterval("500 millis")
+ *   )
+ * })
+ * ```
+ *
  * @see {@link CheckInterval} for the reference it sets
  *
  * @stability unstable
@@ -390,10 +573,27 @@ const ExpectationFailedTypeId = "~@usestrider/browser/Expect/ExpectationFailed"
  *
  * - `last` is the last value seen, and `history` every value seen, with repeats in a row dropped.
  * - `checks` says how many checks ran and what triggered them.
- * - `nearest`, when nothing matched, is an accessibility snapshot of what the longest start of the locator that
- *   still matches found.
+ * - `nearest`, when nothing matched, is an accessibility snapshot of what the locator's first steps found, up to
+ *   the step that matched nothing.
  * - `suggestions`, when nothing matched a `getByRole` with a name, are locators for elements with that role and a
  *   similar name.
+ *
+ * **Example** (Logging a failed expectation as a warning)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const cartCount = Effect.fn("cartCount")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByTestId("cart-count").pipe(
+ *     Expect.toHaveText("2"),
+ *     Effect.catchTag(
+ *       "ExpectationFailed",
+ *       (error) => Effect.logWarning(error.message, error.last)
+ *     )
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category errors

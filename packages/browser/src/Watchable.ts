@@ -24,20 +24,21 @@ const TypeId = "~@usestrider/browser/Watchable"
  *
  * **Details**
  *
- * - `changes` starts with the current value, conflates (a slow consumer sees the latest value, not every
- *   intermediate one), and ends after the terminal state, which is emitted as data.
- * - `waitFor` checks the current value first, then each change, so values skipped in between don't matter. It
- *   runs under the deadline.
+ * - `yield*` reads the current value.
+ * - `changes` starts with the current value, skips consecutive repeats, and ends after the terminal state, which
+ *   is emitted as data.
+ * - `waitFor` checks the current value first, then each change. It runs under the deadline.
  * - `map` derives a watchable from the same source, so derived values never disagree with their source.
  *
- * **Example** (Waiting for a page to finish loading)
+ * **Example** (Reading the current path)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
- * const loaded = Effect.fn("loaded")(function*(page: Page.ObservedPage) {
- *   yield* page.status.waitFor((status) => status._tag === "Open" && status.document.readiness === "complete")
+ * const currentPath = Effect.fn("currentPath")(function*(page: Page.ObservedPage) {
+ *   const url = yield* page.url
+ *   return new URL(url).pathname
  * })
  * ```
  *
@@ -49,20 +50,72 @@ export interface Watchable<A> extends Effect.Effect<A> {
   readonly [TypeId]: typeof TypeId
   /**
    * The current value, then each change; ends after the terminal state.
+   *
+   * **Example** (Logging each URL a page visits)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect, Stream } from "effect"
+   *
+   * const logVisits = Effect.fn("logVisits")(function*(page: Page.ObservedPage) {
+   *   yield* page.url.changes.pipe(Stream.runForEach((url) => Effect.log(`Visited ${url}`)))
+   * })
+   * ```
    */
   readonly changes: Stream.Stream<A>
   /**
-   * Waits until the value satisfies `refinement`, checking the current value first.
+   * Waits until the value satisfies `refinement`, checking the current value first, and gives it narrowed.
+   *
+   * **Example** (Reading a download's size once it starts)
+   *
+   * ```ts import.meta.vitest
+   * import { Download } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const expectedSize = Effect.fn("expectedSize")(function*(download: Download.Download) {
+   *   const progress = yield* download.status.waitFor((status) =>
+   *     status._tag === "InProgress"
+   *   )
+   *   return progress.total
+   * })
+   * ```
    */
   waitFor<B extends A>(
     refinement: Predicate.Refinement<A, B>
   ): Effect.Effect<B, Deadline.Timeout | Target.TargetGone | Ended>
   /**
    * Waits until the value satisfies `predicate`, checking the current value first.
+   *
+   * **Example** (Waiting for a page to finish loading)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const loaded = Effect.fn("loaded")(function*(page: Page.ObservedPage) {
+   *   yield* page.status.waitFor((status) =>
+   *     status._tag === "Open" && status.document.readiness === "complete"
+   *   )
+   * })
+   * ```
    */
   waitFor(predicate: Predicate.Predicate<A>): Effect.Effect<A, Deadline.Timeout | Target.TargetGone | Ended>
   /**
    * Derives a watchable from the same source.
+   *
+   * **Example** (Watching which site a page is on)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect, Stream } from "effect"
+   *
+   * const logOrigins = Effect.fn("logOrigins")(function*(page: Page.ObservedPage) {
+   *   const origin = page.url.map((url) => new URL(url).origin)
+   *   yield* origin.changes.pipe(
+   *     Stream.runForEach((value) => Effect.log(`Now on ${value}`))
+   *   )
+   * })
+   * ```
    */
   map<B>(f: (a: A) => B): Watchable<B>
 }
@@ -79,13 +132,13 @@ export const isWatchable = (u: unknown): u is Watchable<unknown> => P.hasPropert
 const EndedTypeId = "~@usestrider/browser/Watchable/Ended"
 
 /**
- * Error for a wait whose value settled on one that doesn't satisfy it, such as a download's status once the
- * download completed: no other value will come, though the download is still there.
+ * Error for a `waitFor` whose value settled on one that doesn't satisfy it, such as a download's status once the
+ * download completed.
  *
  * **Details**
  *
- * `value` is the final value. When what the watchable describes ends instead, such as a page that closed, the
- * wait fails with `TargetGone`.
+ * No other value will come, though what the watchable describes is still there. `value` is the final value.
+ * When what it describes ends instead, such as a page that closed, the wait fails with `TargetGone`.
  *
  * @stability unstable
  * @category errors

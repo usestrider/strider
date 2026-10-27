@@ -1,13 +1,13 @@
 /**
  * Locators: how to find elements on a page, and the actions and reads that use them.
  *
- * A locator is a value that describes how to find elements, and it's resolved again on every attempt, so it never
- * goes stale. A query on a locator searches inside its matches. Reads happen once and never retry; the expectations
- * that retry are `Expect`. A ref from a snapshot is the one exception to resolving again: it's pinned to one node,
- * and fails with `StaleRef` rather than finding another.
+ * A locator describes how to find elements and is resolved again on every attempt, so it never goes stale. A query
+ * on a locator searches inside its matches. Reads happen once and never retry; the expectations that retry are
+ * `Expect`. A ref from a snapshot is the exception: it's pinned to one node, and fails with `StaleRef` rather than
+ * finding another.
  *
  * Before acting, a locator checks that its element is ready: visible, stable, enabled and the rest of the action's
- * checks, all tested in the page together on each attempt. The checks are named, can be turned off per call with
+ * checks, tested in the page together on each attempt. The checks are named, can be turned off per call with
  * `checks`, and are reported in errors. An action needs exactly one match, so an ambiguous locator fails at once,
  * listing what it matched. An action dispatches at most once.
  *
@@ -103,7 +103,18 @@ export interface Queries<L> {
    * An element's role is the first token of its `role` attribute that Strider knows, or else its implicit
    * role under HTML-AAM, and its name is computed under accname 1.2. Elements outside the accessibility tree
    * (`aria-hidden`, `display: none`, `visibility: hidden`, the `hidden` attribute) aren't matched unless
-   * `includeHidden` is set. A name matches as text does in `getByText`.
+   * `includeHidden` is set.
+   *
+   * **Example** (Clicking Save, not Save draft)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const save = Effect.fn("save")(function*(page: Page.Page) {
+   *   yield* page.getByRole("button", { name: "Save", exact: true }).click()
+   * })
+   * ```
    */
   getByRole(role: AriaRole.AriaRole, options?: RoleOptions | undefined): L
   /**
@@ -112,36 +123,113 @@ export interface Queries<L> {
    * **Details**
    *
    * An element matches when its text does and no child element's does, so `<p>1 <b>item</b></p>` is found by
-   * `"1 item"`. An element's text is its text content through open shadow roots, skipping `script`, `style`, `noscript`
-   * and `template`, with a button-like `input`'s value, and with whitespace collapsed and trimmed. It isn't
-   * `innerText`, which depends on layout and differs between browsers. A string matches as a case-insensitive
-   * substring, or with `exact` as the whole text, case-sensitively; a `RegExp` is tested as given. The
-   * document's `head` isn't searched.
+   * `"1 item"`. An element's text is its text content through open shadow roots, without `script`, `style`,
+   * `noscript` and `template`, with a button-like `input`'s value, and with whitespace collapsed and trimmed; it
+   * isn't `innerText`, which depends on layout and differs between browsers. A string matches as a case-insensitive
+   * substring, or with `exact` as the whole text, case-sensitively; a `RegExp` is tested as given. The document's
+   * `head` isn't searched.
+   *
+   * **Example** (Reading an order number)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const confirmation = Effect.fn("confirmation")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByText(/^Order #\d+ confirmed$/).readText
+   * })
+   * ```
    */
   getByText(text: string | RegExp, options?: TextOptions | undefined): L
   /**
    * Form controls whose label matches.
+   *
+   * **Example** (Filling a field by its label)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const enterEmail = Effect.fn("enterEmail")(function*(page: Page.Page) {
+   *   yield* page.getByLabel("Email").fill("me@example.com")
+   * })
+   * ```
    */
   getByLabel(text: string | RegExp, options?: TextOptions | undefined): L
   /**
    * Inputs whose placeholder matches.
+   *
+   * **Example** (Searching from a field with no label)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const search = Effect.fn("search")(function*(page: Page.Page) {
+   *   yield* page.getByPlaceholder("Search products").fill("headphones")
+   * })
+   * ```
    */
   getByPlaceholder(text: string | RegExp, options?: TextOptions | undefined): L
   /**
    * Images and areas whose alt text matches.
+   *
+   * **Example** (Opening a product from its photo)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const openProduct = Effect.fn("openProduct")(function*(page: Page.Page) {
+   *   yield* page.getByAltText("Wireless headphones").click()
+   * })
+   * ```
    */
   getByAltText(text: string | RegExp, options?: TextOptions | undefined): L
   /**
    * Elements whose `title` attribute matches.
+   *
+   * **Example** (Clicking an icon button by its tooltip)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const removeItem = Effect.fn("removeItem")(function*(page: Page.Page) {
+   *   yield* page.getByTitle("Remove from cart").click()
+   * })
+   * ```
    */
   getByTitle(text: string | RegExp, options?: TextOptions | undefined): L
   /**
    * Elements whose `data-testid` attribute is `id`.
+   *
+   * **Example** (Reading the cart badge)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const cartCount = Effect.fn("cartCount")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByTestId("cart-count").readText
+   * })
+   * ```
    */
   getByTestId(id: string): L
   /**
    * Elements matching a CSS selector. A malformed selector fails with `InvalidInput` as soon as the locator is
    * used, without waiting.
+   *
+   * **Example** (Submitting a form found by CSS)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const placeOrder = Effect.fn("placeOrder")(function*(page: Page.Page) {
+   *   yield* page.locator("form#checkout button[type=submit]").click()
+   * })
+   * ```
    */
   locator(css: string): L
 }
@@ -163,11 +251,11 @@ export interface FilterOptions {
    */
   readonly hasNot?: RelativeLocator | undefined
   /**
-   * Keep elements whose text contains this.
+   * Keep elements whose text contains this, case-insensitively.
    */
   readonly hasText?: string | RegExp | undefined
   /**
-   * Keep elements whose text doesn't contain this.
+   * Keep elements whose text doesn't contain this, case-insensitively.
    */
   readonly hasNotText?: string | RegExp | undefined
   /**
@@ -193,75 +281,293 @@ export interface ReadonlyLocator
   readonly [TypeId]: typeof TypeId
   /**
    * Enters an iframe inside this locator's matches, found by `iframe`'s query.
+   *
+   * **Example** (Filling a card field in a checkout's iframe)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const enterCard = Effect.fn("enterCard")(function*(page: Page.Page) {
+   *   const checkout = page.getByRole("region", { name: "Checkout" })
+   *   const card = checkout.frame(checkout.locator("iframe"))
+   *   yield* card.getByLabel("Card number").fill("4242 4242 4242 4242")
+   * })
+   * ```
    */
   frame(iframe: ReadonlyLocator): ReadonlyFrameLocator
   /**
    * Narrows the matches.
+   *
+   * **Example** (Removing one item from the cart)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const removeHeadphones = Effect.fn("removeHeadphones")(function*(page: Page.Page) {
+   *   yield* page.getByRole("listitem")
+   *     .filter({ hasText: "Headphones" })
+   *     .getByRole("button", { name: "Remove" })
+   *     .click()
+   * })
+   * ```
    */
   filter(options: FilterOptions): ReadonlyLocator
   /**
    * Elements that match both locators.
+   *
+   * **Example** (Clicking a button that also has a tooltip)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const subscribe = Effect.fn("subscribe")(function*(page: Page.Page) {
+   *   yield* page.getByRole("button").and(page.getByTitle("Subscribe to the newsletter"))
+   *     .click()
+   * })
+   * ```
    */
   and(other: ReadonlyLocator): ReadonlyLocator
   /**
    * Elements that match either locator.
+   *
+   * **Example** (Waiting for whichever appears first)
+   *
+   * ```ts import.meta.vitest
+   * import { Expect, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const signedInOrAsked = Effect.fn("signedInOrAsked")(
+   *   function*(page: Page.ReadonlyPage) {
+   *     const account = page.getByRole("button", { name: "Account" })
+   *     const signIn = page.getByRole("button", { name: "Sign in" })
+   *     yield* account.or(signIn).first.pipe(Expect.toBeVisible)
+   *   }
+   * )
+   * ```
    */
   or(other: ReadonlyLocator): ReadonlyLocator
   /**
    * The match at `index`, counting from 0. Errors name it by its position, as `nth(index)`.
+   *
+   * **Example** (Reading the third result)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const thirdResult = Effect.fn("thirdResult")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByRole("listitem").nth(2).readText
+   * })
+   * ```
    */
   nth(index: number): ReadonlyLocator
   /**
    * The first match; `nth(0)`.
+   *
+   * **Example** (Opening the first search result)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const openFirst = Effect.fn("openFirst")(function*(page: Page.Page) {
+   *   yield* page.getByRole("listitem").first.getByRole("link").click()
+   * })
+   * ```
    */
   readonly first: ReadonlyLocator
   /**
    * The last match.
+   *
+   * **Example** (Reading the newest message)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const newestMessage = Effect.fn("newestMessage")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByRole("log").getByRole("listitem").last.readText
+   * })
+   * ```
    */
   readonly last: ReadonlyLocator
   /**
    * Gives the locator a label, which errors and traces show instead of the query.
+   *
+   * **Example** (Naming a locator built from CSS)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const checkout = Effect.fn("checkout")(function*(page: Page.Page) {
+   *   const button = page.locator("#cart > div:nth-child(3) button").describe(
+   *     "the checkout button"
+   *   )
+   *   yield* button.click()
+   * })
+   * ```
    */
   describe(label: string): ReadonlyLocator
   /**
    * How many elements match now.
+   *
+   * **Example** (Counting search results)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const resultCount = Effect.fn("resultCount")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByRole("listitem").count
+   * })
+   * ```
    */
   readonly count: Effect.Effect<number, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
-   * The text of the one match: the text `getByText` matches, its text content with whitespace collapsed. It isn't
-   * `innerText`, which depends on layout and differs between browsers.
+   * The text of the one match, as `getByText` sees it: its text content with whitespace collapsed, not
+   * `innerText`.
+   *
+   * **Example** (Reading the order total)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const orderTotal = Effect.fn("orderTotal")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByTestId("order-total").readText
+   * })
+   * ```
    */
   readonly readText: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
    * The value of the one matching form control.
+   *
+   * **Example** (Reading a quantity field)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const quantity = Effect.fn("quantity")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByLabel("Quantity").readValue
+   * })
+   * ```
    */
   readonly readValue: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
    * The HTML of the one match (`outerHTML`).
+   *
+   * **Example** (Reading an article's markup)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const articleHtml = Effect.fn("articleHtml")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByRole("article").readHtml
+   * })
+   * ```
    */
   readonly readHtml: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
    * An attribute of the one match, or `None` when it is absent.
+   *
+   * **Example** (Reading a link's address)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const invoiceHref = Effect.fn("invoiceHref")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByRole("link", { name: "Download invoice" }).readAttribute(
+   *     "href"
+   *   )
+   * })
+   * ```
    */
   readAttribute(name: string): Effect.Effect<Option.Option<string>, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
-   * Whether the one match is visible now.
+   * Whether the one match is visible now; `false` when nothing matches.
+   *
+   * **Example** (Dismissing a banner only when it shows)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const dismissCookies = Effect.fn("dismissCookies")(function*(page: Page.Page) {
+   *   const accept = page.getByRole("button", { name: "Accept cookies" })
+   *   if (yield* accept.isVisible) yield* accept.click()
+   * })
+   * ```
    */
   readonly isVisible: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
    * Whether the one match is enabled now.
+   *
+   * **Example** (Reading whether checkout is available)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const canCheckout = Effect.fn("canCheckout")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByRole("button", { name: "Checkout" }).isEnabled
+   * })
+   * ```
    */
   readonly isEnabled: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
    * Whether the one match is checked now.
+   *
+   * **Example** (Reading a preference)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const wantsOffers = Effect.fn("wantsOffers")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByRole("checkbox", { name: "Email me offers" }).isChecked
+   * })
+   * ```
    */
   readonly isChecked: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
    * One locator per current match, each pinned to its position with `nth`.
+   *
+   * **Example** (Reading every product name)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const productNames = Effect.fn("productNames")(function*(page: Page.ReadonlyPage) {
+   *   const products = yield* page.getByRole("listitem").all
+   *   return yield* Effect.forEach(products, (product) => product.readText)
+   * })
+   * ```
    */
   readonly all: Effect.Effect<ReadonlyArray<ReadonlyLocator>, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
    * A snapshot of the one match's subtree.
+   *
+   * **Example** (Describing the cart to an agent)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const cartOutline = Effect.fn("cartOutline")(function*(page: Page.ReadonlyPage) {
+   *   const snapshot = yield* page.getByRole("region", { name: "Cart" }).snapshot({
+   *     sources: "aria"
+   *   })
+   *   return snapshot.text
+   * })
+   * ```
    */
   snapshot(
     options?: Snapshot.Options | undefined
@@ -269,6 +575,19 @@ export interface ReadonlyLocator
   /**
    * Calls `fn` in the isolated world with the one match as its first argument, and returns the result by
    * value.
+   *
+   * **Example** (Reading an image's natural width)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const photoWidth = Effect.fn("photoWidth")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByAltText("Product photo").evaluate((image) =>
+   *     (image as HTMLImageElement).naturalWidth
+   *   )
+   * })
+   * ```
    */
   evaluate<Args extends ReadonlyArray<unknown>, B>(
     fn: (element: Element, ...args: Args) => B | Promise<B>,
@@ -284,6 +603,19 @@ export interface ReadonlyLocator
  * Each action documents which checks it runs. An override is recorded in the action's span. `stable` waits for
  * the element's box to stay the same for 2 animation frames, or as many as `{ frames }` says, and a timeout says
  * how many.
+ *
+ * **Example** (Clicking a button that keeps pulsing)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const claimOffer = Effect.fn("claimOffer")(function*(page: Page.Page) {
+ *   yield* page.getByRole("button", { name: "Claim offer" }).click({
+ *     checks: { stable: false }
+ *   })
+ * })
+ * ```
  *
  * @stability unstable
  * @category models
@@ -381,9 +713,9 @@ export interface DragOptions extends PointerOptions {
   readonly steps?: number | undefined
   /**
    * How an HTML drag (the element or an ancestor is `draggable`) is made. With `"native"`, the browser makes it
-   * from input, where its protocol can finish one (`input.dragAndDrop`). With `"synthetic"`, the page dispatches
-   * the events itself, `dragstart` to `dragend`, sharing one `DataTransfer`, and the events are untrusted. An
-   * element that isn't draggable is dragged with pointer events either way.
+   * from input, which needs `input.dragAndDrop` (Chromium). With `"synthetic"`, the page dispatches the events
+   * itself, `dragstart` to `dragend`, sharing one `DataTransfer`, and the events are untrusted. An element that
+   * isn't draggable is dragged with pointer events either way.
    *
    * @default "native"
    */
@@ -433,8 +765,8 @@ type ActionEffect = Effect.Effect<void, LocatorError | Target.TargetGone | Deadl
  * **Example** (Filling and submitting a form)
  *
  * ```ts import.meta.vitest
- * import { Config, Effect } from "effect"
  * import { Page } from "@usestrider/browser"
+ * import { Config, Effect } from "effect"
  *
  * const signIn = Effect.fn("signIn")(function*(page: Page.Page) {
  *   yield* page.getByLabel("Email").fill("me@example.com")
@@ -474,17 +806,40 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
-   * The click is a move to the action point, then a press and a release, carrying the keys and buttons the page
-   * holds. The gesture is guarded: the first of its pointer, mouse, touch and click events must land in the
-   * element. If the page covered it between the checks and the input, that event and the rest of the gesture are
-   * stopped before the page's handlers see them, and the action checks again. `modifiers` are pressed before the
-   * gesture and released after it; on WebKit, whose pointer events can't carry them, an action with modifiers
-   * fails with `Unsupported{capability: "input.pointerModifiers"}` before anything is sent.
+   * - The click is a move to the action point, then a press and a release, carrying the keys and buttons the page
+   *   holds.
+   * - The gesture is guarded: the first of its pointer, mouse, touch and click events must land in the element. If
+   *   the page covered it between the checks and the input, the gesture is stopped before the page's handlers see
+   *   it, and the action checks again.
+   * - `modifiers` are pressed before the gesture and released after it. On a backend without
+   *   `input.pointerModifiers`, an action with modifiers fails with `Unsupported` before anything is sent.
+   *
+   * **Example** (Adding to the cart)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const addToCart = Effect.fn("addToCart")(function*(page: Page.Page) {
+   *   yield* page.getByRole("button", { name: "Add to cart" }).click()
+   * })
+   * ```
    */
   click(options?: ClickOptions | undefined): ActionEffect
   /**
    * Double-clicks the one match, with the same checks and guard as `click`: two clicks, the second with a click
    * count of 2, so the page sees `dblclick`.
+   *
+   * **Example** (Opening a file from a list)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const openInvoice = Effect.fn("openInvoice")(function*(page: Page.Page) {
+   *   yield* page.getByRole("row", { name: "invoice-1042.pdf" }).dblclick()
+   * })
+   * ```
    */
   dblclick(options?: ClickOptions | undefined): ActionEffect
   /**
@@ -492,8 +847,20 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Gotchas**
    *
-   * No backend needs touch emulation for it. WebKit fires no `click` after a tap, and Firefox on the desktop
-   * dispatches touch events to listeners but has no `ontouchstart` attribute.
+   * No backend needs touch emulation for it. On WebKit, which has no touch input, it fails with `Unsupported`
+   * before anything is sent. Firefox on the desktop dispatches touch events to listeners but has no `ontouchstart`
+   * attribute.
+   *
+   * **Example** (Opening the menu on a phone layout)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const openMenu = Effect.fn("openMenu")(function*(page: Page.Page) {
+   *   yield* page.getByRole("button", { name: "Menu" }).tap()
+   * })
+   * ```
    */
   tap(options?: PointerOptions | undefined): ActionEffect
   /**
@@ -502,7 +869,20 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
-   * Unlike `click`, it isn't guarded: a move has no event to stop, and the hover effects it causes are its point.
+   * Unlike `click`, it isn't guarded: if the page covers the element after the checks, whatever covers it gets the
+   * move.
+   *
+   * **Example** (Signing out from a menu that opens on hover)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const signOut = Effect.fn("signOut")(function*(page: Page.Page) {
+   *   yield* page.getByRole("button", { name: "Account" }).hover()
+   *   yield* page.getByRole("menuitem", { name: "Sign out" }).click()
+   * })
+   * ```
    */
   hover(options?: PointerOptions | undefined): ActionEffect
   /**
@@ -512,15 +892,48 @@ export interface Locator extends ReadonlyLocator {
    *
    * If it's already checked, nothing is sent. Otherwise it clicks, then reads the state again: a click that didn't
    * check it fails with `StateUnchanged{expected: "checked"}`. Any other element fails at once with `WrongElement`.
+   *
+   * **Example** (Accepting the terms)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const acceptTerms = Effect.fn("acceptTerms")(function*(page: Page.Page) {
+   *   yield* page.getByRole("checkbox", { name: "I accept the terms" }).check()
+   * })
+   * ```
    */
   check(options?: PointerOptions | undefined): ActionEffect
   /**
    * Unchecks a checkbox or an ARIA checkable, and confirms it became unchecked. Checks: the same as `click`. It
    * works as `check` does, failing with `StateUnchanged{expected: "unchecked"}`.
+   *
+   * **Example** (Opting out of offers)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const optOut = Effect.fn("optOut")(function*(page: Page.Page) {
+   *   yield* page.getByLabel("Email me offers").uncheck()
+   * })
+   * ```
    */
   uncheck(options?: PointerOptions | undefined): ActionEffect
   /**
    * Focuses the one match, from an isolated world of Strider's. Checks: visible, notInert.
+   *
+   * **Example** (Focusing the search field)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const focusSearch = Effect.fn("focusSearch")(function*(page: Page.Page) {
+   *   yield* page.getByRole("searchbox").focus()
+   * })
+   * ```
    */
   focus(options?: ActionOptions | undefined): ActionEffect
   /**
@@ -529,10 +942,32 @@ export interface Locator extends ReadonlyLocator {
    * **Details**
    *
    * It's `fill("")`: the contents are selected and deleted with a key, or a value that isn't typed is set to empty.
+   *
+   * **Example** (Removing a coupon code)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const removeCoupon = Effect.fn("removeCoupon")(function*(page: Page.Page) {
+   *   yield* page.getByLabel("Coupon code").clear()
+   * })
+   * ```
    */
   clear(options?: ActionOptions | undefined): ActionEffect
   /**
    * Scrolls the one match into view, from an isolated world of Strider's. Checks: visible, stable.
+   *
+   * **Example** (Scrolling to the footer)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const toFooter = Effect.fn("toFooter")(function*(page: Page.Page) {
+   *   yield* page.getByRole("contentinfo").scrollIntoView()
+   * })
+   * ```
    */
   scrollIntoView(options?: ActionOptions | undefined): ActionEffect
   /**
@@ -547,6 +982,17 @@ export interface Locator extends ReadonlyLocator {
    * - An element that can't be edited fails at once with `NotEditable`. A read-only one is waited for, and a
    *   timeout reports it as `ReadOnly`.
    * - A `Redacted` value is typed into the page but never shown in spans, traces or errors.
+   *
+   * **Example** (Choosing a delivery date)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const deliverOn = Effect.fn("deliverOn")(function*(page: Page.Page) {
+   *   yield* page.getByLabel("Delivery date").fill("2026-12-24")
+   * })
+   * ```
    */
   fill(value: string | Redacted.Redacted<string>, options?: ActionOptions | undefined): ActionEffect
   /**
@@ -556,6 +1002,18 @@ export interface Locator extends ReadonlyLocator {
    *
    * A key is a UI Events `key` value (`"Enter"`, `"a"`, `"ArrowDown"`) or one character; anything else fails with
    * `InvalidInput`. `modifiers` are pressed before it and released after, and Shift turns `"a"` into `"A"`.
+   *
+   * **Example** (Submitting a search with Enter)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const search = Effect.fn("search")(function*(page: Page.Page) {
+   *   yield* page.getByRole("searchbox").fill("headphones")
+   *   yield* page.getByRole("searchbox").press("Enter")
+   * })
+   * ```
    */
   press(key: Keyboard.Key | string, options?: PressOptions | undefined): ActionEffect
   /**
@@ -565,6 +1023,20 @@ export interface Locator extends ReadonlyLocator {
    *
    * `\n` is Enter and `\t` is Tab; `delay` waits between keys. A `Redacted` text is never shown in spans, traces or
    * errors.
+   *
+   * **Example** (Typing into an autocomplete)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const chooseCity = Effect.fn("chooseCity")(function*(page: Page.Page) {
+   *   yield* page.getByRole("combobox", { name: "City" }).pressSequentially("Lisbon", {
+   *     delay: "50 millis"
+   *   })
+   *   yield* page.getByRole("option", { name: "Lisbon, Portugal" }).click()
+   * })
+   * ```
    */
   pressSequentially(text: string | Redacted.Redacted<string>, options?: TypeOptions | undefined): ActionEffect
   /**
@@ -573,9 +1045,19 @@ export interface Locator extends ReadonlyLocator {
    * **Details**
    *
    * The options are chosen from an isolated world of Strider's, with `input` and `change` dispatched as for a
-   * user's choice, because input can't drive a select's popup in a headless browser. An option that isn't there
-   * yet is waited for, and a timeout reports it as `NoSuchOption`. Any element but a `<select>` fails at once with
-   * `WrongElement`.
+   * user's choice. An option that isn't there yet is waited for, and a timeout reports it as `NoSuchOption`. Any
+   * element but a `<select>` fails at once with `WrongElement`.
+   *
+   * **Example** (Choosing a country)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const shipToPortugal = Effect.fn("shipToPortugal")(function*(page: Page.Page) {
+   *   yield* page.getByLabel("Country").selectOption({ label: "Portugal" })
+   * })
+   * ```
    */
   selectOption(
     choice: SelectOption | ReadonlyArray<SelectOption>,
@@ -588,6 +1070,17 @@ export interface Locator extends ReadonlyLocator {
    *
    * A local file that doesn't exist fails with `FileUnreadable` before anything is sent, and any element but a
    * file input with `WrongElement`.
+   *
+   * **Example** (Uploading a receipt)
+   *
+   * ```ts import.meta.vitest
+   * import { FileInput, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const uploadReceipt = Effect.fn("uploadReceipt")(function*(page: Page.Page) {
+   *   yield* page.getByLabel("Receipt").setInputFiles(FileInput.local("./receipt.pdf"))
+   * })
+   * ```
    */
   setInputFiles(
     files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>,
@@ -599,18 +1092,31 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
-   * The drag is a press at the element's action point, `steps` moves with the button held, and a release at the
-   * target's, which drives pages that drag with pointer events. An HTML drag (`draggable="true"` on the element or
-   * an ancestor) needs `input.dragAndDrop`: Chromium finishes it; elsewhere it fails with `Unsupported` before
-   * anything is sent. With `html: "synthetic"`, the page dispatches the drag's events itself, on every backend:
-   * `dragstart` and `drag` on the element, `dragenter` and `dragover` where the target's point is, then `drop`
-   * there if a `dragover` handler accepted it, or `dragleave`, and `dragend` on the element. The element and the
-   * target must be in one document.
+   * - The drag is a press at the element's action point, `steps` moves with the button held, and a release at the
+   *   target's, which drives pages that drag with pointer events.
+   * - An HTML drag (`draggable="true"` on the element or an ancestor) needs `input.dragAndDrop`, which Chromium
+   *   has; elsewhere it fails with `Unsupported` before anything is sent.
+   * - With `html: "synthetic"`, the page dispatches the drag's events itself, on every backend: `dragstart` and
+   *   `drag` on the element, `dragenter` and `dragover` where the target's point is, then `drop` there if a
+   *   `dragover` handler accepted it, or `dragleave`, and `dragend` on the element.
+   * - The element and the target must be in one document.
    *
    * **Gotchas**
    *
    * In a synthetic drag, only Firefox lets `dragend` see the `dropEffect` the target set: Chromium and WebKit
    * ignore a `dropEffect` set on a `DataTransfer` that a script made, so `dragend` sees `"none"` there.
+   *
+   * **Example** (Moving a card to another column)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const markShipped = Effect.fn("markShipped")(function*(page: Page.Page) {
+   *   const card = page.getByRole("listitem").filter({ hasText: "Order 1042" })
+   *   yield* card.dragTo(page.getByRole("list", { name: "Shipped" }))
+   * })
+   * ```
    */
   dragTo(target: ReadonlyLocator, options?: DragOptions | undefined): ActionEffect
 }
@@ -650,13 +1156,15 @@ export interface RelativeLocator extends Queries<RelativeLocator> {
 /**
  * The queries that build a `RelativeLocator`.
  *
- * **Example** (Rows that contain a Delete button)
+ * **Example** (Finding the rows that have a Delete button)
  *
  * ```ts import.meta.vitest
  * import { Locator, Page } from "@usestrider/browser"
  *
  * const deletableRows = (page: Page.Page) =>
- *   page.getByRole("row").filter({ has: Locator.relative.getByRole("button", { name: "Delete" }) })
+ *   page.getByRole("row").filter({
+ *     has: Locator.relative.getByRole("button", { name: "Delete" })
+ *   })
  * ```
  *
  * @stability unstable
@@ -675,10 +1183,36 @@ export const relative: Queries<RelativeLocator> = Steps.relative
 export interface ReadonlyFrameLocator extends Queries<ReadonlyLocator> {
   /**
    * The iframe element.
+   *
+   * **Example** (Waiting for an embedded form to show)
+   *
+   * ```ts import.meta.vitest
+   * import { Expect, Locator } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const paymentShown = Effect.fn("paymentShown")(
+   *   function*(payment: Locator.ReadonlyFrameLocator) {
+   *     yield* payment.owner.pipe(Expect.toBeVisible)
+   *   }
+   * )
+   * ```
    */
   readonly owner: ReadonlyLocator
   /**
-   * Enters a nested iframe.
+   * Enters a nested iframe, found by a locator built from this frame locator.
+   *
+   * **Example** (Reaching a card field two iframes deep)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const enterCard = Effect.fn("enterCard")(function*(page: Page.Page) {
+   *   const checkout = page.frame(page.locator("iframe#checkout"))
+   *   const card = checkout.frame(checkout.locator("iframe#card"))
+   *   yield* card.getByLabel("Card number").fill("4242 4242 4242 4242")
+   * })
+   * ```
    */
   frame(iframe: ReadonlyLocator): ReadonlyFrameLocator
 }
@@ -689,8 +1223,8 @@ export interface ReadonlyFrameLocator extends Queries<ReadonlyLocator> {
  * **Example** (Paying inside an embedded form)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const pay = Effect.fn("pay")(function*(page: Page.Page) {
  *   const payment = page.frame(page.locator("iframe#payment"))
@@ -720,8 +1254,8 @@ export interface FrameLocator extends ReadonlyFrameLocator {
  *
  * **Details**
  *
- * `candidates` describes each match, and `suggestions` are locators that would match one, such as
- * `getByRole('button', { name: 'Save' })`.
+ * `candidates` describes each match. When exactly one of them is visible, `suggestions` holds the locator with
+ * `.filter({ visible: true })` added, which matches it; otherwise it's empty.
  *
  * @stability unstable
  * @category reasons
@@ -765,6 +1299,20 @@ export class StaleRef extends Schema.Error<StaleRef>("@usestrider/browser/Locato
 
 /**
  * Reason for a read that found nothing to read: a read never waits, so it fails at once.
+ *
+ * **Example** (Reading a banner that may not be there)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const promotion = Effect.fn("promotion")(function*(page: Page.ReadonlyPage) {
+ *   return yield* page.getByTestId("promo-banner").readText.pipe(
+ *     Effect.map(Option.some),
+ *     Effect.catchReason("LocatorError", "NoMatch", () => Effect.succeedNone)
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category reasons
@@ -891,19 +1439,23 @@ const LocatorErrorTypeId = "~@usestrider/browser/Locator/LocatorError"
  *
  * **Details**
  *
- * `operation` names what was attempted, such as `click`, and `locator` describes the query, or its
+ * `operation` names what was attempted, such as `Locator.click`, and `locator` describes the query, or its
  * `describe` label. Ambiguity, a bad selector and a stale ref fail at once; only waiting for checks to pass
  * uses the deadline.
  *
  * **Example** (Recovering from an ambiguous locator)
  *
  * ```ts import.meta.vitest
- * import { Console, Effect } from "effect"
  * import { Page } from "@usestrider/browser"
+ * import { Console, Effect } from "effect"
  *
  * const save = Effect.fn("save")(function*(page: Page.Page) {
  *   yield* page.getByText("Save").click().pipe(
- *     Effect.catchReason("LocatorError", "StrictViolation", (reason) => Console.log(reason.suggestions))
+ *     Effect.catchReason(
+ *       "LocatorError",
+ *       "StrictViolation",
+ *       (reason) => Console.log(reason.suggestions)
+ *     )
  *   )
  * })
  * ```

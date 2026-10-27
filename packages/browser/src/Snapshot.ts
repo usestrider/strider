@@ -1,13 +1,13 @@
 /**
  * Accessibility snapshots of a page, for agents and for checking a page's structure.
  *
- * A snapshot is a tree, and its `text` is one rendering of it, the YAML agents already read. By default `snapshot`
- * adds what it can infer for pages that aren't fully accessible, interactivity and names, and tags every inference
- * with its evidence; `snapshot({ sources: "aria" })` is the accessibility tree alone. While a document lives, the
- * same node keeps the same ref.
+ * A snapshot is a tree, with a YAML rendering of it in `text`. By default `snapshot` adds the interactivity and
+ * names it can infer on pages that aren't fully accessible, and marks each inference with what it came from;
+ * `snapshot({ sources: "aria" })` is the accessibility tree alone. While a document lives, the same node keeps the
+ * same ref.
  *
- * The tree is data (a Schema), so it can be encoded for the CLI, an MCP result or a trace. The refs aren't:
- * `ref(id)` returns a locator bound to the page the snapshot came from, with that page's access.
+ * The tree is data, so it can be encoded for the CLI, an MCP result or a trace. `ref(id)` returns a locator for a
+ * node, bound to the page the snapshot came from and with that page's access.
  *
  * @stability unstable
  * @since 0.1.0
@@ -168,6 +168,20 @@ export const Node: Schema.Codec<Node, NodeEncoded> = Schema.Struct({
 /**
  * The data of a snapshot: which document it describes, its generation, its tree and its text rendering.
  *
+ * **Example** (Encoding a snapshot as JSON)
+ *
+ * ```ts import.meta.vitest
+ * import { Page, Snapshot } from "@usestrider/browser"
+ * import { Effect, Schema } from "effect"
+ *
+ * const snapshotJson = Effect.fn("snapshotJson")(function*(page: Page.ReadonlyPage) {
+ *   const snapshot = yield* page.snapshot()
+ *   return yield* Schema.encodeEffect(
+ *     Schema.fromJsonString(Schema.toCodecJson(Snapshot.Data))
+ *   )(snapshot)
+ * })
+ * ```
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
@@ -203,18 +217,6 @@ const TypeId = "~@usestrider/browser/Snapshot"
  * `L` follows the access of the page the snapshot came from: a `ReadonlyPage`'s snapshot hands out
  * `ReadonlyLocator`s, so its refs can't act.
  *
- * **Example** (Acting on a ref an agent chose)
- *
- * ```ts import.meta.vitest
- * import { Effect } from "effect"
- * import { Page, Snapshot } from "@usestrider/browser"
- *
- * const clickRef = Effect.fn("clickRef")(function*(page: Page.Page, id: Snapshot.RefId) {
- *   const snapshot = yield* page.snapshot()
- *   yield* snapshot.ref(id).click()
- * })
- * ```
- *
  * @stability unstable
  * @category models
  * @since 0.1.0
@@ -232,10 +234,37 @@ export interface Snapshot<L extends Locator.ReadonlyLocator = Locator.ReadonlyLo
    *
    * Acting on it fails with `StaleRef` once its node is removed, or its document or generation moves on. Use a
    * locator built from roles and names for anything that must survive a re-render.
+   *
+   * **Example** (Acting on a ref an agent chose)
+   *
+   * ```ts import.meta.vitest
+   * import { Page, Snapshot } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const clickRef = Effect.fn("clickRef")(function*(page: Page.Page, id: Snapshot.RefId) {
+   *   const snapshot = yield* page.snapshot()
+   *   yield* snapshot.ref(id).click()
+   * })
+   * ```
    */
   ref(id: RefId): L
   /**
-   * What changed since `previous`; fails when the two describe different documents.
+   * What changed since `previous`; fails with `DocumentsDiffer` when the two describe different documents.
+   *
+   * **Example** (What a click changed)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const whatChanged = Effect.fn("whatChanged")(function*(page: Page.Page) {
+   *   const before = yield* page.snapshot()
+   *   yield* page.getByRole("button", { name: "Add to cart" }).click()
+   *   const after = yield* page.snapshot()
+   *   const diff = yield* after.diff(before)
+   *   return diff.text
+   * })
+   * ```
    */
   diff(previous: Snapshot): Effect.Effect<Diff, SnapshotError>
 }
@@ -303,6 +332,22 @@ const SnapshotErrorTypeId = "~@usestrider/browser/Snapshot/SnapshotError"
 
 /**
  * Error for a snapshot operation that failed.
+ *
+ * **Example** (Diffing only within one document)
+ *
+ * ```ts import.meta.vitest
+ * import { Snapshot } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const changes = Effect.fn("changes")(
+ *   function*(before: Snapshot.Snapshot, after: Snapshot.Snapshot) {
+ *     return yield* after.diff(before).pipe(
+ *       Effect.map(Option.some),
+ *       Effect.catchReason("SnapshotError", "DocumentsDiffer", () => Effect.succeedNone)
+ *     )
+ *   }
+ * )
+ * ```
  *
  * @stability unstable
  * @category errors

@@ -1,17 +1,17 @@
 /**
  * Page time: the clock a page's scripts read, under your control.
  *
- * One timeline covers a page, or a whole context, across every document and frame, because a test's time must not
- * reset when the page navigates: each operation reaches every current document, and a new document starts where the
- * timeline is. Readiness checks use the browser's own rendering, so a paused clock never stalls `click`, and
- * nothing advances page time unless you do. Page time never touches Strider's deadlines, and `TestClock` never
- * touches the page. `adjust` and `setTime` mean what they mean on `TestClock`.
+ * One timeline covers a page, or a whole context, across every document and frame, so time doesn't reset when the
+ * page navigates: each operation reaches every current document, and a new document starts where the timeline is.
+ * Readiness checks use the browser's own rendering, so a paused clock never stalls `click`, and nothing advances
+ * page time unless you do. Page time never touches Strider's deadlines, and `TestClock` never touches the page.
+ * `adjust` and `setTime` mean what they mean on `TestClock`.
  *
  * **Details**
  *
- * No backend has a clock to drive, so this one is Strider's: a script in each document's main world, run before the
- * page's own, that replaces `Date`, `performance.now`, and in controlled mode the timers and animation frames. Its
- * controls are on a symbol, which a page that lists the window's symbols can find.
+ * The clock is a script Strider runs in each document's main world before the page's own. It replaces `Date` and
+ * `performance.now`, and in controlled mode the timers and animation frames. Its controls are on a symbol, which a
+ * page that lists the window's symbols can find.
  *
  * **Gotchas**
  *
@@ -78,8 +78,8 @@ export interface InstallOptions {
  * **Example** (Paused application time)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const sessionExpires = Effect.fn("sessionExpires")(function*(page: Page.Page) {
  *   yield* page.clock.install({ mode: "controlled", at: "2026-01-01T09:00:00Z" })
@@ -96,26 +96,83 @@ export interface InstallOptions {
  */
 export interface PageClock {
   /**
-   * Installs the clock in every current document of the page or context, and in every later one, until the
-   * registration is removed or its scope closes. Removing it affects later documents only: a document it reached
-   * keeps the clock. Fails with `Conflict` when a clock already covers any of the same pages, whether it was
-   * installed on a page or on its context.
+   * Installs the clock in every current and later document of the page or context, until the registration is
+   * removed or its scope closes. Removing it affects later documents only: a document it reached keeps the clock.
+   * Fails with `Conflict` when a clock, installed on a page or on its context, already covers any of the same pages.
+   *
+   * **Example** (Freezing the date)
+   *
+   * ```ts import.meta.vitest
+   * import { Expect, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const newYearBanner = Effect.fn("newYearBanner")(function*(page: Page.Page) {
+   *   yield* page.clock.install({ mode: "fixed", at: "2027-01-01T08:00:00Z" })
+   *   yield* page.goto("https://shop.example.com")
+   *   yield* page.getByText("Happy New Year").pipe(Expect.toBeVisible)
+   * })
+   * ```
    */
   install(
     mode: Mode,
     options?: InstallOptions | undefined
   ): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>
   /**
-   * Advances a controlled clock, firing every due timer in order, an interval as often as it falls due.
+   * Advances a controlled clock, firing every due timer in order, an interval as often as it falls due. Fails with
+   * `WrongMode` on a `fixed` or `offset` clock.
+   *
+   * **Example** (Letting a toast time out)
+   *
+   * ```ts import.meta.vitest
+   * import { Expect, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const toastHides = Effect.fn("toastHides")(function*(page: Page.Page) {
+   *   yield* page.clock.install({ mode: "controlled", at: "2026-01-01T09:00:00Z" })
+   *   yield* page.goto("https://shop.example.com/products/42")
+   *   yield* page.getByRole("button", { name: "Add to cart" }).click()
+   *   yield* page.getByRole("status").pipe(Expect.toBeVisible)
+   *   yield* page.clock.adjust("5 seconds")
+   *   yield* page.getByRole("status").pipe(Expect.toBeHidden)
+   * })
+   * ```
    */
   adjust(duration: Duration.Input): Effect.Effect<void, PageClockError | Target.TargetGone>
   /**
    * Jumps a fixed or controlled clock to `at`; due timers fire at most once.
+   *
+   * **Example** (Jumping past the end of a sale)
+   *
+   * ```ts import.meta.vitest
+   * import { Expect, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const saleEnds = Effect.fn("saleEnds")(function*(page: Page.Page) {
+   *   yield* page.clock.install({ mode: "controlled", at: "2026-11-30T23:59:00Z" })
+   *   yield* page.goto("https://shop.example.com/sale")
+   *   yield* page.clock.setTime("2026-12-01T00:00:01Z")
+   *   yield* page.getByText("The sale has ended").pipe(Expect.toBeVisible)
+   * })
+   * ```
    */
   setTime(at: DateTime.DateTime.Input): Effect.Effect<void, PageClockError | Target.TargetGone>
   /**
    * Lets the clock run in real time again, from the time it shows now: it becomes an `offset` clock, and the
    * timers waiting on a controlled clock become real timers.
+   *
+   * **Example** (Advancing a day, then running in real time)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const tomorrow = Effect.fn("tomorrow")(function*(page: Page.Page) {
+   *   yield* page.clock.install({ mode: "controlled", at: "2026-06-01T09:00:00Z" })
+   *   yield* page.goto("https://app.example.com/calendar")
+   *   yield* page.clock.adjust("1 day")
+   *   yield* page.clock.resume
+   * })
+   * ```
    */
   readonly resume: Effect.Effect<void, PageClockError | Target.TargetGone>
 }
@@ -175,6 +232,23 @@ const PageClockErrorTypeId = "~@usestrider/browser/PageClock/PageClockError"
 
 /**
  * Error for a clock operation that failed.
+ *
+ * **Example** (Advancing only a controlled clock)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const skipAhead = Effect.fn("skipAhead")(function*(page: Page.Page) {
+ *   yield* page.clock.adjust("10 minutes").pipe(
+ *     Effect.catchReason(
+ *       "PageClockError",
+ *       "WrongMode",
+ *       (reason) => Effect.logWarning(`A ${reason.mode} clock can't be advanced`)
+ *     )
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category errors

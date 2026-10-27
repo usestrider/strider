@@ -1,8 +1,8 @@
 /**
  * HAR recordings: a page's or context's network traffic, exported as an HTTP Archive.
  *
- * Exports are redacted, unless you name a class of secret to include. A recorded HAR can answer requests again
- * through a route, `Route.fromHar`.
+ * Exports are redacted unless `include` names a class of secret. `Route.fromHar` answers requests from a recorded
+ * HAR.
  *
  * @stability experimental
  * @since 0.1.0
@@ -36,7 +36,7 @@ import type * as WatchableApi from "./Watchable.ts"
 
 /**
  * A class of secret that an export can include on request: a URL's credentials, cookie values, `Authorization`
- * headers, text typed into a trace, or the bodies requests sent.
+ * headers, text typed into a trace or the bodies requests sent.
  *
  * @stability experimental
  * @category models
@@ -53,8 +53,8 @@ export type SecretClass = "credentials" | "cookies" | "authorizationHeaders" | "
  */
 export interface Options {
   /**
-   * Where bodies go: embedded in the HAR, attached beside it in a zip, or left out. Required: never inferred from
-   * a file extension.
+   * Where bodies go: embedded in the HAR, attached beside it in a zip or left out. Required: never inferred from a
+   * file extension.
    */
   readonly content: "embed" | "attach" | "omit"
   /**
@@ -76,8 +76,7 @@ export interface Options {
    */
   readonly webSocketFrames?: boolean | undefined
   /**
-   * Whether stopping and exporting wait for requests still in flight, or mark them incomplete. Neither waits
-   * unless asked.
+   * Whether stopping and exporting wait for requests still in flight, or mark them incomplete.
    *
    * @default "markIncomplete"
    */
@@ -110,10 +109,41 @@ export interface ExportOptions {
 export interface Recording extends Declaration.Registration {
   /**
    * How many entries have been recorded so far.
+   *
+   * **Example** (Waiting for a page's API calls before exporting)
+   *
+   * ```ts import.meta.vitest
+   * import { Har, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const recordLanding = Effect.fn("recordLanding")(function*(page: Page.Page) {
+   *   const har = yield* Har.record(page, {
+   *     content: "omit",
+   *     url: "https://shop.example.com/api/**"
+   *   })
+   *   yield* page.goto("https://shop.example.com")
+   *   yield* har.entries.waitFor((entries) => entries >= 3)
+   *   return yield* har.exportHar("landing.har")
+   * })
+   * ```
    */
   readonly entries: WatchableApi.Watchable<number>
   /**
    * Writes the HAR to `path`, redacted except for the classes of secret `include` names.
+   *
+   * **Example** (Exporting a sign-up with the bodies it sent)
+   *
+   * ```ts import.meta.vitest
+   * import { Har, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const recordSignUp = Effect.fn("recordSignUp")(function*(page: Page.Page) {
+   *   const har = yield* Har.record(page, { content: "embed" })
+   *   yield* page.goto("https://app.example.com/sign-up")
+   *   yield* page.getByRole("button", { name: "Sign up" }).click()
+   *   return yield* har.exportHar("sign-up.har", { include: ["requestBodies"] })
+   * })
+   * ```
    */
   exportHar(path: FilePath.Local | string, options?: ExportOptions | undefined): Effect.Effect<FilePath.Local, HarError>
 }
@@ -123,28 +153,30 @@ export interface Recording extends Declaration.Registration {
  *
  * **Details**
  *
- * From now on, each redirect hop of each request the target makes is an entry, with its response and, unless
- * `content` is `omit`, the response body, read as the hop finishes. Timings come from Strider's clock, so they
- * mean the same on every backend: `send` is 0, `wait` runs from the request to its response, `receive` from the
- * response to the end, and `blocked`, `dns`, `connect` and `ssl` are -1. `exportHar` writes HAR 1.2, or with
- * `content: "attach"` one zip holding `har.har` and the bodies it names. Cookie values, `Authorization` and
- * `Proxy-Authorization`, and a URL's credentials are `REDACTED` unless `include` names their class.
- *
- * The body each request sent is recorded too, whatever `content` says, and written as `postData` only when
- * `include` names `"requestBodies"`: a body can hold a password. A text body is written as `text`, with a form's
- * `params`. Any other is base64, marked with `_encoding`, or a file beside the HAR when bodies are attached.
+ * - From now on, each redirect hop of each request the target makes is an entry, with its response and, unless
+ *   `content` is `"omit"`, the response body, read as the hop finishes.
+ * - Timings come from Strider's clock, so they mean the same on every backend: `send` is 0, `wait` runs from the
+ *   request to its response, `receive` from the response to the end, and `blocked`, `dns`, `connect` and `ssl`
+ *   are -1.
+ * - `exportHar` writes HAR 1.2, or with `content: "attach"` one zip holding `har.har` and the bodies it names.
+ * - A URL's credentials, cookie values and the `Authorization` and `Proxy-Authorization` headers are `REDACTED`
+ *   unless `include` names their class.
+ * - The body each request sent is recorded whatever `content` says, and written as `postData` only when
+ *   `include` names `"requestBodies"`. A text body is written as `text`, with a form's `params`; any other is
+ *   base64 (marked with `_encoding`) or a file beside the HAR when bodies are attached.
  *
  * **Gotchas**
  *
- * Bodies are collected for the target while it records, which WebDriver BiDi needs declared before a request
- * is sent; `webSocketFrames` is `Unsupported` there. Chromium keeps only the body a request's last hop sent, so
- * an earlier hop's body that its event didn't carry, such as a file upload that a 307 redirected, is left out.
+ * - Bodies are collected for the target while it records, up to `NetworkResponse.BodyLimit`.
+ * - `webSocketFrames` is `Unsupported` on WebDriver BiDi.
+ * - Chromium keeps only the body a request's last hop sent, so an earlier hop's body that its event didn't carry,
+ *   such as a file upload that a 307 redirected, is left out.
  *
- * **Example** (A HAR of a checkout, with its bodies)
+ * **Example** (Recording a checkout's traffic)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Har, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const checkout = Effect.fn("checkout")(function*(page: Page.Page) {
  *   const har = yield* Har.record(page, { content: "attach" })
@@ -314,6 +346,23 @@ const HarErrorTypeId = "~@usestrider/browser/Har/HarError"
 
 /**
  * Error for a HAR that couldn't be recorded, exported or read for replay.
+ *
+ * **Example** (Logging a HAR that couldn't be written)
+ *
+ * ```ts import.meta.vitest
+ * import { Har } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const saveHar = Effect.fn("saveHar")(function*(har: Har.Recording) {
+ *   yield* har.exportHar("artifacts/run.har").pipe(
+ *     Effect.catchReason(
+ *       "HarError",
+ *       "WriteFailed",
+ *       (reason) => Effect.logWarning(`No HAR: ${reason.hint}`)
+ *     )
+ *   )
+ * })
+ * ```
  *
  * @stability experimental
  * @category errors

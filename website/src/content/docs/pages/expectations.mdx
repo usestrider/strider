@@ -1,20 +1,15 @@
 ---
 title: Expectations and reads
-description: Expectations wait for the page to be right; reads say what it is now. Knowing which one you want is most of writing a reliable program.
+description: Expectations wait for the page to be right; reads say what it is now.
 order: 3
 ---
 
-## Two ways to ask
+## Expect, then read
 
-There are two ways to find out about a page, and they behave differently on purpose:
+- **An expectation** (`Expect.to*`) retries on each change to the page until it passes or the deadline does.
+- **A read** (`readText`, `count`, `isVisible`, `page.title`) says what's true now. It never waits or retries.
 
-- **An expectation** (`Expect.to*`) waits for something to become true, checking again each time the page
-  changes, until it is or the deadline passes.
-- **A read** (`readText`, `count`, `isVisible`, `page.title`) says what is true now. It never waits and never
-  retries.
-
-When the program's next step depends on the page reaching a state, expect it. When you want a value to use, read
-it, after expecting whatever the value depends on.
+Expect the state you need, then read the value:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -42,11 +37,10 @@ const cartTotal = Effect.fn("cartTotal")(function*(page: Page.Page) {
 | `toMatchAria(pattern)`                         | its accessibility tree matches a pattern                         |
 | `toHaveURL(expected)`, `toHaveTitle(expected)` | the page's URL or title matches                                  |
 
-With a string, `toHaveText` matches the whole text exactly, and with a `RegExp` it tests it. `toBeHidden` passes
-when nothing matches at all, so it's also how to wait for something to go away.
+A string `toHaveText` matches the whole text; a `RegExp` is tested. `toBeHidden` also passes when nothing matches,
+so it waits for something to go away.
 
-Matchers with no arguments are themselves the function, and those with arguments are dual, as Effect's own
-functions are. These lines are the same:
+A matcher without arguments is the function itself; one with arguments is dual:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -61,17 +55,13 @@ const visible = badge.pipe(Expect.toBeVisible)
 
 ## How expectations wait
 
-A locator's expectation waits in the page. It checks, and if the condition doesn't hold, checks again on each
-change to the document, each input or focus event, and each animation frame, until it does or a second has
-passed, and then Strider asks again, until the deadline. No change is missed between checks, and there is no
-polling interval to tune and no backoff, which would make a test slower the longer it waits.
-
-An expectation on the page's URL is checked again each time the URL changes. Everything runs on the real clock,
-within the operation's deadline.
+A locator's expectation re-checks in the page on each DOM change, input or focus event and animation frame, in
+rounds of up to a second, until the deadline. Nothing is missed between checks; there's no polling interval or
+backoff. An expectation on `page.url` re-checks when the URL changes.
 
 ## Expecting anything
 
-`Expect.that` takes any subject and a `Condition`, a predicate with a description that appears in the failure:
+`Expect.that` takes an effect and a `Condition`, a predicate whose description the failure shows:
 
 ```ts
 import { Condition, Expect, Page } from "@usestrider/browser"
@@ -87,15 +77,13 @@ const resultsLoaded = Effect.fn("resultsLoaded")(function*(page: Page.Page) {
 })
 ```
 
-A subject Strider keeps up to date, such as `page.url`, is checked again each time it changes. Any other
-effect is run again every 100 ms, which `Expect.withCheckInterval` changes. `Condition.not`, `Condition.and` and
-`Condition.because` combine conditions and explain them.
+A `Watchable` such as `page.url` re-checks on each change; any other effect re-runs every 100 ms
+(`Expect.withCheckInterval`). `Condition.not`, `Condition.and` and `Condition.because` combine conditions.
 
 ## Structure
 
-`toMatchAria` matches an element's accessibility tree against a pattern. How a node's children are compared is
-always stated: `exactly` these children and no others, `including` these in this order with others allowed
-between, or `unchecked`:
+`toMatchAria` matches an element's accessibility tree against a pattern. Each node says how its children compare:
+`exactly`, `including` (in order, others allowed between) or `unchecked`:
 
 ```ts
 import { AriaPattern, Expect, Page } from "@usestrider/browser"
@@ -122,11 +110,10 @@ const mainNavigation = Effect.fn("mainNavigation")(function*(page: Page.Page) {
 | `count`, `all`                        | how many elements match, and a locator for each                  |
 | `page.title`, `page.readHtml`         | the document's title, and its HTML                               |
 
-Reads are strict, like actions: they need exactly one match. Several fail with `StrictViolation`, and none fails at
-once with `NoMatch`, since a read doesn't wait for an element to arrive. `count` and `all` take any number.
+Reads need exactly one match: several fail with `StrictViolation`, none fails at once with `NoMatch`. `count` and
+`all` take any number.
 
-A read that fails with `NoMatch` because the element hasn't rendered yet is the most common mistake. The fix is to
-expect what you're waiting for, then read:
+A `NoMatch` from an element that hasn't rendered yet means: expect first, then read.
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -142,8 +129,7 @@ const orderNumber = Effect.fn("orderNumber")(function*(page: Page.Page) {
 
 ## Several checks, every failure
 
-An expectation fails the effect it's in, so the first failure stops the rest. To check several things and see
-every failure, collect them with Effect, which already knows how:
+The first failed expectation stops the rest. To see every failure, collect them with Effect:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -160,9 +146,8 @@ const summary = Effect.fn("summary")(function*(page: Page.Page) {
 
 ## State that changes
 
-Some of a page's state is watchable: its status, its URL and its frame tree, a download's progress, a browser's
-pages. A `Watchable` is an `Effect` that reads the current value, with `changes`, a stream that starts with the
-current value, and `waitFor`, which waits until the value satisfies a predicate:
+A page's status, URL and frames, a download's progress and a browser's pages are `Watchable`s: an `Effect` that
+reads the current value, with `changes`, a stream of values, and `waitFor`, which waits for a predicate:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -177,15 +162,14 @@ const fullyLoaded = Effect.fn("fullyLoaded")(function*(page: Page.Page) {
 })
 ```
 
-`waitFor` checks the current value first, so it can't miss a state that's already true.
-It fails with `Watchable.Ended` when the value has settled for good on one that doesn't satisfy it, such as waiting
-for a page to load after it closed.
+- `waitFor` checks the current value first.
+- It fails with `Watchable.Ended` when the value settles on one that doesn't match, such as a completed download's
+  status, and with `TargetGone` when what it watches ends, such as a closed page.
 
 ## Evaluating in the page
 
-For what no query or read covers, run a function in the page. `page.evaluate` runs it in an isolated world of
-Strider's, which sees the page's DOM but not its scripts' globals; `evaluateInMainWorld` runs it among the page's
-own scripts, and needs a `Page` you control:
+`page.evaluate` runs a function in an isolated world, which sees the DOM but not the page's globals.
+`evaluateInMainWorld` runs it among the page's scripts, and needs control:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -202,7 +186,7 @@ const viewport = Effect.fn("viewport")(function*(page: Page.Page) {
 })
 ```
 
-The function crosses into the page, so it must be self-contained: values it needs go in as arguments,
-`page.evaluate((id) => document.getElementById(id)?.textContent, "total")`. Its result comes back by value, and its
-type says what actually arrives. A DOM node can't come back by value; `evaluateHandle` gives a handle to it instead,
-released when its scope closes.
+- The function must be self-contained; pass values as arguments:
+  `page.evaluate((id) => document.getElementById(id)?.textContent, "total")`.
+- The result comes back by value, typed as what arrives.
+- A DOM node can't come back by value: `evaluateHandle` gives a handle, released with its scope.

@@ -1,13 +1,12 @@
 ---
 title: A first program
-description: Launch a browser, open a page, act on it and check the result, then turn the steps into functions you can reuse.
+description: Launch a browser, open a page, act and check the result, then make the steps reusable functions.
 order: 2
 ---
 
 ## The whole program
 
-This program opens a shop, adds a product to the cart and checks that the cart says so. It runs as it is, with
-Node and a Chromium:
+Open a shop, add a product to the cart, and check the cart says so:
 
 ```ts title="checkout.ts"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
@@ -34,63 +33,49 @@ program.pipe(Effect.provide(BrowserLive), NodeRuntime.runMain)
 CHROMIUM_PATH=/usr/bin/chromium node checkout.ts
 ```
 
-Each line does one thing, and each is worth a closer look.
-
 ## Opening a page
 
-`Browser.newPage()` uses the `Browser` service the layer provides. It makes a fresh context, an isolated session
-with its own cookies and storage, and opens a page in it. Both belong to the `Scope` around them, here the one
-`Effect.scoped` makes, and both close when it ends: when the program finishes, when a step fails, or when it's
-interrupted. There is no `close` to forget.
+`Browser.newPage()` makes a fresh context, with its own cookies and storage, and a page in it. Both close when
+the `Scope` from `Effect.scoped` ends: on success, failure or interruption.
 
-`page.goto(url)` navigates and returns once the navigation has committed: the browser has the response and the
-new document has started, which is the moment a navigation has succeeded or failed. To wait for more, ask:
-`page.goto(url, { waitUntil: "load" })`. A 404 still commits, so `goto` succeeds and returns the navigation, with
-its response, for you to check.
+`page.goto(url)` returns when the navigation commits, which is when it has succeeded or failed.
+`{ waitUntil: "load" }` waits for the load too. A 404 still commits: `goto` returns the navigation, with its
+response.
 
 ## Locators and actions
 
-`page.getByRole("button", { name: "Add to cart" })` is a locator: a description of how to find an element, not
-the element itself. Making one does nothing. Each time it's used, it finds the element again, so a locator made
-before the page re-renders still works after.
+`page.getByRole("button", { name: "Add to cart" })` is a locator: how to find an element, not the element. It
+finds the element again each time it's used, so it survives a re-render.
 
-`click()` is an action. Before it clicks, it waits until there is exactly one matching element and that element
-is visible, enabled, not moving and not covered by anything, scrolling it into view if needed. Then it clicks
-once.
-If something covers the button just as the click is sent, such as a toast that slides in, the page never sees
-the click, and the action checks again. [Actions](/docs/pages/actions) lists each action's checks.
+`click()` waits until exactly one element matches and it's visible, enabled, still and uncovered, scrolling it into
+view, then clicks once. If something covers it as the click is sent, the page never sees the click and the action
+checks again. [Actions](/docs/pages/actions) lists each action's checks.
 
 ## Expectations
 
-`Expect.toBeVisible` is an expectation. It checks now, and again each time the page changes, until the element is
-visible or the deadline passes. That is the only kind of waiting in the program: no sleeps, and nothing that
-guesses when the page is ready.
+`Expect.toBeVisible` checks now and on each change to the page, until it passes or the deadline does. It's the
+program's only waiting: no sleeps.
 
-An expectation can be written either way round. With no arguments the matcher is the function, so
-`locator.pipe(Expect.toBeVisible)` and `Expect.toBeVisible(locator)` are the same. Matchers with arguments are
-dual, as Effect's own functions are: `locator.pipe(Expect.toHaveText("1 item"))` or
-`Expect.toHaveText(locator, "1 item")`.
+`locator.pipe(Expect.toBeVisible)` and `Expect.toBeVisible(locator)` are the same. Matchers with arguments are dual:
+`locator.pipe(Expect.toHaveText("1 item"))` or `Expect.toHaveText(locator, "1 item")`.
 
 ## Reads
 
-`page.title` is a read. It's a value, not a function, because there is nothing to configure: an `Effect` that
-reads the title at the moment it runs. Reads never wait and never retry. That is the line the API draws
-everywhere: actions are calls, reads are values, and `Expect.to*` is what retries.
+`page.title` is a read: an `Effect` that reads the title when it runs, never waiting or retrying. Actions are
+calls, reads are values, and only `Expect.to*` retries.
 
 ## The layer
 
-`Chromium.layerConfig` launches the executable that `CHROMIUM_PATH` names, headless, with a temporary profile.
-`NodeServices.layer` gives it what it needs to start a process and make that profile. `Effect.provide` runs the
-program with the browser, and when the program ends the browser exits and its profile is deleted.
-`NodeRuntime.runMain` runs it all, and turns Ctrl-C into an interruption, which closes the page and the browser
-on the way out.
+`Chromium.layerConfig` launches the executable `CHROMIUM_PATH` names, headless, with a temporary profile;
+`NodeServices.layer` lets it start the process. When the program ends, the browser exits and the profile is
+deleted. `NodeRuntime.runMain` turns Ctrl-C into an interruption, which closes the page and the browser.
 
-Swap the layer to run the same program somewhere else. Everything above it stays as it is.
+To run on another browser, change the layer.
 
 ## Steps as functions
 
-As a program grows, its steps become functions. Write them with `Effect.fn`, which names each one. The name becomes
-the step's span, so a trace shows `addToCart` with its clicks inside it.
+Write steps with `Effect.fn`. The name becomes the step's span, so a trace shows `addToCart` with its clicks
+inside.
 
 ```ts title="checkout.ts"
 import { Browser, Expect, Page } from "@usestrider/browser"
@@ -116,14 +101,12 @@ const program = Effect.scoped(Effect.gen(function*() {
 }))
 ```
 
-A step takes the page as an argument and needs nothing else, so it works the same in a script, in a test, or in a
-segment the `strider` command runs. A step that only reads can take a `Page.ReadonlyPage` instead, and then works on pages you're only allowed
-to inspect.
+A step that takes the page works the same in a script, a test or a `strider` segment. One that only reads can
+take a `Page.ReadonlyPage`, and then also works on pages you may only inspect.
 
 ## Many pages at once
 
-Pages are values and steps are effects, so running several at once is Effect's job. Each `newPage` here gets a
-context of its own, so the pages share no cookies, and each is closed when its own scope ends:
+Run steps concurrently with Effect. Each `newPage` gets its own context, so the pages share no cookies:
 
 ```ts
 import { Browser } from "@usestrider/browser"
@@ -140,4 +123,3 @@ const titles = Effect.fn("titles")(function*(urls: ReadonlyArray<string>) {
 })
 ```
 
-Next: what happens when a step fails.

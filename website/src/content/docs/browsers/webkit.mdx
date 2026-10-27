@@ -1,74 +1,116 @@
 ---
 title: WebKit
-description: Safari's engine, through Playwright's WebKit build. Getting the one build Strider needs, how its pages change process, and what WebKit does differently.
+description: Stock WebKitGTK and WPE on Linux. Launching a MiniBrowser, attaching to a running browser, and what WebKit can't do.
 order: 4
 ---
 
-## Safari's engine, as Playwright builds it
+## Stock WebKit
 
-WebKit is the engine Safari runs on. Safari itself can't be automated the way Chromium and Firefox can, so to test
-what Safari's users will see, Strider launches Playwright's WebKit build: WebKit with the protocol Playwright adds
-for automation, built for Linux, macOS and Windows. It's the closest a test can get to Safari outside an Apple
-device.
+Strider drives stock WebKitGTK and WPE, unpatched: WebKit's Automation protocol for pages and input, its inspector
+protocol for the rest. Both are generated from WebKitGTK 2.54.1, and the tests run its MiniBrowser.
 
-To look into a WebKitGTK or WPE browser that's already running, such as a device's, see
-[Stock WebKit](/docs/browsers/stock-webkit).
+- `WebKit.layer` launches a MiniBrowser and drives it.
+- `WebKit.layerAttach` attaches to a running WebKitGTK or WPE browser, to read, locate, screenshot and navigate. It
+  can't click or type.
 
-## The one build Strider needs
-
-Playwright's WebKit protocol changes often between builds, so Strider is built for one: **build 2359**, the one
-Playwright 1.63 installs. Install it with that Playwright:
-
-```sh
-npx playwright@1.63 install webkit
-```
-
-The build goes into Playwright's browser cache: `~/.cache/ms-playwright` on Linux, `~/Library/Caches/ms-playwright`
-on macOS, `%LOCALAPPDATA%\ms-playwright` on Windows, or `PLAYWRIGHT_BROWSERS_PATH` if it's set. `npx strider
-browsers` looks there, and says of each build whether it's the one Strider needs. The executable to give the layer
-is the build's `pw_run.sh`, or `Playwright.exe` on Windows:
-
-```ts
-import { NodeServices } from "@effect/platform-node"
-import { WebKit } from "@usestrider/browser/webkit"
-import { Config, Layer } from "effect"
-
-const WebKitLive = WebKit.layerConfig({
-  executablePath: Config.String("WEBKIT_PATH") // …/ms-playwright/webkit-2359/pw_run.sh
-}).pipe(Layer.provide(NodeServices.layer))
-```
-
-Before it starts anything, a launch checks the build's `protocol.json` against the one Strider was generated from.
-Any other build fails with `IncompatibleRevision`, saying which build is needed, rather than failing later in some
-command it doesn't know.
-
-Strider's tests run build 2359 on Linux. Playwright builds it for macOS and Windows too, which aren't tested.
+Linux only. Safari on macOS and iOS isn't supported. WPE isn't tested.
 
 ## Launching
 
-A launch runs the build with `--inspector-pipe`, so Strider talks to it over a pipe as it does to Chromium, and
-with `--headless` unless you say otherwise. On Linux, Playwright's script runs WebKit's WPE port headless and its
-GTK port headed, so a headed run needs a display. The browser gets a temporary profile, deleted after it exits, or
-the `userDataDir` you name.
+`WebKit.layer` takes WebKitGTK's or WPE's MiniBrowser; any other executable fails with `InvalidInput`. It isn't on
+`PATH`: it's under the port's directory, such as `/usr/libexec/webkitgtk-6.0/MiniBrowser`. `npx strider browsers`
+finds it.
 
-Launch profiles don't apply: their switches are Chromium's and their preferences Firefox's, and Playwright's build
-takes neither. There's no endpoint to attach to, either: Playwright's build can only be launched.
+A launch needs:
 
-## Pages change process
+- **A display.** WebKitGTK has no headless mode: leave `headless` unset, since `headless: true` fails with
+  `InvalidInput`. The window opens on `DISPLAY` or `WAYLAND_DISPLAY`; on a server, use a virtual display such as Xvfb.
+- **A `SocketConnector`,** to reach the browser's inspector over TCP. Make one from Node's sockets:
 
-A WebKit page has two halves. Its page proxy lives in the browser's UI process, holds the window and takes input,
-and lasts for the page's whole life; the page itself runs in a web process, and a navigation to another site moves
-it to a new one. Strider follows the move, so the same `Page` handle goes on working across it, and every new web
-process starts paused until Strider has set it up: routes, init scripts and its own isolated world are in place
-before the page's first script runs.
+```ts
+import { NodeServices, NodeSocket } from "@effect/platform-node"
+import { SocketConnector } from "@usestrider/browser/protocol"
+import { WebKit } from "@usestrider/browser/webkit"
+import { Config, Layer } from "effect"
 
-What a new process means for you is small. A locale reaches only a new web process, so it's set when a context is
-made, not later, and a document reads its user agent once, when it loads.
+const Sockets = SocketConnector.layer((endpoint) =>
+  NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port })
+)
+
+const WebKitLive = WebKit.layerConfig({
+  executablePath: Config.String("WEBKIT_PATH")
+}).pipe(Layer.provide([NodeServices.layer, Sockets]))
+```
+
+`SocketConnector` is provisional; Effect's own will replace it.
+
+Each context is a browser process with its own ephemeral profile, about 0.6 seconds to start. The default context
+is the first tab's. Launch profiles don't apply to WebKit.
+
+## Attaching
+
+Start the browser with an inspector server:
+
+```sh
+WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9333 /usr/libexec/webkitgtk-6.0/MiniBrowser https://example.com
+```
+
+Attach to it with `WebKit.layerAttach`, which needs a `WebSocketConstructor`:
+
+```ts
+import { NodeSocket } from "@effect/platform-node"
+import { Browser, Expect } from "@usestrider/browser"
+import { WebKit } from "@usestrider/browser/webkit"
+import { Effect, Layer } from "effect"
+
+const Device = WebKit.layerAttach("http://127.0.0.1:9333").pipe(
+  Layer.provide(NodeSocket.layerWebSocketConstructor)
+)
+
+const menuShows = Effect.scoped(Effect.gen(function*() {
+  const [first] = yield* (yield* Browser.Browser).pages
+  if (first === undefined) return
+  const page = yield* first.control
+  yield* page.goto("http://localhost:8080/menu")
+  yield* page.getByRole("heading", { name: "Menu" }).pipe(Expect.toBeVisible)
+  return yield* page.screenshot()
+})).pipe(Effect.provide(Device))
+```
+
+- The page list is read at connect and every 250 ms, so new pages appear.
+- Every page is observed; `inspect` or `control` gives access for a scope. Pages stay open after the program ends.
+- `browser.info` is `WebKit (stock)`, version `unknown`.
+- `goto` sets `location.href`; a fragment-only change is refused.
+- After a failed load, the error page is `about:blank`, as the failed navigation's document.
+- An `alert` stops the page, unreported, until a person dismisses it.
+- The `strider` command's `--attach` can't reach stock WebKit.
+
+There's no input, no dialogs and no new pages. To press a button, run the page's own script:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const refresh = Effect.fn("refresh")(function*(page: Page.Page) {
+  yield* page.evaluateInMainWorld(() => {
+    document.querySelector<HTMLButtonElement>("button#refresh")?.click()
+  })
+})
+```
+
+That runs the button's handlers, without what a real click does first, such as focusing it.
+
+## No isolated worlds
+
+Stock WebKit has no isolated worlds, launched or attached:
+
+- `page.evaluate` fails with `Unsupported`. Use `evaluateInMainWorld`, which needs control.
+- Strider's engine and init scripts run in the page's world, where the page's scripts can see them. A page that
+  replaces the built-ins they use can change what locators find.
 
 ## What WebKit can't do
 
-Generated from the backend's capability list: each entry is something WebKit lacks or does only partly, with the
-reason the backend gives.
+From the backend's capability list, for a launched MiniBrowser:
 
 <BrowserLimits browser="webkit" />
 
@@ -76,48 +118,48 @@ Supported, with a caveat:
 
 <BrowserLimits browser="webkit" caveats />
 
+What changes when attached:
+
+<BrowserLimits browser="webkit" when="attached" />
+
 ## What's different
 
-**Modifiers don't reach pointer events.** WebKit's mouse events can't carry Shift, Control, Alt or Meta, so a
-click with `modifiers`, or one made while a key is held, fails with `Unsupported` before anything is sent. Key
-events have a similar gap: typing with Shift held gives the right text, but the events say `shiftKey` is false.
+**Dialogs are `Dialog.Unknown`,** with their message: WebKit doesn't say which kind is open. `accept` answers as OK,
+a prompt with its default; `dismiss` as Cancel; `respond(text)` answers a prompt.
 
-**Set the locale when making the context.** WebKit applies a locale per context, and only before its pages exist.
-Pass it at creation, `Browser.newPage({ emulation: { locale: "de-DE" } })`; `page.emulate({ locale })` is refused.
-Geolocation is per context too.
+**`Popup.next` fails with `Unsupported`:** WebKit names no opener. Wait for the new page in the context's `pages`:
 
-**Routes miss pages a service worker controls.** WebKit sends such a page's requests past the interceptor, even the
-ones the worker passes on to the network, so no route sees them.
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect, Equal } from "effect"
 
-**Redirects pause once.** Only a redirect's first hop reaches a route, and a redirect a route fulfills isn't
-followed.
+const openHelp = Effect.fn("openHelp")(function*(page: Page.Page) {
+  const before = yield* page.context.pages
+  yield* page.getByRole("link", { name: "Help" }).click()
+  const after = yield* page.context.pages.waitFor((pages) =>
+    pages.length > before.length
+  )
+  return after.find((each) => !before.some((known) => Equal.equals(known, each)))
+})
+```
 
-**The response phase can fulfill, but not read.** A route at the response phase can replace a response, but can't
-read its body or send it on with new headers. Every abort is the same failure, `"failed"`.
+**No `back` or `forward`:** WebKit misreports them.
 
-**No back/forward cache.** Going back loads the page again rather than restoring it, so a navigation from `back`
-is `Committed`, never `Restored`.
+**Little emulation.** The viewport is the window's size. Locale, time zone, user agent, touch and throttling can't
+be emulated.
 
-**No PDF.** Playwright's WebKit has no print-to-PDF.
+**Cookies.** A context lists only the cookies its open pages are sent, and a host's cookie is set as its domain's.
 
-**A response's protocol comes late.** WebKit reports the HTTP version when a response ends, so `httpVersion` on a
-`NetworkResponse` event is `None`; a HAR has it.
+**Requests.** No `Cookie` header, in request events or `headersSent`. Request bodies come as text.
 
-**Init scripts run in the page's world only.** One for an isolated world is refused. A script's top-level `var`
-becomes a global, as in Chromium.
+**Storage is keyed by origin.** A cross-site frame's storage is keyed by its page's origin, port included, so a
+saved storage state restored at another port isn't found.
 
-**Only dedicated workers are reported.** Shared and service workers aren't.
+**No downloads, file choosers, PDFs or screencasts.** `setInputFiles` works. Screenshots are PNG.
 
-## The raw protocol
+## The protocols
 
-`@usestrider/browser/webkit-protocol` has build 2359's protocol as typed values, Playwright's own domains included,
-and `WebKitConnection` runs it over a pipe to a build you start yourself, with `--inspector-pipe`. It hands out the
-browser's session, each page proxy's, and each target's inside it.
+`@usestrider/browser/webkit-automation-protocol` and `@usestrider/browser/webkit-stock-protocol` are the generated
+protocols, as typed values. No public connection runs them yet.
 
-It's the protocol and nothing more, and WebKit's is unforgiving. Every target starts paused until you send
-`Target.resume`. Two commands abort the browser instead of failing: `Playwright.navigate` with a frame id the page
-doesn't have, and `Dialog.handleJavaScriptDialog` with no dialog open. And starting the build yourself skips the
-launch's check that it's build 2359.
-
-When WebKit rejects a command in an ordinary Strider call, the operation fails with `BackendFailure`, whose `cause`
-is the `ProtocolError`, with WebKit's own error code and message.
+A rejected command fails with `BackendFailure`; its `cause` is the `ProtocolError`, with WebKit's code and message.

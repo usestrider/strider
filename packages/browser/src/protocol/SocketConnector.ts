@@ -1,13 +1,12 @@
 /**
- * Opens scoped socket connections to endpoints chosen at run time, such as the inspector server of a stock WebKit
- * browser `WebKit.layer` launched.
+ * Opens scoped socket connections to endpoints known only at run time, such as the inspector server of a
+ * MiniBrowser that `WebKit.layer` launched.
  *
  * **Details**
  *
- * Provisional. It has the shape of Effect's own `effect/socket/SocketConnector` (Effect-TS/effect#8735), which
- * replaces it once Effect releases it: Effect's services make WebSockets, processes and files, and none yet opens
- * a TCP connection to a port only known at run time. A program provides it from its platform's sockets, as
- * `@effect/platform-node`'s `NodeSocket.makeNet` makes them.
+ * Provisional: it has the shape of Effect's proposed `effect/socket/SocketConnector` (Effect-TS/effect#8735), which
+ * replaces it once Effect releases it. Provide it from your platform's sockets with `layer`, such as
+ * `@effect/platform-node`'s `NodeSocket.makeNet`.
  *
  * @stability experimental
  * @since 0.1.0
@@ -52,6 +51,25 @@ export type TlsOptions = Socket.TlsUpgradeOptions
  * @since 0.1.0
  */
 export interface Connection extends Socket.Reader, Socket.Writer {
+  /**
+   * Ends the connection before its scope closes.
+   *
+   * **Example** (Closing a connection once its answer is read)
+   *
+   * ```ts import.meta.vitest
+   * import { SocketConnector } from "@usestrider/browser/protocol"
+   * import { Effect } from "effect"
+   *
+   * const ask = Effect.fn("ask")(function*(port: number) {
+   *   const connector = yield* SocketConnector.SocketConnector
+   *   const connection = yield* connector.connect({ host: "127.0.0.1", port })
+   *   yield* connection.write("GET /json HTTP/1.0\r\n\r\n")
+   *   const answer = yield* connection.pull
+   *   yield* connection.close
+   *   return answer
+   * })
+   * ```
+   */
   readonly close: Effect.Effect<void>
 }
 
@@ -63,6 +81,25 @@ export interface Connection extends Socket.Reader, Socket.Writer {
  * @since 0.1.0
  */
 export interface SocketConnector {
+  /**
+   * Opens a connection to `endpoint`, which closes when the scope does.
+   *
+   * **Example** (Checking whether a port accepts connections)
+   *
+   * ```ts import.meta.vitest
+   * import { SocketConnector } from "@usestrider/browser/protocol"
+   * import { Effect } from "effect"
+   *
+   * const accepts = Effect.fn("accepts")(function*(port: number) {
+   *   const connector = yield* SocketConnector.SocketConnector
+   *   return yield* connector.connect({ host: "127.0.0.1", port }).pipe(
+   *     Effect.scoped,
+   *     Effect.as(true),
+   *     Effect.catch(() => Effect.succeed(false))
+   *   )
+   * })
+   * ```
+   */
   readonly connect: (endpoint: Endpoint) => Effect.Effect<Connection, Socket.SocketError, Scope.Scope>
 }
 
@@ -78,8 +115,25 @@ export const SocketConnector: Context.Service<SocketConnector, SocketConnector> 
 )
 
 /**
- * A connection from a socket that hasn't connected yet: its reader, which connects it, and its writer, both held
- * until `close` or the scope ends.
+ * Connects a socket that hasn't connected yet and makes a `Connection` of it.
+ *
+ * **Details**
+ *
+ * Its reader and writer are held until `close` or the end of the scope.
+ *
+ * **Example** (Sending a request over a socket)
+ *
+ * ```ts import.meta.vitest
+ * import { SocketConnector } from "@usestrider/browser/protocol"
+ * import { Effect } from "effect"
+ * import type * as Socket from "effect/socket/Socket"
+ *
+ * const request = Effect.fn("request")(function*(socket: Socket.Socket) {
+ *   const connection = yield* SocketConnector.fromSocket(socket)
+ *   yield* connection.write("GET /json HTTP/1.0\r\n\r\n")
+ *   return yield* connection.pull
+ * })
+ * ```
  *
  * @stability experimental
  * @category constructors
@@ -104,16 +158,20 @@ export const fromSocket: (socket: Socket.Socket) => Effect.Effect<Connection, So
 /**
  * Provides `SocketConnector` from a platform's way to make a socket for an endpoint.
  *
- * **Example** (A platform's sockets, such as `@effect/platform-node`'s `NodeSocket.makeNet`)
+ * **Example** (Providing sockets such as `@effect/platform-node`'s `NodeSocket.makeNet`)
  *
  * ```ts import.meta.vitest
+ * import { SocketConnector } from "@usestrider/browser/protocol"
  * import type { Effect } from "effect"
  * import type * as Socket from "effect/socket/Socket"
- * import { SocketConnector } from "@usestrider/browser/protocol"
  *
- * declare const makeNet: (options: { readonly host: string; readonly port: number }) => Effect.Effect<Socket.Socket>
+ * declare const makeNet: (
+ *   options: { readonly host: string; readonly port: number }
+ * ) => Effect.Effect<Socket.Socket>
  *
- * const sockets = SocketConnector.layer((endpoint) => makeNet({ host: endpoint.host, port: endpoint.port }))
+ * const sockets = SocketConnector.layer((endpoint) =>
+ *   makeNet({ host: endpoint.host, port: endpoint.port })
+ * )
  * ```
  *
  * @stability experimental

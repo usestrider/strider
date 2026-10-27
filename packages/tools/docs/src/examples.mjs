@@ -23,7 +23,8 @@ export const examples = (root, guides) => {
       const key = `${api.source.file}:${example.title}`
       if (seen.has(key)) return // an API re-exported from a barrel shares its examples
       seen.add(key)
-      const name = `${api.apiFqn.replace(/[^A-Za-z0-9]+/g, "_")}_${index}.ts`
+      // numbered, so names that differ only in case, such as `Protocol.command` and `Protocol.Command`, stay apart
+      const name = `${count}_${api.apiFqn.replace(/[^A-Za-z0-9]+/g, "_")}_${index}.ts`
       const header = `// ${api.apiFqn}: ${example.title} (${api.source.file})\n`
       fs.writeFileSync(path.join(out, name), header + example.code + "\nexport {}\n")
       count++

@@ -1,15 +1,18 @@
 /**
  * The WebSockets and event sources a page opens: connections that stay open and carry messages.
  *
- * A connection is reported when it opens, to its page and context. Its frames are a separate subscription, because
- * most tests care that a socket opened, and only some care what crossed it.
+ * A connection is reported to its page and context when it opens. Its frames are a separate subscription, the
+ * connection's `frames`.
  *
  * **Gotchas**
  *
- * Connections are a capability, `networkConnections`. CDP reports both kinds, with their frames. Playwright's
- * WebKit reports WebSockets, and an `EventSource` only as its request. BiDi reports a WebSocket's handshake as a
- * request and nothing after it, so subscribing there fails with `Unsupported`, as asking WebKit for
- * `kind: "eventSource"` does.
+ * Connections are a capability, `networkConnections`:
+ *
+ * - CDP reports both kinds, with their frames.
+ * - WebKit reports WebSockets, and an `EventSource` only as its request, so `kind: "eventSource"` fails with
+ *   `Unsupported` there.
+ * - BiDi reports a WebSocket's handshake as a request and nothing after it, so subscribing fails with
+ *   `Unsupported`.
  *
  * @stability unstable
  * @since 0.1.0
@@ -66,6 +69,17 @@ export type Kind = "webSocket" | "eventSource"
 /**
  * One message that crossed a connection.
  *
+ * **Example** (Reading a frame's payload)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkConnection } from "@usestrider/browser"
+ *
+ * const describe = (frame: NetworkConnection.Frame) =>
+ *   frame.payload._tag === "Text"
+ *     ? frame.payload.text
+ *     : `${frame.payload.bytes.length} bytes`
+ * ```
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
@@ -83,21 +97,6 @@ const TypeId = "~@usestrider/browser/NetworkConnection"
 
 /**
  * A WebSocket or EventSource connection.
- *
- * **Example** (Watching the first frames of a chat socket)
- *
- * ```ts import.meta.vitest
- * import { Console, Effect, Stream } from "effect"
- * import { NetworkConnection, Page } from "@usestrider/browser"
- *
- * const watchChat = Effect.fn("watchChat")(function*(page: Page.Page) {
- *   const opened = yield* NetworkConnection.next(page, { kind: "webSocket", url: "wss://chat.example.com/*" })
- *   yield* page.getByRole("button", { name: "Open chat" }).click()
- *   const chat = yield* opened
- *   const frames = yield* chat.frames
- *   yield* frames.pipe(Stream.take(3), Stream.runForEach((frame) => Console.log(frame.direction)))
- * })
- * ```
  *
  * @stability unstable
  * @category models
@@ -120,6 +119,27 @@ export interface NetworkConnection extends Pipeable.Pipeable, Inspectable.Inspec
   readonly openedAt: DateTime.Utc
   /**
    * Subscribes to the frames that cross the connection, and gives a stream of every one from then on.
+   *
+   * **Example** (Watching the first frames of a chat socket)
+   *
+   * ```ts import.meta.vitest
+   * import { NetworkConnection, Page } from "@usestrider/browser"
+   * import { Console, Effect, Stream } from "effect"
+   *
+   * const watchChat = Effect.fn("watchChat")(function*(page: Page.Page) {
+   *   const opened = yield* NetworkConnection.next(page, {
+   *     kind: "webSocket",
+   *     url: "wss://chat.example.com/*"
+   *   })
+   *   yield* page.getByRole("button", { name: "Open chat" }).click()
+   *   const chat = yield* opened
+   *   const frames = yield* chat.frames
+   *   yield* frames.pipe(
+   *     Stream.take(3),
+   *     Stream.runForEach((frame) => Console.log(frame.direction))
+   *   )
+   * })
+   * ```
    */
   readonly frames: Effect.Effect<
     Stream.Stream<Frame, Subscription.EventOverflow | Target.TargetGone>,
@@ -129,6 +149,21 @@ export interface NetworkConnection extends Pipeable.Pipeable, Inspectable.Inspec
   /**
    * Waits as long as the connection is open, then gives the reason it ended: `NetworkConnectionClosed` when the
    * page or the server closed it.
+   *
+   * **Example** (Checking that leaving a chat closes its socket)
+   *
+   * ```ts import.meta.vitest
+   * import { NetworkConnection, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const leaveChat = Effect.fn("leaveChat")(
+   *   function*(page: Page.Page, chat: NetworkConnection.NetworkConnection) {
+   *     yield* page.getByRole("button", { name: "Leave chat" }).click()
+   *     const reason = yield* chat.closed
+   *     return reason._tag === "NetworkConnectionClosed"
+   *   }
+   * )
+   * ```
    */
   readonly closed: Effect.Effect<Target.CloseReason>
 }
@@ -202,6 +237,23 @@ const subscription = (
  * Subscribes to connections and returns the wait: an effect whose value is the first match, the same each time it
  * runs.
  *
+ * **Example** (Waiting for a product page's live stock updates)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkConnection, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const openProduct = Effect.fn("openProduct")(function*(page: Page.Page) {
+ *   const opened = yield* NetworkConnection.next(page, {
+ *     kind: "eventSource",
+ *     url: "https://shop.example.com/api/**"
+ *   })
+ *   yield* page.goto("https://shop.example.com/products/boots")
+ *   const updates = yield* opened
+ *   return updates.url
+ * })
+ * ```
+ *
  * @stability unstable
  * @category subscriptions
  * @since 0.1.0
@@ -223,6 +275,21 @@ export const next = <PE = never, PR = never>(
 /**
  * Subscribes to connections and emits every match from now on.
  *
+ * **Example** (Logging every WebSocket a page opens)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkConnection, Page } from "@usestrider/browser"
+ * import { Console, Effect, Stream } from "effect"
+ *
+ * const logSockets = Effect.fn("logSockets")(function*(page: Page.ObservedPage) {
+ *   const sockets = yield* NetworkConnection.stream(page, { kind: "webSocket" })
+ *   yield* sockets.pipe(
+ *     Stream.runForEach((socket) => Console.log(socket.url)),
+ *     Effect.forkScoped
+ *   )
+ * })
+ * ```
+ *
  * @stability unstable
  * @category subscriptions
  * @since 0.1.0
@@ -243,6 +310,18 @@ export const stream = <PE = never, PR = never>(
 
 /**
  * Reads the connections the target's event log kept (`UserContext.Options.eventLog`); never waits.
+ *
+ * **Example** (Listing the sockets a page has opened)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkConnection, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const openedSockets = Effect.fn("openedSockets")(function*(page: Page.ObservedPage) {
+ *   const history = yield* NetworkConnection.history(page, { kind: "webSocket" })
+ *   return history.entries.map((socket) => socket.url)
+ * })
+ * ```
  *
  * @stability unstable
  * @category getters

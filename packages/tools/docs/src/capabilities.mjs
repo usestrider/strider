@@ -1,7 +1,8 @@
 // Each backend's capabilities as its adapter states them, for the site's browser guides: what each browser
-// supports, and where it doesn't, why. They're read from the adapters' own tables (`capabilities` in
-// `cdpAdapter.ts`, `bidiAdapter.ts` and `webkitAdapter.ts`), for a browser Strider launched and one it attached to,
-// so the guides can't drift from what the code reports. Node runs the adapters' TypeScript as it is.
+// supports, and where it doesn't, why. They're read from the adapters' own tables (`capabilities` in `cdpAdapter.ts`
+// and `bidiAdapter.ts`, `launchedCapabilities` and `attachedCapabilities` in `webkitAdapter.ts`), for a browser
+// Strider launched and one it attached to, so the guides can't drift from what the code reports. Node runs the
+// adapters' TypeScript as it is.
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { pathToFileURL } from "node:url"
@@ -38,16 +39,9 @@ export const capabilities = async (root, out) => {
     {
       id: "webkit",
       label: "WebKit",
-      layers: "WebKit.layer",
-      launched: plain(webkit.capabilities(info("Playwright WebKit", "webkit"))),
-      attached: null
-    },
-    {
-      id: "webkit-stock",
-      label: "Stock WebKit",
-      layers: "WebKit.layerAttach",
-      launched: null,
-      attached: plain(webkit.stockCapabilities(info("WebKit (stock)", "webkit")))
+      layers: "WebKit.layer, WebKit.layerAttach",
+      launched: plain(webkit.launchedCapabilities(info("WebKit", "webkit"))),
+      attached: plain(webkit.attachedCapabilities(info("WebKit (stock)", "webkit")))
     }
   ]
   fs.mkdirSync(out, { recursive: true })

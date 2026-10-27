@@ -123,13 +123,12 @@ export interface MakeOptions {
    */
   readonly secrets: Readonly<Record<SecretName | string, Redacted.Redacted<string>>>
   /**
-   * What snapshots, screenshots and digests may contain before they reach the model. Required.
+   * What snapshots, screenshots and digests may contain before they reach the model.
    */
   readonly capture: CapturePolicy.CapturePolicy
   /**
    * The browser, so the model can list its other pages (`tabs`) and take control of one (`control`), such as
-   * an attached browser's own tabs. Without it, those tools fail with `NotPermitted`: a model reaches beyond
-   * the context only when it is given the browser.
+   * an attached browser's own tabs. Without it, those tools fail with `NotPermitted`.
    *
    * @default none
    */
@@ -141,19 +140,21 @@ export interface MakeOptions {
  *
  * **Details**
  *
- * Pages are named as they are created (`newPage`'s `name`, or `p1`, `p2`…) or first seen, as a popup is. A
- * target is a ref from the page's latest snapshot (`e12`), or `role=button[name="Save"]`, `text="Add to cart"`,
- * `label=Email`, `testid=cart` or `css=…`; a bad one fails at once. Each result is the call's outcome and
- * `sinceLast`: navigations, popups, dialogs and who decided them, downloads, uncaught exceptions, console
- * errors and failed requests since the previous call. A `%name%` in a parameter becomes the secret's value as the
- * call runs, and results show the value as `%name%` again. Waits, routes and dialog handlers end with the scope.
+ * - Pages are named when they're created (`newPage`'s `name`, or `p1`, `p2`…) or first seen, as a popup is.
+ * - A target is a ref from the page's latest snapshot (`e12`), or `role=button[name="Save"]`, `text="Add to cart"`,
+ *   `label=Email`, `testid=cart` or `css=…`; a bad one fails at once.
+ * - Each result is the call's outcome and `sinceLast`: navigations, popups, dialogs and who decided them,
+ *   downloads, uncaught exceptions, console errors and failed requests since the previous call.
+ * - A `%name%` in a parameter becomes the secret's value as the call runs, and results show the value as `%name%`
+ *   again.
+ * - Waits, routes and dialog handlers end with the scope.
  *
- * **Example** (A toolkit for one context)
+ * **Example** (Building a toolkit for a context)
  *
  * ```ts import.meta.vitest
- * import { Config, Effect } from "effect"
  * import { Page } from "@usestrider/browser"
  * import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
+ * import { Config, Effect } from "effect"
  *
  * const tools = Effect.fn("tools")(function*(page: Page.Page) {
  *   return yield* BrowserToolkit.make({

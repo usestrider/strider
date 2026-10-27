@@ -3,7 +3,7 @@
  *
  * Export a signed-in context's state with `context.exportStorageState`, save it with the `Json` codec, and start
  * new contexts from it with `UserContext.Options.storageState`. It carries secrets: values are `Redacted` in
- * memory, and encoding writes them out in full, because that's the point of saving them.
+ * memory, and `Json` writes them out in full.
  *
  * @stability unstable
  * @since 0.1.0
@@ -49,10 +49,10 @@ export const IndexedDbDatabase = Schema.Struct({
  *
  * **Details**
  *
- * `topLevelOrigin` is, for a partitioned origin, the origin of the top-level document it was read under:
- * stock WebKit keys a partition by that origin, port included, where Chromium and Firefox key it by `partition`'s
- * site. A restore writes the origin's storage under a page there; a state saved without it, under the site's
- * default port.
+ * A partitioned origin also has `topLevelOrigin`: the origin of the page it was read under. A restore writes its
+ * storage from a frame in a page at that origin, or, in a state saved without one, at `partition`'s site on its
+ * default port. WebKit needs it, because it keys a partition by the top-level origin, port included; Chromium
+ * and Firefox key it by site.
  *
  * @stability unstable
  * @category schemas
@@ -83,15 +83,15 @@ export class StorageState extends Schema.Class<StorageState>("@usestrider/browse
  *
  * **Details**
  *
- * It is built with `Schema.toCodecJson`, which writes each `Redacted` value in full. Effect's default JSON
- * encoding (`Schema.fromJsonString(StorageState)`) writes `"<redacted>"` instead, which is right for logs, CLI
- * output and agent results, and would lose every secret in a saved file.
+ * It writes each `Redacted` value in full, through `Schema.toCodecJson`. Effect's default JSON encoding
+ * (`Schema.fromJsonString(StorageState)`) writes `"<redacted>"` instead, which suits logs but loses every secret
+ * in a saved file.
  *
- * **Example** (Log in once, reuse the session)
+ * **Example** (Logging in once and reusing the session)
  *
  * ```ts import.meta.vitest
- * import { Config, Effect, Schema } from "effect"
  * import { Browser, Expect, StorageState } from "@usestrider/browser"
+ * import { Config, Effect, Schema } from "effect"
  *
  * const loginOnce = Effect.gen(function*() {
  *   const json = yield* Effect.scoped(Effect.gen(function*() {
@@ -116,12 +116,34 @@ export class StorageState extends Schema.Class<StorageState>("@usestrider/browse
 export const Json = Schema.fromJsonString(Schema.toCodecJson(StorageState))
 
 /**
- * Reason for a storage state that the new context can't apply in full, such as partitions the backend
- * doesn't support.
+ * Reason for a storage state the new context can't apply in full, such as partitioned cookies on a backend that
+ * can't set them.
  *
  * **Details**
  *
- * Nothing is applied partly: the context isn't created.
+ * The context isn't created, so nothing is applied.
+ *
+ * **Example** (Starting signed out when the state doesn't apply)
+ *
+ * ```ts import.meta.vitest
+ * import { Browser, StorageState } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const signedIn = Effect.fn("signedIn")(
+ *   function*(storageState: StorageState.StorageState) {
+ *     return yield* Browser.newContext({ storageState }).pipe(
+ *       Effect.catchReason(
+ *         "UserContextError",
+ *         "Incompatible",
+ *         (reason) =>
+ *           Effect.logWarning(`Starting signed out: ${reason.hint}`).pipe(
+ *             Effect.andThen(Browser.newContext())
+ *           )
+ *       )
+ *     )
+ *   }
+ * )
+ * ```
  *
  * @stability unstable
  * @category reasons

@@ -37,12 +37,12 @@ declare module "../Reason.ts" {
  * The browser gets a temporary profile, created before it starts and deleted after it exits, unless
  * `userDataDir` names one you own. It exits when the layer's scope closes.
  *
- * **Example** (A headless browser for a program)
+ * **Example** (Launching headless Firefox)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Browser } from "@usestrider/browser"
  * import { Firefox } from "@usestrider/browser/firefox"
+ * import { Effect } from "effect"
  *
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
@@ -72,17 +72,19 @@ export const layer = (
  * Launches Firefox as `layer` does, with options read from configuration, such as the executable path from each
  * machine's environment.
  *
- * **Example** (The executable from each machine's environment)
+ * **Example** (Reading the executable's path from the environment)
  *
  * ```ts import.meta.vitest
- * import { Config, Effect } from "effect"
  * import { Browser } from "@usestrider/browser"
  * import { Firefox } from "@usestrider/browser/firefox"
+ * import { Config, Effect } from "effect"
  *
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
  *   yield* page.goto("https://example.com")
- * })).pipe(Effect.provide(Firefox.layerConfig({ executablePath: Config.String("FIREFOX_PATH") })))
+ * })).pipe(
+ *   Effect.provide(Firefox.layerConfig({ executablePath: Config.String("FIREFOX_PATH") }))
+ * )
  * ```
  *
  * @see {@link layer}
@@ -100,20 +102,34 @@ export const layerConfig = (
 > => LaunchOptions.fromConfig(options, layer)
 
 /**
- * Connects to a running Firefox at `endpoint` and provides it as `Browser`. Pages and contexts that were already
- * open stay open after the layer's scope closes.
+ * Connects to a running Firefox at `endpoint` and provides it as `Browser`.
  *
  * **Details**
  *
  * `endpoint` is Firefox's remote agent, as `--remote-debugging-port` starts it (`ws://127.0.0.1:9222`); `/session`
  * is added when the URL has no path. The connection starts a WebDriver BiDi session and ends it when the layer's
- * scope closes.
+ * scope closes. Pages and contexts that were already open stay open.
  *
  * **Gotchas**
  *
- * Firefox allows one session at a time, and keeps a session after its connection closes until something ends it:
- * a connect while another client holds it fails with `ConnectionFailed`. An attached session leaves file choosers
- * to the browser, because a session's prompt settings apply to the whole browser.
+ * - Firefox allows one session at a time, and keeps a session after its connection closes until something ends
+ *   it: a connect while another client holds one fails with `ConnectionFailed`.
+ * - An attached session leaves file choosers to the browser, because a session's prompt settings apply to the
+ *   whole browser.
+ *
+ * **Example** (Driving a Firefox started with `--remote-debugging-port=9222`)
+ *
+ * ```ts import.meta.vitest
+ * import { Browser } from "@usestrider/browser"
+ * import { Firefox } from "@usestrider/browser/firefox"
+ * import { Effect } from "effect"
+ *
+ * const program = Effect.scoped(Effect.gen(function*() {
+ *   const page = yield* Browser.newPage()
+ *   yield* page.goto("https://shop.example.com")
+ *   return yield* page.title
+ * })).pipe(Effect.provide(Firefox.layerConnect("ws://127.0.0.1:9222")))
+ * ```
  *
  * @stability unstable
  * @category layers

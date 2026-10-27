@@ -60,7 +60,7 @@ The chapters are the groups in `src/features/docs/navigation.ts`, each a directo
 | 2. Pages and locators     | `pages/`  | finding elements, actions, expectations and reads, contexts and access |
 | 3. Events and the network | `events/` | events, requests and responses, routes, scripts and time      |
 | 4. Testing and tools      | `tools/`  | Vitest, traces and HAR files, agents and the `strider` command |
-| 5. Browsers               | `browsers/` | choosing a browser, Chromium, Firefox, WebKit, stock WebKit  |
+| 5. Browsers               | `browsers/` | choosing a browser, Chromium, Firefox, WebKit                |
 
 The browser pages render each backend's capabilities with `<Capabilities />` (every backend, side by side) and
 `<BrowserLimits browser="firefox" />` (one backend's limits, `when="attached"` for what attaching changes). Both read
@@ -71,9 +71,10 @@ Code blocks render through Expressive Code (`ec.config.mjs`), and a title names 
 A guide's TypeScript is type-checked by `pnpm examples`, with the JSDoc examples, so each block is a module of its
 own, with its imports; `@effect/platform-node` is a dev dependency of the repository's root so blocks can import
 it. Blocks are formatted as the repository's code is, with Effect's dprint settings, at 88 characters, the width
-of the column: `pnpm lint-fix` formats them and `pnpm lint` checks them (`strider-docs format`). dprint keeps the
-line breaks it's given where they fit, so lay a block out to read well, naming a value rather than nesting a call
-four deep.
+of the column: `pnpm lint-fix` formats them and `pnpm lint` checks them (`strider-docs format`). The JSDoc examples
+are formatted the same way, inside their comments, so the reference shows them unwrapped. dprint keeps the line
+breaks it's given where they fit, so lay a block out to read well, naming a value rather than nesting a call four
+deep.
 
 ## The reference
 

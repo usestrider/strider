@@ -1,13 +1,12 @@
 /**
- * The responses a page or context receives: the event, and, when asked for, their bodies.
+ * The responses a page or context receives, with their bodies when a subscription asks for them.
  *
- * A `NetworkResponse` is the status and headers of one redirect hop: data, immutable, with Effect's `Headers`. A
- * body is collected only when a subscription asks for it with a decoder, because collecting bodies costs memory and
- * needs read access to the page. A collected body becomes a `CapturedResponse`: bytes of your own that outlive the
- * page, read with Effect's own `HttpIncomingMessage` decoders.
+ * A `NetworkResponse` is the status and headers of one redirect hop, as immutable data with Effect's `Headers`. A
+ * body is collected only for a subscription given a `body` decoder, which needs inspect access. It arrives as a
+ * `CapturedResponse`, whose bytes outlive the page and which Effect's `HttpIncomingMessage` decoders read.
  *
- * A response is reported when it arrives, to the page and context whose request it answers. With a `body`, it's
- * delivered once its body has loaded, up to `BodyLimit`, and been decoded.
+ * A response is reported to the page and context whose request it answers: when it arrives, or, with a `body`,
+ * once the body has loaded, up to `BodyLimit`, and been decoded.
  *
  * @stability unstable
  * @since 0.1.0
@@ -116,11 +115,10 @@ export type ServedBy = typeof ServedBy.Type
  *
  * **Details**
  *
- * `servedBy` says what answered: the network, a cache, a service worker or a route. A request that fails gets
- * no response, so it has no `servedBy`. `statusText` is the status line's reason phrase as the browser reports
- * it, empty for HTTP/2 and later. `httpVersion` is the protocol as the browser names it, such as `http/1.1` or
- * `h2`; it's `None` where the backend doesn't report it with the response: WebKit reports it only when the
- * response ends.
+ * - `servedBy` says what answered: the network, a cache, a service worker or a route.
+ * - `statusText` is the status line's reason phrase as the browser reports it, empty for HTTP/2 and later.
+ * - `httpVersion` is the protocol as the browser names it, such as `http/1.1` or `h2`. It's `None` where the
+ *   browser doesn't report it with the response, as WebKit doesn't: it reports it only when the response ends.
  *
  * @stability unstable
  * @category models
@@ -146,8 +144,8 @@ export class NetworkResponse extends Schema.Class<NetworkResponse>("@usestrider/
  *
  * **Details**
  *
- * It's also an `HttpIncomingMessage`, so Effect's decoders can read its bytes again if needed. `body` is what
- * the subscription's decoder produced.
+ * `body` is what the subscription's decoder produced. It's also an `HttpIncomingMessage`, so Effect's decoders
+ * can read its bytes again.
  *
  * @stability unstable
  * @category models
@@ -158,8 +156,8 @@ export interface CapturedResponse<B> extends NetworkResponse, HttpIncomingMessag
 }
 
 /**
- * Reads a collected body. Effect's own decoders fit as they are: `HttpIncomingMessage.schemaBodyJson(schema)`,
- * or a function reading `.text` or `.arrayBuffer`.
+ * A function that reads a collected body, such as Effect's `HttpIncomingMessage.schemaBodyJson(schema)` or one
+ * reading `.text` or `.arrayBuffer`.
  *
  * @stability unstable
  * @category models
@@ -202,9 +200,9 @@ export interface Filter {
  *
  * **Details**
  *
- * It's read when a subscription with a `body` starts, and declared to the browser with it. A larger body fails
- * with `BodyUnavailable`, `why: "overLimit"`. Effect's `HttpIncomingMessage.MaxBodySize` bounds what this program
- * reads, and is a separate setting.
+ * It's read when a subscription with a `body` starts, and declared to the browser with it; `Har.record` and
+ * `Trace.record` with `network` read it too. A larger body fails with `BodyUnavailable`, `why: "overLimit"`.
+ * Effect's `HttpIncomingMessage.MaxBodySize` bounds what this program reads, and is a separate setting.
  *
  * @stability unstable
  * @category references
@@ -216,7 +214,24 @@ export const BodyLimit: Context.Reference<ByteSize.ByteSize> = Context.Reference
 )
 
 /**
- * Sets the largest response body every subscription inside an effect collects.
+ * Sets the largest response body that the subscriptions started inside an effect collect.
+ *
+ * **Example** (Collecting a large export)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkResponse, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const exportReport = Effect.fn("exportReport")(function*(page: Page.Page) {
+ *   const exported = yield* NetworkResponse.next(page, {
+ *     url: "https://app.example.com/api/report",
+ *     body: (message) => message.arrayBuffer
+ *   }).pipe(NetworkResponse.withBodyLimit("50 MiB"))
+ *   yield* page.getByRole("button", { name: "Export" }).click()
+ *   const response = yield* exported
+ *   return response.body.byteLength
+ * })
+ * ```
  *
  * @see {@link BodyLimit} for the reference it sets
  *
@@ -408,24 +423,29 @@ const collect = (
  *
  * **Details**
  *
- * With `body`, body collection is set up before this returns, which needs inspect access: a `ReadonlyPage` or a
- * `UserContext`. Without it, only the status and headers are delivered. `url` is required either way. A response
- * with a body matches once the body has loaded and been decoded, within the deadline in force when `next` is
- * called.
+ * `url` is required. Without `body`, only the status and headers are delivered. With it, body collection is set
+ * up before this returns, which needs inspect access (a `ReadonlyPage` or a `UserContext`), and a response
+ * matches once its body has loaded and been decoded, within the deadline in force when `next` is called.
  *
- * **Example** (A response body, decoded and filtered)
+ * **Example** (Waiting for the cart's response)
  *
  * ```ts import.meta.vitest
+ * import { NetworkResponse, Page } from "@usestrider/browser"
  * import { Effect, Schema } from "effect"
  * import { HttpIncomingMessage } from "effect/http"
- * import { NetworkResponse, Page } from "@usestrider/browser"
  *
- * const Cart = Schema.Struct({ items: Schema.Array(Schema.Struct({ id: Schema.String })) })
+ * const Cart = Schema.Struct({
+ *   items: Schema.Array(Schema.Struct({ id: Schema.String }))
+ * })
  *
  * const addToCart = Effect.fn("addToCart")(function*(page: Page.Page) {
  *   const added = yield* NetworkResponse.next(
  *     page,
- *     { url: "https://shop.example.com/api/cart", method: "POST", body: HttpIncomingMessage.schemaBodyJson(Cart) },
+ *     {
+ *       url: "https://shop.example.com/api/cart",
+ *       method: "POST",
+ *       body: HttpIncomingMessage.schemaBodyJson(Cart)
+ *     },
  *     (response) => Effect.succeed(response.body.items.length > 0)
  *   )
  *   yield* page.getByRole("button", { name: "Add to cart" }).click()
@@ -493,6 +513,25 @@ export const next: {
  * Each body has `Deadline.DefaultBudget`, as read when `stream` is called, to finish loading. One that doesn't,
  * such as an event stream's, fails the stream with `BodyUnavailable`, `why: "streaming"`.
  *
+ * **Example** (Logging server errors)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkResponse, Page } from "@usestrider/browser"
+ * import { Console, Effect, Stream } from "effect"
+ *
+ * const logServerErrors = Effect.fn("logServerErrors")(
+ *   function*(page: Page.ObservedPage) {
+ *     const failures = yield* NetworkResponse.stream(page, {
+ *       status: (status) => status >= 500
+ *     })
+ *     yield* failures.pipe(
+ *       Stream.runForEach((response) => Console.log(response.status, response.url)),
+ *       Effect.forkScoped
+ *     )
+ *   }
+ * )
+ * ```
+ *
  * @stability unstable
  * @category subscriptions
  * @since 0.1.0
@@ -543,6 +582,22 @@ export const stream: {
  * Reads the responses the target's event log kept (`UserContext.Options.eventLog`), without their bodies; never
  * waits.
  *
+ * **Example** (Listing the failed responses so far)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkResponse, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const failedResponses = Effect.fn("failedResponses")(
+ *   function*(page: Page.ObservedPage) {
+ *     const history = yield* NetworkResponse.history(page, {
+ *       status: (status) => status >= 400
+ *     })
+ *     return history.entries.map((response) => `${response.status} ${response.url}`)
+ *   }
+ * )
+ * ```
+ *
  * @stability unstable
  * @category getters
  * @since 0.1.0
@@ -586,8 +641,8 @@ export class BodyUnavailable
 }
 
 /**
- * Reason for a body that was read but isn't what it was read as, such as `json` of a body that isn't JSON: the
- * page's response is at fault, not the browser.
+ * Reason for a body that isn't what it was read as, such as `json` of a body that isn't JSON: the response is at
+ * fault, not the browser.
  *
  * @stability unstable
  * @category reasons
@@ -625,6 +680,25 @@ const ResponseErrorTypeId = "~@usestrider/browser/NetworkResponse/ResponseError"
 
 /**
  * Error for a response body that couldn't be read.
+ *
+ * **Example** (Going on without a body that wasn't available)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkResponse, Page } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const exportText = Effect.fn("exportText")(function*(page: Page.Page) {
+ *   const exported = yield* NetworkResponse.next(page, {
+ *     url: "https://app.example.com/api/export",
+ *     body: (message) => message.text
+ *   })
+ *   yield* page.getByRole("button", { name: "Export" }).click()
+ *   return yield* exported.pipe(
+ *     Effect.map((response) => Option.some(response.body)),
+ *     Effect.catchReason("ResponseError", "BodyUnavailable", () => Effect.succeedNone)
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category errors

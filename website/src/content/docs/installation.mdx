@@ -1,14 +1,10 @@
 ---
 title: Installation
-description: The packages, a browser to drive, and the layer that launches it.
+description: The packages, a browser, and the layer that launches it.
 order: 1
 ---
 
 ## The packages
-
-Strider is one package, `@usestrider/browser`, with Effect as a peer dependency. A program that launches a
-browser on Node also needs Effect's Node services, which start the browser's process and make its temporary
-profile:
 
 ```sh
 npm install @usestrider/browser effect @effect/platform-node
@@ -17,46 +13,42 @@ npm install @usestrider/browser effect @effect/platform-node
 | Package                 | What it's for                                                                       |
 | ----------------------- | ----------------------------------------------------------------------------------- |
 | `@usestrider/browser`   | Strider, its backends as subpaths, and the `strider` command                        |
-| `effect`                | Effect 4, which the whole API is written in                                          |
-| `@effect/platform-node` | processes, files and WebSockets on Node; `@effect/platform-bun` does the same on Bun |
-| `@usestrider/vitest`    | for tests: the Vitest adapter, with `vitest` and `@effect/vitest` ([Testing](/docs/tools/testing)) |
+| `effect`                | Effect 4, a peer dependency                                                          |
+| `@effect/platform-node` | processes, files and sockets on Node; `@effect/platform-bun` on Bun                 |
+| `@usestrider/vitest`    | the Vitest adapter, for [tests](/docs/tools/testing)                                |
 
-Strider depends on nothing but Effect. Platform services are needed only where a browser is launched or connected
-to, so the rest of your code never sees them.
+Strider depends only on Effect. Platform services are needed only where a browser is launched or connected to.
 
 ## A browser
 
-Strider never downloads, installs or looks for a browser. A launch names the executable it runs, by an absolute
-path, so the browser you test against is the one you chose. Install browsers as you install any program: your
-operating system's package, a vendor's installer, a Nix package, or Playwright's installer for its WebKit build.
-
-To find the paths on a machine, ask the `strider` command:
+Strider never downloads, installs or looks for a browser: a launch takes an absolute path. Install browsers as
+you'd install any program. To find their paths:
 
 ```sh
 npx strider browsers
 ```
 
-It lists the browsers it finds, by backend: those on your `PATH`, those where Chrome's, Edge's and Firefox's
-installers put them, and the builds in Playwright's cache. Each comes with its version and the file its path leads
-to, and a WebKit build says whether it's the one Strider needs. With `--json` it prints the same as data. It runs each
-browser only to ask its version, and your programs never run it.
+It lists browsers on your `PATH`, in Chrome's, Edge's and Firefox's install locations, and WebKit's MiniBrowser
+where Linux packages and Nix profiles put it, each with its version. `--json` prints the same as data.
 
 ## Backends
 
-A backend is an import, so a program loads only the protocol code it uses. Each provides the same `Browser`
-service, and everything else in this guide works on all of them; what one browser can't do fails with
-`Unsupported`, naming the capability.
+Each backend is an import, so a program loads only the protocol code it uses. All provide the same `Browser`
+service.
 
 | Import                          | Drives                                                         | Layers                                      |
 | ------------------------------- | -------------------------------------------------------------- | ------------------------------------------- |
 | `@usestrider/browser/chromium`  | Chromium, Chrome and Edge, over the Chrome DevTools Protocol    | `layer`, `layerConfig`, `layerConnect`      |
 | `@usestrider/browser/firefox`   | Firefox, over WebDriver BiDi                                    | `layer`, `layerConfig`, `layerConnect`      |
-| `@usestrider/browser/webkit`    | Playwright's WebKit build, launched; WebKitGTK and WPE, attached | `layer`, `layerConfig`, `layerAttach`       |
+| `@usestrider/browser/webkit`    | WebKitGTK's and WPE's MiniBrowser, launched, or their browsers, attached | `layer`, `layerConfig`, `layerAttach` |
 | `@usestrider/browser/bidi`      | any WebDriver BiDi endpoint, such as a remote grid              | `layerConnect`                              |
 
-`layer` launches a browser, and `layerConfig` does the same with its options read from configuration. A launched
-browser is headless unless you say otherwise, gets a temporary profile that is deleted after it exits, and exits
-when the layer's scope closes:
+- `layer` launches a browser with a temporary profile, deleted after it exits. The browser exits when the layer's
+  scope closes.
+- Chromium and Firefox run headless unless `headless: false`. WebKit has no headless mode.
+- `layerConfig` reads the same options from configuration.
+- `layerConnect` and `layerAttach` attach to a running browser and leave it running. See
+  [Contexts and access](/docs/pages/contexts#attaching-to-a-browser).
 
 ```ts
 import { Chromium } from "@usestrider/browser/chromium"
@@ -65,14 +57,9 @@ const headless = Chromium.layer({ executablePath: "/usr/bin/chromium" })
 const headed = Chromium.layer({ executablePath: "/usr/bin/chromium", headless: false })
 ```
 
-`layerConnect` and `layerAttach` attach to a browser someone else started, and leave it running when they're done.
-[Contexts and access](/docs/pages/contexts) covers attaching.
-
 ## Paths from configuration
 
-A path that is right on your machine is wrong on the next one. Code that runs in more than one place reads the
-path from each machine's environment with `layerConfig`, which takes Effect `Config` values where `layer` takes
-plain ones:
+Read each machine's path from its environment with `layerConfig`:
 
 ```ts
 import { Chromium } from "@usestrider/browser/chromium"
@@ -83,14 +70,18 @@ const BrowserLive = Chromium.layerConfig({
 })
 ```
 
-A missing variable fails the layer with Effect's `ConfigError`, before anything is launched.
+A missing variable fails the layer with `ConfigError` before anything launches.
 
 ## Platform services
 
-A backend's layer needs Effect's platform services, which you provide once, where the program starts.
-`NodeServices.layer` gives Chromium and WebKit what they need to launch: `ChildProcessSpawner` and `FileSystem`.
-Firefox's launcher also connects to the browser over a WebSocket, so it needs a `WebSocketConstructor` as well, as
-every `layerConnect` does:
+Provide them once, where the program starts:
+
+| Backend  | Needs                                                                     |
+| -------- | ------------------------------------------------------------------------- |
+| Chromium | `NodeServices.layer`                                                      |
+| Firefox  | `NodeServices.layer` and `NodeSocket.layerWebSocketConstructor`           |
+| WebKit   | `NodeServices.layer` and a `SocketConnector` ([how](/docs/browsers/webkit#launching)) |
+| Attaching (`layerConnect`, `layerAttach`) | `NodeSocket.layerWebSocketConstructor`   |
 
 ```ts
 import { NodeServices, NodeSocket } from "@effect/platform-node"
@@ -106,5 +97,3 @@ const FirefoxLive = Firefox.layerConfig({
   executablePath: Config.String("FIREFOX_PATH")
 }).pipe(Layer.provide([NodeServices.layer, NodeSocket.layerWebSocketConstructor]))
 ```
-
-The next page puts one of these to work.

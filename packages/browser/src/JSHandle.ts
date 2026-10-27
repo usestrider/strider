@@ -1,11 +1,10 @@
 /**
  * Handles to values in the page, and the type of what an evaluation returns by value.
  *
- * An evaluated function's result comes back by value, and `Serialized<A>` is the type of what actually arrives.
- * It's defined once, next to the serializer, which is the same on every backend, so the type says what arrives: a
- * `Date` survives, a class instance arrives as its data, and a DOM node doesn't come back at all. A handle is the
- * alternative you opt into: a reference to a value that stays in the page, in one realm, released when the caller's
- * scope closes.
+ * An evaluated function's result comes back by value, and `Serialized<A>` is the type of what arrives, the same on
+ * every backend: a `Date` survives, a class instance arrives as its data and a DOM node doesn't come back at all.
+ * A handle is the alternative you opt into: a reference to a value that stays in the page, in one realm, released
+ * when the caller's scope closes.
  *
  * @stability unstable
  * @since 0.1.0
@@ -76,8 +75,8 @@ const TypeId = "~@usestrider/browser/JSHandle"
  * **Example** (Reading from a DOM node)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const bodyTag = Effect.fn("bodyTag")(function*(page: Page.Page) {
  *   const body = yield* page.evaluateHandle(() => document.body)
@@ -97,6 +96,21 @@ export interface JSHandle<A = unknown> extends Pipeable.Pipeable, Inspectable.In
   readonly realm: Target.RealmId
   /**
    * Calls `fn` in the handle's realm, with the value as its first argument, and returns the result by value.
+   *
+   * **Example** (Passing an argument)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const hasClass = Effect.fn("hasClass")(function*(page: Page.Page, name: string) {
+   *   const body = yield* page.evaluateHandle(() => document.body)
+   *   return yield* body.evaluate(
+   *     (element, className) => element.classList.contains(className),
+   *     name
+   *   )
+   * })
+   * ```
    */
   evaluate<Args extends ReadonlyArray<unknown>, B>(
     fn: (value: A, ...args: Args) => B | Promise<B>,
@@ -104,6 +118,21 @@ export interface JSHandle<A = unknown> extends Pipeable.Pipeable, Inspectable.In
   ): Effect.Effect<Serialized<B>, JSHandleError | Target.TargetGone | Deadline.Timeout>
   /**
    * Calls `fn` in the handle's realm and returns its result as another handle.
+   *
+   * **Example** (Following a reference)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const searchAction = Effect.fn("searchAction")(function*(page: Page.Page) {
+   *   const body = yield* page.evaluateHandle(() => document.body)
+   *   const form = yield* body.evaluateHandle((element) =>
+   *     element.querySelector("form[role=search]")
+   *   )
+   *   return yield* form.evaluate((element) => element?.getAttribute("action") ?? "")
+   * })
+   * ```
    */
   evaluateHandle<Args extends ReadonlyArray<unknown>, B>(
     fn: (value: A, ...args: Args) => B | Promise<B>,
@@ -111,11 +140,45 @@ export interface JSHandle<A = unknown> extends Pipeable.Pipeable, Inspectable.In
   ): Effect.Effect<JSHandle<Awaited<B>>, JSHandleError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
   /**
    * The value itself, by value.
+   *
+   * **Example** (Reading what the page collected)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const typedValues = Effect.fn("typedValues")(function*(page: Page.Page) {
+   *   const values = yield* page.evaluateHandle(() => {
+   *     const seen: Array<string> = []
+   *     document.addEventListener(
+   *       "input",
+   *       (event) => seen.push((event.target as HTMLInputElement).value)
+   *     )
+   *     return seen
+   *   })
+   *   yield* page.getByLabel("Quantity").fill("3")
+   *   return yield* values.read
+   * })
+   * ```
    */
   readonly read: Effect.Effect<Serialized<A>, JSHandleError | Target.TargetGone | Deadline.Timeout>
   /**
    * Releases the handle before its scope closes. Releasing it again does nothing, and neither does the scope when
    * it closes.
+   *
+   * **Example** (Releasing a handle early)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const bodyText = Effect.fn("bodyText")(function*(page: Page.Page) {
+   *   const body = yield* page.evaluateHandle(() => document.body)
+   *   const text = yield* body.evaluate((element) => element.innerText)
+   *   yield* body.release
+   *   return text
+   * })
+   * ```
    */
   readonly release: Effect.Effect<void>
 }
@@ -157,6 +220,23 @@ const JSHandleErrorTypeId = "~@usestrider/browser/JSHandle/JSHandleError"
 
 /**
  * Error for a handle operation that failed.
+ *
+ * **Example** (Falling back when the page's code throws)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const pageConfig = Effect.fn("pageConfig")(function*(page: Page.Page) {
+ *   const body = yield* page.evaluateHandle(() => document.body)
+ *   const parsed = body.evaluate((element): Record<string, string> =>
+ *     JSON.parse(element.dataset["config"] ?? "")
+ *   )
+ *   return yield* parsed.pipe(
+ *     Effect.catchReason("JSHandleError", "EvaluationThrown", () => Effect.succeed({}))
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category errors

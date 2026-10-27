@@ -6,11 +6,9 @@ order: 4
 
 ## Contexts
 
-A context is an isolated session in a browser: its own cookies, storage, cache and permissions, as a fresh profile
-would have. Strider calls it a user context, the WebDriver BiDi spec's term; Playwright calls it a browser context.
-
-`Browser.newPage()` makes a context with one page in it, and that's what most programs need. When pages should
-share a session, such as two tabs of the same signed-in user, make the context yourself and open pages in it:
+A context is an isolated session: its own cookies, storage, cache and permissions, like a fresh profile.
+`Browser.newPage()` makes a context with one page in it. For pages that share a session, such as two tabs of one
+signed-in user, make the context and open pages in it:
 
 ```ts
 import { Browser, Expect } from "@usestrider/browser"
@@ -29,12 +27,11 @@ const twoTabs = Effect.scoped(Effect.gen(function*() {
 }))
 ```
 
-A context and its pages close with the scope that made them. Popups the pages open belong to the same scope.
+A context and its pages close with the scope that made them, popups included.
 
 ## Settings for the whole session
 
-The options you give `newContext` or `newPage` hold for the context's whole life, and are set before its first page
-loads:
+Options to `newContext` or `newPage` hold for the context's life, and apply before its first page loads:
 
 ```ts
 import { Browser } from "@usestrider/browser"
@@ -66,13 +63,13 @@ const berlinPhone = Effect.scoped(Effect.gen(function*() {
 | `keyboardLayout` | the layout typing uses: `us` (the default), `uk`, `de`, `fr`, `es`, `it`           |
 | `eventLog`       | how many past events of each kind `history` keeps per page; 100 unless set           |
 
-Emulation is checked, not best-effort. A field the browser can't apply, such as touch on Firefox, fails with
-`Unsupported` naming it, before anything is applied. `browser.capabilities` says in advance what a backend can do.
+A field the browser can't apply, such as touch on Firefox, fails with `Unsupported` naming it, before anything is
+applied. `browser.capabilities` lists what a backend can do.
 
 ## Settings for a while
 
-The same settings can also apply to just part of a program, on a page or a context. `emulate` and `grant` are
-removed when their scope closes, and what they changed goes back to what it was:
+`emulate` and `grant`, on a page or a context, apply settings until their scope closes, then restore what was
+there:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -89,9 +86,8 @@ const offlineBanner = Effect.fn("offlineBanner")(function*(page: Page.Page) {
 
 ## Logging in once
 
-A context's storage state is its cookies and the `localStorage` and IndexedDB of each origin it has open.
-`exportStorageState` reads it, and the `storageState` option starts a new context from it, already signed in. So a
-suite logs in once and every test after starts from there:
+Storage state is a context's cookies, and the `localStorage` and IndexedDB of each origin it has open.
+`exportStorageState` reads it; the `storageState` option starts a context from it, already signed in:
 
 ```ts
 import { Browser, Expect, StorageState } from "@usestrider/browser"
@@ -118,17 +114,17 @@ const signedIn = Effect.gen(function*() {
 })
 ```
 
-In memory, the state's secrets are `Redacted`, so logging it shows nothing. Encoding it with `StorageState.Json` is
-the deliberate step that writes them out in full, because that's what a saved login is for; keep the file out of
-version control. Storage state doesn't carry `sessionStorage`, service workers or logins bound to a device. A site
-that needs those needs a profile directory of your own, `Chromium.layer({ executablePath, userDataDir })`. A
-profile's logins are in the browser's default context, not in the fresh one `Browser.newPage()` makes, so open the
-page there: `(yield* browser.defaultContext.control).newPage`.
+- In memory, its secrets are `Redacted`. `StorageState.Json` writes them out in full: keep the file out of version
+  control.
+- It doesn't carry `sessionStorage`, service workers or logins bound to a device. For those, use a profile
+  directory: `Chromium.layer({ executablePath, userDataDir })`.
+- A profile's logins are in the default context, not the one `Browser.newPage()` makes. Open the page there:
+  `(yield* browser.defaultContext.control).newPage`.
 
 ## Cookies and storage
 
-`context.cookies` reads and changes a context's cookies, and `page.localStorage` and `page.sessionStorage` the
-current origin's storage:
+`context.cookies` reads and changes a context's cookies; `page.localStorage` and `page.sessionStorage`, the current
+origin's storage:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -147,13 +143,14 @@ const betaFlag = Effect.fn("betaFlag")(function*(page: Page.Page) {
 })
 ```
 
-`listFor` gives the cookies a request to that URL would send. Cookie values are `Redacted`. Setting a cookie is a
-change, like a click: a scope closing doesn't undo it.
+- `listFor` gives the cookies a request to that URL would send.
+- Cookie values are `Redacted`.
+- A set cookie stays when the scope closes.
 
 ## Attaching to a browser
 
-`layerConnect` attaches to a browser something else started, such as a Chrome run with
-`--remote-debugging-port=9222`, and leaves it running when the program ends:
+`layerConnect` attaches to a running browser, such as Chrome started with `--remote-debugging-port=9222`, and
+leaves it running:
 
 ```ts
 import { NodeSocket } from "@effect/platform-node"
@@ -174,13 +171,14 @@ const firstHeading = Effect.scoped(Effect.gen(function*() {
 })).pipe(Effect.provide(Attached))
 ```
 
-`Firefox.layerConnect` takes Firefox's remote agent, `Bidi.layerConnect` any WebDriver BiDi endpoint, and
-`WebKit.layerAttach` the inspector server of a WebKitGTK or WPE browser, which can be read and navigated but not
-typed into.
+- `Firefox.layerConnect`: Firefox's remote agent.
+- `Bidi.layerConnect`: any WebDriver BiDi endpoint.
+- `WebKit.layerAttach`: a WebKitGTK or WPE browser's inspector server. Its pages can be read and navigated, not
+  typed into.
 
 ## Access is typed
 
-A page is one of three types, each with more than the last:
+A page has one of three types:
 
 | Type                | Can                                                                            |
 | ------------------- | ------------------------------------------------------------------------------ |
@@ -188,9 +186,8 @@ A page is one of three types, each with more than the last:
 | `Page.ReadonlyPage` | also locate and read, take snapshots and screenshots, and evaluate in isolation |
 | `Page.Page`         | also act, navigate, evaluate among the page's own scripts, and declare routes    |
 
-A page you opened is a `Page` for its whole life. A page you didn't open, such as an attached browser's tab or the
-first tab a launched browser starts with, is only observed: you can watch its state and events. `inspect` gives you
-read access to it and `control` full access, each for as long as the scope it's called in lasts:
+A page you opened is a `Page`. One you didn't, such as an attached browser's tab or a launched browser's first tab,
+is observed. `inspect` gives read access and `control` full access, for the scope they're called in:
 
 ```ts
 import { Browser, Route } from "@usestrider/browser"
@@ -209,6 +206,7 @@ const blockAnalytics = Effect.scoped(Effect.gen(function*() {
 }))
 ```
 
-When the scope closes, its access ends: the route is removed, the tab stays open, and using `tab` again fails with
-`TargetGone`, whose reason is `AccessReleased`. Calling an action on a page you only inspected is a compile error,
-so a helper that only reads should take a `Page.ReadonlyPage`; it then works with either.
+- When the scope closes, the route is removed and the tab stays open. Using `tab` again fails with `TargetGone`,
+  reason `AccessReleased`.
+- An action on an inspected page is a compile error. A helper that only reads should take a `Page.ReadonlyPage`, so
+  it takes either.

@@ -1,12 +1,12 @@
 ---
 title: Acting on a page
-description: Clicking, typing, choosing and uploading; the checks each action makes first; and the keyboard and mouse for what locators can't reach.
+description: Clicking, typing, choosing and uploading; the checks each action makes first; and the keyboard and mouse.
 order: 2
 ---
 
-## Actions are calls
+## Actions
 
-An action is a method on a locator that you call, with its settings as an optional last argument:
+An action is a locator method, with settings as an optional last argument:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -22,47 +22,42 @@ const editProfile = Effect.fn("editProfile")(function*(page: Page.Page) {
 })
 ```
 
-| Action                       | Does                                                                      |
-| ---------------------------- | ------------------------------------------------------------------------- |
-| `click()`, `dblclick()`      | moves the pointer to the element, presses and releases                     |
-| `tap()`                      | a touch start and end                                                      |
-| `hover()`                    | moves the pointer over the element                                         |
-| `check()`, `uncheck()`       | clicks a checkbox or radio if it isn't already in that state, and confirms it changed |
-| `fill(value)`                | focuses a field, selects its contents and inserts the value; `""` empties it |
-| `clear()`                    | empties a field                                                            |
-| `press(key)`                 | focuses the element and presses a key                                      |
-| `pressSequentially(text)`    | focuses the element and types the text key by key                         |
-| `selectOption(choice)`       | chooses a `<select>`'s option by `value`, `label` or `index`                |
-| `setInputFiles(files)`       | sets a file input's files                                                  |
-| `dragTo(target)`             | presses on the element, moves to the target with the button held, and releases |
-| `focus()`, `scrollIntoView()` | what they say                                                             |
+| Action                        | Does                                                                      |
+| ----------------------------- | ------------------------------------------------------------------------- |
+| `click()`, `dblclick()`       | moves the pointer to the element, presses and releases                     |
+| `tap()`                       | a touch start and end                                                      |
+| `hover()`                     | moves the pointer over the element                                         |
+| `check()`, `uncheck()`        | clicks a checkbox or radio unless it's already in that state, then confirms the change |
+| `fill(value)`                 | focuses a field, selects its contents and inserts the value; `""` empties it |
+| `clear()`                     | empties a field                                                            |
+| `press(key)`                  | focuses the element and presses a key                                      |
+| `pressSequentially(text)`     | focuses the element and types the text key by key                         |
+| `selectOption(choice)`        | chooses a `<select>`'s option by `value`, `label` or `index`                |
+| `setInputFiles(files)`        | sets a file input's files                                                  |
+| `dragTo(target)`              | presses on the element, moves to the target with the button held, releases |
+| `focus()`, `scrollIntoView()` | focuses it, or scrolls it into view                                        |
 
-An action sends its input at most once per call. If something fails after the input may have reached the page, the
-error says so, and the action is never repeated behind your back.
+An action sends its input at most once. If it fails after the input may have reached the page, the error says so.
 
-## Checks before acting
+## Checks
 
-Before it sends anything, an action waits until its element is ready. It checks in the page, at each animation
-frame, until the deadline. Each action has its own checks:
+Before sending anything, an action waits, checking at each animation frame, until its element is ready:
 
-| Action                                                   | Checks                                                                   |
-| -------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Action                                                            | Checks                                                                   |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | `click`, `dblclick`, `tap`, `check`, `uncheck`, `dragTo`, `hover` | visible, stable, enabled, not inert, in the viewport, receives the pointer |
-| `fill`, `clear`                                          | visible, enabled, editable, not inert                                    |
-| `focus`, `press`, `pressSequentially`                    | visible, not inert                                                       |
-| `scrollIntoView`                                         | visible, stable                                                          |
-| `selectOption`                                           | visible, enabled                                                         |
-| `setInputFiles`                                          | none                                                                     |
+| `fill`, `clear`                                                   | visible, enabled, editable, not inert                                    |
+| `focus`, `press`, `pressSequentially`                             | visible, not inert                                                       |
+| `scrollIntoView`                                                  | visible, stable                                                          |
+| `selectOption`                                                    | visible, enabled                                                         |
+| `setInputFiles`                                                   | none                                                                     |
 
-"Stable" means the element has stopped moving, "in the viewport" scrolls it there, and "receives the pointer"
-means nothing else is on top of the point the action will use. When the checks pass, the action waits its turn
-at the page's input, checks once more, and sends. A click also guards its first event: if a toast slides over the
-button between the check and the click, the page never sees the click, and the action starts checking again.
+- "Stable": stopped moving. "In the viewport": scrolled there. "Receives the pointer": nothing covers the point.
+- After the checks pass, it checks once more and sends. If something covers a click's target in between, the page
+  never sees the click, and the action checks again.
+- A timeout names the last failed check: `Another element covers the element's action point: div.toast "Saved"`.
 
-A timeout explains the last check that failed, such as
-`Another element covers the element's action point: div.toast "Saved"`.
-
-You can turn individual checks off for one call, and the span records it. There is no blanket `force`:
+Turn single checks off with `checks`; there's no blanket `force`. `trial: true` runs the checks and sends nothing:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -74,19 +69,12 @@ const behindOverlay = close.click({ checks: { receivesPointer: false } })
 const dryRun = page.getByRole("button", { name: "Delete" }).click({ trial: true })
 ```
 
-`trial: true` runs every check and sends nothing: a way to ask "could I click this now?".
-
 ## Typing
 
-`fill` is the usual way to enter text. It inserts the value as text, as pasting or an input method would, so the
-page sees the input but no key presses. An input whose value isn't typed, such as a date, a color or a range, has
-its value set directly, with `input` and `change` events, and a value it refuses fails with `InvalidInput`.
-
-`pressSequentially` sends a key for each character, for fields that react to each keystroke, like search boxes
-that suggest as you type. `delay` spaces them out.
-
-Pass secrets as `Redacted`. A `Redacted` value is typed into the page and never written to an error, a span, a log
-or a trace:
+- `fill` inserts text as pasting would: the page sees input events, not key presses. A date, color or range input
+  has its value set, and a value it refuses fails with `InvalidInput`.
+- `pressSequentially` sends a key per character, for fields that react to each keystroke. `delay` spaces them.
+- Pass secrets as `Redacted`. The value is typed, and never appears in errors, spans, logs or traces:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -101,8 +89,8 @@ const logIn = Effect.fn("logIn")(function*(page: Page.Page) {
 
 ## Keys
 
-Keys are named as the UI Events spec names them, the same names a page sees in `event.key`: `"Enter"`, `"Tab"`,
-`"ArrowDown"`, `"Escape"`, `"a"`. Modifiers are an option, not part of the name, so there is no `"Control+A"`:
+Keys use UI Events names, as in `event.key`: `"Enter"`, `"Tab"`, `"ArrowDown"`, `"a"`. Modifiers are an option;
+there's no `"Control+A"`:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -116,13 +104,13 @@ const copyAll = Effect.fn("copyAll")(function*(page: Page.Page) {
 })
 ```
 
-Characters are typed as a US keyboard would type them unless the context says otherwise:
-`Browser.newPage({ keyboardLayout: "de" })` types on a German layout, with Shift, AltGr and dead keys pressed
-as a person's would be. `us`, `uk`, `de`, `fr`, `es` and `it` are available.
+Typing uses a US layout unless the context sets another: `Browser.newPage({ keyboardLayout: "de" })`, with Shift,
+AltGr and dead keys. Layouts: `us`, `uk`, `de`, `fr`, `es`, `it`. Firefox sends only the keys' values; WebKit has no
+layouts.
 
 ## Files
 
-`setInputFiles` takes `FileInput`s, which say where a file's bytes come from:
+`setInputFiles` takes `FileInput`s:
 
 ```ts
 import { FileInput, Page } from "@usestrider/browser"
@@ -136,16 +124,15 @@ const upload = Effect.fn("upload")(function*(page: Page.Page, csv: string) {
 })
 ```
 
-`FileInput.local` reads a file on this machine. `FileInput.bytes` makes the file in the page from bytes you have,
-keeping its name and type, so it works even on a browser on another machine. When an upload goes through a file
-chooser rather than an input you can locate, answer the chooser with `FileChooser.handle`, covered in
-[Events](/docs/events/events).
+- `FileInput.local` names a file on this machine.
+- `FileInput.bytes` makes the file in the page, so it works with a browser on another machine.
+- An upload through a file chooser, not an input, is answered with `FileChooser.handle`
+  ([Events](/docs/events/events#dialogs)).
 
 ## Dragging
 
-`dragTo` drags one element onto another. By default it's a real drag of the pointer, which HTML drag and drop
-(`draggable="true"`) finishes only on Chromium. `html: "synthetic"` has the page dispatch the drag's events
-itself instead, which works on every browser; the events are untrusted, as the option's name says:
+`dragTo` drags with the pointer. A native HTML drag (`draggable="true"`) finishes only on Chromium;
+`html: "synthetic"` has the page dispatch the drag's events instead, on every browser, untrusted:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -159,11 +146,8 @@ const moved = card.dragTo(done, { html: "synthetic" })
 
 ## The keyboard and the mouse
 
-`page.keyboard` sends keys to whatever has focus, and `page.mouse` acts at coordinates, for canvases and maps that
-have no elements to locate. Neither checks anything first.
-
-Holding input is scoped: a held key or button is released when its scope closes, so a step that fails halfway
-never leaves Shift held down for the rest of the program:
+`page.keyboard` types into whatever has focus; `page.mouse` acts at coordinates, for canvases and maps. Neither
+checks anything. Holding a key or button is scoped, so a failed step never leaves it held:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -187,11 +171,13 @@ const sketch = Effect.fn("sketch")(function*(page: Page.Page) {
 })
 ```
 
-While Shift is held, the click is a Shift-click; while the button is held, the moves are a drag. Input to a page
-goes one gesture at a time, so two fibers acting on the same page take turns rather than mixing their keys.
+A click while Shift is held is a Shift-click; moves while a button is held are a drag. Input to one page goes one
+gesture at a time.
 
-## What a browser can't do
+## Browser differences
 
-A few actions depend on the browser. WebKit's pointer events can't carry modifiers, so a click with `modifiers`
-fails there with `Unsupported` before anything is sent, and a native HTML drag is Chromium's alone. A failure
-names the capability, so the message says what to change.
+- Native HTML drag and drop: Chromium only.
+- `tap` and touch: not on WebKit.
+- Keyboard layouts: partial on Firefox, none on WebKit.
+
+Each fails with `Unsupported`, naming the capability, before anything is sent.

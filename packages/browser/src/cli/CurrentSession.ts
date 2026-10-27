@@ -1,9 +1,9 @@
 /**
  * What `strider run` gives a segment: the live CLI session, and its pages by name.
  *
- * A segment is a file whose default export is an effect, run in a live CLI session. Programs and tests never make a
- * session; they pass pages around as values. A segment finds the session's pages by the names they have there, such
- * as the `shop` that `page new --name shop` gave one.
+ * A segment is a file whose default export is an effect, which `strider run` runs in a live CLI session with a scope
+ * of its own. It finds the session's pages by name, such as the `shop` that `page new --name shop` gave one.
+ * Programs and tests never make a session; they pass pages around as values.
  *
  * @stability experimental
  * @since 0.1.0
@@ -47,6 +47,19 @@ export interface CurrentSession {
   readonly context: UserContext.UserContext
   /**
    * Gets the page with this name, or fails at once with `PageNotFound` when there is none.
+   *
+   * **Example** (Adding to the cart on the session's `shop` page)
+   *
+   * ```ts import.meta.vitest
+   * import { CurrentSession } from "@usestrider/browser/cli"
+   * import { Effect } from "effect"
+   *
+   * export default Effect.gen(function*() {
+   *   const session = yield* CurrentSession.CurrentSession
+   *   const shop = yield* session.page("shop")
+   *   yield* shop.getByRole("button", { name: "Add to cart" }).click()
+   * })
+   * ```
    */
   page(name: PageName | string): Effect.Effect<Page.Page, PageNotFound>
   /**
@@ -54,6 +67,20 @@ export interface CurrentSession {
    * then on, and it is named `name`, or else the next of `p1`, `p2`…, which `keep` returns. A page the
    * segment returns is named without being kept, so it closes with the segment unless something else owns it,
    * such as a session page that opened it as a popup.
+   *
+   * **Example** (Opening a page that outlives the segment)
+   *
+   * ```ts import.meta.vitest
+   * import { CurrentSession } from "@usestrider/browser/cli"
+   * import { Effect } from "effect"
+   *
+   * export default Effect.gen(function*() {
+   *   const session = yield* CurrentSession.CurrentSession
+   *   const orders = yield* session.context.newPage
+   *   yield* orders.goto("https://shop.example.com/orders")
+   *   yield* session.keep(orders, "orders")
+   * })
+   * ```
    */
   keep(page: Page.Page, name?: PageName | string): Effect.Effect<PageName, NameTaken>
 }
@@ -61,12 +88,12 @@ export interface CurrentSession {
 /**
  * The service tag for `CurrentSession`, provided only by `strider run`.
  *
- * **Example** (A segment that pays in a popup)
+ * **Example** (Paying in a popup from a segment)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Popup } from "@usestrider/browser"
  * import { CurrentSession } from "@usestrider/browser/cli"
+ * import { Effect } from "effect"
  *
  * export default Effect.gen(function*() {
  *   const session = yield* CurrentSession.CurrentSession
@@ -91,6 +118,23 @@ const PageNotFoundTypeId = "~@usestrider/browser/cli/CurrentSession/PageNotFound
 
 /**
  * Error for a page name the session doesn't have. Its hint lists the session's page names.
+ *
+ * **Example** (Opening the page when the session has none by that name)
+ *
+ * ```ts import.meta.vitest
+ * import { CurrentSession } from "@usestrider/browser/cli"
+ * import { Effect } from "effect"
+ *
+ * const shopPage = Effect.gen(function*() {
+ *   const session = yield* CurrentSession.CurrentSession
+ *   return yield* session.page("shop").pipe(
+ *     Effect.catchTag(
+ *       "PageNotFound",
+ *       () => Effect.tap(session.context.newPage, (page) => session.keep(page, "shop"))
+ *     )
+ *   )
+ * })
+ * ```
  *
  * @stability experimental
  * @category errors

@@ -95,6 +95,19 @@ export class CapabilitySet extends Schema.Class<CapabilitySet>("@usestrider/brow
 }) {
   /**
    * Whether the capability's status is `"supported"`.
+   *
+   * **Example** (Emulating a locale only where the browser can)
+   *
+   * ```ts import.meta.vitest
+   * import type { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const germanPage = Effect.fn("germanPage")(function*(browser: Browser.Browser) {
+   *   const capabilities = yield* browser.capabilities
+   *   const emulation = capabilities.has("emulation.locale") ? { locale: "de-DE" } : {}
+   *   return yield* browser.newPage({ emulation })
+   * })
+   * ```
    */
   has(name: string): boolean {
     return this.entries.some((entry) => entry.name === name && entry.status === "supported")
@@ -116,25 +129,79 @@ export interface Browser {
   readonly info: Info
   /**
    * What it supports, as its backend describes it.
+   *
+   * **Example** (Listing what the browser can't do)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const missing = Effect.gen(function*() {
+   *   const browser = yield* Browser.Browser
+   *   const { entries } = yield* browser.capabilities
+   *   const unsupported = entries.filter((entry) => entry.status === "unsupported")
+   *   return unsupported.map((entry) => entry.name)
+   * })
+   * ```
    */
   readonly capabilities: Watchable.Watchable<CapabilitySet>
   /**
-   * Creates a context you own; removed when the scope closes.
+   * Creates a context you own, removed when the scope closes.
+   *
+   * **Example** (Two pages sharing one context's storage)
+   *
+   * ```ts import.meta.vitest
+   * import type { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const shopAndCart = Effect.fn("shopAndCart")(function*(browser: Browser.Browser) {
+   *   const context = yield* browser.newContext()
+   *   const shop = yield* context.newPage
+   *   const cart = yield* context.newPage
+   *   yield* shop.goto("https://shop.example.com")
+   *   yield* cart.goto("https://shop.example.com/cart")
+   * })
+   * ```
    */
   newContext(
     options?: UserContext.Options | undefined
   ): Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Scope.Scope>
   /**
    * Creates a context and a page in it, released together: `newContext`, then its `newPage`.
+   *
+   * **Example** (A page that accepts every dialog)
+   *
+   * ```ts import.meta.vitest
+   * import type { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const openShop = Effect.fn("openShop")(function*(browser: Browser.Browser) {
+   *   const page = yield* browser.newPage({ dialogs: "accept" })
+   *   yield* page.goto("https://shop.example.com")
+   *   return page
+   * })
+   * ```
    */
   newPage(
     options?: UserContext.Options | undefined
   ): Effect.Effect<Page.Page, Page.PageError | Target.TargetGone, Scope.Scope>
   /**
-   * Every page of the browser, kept up to date as pages open and close. A page this connection controls for its
-   * whole life, because it created the page or its context, is a `Page`. Any other, such as a launched browser's
-   * first tab or an attached browser's tabs, is an observed page, whose `inspect` and `control` give access for a
-   * scope.
+   * Every page of the browser, kept up to date as pages open and close. A page this connection created, or whose
+   * context it created, is a `Page`. Any other, such as a launched browser's first tab or an attached browser's
+   * tabs, is an observed page, whose `inspect` and `control` give access for a scope.
+   *
+   * **Example** (Waiting for a second tab)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const secondTab = Effect.gen(function*() {
+   *   const browser = yield* Browser.Browser
+   *   const pages = yield* browser.pages.waitFor((pages) => pages.length >= 2)
+   *   return pages[1]!
+   * })
+   * ```
    */
   readonly pages: Watchable.Watchable<ReadonlyArray<Page.ObservedPage>>
   /**
@@ -169,11 +236,11 @@ export const isBrowser = (u: unknown): u is Browser => Predicate.hasProperty(u, 
  * Use as the starting point of a test or script. Code that already holds a `Browser` calls its `newPage`
  * member, which does the same.
  *
- * **Example** (A page for one test)
+ * **Example** (Opening a page with a German locale)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Browser } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage({ emulation: { locale: "de-DE" } })
@@ -194,6 +261,22 @@ export const newPage = (
 /**
  * Creates a context you own, using the `Browser` from context; removed when the scope closes.
  *
+ * **Example** (Starting from a saved login)
+ *
+ * ```ts import.meta.vitest
+ * import { Browser, StorageState } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * declare const signedIn: StorageState.StorageState
+ *
+ * const account = Effect.scoped(Effect.gen(function*() {
+ *   const context = yield* Browser.newContext({ storageState: signedIn })
+ *   const page = yield* context.newPage
+ *   yield* page.goto("https://app.example.com/account")
+ *   return yield* page.title
+ * }))
+ * ```
+ *
  * @stability unstable
  * @category accessors
  * @since 0.1.0
@@ -208,16 +291,15 @@ export const newContext = (
  *
  * **Details**
  *
- * `executablePath` is the browser, and nothing else is looked up: not `PATH`, not an install location. It must be
- * absolute, so it means the same file in every working directory; a relative path or a bare command name fails
- * with `InvalidInput`. Code that runs on several machines reads it from the environment with the backend's
- * `layerConfig`.
+ * `executablePath` must be absolute, and nothing else is looked up: not `PATH`, not an install location. A relative
+ * path or a bare command name fails with `InvalidInput`, and a path with no file there with `ExecutableNotFound`.
+ * Code that runs on several machines reads it from the environment with the backend's `layerConfig`.
  *
  * **Gotchas**
  *
- * Strider never downloads or installs a browser. Install it as you would any program (an operating
- * system's package, a vendor's installer, a Nix package, Playwright's installer for its WebKit), and name its
- * executable here. `strider browsers` lists the ones it can find on this machine, with their versions.
+ * Strider never downloads or installs a browser. Install it as you would any program (an operating system's
+ * package, a vendor's installer, a Nix package) and name its executable here. `strider browsers` lists the ones it
+ * can find on this machine, with their versions.
  *
  * @stability unstable
  * @category models
@@ -229,9 +311,9 @@ export interface LaunchOptions {
    */
   readonly executablePath: FilePath.Local | string
   /**
-   * Run without a visible window.
+   * Run without a visible window. WebKit has no headless mode, so `true` fails there with `InvalidInput`.
    *
-   * @default true
+   * @default true, except on WebKit, which opens a window
    */
   readonly headless?: boolean | undefined
   /**
@@ -241,13 +323,14 @@ export interface LaunchOptions {
    */
   readonly args?: ReadonlyArray<string> | undefined
   /**
-   * The browser's flags and preferences, as an inspectable value.
+   * The browser's flags and preferences, as an inspectable value. WebKit takes neither.
    *
    * @default LaunchProfile.automation
    */
   readonly profile?: LaunchProfile.LaunchProfile | undefined
   /**
-   * A profile directory you own: never deleted, and locked while the browser uses it.
+   * A profile directory you own: never deleted, and locked while the browser uses it. On WebKit, it's the default
+   * context's only.
    *
    * @default a temporary profile, deleted after the browser exits
    */
@@ -263,7 +346,7 @@ export interface LaunchOptions {
  */
 export interface ConnectOptions {
   /**
-   * Headers for the WebSocket handshake, such as a grid's token.
+   * Headers for the WebSocket handshakes and HTTP requests, such as a grid's token.
    *
    * @default none
    */
@@ -295,12 +378,12 @@ export interface ConnectOptions {
  * The fake has no DOM: locator actions and reads fail with `Unsupported`. It tests what happens around
  * events and lifetimes, not page content. A timeline it can't read fails the layer as a defect, naming where.
  *
- * **Example** (A response that arrives before its wait runs)
+ * **Example** (Testing a response that arrives before its wait runs)
  *
  * ```ts import.meta.vitest
+ * import { Browser, NetworkResponse } from "@usestrider/browser"
  * import { Effect } from "effect"
  * import { TestClock } from "effect/testing"
- * import { Browser, NetworkResponse } from "@usestrider/browser"
  *
  * const test = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
@@ -350,6 +433,22 @@ export interface Operation extends Tracing.Operation {
  * (`browser.page.id`, `browser.context.id` or `browser.realm.id`), attributes of its own, such as
  * `browser.locator`, and a URL as `url.full`, shown as `Diagnostics.CurrentPreset` allows.
  *
+ * **Example** (Prefixing every span with the service's name)
+ *
+ * ```ts import.meta.vitest
+ * import { Browser } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * declare const checkout: Effect.Effect<void>
+ *
+ * const traced = checkout.pipe(
+ *   Effect.provideService(
+ *     Browser.SpanNameGenerator,
+ *     (operation) => `shop ${operation.name}`
+ *   )
+ * )
+ * ```
+ *
  * @stability unstable
  * @category references
  * @since 0.1.0
@@ -358,6 +457,22 @@ export const SpanNameGenerator: Context.Reference<(operation: Operation) => stri
 
 /**
  * Reference to a predicate that suppresses an operation's span when it returns `true`.
+ *
+ * **Example** (Leaving visibility checks out of traces)
+ *
+ * ```ts import.meta.vitest
+ * import { Browser } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * declare const checkout: Effect.Effect<void>
+ *
+ * const quieter = checkout.pipe(
+ *   Effect.provideService(
+ *     Browser.TracerDisabledWhen,
+ *     (operation) => operation.name === "Locator.isVisible"
+ *   )
+ * )
+ * ```
  *
  * @stability unstable
  * @category references
@@ -372,8 +487,21 @@ export const TracerDisabledWhen: Context.Reference<Predicate.Predicate<Operation
  * **Details**
  *
  * A command's span is named by its method, such as `Page.navigate` or `browsingContext.navigate`, with
- * `browser.protocol.method` and `browser.protocol.id`, under the span of the operation that sent it. It is
- * read where each command is sent, so it can be set around one operation.
+ * `browser.protocol.method` and `browser.protocol.id`, under the span of the operation that sent it. It's read
+ * where each command is sent, so it can be set around one operation.
+ *
+ * **Example** (Tracing the commands of one click)
+ *
+ * ```ts import.meta.vitest
+ * import { Browser, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const placeOrder = Effect.fn("placeOrder")(function*(page: Page.Page) {
+ *   yield* page.getByRole("button", { name: "Place order" }).click().pipe(
+ *     Effect.provideService(Browser.TraceProtocolCommands, true)
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category references
@@ -483,6 +611,26 @@ const BrowserErrorTypeId = "~@usestrider/browser/Browser/BrowserError"
 
 /**
  * Error for a browser that couldn't be launched or connected to.
+ *
+ * **Example** (Logging the output of a browser that exited at launch)
+ *
+ * ```ts import.meta.vitest
+ * import { Browser } from "@usestrider/browser"
+ * import { Chromium } from "@usestrider/browser/chromium"
+ * import { Effect } from "effect"
+ *
+ * const program = Effect.scoped(Effect.gen(function*() {
+ *   const page = yield* Browser.newPage()
+ *   yield* page.goto("https://shop.example.com")
+ * })).pipe(
+ *   Effect.provide(Chromium.layer({ executablePath: "/usr/bin/chromium" })),
+ *   Effect.catchReason(
+ *     "BrowserError",
+ *     "ProcessExited",
+ *     (reason) => Effect.logError(reason.stderrTail)
+ *   )
+ * )
+ * ```
  *
  * @stability unstable
  * @category errors

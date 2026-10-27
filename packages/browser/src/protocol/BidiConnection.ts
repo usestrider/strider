@@ -2,7 +2,7 @@
  * A raw WebDriver BiDi connection, for working with the protocol directly: one session over one `Transport`.
  *
  * A BiDi endpoint serves one session per connection. Connected to a browser's `/session` endpoint, start the session
- * with `Session.new_` before anything else; a connection made for an existing session needs no `session.new`.
+ * with `Session.new_` before anything else; a connection made for an existing session needs no `Session.new_`.
  * Events arrive for the session only after `Session.subscribe` names them.
  *
  * **Gotchas**
@@ -37,6 +37,18 @@ export interface BidiConnection {
   readonly session: Protocol.ProtocolSession
   /**
    * Waits as long as the connection lives, then gives the reason it was lost.
+   *
+   * **Example** (Logging a lost connection)
+   *
+   * ```ts import.meta.vitest
+   * import type { BidiConnection } from "@usestrider/browser/protocol"
+   * import { Effect } from "effect"
+   *
+   * const watch = Effect.fn("watch")(function*(bidi: BidiConnection.BidiConnection) {
+   *   const lost = yield* bidi.closed
+   *   yield* Effect.logError(`Firefox's connection was lost: ${lost.description}`)
+   * })
+   * ```
    */
   readonly closed: Effect.Effect<Transport.ConnectionLost>
 }
@@ -54,16 +66,22 @@ export interface BidiConnection {
  * **Example** (Starting a session and opening a tab)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { BrowsingContext, Session } from "@usestrider/browser/bidi-protocol"
  * import { BidiConnection, Protocol, Transport } from "@usestrider/browser/protocol"
+ * import { Effect } from "effect"
  *
- * const openTab = Effect.fn("openTab")(function*(transport: Transport.Transport, url: string) {
- *   const bidi = yield* BidiConnection.make(transport)
- *   yield* Session.new_({ capabilities: {} }).pipe(Protocol.on(bidi.session))
- *   const { context } = yield* BrowsingContext.create({ type: "tab" }).pipe(Protocol.on(bidi.session))
- *   yield* BrowsingContext.navigate({ context, url, wait: "complete" }).pipe(Protocol.on(bidi.session))
- * })
+ * const openTab = Effect.fn("openTab")(
+ *   function*(transport: Transport.Transport, url: string) {
+ *     const bidi = yield* BidiConnection.make(transport)
+ *     yield* Session.new_({ capabilities: {} }).pipe(Protocol.on(bidi.session))
+ *     const { context } = yield* BrowsingContext.create({ type: "tab" }).pipe(
+ *       Protocol.on(bidi.session)
+ *     )
+ *     yield* BrowsingContext.navigate({ context, url, wait: "complete" }).pipe(
+ *       Protocol.on(bidi.session)
+ *     )
+ *   }
+ * )
  * ```
  *
  * @stability experimental

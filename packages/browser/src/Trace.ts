@@ -1,10 +1,9 @@
 /**
  * Recordings of what happened on a page, exported as traces that Playwright's trace viewer opens.
  *
- * Spans are the record: every operation is a span, so any tracer you install (OTLP through `effect/observability`,
- * or `effect/devtools`) already receives it. `record` adds what spans can't carry, captures from the page such as
- * screenshots, and the export. An export leaves the process, so it's explicit and redacted. Archives are written
- * with Effect's `Zip` module.
+ * Every operation is already a span, which any tracer you install receives (OTLP through `effect/observability`
+ * or `effect/devtools`). `record` adds what spans can't carry, such as screenshots and DOM snapshots, and an
+ * export, which is explicit and redacted.
  *
  * @stability experimental
  * @since 0.1.0
@@ -76,6 +75,20 @@ export interface Options {
 export interface Recording extends Declaration.Registration {
   /**
    * Writes the trace as a Playwright trace-viewer archive (format 9), redacted.
+   *
+   * **Example** (Exporting a trace of signing in)
+   *
+   * ```ts import.meta.vitest
+   * import { Page, Trace } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const traceSignIn = Effect.fn("traceSignIn")(function*(page: Page.Page) {
+   *   const trace = yield* Trace.record(page, { screenshots: "perAction" })
+   *   yield* page.goto("https://app.example.com/sign-in")
+   *   yield* page.getByRole("button", { name: "Sign in" }).click()
+   *   return yield* trace.exportTrace("sign-in-trace.zip")
+   * })
+   * ```
    */
   exportTrace(path: FilePath.Local | string): Effect.Effect<FilePath.Local, TraceError>
 }
@@ -85,31 +98,36 @@ export interface Recording extends Declaration.Registration {
  *
  * **Details**
  *
- * Each Strider operation on the target is a step, with its name, its span's attributes as params, its duration
- * and its error. A span of the caller's that encloses one, such as an `Effect.fn`'s, is a step too, spanning the
- * operations recorded inside it, so the trace nests as the program did. Console messages and uncaught exceptions
- * are recorded. `screenshots: "perAction"` adds a screenshot after each action and navigation. `screencast` adds
- * frames: the browser's own where `Capability.Screencast` has them, Firefox's video (`Capability.Video`), or
- * polled screenshots. `network` adds the requests a `Har` would record, with their bodies. `domSnapshots` adds a
- * snapshot of each frame of the page before and after each action and navigation, which the viewer renders with
- * the recorded network and the action's target highlighted. Times come from Strider's clock, never Effect's, so
- * a trace made under `TestClock` still has a timeline. `exportTrace` writes a zip that trace.playwright.dev opens
- * (format 9), with params redacted under `Diagnostics.CurrentPreset`; under the strict preset, so are the values
- * of password inputs, and of fields filled with `Redacted` text, in snapshots.
+ * - Each Strider operation on the target is a step, with its name, its span's attributes as params, its duration
+ *   and its error. A span of yours that encloses steps, such as an `Effect.fn`'s, is a step too, so the trace
+ *   nests as the program did.
+ * - Console messages and uncaught exceptions are always recorded.
+ * - `screenshots: "perAction"` adds a screenshot after each action and navigation.
+ * - `screencast` adds frames: the browser's own where `Capability.Screencast` has them, Firefox's video
+ *   (`Capability.Video`) or polled screenshots.
+ * - `network` adds the requests a `Har` would record, with their bodies.
+ * - `domSnapshots` adds a snapshot of each frame of the page before and after each action and navigation, which
+ *   the viewer renders with the recorded network and the action's target highlighted.
+ * - Times come from Strider's clock, never Effect's, so a trace made under `TestClock` still has a timeline.
+ * - `exportTrace` writes a zip that trace.playwright.dev opens, with params redacted under
+ *   `Diagnostics.CurrentPreset`. Under the strict preset, snapshots also redact password inputs and fields filled
+ *   with `Redacted` text.
  *
  * **Gotchas**
  *
- * `domSnapshots` without `network: true` fails with `InvalidInput`: a snapshot's images, fonts and cross-origin
- * styles come from the network recording. Snapshots are captured in an isolated world of Strider's, which the
- * page can't see, and nothing hooks the page's styles, so each capture reads every stylesheet again. The viewer
- * draws a snapshot's canvas from the action's screenshot, so canvases need `screenshots: "perAction"`. Firefox's
- * video ends at the first `exportTrace`, which reads its file.
+ * - `domSnapshots` without `network: true` fails with `InvalidInput`: a snapshot's images, fonts and cross-origin
+ *   styles come from the network recording.
+ * - Snapshots are taken in an isolated world of Strider's, which the page can't see, and each one reads every
+ *   stylesheet again. Stock WebKit has no isolated worlds, so there they run in the page's own.
+ * - The viewer draws a snapshot's canvas from the action's screenshot, so canvases need
+ *   `screenshots: "perAction"`.
+ * - Firefox's video ends at the first `exportTrace`, which reads its file.
  *
- * **Example** (A trace of a failing checkout)
+ * **Example** (Exporting a trace when checkout fails)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Page, Trace } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const traced = Effect.fn("traced")(function*(page: Page.Page) {
  *   const recording = yield* Trace.record(page.context, { screenshots: "perAction" })
@@ -235,6 +253,23 @@ const TraceErrorTypeId = "~@usestrider/browser/Trace/TraceError"
 
 /**
  * Error for a trace that couldn't be recorded or exported.
+ *
+ * **Example** (Falling back to polled screenshots)
+ *
+ * ```ts import.meta.vitest
+ * import { Page, Trace } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const recordVideo = Effect.fn("recordVideo")(function*(page: Page.Page) {
+ *   return yield* Trace.record(page, { screencast: "native" }).pipe(
+ *     Effect.catchReason(
+ *       "TraceError",
+ *       "Unsupported",
+ *       () => Trace.record(page, { screencast: { polled: "500 millis" } })
+ *     )
+ *   )
+ * })
+ * ```
  *
  * @stability experimental
  * @category errors

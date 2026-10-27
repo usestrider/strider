@@ -1,9 +1,8 @@
 /**
- * Dialogs, file choosers and paused requests that a default policy decided, because no handler did.
+ * Dialogs, file choosers and paused requests that a default policy decided, because no handler or route did.
  *
- * A dialog no handler answered, a file chooser no handler answered, or a paused request whose route failed is
- * decided by a stated policy, never silently. This event reports each such decision, so a test can check that none
- * happened, and an agent can see why a dialog disappeared.
+ * Each such decision is reported, never made silently, so a test can check that none happened and an agent can see
+ * why a dialog disappeared.
  *
  * @stability unstable
  * @since 0.1.0
@@ -170,6 +169,20 @@ const accepts = (filter: Filter | undefined) => {
  * Subscribes to automatic decisions and returns the wait: an effect that gives the first match, the same each
  * time it runs.
  *
+ * **Example** (What the context's policy did with a dialog)
+ *
+ * ```ts import.meta.vitest
+ * import { AutoResolution, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const deleteUnhandled = Effect.fn("deleteUnhandled")(function*(page: Page.Page) {
+ *   const decided = yield* AutoResolution.next(page, { subject: "Dialog" })
+ *   yield* page.getByRole("button", { name: "Delete account" }).click()
+ *   const resolution = yield* decided
+ *   return resolution.decision
+ * })
+ * ```
+ *
  * @stability unstable
  * @category subscriptions
  * @since 0.1.0
@@ -190,6 +203,23 @@ export const next = <PE = never, PR = never>(
 /**
  * Subscribes to automatic decisions and emits every match from now on.
  *
+ * **Example** (Warning about every default decision in a context)
+ *
+ * ```ts import.meta.vitest
+ * import { AutoResolution, Page } from "@usestrider/browser"
+ * import { Effect, Stream } from "effect"
+ *
+ * const warnOnDefaults = Effect.fn("warnOnDefaults")(function*(page: Page.Page) {
+ *   const decisions = yield* AutoResolution.stream(page.context)
+ *   yield* decisions.pipe(
+ *     Stream.runForEach((resolution) =>
+ *       Effect.logWarning(`${resolution.subject._tag}: ${resolution.decision}`)
+ *     ),
+ *     Effect.forkScoped
+ *   )
+ * })
+ * ```
+ *
  * @stability unstable
  * @category subscriptions
  * @since 0.1.0
@@ -206,6 +236,18 @@ export const stream = <PE = never, PR = never>(
 
 /**
  * Reads the automatic decisions still in the event log; never waits.
+ *
+ * **Example** (Checking that no default decided anything)
+ *
+ * ```ts import.meta.vitest
+ * import { AutoResolution, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const nothingDefaulted = Effect.fn("nothingDefaulted")(function*(page: Page.Page) {
+ *   const decisions = yield* AutoResolution.history(page)
+ *   return decisions.entries.length === 0 && decisions.dropped === 0
+ * })
+ * ```
  *
  * @stability unstable
  * @category getters

@@ -48,7 +48,7 @@ The WAI-ARIA roles that `getByRole`, snapshots and `AriaPattern` use.
 
 ### AutoResolution
 
-Dialogs, file choosers and paused requests that a default policy decided, because no handler did.
+Dialogs, file choosers and paused requests that a default policy decided, because no handler or route did.
 
 *models*
 
@@ -1122,7 +1122,7 @@ The WebSockets and event sources a page opens: connections that stay open and ca
 
 ### NetworkRequest
 
-The requests a page or context sends: the event, and the data that routes and responses refer to.
+The requests a page or context sends, as events and as the data routes and responses refer to.
 
 *models*
 
@@ -1160,7 +1160,7 @@ The requests a page or context sends: the event, and the data that routes and re
 
 ### NetworkResponse
 
-The responses a page or context receives: the event, and, when asked for, their bodies.
+The responses a page or context receives, with their bodies when a subscription asks for them.
 
 *models*
 
@@ -1518,7 +1518,7 @@ Failure reasons that more than one module's error can carry.
 
 ### Route
 
-Routes intercept the requests of a page or context, and their handlers decide what happens to each one.
+Routes intercept a page's or context's requests, and a route's handler decides what happens to each one.
 
 *models*
 
@@ -2141,7 +2141,7 @@ The raw protocol client: commands and events as data, the session they run on, a
 
 ### SocketConnector
 
-Opens scoped socket connections to endpoints chosen at run time, such as the inspector server of a stock WebKit browser `WebKit.layer` launched.
+Opens scoped socket connections to endpoints known only at run time, such as the inspector server of a MiniBrowser that `WebKit.layer` launched.
 
 *services*
 
@@ -2236,7 +2236,7 @@ Test support that works with any test runner: the running test, and the files at
 
 ### WebKit
 
-The WebKit backend (`@usestrider/browser/webkit`): stock WebKit, launched in automation mode or attached through its inspector.
+The WebKit backend: stock WebKitGTK and WPE, launched in automation mode or attached through their inspector.
 
 *layers*
 

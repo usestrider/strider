@@ -1,12 +1,11 @@
 /**
- * Routes intercept the requests of a page or context, and their handlers decide what happens to each one.
+ * Routes intercept a page's or context's requests, and a route's handler decides what happens to each one.
  *
- * A route works at one phase: a request before it's sent (the default), its response before the page sees it, or
- * its authentication challenge. A handler returns a `Decision` valid at its phase, so a paused request is never
- * left hanging: a handler that fails, is interrupted, runs out of time, or returns a decision the backend can't
- * apply gets the default, `continue`, and its failure is logged. Requests and responses are Effect's HTTP types: a
- * fulfilled response is an `HttpServerResponse`, and a change to a request is a function of `HttpClientRequest`.
- * Routes are asked in order of precedence: the page's before its context's, and the most recent first.
+ * A route works at one phase: before the request is sent (the default), when its response starts or at an
+ * authentication challenge. Its handler returns a `Decision` valid at that phase. A handler that fails, is
+ * interrupted, runs out of time or returns a decision the backend can't apply gets the default, `continue`, and
+ * its failure is logged. A fulfilled response is an `HttpServerResponse`, and a change to a request is a function
+ * of `HttpClientRequest`. The page's routes are asked before its context's, the most recent first.
  *
  * **Gotchas**
  *
@@ -41,7 +40,7 @@ import type * as Watchable from "./Watchable.ts"
 const DecisionTypeId = RouteDecision.TypeId
 
 /**
- * Where a request is paused: before it is sent, when its response starts, or at an authentication challenge.
+ * Where a request is paused: before it's sent, when its response starts or at an authentication challenge.
  *
  * @stability unstable
  * @category models
@@ -54,8 +53,8 @@ export type Phase = "request" | "response" | "auth"
  *
  * **Details**
  *
- * A decision valid at more phases is accepted where fewer are asked for, so `Route.continue`, valid at every
- * phase, is a decision for any handler, while `Route.provideCredentials` is one only for an `auth` route.
+ * A decision valid at more phases fits where fewer are asked for: `Route.continue`, valid at every phase, fits
+ * any handler, while `Route.provideCredentials` fits only an `auth` route's.
  *
  * @stability unstable
  * @category models
@@ -101,6 +100,26 @@ export interface Paused {
   readonly request: NetworkRequest.NetworkRequest
   /**
    * The request's body as it was sent, or `None` if it has none.
+   *
+   * **Example** (Logging the orders a page places)
+   *
+   * ```ts import.meta.vitest
+   * import { Page, Route } from "@usestrider/browser"
+   * import { Console, Effect, Option } from "effect"
+   *
+   * const logOrders = Effect.fn("logOrders")(function*(page: Page.Page) {
+   *   yield* page.route(
+   *     "https://shop.example.com/api/orders",
+   *     ({ requestBody }) =>
+   *       requestBody.pipe(
+   *         Effect.tap((body) =>
+   *           Console.log(Option.map(body, (bytes) => new TextDecoder().decode(bytes)))
+   *         ),
+   *         Effect.as(Route.continue)
+   *       )
+   *   )
+   * })
+   * ```
    */
   readonly requestBody: Effect.Effect<Option.Option<Uint8Array>, RouteError | Target.TargetGone>
 }
@@ -132,6 +151,28 @@ export interface ResponsePhase extends Paused {
   /**
    * The response's body. It fails with `Unsupported` where the backend can't read a paused response
    * (`interception.responseBody`: CDP only).
+   *
+   * **Example** (Rewriting a response's body)
+   *
+   * ```ts import.meta.vitest
+   * import { Page, Route } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   * import { HttpServerResponse } from "effect/http"
+   *
+   * const showProPlan = Effect.fn("showProPlan")(function*(page: Page.Page) {
+   *   yield* page.route(
+   *     "https://app.example.com/api/plan",
+   *     ({ responseBody }) =>
+   *       Effect.map(responseBody, (bytes) => {
+   *         const text = new TextDecoder().decode(bytes).replace("Free", "Pro")
+   *         return Route.fulfill(
+   *           HttpServerResponse.text(text, { contentType: "application/json" })
+   *         )
+   *       }),
+   *     { phase: "response" }
+   *   )
+   * })
+   * ```
    */
   readonly responseBody: Effect.Effect<Uint8Array, RouteError | Target.TargetGone>
 }
@@ -197,8 +238,21 @@ export {
    *
    * **Details**
    *
-   * At the `auth` phase, Strider never lets the browser show its own prompt, which a headless browser would wait
-   * on forever.
+   * At the `auth` phase, the browser never shows its own prompt.
+   *
+   * **Example** (Logging API calls without changing them)
+   *
+   * ```ts import.meta.vitest
+   * import { Page, Route } from "@usestrider/browser"
+   * import { Console, Effect } from "effect"
+   *
+   * const logApiCalls = Effect.fn("logApiCalls")(function*(page: Page.Page) {
+   *   yield* page.route(
+   *     "https://shop.example.com/api/**",
+   *     ({ request }) => Effect.as(Console.log(request.method, request.url), Route.continue)
+   *   )
+   * })
+   * ```
    *
    * @stability unstable
    * @category constructors
@@ -230,9 +284,12 @@ export interface ResponseChange {
 }
 
 /**
- * Lets the request continue, changed by `change`. Only the parts the change altered are sent to the browser, so
- * adding a header doesn't send the body again. At the `response` phase, the response continues with its status or
- * headers changed, and its body as the server sent it.
+ * Lets the request continue, changed by `change`.
+ *
+ * **Details**
+ *
+ * Only what the change altered is sent to the browser, so adding a header doesn't send the body again. At the
+ * `response` phase, the change sets the status or headers, and the body stays as the server sent it.
  *
  * **Gotchas**
  *
@@ -243,28 +300,34 @@ export interface ResponseChange {
  * **Example** (Adding a header to API calls)
  *
  * ```ts import.meta.vitest
+ * import { Page, Route } from "@usestrider/browser"
  * import { Effect } from "effect"
  * import { HttpClientRequest } from "effect/http"
- * import { Page, Route } from "@usestrider/browser"
  *
  * const tagApiCalls = Effect.fn("tagApiCalls")(function*(page: Page.Page) {
- *   yield* page.route("https://shop.example.com/api/**", () =>
- *     Effect.succeed(Route.continueWith(HttpClientRequest.setHeader("x-test", "1"))))
+ *   yield* page.route(
+ *     "https://shop.example.com/api/**",
+ *     () => Effect.succeed(Route.continueWith(HttpClientRequest.setHeader("x-test", "1")))
+ *   )
  * })
  * ```
  *
  * **Example** (Letting a response be cached)
  *
  * ```ts import.meta.vitest
+ * import { Page, Route } from "@usestrider/browser"
  * import { Effect } from "effect"
  * import { Headers } from "effect/http"
- * import { Page, Route } from "@usestrider/browser"
  *
  * const cacheable = Effect.fn("cacheable")(function*(page: Page.Page) {
  *   yield* page.route(
  *     "https://shop.example.com/static/**",
  *     ({ response }) =>
- *       Effect.succeed(Route.continueWith({ headers: Headers.set(response.headers, "cache-control", "max-age=60") })),
+ *       Effect.succeed(
+ *         Route.continueWith({
+ *           headers: Headers.set(response.headers, "cache-control", "max-age=60")
+ *         })
+ *       ),
  *     { phase: "response" }
  *   )
  * })
@@ -304,13 +367,15 @@ export const continueWith: {
  * **Example** (Stubbing an API response)
  *
  * ```ts import.meta.vitest
+ * import { Page, Route } from "@usestrider/browser"
  * import { Effect } from "effect"
  * import { HttpServerResponse } from "effect/http"
- * import { Page, Route } from "@usestrider/browser"
  *
  * const stubUser = Effect.fn("stubUser")(function*(page: Page.Page) {
- *   yield* page.route("https://shop.example.com/api/user", () =>
- *     Effect.succeed(Route.fulfill(HttpServerResponse.jsonUnsafe({ name: "Ada" }))))
+ *   yield* page.route(
+ *     "https://shop.example.com/api/user",
+ *     () => Effect.succeed(Route.fulfill(HttpServerResponse.jsonUnsafe({ name: "Ada" })))
+ *   )
  * })
  * ```
  *
@@ -352,6 +417,21 @@ export type AbortReason =
  * A reason other than `"failed"` is CDP's alone (`interception.abortReason`): Firefox and WebKit report the same
  * failure for every reason, so on them the decision fails with `Unsupported`, and the default applies.
  *
+ * **Example** (Blocking images)
+ *
+ * ```ts import.meta.vitest
+ * import { Page, Route } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const blockImages = Effect.fn("blockImages")(function*(page: Page.Page) {
+ *   yield* page.route(
+ *     "https://shop.example.com/images/**",
+ *     () => Effect.succeed(Route.abort())
+ *   )
+ *   yield* page.goto("https://shop.example.com")
+ * })
+ * ```
+ *
  * @stability unstable
  * @category constructors
  * @since 0.1.0
@@ -361,6 +441,26 @@ export const abort = (reason?: AbortReason | undefined): Decision<"request" | "r
 
 /**
  * Passes the request to the next matching route, or lets the default decide when there is none.
+ *
+ * **Example** (Stubbing only the cart's POST requests)
+ *
+ * ```ts import.meta.vitest
+ * import { Page, Route } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ * import { HttpServerResponse } from "effect/http"
+ *
+ * const stubAddToCart = Effect.fn("stubAddToCart")(function*(page: Page.Page) {
+ *   yield* page.route(
+ *     "https://shop.example.com/api/cart",
+ *     ({ request }) =>
+ *       Effect.succeed(
+ *         request.method === "POST"
+ *           ? Route.fulfill(HttpServerResponse.empty())
+ *           : Route.fallthrough
+ *       )
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category constructors
@@ -386,19 +486,18 @@ export interface FromHarOptions {
 }
 
 /**
- * Reads a recorded HAR, and gives a route handler that answers requests from it.
+ * Reads a recorded HAR and gives a route handler that answers requests from it.
  *
  * **Details**
  *
- * `path` names a HAR, or the zip that `Har.record` writes with `content: "attach"`; Strider tells them apart by
- * the zip's signature. An entry matches a request by method and URL, and by body where both have one; the latest
- * matching entry wins. Its response is fulfilled as recorded, a redirect as a redirect. Its body is replayed
- * decoded, so the headers that describe its encoding or length are dropped, as is a `Set-Cookie` whose value the
- * export redacted. An entry that failed without a response fails the request. A request no entry matches is
- * aborted, or falls through with `notFound: "fallthrough"`.
- *
- * Replay is a route like any other, so the route's pattern says which requests the HAR answers. `Har.record`
- * makes the recording.
+ * - `path` names a HAR, or the zip `Har.record` writes with `content: "attach"`, told apart by its contents, not
+ *   its extension.
+ * - An entry matches a request by method and URL, and by body where both have one; the latest match wins.
+ * - Its response is fulfilled as recorded, a redirect as a redirect. The body is replayed decoded, so the headers
+ *   that describe its encoding or length are dropped, as is a `Set-Cookie` whose value the export redacted.
+ * - An entry that failed without a response fails the request.
+ * - A request no entry matches is aborted, or falls through with `notFound: "fallthrough"`.
+ * - The route's pattern decides which requests the HAR answers.
  *
  * **Gotchas**
  *
@@ -408,8 +507,8 @@ export interface FromHarOptions {
  * **Example** (Answering a page's API calls from a recording)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Page, Route } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const offline = Effect.fn("offline")(function*(page: Page.Page) {
  *   yield* page.route("https://shop.example.com/api/**", yield* Route.fromHar("api.har"))
@@ -428,6 +527,33 @@ export const fromHar: (
 
 /**
  * Answers an authentication challenge.
+ *
+ * **Gotchas**
+ *
+ * An `auth` route fails with `Unsupported` on WebKit, which answers challenges only from credentials set in advance
+ * (`interception.auth`).
+ *
+ * **Example** (Signing in to a page behind HTTP authentication)
+ *
+ * ```ts import.meta.vitest
+ * import { Page, Route } from "@usestrider/browser"
+ * import { Effect, Redacted } from "effect"
+ *
+ * const openAdmin = Effect.fn("openAdmin")(function*(page: Page.Page) {
+ *   yield* page.route(
+ *     "https://app.example.com/**",
+ *     () =>
+ *       Effect.succeed(
+ *         Route.provideCredentials({
+ *           username: "ada",
+ *           password: Redacted.make("hunter2")
+ *         })
+ *       ),
+ *     { phase: "auth" }
+ *   )
+ *   yield* page.goto("https://app.example.com/admin")
+ * })
+ * ```
  *
  * @stability unstable
  * @category constructors
@@ -448,6 +574,23 @@ export const provideCredentials = (credentials: {
 export interface Registration extends Declaration.Registration {
   /**
    * How many requests this route was asked about.
+   *
+   * **Example** (Waiting until a stub has answered)
+   *
+   * ```ts import.meta.vitest
+   * import { Page, Route } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   * import { HttpServerResponse } from "effect/http"
+   *
+   * const stubProducts = Effect.fn("stubProducts")(function*(page: Page.Page) {
+   *   const stub = yield* page.route(
+   *     "https://shop.example.com/api/products",
+   *     () => Effect.succeed(Route.fulfill(HttpServerResponse.jsonUnsafe([])))
+   *   )
+   *   yield* page.goto("https://shop.example.com")
+   *   yield* stub.hits.waitFor((hits) => hits > 0)
+   * })
+   * ```
    */
   readonly hits: Watchable.Watchable<number>
 }

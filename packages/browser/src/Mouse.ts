@@ -94,6 +94,23 @@ export interface ClickOptions {
 export interface HeldButton {
   /**
    * Releases the button early. Running it again does nothing, and neither does closing the scope.
+   *
+   * **Example** (Dropping a dragged map pin)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const movePin = Effect.fn("movePin")(function*(page: Page.Page) {
+   *   yield* Effect.scoped(Effect.gen(function*() {
+   *     yield* page.mouse.move({ x: 200, y: 200 })
+   *     const button = yield* page.mouse.hold("left")
+   *     yield* page.mouse.move({ x: 320, y: 240 }, { steps: 8 })
+   *     yield* button.release
+   *     yield* page.getByRole("button", { name: "Save location" }).click()
+   *   }))
+   * })
+   * ```
    */
   readonly release: Effect.Effect<void>
 }
@@ -107,29 +124,96 @@ export interface HeldButton {
  */
 export interface Mouse {
   /**
-   * Where the pointer is now; read through an effect because it changes.
+   * Where Strider last moved the pointer, in CSS pixels; `{ x: 0, y: 0 }` before any pointer input.
+   *
+   * **Example** (Putting the pointer back after a click)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const clickCorner = Effect.fn("clickCorner")(function*(page: Page.Page) {
+   *   const before = yield* page.mouse.position
+   *   yield* page.mouse.click({ x: 24, y: 24 })
+   *   yield* page.mouse.move(before)
+   * })
+   * ```
    */
   readonly position: Effect.Effect<Point>
   /**
    * Moves the pointer to a point.
+   *
+   * **Example** (Hovering over a chart)
+   *
+   * ```ts import.meta.vitest
+   * import { Expect, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const hoverBar = Effect.fn("hoverBar")(function*(page: Page.Page) {
+   *   yield* page.mouse.move({ x: 320, y: 180 }, { steps: 5 })
+   *   yield* page.getByRole("tooltip").pipe(Expect.toBeVisible)
+   * })
+   * ```
    */
   move(
     to: Point,
     options?: MoveOptions | undefined
   ): Effect.Effect<void, MouseError | Target.TargetGone | Deadline.Timeout>
   /**
-   * Clicks at a point, with no actionability checks: there is no element to check.
+   * Moves the pointer to a point and clicks there, with no checks first: there is no element to check. With a
+   * modifier held or asked for, it fails with `Unsupported` on a backend whose pointer can't carry one
+   * (`input.pointerModifiers`).
+   *
+   * **Example** (Opening a canvas's context menu)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const deleteShape = Effect.fn("deleteShape")(function*(page: Page.Page) {
+   *   yield* page.mouse.click({ x: 400, y: 300 }, { button: "right" })
+   *   yield* page.getByRole("menuitem", { name: "Delete" }).click()
+   * })
+   * ```
    */
   click(
     at: Point,
     options?: ClickOptions | undefined
   ): Effect.Effect<void, MouseError | Target.TargetGone | Deadline.Timeout>
   /**
-   * Holds a button down until the returned handle is released or its scope closes.
+   * Presses a button at the pointer and holds it until the returned handle is released or its scope closes, so
+   * moves meanwhile are a drag.
+   *
+   * **Example** (Drawing a line on a canvas)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const drawLine = Effect.fn("drawLine")(function*(page: Page.Page) {
+   *   yield* page.mouse.move({ x: 100, y: 100 })
+   *   yield* Effect.scoped(Effect.gen(function*() {
+   *     yield* page.mouse.hold("left")
+   *     yield* page.mouse.move({ x: 220, y: 140 }, { steps: 12 })
+   *   }))
+   * })
+   * ```
    */
   hold(button: Button): Effect.Effect<HeldButton, MouseError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
   /**
    * Scrolls by a delta in CSS pixels, at the pointer's position.
+   *
+   * **Example** (Zooming a map with the wheel)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const zoomMap = Effect.fn("zoomMap")(function*(page: Page.Page) {
+   *   yield* page.mouse.move({ x: 480, y: 320 })
+   *   yield* page.mouse.wheel({ x: 0, y: -240 })
+   * })
+   * ```
    */
   wheel(delta: Point): Effect.Effect<void, MouseError | Target.TargetGone | Deadline.Timeout>
 }

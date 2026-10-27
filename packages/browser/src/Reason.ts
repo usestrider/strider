@@ -3,9 +3,9 @@
  *
  * Every module has one error, and what went wrong is its `reason`. Reasons that belong to one module are declared
  * there, such as `Locator.StrictViolation` or `PageNavigation.NavigationFailed`. The ones here are shared: a bad
- * argument, missing access, a capability the backend lacks, a protocol failure and the two ways an evaluated
- * function can fail. Match them with `Effect.catchReason`; each carries a one-line `hint`, which its `message`
- * includes.
+ * argument, missing access, a capability the backend lacks, a protocol failure, the two ways an evaluated
+ * function can fail and a dialog that blocks the page. Match them with `Effect.catchReason`; each carries a
+ * one-line `hint`, which its `message` includes.
  *
  * @stability unstable
  * @since 0.1.0
@@ -38,7 +38,26 @@ export interface Reason {
  *
  * **Details**
  *
- * An invalid input fails at once, before anything is sent and without waiting for the deadline.
+ * An invalid input fails at once, without waiting for the deadline.
+ *
+ * **Example** (Reporting a date the field refuses)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const setDeliveryDate = Effect.fn("setDeliveryDate")(
+ *   function*(page: Page.Page, date: string) {
+ *     yield* page.getByLabel("Delivery date").fill(date).pipe(
+ *       Effect.catchReason(
+ *         "LocatorError",
+ *         "InvalidInput",
+ *         (invalid) => Effect.logWarning(invalid.hint)
+ *       )
+ *     )
+ *   }
+ * )
+ * ```
  *
  * @stability unstable
  * @category reasons
@@ -60,8 +79,9 @@ export class InvalidInput extends Schema.Error<InvalidInput>("@usestrider/browse
  *
  * **Details**
  *
- * Access is a grant held by a `Scope`, so the hint names the upgrade, such as `.inspect` or `.control`. The
- * types already rule out most of these; the rest come from grants that ended.
+ * Access is a grant held by a `Scope`, and the hint names the call that gains it. The types rule out most of
+ * these. Most others come from a page in a context Strider didn't create: its `page.context` refuses what needs
+ * control until `page.context.control` gains it.
  *
  * @stability unstable
  * @category reasons
@@ -82,8 +102,25 @@ export class NotPermitted extends Schema.Error<NotPermitted>("@usestrider/browse
  *
  * **Details**
  *
- * The hint says what is missing, such as which backends do have the capability. Nothing is emulated in its
- * place.
+ * `capability` names what is missing, and the hint says why, such as which backends have it. Nothing is
+ * emulated in its place.
+ *
+ * **Example** (Skipping dark mode where the browser can't emulate it)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const darkMode = Effect.fn("darkMode")(function*(page: Page.Page) {
+ *   yield* page.emulate({ media: { colorScheme: "dark" } }).pipe(
+ *     Effect.catchReason(
+ *       "DeclarationError",
+ *       "Unsupported",
+ *       (unsupported) => Effect.logInfo(`No dark mode on ${unsupported.backend}`)
+ *     )
+ *   )
+ * })
+ * ```
  *
  * @see {@link Capability.Capability} for features reached through a typed handle
  *
@@ -127,7 +164,8 @@ export type Metadata = typeof Metadata.Type
  *
  * A backend declares its key with `declare module`, so CDP error codes are typed where the Chromium backend
  * is imported, and the modules every backend shares never have to know them. Its keys are optional, and its index
- * admits `undefined`, so the declarations type-check with `exactOptionalPropertyTypes` on or off.
+ * admits `undefined`, so the declarations type-check with `exactOptionalPropertyTypes` on or off. No backend fills
+ * its key in: the browser's code and message are on the failure's `cause`.
  *
  * @stability unstable
  * @category configuration
@@ -143,8 +181,30 @@ export interface BackendMetadata {
  * **Details**
  *
  * `method` is the protocol command, such as `Input.dispatchMouseEvent`. A failure the browser reported carries
- * its `ProtocolError` as `cause`, with the browser's own code and message. `metadata` is where a backend can add
- * detail under its own key; none does yet, so it's empty.
+ * its `ProtocolError` as `cause`, with the browser's own code and message. `metadata` is empty.
+ *
+ * **Example** (Logging the browser's own message)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Protocol } from "@usestrider/browser/protocol"
+ * import { Effect } from "effect"
+ *
+ * const printInvoice = Effect.fn("printInvoice")(function*(page: Page.ReadonlyPage) {
+ *   return yield* page.pdf().pipe(
+ *     Effect.catchReason(
+ *       "PageError",
+ *       "BackendFailure",
+ *       (failure, error) =>
+ *         Effect.logError(
+ *           Protocol.isProtocolError(failure.cause) ? failure.cause.message : failure.hint
+ *         ).pipe(
+ *           Effect.andThen(Effect.fail(error))
+ *         )
+ *     )
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category reasons
@@ -170,6 +230,30 @@ export class BackendFailure extends Schema.Error<BackendFailure>("@usestrider/br
  *
  * Functions are serialized and run in the page, so they must be self-contained. A `ReferenceError` for a
  * name from the surrounding module is the usual sign, and its hint says so.
+ *
+ * **Example** (Treating unreadable saved state as none)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const savedCart = Effect.fn("savedCart")(function*(page: Page.ReadonlyPage) {
+ *   const read = page.evaluate(() =>
+ *     JSON.parse(localStorage.getItem("cart") ?? "") as { items: number }
+ *   )
+ *   return yield* read.pipe(
+ *     Effect.map(Option.some),
+ *     Effect.catchReason(
+ *       "PageError",
+ *       "EvaluationThrown",
+ *       (thrown, error) =>
+ *         thrown.exception.name === "SyntaxError"
+ *           ? Effect.succeedNone
+ *           : Effect.fail(error)
+ *     )
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category reasons
@@ -219,11 +303,11 @@ export class NotSerializable extends Schema.Error<NotSerializable>("@usestrider/
  *
  * **Details**
  *
- * A dialog pauses its page: on some backends every evaluation waits for it, and on all of them the input that
- * opened it does. When a handler or the context's `dialogs` policy will decide the dialog, the operation waits
- * for it within its deadline. This reason is for a dialog nothing will decide: the context's policy is
- * `"leaveOpen"` and no `Dialog.handle` was registered when it opened, so the operation fails at once rather than
- * at its deadline. `text` is the dialog's message, empty for a `beforeunload`.
+ * A dialog pauses its page: the input that opened it waits for it, and on some backends so does every
+ * evaluation. When a handler or the context's `dialogs` policy will decide the dialog, the operation waits within
+ * its deadline. When nothing will (the policy is `"leaveOpen"` and no `Dialog.handle` was registered when it
+ * opened), the operation fails at once with this reason. `text` is the dialog's message, empty for a
+ * `beforeunload`.
  *
  * @stability unstable
  * @category reasons

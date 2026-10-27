@@ -1,17 +1,17 @@
 /**
  * File choosers: the file picker a page opens when a file input is clicked.
  *
- * A file chooser doesn't pause the page, but something must answer it, by choosing files or canceling. `handle`
- * registers the scoped handler that answers; a chooser no handler answers is canceled, and the cancellation is
- * reported as an `AutoResolution`. Setting files directly with `locator.setInputFiles` needs no chooser at all.
- *
- * Every page of a context Strider creates has its choosers reported and answered, so none is ever shown. `next`,
- * `stream` and `history` report a chooser as data; a handler receives it as `Pending`, with the decisions.
+ * A chooser doesn't pause the page, but something must answer it, by choosing files or canceling. `next`, `stream`
+ * and `history` report a chooser as data; `handle` registers a scoped handler that answers it, given as `Pending`
+ * with the decisions. In a context Strider creates no chooser is shown: one no handler answers is canceled and
+ * reported as an `AutoResolution`. `locator.setInputFiles` sets an input's files without a chooser.
  *
  * **Gotchas**
  *
- * On Firefox the input gets a `cancel` event as the chooser opens, before any decision; the files a handler chooses
- * still arrive after it, with `input` and `change`. Firefox's `fileChooser` capability says so.
+ * - On Firefox the input gets a `cancel` event as the chooser opens, before any decision; the files a handler
+ *   chooses still arrive after it, with `input` and `change` (`fileChooser`).
+ * - On a backend without the `fileChooser` capability, such as WebKit, no chooser is reported: `next`, `stream`
+ *   and `history` fail with `Unsupported`, and the browser cancels the chooser itself.
  *
  * @stability unstable
  * @since 0.1.0
@@ -45,7 +45,7 @@ import type * as Target from "./Target.ts"
 const DecisionTypeId = "~@usestrider/browser/FileChooser/Decision"
 
 /**
- * How a file chooser is answered.
+ * How a file chooser is answered: one of a `Pending` chooser's decisions, which a handler returns.
  *
  * @stability unstable
  * @category models
@@ -156,6 +156,25 @@ const subscription = (target: Page.ObservedPage, filter: Filter | undefined, ope
  * Subscribes to file choosers and returns the wait: an effect that gives the first match, the same each time it
  * runs. Waiting for a chooser doesn't decide it.
  *
+ * **Gotchas**
+ *
+ * On a backend without the `fileChooser` capability, such as WebKit, it fails at once with `SubscriptionError`,
+ * reason `Unsupported`.
+ *
+ * **Example** (Checking that a picker takes several files)
+ *
+ * ```ts import.meta.vitest
+ * import { FileChooser, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const takesSeveral = Effect.fn("takesSeveral")(function*(page: Page.Page) {
+ *   const choosers = yield* FileChooser.next(page)
+ *   yield* page.getByRole("button", { name: "Add photos" }).click()
+ *   const chooser = yield* choosers
+ *   return chooser._tag === "Multiple"
+ * })
+ * ```
+ *
  * @stability unstable
  * @category subscriptions
  * @since 0.1.0
@@ -177,6 +196,26 @@ export const next = <PE = never, PR = never>(
 /**
  * Subscribes to file choosers and emits every match from now on. Seeing a chooser doesn't decide it.
  *
+ * **Gotchas**
+ *
+ * On a backend without the `fileChooser` capability, such as WebKit, it fails at once with `SubscriptionError`,
+ * reason `Unsupported`.
+ *
+ * **Example** (Logging every chooser a page opens)
+ *
+ * ```ts import.meta.vitest
+ * import { FileChooser, Page } from "@usestrider/browser"
+ * import { Effect, Stream } from "effect"
+ *
+ * const logChoosers = Effect.fn("logChoosers")(function*(page: Page.Page) {
+ *   const choosers = yield* FileChooser.stream(page)
+ *   yield* choosers.pipe(
+ *     Stream.runForEach((chooser) => Effect.log(`${chooser._tag} file chooser`)),
+ *     Effect.forkScoped
+ *   )
+ * })
+ * ```
+ *
  * @stability unstable
  * @category subscriptions
  * @since 0.1.0
@@ -197,6 +236,23 @@ export const stream = <PE = never, PR = never>(
 
 /**
  * Reads the file choosers still in the page's event log; never waits.
+ *
+ * **Gotchas**
+ *
+ * On a backend without the `fileChooser` capability, such as WebKit, it fails with `SubscriptionError`, reason
+ * `Unsupported`.
+ *
+ * **Example** (Whether a page has opened a picker)
+ *
+ * ```ts import.meta.vitest
+ * import { FileChooser, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const pickerOpened = Effect.fn("pickerOpened")(function*(page: Page.Page) {
+ *   const choosers = yield* FileChooser.history(page)
+ *   return choosers.entries.length > 0
+ * })
+ * ```
  *
  * @stability unstable
  * @category getters
@@ -223,14 +279,15 @@ export const history = (
  *
  * **Gotchas**
  *
- * A handler that fails, is interrupted or runs out of time leaves the chooser canceled, reported as an
- * `AutoResolution`, and its failure is logged at Effect's `References.UnhandledLogLevel`.
+ * - A handler that fails, is interrupted or runs out of time leaves the chooser canceled, reported as an
+ *   `AutoResolution`, and its failure is logged at Effect's `References.UnhandledLogLevel`.
+ * - On a backend without the `fileChooser` capability, such as WebKit, no chooser reaches the handler.
  *
  * **Example** (Uploading through the page's own picker)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { FileChooser, FileInput, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const uploadReport = Effect.fn("uploadReport")(function*(page: Page.Page) {
  *   yield* FileChooser.handle(page, FileChooser.choose(FileInput.local("./report.pdf")))
@@ -327,6 +384,19 @@ const setMade = Effect.fnUntraced(function*(
  *
  * A `Single` chooser given several files fails the handler with `InvalidInput`, so the chooser is canceled
  * rather than given the first file.
+ *
+ * **Example** (Choosing two photos)
+ *
+ * ```ts import.meta.vitest
+ * import { FileChooser, FileInput, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const addPhotos = Effect.fn("addPhotos")(function*(page: Page.Page) {
+ *   const photos = [FileInput.local("./front.jpg"), FileInput.local("./back.jpg")]
+ *   yield* FileChooser.handle(page, FileChooser.choose(photos))
+ *   yield* page.getByRole("button", { name: "Add photos" }).click()
+ * })
+ * ```
  *
  * @stability unstable
  * @category handlers

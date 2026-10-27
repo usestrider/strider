@@ -29,16 +29,15 @@ export const Url = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url/Url
  *
  * **Details**
  *
- * URLs are stored as strings, as Effect's own `HttpClientRequest.url` is, because a `URL` object can be
- * changed in place and compares by reference. To work on one, use `effect/http`'s `Url` module:
- * `Url.fromString(url)` gives a `URL`, its setters change it, and `href` is a string again.
+ * To work on one, use `effect/http`'s `Url` module: `Url.fromString(url)` gives a `URL`, its setters change it,
+ * and `href` is a string again.
  *
  * **Example** (Reading the path of a page's URL)
  *
  * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
  * import { Effect, Result } from "effect"
  * import { Url as HttpUrl } from "effect/http"
- * import { Page } from "@usestrider/browser"
  *
  * const pathOf = Effect.fn("pathOf")(function*(page: Page.ObservedPage) {
  *   const url = yield* page.url
@@ -66,9 +65,29 @@ export const Pattern = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url
  *
  * **Details**
  *
- * A pattern with `*` or `**` is a glob over the whole URL. A pattern that starts with a scheme and contains
- * `:name` groups is a `URLPattern`. Which one is used is decided by the string's form, and an invalid pattern
- * fails with `InvalidInput` at once.
+ * The string's form decides how it matches:
+ *
+ * - With `*`, it's a glob over the whole URL: `**` matches anything, and `*` anything but `/`.
+ * - Starting with a scheme and containing `:name` groups, it's a `URLPattern`.
+ * - Anything else matches that exact URL.
+ *
+ * An invalid pattern fails with `InvalidInput` at once.
+ *
+ * **Example** (Matching with a glob and a `URLPattern`)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const productLoads = Effect.fn("productLoads")(function*(page: Page.Page) {
+ *   const api = yield* NetworkRequest.next(page, { url: "https://*.example.com/api/**" })
+ *   const product = yield* NetworkRequest.next(page, {
+ *     url: "https://shop.example.com/products/:id"
+ *   })
+ *   yield* page.goto("https://shop.example.com/products/42")
+ *   return { api: yield* api, product: yield* product }
+ * })
+ * ```
  *
  * @stability unstable
  * @category models

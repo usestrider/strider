@@ -26,8 +26,8 @@ import type * as UserContext from "./UserContext.ts"
  *
  * **Details**
  *
- * - `kind` is `"thrown"` or `"unhandledRejection"`, or `"unknown"` where the browser reports both the same way:
- *   Firefox does, which its `exceptions.kind` capability says.
+ * - `kind` is `"thrown"` or `"unhandledRejection"`, or `"unknown"` where the browser reports both the same way, as
+ *   Firefox does (`exceptions.kind`).
  * - A thrown value that isn't an `Error`, such as a string, reads as an `Error` whose `message` is the value.
  * - `stack` is the browser's, where it gives one.
  *
@@ -86,6 +86,20 @@ const subscription = (
  * Subscribes to uncaught exceptions and returns the wait: an effect that gives the first match, the same each
  * time it runs.
  *
+ * **Example** (The error a broken button throws)
+ *
+ * ```ts import.meta.vitest
+ * import { Page, UncaughtException } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const checkoutError = Effect.fn("checkoutError")(function*(page: Page.Page) {
+ *   const thrown = yield* UncaughtException.next(page)
+ *   yield* page.getByRole("button", { name: "Checkout" }).click()
+ *   const exception = yield* thrown
+ *   return `${exception.name}: ${exception.message}`
+ * })
+ * ```
+ *
  * @stability unstable
  * @category subscriptions
  * @since 0.1.0
@@ -106,6 +120,23 @@ export const next = <PE = never, PR = never>(
 
 /**
  * Subscribes to uncaught exceptions and emits every match from now on.
+ *
+ * **Example** (Logging every uncaught error)
+ *
+ * ```ts import.meta.vitest
+ * import { Page, UncaughtException } from "@usestrider/browser"
+ * import { Effect, Stream } from "effect"
+ *
+ * const logExceptions = Effect.fn("logExceptions")(function*(page: Page.ObservedPage) {
+ *   const exceptions = yield* UncaughtException.stream(page)
+ *   yield* exceptions.pipe(
+ *     Stream.runForEach((exception) =>
+ *       Effect.logError(`${exception.name}: ${exception.message}`)
+ *     ),
+ *     Effect.forkScoped
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category subscriptions
@@ -131,8 +162,8 @@ export const stream = <PE = never, PR = never>(
  * **Example** (Errors so far, and whether the log dropped any)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Page, UncaughtException } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const errorsSoFar = Effect.fn("errorsSoFar")(function*(page: Page.ObservedPage) {
  *   const errors = yield* UncaughtException.history(page)

@@ -1,9 +1,9 @@
 /**
  * Features that only some backends have, each reached through a handle bound to one page.
  *
- * A capability handle is acquired from a page (`page.capability(Capability.Screencast)`), so a feature of one
- * browser can't be used on another. A backend without the feature fails with `Unsupported`, naming the backends
- * that have it. `browser.capabilities` lists what the connected browser supports, with each entry's `evidence`.
+ * `page.capability(Capability.Screencast)` acquires a handle for the caller's scope. A backend without the feature
+ * fails with `Unsupported`, naming the backends that have it. `browser.capabilities` lists what the connected
+ * browser supports, with each entry's `evidence`.
  *
  * @stability unstable
  * @since 0.1.0
@@ -60,13 +60,29 @@ export interface AxNode {
 }
 
 /**
- * Reads the browser's own accessibility tree, as opposed to the processed one in snapshots.
+ * Reads the browser's own accessibility tree, unlike the processed one in snapshots.
  *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
 export interface AxTreeReader {
+  /**
+   * Reads the page's whole tree, its frames' included, from the root.
+   *
+   * **Example** (Listing the top of Chromium's tree)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const rawTree = Effect.fn("rawTree")(function*(page: Page.ReadonlyPage) {
+   *   const reader = yield* page.capability(Capability.AxTree)
+   *   const root = yield* reader.read
+   *   return root.children.map((node) => `${node.role}: ${node.name}`)
+   * })
+   * ```
+   */
   readonly read: Effect.Effect<AxNode, CapabilityError | Target.TargetGone>
 }
 
@@ -94,6 +110,22 @@ export interface ScreencastFrame {
 export interface ScreencastControl {
   /**
    * The frames rendered from when the capability was acquired.
+   *
+   * **Example** (Collecting the frames of an animation)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect, Fiber, Stream } from "effect"
+   *
+   * const recordCarousel = Effect.fn("recordCarousel")(function*(page: Page.Page) {
+   *   const screencast = yield* page.capability(Capability.Screencast)
+   *   const frames = yield* Effect.forkScoped(
+   *     screencast.frames.pipe(Stream.take(60), Stream.runCollect)
+   *   )
+   *   yield* page.getByRole("button", { name: "Next slide" }).click()
+   *   return yield* Fiber.join(frames)
+   * })
+   * ```
    */
   readonly frames: Stream.Stream<ScreencastFrame, Target.TargetGone>
 }
@@ -122,7 +154,7 @@ export interface VideoRecording {
 export const AxTree: Capability<AxTreeReader> = make("AxTree")
 
 /**
- * The browser's own screencast frames; Chromium and Playwright's WebKit builds.
+ * The browser's own screencast frames: Chromium's alone.
  *
  * @stability unstable
  * @category constants
@@ -141,15 +173,15 @@ export const Screencast: Capability<ScreencastControl> = make("Screencast")
  *
  * **Gotchas**
  *
- * It fails with `Unsupported` on Chromium and WebKit, which stream frames (`Screencast`) rather than write a
- * file. It fails on Firefox too when Strider didn't launch it, or when the page's context denies downloads,
- * because the file would be out of reach.
+ * It fails with `Unsupported` on Chromium, which streams frames (`Screencast`) instead, and on WebKit. It fails on
+ * Firefox too when Strider didn't launch it, or when the page's context denies downloads, because the file would
+ * be out of reach.
  *
  * **Example** (Recording a checkout)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Capability, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const recorded = Effect.fn("recorded")(function*(page: Page.Page) {
  *   const video = yield* Effect.scoped(Effect.gen(function*() {
@@ -189,6 +221,18 @@ const CapabilityErrorTypeId = "~@usestrider/browser/Capability/CapabilityError"
 
 /**
  * Error for a capability that couldn't be acquired or used.
+ *
+ * **Example** (Reading the tree only where the browser has one)
+ *
+ * ```ts import.meta.vitest
+ * import { Capability, Page } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const rawTree = Effect.fn("rawTree")(function*(page: Page.ReadonlyPage) {
+ *   const reader = yield* page.capability(Capability.AxTree)
+ *   return Option.some(yield* reader.read)
+ * }, Effect.catchReason("CapabilityError", "Unsupported", () => Effect.succeedNone))
+ * ```
  *
  * @stability unstable
  * @category errors

@@ -7,8 +7,9 @@
  * - A `Page` adds input, navigation, evaluation among the page's own scripts, and declarations.
  *
  * Access is granted for a `Scope`: `inspect` and `control` are the only ways up, and no type guard narrows a page's
- * access. A subtype never changes what an inherited member does: `evaluate` runs in the isolated world on every
- * page, and only `evaluateInMainWorld`, on a `Page`, runs among the page's own scripts.
+ * access. A subtype never changes what an inherited member does: `evaluate` runs in the isolated world whatever
+ * the page's access, and only `evaluateInMainWorld`, on a `Page`, runs among the page's own scripts. WebKit has no
+ * isolated worlds: there, reads run in the page's own world, and `evaluate` fails with `Unsupported`.
  *
  * @stability unstable
  * @since 0.1.0
@@ -279,17 +280,21 @@ export interface PdfOptions {
    */
   readonly pageRanges?: string | undefined
   /**
-   * Use the page's CSS `@page` size over `paper`.
+   * Use the page's CSS `@page` size over `paper`. `Unsupported` over WebDriver BiDi (`pdf.preferCssPageSize`).
    *
    * @default false
    */
   readonly preferCssPageSize?: boolean | undefined
   /**
    * An HTML template for the header. `Unsupported` over WebDriver BiDi (`pdf.headerFooter`).
+   *
+   * @default none
    */
   readonly header?: string | undefined
   /**
    * An HTML template for the footer. `Unsupported` over WebDriver BiDi (`pdf.headerFooter`).
+   *
+   * @default none
    */
   readonly footer?: string | undefined
 }
@@ -309,10 +314,9 @@ export interface GotoOptions {
    */
   readonly waitUntil?: PageNavigation.LoadState | undefined
   /**
-   * Outcomes that `goto` returns instead of failing: with `"download"`, a download is returned as
-   * `PageNavigation`'s `BecameDownload`, and with `"noContent"`, a 204 or 205 is returned as its `NoContent`, with
-   * the response. Otherwise they fail with the `BecameDownload` and `NoContent` reasons. Either way the page stays
-   * where it was.
+   * Outcomes `goto` returns instead of failing: `"download"` returns a download as the `BecameDownload`
+   * navigation, and `"noContent"` returns a 204 or 205 as `NoContent`, with the response. Without them, `goto`
+   * fails with the reason of the same name. Either way the page stays where it was.
    *
    * @default none
    */
@@ -362,8 +366,8 @@ export interface TraverseOptions {
  *
  * **Details**
  *
- * Pages are equal by identity: a `ReadonlyPage` and a `Page` for the same tab are equal, because identity is
- * the tab and not the access level.
+ * Pages are equal when they are the same tab, whatever their access: a `ReadonlyPage` and a `Page` for one tab
+ * are equal.
  *
  * @stability unstable
  * @category models
@@ -374,31 +378,119 @@ export interface ObservedPage extends Pipeable.Pipeable, Equal.Equal, Inspectabl
   readonly id: Target.NavigableId
   /**
    * One consistent view of the page's state; ends with `Closed`.
+   *
+   * **Example** (Checking for an open prompt)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect, Option } from "effect"
+   *
+   * const promptOpen = Effect.fn("promptOpen")(function*(page: Page.ObservedPage) {
+   *   const status = yield* page.status
+   *   return status._tag === "Open" && Option.isSome(status.prompt)
+   * })
+   * ```
    */
   readonly status: Watchable.Watchable<Status>
   /**
-   * The page's URL; `status.map(…)`, so it never disagrees with `status`.
+   * The page's URL, derived from `status`, so the two never disagree.
+   *
+   * **Example** (Waiting for the checkout URL)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const toCheckout = Effect.fn("toCheckout")(function*(page: Page.Page) {
+   *   yield* page.getByRole("button", { name: "Checkout" }).click()
+   *   yield* page.url.waitFor((url) => url.startsWith("https://shop.example.com/checkout"))
+   * })
+   * ```
    */
   readonly url: Watchable.Watchable<Url.Url>
   /**
    * The frame tree.
+   *
+   * **Example** (Listing the URLs of the page's iframes)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const frameUrls = Effect.fn("frameUrls")(function*(page: Page.ObservedPage) {
+   *   const tree = yield* page.frames
+   *   return tree.children.map((frame) => frame.url)
+   * })
+   * ```
    */
   readonly frames: Watchable.Watchable<FrameTree>
   /**
    * The page's dedicated workers.
+   *
+   * **Example** (Listing the page's workers)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const workerScripts = Effect.fn("workerScripts")(function*(page: Page.ObservedPage) {
+   *   const workers = yield* page.workers
+   *   return workers.map((worker) => worker.url)
+   * })
+   * ```
    */
   readonly workers: Watchable.Watchable<ReadonlyArray<BrowserWorker.ObservedBrowserWorker>>
   /**
    * Waits as long as the page lives, then gives the reason it ended.
+   *
+   * **Example** (Checking that the page closed itself)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const closesItself = Effect.fn("closesItself")(function*(page: Page.Page) {
+   *   yield* page.getByRole("button", { name: "Close window" }).click()
+   *   const reason = yield* page.closed
+   *   return reason._tag === "PageClosed" && reason.by === "script"
+   * })
+   * ```
    */
   readonly closed: Effect.Effect<Target.CloseReason>
   /**
    * Gets inspect access for the caller's scope, installing the isolated world. The page stays open when the scope
    * closes.
+   *
+   * **Example** (Reading every tab's title)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const tabTitles = Effect.fn("tabTitles")(function*() {
+   *   const tabs = yield* (yield* Browser.Browser).pages
+   *   return yield* Effect.forEach(
+   *     tabs,
+   *     (tab) => Effect.flatMap(tab.inspect, (page) => page.title)
+   *   )
+   * })
+   * ```
    */
   readonly inspect: Effect.Effect<ReadonlyPage, PageError, Scope.Scope>
   /**
    * Gets control for the caller's scope. The page stays open when the scope closes.
+   *
+   * **Example** (Acting on a tab you observe)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const acceptCookies = Effect.fn("acceptCookies")(function*(tab: Page.ObservedPage) {
+   *   const page = yield* tab.control
+   *   yield* page.getByRole("button", { name: "Accept cookies" }).click()
+   * })
+   * ```
    */
   readonly control: Effect.Effect<Page, PageError, Scope.Scope>
 }
@@ -413,30 +505,109 @@ export interface ObservedPage extends Pipeable.Pipeable, Equal.Equal, Inspectabl
 export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.ReadonlyLocator> {
   /**
    * Enters an iframe by its element.
+   *
+   * **Example** (Reading text inside an iframe)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const cardBrand = Effect.fn("cardBrand")(function*(page: Page.ReadonlyPage) {
+   *   const payment = page.frame(page.locator("iframe#payment"))
+   *   return yield* payment.getByTestId("card-brand").readText
+   * })
+   * ```
    */
   frame(iframe: Locator.ReadonlyLocator): Locator.ReadonlyFrameLocator
   /**
    * The document's title, read now.
+   *
+   * **Example** (Checking the page's title)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const onCart = Effect.fn("onCart")(function*(page: Page.ReadonlyPage) {
+   *   const title = yield* page.title
+   *   return title.startsWith("Cart")
+   * })
+   * ```
    */
   readonly title: Effect.Effect<string, PageError | Target.TargetGone | Deadline.Timeout>
   /**
    * The document's serialized HTML.
+   *
+   * **Example** (Saving the page's HTML)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect, FileSystem } from "effect"
+   *
+   * const saveHtml = Effect.fn("saveHtml")(function*(page: Page.ReadonlyPage) {
+   *   const fs = yield* FileSystem.FileSystem
+   *   yield* fs.writeFileString("./cart.html", yield* page.readHtml)
+   * })
+   * ```
    */
   readonly readHtml: Effect.Effect<string, PageError | Target.TargetGone | Deadline.Timeout>
   /**
    * A snapshot of the page: the accessibility tree, with inferred interactivity unless `sources` is `"aria"`.
+   *
+   * **Example** (Describing the page's controls)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const describeControls = Effect.fn("describeControls")(
+   *   function*(page: Page.ReadonlyPage) {
+   *     const snapshot = yield* page.snapshot({ interactiveOnly: true })
+   *     return snapshot.text
+   *   }
+   * )
+   * ```
    */
   snapshot(
     options?: Snapshot.Options | undefined
   ): Effect.Effect<Snapshot.Snapshot<Locator.ReadonlyLocator>, PageError | Target.TargetGone | Deadline.Timeout>
   /**
    * A screenshot; the viewport as PNG unless options say otherwise.
+   *
+   * **Example** (Capturing one element)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const captureCart = Effect.fn("captureCart")(function*(page: Page.ReadonlyPage) {
+   *   const cart = page.getByRole("region", { name: "Cart" })
+   *   return yield* page.screenshot({ area: { _tag: "Element", locator: cart } })
+   * })
+   * ```
    */
   screenshot(
     options?: ScreenshotOptions | undefined
   ): Effect.Effect<Uint8Array, PageError | Target.TargetGone | Deadline.Timeout>
   /**
-   * The page printed as PDF.
+   * The page printed as PDF. `Unsupported` on WebKit, which has no print-to-PDF (`pdf`).
+   *
+   * **Example** (Saving an invoice as an A4 PDF)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect, FileSystem } from "effect"
+   *
+   * const saveInvoice = Effect.fn("saveInvoice")(function*(page: Page.ReadonlyPage) {
+   *   const fs = yield* FileSystem.FileSystem
+   *   const pdf = yield* page.pdf({
+   *     paper: "a4",
+   *     margins: { top: { value: 1, unit: "cm" } },
+   *     background: true
+   *   })
+   *   yield* fs.writeFile("./invoice.pdf", pdf)
+   * })
+   * ```
    */
   pdf(options?: PdfOptions | undefined): Effect.Effect<Uint8Array, PageError | Target.TargetGone | Deadline.Timeout>
   /**
@@ -450,11 +621,15 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
   /**
    * Calls `fn` in the isolated world, where page globals are invisible, and returns the result by value.
    *
-   * **Example** (A `Date` comes back as a `Date`)
+   * **Gotchas**
+   *
+   * Fails with `Unsupported` on WebKit, which has no isolated worlds (`isolatedWorlds`); use `evaluateInMainWorld`.
+   *
+   * **Example** (Reading the page's time as a `Date`)
    *
    * ```ts import.meta.vitest
-   * import { Effect } from "effect"
    * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
    *
    * const now = Effect.fn("now")(function*(page: Page.ReadonlyPage) {
    *   const when: Date = yield* page.evaluate(() => new Date())
@@ -469,6 +644,18 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
   /**
    * Acquires a specialized feature bound to this page, for the caller's scope. A backend without it fails with
    * `Unsupported`, naming the backends that have it.
+   *
+   * **Example** (Reading Chromium's own accessibility tree)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const rawTree = Effect.fn("rawTree")(function*(page: Page.ReadonlyPage) {
+   *   const reader = yield* page.capability(Capability.AxTree)
+   *   return yield* reader.read
+   * })
+   * ```
    */
   capability<H>(
     capability: Capability.Capability<H>
@@ -478,11 +665,11 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
 /**
  * A page you control.
  *
- * **Example** (Navigate, act, read)
+ * **Example** (Searching the shop)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const search = Effect.fn("search")(function*(page: Page.Page, query: string) {
  *   yield* page.goto("https://shop.example.com")
@@ -519,6 +706,20 @@ export interface Page extends ReadonlyPage {
   readonly context: UserContext.UserContext
   /**
    * Navigates to `url`; returns at commit unless `waitUntil` asks for more.
+   *
+   * **Example** (Opening the cart once it has loaded)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const openCart = Effect.fn("openCart")(function*(page: Page.Page) {
+   *   const navigation = yield* page.goto("https://shop.example.com/cart", {
+   *     waitUntil: "load"
+   *   })
+   *   return navigation.url
+   * })
+   * ```
    */
   goto(
     url: Url.Url | string,
@@ -526,18 +727,56 @@ export interface Page extends ReadonlyPage {
   ): Effect.Effect<PageNavigation.PageNavigation, PageError | Target.TargetGone | Deadline.Timeout>
   /**
    * Reloads the current document.
+   *
+   * **Example** (Reloading without the cache)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const hardReload = Effect.fn("hardReload")(function*(page: Page.Page) {
+   *   yield* page.reload({ bypassCache: true, waitUntil: "load" })
+   * })
+   * ```
    */
   reload(
     options?: ReloadOptions | undefined
   ): Effect.Effect<PageNavigation.PageNavigation, PageError | Target.TargetGone | Deadline.Timeout>
   /**
    * Goes back one history entry; `None` when there is none.
+   *
+   * **Example** (Going back to the cart)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect, Option } from "effect"
+   *
+   * const backToCart = Effect.fn("backToCart")(function*(page: Page.Page) {
+   *   yield* page.goto("https://shop.example.com/cart")
+   *   yield* page.getByRole("link", { name: "Checkout" }).click()
+   *   const navigation = yield* page.back()
+   *   return Option.map(navigation, (back) => back.url)
+   * })
+   * ```
    */
   back(
     options?: TraverseOptions | undefined
   ): Effect.Effect<Option.Option<PageNavigation.PageNavigation>, PageError | Target.TargetGone | Deadline.Timeout>
   /**
    * Goes forward one history entry; `None` when there is none.
+   *
+   * **Example** (Returning after going back)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect, Option } from "effect"
+   *
+   * const backAndForth = Effect.fn("backAndForth")(function*(page: Page.Page) {
+   *   yield* page.back()
+   *   const navigation = yield* page.forward({ waitUntil: "load" })
+   *   return Option.isSome(navigation)
+   * })
+   * ```
    */
   forward(
     options?: TraverseOptions | undefined
@@ -549,6 +788,19 @@ export interface Page extends ReadonlyPage {
    *
    * Page scripts can see and tamper with what runs here. Prefer `evaluate` unless you need the page's
    * globals. Wrap the call in `Page.withUserGesture` when the page checks for one.
+   *
+   * **Example** (Reading a global the page's scripts set)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const appVersion = Effect.fn("appVersion")(function*(page: Page.Page) {
+   *   return yield* page.evaluateInMainWorld(() =>
+   *     String(Reflect.get(window, "APP_VERSION"))
+   *   )
+   * })
+   * ```
    */
   evaluateInMainWorld<Args extends ReadonlyArray<unknown>, A>(
     fn: (...args: Args) => A | Promise<A>,
@@ -556,6 +808,22 @@ export interface Page extends ReadonlyPage {
   ): Effect.Effect<JSHandle.Serialized<A>, PageError | Target.TargetGone | Deadline.Timeout>
   /**
    * Calls `fn` in the isolated world and returns its result as a handle, for values that can't come back by value.
+   *
+   * **Gotchas**
+   *
+   * Fails with `Unsupported` on WebKit, which has no isolated worlds (`isolatedWorlds`); use `evaluateInMainWorld`.
+   *
+   * **Example** (Reading a canvas through a handle)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const chartImage = Effect.fn("chartImage")(function*(page: Page.Page) {
+   *   const canvas = yield* page.evaluateHandle(() => document.querySelector("canvas"))
+   *   return yield* canvas.evaluate((element) => element?.toDataURL("image/png"))
+   * })
+   * ```
    */
   evaluateHandle<Args extends ReadonlyArray<unknown>, A>(
     fn: (...args: Args) => A | Promise<A>,
@@ -578,15 +846,31 @@ export interface Page extends ReadonlyPage {
    *
    * **Details**
    *
-   * The page's routes are asked before its context's, the most recent first; one whose handler decides
-   * `Route.fallthrough` passes the request on. Each request's handler runs in a fiber of the registration's scope,
-   * with the `Deadline.DefaultBudget` in effect where `route` was called. The phase is `"request"` unless
-   * `options.phase` says `"response"` or `"auth"`, and decides what the handler is given and may decide.
+   * - The page's routes are asked before its context's, the most recent first; `Route.fallthrough` passes the
+   *   request to the next.
+   * - `options.phase` (`"request"`, `"response"` or `"auth"`) decides what the handler is given and may decide.
+   * - Each request's handler runs in a fiber of the registration's scope, under the `Deadline.DefaultBudget` in
+   *   effect where `route` was called.
    *
    * **Gotchas**
    *
    * On Chromium, a route that matches a cross-origin request also sees its CORS preflight, an `OPTIONS`
    * request, which Firefox and WebKit don't show. WebKit pauses only a redirect's first hop.
+   *
+   * **Example** (Blocking analytics requests)
+   *
+   * ```ts import.meta.vitest
+   * import { Page, Route } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const blockAnalytics = Effect.fn("blockAnalytics")(function*(page: Page.Page) {
+   *   yield* page.route(
+   *     "https://analytics.example.com/**",
+   *     () => Effect.succeed(Route.abort())
+   *   )
+   *   yield* page.goto("https://shop.example.com")
+   * })
+   * ```
    */
   route<E, R, P extends Route.Phase = "request">(
     pattern: Url.Pattern | string,
@@ -602,15 +886,17 @@ export interface Page extends ReadonlyPage {
    * must run before this one. A script added to a page that has already loaded runs from the next document. See
    * `InitScript` for the rest.
    *
-   * **Example** (Ordered setup scripts)
+   * **Example** (Ordering setup scripts)
    *
    * ```ts import.meta.vitest
-   * import { Effect } from "effect"
    * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
    *
    * const installHooks = Effect.fn("installHooks")(function*(page: Page.Page) {
    *   const helper = yield* page.addInitScript({ source: "window.__hooks = []" })
-   *   yield* page.addInitScript({ source: "window.__hooks.push('ready')" }, { after: [helper] })
+   *   yield* page.addInitScript({ source: "window.__hooks.push('ready')" }, {
+   *     after: [helper]
+   *   })
    * })
    * ```
    */
@@ -619,26 +905,100 @@ export interface Page extends ReadonlyPage {
     options?: InitScript.Options | undefined
   ): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>
   /**
-   * Overrides the given settings while the registration lives; a page's overrides take precedence over its
-   * context's. One call is one registration: if the backend can't apply a field, the call fails before anything is
-   * applied (see `Emulation`).
+   * Overrides the given settings while the registration lives.
+   *
+   * **Details**
+   *
+   * A page's overrides take precedence over its context's. One call is one registration: if the backend can't
+   * apply a field, the call fails with `Unsupported` before applying any (see `Emulation`).
+   *
+   * **Example** (A phone-sized viewport for one step)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const openMobileMenu = Effect.fn("openMobileMenu")(function*(page: Page.Page) {
+   *   yield* Effect.scoped(Effect.gen(function*() {
+   *     yield* page.emulate({ viewport: { width: 390, height: 844 } })
+   *     yield* page.getByRole("button", { name: "Menu" }).click()
+   *   }))
+   * })
+   * ```
    */
   emulate(
     settings: Emulation.Emulation
   ): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>
   /**
-   * Brings the page to the front. Waits that depend on rendering need it.
+   * Brings the page to the front.
+   *
+   * **Details**
+   *
+   * A page in the background, such as a popup's opener, may render too few frames to act on, and actions on it
+   * time out. A context made with `focus: "emulated"` keeps every page rendering instead.
+   *
+   * **Example** (Returning to the opener after a popup)
+   *
+   * ```ts import.meta.vitest
+   * import { Page, Popup } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const keepShopping = Effect.fn("keepShopping")(function*(page: Page.Page) {
+   *   const popups = yield* Popup.next(page)
+   *   yield* page.getByRole("link", { name: "Size guide" }).click()
+   *   yield* popups
+   *   yield* page.activate
+   *   yield* page.getByRole("button", { name: "Add to cart" }).click()
+   * })
+   * ```
    */
   readonly activate: Effect.Effect<void, Target.TargetGone>
   /**
    * Closes the page without running `beforeunload`, so no prompt opens.
+   *
+   * **Example** (Checking a second page, then closing it)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const helpTitle = Effect.fn("helpTitle")(function*(page: Page.Page) {
+   *   const help = yield* page.context.newPage
+   *   yield* help.goto("https://shop.example.com/help")
+   *   const title = yield* help.title
+   *   yield* help.close()
+   *   return title
+   * })
+   * ```
    */
   close(): Effect.Effect<void, Target.TargetGone | Deadline.Timeout>
   /**
-   * Closes the page, running `beforeunload` when `runBeforeUnload` is `true`. Its prompt is decided as any dialog
-   * is: by the page's `Dialog.handle`, or else by its context's `dialogs` policy, which leaves unless it's
-   * `"leaveOpen"`. A handler that decides `stay` fails the close with `CloseCanceled`, and the page stays usable.
-   * Browsers prompt only once the user has interacted with the page, so a page nobody has touched closes at once.
+   * Closes the page, running its `beforeunload` handlers first when `runBeforeUnload` is `true`.
+   *
+   * **Details**
+   *
+   * - The prompt is decided as any dialog is: by the page's `Dialog.handle`, or else by its context's `dialogs`
+   *   policy. `"dismiss"` and `"accept"` both leave; under `"leaveOpen"` the prompt stays open and the close times
+   *   out.
+   * - A handler that decides `stay` fails the close with `CloseCanceled`, and the page stays usable.
+   * - Browsers prompt only once the user has interacted with the page, so a page nobody has touched closes at once.
+   * - `Unsupported` on WebKit (`close.runBeforeUnload`).
+   *
+   * **Example** (Keeping a page with unsaved changes open)
+   *
+   * ```ts import.meta.vitest
+   * import { Dialog, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const stayedOpen = Effect.fn("stayedOpen")(function*(page: Page.Page) {
+   *   yield* Dialog.handle(page, Dialog.dismissAll)
+   *   yield* page.getByLabel("Message").pressSequentially("Draft reply")
+   *   return yield* page.close({ runBeforeUnload: true }).pipe(
+   *     Effect.as(false),
+   *     Effect.catchReason("PageError", "CloseCanceled", () => Effect.succeed(true))
+   *   )
+   * })
+   * ```
    */
   close(options: {
     readonly runBeforeUnload: boolean
@@ -650,8 +1010,20 @@ export interface Page extends ReadonlyPage {
  *
  * **Gotchas**
  *
- * This identifies the kind, not the access: it narrows to `ObservedPage`, because access is a grant held by
- * a scope, not a fact about the page.
+ * It narrows to `ObservedPage`, whatever the page's access: get more with `inspect` or `control`.
+ *
+ * **Example** (Reading the title of a value that may be a page)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const titleOf = Effect.fn("titleOf")(function*(value: unknown) {
+ *   if (!Page.isPage(value)) return Option.none<string>()
+ *   const page = yield* value.inspect
+ *   return Option.some(yield* page.title)
+ * })
+ * ```
  *
  * @stability unstable
  * @category guards
@@ -674,6 +1046,19 @@ export const UserGesture: Context.Reference<boolean> = Context.Reference<boolean
 /**
  * Makes each `evaluateInMainWorld` inside an effect run with a user gesture, for pages that require one, such as
  * to open a popup or start media.
+ *
+ * **Example** (Starting a video)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const playVideo = Effect.fn("playVideo")(function*(page: Page.Page) {
+ *   yield* page.evaluateInMainWorld(() => document.querySelector("video")?.play()).pipe(
+ *     Page.withUserGesture
+ *   )
+ * })
+ * ```
  *
  * @see {@link UserGesture} for the reference it sets
  *
@@ -764,11 +1149,11 @@ const PageErrorTypeId = "~@usestrider/browser/Page/PageError"
 /**
  * Error for a page operation that failed: navigation, evaluation, capture, reads or setting the page up.
  *
- * **Example** (Accepting a failed navigation)
+ * **Example** (Recovering from a failed navigation)
  *
  * ```ts import.meta.vitest
- * import { Effect, Option } from "effect"
  * import { Page } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
  *
  * const tryOpen = Effect.fn("tryOpen")(function*(page: Page.Page, url: string) {
  *   return yield* page.goto(url).pipe(

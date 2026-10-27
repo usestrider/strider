@@ -2,10 +2,11 @@
  * The raw protocol client: commands and events as data, the session they run on, and the errors a session
  * reports.
  *
- * Generated modules (`@usestrider/browser/cdp`) declare each command and event with `command` and `event`:
- * a method name, codecs and traits, and no behavior. Behavior lives in the session, so a change to how
- * commands are sent never needs a regeneration. A command is a yieldable value: `yield* Page.navigate({ url })`
- * runs on the `ProtocolSession` in context, and `Protocol.on(session)` picks one explicitly.
+ * The generated modules (`@usestrider/browser/cdp`, `/bidi-protocol`, `/webkit-stock-protocol` and
+ * `/webkit-automation-protocol`) declare each command and event with `command` and `event`: a method name, codecs
+ * and traits, and no behavior. Behavior lives in the session. A command is a yieldable value:
+ * `yield* Page.navigate({ url })` runs on the `ProtocolSession` in context, and `Protocol.on(session)` picks one
+ * explicitly.
  *
  * **Gotchas**
  *
@@ -33,8 +34,8 @@ import type * as Stream from "effect/Stream"
  * - `session`: `"browser"` for commands sent on the browser session rather than a target's.
  * - `compensation`: what must be undone if the caller is interrupted after the command was sent, such as
  *   releasing held input.
- * - `createsResource`: the reply hands out something with a remote lifetime, so a late reply is routed to an
- *   owner that adopts or releases it.
+ * - `createsResource`: the reply hands out something with a remote lifetime, so a late reply goes to
+ *   `CurrentLateReplyHandler`, which adopts or releases it.
  * - `release`: the commands that release what the reply hands out, each taking one parameter from the
  *   result. `from` is a JSON pointer into the result as sent, where `*` stands for every element of a list.
  * - `redirect`: the domain the spec points to for this command instead, such as `Overlay` for
@@ -79,6 +80,21 @@ export type CommandArgs<P> = [P] extends [void] ? [] : {} extends P ? [params?: 
 
 /**
  * A command, ready to run on a session: an effect, plus the method and parameters it sends.
+ *
+ * **Example** (Running a command on the session in context)
+ *
+ * ```ts import.meta.vitest
+ * import { Browser } from "@usestrider/browser/cdp"
+ * import { Protocol } from "@usestrider/browser/protocol"
+ * import { Effect } from "effect"
+ *
+ * const product = Effect.fn("product")(function*(session: Protocol.ProtocolSession) {
+ *   const version = yield* Browser.getVersion().pipe(
+ *     Effect.provideService(Protocol.ProtocolSession, session)
+ *   )
+ *   return version.product
+ * })
+ * ```
  *
  * @stability experimental
  * @category models
@@ -131,7 +147,22 @@ export interface EventDef<M extends string, A> {
 }
 
 /**
- * Declares a command. Generated modules call this; it does nothing until the command runs.
+ * Declares a command from its method, codecs and traits; nothing is sent until the command runs. The generated
+ * modules call it.
+ *
+ * **Example** (Declaring a command by hand)
+ *
+ * ```ts import.meta.vitest
+ * import { Protocol } from "@usestrider/browser/protocol"
+ * import { Schema } from "effect"
+ *
+ * const getWindowForTarget = Protocol.command(
+ *   "Browser.getWindowForTarget",
+ *   Schema.Struct({ targetId: Schema.optional(Schema.String) }),
+ *   Schema.Struct({ windowId: Schema.Int }),
+ *   { status: "experimental", session: "browser" }
+ * )
+ * ```
  *
  * @stability experimental
  * @category constructors
@@ -155,7 +186,20 @@ export const command = <M extends string, P, A>(
 }
 
 /**
- * Declares an event. Generated modules call this.
+ * Declares an event from its method, codec and traits. The generated modules call it.
+ *
+ * **Example** (Declaring an event by hand)
+ *
+ * ```ts import.meta.vitest
+ * import { Protocol } from "@usestrider/browser/protocol"
+ * import { Schema } from "effect"
+ *
+ * const visibilityChanged = Protocol.event(
+ *   "Page.screencastVisibilityChanged",
+ *   Schema.Struct({ visible: Schema.Boolean }),
+ *   { status: "experimental" }
+ * )
+ * ```
  *
  * @stability experimental
  * @category constructors
@@ -187,21 +231,24 @@ export const SessionKey = Schema.String.pipe(Schema.brand("~@usestrider/browser/
 export type SessionKey = typeof SessionKey.Type
 
 /**
- * A declarative filter on an event's parameters: the values some of its fields must equal, nested as the
- * parameters are. It runs before an event is buffered, so excluded events never take up a subscription's
- * space, and it never runs your code on the connection's behalf.
+ * A filter on an event's parameters, as data: the values some of its fields must equal, nested as the parameters
+ * are. It's applied before an event is buffered, so excluded events take no buffer space.
  *
- * **Example** (One frame's navigations)
+ * **Example** (Following one frame's navigations)
  *
  * ```ts import.meta.vitest
- * import { Effect, Stream } from "effect"
  * import { Page } from "@usestrider/browser/cdp"
  * import type { Protocol } from "@usestrider/browser/protocol"
+ * import { Effect, Stream } from "effect"
  *
- * const navigations = Effect.fn("navigations")(function*(page: Protocol.ProtocolSession, frameId: Page.FrameId) {
- *   const navigated = yield* page.subscribe(Page.frameNavigated, { prefilter: { frame: { id: frameId } } })
- *   return yield* navigated.pipe(Stream.take(1), Stream.runCollect)
- * })
+ * const navigations = Effect.fn("navigations")(
+ *   function*(page: Protocol.ProtocolSession, frameId: Page.FrameId) {
+ *     const navigated = yield* page.subscribe(Page.frameNavigated, {
+ *       prefilter: { frame: { id: frameId } }
+ *     })
+ *     return yield* navigated.pipe(Stream.take(1), Stream.runCollect)
+ *   }
+ * )
  * ```
  *
  * @stability experimental
@@ -324,11 +371,48 @@ export interface ProtocolSession {
    * Sends a command and waits for its reply, for at most `CommandTimeout`. Interrupting the caller, or running
    * out of time, abandons the reply; it never cancels the command, which no protocol can do. A late reply to
    * a command that creates a resource goes to `CurrentLateReplyHandler`.
+   *
+   * **Example** (Reading a page's title)
+   *
+   * ```ts import.meta.vitest
+   * import { Runtime } from "@usestrider/browser/cdp"
+   * import type { Protocol } from "@usestrider/browser/protocol"
+   * import { Effect } from "effect"
+   *
+   * const title = Effect.fn("title")(function*(page: Protocol.ProtocolSession) {
+   *   const { result } = yield* page.send(
+   *     Runtime.evaluate({ expression: "document.title", returnByValue: true })
+   *   )
+   *   return String(result.value)
+   * })
+   * ```
    */
   send<M extends string, P, A>(command: Command<M, P, A>): Effect.Effect<A, ProtocolError>
   /**
    * Subscribes to an event, keeping only the newest events; live by the time this returns. A `Gap` marks
    * where older events were dropped.
+   *
+   * **Example** (Logging console calls without falling behind)
+   *
+   * ```ts import.meta.vitest
+   * import { Runtime } from "@usestrider/browser/cdp"
+   * import { Protocol } from "@usestrider/browser/protocol"
+   * import { Effect, Stream } from "effect"
+   *
+   * const logConsole = Effect.fn("logConsole")(function*(page: Protocol.ProtocolSession) {
+   *   const calls = yield* page.subscribe(Runtime.consoleAPICalled, {
+   *     buffer: { sliding: 100 }
+   *   })
+   *   yield* calls.pipe(
+   *     Stream.runForEach((call) =>
+   *       Protocol.isGap(call)
+   *         ? Effect.logWarning(`${call.dropped} calls dropped`)
+   *         : Effect.log(call.type)
+   *     ),
+   *     Effect.forkScoped
+   *   )
+   * })
+   * ```
    */
   subscribe<M extends string, A>(
     event: EventDef<M, A>,
@@ -337,6 +421,20 @@ export interface ProtocolSession {
   /**
    * Subscribes to an event; live by the time this returns. Each event's parameters are decoded as the stream
    * is read, so one that doesn't match its codec fails this stream with `Decode` and no other.
+   *
+   * **Example** (Waiting for a reload's `load` event)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser/cdp"
+   * import { Protocol } from "@usestrider/browser/protocol"
+   * import { Effect, Stream } from "effect"
+   *
+   * const reload = Effect.fn("reload")(function*(page: Protocol.ProtocolSession) {
+   *   const loads = yield* page.subscribe(Page.loadEventFired)
+   *   yield* Page.reload().pipe(Protocol.on(page))
+   *   return yield* Stream.runHead(loads)
+   * })
+   * ```
    */
   subscribe<M extends string, A>(
     event: EventDef<M, A>,
@@ -348,12 +446,40 @@ export interface ProtocolSession {
    *
    * **Gotchas**
    *
-   * It is a local barrier, not proof that everything a command caused has arrived: an event the browser
+   * It's a local barrier, not proof that everything a command caused has arrived: an event the browser
    * hasn't sent yet isn't waited for.
+   *
+   * **Example** (Publishing the events received before a checkpoint)
+   *
+   * ```ts import.meta.vitest
+   * import { Runtime } from "@usestrider/browser/cdp"
+   * import { Protocol } from "@usestrider/browser/protocol"
+   * import { Effect } from "effect"
+   *
+   * const checkpoint = Effect.fn("checkpoint")(function*(page: Protocol.ProtocolSession) {
+   *   yield* Runtime.evaluate({ expression: "console.log('checkpoint')" }).pipe(
+   *     Protocol.on(page)
+   *   )
+   *   // Every event received before this point is now in each subscription's buffer
+   *   yield* page.drainObserved
+   * })
+   * ```
    */
   readonly drainObserved: Effect.Effect<void>
   /**
    * Waits as long as the session lives, then gives the reason it ended.
+   *
+   * **Example** (Logging why a session ended)
+   *
+   * ```ts import.meta.vitest
+   * import type { Protocol } from "@usestrider/browser/protocol"
+   * import { Effect } from "effect"
+   *
+   * const watch = Effect.fn("watch")(function*(page: Protocol.ProtocolSession) {
+   *   const ended = yield* page.ended
+   *   yield* Effect.logInfo(`The page's session ended: ${ended.why}`)
+   * })
+   * ```
    */
   readonly ended: Effect.Effect<SessionEnded>
 }
@@ -371,6 +497,20 @@ export const ProtocolSession: Context.Service<ProtocolSession, ProtocolSession> 
 
 /**
  * Runs a command on a given session instead of the one in context.
+ *
+ * **Example** (Navigating a target's session)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser/cdp"
+ * import { Protocol } from "@usestrider/browser/protocol"
+ * import { Effect } from "effect"
+ *
+ * const navigate = Effect.fn("navigate")(function*(page: Protocol.ProtocolSession) {
+ *   return yield* Page.navigate({ url: "https://shop.example.com" }).pipe(
+ *     Protocol.on(page)
+ *   )
+ * })
+ * ```
  *
  * @stability experimental
  * @category combinators
@@ -405,13 +545,16 @@ export const CommandTimeout: Context.Reference<Duration.Duration> = Context.Refe
 /**
  * Sets how long the commands an effect sends wait for their replies.
  *
- * **Example** (A slow evaluation)
+ * **Example** (Giving a slow evaluation more time)
  *
  * ```ts import.meta.vitest
  * import { Runtime } from "@usestrider/browser/cdp"
  * import { Protocol } from "@usestrider/browser/protocol"
  *
- * const settle = Runtime.evaluate({ expression: "new Promise((r) => setTimeout(r, 60_000))", awaitPromise: true })
+ * const settle = Runtime.evaluate({
+ *   expression: "new Promise((r) => setTimeout(r, 60_000))",
+ *   awaitPromise: true
+ * })
  *   .pipe(Protocol.withCommandTimeout("2 minutes"))
  * ```
  *
@@ -460,6 +603,17 @@ export const CurrentValidation: Context.Reference<Validation> = Context.Referenc
 /**
  * Sets how the results and event parameters an effect reads are checked.
  *
+ * **Example** (Skipping the checks on a large snapshot)
+ *
+ * ```ts import.meta.vitest
+ * import { DOMSnapshot } from "@usestrider/browser/cdp"
+ * import { Protocol } from "@usestrider/browser/protocol"
+ *
+ * const snapshot = DOMSnapshot.captureSnapshot({ computedStyles: [] }).pipe(
+ *   Protocol.withValidation("trust")
+ * )
+ * ```
+ *
  * @stability experimental
  * @category combinators
  * @since 0.1.0
@@ -497,14 +651,16 @@ export const CurrentLateReplyHandler: Context.Reference<(reply: LateReply) => Ef
  * **Example** (Recording a page created too late)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Target } from "@usestrider/browser/cdp"
  * import { Protocol } from "@usestrider/browser/protocol"
+ * import { Effect } from "effect"
  *
  * const open = Target.createTarget({ url: "about:blank" }).pipe(
  *   Effect.timeout("5 seconds"),
  *   Protocol.withLateReplyHandler((late) =>
- *     Effect.logWarning(`${late.method} replied after its caller gave up`).pipe(Effect.andThen(late.release))
+ *     Effect.logWarning(`${late.method} replied after its caller gave up`).pipe(
+ *       Effect.andThen(late.release)
+ *     )
  *   )
  * )
  * ```
@@ -679,6 +835,23 @@ const ProtocolErrorTypeId = "~@usestrider/browser/protocol/Protocol/ProtocolErro
 
 /**
  * Error for a command or subscription that failed at the protocol level.
+ *
+ * **Example** (Reading a page that may have closed)
+ *
+ * ```ts import.meta.vitest
+ * import { Runtime } from "@usestrider/browser/cdp"
+ * import { Protocol } from "@usestrider/browser/protocol"
+ * import { Effect, Option } from "effect"
+ *
+ * const titleIfOpen = Effect.fn("titleIfOpen")(function*(page: Protocol.ProtocolSession) {
+ *   return yield* Runtime.evaluate({ expression: "document.title", returnByValue: true })
+ *     .pipe(
+ *       Protocol.on(page),
+ *       Effect.map(({ result }) => Option.some(String(result.value))),
+ *       Effect.catchReason("ProtocolError", "SessionEnded", () => Effect.succeedNone)
+ *     )
+ * })
+ * ```
  *
  * @stability experimental
  * @category errors

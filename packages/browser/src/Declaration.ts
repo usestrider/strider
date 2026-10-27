@@ -26,6 +26,23 @@ import type * as Watchable from "./Watchable.ts"
 export interface Registration {
   /**
    * Removes the declaration early. Running it again does nothing, and neither does closing the scope.
+   *
+   * **Example** (Going back online after the first load)
+   *
+   * ```ts import.meta.vitest
+   * import { Page, Route } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const offlineFirstLoad = Effect.fn("offlineFirstLoad")(function*(page: Page.Page) {
+   *   const offline = yield* page.route(
+   *     "https://shop.example.com/api/**",
+   *     () => Effect.succeed(Route.abort())
+   *   )
+   *   yield* page.goto("https://shop.example.com")
+   *   yield* offline.remove
+   *   yield* page.reload()
+   * })
+   * ```
    */
   readonly remove: Effect.Effect<void>
 }
@@ -40,6 +57,19 @@ export interface Registration {
 export interface HandlerRegistration extends Registration {
   /**
    * How many dialogs or file choosers this handler has decided.
+   *
+   * **Example** (Waiting until the leave-page dialog is decided)
+   *
+   * ```ts import.meta.vitest
+   * import { Dialog, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const leaveDraft = Effect.fn("leaveDraft")(function*(page: Page.Page) {
+   *   const handler = yield* Dialog.handle(page, Dialog.acceptAll)
+   *   yield* page.getByRole("link", { name: "Home" }).click()
+   *   yield* handler.handled.waitFor((count) => count === 1)
+   * })
+   * ```
    */
   readonly handled: Watchable.Watchable<number>
 }
@@ -134,6 +164,24 @@ const DeclarationErrorTypeId = "~@usestrider/browser/Declaration/DeclarationErro
  *
  * `declaration` names it, such as `Page.addInitScript` or `Page.emulate`. A declaration either takes effect as
  * stated or fails; it never applies partly.
+ *
+ * **Example** (Freezing time unless a clock is already installed)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const freezeTime = Effect.fn("freezeTime")(function*(page: Page.Page) {
+ *   yield* page.clock.install({ mode: "fixed", at: "2026-01-01T09:00:00Z" }).pipe(
+ *     Effect.catchReason(
+ *       "DeclarationError",
+ *       "Conflict",
+ *       (conflict) => Effect.logWarning(`Time is already controlled by ${conflict.with}`)
+ *     )
+ *   )
+ *   yield* page.goto("https://shop.example.com/offers")
+ * })
+ * ```
  *
  * @stability unstable
  * @category errors

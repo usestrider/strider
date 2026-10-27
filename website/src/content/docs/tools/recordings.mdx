@@ -6,19 +6,17 @@ order: 2
 
 ## Spans first
 
-Every operation Strider performs opens one span, named for it: `Locator.click`, `Page.goto`, with attributes such
-as the page's id, the locator and a redacted URL. Steps you write with `Effect.fn` are spans too, so Strider's
-operations nest under your own. Whatever tracer you give Effect receives them: `effect/observability` exports them
-over OTLP to any OpenTelemetry backend, and Effect's DevTools shows them live.
+Every operation opens a span named for it, such as `Locator.click` or `Page.goto`, with attributes such as the
+page's id, the locator and a redacted URL. They nest under your `Effect.fn` steps and go to whatever tracer Effect
+has: `effect/observability` exports OTLP, and Effect's DevTools shows them live.
 
-So a program already has a record of what it did. The two recordings add what spans can't carry: what the page
-looked like, and what went over the network.
+Traces and HAR files add what spans can't carry: what the page looked like, and the network traffic.
 
 ## Traces
 
-`Trace.record` records a page or a context in the format Playwright's trace viewer reads. Open the file at
-[trace.playwright.dev](https://trace.playwright.dev): each operation is a step, under your own spans, with the
-console, errors and, if you ask, screenshots, the network and the page's DOM before and after each action.
+`Trace.record` records a page or context for Playwright's trace viewer. Open the file at
+[trace.playwright.dev](https://trace.playwright.dev): each operation is a step under your spans, with console
+output and errors, and optionally screenshots, network and DOM snapshots.
 
 ```ts
 import { Browser, Trace } from "@usestrider/browser"
@@ -38,7 +36,7 @@ const recorded = Effect.scoped(Effect.gen(function*() {
 }))
 ```
 
-What a trace captures is opt-in, because each level costs something:
+Each capture is opt-in:
 
 | Option                       | Adds                                                                  |
 | ---------------------------- | --------------------------------------------------------------------- |
@@ -48,14 +46,13 @@ What a trace captures is opt-in, because each level costs something:
 | `network: true`              | the page's requests and responses                                     |
 | `domSnapshots: true`         | each frame's DOM before and after every action, which the viewer renders; needs `network` |
 
-DOM snapshots are taken in Strider's own isolated world, so recording changes nothing in the page and works on a
-page you can only inspect.
+DOM snapshots change nothing in the page, and work on an inspected page. They're taken in an isolated world,
+except on WebKit, which has none.
 
 ## HAR files
 
-`Har.record` records a page's or a context's requests as an HTTP Archive, HAR 1.2, one entry per redirect hop.
-Where bodies go is required, never guessed from a file name: `"embed"` puts them in the file, `"attach"` writes a
-zip with the bodies beside it, and `"omit"` leaves them out:
+`Har.record` records a page's or context's requests as HAR 1.2, one entry per redirect hop. `content` is required:
+`"embed"` puts bodies in the file, `"attach"` writes a zip with them beside it, `"omit"` leaves them out:
 
 ```ts
 import { Browser, Har } from "@usestrider/browser"
@@ -70,18 +67,15 @@ const traffic = Effect.scoped(Effect.gen(function*() {
 }))
 ```
 
-Timings come from Strider's own clock, so they mean the same on every browser. A recording stops when its scope
-closes; `entries` counts what it has so far. A request still in flight at the export is marked incomplete rather
-than waited for, unless the recording says `inFlightAtStop: "wait"`.
-
-A HAR recorded with its request bodies can answer the same requests later, as a route:
-`page.route("**/api/**", yield* Route.fromHar("fixtures/api.har"))`. [Routes](/docs/events/routes#replaying-a-recording)
-covers replay.
+- Timings come from Strider's clock, so they compare across browsers.
+- A recording stops when its scope closes; `entries` counts what it has.
+- A request in flight at export is marked incomplete, unless `inFlightAtStop: "wait"`.
+- A HAR with request bodies can answer the same requests later:
+  [`Route.fromHar`](/docs/events/routes#replaying-a-recording).
 
 ## What exports leave out
 
-A recording holds what the page did, and that includes secrets. An export is where they could leave the process,
-so a HAR's export redacts each class of secret unless `include` names it:
+A HAR's export redacts each class of secret unless `include` names it:
 
 | Class                    | Redacted unless included                                   |
 | ------------------------ | ---------------------------------------------------------- |
@@ -90,13 +84,11 @@ so a HAR's export redacts each class of secret unless `include` names it:
 | `"authorizationHeaders"` | `Authorization` headers                                    |
 | `"requestBodies"`        | the bodies requests sent, which can hold a password        |
 
-A trace is redacted under the diagnostics preset. Under the default, `strict`, its DOM snapshots write a password
-field's value, and any field filled with a `Redacted` value, as `REDACTED`.
-
-Screenshots, bodies and DOM snapshots can contain anything the page showed. Strider can't tell which parts are
-secret, so think of a trace with captures as you would a screen recording.
+- A trace follows the diagnostics preset. Under `strict`, the default, DOM snapshots write password fields and
+  fields filled with a `Redacted` value as `REDACTED`.
+- Screenshots, bodies and DOM snapshots hold whatever the page showed. Treat them as a screen recording.
 
 ## In tests
 
-Attach a trace to the test that made it with `TestRun`, and Vitest keeps it with the test's results. [Testing with
-Vitest](/docs/tools/testing#attaching-files) has the example.
+`TestRun` attaches a trace to the test that made it
+([example](/docs/tools/testing#attaching-files)).

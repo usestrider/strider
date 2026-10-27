@@ -1,10 +1,9 @@
 /**
  * A context's cookies: reading, setting and removing them.
  *
- * The jar belongs to its context (`context.cookies`). A `Cookie` is what a browser stores: Effect's cookie
- * attributes, plus the two fields only browsers have, a partition key and a priority. Cookie values are classified,
- * so they arrive `Redacted`; `toCookie` converts a cookie to `effect/http`'s `Cookie`, unredacting its value as it
- * does.
+ * The jar is `context.cookies`. A `Cookie` is what a browser stores: Effect's cookie attributes, plus a partition
+ * key and a priority. Cookie values are secrets, so they arrive `Redacted`; `toCookie` converts a cookie to
+ * `effect/http`'s `Cookie`, unredacting its value.
  *
  * @stability unstable
  * @since 0.1.0
@@ -87,7 +86,7 @@ export type PartitionKey = typeof PartitionKey.Type
  *
  * **Details**
  *
- * `expires` is `None` for a session cookie. The value is `Redacted`: cookie values are classified.
+ * `expires` is `None` for a session cookie. The value is `Redacted`; `Redacted.value` reads it.
  *
  * @stability unstable
  * @category models
@@ -117,8 +116,7 @@ export interface Input {
   readonly name: Name | string
   readonly value: string | Redacted.Redacted<string>
   /**
-   * Where the cookie applies: a URL, or a domain and path. It's required, so which of them you mean is never
-   * guessed.
+   * Where the cookie applies: a URL, or a domain and path.
    */
   readonly scope:
     | { readonly _tag: "Url"; readonly url: Url.Url | string }
@@ -181,18 +179,10 @@ export interface Match {
 /**
  * A context's cookies.
  *
- * **Example** (What a request would send, and setting a flag)
+ * **Gotchas**
  *
- * ```ts import.meta.vitest
- * import { Effect } from "effect"
- * import { Page } from "@usestrider/browser"
- *
- * const enableBeta = Effect.fn("enableBeta")(function*(page: Page.Page) {
- *   const sent = yield* page.context.cookies.listFor("https://app.example.com")
- *   yield* page.context.cookies.set({ name: "beta", value: "1", scope: { _tag: "Url", url: "https://app.example.com" } })
- *   return sent.length
- * })
- * ```
+ * On WebKit, `list` and `listFor` give only the cookies the context's open pages were sent, and `remove` and
+ * `clear` remove only those (`cookies` is partial there).
  *
  * @stability unstable
  * @category models
@@ -201,28 +191,112 @@ export interface Match {
 export interface CookieJar {
   /**
    * Every cookie in the context.
+   *
+   * **Example** (Reading the session cookie)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect, Redacted } from "effect"
+   *
+   * const sessionId = Effect.fn("sessionId")(function*(page: Page.Page) {
+   *   const cookies = yield* page.context.cookies.list
+   *   const session = cookies.find((cookie) => cookie.name === "session")
+   *   return session === undefined ? undefined : Redacted.value(session.value)
+   * })
+   * ```
    */
   readonly list: Effect.Effect<ReadonlyArray<Cookie>, CookieJarError | Target.TargetGone>
   /**
    * The cookies a request to `url` would send.
+   *
+   * **Example** (Listing what a request would send)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const sentNames = Effect.fn("sentNames")(function*(page: Page.Page) {
+   *   const sent = yield* page.context.cookies.listFor("https://app.example.com/account")
+   *   return sent.map((cookie) => cookie.name)
+   * })
+   * ```
    */
   listFor(url: Url.Url | string): Effect.Effect<ReadonlyArray<Cookie>, CookieJarError | Target.TargetGone>
   /**
    * Sets a cookie. A change, not a declaration: it isn't undone when a scope closes.
+   *
+   * **Example** (Turning on a beta flag)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const enableBeta = Effect.fn("enableBeta")(function*(page: Page.Page) {
+   *   yield* page.context.cookies.set({
+   *     name: "beta",
+   *     value: "1",
+   *     scope: { _tag: "Url", url: "https://app.example.com" }
+   *   })
+   *   yield* page.goto("https://app.example.com")
+   * })
+   * ```
    */
   set(cookie: Input): Effect.Effect<void, CookieJarError | Target.TargetGone>
   /**
    * Removes the cookies that match.
+   *
+   * **Example** (Forgetting a cookie consent)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const forgetConsent = Effect.fn("forgetConsent")(function*(page: Page.Page) {
+   *   yield* page.context.cookies.remove({ name: "consent" })
+   *   yield* page.goto("https://shop.example.com")
+   * })
+   * ```
    */
   remove(match: Match): Effect.Effect<void, CookieJarError | Target.TargetGone>
   /**
    * Removes every cookie in the context.
+   *
+   * **Example** (Visiting an account page signed out)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const visitSignedOut = Effect.fn("visitSignedOut")(function*(page: Page.Page) {
+   *   yield* page.context.cookies.clear
+   *   yield* page.goto("https://app.example.com/account")
+   * })
+   * ```
    */
   readonly clear: Effect.Effect<void, CookieJarError | Target.TargetGone>
 }
 
 /**
  * Converts a browser cookie to `effect/http`'s `Cookie`, unredacting its value.
+ *
+ * **Example** (Calling an API with the page's session)
+ *
+ * ```ts import.meta.vitest
+ * import { CookieJar, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ * import { Cookies, HttpClient, HttpClientRequest } from "effect/http"
+ *
+ * const fetchAccount = Effect.fn("fetchAccount")(function*(page: Page.Page) {
+ *   const url = "https://app.example.com/api/account"
+ *   const cookies = Cookies.fromIterable(
+ *     (yield* page.context.cookies.listFor(url)).map(CookieJar.toCookie)
+ *   )
+ *   const header = Cookies.toCookieHeader(cookies)
+ *   return yield* HttpClient.execute(
+ *     HttpClientRequest.get(url).pipe(HttpClientRequest.setHeader("cookie", header))
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category converting

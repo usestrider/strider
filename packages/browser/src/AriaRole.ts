@@ -1,7 +1,8 @@
 /**
  * The WAI-ARIA roles that `getByRole`, snapshots and `AriaPattern` use.
  *
- * Like `effect/http`'s `HttpMethod`, the module has a type, the set of known values and a guard.
+ * Like `effect/http`'s `HttpMethod`, the module has the type (`AriaRole`), the roles Strider knows (`all`) and a
+ * guard (`isAriaRole`).
  *
  * @stability unstable
  * @since 0.1.0
@@ -198,6 +199,22 @@ export const all: ReadonlySet<AriaRole> = new Set<AriaRole>([
 
 /**
  * Checks whether a value is a role this version of Strider knows.
+ *
+ * **Example** (Validating a role before querying)
+ *
+ * ```ts import.meta.vitest
+ * import { AriaRole, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const clickByRole = Effect.fn("clickByRole")(
+ *   function*(page: Page.Page, role: unknown, name: string) {
+ *     if (!AriaRole.isAriaRole(role)) {
+ *       return yield* Effect.fail(`${String(role)} isn't a known role`)
+ *     }
+ *     yield* page.getByRole(role, { name }).click()
+ *   }
+ * )
+ * ```
  *
  * @stability unstable
  * @category guards

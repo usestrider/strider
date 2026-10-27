@@ -58,6 +58,11 @@ export type Modifier = "Alt" | "Control" | "Meta" | "Shift"
  * a key of its own, with an empty `code`. The page sees the layout's `key` and `code` (on Firefox, only the
  * `key`); the browser's own layout doesn't change.
  *
+ * **Gotchas**
+ *
+ * WebKit types characters and named keys, not a layout's physical keys, so a character that needs a dead key fails
+ * there with `Unsupported` (`input.keyboardLayout`).
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
@@ -106,6 +111,22 @@ export interface TypeOptions {
 export interface HeldKey {
   /**
    * Releases the key early. Running it again does nothing, and neither does closing the scope.
+   *
+   * **Example** (Releasing Shift before the next click)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const selectAndAdd = Effect.fn("selectAndAdd")(function*(page: Page.Page) {
+   *   yield* Effect.scoped(Effect.gen(function*() {
+   *     const shift = yield* page.keyboard.hold("Shift")
+   *     yield* page.getByRole("option", { name: "Pears" }).click()
+   *     yield* shift.release
+   *     yield* page.getByRole("button", { name: "Add to cart" }).click()
+   *   }))
+   * })
+   * ```
    */
   readonly release: Effect.Effect<void>
 }
@@ -113,28 +134,26 @@ export interface HeldKey {
 /**
  * The keyboard of one page.
  *
- * **Example** (Selecting several options with Shift held)
- *
- * ```ts import.meta.vitest
- * import { Effect } from "effect"
- * import { Page } from "@usestrider/browser"
- *
- * const selectRange = Effect.fn("selectRange")(function*(page: Page.Page) {
- *   yield* Effect.scoped(Effect.gen(function*() {
- *     yield* page.keyboard.hold("Shift")
- *     yield* page.getByRole("option", { name: "Apples" }).click()
- *     yield* page.getByRole("option", { name: "Pears" }).click()
- *   }))
- * })
- * ```
- *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
 export interface Keyboard {
   /**
-   * Presses and releases one key.
+   * Presses and releases one key: a key value such as `"Enter"`, or one character. Anything else fails with
+   * `InvalidInput`.
+   *
+   * **Example** (Closing a menu with Escape)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const closeMenu = Effect.fn("closeMenu")(function*(page: Page.Page) {
+   *   yield* page.getByRole("button", { name: "Account" }).click()
+   *   yield* page.keyboard.press("Escape")
+   * })
+   * ```
    */
   press(
     key: Key | string,
@@ -142,19 +161,61 @@ export interface Keyboard {
   ): Effect.Effect<void, KeyboardError | Target.TargetGone | Deadline.Timeout>
   /**
    * Types text one key at a time, with key events for each character.
+   *
+   * **Example** (Typing a PIN slowly)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect, Redacted } from "effect"
+   *
+   * const enterPin = Effect.fn("enterPin")(
+   *   function*(page: Page.Page, pin: Redacted.Redacted<string>) {
+   *     yield* page.getByLabel("PIN").click()
+   *     yield* page.keyboard.pressSequentially(pin, { delay: "100 millis" })
+   *   }
+   * )
+   * ```
    */
   pressSequentially(
     text: string | Redacted.Redacted<string>,
     options?: TypeOptions | undefined
   ): Effect.Effect<void, KeyboardError | Target.TargetGone | Deadline.Timeout>
   /**
-   * Inserts text without key events, as an input method would.
+   * Inserts text without key events, as an input method would. On Firefox, each character is typed as a key.
+   *
+   * **Example** (Entering text an input method composes)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const searchInJapanese = Effect.fn("searchInJapanese")(function*(page: Page.Page) {
+   *   yield* page.getByRole("searchbox").click()
+   *   yield* page.keyboard.insertText("東京")
+   * })
+   * ```
    */
   insertText(
     text: string | Redacted.Redacted<string>
   ): Effect.Effect<void, KeyboardError | Target.TargetGone | Deadline.Timeout>
   /**
-   * Holds a key down until the returned handle is released or its scope closes.
+   * Holds a key down until the returned handle is released or its scope closes. Input sent meanwhile carries it,
+   * so a click while Shift is held is a Shift-click.
+   *
+   * **Example** (Selecting several options with Shift held)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const selectRange = Effect.fn("selectRange")(function*(page: Page.Page) {
+   *   yield* Effect.scoped(Effect.gen(function*() {
+   *     yield* page.keyboard.hold("Shift")
+   *     yield* page.getByRole("option", { name: "Apples" }).click()
+   *     yield* page.getByRole("option", { name: "Pears" }).click()
+   *   }))
+   * })
+   * ```
    */
   hold(key: Key | string): Effect.Effect<HeldKey, KeyboardError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
 }
@@ -186,6 +247,25 @@ const KeyboardErrorTypeId = "~@usestrider/browser/Keyboard/KeyboardError"
 
 /**
  * Error for a keyboard operation that failed.
+ *
+ * **Example** (Pressing a shortcut from configuration)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const pressShortcut = Effect.fn("pressShortcut")(
+ *   function*(page: Page.Page, key: string) {
+ *     yield* page.keyboard.press(key).pipe(
+ *       Effect.catchReason(
+ *         "KeyboardError",
+ *         "InvalidInput",
+ *         (invalid) => Effect.logWarning(invalid.hint)
+ *       )
+ *     )
+ *   }
+ * )
+ * ```
  *
  * @stability unstable
  * @category errors

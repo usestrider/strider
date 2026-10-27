@@ -5,16 +5,15 @@
  * functions. Waits look forward, and reads look back:
  *
  * - `next(target, filter?, where?)` subscribes by the time it returns, and gives back the wait: an effect whose
- *   value is the first match, the same each time it runs. Code order is subscription order, so call it before the
- *   action that causes the event. It keeps what arrives until its first match or its deadline, which starts at
- *   `next`.
+ *   value is the first match, the same each time it runs. Call it before the action that causes the event. It
+ *   keeps what arrives until its first match or its deadline, which starts at `next`.
  * - `stream(target, filter?, where?)` subscribes the same way and emits every match from then on, buffering at most
  *   `Capacity` events for a consumer that falls behind.
- * - `history(target, filter?)` reads what already happened from a bounded log, and never waits. Its filter is
- *   checked as the others' are, so a filter it can't apply fails it with `SubscriptionError` too.
+ * - `history(target, filter?)` reads what already happened from a bounded log, and never waits. A filter it can't
+ *   apply fails it with `SubscriptionError`, as it does the others.
  *
- * Events report and handlers decide (`Dialog.handle`, `FileChooser.handle`, `route`). Seeing an event doesn't make
- * anything yours: a popup belongs to the scope that owns its opener, and a download's file to its context.
+ * Seeing an event decides nothing and makes nothing yours. Handlers decide (`Dialog.handle`, `FileChooser.handle`,
+ * `route`), a popup belongs to the scope that owns its opener, and a download's file to its context.
  *
  * @stability unstable
  * @since 0.1.0
@@ -34,14 +33,27 @@ import * as Reason from "./Reason.ts"
  *
  * **Details**
  *
- * The filter is data and is applied before buffering. `where` runs after it, in the fiber that runs the wait or
- * the stream, never as events arrive, so a slow or failing predicate can't hold up other subscribers. Its failure
- * `PE` and requirements `PR` join the wait's or the stream's.
+ * It's the argument after the filter, so its parameter is typed by the filter, such as a decoded body. The filter
+ * is data, applied before buffering. `where` runs after it in the subscriber's own fiber, never as events arrive,
+ * so a slow or failing predicate holds up no other subscriber. Its failure `PE` fails the wait or the stream, and
+ * its requirements `PR` are the `next` or `stream` call's.
  *
- * **Gotchas**
+ * **Example** (Matching a download by its file name)
  *
- * `where` is a separate trailing argument, not a filter field, so that its parameter type can be inferred from
- * the filter (a decoded body, say). TypeScript can't infer that for a callback inside the same object.
+ * ```ts import.meta.vitest
+ * import { Download, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const exportCsv = Effect.fn("exportCsv")(function*(page: Page.Page) {
+ *   const csv = yield* Download.next(
+ *     page,
+ *     {},
+ *     (download) => Effect.succeed(download.suggestedFilename.endsWith(".csv"))
+ *   )
+ *   yield* page.getByRole("button", { name: "Export" }).click()
+ *   return yield* csv
+ * })
+ * ```
  *
  * @stability unstable
  * @category models
@@ -54,9 +66,9 @@ export type Where<A, PE, PR> = (event: A) => Effect.Effect<boolean, PE, PR>
  *
  * **Details**
  *
- * `dropped` counts every event of the kind the log discarded for its target, so a truncated log doesn't look
- * complete. Which of them a filter would have matched can't be known once they're gone, so it is an upper
- * bound on the matches lost, and `0` proves the entries are complete. The cap is `UserContext.Options.eventLog`.
+ * `dropped` counts every event of the kind that the target's log discarded, whether the filter would have
+ * matched it or not, so it's an upper bound on the matches lost; `0` means `entries` is complete. The log's size
+ * is `UserContext.Options.eventLog`.
  *
  * @stability unstable
  * @category models
@@ -77,8 +89,8 @@ export interface History<A> {
  * **Example** (Encoding request history)
  *
  * ```ts import.meta.vitest
- * import { Effect, Schema } from "effect"
  * import { NetworkRequest, Page, Subscription } from "@usestrider/browser"
+ * import { Effect, Schema } from "effect"
  *
  * const RequestHistory = Subscription.History(NetworkRequest.NetworkRequest)
  *
@@ -129,10 +141,29 @@ const SubscriptionErrorTypeId = "~@usestrider/browser/Subscription/SubscriptionE
  *
  * **Details**
  *
- * It fails the call that took the filter (`next`, `stream` or `history`) before any event, never the wait or
+ * It fails the call that took the filter (`next`, `stream` or `history`), before any event, never the wait or
  * the stream that call returns. An invalid filter, such as a malformed URL pattern, is `InvalidInput`, and one
  * that asks for events the backend can't report is `Unsupported`, naming the capability. `operation` names the
  * call, such as `NetworkResponse.next`.
+ *
+ * **Example** (Skipping a download the browser can't report)
+ *
+ * ```ts import.meta.vitest
+ * import { Download, Page } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const exportReport = Effect.fn("exportReport")(function*(page: Page.Page) {
+ *   const download = yield* Download.next(page).pipe(
+ *     Effect.map(Option.some),
+ *     Effect.catchReason("SubscriptionError", "Unsupported", () => Effect.succeedNone)
+ *   )
+ *   yield* page.getByRole("button", { name: "Export" }).click()
+ *   if (Option.isSome(download)) {
+ *     const file = yield* download.value
+ *     yield* file.saveAs("./report.csv")
+ *   }
+ * })
+ * ```
  *
  * @stability unstable
  * @category errors
@@ -170,9 +201,8 @@ export const isSubscriptionError = (u: unknown): u is SubscriptionError =>
  *
  * **Details**
  *
- * It is read when a stream subscribes. A stream whose consumer falls further behind fails with `EventOverflow`
- * rather than losing events silently. `next` keeps what arrives until its first match or its deadline, so it needs
- * no bound.
+ * It's read when a stream subscribes. A stream whose consumer falls further behind fails with `EventOverflow`.
+ * `next` has no bound: it keeps what arrives until its first match or its deadline.
  *
  * @stability unstable
  * @category references
@@ -185,6 +215,22 @@ export const Capacity: Context.Reference<number> = Context.Reference<number>(
 
 /**
  * Sets the buffer size of every stream that subscribes inside an effect.
+ *
+ * **Example** (Logging every request without falling behind)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest, Page, Subscription } from "@usestrider/browser"
+ * import { Effect, Stream } from "effect"
+ *
+ * const logRequests = Effect.fn("logRequests")(function*(page: Page.ObservedPage) {
+ *   const requests = yield* NetworkRequest.stream(page).pipe(
+ *     Subscription.withCapacity(10_000)
+ *   )
+ *   yield* requests.pipe(
+ *     Stream.runForEach((request) => Effect.log(`${request.method} ${request.url}`))
+ *   )
+ * })
+ * ```
  *
  * @see {@link Capacity} for the reference it sets
  *
@@ -208,8 +254,8 @@ const EventOverflowTypeId = "~@usestrider/browser/Subscription/EventOverflow"
  *
  * **Details**
  *
- * Event streams are bounded, so a stalled consumer can't grow memory without limit. The stream fails rather
- * than dropping events silently; `bound` is the buffer size and `at` is when it overflowed.
+ * Only that stream fails; other subscriptions to the same events go on. `bound` is its buffer's size
+ * (`Capacity`) and `at` is when it overflowed.
  *
  * @stability unstable
  * @category errors

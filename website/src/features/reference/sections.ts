@@ -25,12 +25,12 @@ export const sections = {
     "Generated from the WebDriver BiDi specification, one module for each of its modules.",
     true
   ),
-  webkit: section(
-    "WebKit inspector (Playwright's build)",
-    "Generated from the protocol of Playwright's WebKit build.",
+  webkitAutomation: section(
+    "WebKit Automation",
+    "Generated from WebKit's Automation protocol in WebKitGTK's source, which drives a launched WebKit.",
     true
   ),
-  webkitStock: section("WebKit inspector (stock)", "Generated from the inspector protocol in WebKitGTK's source.", true)
+  webkitStock: section("WebKit inspector", "Generated from the inspector protocol in WebKitGTK's source.", true)
 } as const
 
 export type SectionKey = keyof typeof sections
@@ -43,7 +43,7 @@ export const sectionOrder: ReadonlyArray<SectionKey> = [
   "protocol",
   "cdp",
   "bidi",
-  "webkit",
+  "webkitAutomation",
   "webkitStock"
 ]
 
@@ -58,7 +58,7 @@ const byEntryPoint: Record<string, SectionKey> = {
   protocol: "protocol",
   cdp: "cdp",
   "bidi-protocol": "bidi",
-  "webkit-protocol": "webkit",
+  "webkit-automation-protocol": "webkitAutomation",
   "webkit-stock-protocol": "webkitStock"
 }
 

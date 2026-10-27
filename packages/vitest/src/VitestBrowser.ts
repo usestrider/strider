@@ -1,8 +1,7 @@
 /**
  * The Vitest adapter: a browser layer for `@effect/vitest`, with `TestRun` for the test that's running.
  *
- * `VitestBrowser.layer` passes the backend's layer through unchanged and adds `TestRun`, which attaches files to
- * the running test. Its peer dependency is `vitest` 5.
+ * `VitestBrowser.layer` passes the backend's layer through unchanged. The package's peer dependency is `vitest` 5.
  *
  * @stability unstable
  * @since 0.1.0
@@ -87,18 +86,22 @@ const testRun: TestRun.TestRun = {
  * Provides the backend you pass, unchanged, plus `TestRun` for the current test. Each `@effect/vitest` `layer`
  * block gets one browser.
  *
- * **Example** (A test with an emulated-focus page)
+ * **Example** (Providing a browser to a test)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Browser } from "@usestrider/browser"
  * import { Chromium } from "@usestrider/browser/chromium"
  * import { VitestBrowser } from "@usestrider/vitest"
+ * import { Effect } from "effect"
  *
  * const test = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage({ focus: "emulated" })
  *   yield* page.goto("https://shop.example.com")
- * })).pipe(Effect.provide(VitestBrowser.layer(Chromium.layer({ executablePath: "/usr/bin/chromium" }))))
+ * })).pipe(
+ *   Effect.provide(
+ *     VitestBrowser.layer(Chromium.layer({ executablePath: "/usr/bin/chromium" }))
+ *   )
+ * )
  * ```
  *
  * @stability unstable

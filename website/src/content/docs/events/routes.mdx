@@ -6,17 +6,16 @@ order: 3
 
 ## Declarations
 
-Events report; declarations decide. A declaration is a setting held for a scope: a route that answers requests,
-a script that runs in every new document, a clock the page's scripts read, an emulated setting or a granted
-permission. The browser confirms each one before the call returns, so it applies from the next line, and each is
-removed when its scope closes, or earlier with its handle's `remove`.
+A declaration is a setting held for a scope: a route, an init script, the page clock, an emulated setting, a
+granted permission, a dialog or file chooser handler.
 
-`Dialog.handle` and `FileChooser.handle`, on the [events page](/docs/events/events), are declarations too.
+- The browser confirms it before the call returns, so it applies from the next line.
+- It's removed when its scope closes, or earlier with its handle's `remove`.
 
 ## Routes
 
-`page.route(pattern, handler)` sends each matching request to the handler before it leaves the browser. The
-handler returns a decision. Responses and request changes are Effect's own HTTP types, from `effect/http`:
+`page.route(pattern, handler)` sends each matching request to the handler before it leaves the browser. The handler
+returns a decision, built from Effect's HTTP types in `effect/http`:
 
 ```ts
 import { Page, Route } from "@usestrider/browser"
@@ -45,18 +44,17 @@ const fakeBackend = Effect.fn("fakeBackend")(function*(page: Page.Page) {
 | `Route.abort(reason?)`      | fails, as a network error would                                          |
 | `Route.fallthrough`         | asks the next route that matches, or lets the request continue           |
 
-A pattern is a glob, a URL or a `URLPattern`. Routes are asked in order of precedence: the page's before its
-context's, and the most recently added first, with `fallthrough` passing to the next. A route's handle counts the
-requests it was asked about in `hits`, a watchable number.
-
-A request is never left hanging. A handler that fails, is interrupted or runs out of time lets the request
-continue; its failure is logged, and the decision is reported as an `AutoResolution` event.
+- A pattern is a glob, a URL or a `URLPattern`.
+- The page's routes are asked before its context's, the newest first; `fallthrough` passes to the next.
+- A route's handle counts the requests it was asked about in `hits`, a watchable number.
+- A handler that fails, is interrupted or times out lets the request continue. The failure is logged and reported
+  as an `AutoResolution` event.
 
 ## The response phase
 
-A route can wait for the server's answer instead, with `{ phase: "response" }`. Its handler sees the response's
-status and headers, and can pass it on changed or replace it. The phase sets the types of what the handler gets
-and may return, so a decision that makes no sense at a phase doesn't compile:
+With `{ phase: "response" }`, the handler sees the server's status and headers, and can pass the response on
+changed or replace it. The phase types what the handler gets and returns, so a decision that doesn't fit the phase
+doesn't compile:
 
 ```ts
 import { Page, Route } from "@usestrider/browser"
@@ -74,15 +72,31 @@ const markResponses = Effect.fn("markResponses")(function*(page: Page.Page) {
 })
 ```
 
-Changing a response's status and headers this way works on Chromium and Firefox. A handler at this phase can also
-read the body, `intercepted.responseBody`, and fulfill with a patched copy; that is Chromium's alone, and WebKit can
-do neither. `{ phase: "auth" }` answers an HTTP authentication challenge with
-`Route.provideCredentials({ username, password })`, the password `Redacted`.
+- Changing status and headers: Chromium and Firefox.
+- Reading `intercepted.responseBody` and fulfilling with a patched copy: Chromium only.
+- WebKit does neither.
+
+`{ phase: "auth" }` answers an HTTP authentication challenge, on Chromium and Firefox:
+
+```ts
+import { Page, Route } from "@usestrider/browser"
+import { Config, Effect } from "effect"
+
+const signInToStaging = Effect.fn("signInToStaging")(function*(page: Page.Page) {
+  const password = yield* Config.Redacted("STAGING_PASSWORD")
+  yield* page.route(
+    "https://staging.example.com/**",
+    () => Effect.succeed(Route.provideCredentials({ username: "ada", password })),
+    { phase: "auth" }
+  )
+  yield* page.goto("https://staging.example.com")
+})
+```
 
 ## Replaying a recording
 
-A HAR file recorded earlier, by `Har.record` or another tool, can answer a page's requests. `Route.fromHar` reads
-it once and makes a handler that answers each request from the matching entry, by method, URL and body:
+`Route.fromHar` reads a HAR file, from `Har.record` or another tool, and makes a handler that answers each request
+from the entry matching its method, URL and body:
 
 ```ts
 import { Page, Route } from "@usestrider/browser"
@@ -95,14 +109,13 @@ const fromRecording = Effect.fn("fromRecording")(function*(page: Page.Page) {
 })
 ```
 
-A request nothing in the file matches is aborted, unless `{ notFound: "fallthrough" }` lets it through. Reading the
-file needs Effect's `FileSystem` in the program's context. `NodeServices.layer` provides it: build the backend's
-layer with `Layer.provideMerge(NodeServices.layer)` instead of `Layer.provide`, and the program gets both.
+- A request with no entry is aborted, unless `{ notFound: "fallthrough" }`.
+- Reading the file needs Effect's `FileSystem`. Build the backend's layer with
+  `Layer.provideMerge(NodeServices.layer)` instead of `Layer.provide`, so the program gets it too.
 
 ## Init scripts
 
-`addInitScript` runs a function at the start of every new document of the page, in every frame, before the page's
-own scripts. It's the place for test hooks, stubs and anything the page should find already there:
+`addInitScript` runs a function at the start of each new document, in every frame, before the page's own scripts:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -124,19 +137,17 @@ const testHooks = Effect.fn("testHooks")(function*(page: Page.Page) {
 })
 ```
 
-The function crosses into the page, so it must be self-contained. Scripts run in one order on every browser: the
-context's before the page's, then in the order they were added. `after` makes a script depend on others: it runs
-only if each one it comes after ran in that document without throwing. One that throws is reported as the
-page's `UncaughtException`.
-
-A script runs in the page's own world unless `world: "isolated"` says otherwise, and `workers: true` runs it in the
-page's dedicated workers too, on Chromium and WebKit. Added to a page that has already loaded, a script runs from
-its next document.
+- The function crosses into the page, so it must be self-contained.
+- The context's scripts run before the page's, each in the order added.
+- With `after`, a script runs only if each script it names ran in that document without throwing.
+- A script that throws is reported as an `UncaughtException`.
+- `world: "isolated"` runs it apart from the page's scripts. `workers: true` also runs it in dedicated workers, on
+  Chromium and WebKit.
+- Added to a loaded page, it runs from the next document.
 
 ## The page clock
 
-A page's scripts read time from `Date`, `performance.now` and their timers. `page.clock` replaces them with a
-clock of Strider's, so a test can stop time, set it, or move it forward without waiting:
+`page.clock` replaces `Date`, `performance.now` and timers with a clock you stop, set and move:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -157,10 +168,8 @@ const sessionExpires = Effect.fn("sessionExpires")(function*(page: Page.Page) {
 | `offset`     | shifted `by` a duration   | run in real time               |
 | `controlled` | starts at `at`, moves only when told | run only when time moves |
 
-`adjust` moves a controlled clock forward, firing every timer that comes due, in order. `setTime` jumps, firing due
-timers at most once, as a laptop waking from sleep does. `resume` goes back to real time from where the clock
-stands. The words are Effect's, from `TestClock`, so a test reads the same whichever clock it moves.
-
-The page clock is one timeline across the page's documents and frames, so navigating doesn't reset it. It never
-touches Strider's own deadlines, and Effect's `TestClock` never touches the page, so a click still works while the
-page's time is stopped.
+- `adjust` moves a controlled clock forward, firing each timer that comes due, in order.
+- `setTime` jumps, firing due timers at most once, as a laptop waking from sleep.
+- `resume` returns to real time from where the clock stands.
+- One timeline spans the page's documents and frames; navigating doesn't reset it.
+- The page clock doesn't touch Strider's deadlines, and `TestClock` doesn't touch the page.

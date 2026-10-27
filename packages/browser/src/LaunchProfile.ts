@@ -2,9 +2,9 @@
  * The flags and preferences a browser is launched with, as values you can inspect.
  *
  * A profile is never a hidden flag: it's a value whose `args` and `prefs` you can read, and a launch's span records
- * which profile it used. `args` are Chromium's switches and `prefs` Firefox's preferences; Playwright's WebKit takes
- * neither. No profile turns off the back/forward cache, third-party storage partitioning or popup blocking, because
- * Strider handles each of those itself.
+ * which profile it used. `args` are Chromium's switches and `prefs` Firefox's preferences; WebKit takes neither. No
+ * profile turns off the back/forward cache, third-party storage partitioning or popup blocking, because Strider
+ * handles each of those itself.
  *
  * @stability unstable
  * @since 0.1.0
@@ -39,13 +39,12 @@ export const stock: LaunchProfile = new LaunchProfile({
 })
 
 /**
- * First-run, sync and update prompts off; nothing a page can observe. The default.
+ * The default profile: first-run, sync and update prompts off, and nothing a page can observe.
  *
  * **Details**
  *
- * Firefox's JSON viewer is off too, so a JSON response's document is the JSON as served, as in Chromium and
- * WebKit, rather than the viewer's page; and Firefox opens a page's popups as windows, so the page keeps
- * rendering behind them.
+ * - Firefox's JSON viewer is off, so a JSON response's document is the JSON as served, as in Chromium and WebKit.
+ * - Firefox opens popups as windows, so the page that opened one keeps rendering behind it.
  *
  * @stability unstable
  * @category constants
@@ -62,7 +61,19 @@ export const automation: LaunchProfile = new LaunchProfile({
  *
  * **Gotchas**
  *
- * Pages can observe the difference, such as in timer cadence, so it is opt-in.
+ * Pages can observe the difference, such as in timer cadence.
+ *
+ * **Example** (Launching Chromium for many pages at once)
+ *
+ * ```ts import.meta.vitest
+ * import { LaunchProfile } from "@usestrider/browser"
+ * import { Chromium } from "@usestrider/browser/chromium"
+ *
+ * const browser = Chromium.layer({
+ *   executablePath: "/usr/bin/chromium",
+ *   profile: LaunchProfile.concurrent
+ * })
+ * ```
  *
  * @stability unstable
  * @category constants

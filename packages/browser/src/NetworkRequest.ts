@@ -1,12 +1,12 @@
 /**
- * The requests a page or context sends: the event, and the data that routes and responses refer to.
+ * The requests a page or context sends, as events and as the data routes and responses refer to.
  *
- * A `NetworkRequest` is one redirect hop, immutable, with Effect's `Headers`; header values that carry credentials,
- * such as cookies and authorization, are redacted. It's data (a Schema), so it can be encoded for export.
+ * A `NetworkRequest` is one redirect hop, as immutable data with Effect's `Headers`. It's a Schema, so it can be
+ * encoded for export. Header values that carry credentials, such as cookies and authorization, are redacted.
  *
  * A request is reported when it's sent, to the page and context that made it: a frame's requests reach its page,
  * and a worker's reach its page or context. Firefox and WebKit attribute a dedicated worker's requests to its
- * page's document, as `initiator` says.
+ * page's document, as `initiator` shows.
  *
  * @stability unstable
  * @since 0.1.0
@@ -129,6 +129,16 @@ export const Initiator = Schema.Union([
 /**
  * What started a request.
  *
+ * **Example** (Telling navigations from subresources)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest } from "@usestrider/browser"
+ * import { Option } from "effect"
+ *
+ * const isNavigation = (request: NetworkRequest.NetworkRequest) =>
+ *   request.initiator._tag === "Document" && Option.isSome(request.initiator.navigation)
+ * ```
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
@@ -235,9 +245,26 @@ const subscription = (
  * Subscribes to requests and returns the wait: an effect whose value is the first match, the same each time it
  * runs.
  *
- * **Gotchas**
+ * **Details**
  *
- * `url` is required here: "the next request of any kind" is almost never what a test means.
+ * `url` is required here, unlike in `stream` and `history`.
+ *
+ * **Example** (Waiting for the order request)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const placeOrder = Effect.fn("placeOrder")(function*(page: Page.Page) {
+ *   const sent = yield* NetworkRequest.next(page, {
+ *     url: "https://shop.example.com/api/orders",
+ *     method: "POST"
+ *   })
+ *   yield* page.getByRole("button", { name: "Place order" }).click()
+ *   const request = yield* sent
+ *   return request.headers["content-type"]
+ * })
+ * ```
  *
  * @stability unstable
  * @category subscriptions
@@ -263,8 +290,8 @@ export const next = <PE = never, PR = never>(
  * **Example** (Logging fetches until the page closes)
  *
  * ```ts import.meta.vitest
- * import { Console, Effect, Stream } from "effect"
  * import { NetworkRequest, Page } from "@usestrider/browser"
+ * import { Console, Effect, Stream } from "effect"
  *
  * const logFetches = Effect.fn("logFetches")(function*(page: Page.ObservedPage) {
  *   const requests = yield* NetworkRequest.stream(page, { resourceType: "fetch" })
@@ -296,6 +323,18 @@ export const stream = <PE = never, PR = never>(
 /**
  * Reads the requests the target's event log kept (`UserContext.Options.eventLog`); never waits.
  *
+ * **Example** (Counting the images a page loaded)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const countImages = Effect.fn("countImages")(function*(page: Page.ObservedPage) {
+ *   const images = yield* NetworkRequest.history(page, { resourceType: "image" })
+ *   return { count: images.entries.length, complete: images.dropped === 0 }
+ * })
+ * ```
+ *
  * @stability unstable
  * @category getters
  * @since 0.1.0
@@ -314,8 +353,27 @@ export const history = (
  *
  * **Gotchas**
  *
- * Redacted header values stay redacted in the result. Replaying a request that needs them means setting them
- * again explicitly.
+ * Redacted header values stay redacted in the result: a replay that needs them must set them again.
+ *
+ * **Example** (Replaying a search request)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ * import { HttpClient } from "effect/http"
+ *
+ * const replaySearch = Effect.fn("replaySearch")(function*(page: Page.Page) {
+ *   const searched = yield* NetworkRequest.next(page, {
+ *     url: "https://shop.example.com/api/search?*"
+ *   })
+ *   yield* page.goto("https://shop.example.com/search?q=boots")
+ *   const request = yield* searched
+ *   const response = yield* HttpClient.execute(
+ *     NetworkRequest.toHttpClientRequest(request)
+ *   )
+ *   return response.status
+ * })
+ * ```
  *
  * @stability unstable
  * @category converting
@@ -329,11 +387,31 @@ export const toHttpClientRequest = (request: NetworkRequest): HttpClientRequest.
  *
  * **Details**
  *
- * A request's `headers` are the ones its event gives, which on Chromium and WebKit leave out what the network
- * adds, `Cookie` among them; both browsers report those separately, a moment later. This waits for them: on
- * Chromium until the `ExtraInfo` event its response promises, on WebKit until the response, and on Firefox not at
- * all. `target` is the page or context the request was seen on. Strider keeps the last 1000 redirect hops; for a
- * request older than those, this gives its event's headers.
+ * - A request's `headers` are the ones its event gives, which on Chromium and WebKit leave out what the network
+ *   adds, such as `Cookie`. This waits until the browser reports the rest: on Chromium for the `ExtraInfo` event
+ *   its response promises, on WebKit for the response. On Firefox it returns at once.
+ * - `target` is the page or context the request was seen on.
+ * - Strider keeps the last 1000 redirect hops; for an older request, this gives its event's headers.
+ *
+ * **Gotchas**
+ *
+ * WebKit never reports `Cookie` among the headers sent (`network.headersSent` is partial there).
+ *
+ * **Example** (Checking that a request sent cookies)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const sentSession = Effect.fn("sentSession")(function*(page: Page.Page) {
+ *   const sent = yield* NetworkRequest.next(page, {
+ *     url: "https://app.example.com/api/session"
+ *   })
+ *   yield* page.goto("https://app.example.com")
+ *   const headers = yield* NetworkRequest.headersSent(page, yield* sent)
+ *   return headers["cookie"] !== undefined
+ * })
+ * ```
  *
  * @stability unstable
  * @category getters

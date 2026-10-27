@@ -32,17 +32,21 @@ declare module "../Reason.ts" {
  * `endpoint` is taken as given, such as a grid's session URL. The connection starts a session and ends it when the
  * layer's scope closes; the pages that were open are observed, as an attached browser's are.
  *
- * **Example** (A browser on a remote grid)
+ * **Example** (Connecting to a remote grid)
  *
  * ```ts import.meta.vitest
- * import { Config, Effect } from "effect"
  * import { Browser } from "@usestrider/browser"
  * import { Bidi } from "@usestrider/browser/bidi"
+ * import { Config, Effect } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const token = yield* Config.Redacted("GRID_TOKEN")
  *   const page = yield* Effect.scoped(Browser.newPage()).pipe(
- *     Effect.provide(Bidi.layerConnect("wss://grid.example.com/session", { headers: { authorization: token } }))
+ *     Effect.provide(
+ *       Bidi.layerConnect("wss://grid.example.com/session", {
+ *         headers: { authorization: token }
+ *       })
+ *     )
  *   )
  *   return page.id
  * })

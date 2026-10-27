@@ -4,15 +4,15 @@
  *
  * Adding one is a declaration (`page.addInitScript`, `context.addInitScript`), removed with its scope.
  *
- * - **Order** is the same on every backend: a context's scripts before a page's, then the order they were
- *   added in. `after` doesn't change the order. It makes a script depend on another, which must still be in
- *   force and belong to the same page or context or to a broader one: a page's script can come after its
- *   context's, not the reverse. A script runs only if each script it comes after ran in that document without
- *   throwing.
+ * - **Order** is the same on every backend: a context's scripts before a page's, each in the order added.
+ *   `after` doesn't reorder; it makes a script depend on others, which must still be in force and belong to the
+ *   same page or context or a broader one: a page's script can come after its context's, not the reverse. A
+ *   script runs only if each script it comes after ran in that document without throwing.
  * - **When.** A script runs as its document starts, before `document.documentElement` exists, in every frame
  *   of the page, cross-site ones included. Added to a loaded page, it runs from the next document; removed, it
  *   stops at the next, along with the scripts that come after it.
- * - **A script that throws** is reported as the page's `UncaughtException`, and the scripts after it still run.
+ * - **A script that throws** is reported as the page's `UncaughtException`. The scripts added after it still
+ *   run, unless they name it in `after`.
  *
  * **Gotchas**
  *
@@ -62,7 +62,23 @@ export interface InitScript extends Declaration.Registration {
  *
  * - A function is serialized, so it must be self-contained.
  * - `{ source }` is JavaScript source text.
- * - `{ path }` is a file on this machine, read when the script is added.
+ * - `{ path }` is a file on this machine, read when the script is added. It fails with `InvalidInput` unless the
+ *   browser's layer was built with `FileSystem` and `Path`.
+ *
+ * **Example** (A function and a file)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const prepare = Effect.fn("prepare")(function*(page: Page.Page) {
+ *   yield* page.addInitScript(() => {
+ *     localStorage.setItem("cookie-consent", "declined")
+ *   })
+ *   yield* page.addInitScript({ path: "./fixtures/analytics-stub.js" })
+ *   yield* page.goto("https://shop.example.com")
+ * })
+ * ```
  *
  * @stability unstable
  * @category models

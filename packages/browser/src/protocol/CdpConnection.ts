@@ -41,10 +41,42 @@ export interface CdpConnection {
   /**
    * The session for a `sessionId` the browser announced with `Target.attachedToTarget`. Fails with
    * `SessionEnded` if it isn't attached, or no longer is.
+   *
+   * **Example** (Following every target the browser attaches)
+   *
+   * ```ts import.meta.vitest
+   * import { Target } from "@usestrider/browser/cdp"
+   * import { type CdpConnection, Protocol } from "@usestrider/browser/protocol"
+   * import { Effect, Stream } from "effect"
+   *
+   * const targets = Effect.fn("targets")(function*(cdp: CdpConnection.CdpConnection) {
+   *   const attached = yield* cdp.browser.subscribe(Target.attachedToTarget)
+   *   yield* Target.setAutoAttach({
+   *     autoAttach: true,
+   *     waitForDebuggerOnStart: false,
+   *     flatten: true
+   *   }).pipe(
+   *     Protocol.on(cdp.browser)
+   *   )
+   *   return attached.pipe(Stream.mapEffect((event) => cdp.session(event.sessionId)))
+   * })
+   * ```
    */
   readonly session: (sessionId: Target.SessionID) => Effect.Effect<Protocol.ProtocolSession, Protocol.ProtocolError>
   /**
    * Waits as long as the connection lives, then gives the reason it was lost.
+   *
+   * **Example** (Logging a lost connection)
+   *
+   * ```ts import.meta.vitest
+   * import type { CdpConnection } from "@usestrider/browser/protocol"
+   * import { Effect } from "effect"
+   *
+   * const watch = Effect.fn("watch")(function*(cdp: CdpConnection.CdpConnection) {
+   *   const lost = yield* cdp.closed
+   *   yield* Effect.logError(`Chrome's connection was lost: ${lost.description}`)
+   * })
+   * ```
    */
   readonly closed: Effect.Effect<Transport.ConnectionLost>
 }
@@ -63,20 +95,25 @@ export interface CdpConnection {
  * **Example** (Navigating a new tab)
  *
  * ```ts import.meta.vitest
- * import { Effect, Stream } from "effect"
  * import { Page, Target } from "@usestrider/browser/cdp"
  * import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol"
+ * import { Effect, Stream } from "effect"
  *
- * const visit = Effect.fn("visit")(function*(transport: Transport.Transport, url: string) {
- *   const cdp = yield* CdpConnection.make(transport)
- *   const { targetId } = yield* Target.createTarget({ url: "about:blank" }).pipe(Protocol.on(cdp.browser))
- *   const { sessionId } = yield* Target.attachToTarget({ targetId, flatten: true }).pipe(Protocol.on(cdp.browser))
- *   const page = yield* cdp.session(sessionId)
- *   const loaded = yield* page.subscribe(Page.loadEventFired)
- *   yield* Page.enable().pipe(Protocol.on(page))
- *   yield* Page.navigate({ url }).pipe(Protocol.on(page))
- *   yield* Stream.runHead(loaded)
- * })
+ * const visit = Effect.fn("visit")(
+ *   function*(transport: Transport.Transport, url: string) {
+ *     const cdp = yield* CdpConnection.make(transport)
+ *     const { targetId } = yield* Target.createTarget({ url: "about:blank" }).pipe(
+ *       Protocol.on(cdp.browser)
+ *     )
+ *     const { sessionId } = yield* Target.attachToTarget({ targetId, flatten: true })
+ *       .pipe(Protocol.on(cdp.browser))
+ *     const page = yield* cdp.session(sessionId)
+ *     const loaded = yield* page.subscribe(Page.loadEventFired)
+ *     yield* Page.enable().pipe(Protocol.on(page))
+ *     yield* Page.navigate({ url }).pipe(Protocol.on(page))
+ *     yield* Stream.runHead(loaded)
+ *   }
+ * )
  * ```
  *
  * @stability experimental

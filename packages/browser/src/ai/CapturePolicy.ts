@@ -14,10 +14,31 @@ import * as Schema from "effect/Schema"
  *
  * **Details**
  *
- * - `screenshots`: whether images may be sent at all.
+ * - `screenshots`: whether images may be sent at all; `"denied"` fails the `screenshot` tool with `NotPermitted`.
  * - `snapshotText`: `"redacted"` masks the text inside an editable field (a textbox, searchbox, combobox or
  *   spinbutton) as `•••`.
- * - `consoleText`: console messages in full, masked or left out.
+ * - `consoleText`: `"full"` sends console messages' text; `"redacted"` says a message was logged, without its
+ *   text; `"omitted"` also leaves console errors out of each result's `sinceLast`.
+ *
+ * **Example** (Allowing screenshots but masking text)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
+ * import { Effect } from "effect"
+ *
+ * const reviewTools = Effect.fn("reviewTools")(function*(page: Page.Page) {
+ *   return yield* BrowserToolkit.make({
+ *     context: page.context,
+ *     secrets: {},
+ *     capture: new CapturePolicy.CapturePolicy({
+ *       screenshots: "allowed",
+ *       snapshotText: "redacted",
+ *       consoleText: "redacted"
+ *     })
+ *   })
+ * })
+ * ```
  *
  * @stability experimental
  * @category models

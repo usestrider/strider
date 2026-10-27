@@ -2,8 +2,8 @@
  * Files to upload, each saying where its bytes come from.
  *
  * `local` reads a file on this machine, `remote` names one on the browser's machine, and `bytes` makes one from
- * data you already have. Which machine a path is on is always stated, because a browser on a remote grid can't read
- * your local paths, and you can't read its; that's why a plain string isn't accepted.
+ * data you already have. `setInputFiles` and file choosers take these, never a plain path, because a browser on a
+ * remote grid can't read your local paths, and you can't read its.
  *
  * @stability unstable
  * @since 0.1.0
@@ -74,8 +74,8 @@ export interface FileInput {
  * **Example** (Uploading an avatar)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { FileInput, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const upload = Effect.fn("upload")(function*(page: Page.Page) {
  *   yield* page.getByLabel("Avatar").setInputFiles(FileInput.local("./avatar.png"))
@@ -93,6 +93,22 @@ export const local = (path: FilePath.Local | string): FileInput => FileInputImpl
 /**
  * Creates a file input from a path on the browser's host.
  *
+ * **Details**
+ *
+ * The browser is given the path as it is, and reads the file on its own machine.
+ *
+ * **Example** (Uploading a file already on the grid)
+ *
+ * ```ts import.meta.vitest
+ * import { FileInput, FilePath, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const uploadFixture = Effect.fn("uploadFixture")(function*(page: Page.Page) {
+ *   const avatar = FilePath.Remote.make("/srv/fixtures/avatar.png")
+ *   yield* page.getByLabel("Avatar").setInputFiles(FileInput.remote(avatar))
+ * })
+ * ```
+ *
  * @see {@link local} for a file on this machine
  *
  * @stability unstable
@@ -106,26 +122,29 @@ export const remote = (path: FilePath.Remote): FileInput => FileInputImpl.make({
  *
  * **Details**
  *
- * The file is made in the page: its bytes are copied into the isolated world `page.evaluate` runs in and become a
- * `File`, which is set on the input through a `DataTransfer`, with `input` and `change` dispatched as when a user
- * chooses files. It keeps its MIME type and needs no file system shared with the browser, so it works with a
- * browser on another machine too.
+ * The file is made in the page and set on the input through a `DataTransfer`, with `input` and `change`
+ * dispatched as when a user chooses files. It keeps its MIME type and needs no file system shared with the
+ * browser, so it works with a browser on another machine too.
  *
  * **Gotchas**
  *
- * One call takes files that are all bytes or all paths: the browser sets files from paths and the page makes
- * them from bytes, each replacing the other's, so a mix fails with `InvalidInput`.
+ * One call takes files that are all bytes or all paths, because each kind replaces the other's; a mix fails with
+ * `InvalidInput`.
  *
  * **Example** (Uploading a generated report)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { FileInput, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
- * const uploadCsv = Effect.fn("uploadCsv")(function*(page: Page.Page, rows: ReadonlyArray<string>) {
- *   const csv = new TextEncoder().encode(rows.join("\n"))
- *   yield* page.getByLabel("Report").setInputFiles(FileInput.bytes("report.csv", "text/csv", csv))
- * })
+ * const uploadCsv = Effect.fn("uploadCsv")(
+ *   function*(page: Page.Page, rows: ReadonlyArray<string>) {
+ *     const csv = new TextEncoder().encode(rows.join("\n"))
+ *     yield* page.getByLabel("Report").setInputFiles(
+ *       FileInput.bytes("report.csv", "text/csv", csv)
+ *     )
+ *   }
+ * )
  * ```
  *
  * @see {@link local} for a file on this machine

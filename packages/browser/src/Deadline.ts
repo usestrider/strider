@@ -5,9 +5,8 @@
  * shorter. An operation with no deadline around it gets `DefaultBudget`, counted from when it starts. Deadlines run
  * on the clock the browser runs on: for a real browser, the real monotonic clock, even under `TestClock`.
  *
- * This isn't `Effect.timeout`. An operation reads the time it has left and, when it runs out, fails with its own
- * `Timeout`, which says how far it got, instead of being interrupted from outside. So a click that timed out after
- * it was sent says so.
+ * Unlike `Effect.timeout`, nothing interrupts an operation from outside: it reads the time it has left and, when
+ * that runs out, fails with its own `Timeout`, which says how far it got, such as whether a click was sent.
  *
  * @stability unstable
  * @since 0.1.0
@@ -40,8 +39,8 @@ import type * as MonotonicInstant from "./MonotonicInstant.ts"
  * **Example** (A shared budget for a checkout)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Deadline, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const checkout = Effect.fn("checkout")(function*(page: Page.Page) {
  *   yield* page.getByLabel("Card number").fill("4242 4242 4242 4242")
@@ -74,8 +73,20 @@ export const within: {
  *
  * **Details**
  *
- * The default is 30 seconds. An explicit deadline from `within` always wins over this budget. This is
- * `Effect.provideService` on `DefaultBudget`.
+ * Each operation gets the whole budget, counted from when it starts. The default is 30 seconds. A deadline from
+ * `within` always wins over this budget, whether it's shorter or longer.
+ *
+ * **Example** (More time for each step of a slow report)
+ *
+ * ```ts import.meta.vitest
+ * import { Deadline, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const nightlyReport = Effect.fn("nightlyReport")(function*(page: Page.Page) {
+ *   yield* page.goto("https://app.example.com/reports/nightly")
+ *   yield* page.getByRole("button", { name: "Generate" }).click()
+ * }, Deadline.withDefaultBudget("2 minutes"))
+ * ```
  *
  * @see {@link within} for an explicit deadline
  *
@@ -94,6 +105,21 @@ export const withDefaultBudget: {
 
 /**
  * Reads the time left before the enclosing deadline, or `None` when there is none.
+ *
+ * **Example** (Skipping an optional step when time is short)
+ *
+ * ```ts import.meta.vitest
+ * import { Deadline, Page } from "@usestrider/browser"
+ * import { Duration, Effect, Option } from "effect"
+ *
+ * const placeOrder = Effect.fn("placeOrder")(function*(page: Page.Page) {
+ *   yield* page.getByRole("button", { name: "Place order" }).click()
+ *   const left = yield* Deadline.remaining
+ *   if (Option.exists(left, Duration.isGreaterThan(Duration.seconds(5)))) {
+ *     yield* page.getByRole("link", { name: "Download receipt" }).click()
+ *   }
+ * }, Deadline.within("20 seconds"))
+ * ```
  *
  * @stability unstable
  * @category getters
@@ -149,7 +175,8 @@ const TimeoutTypeId = "~@usestrider/browser/Deadline/Timeout"
  * `phase` says how far the operation got:
  *
  * - `"resolving"`: the target was never found.
- * - `"waitingForCondition"`: found, but a check such as `visible` never passed.
+ * - `"waitingForCondition"`: found, but a check such as `visible` never passed, or a `waitFor` predicate never
+ *   held.
  * - `"dispatchedUnconfirmed"`: the input was sent and its effect wasn't confirmed, so it may have happened.
  * - `"postcondition"`: the operation happened, and what it waits for afterwards didn't.
  * - `"waitingForEvent"`: an event wait (`next`) saw no matching event.
@@ -160,14 +187,17 @@ const TimeoutTypeId = "~@usestrider/browser/Deadline/Timeout"
  * **Example** (Recovering when a click may have happened)
  *
  * ```ts import.meta.vitest
- * import { Effect } from "effect"
  * import { Deadline, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
  *
  * const pay = Effect.fn("pay")(function*(page: Page.Page, recheck: Effect.Effect<void>) {
  *   yield* page.getByRole("button", { name: "Pay" }).click().pipe(
  *     Deadline.within("5 seconds"),
- *     Effect.catchTag("Timeout", (timeout) =>
- *       timeout.phase === "dispatchedUnconfirmed" ? recheck : Effect.fail(timeout))
+ *     Effect.catchTag(
+ *       "Timeout",
+ *       (timeout) =>
+ *         timeout.phase === "dispatchedUnconfirmed" ? recheck : Effect.fail(timeout)
+ *     )
  *   )
  * })
  * ```
