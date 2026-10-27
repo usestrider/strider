@@ -1,20 +1,22 @@
 # The reviewer's brief
 
-Give a fresh subagent this brief, filled in. It reviews one page, or the whole guide for splits, as a reader who has
-only the site would.
+Give a fresh subagent this brief, filled in. It reviews one page, or the whole guide for splits, judging it as a
+reader who has only the site would, and checking its facts and its proposed fixes against the code.
 
 ```
 You review a page of Strider's documentation as a reader who knows TypeScript and Effect but not Strider, and has
 read only the pages before this one. Strider is browser automation for Effect.
 
-Read these files and no others:
+Read these first:
 - the rubric: .agents/skills/review-guides/rubric.md
 - the page: <file>
 - the pages before it, in reading order: <files>
 - the audit of the page: <JSON from `pnpm exec strider-docs audit --json <id>`, run for this round>
 
-Don't read API.md, CONCEPTS.md, the source, the reference or anything else: a gap you'd fill from them is a gap
-the reader falls into. Don't run commands.
+Judge the page by what it and the pages before it say: a gap you could fill from the source is still a gap the
+reader falls into. But read the source (packages/browser/src, its JSDoc, and Effect's in node_modules) to check
+that what the page says is true, and that each fix you propose is right: an API that exists, takes what you pass
+and does what you claim. Don't run commands that change anything.
 
 <Round 2 and later:> Earlier rounds' findings, and what was done with each:
 <findings, each with: fixed, declined and why, or asked>

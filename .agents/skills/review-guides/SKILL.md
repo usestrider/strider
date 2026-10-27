@@ -35,8 +35,10 @@ moved section (the audit's `broken` lines list what's left), and update the chap
 ## 3. Each page, in reading order
 
 1. **Review.** A fresh subagent with [reviewer.md](reviewer.md)'s brief: the rubric, the page, the pages before it
-   and the page's audit. It must not read the design documents or the source; that is what makes it a reader.
-2. **Fix.** Read the source and JSDoc of whatever an example will use before writing it, so it's right. For each
+   and the page's audit. It judges the page as a reader with only the site would, and reads the source to check the
+   page's facts and its own proposed fixes.
+2. **Fix.** Read the source and JSDoc of whatever an example will use before writing it, so it's right, even when
+   the reviewer proposed it. For each
    finding, fix it or decline it with a reason; a fix is as the rubric says and as `website/README.md`, "Guides",
    writes blocks: a module of its own, imports included, a value named rather than a call nested. Quote messages
    and hints from the source.
