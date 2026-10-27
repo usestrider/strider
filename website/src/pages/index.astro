@@ -1,5 +1,6 @@
 ---
-// The cover: the engraving, the band with what Strider is, the contents, and a first example
+// The cover, which fills the first screen with the band at its foot: the engraving, and the band with what Strider is;
+// then the contents, and a first example
 import { Image } from "astro:assets"
 import { getCollection } from "astro:content"
 import { Code } from "astro-expressive-code/components"
@@ -34,48 +35,50 @@ const program = Effect.scoped(Effect.gen(function*() {
   title="Strider"
   description="Effect-native browser automation over the Chrome DevTools Protocol, WebDriver BiDi and the WebKit inspector protocol"
 >
-  <SiteHeader />
+  <div class="flex min-h-svh flex-col">
+    <SiteHeader />
 
-  <section class="mx-auto max-w-3xl px-6 pt-12 pb-14 text-center">
-    {
-      engraving !== undefined && (
-        <Image
-          class="engraving mx-auto w-[min(26rem,100%)]"
-          src={engraving}
-          widths={[468, 936]}
-          sizes="(min-width: 520px) 468px, 100vw"
-          alt="An engraving of a great blue heron, stepping"
-          loading="eager"
-        />
-      )
-    }
-    <p class="label mt-6">Browser automation · TypeScript · Effect</p>
-    <p class="mt-3 flex justify-center gap-6 font-mono text-[0.75rem]">
-      <span class="flex items-center gap-2"><span class="size-2 bg-[var(--engine-chromium)]"></span>Chromium</span>
-      <span class="flex items-center gap-2"><span class="size-2 bg-[var(--engine-firefox)]"></span>Firefox</span>
-      <span class="flex items-center gap-2"><span class="size-2 bg-[var(--engine-webkit)]"></span>WebKit</span>
-    </p>
-  </section>
+    <section class="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-6 pt-12 pb-14 text-center">
+      {
+        engraving !== undefined && (
+          <Image
+            class="engraving mx-auto w-[min(26rem,100%)]"
+            src={engraving}
+            widths={[468, 936]}
+            sizes="(min-width: 520px) 468px, 100vw"
+            alt="An engraving of a great blue heron, stepping"
+            loading="eager"
+          />
+        )
+      }
+      <p class="label mt-6">Browser automation · TypeScript · Effect</p>
+      <p class="mt-3 flex justify-center gap-6 font-mono text-[0.75rem]">
+        <span class="flex items-center gap-2"><span class="size-2 bg-[var(--engine-chromium)]"></span>Chromium</span>
+        <span class="flex items-center gap-2"><span class="size-2 bg-[var(--engine-firefox)]"></span>Firefox</span>
+        <span class="flex items-center gap-2"><span class="size-2 bg-[var(--engine-webkit)]"></span>WebKit</span>
+      </p>
+    </section>
 
-  <section class="bg-band text-white">
-    <div class="mx-auto max-w-6xl px-6 pt-16 pb-8 md:px-14">
-      <h1 class="max-w-xl font-display text-[2.8rem] leading-[1.08] font-normal sm:text-[3.8rem]">Browser automation, typed end to end.</h1>
-      <p class="mt-5 max-w-lg text-[1.2rem] leading-relaxed">
-        Drive Chromium, Firefox and WebKit from TypeScript, with typed errors that say what happened, lifetimes tied to
-        scopes, and events you subscribe to before you act.
-      </p>
-      <p class="mt-8 flex flex-wrap gap-4">
-        <a class="btn border-white bg-white text-band" href="/docs">Read the guide</a>
-        <button class="btn border-white font-mono text-[0.8rem] text-white" type="button" data-copy-text={install}>
-          {install}
-        </button>
-      </p>
-      <div class="mt-12 flex justify-between border-t border-white/60 pt-4">
-        <span class="label !text-white">Documentation · {version}</span>
-        <span class="label !text-white">MIT license</span>
+    <section class="bg-band text-white">
+      <div class="mx-auto max-w-6xl px-6 pt-16 pb-8 md:px-14">
+        <h1 class="max-w-xl font-display text-[2.8rem] leading-[1.08] font-normal sm:text-[3.8rem]">Browser automation, typed end to end.</h1>
+        <p class="mt-5 max-w-lg text-[1.2rem] leading-relaxed">
+          Drive Chromium, Firefox and WebKit from TypeScript, with typed errors that say what happened, lifetimes tied to
+          scopes, and events you subscribe to before you act.
+        </p>
+        <p class="mt-8 flex flex-wrap gap-4">
+          <a class="btn border-white bg-white text-band" href="/docs">Read the guide</a>
+          <button class="btn border-white font-mono text-[0.8rem] text-white" type="button" data-copy-text={install}>
+            {install}
+          </button>
+        </p>
+        <div class="mt-12 flex justify-between border-t border-white/60 pt-4">
+          <span class="label !text-white">Documentation · {version}</span>
+          <span class="label !text-white">MIT license</span>
+        </div>
       </div>
-    </div>
-  </section>
+    </section>
+  </div>
 
   <section class="mx-auto max-w-6xl px-6 py-20 md:px-14">
     <div class="flex items-baseline justify-between border-b border-ink pb-3">
