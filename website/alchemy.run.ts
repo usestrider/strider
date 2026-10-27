@@ -30,7 +30,8 @@ export default Alchemy.Stack(
       command: "pnpm website:dist",
       cwd: root,
       outdir: "website/dist",
-      domain: "usestrider.dev",
+      // www redirects to the bare domain (301, path kept), by a zone redirect rule ahead of the Worker
+      domain: { name: "usestrider.dev", redirects: ["www.usestrider.dev"] },
       // No workers.dev URL: the domain, behind Access, is the only way in
       workersDev: false,
       access: {
