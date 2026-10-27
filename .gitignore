@@ -10,9 +10,10 @@ dist/
 # Vitest's copies of recorded attachments
 .vitest/
 .repos/
-# symlinks to .agents/AGENTS.md, made by `pnpm install`
+# symlinks to .agents/AGENTS.md and .agents/skills, made by `pnpm install`
 /AGENTS.md
 /CLAUDE.md
+/.claude/skills
 
 # nix build
 /result

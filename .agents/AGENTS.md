@@ -66,6 +66,8 @@ and stock WebKit, and every member the API declares is built. One declared befor
   `website/README.md` says how it fits together.
 - `.repos/`: read-only references cloned by `scripts/worktree-setup.sh`, such as Effect's sources and its
   `.agents/skills`. Never import from them.
+- `.agents/skills/`: the repository's skills, which `pnpm install` links at `.claude/skills`. `review-guides`
+  reviews the guides and fixes what it finds.
 
 ## Validation
 
@@ -137,6 +139,11 @@ documents. Say what a declaration does and what happens, in plain words; cite no
 number or section of a design document, and leave out how the API got here. A summary must read right the first
 time: "The files a page downloads", not "Downloads a page starts". Words of the design's own, such as obligation,
 fold, latched or navigable, become what they mean, unless they are the API's names.
+
+A guide teaches one concept a page, and a section a reader would look for in the sidebar is a page of its own.
+Before its first code, a concept gets up to two plain sentences: what goes wrong without it and what it gets the
+reader, with no history or scene-setting. Whatever the prose names that a reader would type is shown in a block on
+the page, or linked to where it's shown. The `review-guides` skill checks all three.
 
 ## Design changes
 

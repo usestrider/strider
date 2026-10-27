@@ -1,0 +1,58 @@
+---
+name: review-guides
+description: Review the website's guides for pages that hold more than one concept, concepts rushed without their purpose or benefit, and APIs named without an example, then fix them in a loop. Use when asked to review, audit or improve the guides in website/src/content/docs, or one page of them.
+---
+
+# Reviewing the guides
+
+The guides are the MDX pages in `website/src/content/docs/`. [rubric.md](rubric.md) holds the three checks: Split,
+Orient and Example. Given page ids (`events/events`), review those pages; given none, the whole guide.
+
+## 1. Audit
+
+```sh
+pnpm exec strider-docs audit [page…]          # read it
+pnpm exec strider-docs audit --json [page…]   # give it to a reviewer
+```
+
+It lists candidates per page, in reading order: split flags, sections with a short lead before their code, and
+names the prose mentions that no block on the page shows. It can't judge; the reviewer does.
+
+## 2. Splits first
+
+For the whole guide, run the split pass before anything else, since a split changes what each page follows. Give a
+fresh subagent [reviewer.md](reviewer.md)'s brief for the split pass. Put its findings to the maintainer as one
+proposal: for each page, its new pages, what moves where and the sidebar's order.
+
+**Nothing is split without the maintainer's yes.** While waiting, carry on with the pages no proposal touches.
+
+A split, once agreed: write each new page with its frontmatter (`title`, `description`, `order`), renumber the
+chapter's `order`s, move the sections and their examples, give each page its own opening, update every link to a
+moved section (`grep -rn '](/docs/' website/src/content/docs`), and update the chapter table in
+`website/README.md`, "Guides".
+
+## 3. Each page, in reading order
+
+1. **Review.** A fresh subagent with [reviewer.md](reviewer.md)'s brief: the rubric, the page, the pages before it
+   and the page's audit. It must not read the design documents or the source; that is what makes it a reader.
+2. **Fix.** Read the source and JSDoc of whatever an example will use before writing it, so it's right. For each
+   finding, fix it or decline it with a reason; a fix is as the rubric says and as `website/README.md`, "Guides",
+   writes blocks: a module of its own, imports included, a value named rather than a call nested. Quote messages
+   and hints from the source.
+3. **Check.**
+
+   ```sh
+   pnpm lint-fix && pnpm reference && pnpm website:check
+   ```
+
+   `pnpm lint-fix` formats the blocks; `pnpm reference` type-checks them (`pnpm examples`) and links them.
+4. **Review again,** with a new subagent, given the earlier findings and what was done with each. The page is done
+   when a round raises nothing new. Stop after three rounds; a finding that comes back after it was fixed goes to
+   the maintainer instead of a fourth.
+5. **Commit** the page on its own, `Guides: <page>: <what changed>`, with what was added and why in the body. No
+   review document.
+
+## 4. Report
+
+To the maintainer: each page's changes, the findings declined and why, the ones put to them, and any split still
+waiting on their yes. Report any check that couldn't run.
