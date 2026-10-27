@@ -775,7 +775,12 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
     name: (page, given) =>
       Effect.suspend(() => {
         const known = nameById.get(page.id)
-        if (known !== undefined) return Effect.succeed(known)
+        // A page named already, such as one listed as p3 before a segment kept it, takes the name it's given
+        if (known !== undefined) {
+          return given === undefined || given === known
+            ? Effect.succeed(known)
+            : Effect.as(session.rename(known, given), given)
+        }
         if (given !== undefined && byName.has(given)) {
           return Effect.fail(failed("InvalidInput", `A page is already named ${given}`))
         }
