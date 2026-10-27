@@ -1,6 +1,6 @@
 # Strider and Playwright, side by side
 
-*Written by `pnpm scenarios` on 2026-10-27: Chrome/155.0.8059.79, the integration environment's, driven headless by Strider at `d35d291` and by Playwright 1.64.1 through `playwright-core`, whose own browsers are never installed; Node v24.21.0; AMD Ryzen 9 9900X 12-Core Processor, 24 threads, 60 GiB, Linux 7.2.10, load 5.5 5.1 5.0 at the end. Timings are each scenario's wall time over 10 runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Don't edit: run `pnpm scenarios` again.*
+*Written by `pnpm scenarios` on 2026-10-27: Chrome/155.0.8059.79, the integration environment's, driven headless by Strider at `dd98cc7` and by Playwright 1.64.1 through `playwright-core`, whose own browsers are never installed; Node v24.21.0; AMD Ryzen 9 9900X 12-Core Processor, 24 threads, 60 GiB, Linux 7.2.10, load 6.6 5.9 5.4 at the end. Timings are each scenario's wall time over 10 runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Don't edit: run `pnpm scenarios` again.*
 
 ## Scenarios
 
@@ -8,18 +8,18 @@ Each scenario is written with each library as its own documentation would write 
 
 | Scenario | Strider | Playwright | Strider read | Playwright read | Lines, Strider / Playwright |
 |---|---|---|---|---|---|
-| The README's program | 189 ms (p90 191 ms) | 102 ms (p90 118 ms) | ✓ `Added to cart` | ✓ `Added to cart` | 7 / 11 |
-| A login reused through storage state | 419 ms (p90 446 ms) | 277 ms (p90 292 ms) | ✓ `Signed in` | ✓ `Signed in` | 15 / 24 |
-| A popup with a dialog inside it | 319 ms (p90 337 ms) | 151 ms (p90 166 ms) | ✓ `Allowed` | ✓ `Allowed` | 11 / 15 |
-| A route that blocks analytics | 79 ms (p90 83 ms) | 77 ms (p90 85 ms) | ✓ `analytics blocked` | ✓ `analytics blocked` | 7 / 11 |
-| A file upload, from bytes | 102 ms (p90 120 ms) | 75 ms (p90 87 ms) | ✓ `receipt.txt:4` | ✓ `receipt.txt:4` | 9 / 15 |
-| A response's body, from a click | 194 ms (p90 223 ms) | 117 ms (p90 151 ms) | ✓ `tea × 1` | ✓ `tea × 1` | 15 / 15 |
-| Waiting for the navigation a click causes | 240 ms (p90 252 ms) | 179 ms (p90 191 ms) | ✓ `Orders` | ✓ `Orders` | 8 / 11 |
-| A HAR recorded, then replayed | 152 ms (p90 162 ms) | 147 ms (p90 154 ms) | ✓ `42 sold` | ✓ `42 sold` | 17 / 21 |
-| TodoMVC's demo, replayed | 442 ms (p90 453 ms) | 184 ms (p90 229 ms) | ✓ `2 items left` | ✓ `2 items left` | 18 / 18 |
-| The Internet's login, replayed | 340 ms (p90 356 ms) | 242 ms (p90 290 ms) | ✓ `Secure Area` | ✓ `Secure Area` | 13 / 15 |
+| The README's program | 184 ms (p90 205 ms) | 110 ms (p90 117 ms) | ✓ `Added to cart` | ✓ `Added to cart` | 7 / 11 |
+| A login reused through storage state | 436 ms (p90 453 ms) | 297 ms (p90 318 ms) | ✓ `Signed in` | ✓ `Signed in` | 15 / 24 |
+| A popup with a dialog inside it | 329 ms (p90 334 ms) | 154 ms (p90 199 ms) | ✓ `Allowed` | ✓ `Allowed` | 11 / 15 |
+| A route that blocks analytics | 74 ms (p90 80 ms) | 77 ms (p90 93 ms) | ✓ `analytics blocked` | ✓ `analytics blocked` | 7 / 11 |
+| A file upload, from bytes | 101 ms (p90 116 ms) | 81 ms (p90 91 ms) | ✓ `receipt.txt:4` | ✓ `receipt.txt:4` | 9 / 15 |
+| A response's body, from a click | 194 ms (p90 200 ms) | 115 ms (p90 118 ms) | ✓ `tea × 1` | ✓ `tea × 1` | 15 / 15 |
+| Waiting for the navigation a click causes | 243 ms (p90 252 ms) | 168 ms (p90 192 ms) | ✓ `Orders` | ✓ `Orders` | 8 / 11 |
+| A HAR recorded, then replayed | 153 ms (p90 169 ms) | 155 ms (p90 176 ms) | ✓ `42 sold` | ✓ `42 sold` | 17 / 21 |
+| The Internet's login, replayed | 347 ms (p90 360 ms) | 244 ms (p90 246 ms) | ✓ `Secure Area` | ✓ `Secure Area` | 13 / 15 |
+| The Internet's dynamic controls, replayed | 3260 ms (p90 3296 ms) | 3416 ms (p90 3424 ms) | ✓ `Strider` | ✓ `Strider` | 14 / 15 |
 
-**Launch:** a browser launched and a first page loaded, 5 times: Strider 217 ms (p90 459 ms), Playwright 139 ms (p90 150 ms).
+**Launch:** a browser launched and a first page loaded, 5 times: Strider 257 ms (p90 481 ms), Playwright 144 ms (p90 163 ms).
 
 ## What a waiting expectation costs the page (Q82)
 
@@ -27,10 +27,10 @@ Strider evaluates a waiting expectation at every animation frame (QUIRKS.md, Q82
 
 | | Renderer CPU per second |
 |---|---|
-| Strider, idle | 292 ms (p90 325 ms) |
-| Strider, `Expect.toBeVisible` waiting | 310 ms (p90 334 ms) |
-| Playwright, idle | 297 ms (p90 317 ms) |
-| Playwright, `locator.waitFor()` waiting | 294 ms (p90 310 ms) |
+| Strider, idle | 286 ms (p90 319 ms) |
+| Strider, `Expect.toBeVisible` waiting | 327 ms (p90 341 ms) |
+| Playwright, idle | 270 ms (p90 277 ms) |
+| Playwright, `locator.waitFor()` waiting | 297 ms (p90 314 ms) |
 
 ## What an interceptor installed costs a load (Q103)
 
@@ -38,10 +38,10 @@ Strider keeps Chromium's `Fetch` interceptor enabled on every page, with a patte
 
 | | Load |
 |---|---|
-| Strider, no route (its interceptor is always installed, Q103) | 118 ms (p90 126 ms) |
-| Strider, a route matching nothing on the page | 127 ms (p90 169 ms) |
-| Playwright, no route | 81 ms (p90 89 ms) |
-| Playwright, a route matching nothing on the page | 123 ms (p90 126 ms) |
+| Strider, no route (its interceptor is always installed, Q103) | 123 ms (p90 131 ms) |
+| Strider, a route matching nothing on the page | 140 ms (p90 184 ms) |
+| Playwright, no route | 84 ms (p90 105 ms) |
+| Playwright, a route matching nothing on the page | 127 ms (p90 150 ms) |
 
 ## What each leaves for a page to see
 
@@ -66,8 +66,8 @@ What a page's own script reads about the browser driving it, the signals bot pro
 The arguments each launched Chromium with:
 
 ```
-Strider:    --no-first-run --no-default-browser-check --no-service-autorun --disable-sync --disable-component-update --disable-background-networking --disable-default-apps --disable-client-side-phishing-detection --disable-domain-reliability --disable-breakpad --disable-hang-monitor --disable-prompt-on-repost --disable-component-extensions-with-background-pages --disable-features=Translate,MediaRouter,DialMediaRouteProvider,OptimizationHints,AutofillServerCommunication --metrics-recording-only --password-store=basic --use-mock-keychain --headless --remote-debugging-pipe --user-data-dir=/tmp/nix-shell.iLhKyH/strider-chromium-KTpvsm about:blank
-Playwright: --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,AvoidCorsURLLoaderRestartOnRedirect,Translate,AutoDeElevate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/tmp/nix-shell.iLhKyH/playwright_chromiumdev_profile-EXm8zZ --remote-debugging-pipe --no-startup-window
+Strider:    --no-first-run --no-default-browser-check --no-service-autorun --disable-sync --disable-component-update --disable-background-networking --disable-default-apps --disable-client-side-phishing-detection --disable-domain-reliability --disable-breakpad --disable-hang-monitor --disable-prompt-on-repost --disable-component-extensions-with-background-pages --disable-features=Translate,MediaRouter,DialMediaRouteProvider,OptimizationHints,AutofillServerCommunication --metrics-recording-only --password-store=basic --use-mock-keychain --headless --remote-debugging-pipe --user-data-dir=/tmp/nix-shell.SOHYbR/strider-chromium-lbRw4J about:blank
+Playwright: --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,AvoidCorsURLLoaderRestartOnRedirect,Translate,AutoDeElevate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/tmp/nix-shell.SOHYbR/playwright_chromiumdev_profile-yDUhlO --remote-debugging-pipe --no-startup-window
 ```
 
 ## The code
@@ -349,53 +349,6 @@ const harPlaywright = async (browser: Playwright.Browser, origin: string, files:
 }
 ```
 
-### TodoMVC's demo, replayed
-
-```ts
-// TodoMVC's demo, and a recording of it to replay instead of visiting it
-const todomvc = "https://demo.playwright.dev/todomvc/"
-const todomvcRecording = ".data/scenarios/todomvc.har"
-
-const todomvcStrider = Effect.fn("todomvc")(function*() {
-  const page = yield* Browser.newPage()
-  yield* page.route("**/*", yield* Route.fromHar(todomvcRecording))
-  yield* page.goto(todomvc)
-  const input = page.getByPlaceholder("What needs to be done?")
-  for (const todo of ["Buy tea", "Write docs", "Ship it"]) {
-    yield* input.fill(todo)
-    yield* input.press("Enter")
-  }
-  // The checkbox is `opacity: 0` under a styled label, which actions count as hidden
-  const first = page.getByTestId("todo-item").first
-  yield* first.getByRole("checkbox").check({ checks: { visible: false } })
-  yield* page.getByText("2 items left").pipe(Expect.toBeVisible)
-  return yield* page.getByTestId("todo-count").readText
-})
-```
-
-```ts
-const todomvcPlaywright = async (browser: Playwright.Browser, _: string, files: Files) => {
-  const context = await browser.newContext()
-  try {
-    await context.routeFromHAR(files.recording("todomvc"), { notFound: "abort" })
-    const page = await context.newPage()
-    await page.goto(todomvc)
-    const input = page.getByPlaceholder("What needs to be done?")
-    for (const todo of ["Buy tea", "Write docs", "Ship it"]) {
-      await input.fill(todo)
-      await input.press("Enter")
-    }
-    await page.getByTestId("todo-item").first().getByRole("checkbox").check()
-    await page.getByText("2 items left").waitFor()
-    return (await page.getByTestId("todo-count").textContent()) ?? ""
-  } finally {
-    await context.close()
-  }
-}
-```
-
-Strider's `check` waited out its deadline on TodoMVC's checkbox, which is `opacity: 0` under a styled label: its actions count an element of no opacity as hidden (CONCEPTS.md §8), where Playwright's count it visible. Turning the check off, `checks: { visible: false }`, says so at the call site (QUIRKS.md, Q241).
-
 ### The Internet's login, replayed
 
 ```ts
@@ -427,6 +380,44 @@ const theInternetPlaywright = async (browser: Playwright.Browser, _: string, fil
     await page.getByRole("button", { name: "Login" }).click()
     await page.getByText("You logged into a secure area!").waitFor()
     return (await page.locator("h2").textContent()) ?? ""
+  } finally {
+    await context.close()
+  }
+}
+```
+
+### The Internet's dynamic controls, replayed
+
+```ts
+// The page, and a recording of its site to replay instead of visiting it
+const controls = "https://the-internet.herokuapp.com/dynamic_controls"
+const controlsRecording = ".data/scenarios/the-internet.har"
+
+const controlsStrider = Effect.fn("controls")(function*() {
+  const page = yield* Browser.newPage()
+  yield* page.route("**/*", yield* Route.fromHar(controlsRecording))
+  yield* page.goto(controls)
+  yield* page.getByRole("button", { name: "Enable" }).click()
+  // A script enables the box three seconds later: fill waits for it
+  const input = page.getByRole("textbox")
+  yield* input.fill("Strider")
+  yield* page.getByText("It's enabled!").pipe(Expect.toBeVisible)
+  return yield* input.readValue
+})
+```
+
+```ts
+const controlsPlaywright = async (browser: Playwright.Browser, _: string, files: Files) => {
+  const context = await browser.newContext()
+  try {
+    await context.routeFromHAR(files.recording("the-internet"), { notFound: "abort" })
+    const page = await context.newPage()
+    await page.goto(controls)
+    await page.getByRole("button", { name: "Enable" }).click()
+    const input = page.getByRole("textbox")
+    await input.fill("Strider")
+    await page.getByText("It's enabled!").waitFor()
+    return await input.inputValue()
   } finally {
     await context.close()
   }

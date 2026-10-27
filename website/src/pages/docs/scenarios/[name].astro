@@ -10,8 +10,7 @@ export const getStaticPaths = () => scenarios().map((scenario) => ({ params: { n
 
 const { scenario } = Astro.props as { scenario: Scenario }
 const sites: Record<string, string> = {
-  "todomvc": "TodoMVC's demo for testing",
-  "the-internet": "The Internet's login page"
+  "the-internet": "The Internet, a site of examples for practicing automation"
 }
 // A public demo site is replayed from a recording; any other scenario drives a page of the local site
 const site = scenario.recording === undefined

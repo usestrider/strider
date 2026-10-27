@@ -993,7 +993,7 @@ Adapter responsibilities:
 
 **Built** (2026-10-26): the comparison scripts.
 
-- **`packages/scenarios`,** private, never published: ten scenarios, each written with Strider and with Playwright as each library's documentation would write it (`src/scenarios.ts`, between `#region` markers the report copies): the README's program, a login reused through storage state, a popup with a dialog, a route blocking analytics, an upload from bytes, a response's body, the navigation a click causes, a HAR recorded and replayed, and two public demo sites, TodoMVC's demo and The Internet's login. Each scenario's first run is its outcome, compared with what it should read, and the next ten, the libraries taking turns going first, its wall time.
+- **`packages/scenarios`,** private, never published: ten scenarios, each written with Strider and with Playwright as each library's documentation would write it (`src/scenarios.ts`, between `#region` markers the report copies): the README's program, a login reused through storage state, a popup with a dialog, a route blocking analytics, an upload from bytes, a response's body, the navigation a click causes, a HAR recorded and replayed, and two pages of a public demo site, The Internet's login and its dynamic controls. Each scenario's first run is its outcome, compared with what it should read, and the next ten, the libraries taking turns going first, its wall time.
 - **Playwright is `playwright-core` 1.64.1,** the package's dependency alone. It installs no browser and launches the integration environment's Chromium by its `executablePath`; no Playwright build is downloaded or run, and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` has nothing to skip.
 - **`pnpm scenarios`** enters the integration environment, as `pnpm test:integration` does, and writes `packages/scenarios/RESULTS.md` with the date, the browser, both libraries' versions and the machine, which `dprint` leaves as written, as it does `INDEX.md`. `--runs` sets the timed runs, and `--only` runs one scenario without the measurements.
 - **The demo sites are recorded once,** by `pnpm scenarios --record`, which visits them live and records each with `Har.record`, cookies and requests' bodies included, into `.data/scenarios/`; every other run replays them, each library with its own HAR replay (`Route.fromHar`, `routeFromHAR`), aborting what the recording lacks, and fails without them, saying to record them.
@@ -1007,7 +1007,7 @@ Adapter responsibilities:
 - **Settled while building.**
   - **No API reference site here:** the documentation site (`t3/documentation-site`) builds one with Astro.
   - **The recordings aren't committed:** they hold the demo sites' own files, Apache-2.0 and MIT, which the repository would redistribute with their notices; the licence work is deferred, so each machine records once.
-  - **Two demo sites, not a list:** TodoMVC's demo and The Internet.
+  - **One demo site, not a list:** The Internet. TodoMVC's demo, the other at first, is hosted by Playwright, so its scenario became The Internet's dynamic controls (2026-10-27).
   - **No `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`,** which `playwright-core` doesn't need.
 - **Tests.** The scenarios are a script a person runs, not tests; `pnpm all` type-checks them. Every outcome read what it should with both libraries.
 

@@ -33,11 +33,10 @@ Playwright build is downloaded or run.
 
 - **The local site** (`src/site.ts`), a page per scenario and the pages the measurements load, served on
   `127.0.0.1` for the run.
-- **Two public demo sites made for automation practice,** visited live once by `pnpm scenarios --record`, which
-  records them with Strider's `Har.record`, and replayed by each library's own HAR replay from then on, every
-  request answered from the recording, so a run sends nothing to anyone:
-  - TodoMVC's demo for testing, `https://demo.playwright.dev/todomvc/` (TodoMVC is MIT-licensed);
-  - The Internet's login, `https://the-internet.herokuapp.com/login` (Sauce Labs' `the-internet`, Apache-2.0).
+- **A public demo site made for automation practice,** The Internet (`https://the-internet.herokuapp.com`, Sauce
+  Labs' `the-internet`, Apache-2.0): its login and its dynamic controls. It's visited live once by
+  `pnpm scenarios --record`, which records it with Strider's `Har.record`, and replayed by each library's own HAR
+  replay from then on, every request answered from the recording, so a run sends nothing to anyone.
 
-  The recordings are kept in `.data/scenarios/`, which git ignores: they hold the sites' own files, which the
+  The recording is kept in `.data/scenarios/`, which git ignores: it holds the site's own files, which the
   repository doesn't redistribute.

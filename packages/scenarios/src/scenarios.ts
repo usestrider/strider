@@ -310,49 +310,6 @@ const harPlaywright = async (browser: Playwright.Browser, origin: string, files:
 }
 // #endregion
 
-// #region todomvc/strider
-// TodoMVC's demo, and a recording of it to replay instead of visiting it
-const todomvc = "https://demo.playwright.dev/todomvc/"
-const todomvcRecording = ".data/scenarios/todomvc.har"
-
-const todomvcStrider = Effect.fn("todomvc")(function*() {
-  const page = yield* Browser.newPage()
-  yield* page.route("**/*", yield* Route.fromHar(todomvcRecording))
-  yield* page.goto(todomvc)
-  const input = page.getByPlaceholder("What needs to be done?")
-  for (const todo of ["Buy tea", "Write docs", "Ship it"]) {
-    yield* input.fill(todo)
-    yield* input.press("Enter")
-  }
-  // The checkbox is `opacity: 0` under a styled label, which actions count as hidden
-  const first = page.getByTestId("todo-item").first
-  yield* first.getByRole("checkbox").check({ checks: { visible: false } })
-  yield* page.getByText("2 items left").pipe(Expect.toBeVisible)
-  return yield* page.getByTestId("todo-count").readText
-})
-// #endregion
-
-// #region todomvc/playwright
-const todomvcPlaywright = async (browser: Playwright.Browser, _: string, files: Files) => {
-  const context = await browser.newContext()
-  try {
-    await context.routeFromHAR(files.recording("todomvc"), { notFound: "abort" })
-    const page = await context.newPage()
-    await page.goto(todomvc)
-    const input = page.getByPlaceholder("What needs to be done?")
-    for (const todo of ["Buy tea", "Write docs", "Ship it"]) {
-      await input.fill(todo)
-      await input.press("Enter")
-    }
-    await page.getByTestId("todo-item").first().getByRole("checkbox").check()
-    await page.getByText("2 items left").waitFor()
-    return (await page.getByTestId("todo-count").textContent()) ?? ""
-  } finally {
-    await context.close()
-  }
-}
-// #endregion
-
 // #region the-internet/strider
 // The Internet's login, and a recording of it to replay instead of visiting it
 const theInternet = "https://the-internet.herokuapp.com"
@@ -382,6 +339,42 @@ const theInternetPlaywright = async (browser: Playwright.Browser, _: string, fil
     await page.getByRole("button", { name: "Login" }).click()
     await page.getByText("You logged into a secure area!").waitFor()
     return (await page.locator("h2").textContent()) ?? ""
+  } finally {
+    await context.close()
+  }
+}
+// #endregion
+
+// #region controls/strider
+// The page, and a recording of its site to replay instead of visiting it
+const controls = "https://the-internet.herokuapp.com/dynamic_controls"
+const controlsRecording = ".data/scenarios/the-internet.har"
+
+const controlsStrider = Effect.fn("controls")(function*() {
+  const page = yield* Browser.newPage()
+  yield* page.route("**/*", yield* Route.fromHar(controlsRecording))
+  yield* page.goto(controls)
+  yield* page.getByRole("button", { name: "Enable" }).click()
+  // A script enables the box three seconds later: fill waits for it
+  const input = page.getByRole("textbox")
+  yield* input.fill("Strider")
+  yield* page.getByText("It's enabled!").pipe(Expect.toBeVisible)
+  return yield* input.readValue
+})
+// #endregion
+
+// #region controls/playwright
+const controlsPlaywright = async (browser: Playwright.Browser, _: string, files: Files) => {
+  const context = await browser.newContext()
+  try {
+    await context.routeFromHAR(files.recording("the-internet"), { notFound: "abort" })
+    const page = await context.newPage()
+    await page.goto(controls)
+    await page.getByRole("button", { name: "Enable" }).click()
+    const input = page.getByRole("textbox")
+    await input.fill("Strider")
+    await page.getByText("It's enabled!").waitFor()
+    return await input.inputValue()
   } finally {
     await context.close()
   }
@@ -456,17 +449,6 @@ export const scenarios: ReadonlyArray<Scenario> = [
     playwright: harPlaywright
   },
   {
-    name: "todomvc",
-    title: "TodoMVC's demo, replayed",
-    description: "Adds three todos to TodoMVC's demo and completes one, against a recording of the site.",
-    expected: "2 items left",
-    recording: "todomvc",
-    note:
-      "Strider's `check` waited out its deadline on TodoMVC's checkbox, which is `opacity: 0` under a styled label: its actions count an element of no opacity as hidden (CONCEPTS.md §8), where Playwright's count it visible. Turning the check off, `checks: { visible: false }`, says so at the call site (QUIRKS.md, Q241).",
-    strider: todomvcStrider,
-    playwright: todomvcPlaywright
-  },
-  {
     name: "the-internet",
     title: "The Internet's login, replayed",
     description: "Logs in on The Internet's demo login page, against a recording of the site.",
@@ -474,21 +456,20 @@ export const scenarios: ReadonlyArray<Scenario> = [
     recording: "the-internet",
     strider: theInternetStrider,
     playwright: theInternetPlaywright
+  },
+  {
+    name: "controls",
+    title: "The Internet's dynamic controls, replayed",
+    description: "Enables a text box that a script enables three seconds later, and fills it as soon as it can.",
+    expected: "Strider",
+    recording: "the-internet",
+    strider: controlsStrider,
+    playwright: controlsPlaywright
   }
 ]
 
 /** The public demo sites' recordings: each visited once, live, by `pnpm scenarios --record`. */
 export const recordings = {
-  "todomvc": Effect.fn("record todomvc")(function*(path: string) {
-    const page = yield* Browser.newPage()
-    const har = yield* Har.record(page, { content: "embed" })
-    yield* page.goto(todomvc)
-    const input = page.getByPlaceholder("What needs to be done?")
-    yield* input.fill("Buy tea")
-    yield* input.press("Enter")
-    yield* page.getByText("1 item left").pipe(Expect.toBeVisible)
-    yield* har.exportHar(path, { include: ["cookies", "requestBodies"] })
-  }),
   "the-internet": Effect.fn("record the-internet")(function*(path: string) {
     const page = yield* Browser.newPage()
     const har = yield* Har.record(page, { content: "embed" })
@@ -497,6 +478,9 @@ export const recordings = {
     yield* page.getByLabel("Password").fill("SuperSecretPassword!")
     yield* page.getByRole("button", { name: "Login" }).click()
     yield* page.getByText("You logged into a secure area!").pipe(Expect.toBeVisible)
+    yield* page.goto(controls)
+    yield* page.getByRole("button", { name: "Enable" }).click()
+    yield* page.getByText("It's enabled!").pipe(Expect.toBeVisible)
     yield* har.exportHar(path, { include: ["cookies", "requestBodies"] })
   })
 } as const
