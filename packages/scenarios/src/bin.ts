@@ -4,7 +4,7 @@
  *
  *   pnpm scenarios                 every scenario and measurement, 10 timed runs each
  *   pnpm scenarios --runs 3        fewer runs
- *   pnpm scenarios --only login    one scenario, and no measurements
+ *   pnpm scenarios --only login    one scenario, and no measurements, printed: RESULTS.md keeps the full run
  *   pnpm scenarios --record        visit the public demo sites once, live, and record them for replay
  *
  * Nothing but `--record` sends a request beyond this machine: the demo sites are replayed from their recordings,
@@ -276,13 +276,22 @@ fs.rmSync(temporary, { recursive: true, force: true })
 // ── The report ────────────────────────────────────────────────────────────────
 
 const require = createRequire(import.meta.url)
-const head = fs.readFileSync(path.join(root, ".git/HEAD"), "utf8").trim()
+// Read from .git, since the integration environment has no git. In a worktree, .git is a file naming the worktree's
+// own directory, which holds HEAD, while branches are in the repository's, which its commondir names
+const dotGit = path.join(root, ".git")
+const gitDir = fs.statSync(dotGit).isFile()
+  ? path.resolve(root, fs.readFileSync(dotGit, "utf8").replace(/^gitdir: /, "").trim())
+  : dotGit
+const commonDir = fs.existsSync(path.join(gitDir, "commondir"))
+  ? path.resolve(gitDir, fs.readFileSync(path.join(gitDir, "commondir"), "utf8").trim())
+  : gitDir
+const head = fs.readFileSync(path.join(gitDir, "HEAD"), "utf8").trim()
 const commit = head.startsWith("ref: ")
   ? (() => {
     const ref = head.slice(5)
-    const loose = path.join(root, ".git", ref)
-    if (fs.existsSync(loose)) return fs.readFileSync(loose, "utf8").trim()
-    const packed = fs.readFileSync(path.join(root, ".git/packed-refs"), "utf8")
+    const loose = [gitDir, commonDir].map((dir) => path.join(dir, ref)).find((file) => fs.existsSync(file))
+    if (loose !== undefined) return fs.readFileSync(loose, "utf8").trim()
+    const packed = fs.readFileSync(path.join(commonDir, "packed-refs"), "utf8")
     return packed.split("\n").find((line) => line.endsWith(` ${ref}`))?.split(" ")[0] ?? "unknown"
   })()
   : head
@@ -309,6 +318,11 @@ const written = report({
   flags: { strider: striderArgs.slice(1), playwright: playwrightArgs.slice(1) },
   source: fs.readFileSync(path.join(import.meta.dirname, "scenarios.ts"), "utf8")
 })
-const out = path.join(import.meta.dirname, "../RESULTS.md")
-fs.writeFileSync(out, written)
-log(`wrote ${path.relative(root, out)}`)
+// One scenario is a check, printed; RESULTS.md is the full run's record
+if (only === undefined) {
+  const out = path.join(import.meta.dirname, "../RESULTS.md")
+  fs.writeFileSync(out, written)
+  log(`wrote ${path.relative(root, out)}`)
+} else {
+  process.stdout.write(written)
+}

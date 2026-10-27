@@ -40,10 +40,13 @@ const property = (entry: string, key: string) => {
 
 // The program as it runs, named a scenario: in the source its name pairs it with its Playwright twin
 const withImports = (code: string) => {
-  const used = modules.filter((module) => new RegExp(`\\b${module}\\.`).test(code))
+  const uses = (name: string) => new RegExp(`\\b${name}\\.`).test(code)
+  const effect = ["Effect", "Schema"].filter(uses)
+  const http = ["HttpIncomingMessage"].filter(uses)
   return [
-    `import { ${used.join(", ")} } from "@usestrider/browser"`,
-    `import { Effect } from "effect"`,
+    `import { ${modules.filter(uses).join(", ")} } from "@usestrider/browser"`,
+    `import { ${effect.join(", ")} } from "effect"`,
+    ...(http.length === 0 ? [] : [`import { ${http.join(", ")} } from "effect/http"`]),
     "",
     code.replace(/^const (\w+)Strider = /m, "const $1Scenario = ")
   ].join("\n")

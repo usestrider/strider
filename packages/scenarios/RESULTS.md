@@ -1,73 +1,73 @@
 # Strider and Playwright, side by side
 
-_Written by `pnpm scenarios` on 2026-10-27: Chrome/155.0.8059.79, the integration environment's, driven headless by Strider at `8e9210f` and by Playwright 1.64.1 through `playwright-core`, whose own browsers are never installed; Node v24.21.0; AMD Ryzen 9 9900X 12-Core Processor, 24 threads, 60 GiB, Linux 7.2.10, load 2.9 2.6 2.4 at the end. Timings are each scenario's wall time over 10 runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Don't edit: run `pnpm scenarios` again._
+*Written by `pnpm scenarios` on 2026-10-27: Chrome/155.0.8059.79, the integration environment's, driven headless by Strider at `505b94a` and by Playwright 1.64.1 through `playwright-core`, whose own browsers are never installed; Node v24.21.0; AMD Ryzen 9 9900X 12-Core Processor, 24 threads, 60 GiB, Linux 7.2.10, load 2.5 3.9 4.8 at the end. Timings are each scenario's wall time over 10 runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Don't edit: run `pnpm scenarios` again.*
 
 ## Scenarios
 
 Each scenario is written with each library as its own documentation would write it, against the local site (`src/site.ts`), or a public demo site replayed from a recording, so a run sends nothing to anyone. A run is the whole scenario: its contexts and pages made and closed.
 
-| Scenario                                  | Strider             | Playwright          | Strider read                               | Playwright read                            | Lines, Strider / Playwright |
-| ----------------------------------------- | ------------------- | ------------------- | ------------------------------------------ | ------------------------------------------ | --------------------------- |
-| The README's program                      | 173 ms (p90 189 ms) | 98 ms (p90 101 ms)  | ✓ `Added to cart`                          | ✓ `Added to cart`                          | 7 / 11                      |
-| A login reused through storage state      | 395 ms (p90 410 ms) | 263 ms (p90 270 ms) | ✓ `Signed in`                              | ✓ `Signed in`                              | 15 / 24                     |
-| A popup with a dialog inside it           | 311 ms (p90 316 ms) | 145 ms (p90 152 ms) | ✓ `Allowed`                                | ✓ `Allowed`                                | 11 / 15                     |
-| A route that blocks analytics             | 66 ms (p90 72 ms)   | 69 ms (p90 73 ms)   | ✓ `analytics blocked`                      | ✓ `analytics blocked`                      | 7 / 11                      |
-| A file upload, from bytes                 | 99 ms (p90 106 ms)  | 69 ms (p90 75 ms)   | ✓ `receipt.txt:4`                          | ✓ `receipt.txt:4`                          | 9 / 15                      |
-| A response's body, from a click           | 191 ms (p90 199 ms) | 109 ms (p90 118 ms) | ✓ `{"items":[{"sku":"tea","quantity":1}]}` | ✓ `{"items":[{"sku":"tea","quantity":1}]}` | 12 / 14                     |
-| Waiting for the navigation a click causes | 236 ms (p90 260 ms) | 167 ms (p90 178 ms) | ✓ `Orders`                                 | ✓ `Orders`                                 | 8 / 11                      |
-| A HAR recorded, then replayed             | 139 ms (p90 154 ms) | 152 ms (p90 175 ms) | ✓ `42 sold`                                | ✓ `42 sold`                                | 16 / 21                     |
-| TodoMVC's demo, replayed                  | 424 ms (p90 438 ms) | 176 ms (p90 183 ms) | ✓ `2 items left`                           | ✓ `2 items left`                           | 14 / 18                     |
-| The Internet's login, replayed            | 326 ms (p90 359 ms) | 233 ms (p90 260 ms) | ✓ `Secure Area`                            | ✓ `Secure Area`                            | 10 / 15                     |
+| Scenario | Strider | Playwright | Strider read | Playwright read | Lines, Strider / Playwright |
+|---|---|---|---|---|---|
+| The README's program | 173 ms (p90 185 ms) | 100 ms (p90 101 ms) | ✓ `Added to cart` | ✓ `Added to cart` | 7 / 11 |
+| A login reused through storage state | 399 ms (p90 406 ms) | 262 ms (p90 274 ms) | ✓ `Signed in` | ✓ `Signed in` | 15 / 24 |
+| A popup with a dialog inside it | 314 ms (p90 318 ms) | 149 ms (p90 150 ms) | ✓ `Allowed` | ✓ `Allowed` | 11 / 15 |
+| A route that blocks analytics | 71 ms (p90 74 ms) | 72 ms (p90 74 ms) | ✓ `analytics blocked` | ✓ `analytics blocked` | 7 / 11 |
+| A file upload, from bytes | 98 ms (p90 103 ms) | 69 ms (p90 75 ms) | ✓ `receipt.txt:4` | ✓ `receipt.txt:4` | 9 / 15 |
+| A response's body, from a click | 191 ms (p90 193 ms) | 116 ms (p90 117 ms) | ✓ `tea × 1` | ✓ `tea × 1` | 15 / 15 |
+| Waiting for the navigation a click causes | 237 ms (p90 271 ms) | 166 ms (p90 169 ms) | ✓ `Orders` | ✓ `Orders` | 8 / 11 |
+| A HAR recorded, then replayed | 140 ms (p90 146 ms) | 142 ms (p90 153 ms) | ✓ `42 sold` | ✓ `42 sold` | 16 / 21 |
+| TodoMVC's demo, replayed | 426 ms (p90 451 ms) | 188 ms (p90 200 ms) | ✓ `2 items left` | ✓ `2 items left` | 14 / 18 |
+| The Internet's login, replayed | 342 ms (p90 354 ms) | 241 ms (p90 252 ms) | ✓ `Secure Area` | ✓ `Secure Area` | 10 / 15 |
 
-**Launch:** a browser launched and a first page loaded, 5 times: Strider 201 ms (p90 425 ms), Playwright 130 ms (p90 134 ms).
+**Launch:** a browser launched and a first page loaded, 5 times: Strider 205 ms (p90 663 ms), Playwright 128 ms (p90 167 ms).
 
 ## What a waiting expectation costs the page (Q82)
 
 Strider evaluates a waiting expectation at every animation frame (QUIRKS.md, Q82). A page animating 200 of its 3000 elements each frame shows `#ready` after 3000 ms; the renderers' CPU time per second is read from `/proc` while each library waits for it, and while each leaves the page alone for as long.
 
-|                                         | Renderer CPU per second |
-| --------------------------------------- | ----------------------- |
-| Strider, idle                           | 256 ms (p90 289 ms)     |
-| Strider, `Expect.toBeVisible` waiting   | 287 ms (p90 300 ms)     |
-| Playwright, idle                        | 253 ms (p90 280 ms)     |
-| Playwright, `locator.waitFor()` waiting | 246 ms (p90 259 ms)     |
+| | Renderer CPU per second |
+|---|---|
+| Strider, idle | 272 ms (p90 279 ms) |
+| Strider, `Expect.toBeVisible` waiting | 297 ms (p90 364 ms) |
+| Playwright, idle | 273 ms (p90 277 ms) |
+| Playwright, `locator.waitFor()` waiting | 247 ms (p90 262 ms) |
 
 ## What an interceptor installed costs a load (Q103)
 
 Strider keeps Chromium's `Fetch` interceptor enabled on every page, with a pattern nothing matches, so a route is in force as soon as it is declared (QUIRKS.md, Q103). A page with 300 images, each a request, loaded to its `load` event:
 
-|                                                               | Load                |
-| ------------------------------------------------------------- | ------------------- |
-| Strider, no route (its interceptor is always installed, Q103) | 106 ms (p90 116 ms) |
-| Strider, a route matching nothing on the page                 | 110 ms (p90 113 ms) |
-| Playwright, no route                                          | 73 ms (p90 83 ms)   |
-| Playwright, a route matching nothing on the page              | 111 ms (p90 120 ms) |
+| | Load |
+|---|---|
+| Strider, no route (its interceptor is always installed, Q103) | 115 ms (p90 120 ms) |
+| Strider, a route matching nothing on the page | 114 ms (p90 121 ms) |
+| Playwright, no route | 78 ms (p90 84 ms) |
+| Playwright, a route matching nothing on the page | 115 ms (p90 118 ms) |
 
 ## What each leaves for a page to see
 
 What a page's own script reads about the browser driving it, the signals bot protection looks for (`/tells` in `src/site.ts`), headless, as each launches by default:
 
-|                                 | Strider                                                                                      | Playwright                                                                                   |
-| ------------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| navigator.webdriver             | true                                                                                         | true                                                                                         |
-| userAgent says HeadlessChrome   | true                                                                                         | true                                                                                         |
-| Runtime.enable observed         | false                                                                                        | false                                                                                        |
-| window.chrome                   | object                                                                                       | object                                                                                       |
-| window.chrome.runtime           | undefined                                                                                    | undefined                                                                                    |
-| navigator.plugins.length        | 5                                                                                            | 5                                                                                            |
-| navigator.languages             | en-US,en                                                                                     | en-US,en                                                                                     |
-| outer size                      | 780×580                                                                                      | 1280×720                                                                                     |
-| inner size                      | 780×493                                                                                      | 1280×720                                                                                     |
-| screen size                     | 800×600                                                                                      | 1280×720                                                                                     |
-| Notification.permission / query | default / prompt                                                                             | default / prompt                                                                             |
-| WebGL renderer                  | ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver) | ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver) |
-| globals added                   | 0                                                                                            | 0                                                                                            |
+| | Strider | Playwright |
+|---|---|---|
+| navigator.webdriver | true | true |
+| userAgent says HeadlessChrome | true | true |
+| Runtime.enable observed | false | false |
+| window.chrome | object | object |
+| window.chrome.runtime | undefined | undefined |
+| navigator.plugins.length | 5 | 5 |
+| navigator.languages | en-US,en | en-US,en |
+| outer size | 780×580 | 1280×720 |
+| inner size | 780×493 | 1280×720 |
+| screen size | 800×600 | 1280×720 |
+| Notification.permission / query | default / prompt | default / prompt |
+| WebGL renderer | ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver) | ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver) |
+| globals added | 0 | 0 |
 
 The arguments each launched Chromium with:
 
 ```
-Strider:    --no-first-run --no-default-browser-check --no-service-autorun --disable-sync --disable-component-update --disable-background-networking --disable-default-apps --disable-client-side-phishing-detection --disable-domain-reliability --disable-breakpad --disable-hang-monitor --disable-prompt-on-repost --disable-component-extensions-with-background-pages --disable-features=Translate,MediaRouter,DialMediaRouteProvider,OptimizationHints,AutofillServerCommunication --metrics-recording-only --password-store=basic --use-mock-keychain --headless --remote-debugging-pipe --user-data-dir=/tmp/nix-shell.i2WVC3/strider-chromium-Tiz1Qb about:blank
-Playwright: --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,AvoidCorsURLLoaderRestartOnRedirect,Translate,AutoDeElevate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/tmp/nix-shell.i2WVC3/playwright_chromiumdev_profile-J7twG6 --remote-debugging-pipe --no-startup-window
+Strider:    --no-first-run --no-default-browser-check --no-service-autorun --disable-sync --disable-component-update --disable-background-networking --disable-default-apps --disable-client-side-phishing-detection --disable-domain-reliability --disable-breakpad --disable-hang-monitor --disable-prompt-on-repost --disable-component-extensions-with-background-pages --disable-features=Translate,MediaRouter,DialMediaRouteProvider,OptimizationHints,AutofillServerCommunication --metrics-recording-only --password-store=basic --use-mock-keychain --headless --remote-debugging-pipe --user-data-dir=/tmp/nix-shell.H6q0p6/strider-chromium-AsTzDk about:blank
+Playwright: --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,AvoidCorsURLLoaderRestartOnRedirect,Translate,AutoDeElevate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/tmp/nix-shell.H6q0p6/playwright_chromiumdev_profile-khm2DC --remote-debugging-pipe --no-startup-window
 ```
 
 ## The code
@@ -240,17 +240,21 @@ const uploadPlaywright = async (browser: Playwright.Browser, origin: string) => 
 ### A response's body, from a click
 
 ```ts
+const Cart = Schema.Struct({
+  items: Schema.Array(Schema.Struct({ sku: Schema.String, quantity: Schema.Number }))
+})
+
 const responseStrider = Effect.fn("response")(function*(origin: string) {
   const page = yield* Browser.newPage()
   yield* page.goto(`${origin}/cart`)
   const added = yield* NetworkResponse.next(page, {
     url: `${origin}/api/cart`,
     method: "POST",
-    body: (message) => message.json
+    body: HttpIncomingMessage.schemaBodyJson(Cart)
   })
   yield* page.getByRole("button", { name: "Add to cart" }).click()
-  const response = yield* added
-  return JSON.stringify(response.body)
+  const { body } = yield* added
+  return body.items.map((item) => `${item.sku} × ${item.quantity}`).join(", ")
 })
 ```
 
@@ -264,7 +268,8 @@ const responsePlaywright = async (browser: Playwright.Browser, origin: string) =
     )
     await page.getByRole("button", { name: "Add to cart" }).click()
     const response = await added
-    return JSON.stringify(await response.json())
+    const cart = (await response.json()) as { items: ReadonlyArray<{ sku: string; quantity: number }> }
+    return cart.items.map((item) => `${item.sku} × ${item.quantity}`).join(", ")
   } finally {
     await page.close()
   }

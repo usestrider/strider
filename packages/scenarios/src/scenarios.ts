@@ -19,6 +19,8 @@ import {
 } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
+import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage"
+import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Playwright from "playwright-core"
 
@@ -202,17 +204,21 @@ const uploadPlaywright = async (browser: Playwright.Browser, origin: string) => 
 // #endregion
 
 // #region response/strider
+const Cart = Schema.Struct({
+  items: Schema.Array(Schema.Struct({ sku: Schema.String, quantity: Schema.Number }))
+})
+
 const responseStrider = Effect.fn("response")(function*(origin: string) {
   const page = yield* Browser.newPage()
   yield* page.goto(`${origin}/cart`)
   const added = yield* NetworkResponse.next(page, {
     url: `${origin}/api/cart`,
     method: "POST",
-    body: (message) => message.json
+    body: HttpIncomingMessage.schemaBodyJson(Cart)
   })
   yield* page.getByRole("button", { name: "Add to cart" }).click()
-  const response = yield* added
-  return JSON.stringify(response.body)
+  const { body } = yield* added
+  return body.items.map((item) => `${item.sku} × ${item.quantity}`).join(", ")
 })
 // #endregion
 
@@ -226,7 +232,8 @@ const responsePlaywright = async (browser: Playwright.Browser, origin: string) =
     )
     await page.getByRole("button", { name: "Add to cart" }).click()
     const response = await added
-    return JSON.stringify(await response.json())
+    const cart = (await response.json()) as { items: ReadonlyArray<{ sku: string; quantity: number }> }
+    return cart.items.map((item) => `${item.sku} × ${item.quantity}`).join(", ")
   } finally {
     await page.close()
   }
@@ -419,8 +426,9 @@ export const scenarios: ReadonlyArray<Scenario> = [
   {
     name: "response",
     title: "A response's body, from a click",
-    description: "Subscribes to the response a click causes, before the click, and decodes its JSON body.",
-    expected: `{"items":[{"sku":"tea","quantity":1}]}`,
+    description:
+      "Subscribes to the response a click causes, before the click, and decodes its JSON body with a schema.",
+    expected: "tea × 1",
     strider: responseStrider,
     playwright: responsePlaywright
   },

@@ -17,7 +17,7 @@ found to [RESULTS.md](RESULTS.md):
 pnpm scenarios --record     # once: visits the public demo sites live and records them in .data/scenarios/
 pnpm scenarios              # everything, 10 timed runs each, writing RESULTS.md
 pnpm scenarios --runs 3     # fewer runs
-pnpm scenarios --only login # one scenario, and no measurements
+pnpm scenarios --only login # one scenario, and no measurements, printed: RESULTS.md keeps the full run
 ```
 
 `pnpm scenarios` enters the integration environment (`flake.nix`, `devShells.integration`), as
