@@ -8,6 +8,9 @@
 //   api-reference   write each public package's API reference dataset to .data/api-reference/<package>/, what
 //                   TypeScript reads in every example and guide block to .data/api-reference/code.json, and each
 //                   backend's capabilities to .data/api-reference/capabilities.json
+//   audit           list, for each guide, what its review checks: size, sections with little before their code,
+//                   and names the prose mentions that no block on the page shows; --json for the data, and page
+//                   ids (events/events) to audit only those
 import { spawnSync } from "node:child_process"
 import * as path from "node:path"
 
@@ -48,7 +51,15 @@ switch (command) {
     await (await import("./capabilities.mjs")).capabilities(root, out)
     break
   }
+  case "audit":
+    process.exitCode = await (await import("./audit.mjs")).audit(root, guides, {
+      json: args.includes("--json"),
+      pages: args.filter((arg) => !arg.startsWith("--"))
+    })
+    break
   default:
-    process.stderr.write("usage: strider-docs jsdocs | examples | format [--check] | index | api-reference\n")
+    process.stderr.write(
+      "usage: strider-docs jsdocs | examples | format [--check] | index | api-reference | audit [--json] [page…]\n"
+    )
     process.exitCode = 1
 }

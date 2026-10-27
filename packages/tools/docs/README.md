@@ -10,6 +10,14 @@ Private tools that check Strider's JSDoc and generate its reference. Run them fr
 | `pnpm index`          | writes `packages/browser/INDEX.md`                                                                 |
 | `pnpm api-reference`  | writes the API reference dataset to `.data/api-reference/`, with what TypeScript reads in the code |
 | `pnpm reference`      | `jsdocs`, `examples`, `index` and `api-reference`, in order                                        |
+| `strider-docs audit`  | lists, for each guide, what its review checks (below); `--json` for the data, page ids for some    |
+
+`strider-docs audit` reads the guides in the site's reading order and lists candidates for a reviewer, never
+errors: pages long enough (over 700 words of prose or 7 sections) or titled with "and" so they may hold more than one
+concept; pages with no paragraph before their first section, and sections with under 15 words before their first
+code; and each name the prose puts in inline code that no block on the page uses, with whether another guide shows it
+and whether this page links there. A name counts when the public packages' own source uses it as an identifier,
+which leaves out HTML attributes, DOM names and plain values.
 
 Once the modules are implemented, `@effect/doctest` runs the examples instead of only type-checking them: the fences
 are already marked `ts import.meta.vitest`.
