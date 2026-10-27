@@ -41,6 +41,18 @@ describe("module errors", () => {
     assert.isFalse(Locator.isLocatorError(new Error("click failed")))
   })
 
+  it("lifts its reason's cause, so the failure beneath it renders, and has none where the reason has none", () => {
+    const missing = new Error("ENOENT: no such file")
+    const unreadable = new Locator.LocatorError({
+      operation: "setInputFiles",
+      locator: "getByLabel(\"Photo\")",
+      reason: new Locator.FileUnreadable({ path: "/tmp/photo.png", hint: "check the path", cause: missing }),
+      diagnostics
+    })
+    assert.strictEqual(unreadable.cause, missing)
+    assert.isUndefined(ambiguous.cause)
+  })
+
   it.effect("recovers by reason with catchReason", () =>
     Effect.gen(function*() {
       const suggestions = yield* Effect.fail(ambiguous).pipe(

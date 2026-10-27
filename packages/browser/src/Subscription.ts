@@ -25,6 +25,7 @@ import { dual } from "effect/Function"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Diagnostics from "./Diagnostics.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import * as Reason from "./Reason.ts"
 
@@ -147,6 +148,9 @@ export class SubscriptionError extends Schema.TaggedError<SubscriptionError>(Sub
   readonly [SubscriptionErrorTypeId] = SubscriptionErrorTypeId
   override get message(): string {
     return `${this.operation}: ${this.reason.message}`
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
   }
 }
 

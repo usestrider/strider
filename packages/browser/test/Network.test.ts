@@ -1,15 +1,16 @@
 /**
  * The network pieces, without a browser: the intercept a `URLPattern` route declares, requests' bodies as
- * a HAR writes them, and replay's reading and matching.
+ * a HAR writes them, replay's reading and matching, and how a request shows in a log.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Route } from "@usestrider/browser"
+import { Diagnostics, Route } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
 import * as Cookies from "effect/http/Cookies"
 import * as Headers from "effect/http/Headers"
+import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import * as fs from "node:fs"
@@ -51,6 +52,18 @@ const request = (method: NetworkRequest.NetworkRequest["method"], url: string, h
     initiator: { _tag: "Unattributed" },
     at: 0 as NetworkRequest.NetworkRequest["at"]
   })
+
+describe("A request in a log", () => {
+  it.effect("shows its URL as the preset in context does, and keeps it whole as data", () =>
+    Effect.gen(function*() {
+      const sent = request("GET", "https://user:pw@shop.example.com/search?q=shoes#top")
+      const urlOf = (json: unknown) => (json as { readonly url: string }).url
+      assert.strictEqual(urlOf(Inspectable.toJson(sent)), "https://shop.example.com/search?q=REDACTED")
+      const local = yield* Effect.sync(() => Inspectable.toJson(sent)).pipe(Diagnostics.withPreset("local"))
+      assert.strictEqual(urlOf(local), "https://user:pw@shop.example.com/search?q=shoes#top")
+      assert.strictEqual(urlOf(JSON.parse(JSON.stringify(sent))), sent.url)
+    }))
+})
 
 const recorded = (sent: NetworkRequest.NetworkRequest, body: Uint8Array | undefined): Har.Recorded => ({
   request: sent,

@@ -17,6 +17,7 @@ import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Diagnostics from "./Diagnostics.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import * as Reason from "./Reason.ts"
 import type * as Target from "./Target.ts"
 import * as Url from "./Url.ts"
@@ -278,6 +279,9 @@ export class CookieJarError extends Schema.TaggedError<CookieJarError>(CookieJar
   readonly [CookieJarErrorTypeId] = CookieJarErrorTypeId
   override get message(): string {
     return `${this.operation}: ${this.reason.message}`
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
   }
 }
 

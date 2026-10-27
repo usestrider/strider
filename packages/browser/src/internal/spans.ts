@@ -1,13 +1,16 @@
 /**
  * The span every operation opens. One helper, so `Browser.SpanNameGenerator` names each
  * span and `Browser.TracerDisabledWhen` can suppress it, attributes are written as OpenTelemetry writes them
- * (`browser.operation`, and `url.full` under the diagnostics preset), and recordings learn of each operation.
+ * (`browser.operation`, `url.full` under the diagnostics preset, and `error.type` when the operation fails), and
+ * recordings learn of each operation.
  */
 import * as Effect from "effect/Effect"
+import * as Predicate from "effect/Predicate"
 import * as Diagnostics from "../Diagnostics.ts"
 import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Recorders from "./recorders.ts"
+import * as Redaction from "./redaction.ts"
 import * as Tracing from "./tracing.ts"
 
 /** An operation's span settings, as `Effect.withSpan` takes them. */
@@ -33,22 +36,19 @@ export const scopeAttributes = (scope: Adapter.DeclarationScope): Readonly<Recor
     ? { "browser.context.id": scope.context }
     : {}
 
+/** A URL as the preset shows it (`redaction.ts`). */
+export const redactUrl = Redaction.url
+
 /**
- * A URL as the preset shows it: whole under `"local"`; under `"strict"`, its origin and path, each query value
- * `REDACTED`, credentials and fragment dropped.
+ * OpenTelemetry's `error.type` for a failure: its tag, then its reason's where it has one, as
+ * `LocatorError.StrictViolation`; `_OTHER`, OpenTelemetry's fallback, for a failure without a tag.
  */
-export const redactUrl = (url: string, preset: Diagnostics.Preset): string => {
-  if (preset === "local") return url
-  try {
-    const parsed = new URL(url)
-    parsed.username = ""
-    parsed.password = ""
-    parsed.hash = ""
-    for (const key of new Set(parsed.searchParams.keys())) parsed.searchParams.set(key, "REDACTED")
-    return parsed.href
-  } catch {
-    return "REDACTED"
-  }
+export const errorType = (error: unknown): string => {
+  const tag = Predicate.hasProperty(error, "_tag") && typeof error._tag === "string" ? error._tag : "_OTHER"
+  const reason = Predicate.hasProperty(error, "reason") && Predicate.hasProperty(error.reason, "_tag")
+    ? error.reason._tag
+    : undefined
+  return typeof reason === "string" ? `${tag}.${reason}` : tag
 }
 
 /** Wraps an operation in its span. */
@@ -65,7 +65,9 @@ export const operation = (name: string, options: Options = {}) => <A, E, R>(self
         : value
     }
     return yield* Effect.withSpan(
-      Recorders.observe(name, raw, true, self),
+      Recorders.observe(name, raw, true, self).pipe(
+        Effect.tapError((error) => Effect.annotateCurrentSpan("error.type", errorType(error)))
+      ),
       (yield* Tracing.SpanNameGenerator)(operation),
       { attributes }
     )

@@ -11,12 +11,14 @@
  * @stability unstable
  * @since 0.1.0
  */
+import type * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import type * as Headers from "effect/http/Headers"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import type * as HttpMethod from "effect/http/HttpMethod"
 import * as Option from "effect/Option"
+import * as Redactable from "effect/Redactable"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
@@ -25,6 +27,7 @@ import * as Events from "./internal/events.ts"
 import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
 import * as Operation from "./internal/operation.ts"
+import * as Redaction from "./internal/redaction.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -168,7 +171,11 @@ export class NetworkRequest extends Schema.Class<NetworkRequest>("@usestrider/br
   resourceType: ResourceType,
   initiator: Initiator,
   at: MonotonicInstant.MonotonicInstant
-}) {}
+}) {
+  [Redactable.symbolRedactable](context: Context.Context<never>): unknown {
+    return Redaction.withUrl("NetworkRequest", this, context)
+  }
+}
 
 /**
  * Which requests to match.

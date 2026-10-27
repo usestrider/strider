@@ -1351,3 +1351,8 @@ An entry with no marker is open.
 - *We:* a decision runs apart from the operation that registered it, with no record of its own and a deadline of the budget from when it starts (`Operation.deciding`), timed on the browser's clock captured at registration. Work an operation leaves running, a recording's polls and followers, starts with no deadline of the operation's (`Operation.detached`).
 - *Reconsider:* nothing.
 - **Resolved** in `7b3c783`, with a test of a handler registered under a 10 ms deadline deciding a dialog later.
+
+**Q245. A URL `goto` can't parse fails before its operation's span opens** (Ours). `page.goto("not a url")` fails with `PageError{InvalidInput}` from its argument check, which runs before `navigate` opens the span, so no span, and no `error.type`, records the failure.
+- *Seen:* writing the test of `error.type`, first against a `goto` of a URL that doesn't parse.
+- *We:* nothing yet; the error still carries its diagnostics.
+- *Reconsider:* checking arguments inside the operation, so every failure has its span.

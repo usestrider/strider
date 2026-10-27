@@ -28,6 +28,7 @@ import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
 import type * as Model from "./internal/model.ts"
 import * as Operation from "./internal/operation.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import type * as Runtime from "./internal/runtime.ts"
 import type * as Page from "./Page.ts"
 import * as Reason from "./Reason.ts"
@@ -322,6 +323,9 @@ export class DownloadError extends Schema.TaggedError<DownloadError>(DownloadErr
   readonly [DownloadErrorTypeId] = DownloadErrorTypeId
   override get message(): string {
     return `${this.operation}: ${this.reason.message}`
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
   }
 }
 

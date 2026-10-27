@@ -30,6 +30,7 @@ import type * as FilePath from "./FilePath.ts"
 import * as BrowserImpl from "./internal/browser.ts"
 import * as BrowserClock from "./internal/browserClock.ts"
 import * as Fake from "./internal/fake.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import * as Tracing from "./internal/tracing.ts"
 import type * as LaunchProfile from "./LaunchProfile.ts"
 import type * as Page from "./Page.ts"
@@ -493,6 +494,9 @@ export class BrowserError extends Schema.TaggedError<BrowserError>(BrowserErrorT
   readonly [BrowserErrorTypeId] = BrowserErrorTypeId
   override get message(): string {
     return this.reason.message
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
   }
 }
 

@@ -21,6 +21,7 @@ import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
 import * as HarImpl from "./internal/har.ts"
 import * as Operation from "./internal/operation.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import * as Recordings from "./internal/recordings.ts"
 import * as Spans from "./internal/spans.ts"
 import * as UrlPattern from "./internal/urlPattern.ts"
@@ -324,6 +325,9 @@ export class HarError extends Schema.TaggedError<HarError>(HarErrorTypeId)("HarE
   readonly [HarErrorTypeId] = HarErrorTypeId
   override get message(): string {
     return this.reason.message
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
   }
 }
 

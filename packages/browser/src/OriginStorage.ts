@@ -14,6 +14,7 @@ import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import * as Reason from "./Reason.ts"
 import type * as Target from "./Target.ts"
 
@@ -119,6 +120,9 @@ export class OriginStorageError extends Schema.TaggedError<OriginStorageError>(O
   readonly [OriginStorageErrorTypeId] = OriginStorageErrorTypeId
   override get message(): string {
     return `${this.operation}: ${this.reason.message}`
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
   }
 }
 

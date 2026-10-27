@@ -31,6 +31,7 @@ import * as Diagnostics from "./Diagnostics.ts"
 import * as Dialog from "./Dialog.ts"
 import type * as Emulation from "./Emulation.ts"
 import type * as InitScript from "./InitScript.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import type * as JSHandle from "./JSHandle.ts"
 import type * as Keyboard from "./Keyboard.ts"
 import * as Locator from "./Locator.ts"
@@ -786,6 +787,9 @@ export class PageError extends Schema.TaggedError<PageError>(PageErrorTypeId)("P
   readonly [PageErrorTypeId] = PageErrorTypeId
   override get message(): string {
     return `${this.operation}: ${this.reason.message}`
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
   }
 }
 

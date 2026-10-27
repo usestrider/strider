@@ -138,6 +138,7 @@ The `Browser` service, its accessors, and the settings every backend shares.
 *errors*
 
 - `class BrowserError: Schema.TaggedError "BrowserError" { reason, diagnostics }`
+  - `override get cause(): unknown`
 
 *reasons*
 
@@ -193,6 +194,7 @@ Workers: dedicated workers of a page, and shared and service workers of a contex
 *errors*
 
 - `class BrowserWorkerError: Schema.TaggedError "BrowserWorkerError" { reason, diagnostics }`
+  - `override get cause(): unknown`
 
 ### Capability
 
@@ -239,6 +241,7 @@ Specialized features that not every backend offers, reached through a handle bou
 *errors*
 
 - `class CapabilityError: Schema.TaggedError "CapabilityError" { capability, reason, diagnostics }`
+  - `override get cause(): unknown`
 
 ### Condition
 
@@ -341,6 +344,7 @@ A context's cookies.
 *errors*
 
 - `class CookieJarError: Schema.TaggedError "CookieJarError" { operation, reason, diagnostics }`
+  - `override get cause(): unknown`
 
 ### Deadline
 
@@ -395,6 +399,7 @@ Declarations: scoped registrations that change how a page or context behaves whi
 *errors*
 
 - `class DeclarationError: Schema.TaggedError "DeclarationError" { declaration, reason, diagnostics }`
+  - `override get cause(): unknown`
 
 *reasons*
 
@@ -519,6 +524,7 @@ Downloads a page starts.
 *errors*
 
 - `class DownloadError: Schema.TaggedError "DownloadError" { operation, reason, diagnostics }`
+  - `override get cause(): unknown`
 
 *reasons*
 
@@ -658,6 +664,7 @@ File choosers: what a page opens when a file input is clicked.
 *errors*
 
 - `class FileChooserError: Schema.TaggedError "FileChooserError" { reason, diagnostics }`
+  - `override get cause(): unknown`
 
 ### FileInput
 
@@ -734,6 +741,7 @@ HAR recordings: a page's or context's network traffic, exported as an HTTP Archi
 *errors*
 
 - `class HarError: Schema.TaggedError "HarError" { reason, diagnostics }` (experimental)
+  - `override get cause(): unknown`
 
 *reasons*
 
@@ -787,6 +795,7 @@ Values that cross into and out of the page.
 *errors*
 
 - `class JSHandleError: Schema.TaggedError "JSHandleError" { operation, reason, diagnostics }`
+  - `override get cause(): unknown`
 
 *utility types*
 
@@ -828,6 +837,7 @@ Keys sent to whatever has focus, for what locators can't express.
 *errors*
 
 - `class KeyboardError: Schema.TaggedError "KeyboardError" { operation, reason, diagnostics }`
+  - `override get cause(): unknown`
 
 ### LaunchProfile
 
@@ -1009,6 +1019,7 @@ Locators find elements, and act on them or read them.
 *errors*
 
 - `class LocatorError: Schema.TaggedError "LocatorError" { operation, locator, reason, diagnostics }`
+  - `override get cause(): unknown`
 
 *reasons*
 
@@ -1069,6 +1080,7 @@ Pointer input by coordinates, for canvas-like interfaces that locators can't rea
 *errors*
 
 - `class MouseError: Schema.TaggedError "MouseError" { operation, reason, diagnostics }`
+  - `override get cause(): unknown`
 
 ### NetworkConnection
 
@@ -1200,6 +1212,7 @@ Responses a page or context receives: the event, and, when asked for, their bodi
 *errors*
 
 - `class ResponseError: Schema.TaggedError "ResponseError" { url, reason, diagnostics }`
+  - `override get cause(): unknown`
 
 *reasons*
 
@@ -1232,6 +1245,7 @@ Responses a page or context receives: the event, and, when asked for, their bodi
 *errors*
 
 - `class OriginStorageError: Schema.TaggedError "OriginStorageError" { operation, reason, diagnostics }`
+  - `override get cause(): unknown`
 
 ### Page
 
@@ -1355,6 +1369,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
 *errors*
 
 - `class PageError: Schema.TaggedError "PageError" { operation, reason, diagnostics }`
+  - `override get cause(): unknown`
 
 *reasons*
 
@@ -1388,6 +1403,7 @@ Page time: the clock a page's scripts see, under your control.
 *errors*
 
 - `class PageClockError: Schema.TaggedError "PageClockError" { operation, reason, diagnostics }`
+  - `override get cause(): unknown`
 
 *reasons*
 
@@ -1563,6 +1579,7 @@ Routes intercept requests, and their handlers decide what happens to each one.
 *errors*
 
 - `class RouteError: Schema.TaggedError "RouteError" { pattern, reason, diagnostics }`
+  - `override get cause(): unknown`
 
 ### Snapshot
 
@@ -1612,6 +1629,7 @@ Accessibility snapshots, for agents and for structural expectations.
 *errors*
 
 - `class SnapshotError: Schema.TaggedError "SnapshotError" { reason, diagnostics }`
+  - `override get cause(): unknown`
 
 *reasons*
 
@@ -1670,6 +1688,7 @@ What every event module shares: the three verbs, caller predicates, history and 
 *errors*
 
 - `class SubscriptionError: Schema.TaggedError "SubscriptionError" { operation, reason, diagnostics }`
+  - `override get cause(): unknown`
 - `class EventOverflow: Schema.TaggedError "EventOverflow" { bound, at, diagnostics }`
 
 ### Target
@@ -1732,6 +1751,7 @@ Trace recordings, exported in the format Playwright's trace viewer reads.
 *errors*
 
 - `class TraceError: Schema.TaggedError "TraceError" { reason, diagnostics }` (experimental)
+  - `override get cause(): unknown`
 
 *reasons*
 
@@ -1826,6 +1846,7 @@ User contexts (the spec's term; Playwright calls them browser contexts), at two 
 *errors*
 
 - `class UserContextError: Schema.TaggedError "UserContextError" { operation, reason, diagnostics }`
+  - `override get cause(): unknown`
 
 ### Watchable
 

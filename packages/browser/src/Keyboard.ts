@@ -16,6 +16,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import * as Reason from "./Reason.ts"
 import type * as Target from "./Target.ts"
 
@@ -198,6 +199,9 @@ export class KeyboardError extends Schema.TaggedError<KeyboardError>(KeyboardErr
   readonly [KeyboardErrorTypeId] = KeyboardErrorTypeId
   override get message(): string {
     return `${this.operation}: ${this.reason.message}`
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
   }
 }
 

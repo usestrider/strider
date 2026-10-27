@@ -18,6 +18,7 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as AriaRole from "./AriaRole.ts"
 import * as Diagnostics from "./Diagnostics.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import type * as Locator from "./Locator.ts"
 import * as Target from "./Target.ts"
 
@@ -313,6 +314,9 @@ export class SnapshotError extends Schema.TaggedError<SnapshotError>(SnapshotErr
   readonly [SnapshotErrorTypeId] = SnapshotErrorTypeId
   override get message(): string {
     return this.reason.message
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
   }
 }
 

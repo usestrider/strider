@@ -30,6 +30,7 @@ import * as Diagnostics from "./Diagnostics.ts"
 import type * as FilePath from "./FilePath.ts"
 import type * as Har from "./Har.ts"
 import * as HarReplay from "./internal/harReplay.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import * as RouteDecision from "./internal/routeDecision.ts"
 import type * as NetworkRequest from "./NetworkRequest.ts"
 import type * as NetworkResponse from "./NetworkResponse.ts"
@@ -489,6 +490,9 @@ export class RouteError extends Schema.TaggedError<RouteError>(RouteErrorTypeId)
   readonly [RouteErrorTypeId] = RouteErrorTypeId
   override get message(): string {
     return `${this.pattern}: ${this.reason.message}`
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
   }
 }
 

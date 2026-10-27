@@ -13,6 +13,7 @@ import type * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Diagnostics from "./Diagnostics.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import * as Reason from "./Reason.ts"
 import type * as Watchable from "./Watchable.ts"
 
@@ -150,6 +151,9 @@ export class DeclarationError extends Schema.TaggedError<DeclarationError>(Decla
   readonly [DeclarationErrorTypeId] = DeclarationErrorTypeId
   override get message(): string {
     return `${this.declaration}: ${this.reason.message}`
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
   }
 }
 

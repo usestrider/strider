@@ -25,6 +25,7 @@ import * as UrlParams from "effect/http/UrlParams"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
+import * as Redactable from "effect/Redactable"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
@@ -37,6 +38,8 @@ import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
 import type * as Model from "./internal/model.ts"
 import * as Operation from "./internal/operation.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
+import * as Redaction from "./internal/redaction.ts"
 import type * as Runtime from "./internal/runtime.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import * as NetworkRequest from "./NetworkRequest.ts"
@@ -131,7 +134,11 @@ export class NetworkResponse extends Schema.Class<NetworkResponse>("@usestrider/
   headers: Schema.Headers,
   servedBy: ServedBy,
   at: MonotonicInstant.MonotonicInstant
-}) {}
+}) {
+  [Redactable.symbolRedactable](context: Context.Context<never>): unknown {
+    return Redaction.withUrl("NetworkResponse", this, context)
+  }
+}
 
 /**
  * A response whose body was collected and decoded.
@@ -626,6 +633,9 @@ export class ResponseError extends Schema.TaggedError<ResponseError>(ResponseErr
   readonly [ResponseErrorTypeId] = ResponseErrorTypeId
   override get message(): string {
     return this.reason.message
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
   }
 }
 

@@ -123,6 +123,21 @@ describe("Spans", () => {
       assert.isDefined(spans.find((span) => span.name === "strider Browser.newPage"))
     }))
 
+  it.effect("names a failed operation's error by its tag and its reason's", () =>
+    Effect.gen(function*() {
+      const { spans, tracer } = recording()
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        // Browser.layerTest has no DOM, so a read is Unsupported
+        yield* page.locator("#missing").readText.pipe(Effect.ignore)
+      })).pipe(Effect.provide(Browser.layerTest("")), Effect.withTracer(tracer))
+      const read = spans.find((span) => span.name === "Locator.readText")
+      assert.strictEqual(read?.attributes.get("error.type"), "LocatorError.Unsupported")
+      assert.isFalse(spans.find((span) => span.name === "Browser.newPage")!.attributes.has("error.type"))
+      assert.strictEqual(Spans.errorType({ _tag: "Timeout" }), "Timeout")
+      assert.strictEqual(Spans.errorType(new Error("boom")), "_OTHER")
+    }))
+
   it.effect("suppresses the spans a predicate picks, and shows URLs whole under the local preset", () =>
     Effect.gen(function*() {
       const { spans, tracer } = recording()

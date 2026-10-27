@@ -2,10 +2,10 @@
  * The evidence every failure carries, and the preset that decides how much of it is shown.
  *
  * Each operation records what it sent and what it saw. When it fails, that record travels with the error as
- * `diagnostics`, so "did my click happen?" has an answer: not sent, maybe sent, or acknowledged. Values whose
- * detail depends on where they end up (URLs, titles, descriptions) implement Effect's `Redactable` and read
- * `CurrentPreset` from the fiber's context. Effect's own logs, spans, errors and inspection then apply the
- * preset too, in user code as well as ours.
+ * `diagnostics`, so "did my click happen?" has an answer: not sent, maybe sent, or acknowledged. The preset
+ * decides how a URL shows: in an operation's span attributes, and wherever Effect's logger, formatter or
+ * inspection renders a `NetworkRequest` or `NetworkResponse`, which implement Effect's `Redactable` and read
+ * `CurrentPreset` from the fiber's context, in user code as well as ours.
  *
  * @stability unstable
  * @since 0.1.0
@@ -93,8 +93,7 @@ export type StepEvidence = typeof StepEvidence.Type
  *
  * **Details**
  *
- * `value` is whatever was observed: a text, a count, a status. Classified values are `Redactable`, so they
- * render according to the current preset.
+ * `value` is whatever was observed: a text, a count, a status.
  *
  * @stability unstable
  * @category schemas

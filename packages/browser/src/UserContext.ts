@@ -28,6 +28,7 @@ import type * as Declaration from "./Declaration.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as Emulation from "./Emulation.ts"
 import type * as InitScript from "./InitScript.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import type * as Keyboard from "./Keyboard.ts"
 import type * as Page from "./Page.ts"
 import type * as PageClock from "./PageClock.ts"
@@ -331,6 +332,9 @@ export class UserContextError extends Schema.TaggedError<UserContextError>(UserC
   readonly [UserContextErrorTypeId] = UserContextErrorTypeId
   override get message(): string {
     return `${this.operation}: ${this.reason.message}`
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
   }
 }
 

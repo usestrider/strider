@@ -15,6 +15,7 @@ import * as Schema from "effect/Schema"
 import type * as Stream from "effect/Stream"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as FilePath from "./FilePath.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import type * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Pixels from "./Pixels.ts"
 import * as Reason from "./Reason.ts"
@@ -201,6 +202,9 @@ export class CapabilityError extends Schema.TaggedError<CapabilityError>(Capabil
   readonly [CapabilityErrorTypeId] = CapabilityErrorTypeId
   override get message(): string {
     return `${this.capability}: ${this.reason.message}`
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
   }
 }
 

@@ -26,6 +26,7 @@ import type * as AriaRole from "./AriaRole.ts"
 import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as FileInput from "./FileInput.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import * as Steps from "./internal/steps.ts"
 import type * as JSHandle from "./JSHandle.ts"
 import type * as Keyboard from "./Keyboard.ts"
@@ -916,6 +917,9 @@ export class LocatorError extends Schema.TaggedError<LocatorError>(LocatorErrorT
   readonly [LocatorErrorTypeId] = LocatorErrorTypeId
   override get message(): string {
     return `${this.operation} ${this.locator}: ${this.reason.message}`
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
   }
 }
 

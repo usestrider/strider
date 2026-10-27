@@ -13,6 +13,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import type * as Keyboard from "./Keyboard.ts"
 import type * as Pixels from "./Pixels.ts"
 import * as Reason from "./Reason.ts"
@@ -173,6 +174,9 @@ export class MouseError extends Schema.TaggedError<MouseError>(MouseErrorTypeId)
   readonly [MouseErrorTypeId] = MouseErrorTypeId
   override get message(): string {
     return `${this.operation}: ${this.reason.message}`
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
   }
 }
 

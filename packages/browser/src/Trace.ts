@@ -22,6 +22,7 @@ import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
 import * as HarImpl from "./internal/har.ts"
 import * as Operation from "./internal/operation.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import * as TraceImpl from "./internal/trace.ts"
 import * as NetworkResponse from "./NetworkResponse.ts"
 import type * as Page from "./Page.ts"
@@ -246,6 +247,9 @@ export class TraceError extends Schema.TaggedError<TraceError>(TraceErrorTypeId)
   readonly [TraceErrorTypeId] = TraceErrorTypeId
   override get message(): string {
     return this.reason.message
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
   }
 }
 

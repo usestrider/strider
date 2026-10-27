@@ -99,7 +99,7 @@ Each user-visible operation has one monotonic deadline covering everything it do
 
 ### Diagnostics and secrets
 
-- **Redaction.** Secret inputs accept `Redacted`, and sketches read them with `Config.Redacted`. Credential, cookie and typed-text fields are classified as sensitive even when passed as plain strings. Classified fields are never rendered in spans, logs, errors or snapshots. Values whose detail depends on the preset implement Effect's `Redactable`, so Effect's own logging and tracing apply the preset, in user code too.
+- **Redaction.** Secret inputs accept `Redacted`, and sketches read them with `Config.Redacted`. Credential, cookie and typed-text fields are classified as sensitive even when passed as plain strings. Classified fields are never rendered in spans, logs, errors or snapshots. A URL in a span attribute is rendered under the preset when the span opens, and requests and responses implement Effect's `Redactable`, so Effect's own logging and inspection show their URLs under the preset in the current fiber's context, in user code too; encoded as data, they keep them whole.
 - **Presets.** Diagnostics come in two presets, set through a `Context.Reference`:
   - `local`: URLs whole, and titles; classified fields stripped.
   - `strict`: a URL's origin and path, each query value `REDACTED`, with no fragment or user info, and no titles; for production, exported traces and agents.
