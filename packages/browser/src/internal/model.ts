@@ -629,11 +629,27 @@ export const make = Effect.fnUntraced(function*() {
     if (handler !== undefined) {
       const decision = yield* handler.decide(prompt)
       if (Option.isSome(decision)) {
-        yield* resolve(obligation, decision.value)
-        if (prompt.kind === "beforeunload" && decision.value._tag === "Dismiss") {
-          for (const stayed of Array.from(page!.stayed)) stayed()
+        const sent = yield* Effect.exit(
+          adapter === undefined ? Effect.void : adapter.resolve(obligation, decision.value)
+        )
+        if (Exit.isSuccess(sent)) {
+          if (prompt.kind === "beforeunload" && decision.value._tag === "Dismiss") {
+            for (const stayed of Array.from(page!.stayed)) stayed()
+          }
+          return
         }
-        return
+        // A dialog that ended has nothing left to decide; one the backend refused the decision for, such as text for
+        // a dialog that takes none, is still open, so the context's policy decides it, as when the handler fails
+        const failure = sent.cause.reasons.find((reason) => reason._tag === "Fail")
+        if (failure === undefined || failure.error.reason._tag === "Gone" || failure.error.reason._tag === "Foreign") {
+          return
+        }
+        const level = yield* References.UnhandledLogLevel
+        if (level !== undefined) {
+          yield* Effect.logWithLevel(level)(
+            `Dialog.handle: the handler's decision for the ${prompt.kind} couldn't be applied, so the context's policy decides: ${failure.error.message}`
+          )
+        }
       }
     }
     const context = page === undefined ? undefined : contexts.get(page.context)

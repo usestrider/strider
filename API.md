@@ -781,7 +781,7 @@ type Pending =                                         // what a handler decides
   | Confirm & { readonly accept: Decision; readonly dismiss: Decision }
   | Prompt & { readonly accept: Decision; respond(text: string): Decision; readonly dismiss: Decision }   // accept answers with defaultValue
   | BeforeUnload & { readonly leave: Decision; readonly stay: Decision }
-  | Unknown & { readonly accept: Decision; respond(text: string): Decision; readonly dismiss: Decision }   // accept: as OK would; respond fails unless it was a prompt
+  | Unknown & { readonly accept: Decision; respond(text: string): Decision; readonly dismiss: Decision }   // accept: as OK would; respond, refused unless it was a prompt, leaves it to the policy
 declare const handle: <E, R>(page: Page.Page, handler: (dialog: Pending) => Effect<Decision, E, R>) =>
   Effect<Declaration.HandlerRegistration, Declaration.DeclarationError | TargetGone, Scope | R>   // Unsupported where nothing would ask it
 // ready-made handlers; match on _tag for anything finer

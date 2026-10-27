@@ -109,7 +109,8 @@ export type Dialog = typeof Dialog.Type
  * - `BeforeUnload`: asks whether to `leave` the page or `stay` on it.
  * - `Unknown`: a dialog whose kind the browser doesn't report, as WebKit doesn't. `accept` answers as its OK
  *   button would, a prompt with its default value; `dismiss` as its Cancel button. `respond(text)` answers a
- *   prompt with `text`, and fails for any other dialog.
+ *   prompt with `text`; any other dialog refuses it, and the context's `dialogs` policy decides, as when a handler
+ *   fails.
  *
  * @stability unstable
  * @category models

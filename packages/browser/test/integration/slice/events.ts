@@ -269,6 +269,30 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
           }))
         }), timeout)
 
+      it.effect(
+        "leaves a dialog to the policy when its handler's decision can't be applied",
+        () =>
+          Effect.gen(function*() {
+            // Only a dialog whose kind isn't known can be given text it doesn't take (QUIRKS.md, Q206)
+            if (yield* supports("prompts.kind")) return
+            const { url } = yield* fixture(() => asking("confirm('Sure?')"))
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* Dialog.handle(
+                page,
+                (dialog) =>
+                  dialog._tag === "Unknown" ? Effect.succeed(dialog.respond("typed")) : Dialog.acceptAll(dialog)
+              )
+              const decisions = yield* AutoResolution.next(page)
+              yield* page.getByText("Ask").click()
+              assert.strictEqual((yield* decisions).decision, "dismiss")
+              yield* page.getByText("false", { exact: true }).pipe(Expect.toBeVisible)
+            }))
+          }),
+        timeout
+      )
+
       it.effect("asks the latest handler, and the one before once it is removed", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() => asking("confirm('Sure?')"))
