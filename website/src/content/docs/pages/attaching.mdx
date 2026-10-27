@@ -1,0 +1,73 @@
+---
+title: Attaching to a browser
+description: Drive a browser that's already running, and take read or full access to the tabs you didn't open.
+order: 5
+---
+
+A browser you launch starts empty: no logins, no tabs, nothing a person left open. Attaching drives a browser that's
+already running and leaves it running, and its tabs, which you didn't open, can only be watched until you ask for
+more.
+
+## Connecting
+
+`layerConnect` attaches to a running browser, such as Chrome started with `--remote-debugging-port=9222`, and
+leaves it running:
+
+```ts
+import { NodeSocket } from "@effect/platform-node"
+import { Browser } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Effect, Layer } from "effect"
+
+const Attached = Chromium.layerConnect("http://127.0.0.1:9222").pipe(
+  Layer.provide(NodeSocket.layerWebSocketConstructor)
+)
+
+const firstHeading = Effect.scoped(Effect.gen(function*() {
+  const browser = yield* Browser.Browser
+  const [first] = yield* browser.pages
+  if (first === undefined) return "no tabs"
+  const tab = yield* first.inspect
+  return yield* tab.getByRole("heading").first.readText
+})).pipe(Effect.provide(Attached))
+```
+
+- `Firefox.layerConnect`: Firefox's remote agent.
+- `Bidi.layerConnect`: any WebDriver BiDi endpoint.
+- `WebKit.layerAttach`: a WebKitGTK or WPE browser's inspector server. Its pages can be read and navigated, not
+  typed into.
+
+## Access is typed
+
+A page has one of three types:
+
+| Type                | Can                                                                            |
+| ------------------- | ------------------------------------------------------------------------------ |
+| `Page.ObservedPage` | report its state and events                                                    |
+| `Page.ReadonlyPage` | also locate and read, take snapshots and screenshots, and evaluate in isolation |
+| `Page.Page`         | also act, navigate, evaluate among the page's own scripts, and declare routes    |
+
+A page you opened is a `Page`. One you didn't, such as an attached browser's tab or a launched browser's first tab,
+is observed. `inspect` gives read access and `control` full access, for the scope they're called in:
+
+```ts
+import { Browser, Route } from "@usestrider/browser"
+import { Console, Effect } from "effect"
+
+const blockAnalytics = Effect.scoped(Effect.gen(function*() {
+  const [, second] = yield* (yield* Browser.Browser).pages
+  if (second === undefined) return
+  const tab = yield* second.control
+  const blocked = yield* tab.route(
+    "**/analytics/**",
+    () => Effect.succeed(Route.abort())
+  )
+  yield* tab.getByRole("button", { name: "Refresh" }).click()
+  yield* Console.log(`blocked ${yield* blocked.hits} analytics calls`)
+}))
+```
+
+- When the scope closes, the route is removed and the tab stays open. Using `tab` again fails with `TargetGone`,
+  reason `AccessReleased`.
+- An action on an inspected page is a compile error. A helper that only reads should take a `Page.ReadonlyPage`, so
+  it takes either.
