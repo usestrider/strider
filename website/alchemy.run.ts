@@ -26,7 +26,8 @@ export default Alchemy.Stack(
       (email) => email.length > 0
     )
     const site = yield* Cloudflare.Website.StaticSite("Docs", {
-      command: "pnpm jsdocs && pnpm api-reference && pnpm website:build",
+      // The API reference's data, then the site: one script, since Alchemy runs the command without a shell
+      command: "pnpm website:dist",
       cwd: root,
       outdir: "website/dist",
       domain: "usestrider.dev",
