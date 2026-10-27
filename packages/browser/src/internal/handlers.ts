@@ -18,11 +18,13 @@ import * as References from "effect/References"
 import type * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Deadline from "../Deadline.ts"
-import type * as Declaration from "../Declaration.ts"
+import * as Declaration from "../Declaration.ts"
+import * as Reason from "../Reason.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
+import type * as Runtime from "./runtime.ts"
 import * as Watchable from "./watchable.ts"
 
 /** Logs a handler that didn't decide, at Effect's level for unhandled failures, unless it was interrupted. */
@@ -62,6 +64,32 @@ export interface Staged {
 }
 
 /** Registers a handler for the scope; removing it, or closing its scope, leaves later obligations to the one before. */
+/**
+ * Fails a handler's registration when the backend reports what it handles as unsupported: a handler nothing would
+ * ever ask, with the capability's limitations as the hint.
+ */
+export const requires = (
+  runtime: Runtime.Runtime,
+  declaration: string,
+  capability: string
+): Effect.Effect<void, Declaration.DeclarationError> =>
+  Effect.flatMap(SubscriptionRef.get(runtime.model.adapter.capabilities), (capabilities) => {
+    const entry = capabilities.entries.find((each) => each.name === capability)
+    return entry === undefined || entry.status !== "unsupported"
+      ? Effect.void
+      : Effect.fail(
+        new Declaration.DeclarationError({
+          declaration,
+          reason: new Reason.Unsupported({
+            capability,
+            backend: runtime.backend,
+            hint: entry.limitations.length > 0 ? entry.limitations.join("; ") : `${runtime.backend} reports none`
+          }),
+          diagnostics: Operation.diagnostics(Operation.operationId())
+        })
+      )
+  })
+
 export const register = <S, P, D, E, R>(
   options: Options<S, P, D, E, R>
 ): Effect.Effect<Declaration.HandlerRegistration, never, Scope.Scope | R> =>

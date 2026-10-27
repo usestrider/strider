@@ -12,6 +12,7 @@ import {
   BrowserWorker,
   ConsoleMessage,
   Deadline,
+  Declaration,
   Download,
   Expect,
   FileChooser,
@@ -66,7 +67,13 @@ const temporary = () => fs.mkdtempSync(path.join(os.tmpdir(), "strider-saved-"))
 /** Where the backend lacks `capability`, a subscription that needs it is refused, naming it: whether it was. */
 const refused = Effect.fnUntraced(function*(
   capability: string,
-  subscribe: (page: Page.Page) => Effect.Effect<unknown, Subscription.SubscriptionError, Scope.Scope>
+  subscribe: (
+    page: Page.Page
+  ) => Effect.Effect<
+    unknown,
+    Subscription.SubscriptionError | Declaration.DeclarationError | Target.TargetGone,
+    Scope.Scope
+  >
 ) {
   if (yield* supports(capability)) return false
   yield* Effect.scoped(Effect.gen(function*() {
@@ -167,7 +174,14 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
 
       it.effect("answers a file chooser with the page's handler", () =>
         Effect.gen(function*() {
-          if (yield* refused("fileChooser", (page) => FileChooser.next(page))) return
+          if (yield* refused("fileChooser", (page) => FileChooser.next(page))) {
+            // Nor is a handler registered that nothing would ask
+            yield* refused(
+              "fileChooser",
+              (page) => FileChooser.handle(page, (chooser) => Effect.succeed(chooser.cancel))
+            )
+            return
+          }
           const { url } = yield* fixture(() => chooser)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()

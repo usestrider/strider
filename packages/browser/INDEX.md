@@ -471,7 +471,7 @@ The dialogs a page opens: `alert`, `confirm`, `prompt` and `beforeunload`.
 
 *handlers*
 
-- `const handle: <E, R>(page: Page.Page, handler: (dialog: Pending) => Effect.Effect<Decision, E, R>) => Effect.Effect<Declaration.HandlerRegistration, Target.TargetGone, Scope.Scope | R>`
+- `const handle: <E, R>(page: Page.Page, handler: (dialog: Pending) => Effect.Effect<Decision, E, R>) => Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope | R>`
 - `const acceptAll: (dialog: Pending) => Effect.Effect<Decision>`
 - `const dismissAll: (dialog: Pending) => Effect.Effect<Decision>`
 
@@ -653,7 +653,7 @@ File choosers: the file picker a page opens when a file input is clicked.
 
 *handlers*
 
-- `const handle: <E, R>(page: Page.Page, handler: (chooser: Pending) => Effect.Effect<Decision, E, R>) => Effect.Effect<Declaration.HandlerRegistration, Target.TargetGone, Scope.Scope | R>`
+- `const handle: <E, R>(page: Page.Page, handler: (chooser: Pending) => Effect.Effect<Decision, E, R>) => Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope | R>`
 - `const choose = (files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>) => (chooser: Pending): Effect.Effect<Decision, FileChooserError> => { const list: ReadonlyArray<FileInput.FileInput> = Array.isArray(…`
 
 *guards*

@@ -370,7 +370,8 @@ export const history = (
  *
  * A dialog blocks its page, so register the handler before the action that opens one. A handler that fails,
  * is interrupted or runs out of time leaves the dialog to the context's policy, and its failure is logged at
- * Effect's `References.UnhandledLogLevel`.
+ * Effect's `References.UnhandledLogLevel`. On a backend without the `prompts` capability, such as attached WebKit,
+ * it fails at once with `DeclarationError`, reason `Unsupported`: no dialog would reach the handler.
  *
  * **Example** (Confirming a deletion)
  *
@@ -400,10 +401,11 @@ export const history = (
 export const handle = <E, R>(
   page: Page.Page,
   handler: (dialog: Pending) => Effect.Effect<Decision, E, R>
-): Effect.Effect<Declaration.HandlerRegistration, Target.TargetGone, Scope.Scope | R> =>
+): Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope | R> =>
   Effect.suspend(() => {
-    const { entry, grant } = Handles.page(page)
+    const { entry, grant, runtime } = Handles.page(page)
     return Access.check(grant).pipe(
+      Effect.andThen(Handlers.requires(runtime, "Dialog.handle", "prompts")),
       Effect.andThen(Handlers.register({
         page: entry,
         handlers: entry.promptHandlers,

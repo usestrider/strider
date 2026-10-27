@@ -783,7 +783,7 @@ type Pending =                                         // what a handler decides
   | BeforeUnload & { readonly leave: Decision; readonly stay: Decision }
   | Unknown & { readonly accept: Decision; respond(text: string): Decision; readonly dismiss: Decision }   // accept: as OK would; respond fails unless it was a prompt
 declare const handle: <E, R>(page: Page.Page, handler: (dialog: Pending) => Effect<Decision, E, R>) =>
-  Effect<Declaration.HandlerRegistration, TargetGone, Scope | R>
+  Effect<Declaration.HandlerRegistration, Declaration.DeclarationError | TargetGone, Scope | R>   // Unsupported where nothing would ask it
 // ready-made handlers; match on _tag for anything finer
 declare const acceptAll: (dialog: Pending) => Effect<Decision>    // Alert/Confirm/Prompt/Unknown: accept; BeforeUnload: leave
 declare const dismissAll: (dialog: Pending) => Effect<Decision>   // Alert: accept; Confirm/Prompt/Unknown: dismiss; BeforeUnload: stay
@@ -794,7 +794,7 @@ type Pending =                                         // what a handler decides
   | { readonly _tag: "Single"; select(file: FileInput.FileInput): Decision; readonly cancel: Decision }
   | { readonly _tag: "Multiple"; select(files: ReadonlyArray<FileInput.FileInput>): Decision; readonly cancel: Decision }
 declare const handle: <E, R>(page: Page.Page, handler: (chooser: Pending) => Effect<Decision, E, R>) =>
-  Effect<Declaration.HandlerRegistration, TargetGone, Scope | R>
+  Effect<Declaration.HandlerRegistration, Declaration.DeclarationError | TargetGone, Scope | R>   // Unsupported where nothing would ask it
 declare const choose: (files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>) =>
   (chooser: Pending) => Effect<Decision, FileChooserError>   // fails with InvalidInput on a Single chooser given several files, so Cancel applies
 

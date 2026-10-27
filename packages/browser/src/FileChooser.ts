@@ -10,8 +10,8 @@
  *
  * - On Firefox the input gets a `cancel` event as the chooser opens, before any decision; the files a handler
  *   chooses still arrive after it, with `input` and `change` (`fileChooser`).
- * - On a backend without the `fileChooser` capability, such as WebKit, no chooser is reported: `next`, `stream`
- *   and `history` fail with `Unsupported`, and the browser cancels the chooser itself.
+ * - On a backend without the `fileChooser` capability, such as WebKit, no chooser is reported: `next`, `stream`,
+ *   `history` and `handle` fail with `Unsupported`, and the browser cancels the chooser itself.
  *
  * @stability unstable
  * @since 0.1.0
@@ -281,7 +281,8 @@ export const history = (
  *
  * - A handler that fails, is interrupted or runs out of time leaves the chooser canceled, reported as an
  *   `AutoResolution`, and its failure is logged at Effect's `References.UnhandledLogLevel`.
- * - On a backend without the `fileChooser` capability, such as WebKit, no chooser reaches the handler.
+ * - On a backend without the `fileChooser` capability, such as WebKit, it fails at once with `DeclarationError`,
+ *   reason `Unsupported`: no chooser would reach the handler.
  *
  * **Example** (Uploading through the page's own picker)
  *
@@ -302,10 +303,11 @@ export const history = (
 export const handle = <E, R>(
   page: Page.Page,
   handler: (chooser: Pending) => Effect.Effect<Decision, E, R>
-): Effect.Effect<Declaration.HandlerRegistration, Target.TargetGone, Scope.Scope | R> =>
+): Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope | R> =>
   Effect.suspend(() => {
     const { entry, grant, runtime } = Handles.page(page)
     return Access.check(grant).pipe(
+      Effect.andThen(Handlers.requires(runtime, "FileChooser.handle", "fileChooser")),
       Effect.andThen(Handlers.register({
         page: entry,
         handlers: entry.chooserHandlers,
