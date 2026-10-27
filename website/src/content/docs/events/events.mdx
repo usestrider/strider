@@ -4,9 +4,13 @@ description: Subscribe before you act, then collect what the action caused. Popu
 order: 1
 ---
 
+An action's effects, such as a popup or a download, can arrive before the action returns, so a program that looks
+for them afterwards can miss them. A subscription made before the action sees everything the action causes.
+
 ## Subscribe, act, collect
 
-Subscribe first, then act:
+`Download.next` subscribes when it's called and gives a wait, an `Effect` of the first matching download, so call
+it before the action:
 
 ```ts
 import { Download, Page } from "@usestrider/browser"
@@ -20,21 +24,21 @@ const exportCsv = Effect.fn("exportCsv")(function*(page: Page.Page) {
 })
 ```
 
-- `Download.next(page)` subscribes when it runs. Its value is the wait: an `Effect` that gives the first matching
-  event.
-- A subscription sees every event after it starts and none before.
 - Subscribing after the click is a race. If the download came first, the wait times out with a hint: "a download
   came 12 ms before Download.next subscribed; call Download.next before the action that causes it".
 
 ## Next, stream and history
 
-Each kind of event is a module with three functions:
+Each kind of event is a module with three functions. Use `next` for the one event an action causes, `stream` to
+watch every event for a while, such as console errors, and `history` to read what happened before you looked.
+Dialogs and file choosers also have [`handle`](#dialogs):
 
 | Verb      | Does                                                                                          |
 | --------- | --------------------------------------------------------------------------------------------- |
 | `next`    | subscribes now; its value is a wait for the first match                                       |
 | `stream`  | subscribes now; gives a `Stream` of every match from then on                                  |
 | `history` | reads the matches already logged, and never waits                                             |
+| `handle`  | dialogs and file choosers: registers a function that decides each one until its scope closes  |
 
 | Module              | Reports                                                     | Filter                             |
 | ------------------- | ----------------------------------------------------------- | ---------------------------------- |
@@ -43,34 +47,57 @@ Each kind of event is a module with three functions:
 | `Dialog`            | alerts, confirms, prompts and `beforeunload`                 | `kind`                             |
 | `FileChooser`       | file pickers the page opened                                 | `multiple`                         |
 | `Download`          | downloads                                                    | `url`                              |
-| `NetworkRequest`    | requests, one per redirect hop                               | `url`, `method`, `resourceType`    |
-| `NetworkResponse`   | responses, with their bodies when asked                      | `url`, `method`, `status`, `body`  |
+| [`NetworkRequest`](/docs/events/network) | requests, one per redirect hop                               | `url`, `method`, `resourceType`    |
+| [`NetworkResponse`](/docs/events/network) | responses, with their bodies when asked                      | `url`, `method`, `status`, `body`  |
 | `ConsoleMessage`    | console output                                               | `level`, `text`                    |
 | `UncaughtException` | errors nothing caught, and rejections nothing handled        | `message`                          |
-| `BrowserWorker`     | workers the page or context started                          | `url`, `kind`                      |
-| `NetworkConnection` | WebSockets and event sources, with their frames               | `url`, `kind`                      |
-| `AutoResolution`    | dialogs, choosers and requests decided by a default          | `subject`                          |
+| [`BrowserWorker`](/docs/api/browser/BrowserWorker) | workers the page or context started                          | `url`, `kind`                      |
+| [`NetworkConnection`](/docs/api/browser/NetworkConnection) | WebSockets and event sources, with their frames               | `url`, `kind`                      |
+| [`AutoResolution`](/docs/api/browser/AutoResolution) | dialogs, choosers and requests decided by a default          | `subject`                          |
 
-A filter is data, applied before events are buffered. `where` adds a predicate for anything a filter can't say: it
-gets the event and returns an `Effect` of a boolean.
+A filter is data, applied before events are buffered, so the events it rejects never count toward the 1,000 events a
+stream holds for a slow consumer ([Streams](#streams)). `where`, after the filter, adds a predicate for anything a filter can't say: it gets the event and returns an
+`Effect` of a boolean:
 
-## Named outcomes
+```ts
+import { Download, Page } from "@usestrider/browser"
+import { Effect } from "effect"
 
-Wait for where an action should lead:
+const downloadInvoice = Effect.fn("downloadInvoice")(function*(page: Page.Page) {
+  const invoice = yield* Download.next(
+    page,
+    { url: "**/invoices/**" },
+    (download) => Effect.succeed(download.suggestedFilename.endsWith(".pdf"))
+  )
+  yield* page.getByRole("link", { name: "Download invoice" }).click()
+  const file = yield* invoice
+  yield* file.saveAs(`./invoices/${file.suggestedFilename}`)
+})
+```
+
+## Navigations
+
+[`Expect.toHaveURL`](/docs/pages/expectations#expectations) says where the page is, not what got it there. `PageNavigation.next` gives the navigation the
+action caused, with its response, so an error page or a same-document change can be told apart:
 
 ```ts
 import { Page, PageNavigation } from "@usestrider/browser"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 
 const openOrders = Effect.fn("openOrders")(function*(page: Page.Page) {
-  const orders = yield* PageNavigation.next(page, { url: "**/orders" })
+  const orders = yield* PageNavigation.next(page, {
+    url: "**/orders",
+    waitUntil: "load"
+  })
   yield* page.getByRole("link", { name: "Orders" }).click()
-  return yield* orders
+  const navigation = yield* orders
+  if (navigation._tag !== "Committed") return Option.none()
+  return Option.map(navigation.response, (response) => response.status)
 })
 ```
 
 The navigation is data: `Committed` with its response, `SameDocument` for a fragment or the History API, `Restored`
-from the back/forward cache, and others. `waitUntil: "load"` also waits for the document to load.
+from the back/forward cache, and [others](/docs/api/browser/PageNavigation#PageNavigation). `waitUntil: "load"` also waits for the document to load.
 
 ## Popups
 
@@ -89,18 +116,21 @@ const connectAccount = Effect.fn("connectAccount")(function*(page: Page.Page) {
 })
 ```
 
-The popup is reported before its first document loads, so a handler or route registered on it applies to that
+Here [`Dialog.handle`](#dialogs) accepts every dialog the popup opens. The popup is reported before its first
+document loads, so a handler or route registered on it applies to that
 document.
 
 <Aside type="caution">
 On Chromium, a popup's opener stops rendering, and actions on it time out with a hint saying so. Call
-`yield* page.activate` first, or make the context with `focus: "emulated"`. Firefox and WebKit keep rendering it.
+`yield* page.activate` ([reference](/docs/api/browser/Page#Page.activate)) first, or make the context with
+[`focus: "emulated"`](/docs/tools/testing#many-pages-at-once). Firefox and WebKit keep rendering it.
 </Aside>
 
 ## Dialogs
 
-A dialog blocks its page until it's decided. Register a handler before it opens; the handler lasts until its scope
-closes:
+A dialog blocks its page until it's decided, and the action that opened it doesn't return until then, so a wait
+collected after the action would come too late. Register a handler before it opens; the handler lasts until its
+scope closes:
 
 ```ts
 import { Dialog, Page } from "@usestrider/browser"
@@ -128,9 +158,10 @@ const deleteAccount = Effect.fn("deleteAccount")(function*(page: Page.Page) {
 ```
 
 - Each kind offers only its own decisions: an alert can only be accepted, a prompt can be answered.
-- `Dialog.acceptAll` and `Dialog.dismissAll` are ready-made handlers.
-- A dialog no handler decides goes to the context's `dialogs` policy, `"dismiss"` by default, at once. Each such
-  decision is reported as an `AutoResolution` event.
+- `Dialog.acceptAll` and [`Dialog.dismissAll`](/docs/api/browser/Dialog#dismissAll) are ready-made handlers.
+- A dialog no handler decides goes to the context's
+  [`dialogs` policy](/docs/pages/contexts#settings-for-the-whole-session), `"dismiss"` by default, at once. Each
+  such decision is reported as an `AutoResolution` event.
 
 File choosers work the same way. A chooser no handler answers is canceled, and reported:
 
@@ -144,9 +175,26 @@ const uploadPhoto = Effect.fn("uploadPhoto")(function*(page: Page.Page) {
 })
 ```
 
+The decisions a default made are events too, so a flow can report the dialogs nothing handled:
+
+```ts
+import { AutoResolution, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const undecidedDialogs = Effect.fn("undecidedDialogs")(function*(page: Page.Page) {
+  const decided = yield* AutoResolution.history(page, { subject: "Dialog" })
+  for (const { subject, decision } of decided.entries) {
+    if (subject._tag === "Dialog") {
+      yield* Effect.logWarning(`${subject.kind} "${subject.message}" was ${decision}`)
+    }
+  }
+})
+```
+
 ## Downloads
 
-A download is a handle with its file, status and suggested name:
+A download's event comes when it starts, before its file is complete. The handle, with its file, status and
+suggested name, follows it to the end, so you save or read the file once it's whole:
 
 ```ts
 import { Download, Page } from "@usestrider/browser"
@@ -161,6 +209,13 @@ const exportReport = Effect.fn("exportReport")(function*(page: Page.Page) {
     Effect.forkScoped
   )
   yield* report.saveAs(`./reports/${report.suggestedFilename}`)
+})
+
+const exportedHeader = Effect.fn("exportedHeader")(function*(page: Page.Page) {
+  const csv = yield* Download.next(page)
+  yield* page.getByRole("button", { name: "Export CSV" }).click()
+  const text = yield* (yield* csv).stream.pipe(Stream.decodeText(), Stream.mkString)
+  return text.split("\n")[0]
 })
 ```
 
@@ -203,8 +258,9 @@ const logErrors = Effect.fn("logErrors")(function*(page: Page.Page) {
 })
 ```
 
-- A stream ends when its page closes, and fails with `TargetGone` if the page crashes.
-- A consumer more than 1,000 events behind fails the stream with `EventOverflow`. Nothing is dropped silently.
+- A stream ends when its page closes, and fails with [`TargetGone`](/docs/api/browser/Target#TargetGone) if the page crashes.
+- A consumer more than 1,000 events behind fails the stream with
+  [`EventOverflow`](/docs/api/browser/Subscription#EventOverflow). Nothing is dropped silently.
 
 ## History
 
@@ -223,13 +279,15 @@ const pageErrors = Effect.fn("pageErrors")(function*(page: Page.Page) {
 })
 ```
 
-- The log keeps the latest 100 events of each kind per page, or the context's `eventLog`. `dropped` counts the
+- The log keeps the latest 100 events of each kind per page, or the context's
+  [`eventLog`](/docs/pages/contexts#settings-for-the-whole-session). `dropped` counts the
   rest.
 - To catch what an action causes, use `next`. There's no "last event" to read.
 
 ## Deadlines for waits
 
-A wait's deadline starts at `next`, so set it there:
+Without one, a wait gets the 30-second default, counted from `next`, which a large export can outlast. Set a longer
+one on `next`:
 
 ```ts
 import { Deadline, Download, Page } from "@usestrider/browser"
@@ -244,4 +302,4 @@ const bigExport = Effect.fn("bigExport")(function*(page: Page.Page) {
 ```
 
 Steps between `next` and the wait count against it. A wait ends with its event, `TargetGone` when the page closes,
-or `Timeout`.
+or [`Timeout`](/docs/deadlines#timeouts).
