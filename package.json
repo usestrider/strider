@@ -19,6 +19,7 @@
     "website": "pnpm --filter @usestrider/website dev",
     "website:check": "pnpm --filter @usestrider/website check",
     "website:build": "pnpm --filter @usestrider/website build",
+    "website:deploy": "pnpm --filter @usestrider/website run deploy",
     "strider": "node packages/browser/src/bin/strider.ts",
     "pack-check": "node packages/tools/utils/src/bin.mjs pack-check",
     "scenarios": "nix develop .#integration --ignore-environment --keep TERM --command node packages/scenarios/src/bin.ts",

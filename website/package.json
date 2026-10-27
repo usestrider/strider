@@ -8,7 +8,8 @@
     "dev": "astro dev --port 4390",
     "check": "astro sync && tsc --noEmit",
     "build": "astro build",
-    "preview": "astro preview --port 4390"
+    "preview": "astro preview --port 4390",
+    "deploy": "sops exec-env deploy.sops.env 'alchemy deploy --stage prod'"
   },
   "dependencies": {
     "@astrojs/markdown-remark": "^7.3.4",
@@ -28,8 +29,12 @@
     "unified": "^11.0.5"
   },
   "devDependencies": {
+    "@alchemy.run/cloudflare": "2.0.0-beta.84",
+    "@effect/platform-node": "4.0.6",
     "@types/hast": "^3.0.5",
     "@types/mdast": "^4.0.4",
-    "@types/node": "^26.6.5"
+    "@types/node": "^26.6.5",
+    "alchemy": "2.0.0-beta.84",
+    "effect": "4.0.6"
   }
 }

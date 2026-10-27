@@ -2,6 +2,10 @@ node_modules/
 dist/
 *.tsbuildinfo
 .data/
+# Alchemy's local profile and artifacts; the docs' deploy state is kept on Cloudflare
+.alchemy/
+# Local settings, which Alchemy reads from website/.env; secrets are committed only sops-encrypted
+.env
 .examples/
 # Vitest's copies of recorded attachments
 .vitest/

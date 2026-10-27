@@ -9,6 +9,8 @@ enableGlobalVirtualStore: false
 allowBuilds:
   dprint: false
   esbuild: false
+  # Alchemy's local Worker runtime, for `alchemy dev` alone: deploying the docs doesn't run it
+  workerd: false
 minimumReleaseAgeExclude:
   - '@effect/tsgo-darwin-arm64@0.54.0'
   - '@effect/tsgo-darwin-x64@0.54.0'

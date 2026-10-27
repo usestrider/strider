@@ -1,0 +1,50 @@
+# The documentation site, deployed to Cloudflare from main (website/alchemy.run.ts): in the Nix environment's
+# default shell, as the checks run. Its settings, the Cloudflare token and account among them, are in
+# website/deploy.sops.env, which the SOPS_AGE_KEY secret, the deploy's own age key, decrypts (.sops.yaml). It deploys
+# once the token is there, which is after the first deploy from a maintainer's machine has made Alchemy's state store.
+name: Docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time, and never one cut off halfway
+concurrency:
+  group: docs-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # 31.11.3
+      # Off until the deploy's Cloudflare token is in website/deploy.sops.env
+      - name: Check for the token
+        id: token
+        run: |
+          if nix develop --command sops exec-env website/deploy.sops.env 'test -n "${CLOUDFLARE_API_TOKEN:-}"'; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+      - name: Install
+        if: steps.token.outputs.present == 'true'
+        run: nix develop --command pnpm install --frozen-lockfile
+      # Builds the API reference and the site, then deploys what changed
+      - name: Deploy
+        if: steps.token.outputs.present == 'true'
+        run: nix develop --command pnpm website:deploy
+        env:
+          CI: "true"
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
