@@ -10,6 +10,7 @@ import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import { site } from "../adapter/harness.ts"
+import { supports } from "./capabilities.ts"
 
 const timeout = 60_000
 
@@ -140,10 +141,17 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* page.getByText("double").pipe(Expect.toBeVisible)
             yield* page.locator("#h").hover()
             yield* page.getByText("hovered").pipe(Expect.toBeVisible)
-            yield* page.locator("#t").tap()
-            yield* page.getByText("touched").pipe(Expect.toBeVisible)
+            const tapped = page.locator("#t").tap()
+            if (yield* supports("input.touch")) {
+              yield* tapped
+              yield* page.getByText("touched").pipe(Expect.toBeVisible)
+            } else {
+              const error = yield* Effect.flip(tapped)
+              assert(Locator.isLocatorError(error) && error.reason._tag === "Unsupported", String(error))
+              assert.strictEqual(error.reason.capability, "input.touch")
+            }
             const modified = page.locator("#m").click({ modifiers: ["Shift"] })
-            if (name === "WebKit") {
+            if (!(yield* supports("input.pointerModifiers"))) {
               const error = yield* Effect.flip(modified)
               assert(Locator.isLocatorError(error) && error.reason._tag === "Unsupported", String(error))
               assert.strictEqual(error.reason.capability, "input.pointerModifiers")
@@ -199,6 +207,13 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const page = yield* context.newPage
               yield* page.goto(url)
               const field = page.locator("#field")
+              if (!(yield* supports("input.keyboardLayout"))) {
+                // A backend that types characters, not a layout's keys, refuses the keys only a layout has
+                const error = yield* Effect.flip(field.pressSequentially("zY@ê"))
+                assert(Locator.isLocatorError(error) && error.reason._tag === "Unsupported", String(error))
+                assert.strictEqual(error.reason.capability, "input.keyboardLayout")
+                return
+              }
               yield* field.pressSequentially("zY@ê")
               yield* field.pipe(Expect.toHaveValue("zY@ê"))
               const log = yield* page.locator("#log").readText
@@ -421,7 +436,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* page.mouse.wheel({ x: 0, y: 500 })
             yield* page.locator("#scrolled").pipe(Expect.toHaveText("scrolled"))
             const modified = page.mouse.click({ x: 50, y: 225 }, { modifiers: ["Shift"] })
-            if (name === "WebKit") {
+            if (!(yield* supports("input.pointerModifiers"))) {
               const error = yield* Effect.flip(modified)
               assert(Mouse.isMouseError(error) && error.reason._tag === "Unsupported", String(error))
             } else {

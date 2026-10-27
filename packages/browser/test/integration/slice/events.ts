@@ -27,6 +27,7 @@ import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { site } from "../adapter/harness.ts"
+import { supports } from "./capabilities.ts"
 
 const timeout = 60_000
 
@@ -59,11 +60,26 @@ const connect = (origin: string) =>
     )
   }`
 
+/**
+ * Where the backend can't say which page opened a page, `Popup` refuses to wait for one, naming the capability
+ * (QUIRKS.md, Q212): whether it did.
+ */
+const popupsRefused = Effect.fnUntraced(function*() {
+  if (yield* supports("popups.opener")) return false
+  yield* Effect.scoped(Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const error = yield* Effect.flip(Effect.asVoid(Popup.next(page)))
+    assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "popups.opener" })
+  }))
+  return true
+})
+
 export const events = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} events`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
       it.effect("runs call site 3: a popup, with a dialog inside it a handler accepts", () =>
         Effect.gen(function*() {
+          if (yield* popupsRefused()) return
           const { url } = yield* fixture(connect)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
@@ -87,6 +103,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
         "keeps a popup's opener rendering: on Firefox as launched, elsewhere with focus emulated",
         () =>
           Effect.gen(function*() {
+            if (yield* popupsRefused()) return
             const { origin, url } = yield* fixture((origin) =>
               opener("Open", `${origin}/child`) +
               `<button onclick="document.getElementById('out').textContent = 'clicked'">After</button><p id="out">not yet</p>`
@@ -125,6 +142,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
 
       it.effect("matches a popup by the URL it was opened for, among two", () =>
         Effect.gen(function*() {
+          if (yield* popupsRefused()) return
           const { origin, url } = yield* fixture((origin) =>
             opener("First", fixtureUrl(origin, "<title>First</title>")) + opener("Second", `${origin}/child?second`)
           )
@@ -146,6 +164,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
 
       it.effect("names the event a late next missed", () =>
         Effect.gen(function*() {
+          if (yield* popupsRefused()) return
           const { url } = yield* fixture(connect)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
@@ -164,6 +183,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
 
       it.effect("closes a popup with the scope that acquired its opener", () =>
         Effect.gen(function*() {
+          if (yield* popupsRefused()) return
           const { url } = yield* fixture(connect)
           const scope = yield* Scope.make()
           const popup = yield* Effect.gen(function*() {
@@ -184,9 +204,12 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(url)
-            const popups = yield* Popup.next(page)
+            // A popup's wait, or a dialog's where the backend can't say which page opened a page
+            const waiting = (yield* supports("popups.opener"))
+              ? Effect.asVoid(yield* Popup.next(page))
+              : Effect.asVoid(yield* Dialog.next(page))
             yield* page.close()
-            const error = yield* popups.pipe(Effect.flip)
+            const error = yield* waiting.pipe(Effect.flip)
             assert(Target.isTargetGone(error), String(error))
             assert.deepStrictEqual(error.reason, { _tag: "PageClosed", by: "command" })
           }))
@@ -202,10 +225,12 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             const decisions = yield* AutoResolution.next(page)
             yield* page.getByText("Ask").click()
             const dialog = yield* dialogs
-            assert(dialog._tag === "Confirm")
+            // A backend that can't say a dialog's kind says it's unknown (QUIRKS.md, Q206)
+            const kind = (yield* supports("prompts.kind")) ? "Confirm" : "Unknown"
+            assert(dialog._tag === kind)
             assert.strictEqual(dialog.message, "Sure?")
             const decided = yield* decisions
-            assert.deepStrictEqual(decided.subject, { _tag: "Dialog", kind: "Confirm", message: "Sure?" })
+            assert.deepStrictEqual(decided.subject, { _tag: "Dialog", kind, message: "Sure?" })
             assert.strictEqual(decided.decision, "dismiss")
             assert.deepStrictEqual(decided.policy, { _tag: "ContextOption", name: "dialogs", value: "dismiss" })
             yield* page.getByText("false", { exact: true }).pipe(Expect.toBeVisible)
@@ -251,6 +276,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
         () =>
           Effect.gen(function*() {
             const { url } = yield* fixture(() => asking("(alert('one'), confirm('two'))"))
+            const kinds = yield* supports("prompts.kind")
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* Browser.newPage()
               yield* page.goto(url)
@@ -265,11 +291,14 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
                   each._tag,
                   each.message
                 ]),
-                [["Alert", "one"], ["Confirm", "two"]]
+                kinds ? [["Alert", "one"], ["Confirm", "two"]] : [["Unknown", "one"], ["Unknown", "two"]]
               )
               yield* page.close()
               const all = yield* Fiber.join(collected)
-              assert.deepStrictEqual(Array.from(all).map((each) => each._tag), ["Alert", "Confirm"])
+              assert.deepStrictEqual(
+                Array.from(all).map((each) => each._tag),
+                kinds ? ["Alert", "Confirm"] : ["Unknown", "Unknown"]
+              )
             }))
           }),
         timeout
@@ -283,8 +312,8 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             yield* page.goto(url)
             const error = yield* page.getByText("Ask").click().pipe(Effect.flip)
             assert(Locator.isLocatorError(error), String(error))
-            assert(error.reason._tag === "PromptBlocking")
-            assert.strictEqual(error.reason.kind, "confirm")
+            assert(error.reason._tag === "PromptBlocking", String(error))
+            assert.strictEqual(error.reason.kind, (yield* supports("prompts.kind")) ? "confirm" : "unknown")
             assert.strictEqual(error.reason.text, "Stop?")
             assert.strictEqual(error.diagnostics.dispatch._tag, "MayHaveBeenSent")
             const started = Date.now()

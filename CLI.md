@@ -202,6 +202,8 @@ A page the segment opens itself belongs to the segment's scope, and closes with 
 
 *2026-10-26, after [review 23](reviews/23-webkit-without-playwright.md), its second step.* `start --webkit <path>` with WebKitGTK's or WPE's MiniBrowser launches stock WebKit in automation mode, as `WebKit.layer` does: its window needs a display (`DISPLAY`), and the daemon provides its TCP socket from Node's. Its pages are windows of their own, so the session's context doesn't emulate focus, and `start` says `focus system`. An exported test of such a session provides `SocketConnector` too.
 
+*2026-10-26, after [review 23](reviews/23-webkit-without-playwright.md), its third step.* On stock WebKit, `next` with `event: "popup"` or `"download"` fails at once, as data naming the capability (`popups.opener`, `downloads`): stock WebKit doesn't say which page opened a page (QUIRKS.md, Q212), and reports no downloads. For the same reason the digest notes no popup there.
+
 ## Open questions
 
 None. Type-checking was settled by leaving it to the project's own `tsc`, and failed requests by the rule under Commands.

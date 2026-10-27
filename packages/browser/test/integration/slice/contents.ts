@@ -24,9 +24,11 @@ import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
 import * as Tracer from "effect/Tracer"
 import * as zlib from "node:zlib"
 import { site } from "../adapter/harness.ts"
+import { fullySupports, supports } from "./capabilities.ts"
 
 const timeout = 60_000
 
@@ -85,6 +87,27 @@ const shop =
 <p>Hello <b>world</b></p>
 <pre id="log"></pre><script>function log(word) { const out = document.getElementById('log'); out.textContent = (out.textContent + ' ' + word).trim() }</script>`
 
+/**
+ * Where the backend makes no world of its own, a caller's function never moves to the page's: `evaluate`, its
+ * handles and a locator's are refused, naming the capability. Whether it was.
+ */
+const isolatedRefused = Effect.fnUntraced(function*(refused: Effect.Effect<unknown, unknown, Scope.Scope>) {
+  if (yield* supports("isolatedWorlds")) return false
+  const error = yield* Effect.scoped(Effect.flip(refused))
+  assert.deepInclude((error as { readonly reason: unknown }).reason, {
+    _tag: "Unsupported",
+    capability: "isolatedWorlds"
+  })
+  return true
+})
+
+/** The isolated world's `evaluate`, or the page's world's where the backend makes none. */
+const evaluator = Effect.fnUntraced(function*(page: Page.Page) {
+  const isolated = yield* supports("isolatedWorlds")
+  return <Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args) =>
+    isolated ? page.evaluate(fn, ...args) : page.evaluateInMainWorld(fn, ...args)
+})
+
 export const contents = (
   name: "Chromium" | "Firefox" | "WebKit",
   backend: Layer.Layer<Browser.Browser, unknown>
@@ -99,6 +122,17 @@ export const contents = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(fixtureUrl(origin, `<script>window.secret = 42</script><p id="x">hello</p>`))
+            if (
+              yield* isolatedRefused(page.evaluate(() =>
+                1
+              ))
+            ) {
+              assert.strictEqual(
+                yield* page.evaluateInMainWorld(() => (window as unknown as { secret: number }).secret),
+                42
+              )
+              return
+            }
             const value = yield* page.evaluate(() => ({
               n: 1,
               when: new Date(0),
@@ -118,8 +152,7 @@ export const contents = (
             assert.deepStrictEqual(value.nested, { list: [1, "two", null] })
             assert.strictEqual(
               yield* page.evaluate(
-                (a: number, b: number) =>
-                  a + b,
+                (a: number, b: number) => a + b,
                 1,
                 2
               ),
@@ -145,8 +178,9 @@ export const contents = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(fixtureUrl(origin, `<p>hi</p>`))
+            const evaluate = yield* evaluator(page)
             const thrown = reasonOf(
-              yield* Effect.exit(page.evaluate(() => {
+              yield* Effect.exit(evaluate(() => {
                 throw new TypeError("boom")
               }))
             )
@@ -158,16 +192,16 @@ export const contents = (
               assert.strictEqual(reason.exception.message, "boom")
             }
             const rejected = reasonOf(
-              yield* Effect.exit(page.evaluate(() =>
+              yield* Effect.exit(evaluate(() =>
                 Promise.reject(new Error("later"))
               ))
             )
             assert.strictEqual((rejected as unknown as Page.PageError).reason._tag, "EvaluationThrown")
             const argument = reasonOf(
-              yield* Effect.exit(page.evaluate((value: unknown) => value, { fn: () => 1, nested: [Symbol("s")] }))
+              yield* Effect.exit(evaluate((value: unknown) => value, { fn: () => 1, nested: [Symbol("s")] }))
             )
             assert.deepInclude((argument as unknown as Page.PageError).reason, { _tag: "NotSerializable" })
-            const node = reasonOf(yield* Effect.exit(page.evaluate(() => document.body as unknown)))
+            const node = reasonOf(yield* Effect.exit(evaluate(() => document.body as unknown)))
             const nodeReason = (node as unknown as Page.PageError).reason
             assert.strictEqual(nodeReason._tag, "NotSerializable")
           }))
@@ -179,6 +213,7 @@ export const contents = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(fixtureUrl(origin, `<p id="x">hello</p>`))
+            if (yield* isolatedRefused(page.evaluateHandle(() => document.body))) return
             const body = yield* page.evaluateHandle(() => document.body)
             assert.isTrue(JSHandle.isJSHandle(body))
             assert.strictEqual(yield* body.evaluate((element) => element.tagName), "BODY")
@@ -217,15 +252,19 @@ export const contents = (
               return span
             }
           })
+          const worlds = yield* supports("isolatedWorlds")
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p><p>c</p>`))
+            if (
+              yield* isolatedRefused(page.evaluateHandle(() =>
+                document.body
+              ))
+            ) return
             yield* Effect.scoped(Effect.gen(function*() {
               const paragraphs = yield* Effect.forEach(
                 [0, 1, 2],
-                (index) =>
-                  page.evaluateHandle((at: number) =>
-                    document.querySelectorAll("p")[at]!, index)
+                (index) => page.evaluateHandle((at: number) => document.querySelectorAll("p")[at]!, index)
               )
               assert.strictEqual(yield* paragraphs[1]!.evaluate((element) => element.textContent), "b")
               yield* paragraphs[2]!.release
@@ -236,6 +275,7 @@ export const contents = (
             return typeof method === "string" && /^Runtime\.release|^script\.disown/.test(method) ? [method] : []
           })
           // The one released alone, then the other two together as the scope closed
+          if (!worlds) return
           assert.deepStrictEqual(
             released,
             name === "Firefox"
@@ -250,15 +290,19 @@ export const contents = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(fixtureUrl(origin, `<p id="x" data-n="3">hello</p><p>a</p><p>b</p>`))
+            if (
+              yield* isolatedRefused(
+                page.locator("#x").evaluate((element) =>
+                  element.id
+                )
+              )
+            ) return
             assert.strictEqual(
-              yield* page.locator("#x").evaluate((element, suffix: string) =>
-                element.textContent + suffix, "!"),
+              yield* page.locator("#x").evaluate((element, suffix: string) => element.textContent + suffix, "!"),
               "hello!"
             )
             assert.strictEqual(
-              yield* page.locator("#x").evaluate((element) =>
-                Number((element as HTMLElement).dataset["n"]) * 2
-              ),
+              yield* page.locator("#x").evaluate((element) => Number((element as HTMLElement).dataset["n"]) * 2),
               6
             )
             const missing = reasonOf(yield* Effect.exit(page.locator("#nothing").evaluate((element) => element.id)))
@@ -305,10 +349,12 @@ export const contents = (
               assert.strictEqual(yield* frame.getByLabel("Name").readValue, `typed in ${id}`)
               assert.strictEqual(yield* frame.getByRole("heading").readText, id === "same" ? "Same" : "Cross")
               assert.strictEqual(yield* frame.locator("button").count, 1)
-              assert.strictEqual(
-                yield* frame.getByRole("heading").evaluate((element) => element.ownerDocument.location.origin),
-                id === "same" ? origin : crossSite
-              )
+              if (yield* supports("isolatedWorlds")) {
+                assert.strictEqual(
+                  yield* frame.getByRole("heading").evaluate((element) => element.ownerDocument.location.origin),
+                  id === "same" ? origin : crossSite
+                )
+              }
             }
             // The page's own document has no button
             assert.strictEqual(yield* page.locator("button").count, 0)
@@ -339,12 +385,13 @@ export const contents = (
             yield* nested.getByRole("button", { name: "Add" }).click()
             yield* nested.locator("#count").pipe(Expect.toHaveText("1"))
             // The frame navigates: the locator follows it
-            yield* page.locator("#outer").evaluate((element) => {
-              ;(element as HTMLIFrameElement).src = "/fixture?html=" + encodeURIComponent("<h1>Replaced</h1>")
+            yield* page.evaluateInMainWorld(() => {
+              ;(document.getElementById("outer") as HTMLIFrameElement).src = "/fixture?html=" +
+                encodeURIComponent("<h1>Replaced</h1>")
             })
             yield* outer.getByRole("heading").pipe(Expect.toHaveText("Replaced"))
             // An iframe added later is waited for
-            yield* page.evaluate((url: string) => {
+            yield* page.evaluateInMainWorld((url: string) => {
               setTimeout(() => {
                 const frame = document.createElement("iframe")
                 frame.id = "late"
@@ -377,8 +424,8 @@ export const contents = (
             yield* far.getByRole("button", { name: "Add" }).click()
             yield* far.locator("#count").pipe(Expect.toHaveText("1"))
             // Covered in the parent: the click waits, and says what covers it
-            yield* page.locator("#cover").evaluate((element) => {
-              ;(element as HTMLElement).style.display = "block"
+            yield* page.evaluateInMainWorld(() => {
+              document.getElementById("cover")!.style.display = "block"
             })
             const covered = reasonOf(
               yield* Effect.exit(
@@ -462,8 +509,10 @@ export const contents = (
             const again = yield* page.snapshot()
             assert.isTrue(again.refs.has(refOf("button", "Save")))
             // A removed node's ref is stale
-            yield* page.getByRole("button", { name: "Save" }).evaluate((element) =>
-              element.remove()
+            yield* page.evaluateInMainWorld(() =>
+              [...document.querySelectorAll("button")].find((button) =>
+                button.textContent === "Save"
+              )!.remove()
             )
             const detached = reasonOf(yield* Effect.exit(snapshot.ref(refOf("button", "Save")).click()))
             assert.deepInclude((detached as unknown as Locator.LocatorError).reason, {
@@ -494,7 +543,7 @@ export const contents = (
             yield* page.goto(fixtureUrl(origin, shop))
             const before = yield* page.snapshot()
             yield* page.getByRole("checkbox", { name: "Agree" }).uncheck()
-            yield* page.evaluate(() => {
+            yield* page.evaluateInMainWorld(() => {
               const button = document.createElement("button")
               button.textContent = "Later"
               document.body.append(button)
@@ -573,7 +622,7 @@ export const contents = (
               AriaPattern.node("paragraph", "", AriaPattern.exactly(AriaPattern.text("Hello world")))
             ))
             // It waits for the page to change
-            yield* page.evaluate(() => {
+            yield* page.evaluateInMainWorld(() => {
               setTimeout(() => {
                 const item = document.createElement("li")
                 item.textContent = "Three"
@@ -650,7 +699,7 @@ export const contents = (
                 )
               }"></iframe><div style="height:1000px"></div></body>`
             ))
-            const { height, ratio, width } = yield* page.evaluate(() => ({
+            const { height, ratio, width } = yield* page.evaluateInMainWorld(() => ({
               width: innerWidth,
               height: innerHeight,
               ratio: devicePixelRatio
@@ -673,8 +722,17 @@ export const contents = (
             assert.deepStrictEqual(inner, { width: 50 * ratio, height: 40 * ratio })
             const full = pngSize(yield* page.screenshot({ area: { _tag: "FullPage" } }))
             assert.strictEqual(full.height, (1500 + 80 + 200 + 1000) * ratio + (full.height % ratio))
-            const jpeg = yield* page.screenshot({ format: { _tag: "Jpeg", quality: 50 } })
-            assert.deepStrictEqual([...jpeg.subarray(0, 2)], [0xff, 0xd8])
+            const jpeg = yield* Effect.exit(page.screenshot({ format: { _tag: "Jpeg", quality: 50 } }))
+            if (yield* fullySupports("screenshot.format")) {
+              assert(Exit.isSuccess(jpeg), String(jpeg))
+              assert.deepStrictEqual([...jpeg.value.subarray(0, 2)], [0xff, 0xd8])
+            } else {
+              // A backend that writes PNG only says so: stock WebKit's `snapshotRect`
+              assert.deepInclude((reasonOf(jpeg) as unknown as Page.PageError).reason, {
+                _tag: "Unsupported",
+                capability: "screenshot.format"
+              })
+            }
             const missing = reasonOf(
               yield* Effect.exit(page.screenshot({ area: { _tag: "Element", locator: page.locator("#none") } }))
             )
@@ -690,7 +748,7 @@ export const contents = (
             const page = yield* Browser.newPage()
             // No doctype: in quirks mode the root element is only as tall as its content (QUIRKS.md, Q114)
             yield* page.goto(fixtureUrl(origin, `<p>hi</p>`))
-            const ratio = yield* page.evaluate(() =>
+            const ratio = yield* page.evaluateInMainWorld(() =>
               devicePixelRatio
             )
             const clip = pngSize(
@@ -706,7 +764,7 @@ export const contents = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(fixtureUrl(origin, `<!DOCTYPE html><p>hi</p>`))
-            const width = yield* page.evaluate(() =>
+            const width = yield* page.evaluateInMainWorld(() =>
               innerWidth
             )
             const css = yield* Effect.exit(page.screenshot({ scale: "css" }))
@@ -716,21 +774,24 @@ export const contents = (
                 area: { _tag: "Clip", rect: cssRect({ x: 0, y: 200, width: 20, height: 20 }) }
               })
             )
-            if (name === "Firefox") {
+            if (yield* supports("screenshot.cssScale")) {
+              assert.isTrue(Exit.isSuccess(css) && pngSize(css.value).width === width)
+            } else {
               assert.deepInclude((reasonOf(css) as unknown as Page.PageError).reason, {
                 _tag: "Unsupported",
                 capability: "screenshot.cssScale"
               })
-              assert.deepInclude((reasonOf(clear) as unknown as Page.PageError).reason, {
-                _tag: "Unsupported",
-                capability: "screenshot.omitBackground"
-              })
-            } else {
-              assert.isTrue(Exit.isSuccess(css) && pngSize(css.value).width === width)
+            }
+            if (yield* supports("screenshot.omitBackground")) {
               assert.isTrue(Exit.isSuccess(clear))
               if (Exit.isSuccess(clear)) {
                 assert.strictEqual(firstAlpha(clear.value), 0)
               }
+            } else {
+              assert.deepInclude((reasonOf(clear) as unknown as Page.PageError).reason, {
+                _tag: "Unsupported",
+                capability: "screenshot.omitBackground"
+              })
             }
             // The background is back afterwards
             const after = yield* page.screenshot({
@@ -791,6 +852,27 @@ export const contents = (
             const page = yield* Browser.newPage()
             yield* page.goto(fixtureUrl(origin, `<script>document.cookie = "plain=1; path=/"</script><p>hi</p>`))
             const jar = page.context.cookies
+            if (!(yield* fullySupports("cookies"))) {
+              // Where a context's list is the cookies its pages are sent (QUIRKS.md, Q225), one shows once a page is
+              const listed = Effect.map(jar.list, (cookies) =>
+                cookies.map((cookie) => cookie.name).sort())
+              yield* jar.set({
+                name: "token",
+                value: Redacted.make("secret"),
+                scope: { _tag: "Url", url: `${origin}/app/page` }
+              })
+              assert.deepStrictEqual(yield* listed, ["plain"])
+              yield* page.goto(`${origin}/app/page`)
+              const token = (yield* jar.list).find((cookie) => cookie.name === "token")
+              assert.isDefined(token)
+              assert.strictEqual(Redacted.value(token.value), "secret")
+              assert.strictEqual(token.path, "/app")
+              yield* jar.remove({ name: "token" })
+              assert.deepStrictEqual(yield* listed, ["plain"])
+              yield* jar.clear
+              assert.deepStrictEqual(yield* listed, [])
+              return
+            }
             yield* jar.set({
               name: "token",
               value: Redacted.make("secret"),
@@ -803,9 +885,7 @@ export const contents = (
               sameSite: "strict"
             })
             const all = yield* jar.list
-            const token = all.find((cookie) =>
-              cookie.name === "token"
-            )!
+            const token = all.find((cookie) => cookie.name === "token")!
             assert.strictEqual(Redacted.value(token.value), "secret")
             assert.strictEqual(token.path, "/app")
             assert.deepStrictEqual(token.sameSite, Option.some("lax"))
@@ -969,7 +1049,10 @@ document.getElementById("form").addEventListener("submit", (event) => {
             ))
             yield* page.getByText("Welcome").pipe(Expect.toBeVisible)
             assert.deepStrictEqual(yield* page.localStorage.get("user"), Option.some("me@example.com"))
-            yield* page.frame(page.locator("#widget")).locator("#out").pipe(Expect.toHaveText("w1"))
+            // A partition restored under its site's default port, where the backend keys it by origin (Q232)
+            if (yield* fullySupports("storageState.partitioned")) {
+              yield* page.frame(page.locator("#widget")).locator("#out").pipe(Expect.toHaveText("w1"))
+            }
             const record = yield* page.evaluateInMainWorld(() =>
               new Promise<
                 {
@@ -1030,8 +1113,8 @@ document.getElementById("form").addEventListener("submit", (event) => {
             assert.strictEqual(tree.id, page.id)
             assert.include(tree.url, origin)
             assert.isTrue(Option.isNone(tree.children[0]!.name))
-            yield* page.locator("#a").evaluate((element) =>
-              element.remove()
+            yield* page.evaluateInMainWorld(() =>
+              document.getElementById("a")!.remove()
             )
             yield* page.frames.waitFor((tree) => tree.children.length === 0)
           }))

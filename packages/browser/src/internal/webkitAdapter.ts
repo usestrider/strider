@@ -570,6 +570,16 @@ const capabilities = (info: Browser.Info) => {
       entry("bodies", "supported"),
       entry("console", "supported", ["a message with only primitive arguments is attributed to the main frame"]),
       entry("prompts", "supported"),
+      entry("prompts.kind", "supported"),
+      entry("navigation.sameDocument", "supported"),
+      entry("navigation.traverse", "supported"),
+      entry("frames.contentFrame", "supported"),
+      entry("screenshot.format", "supported"),
+      entry("storageState.partitioned", "supported"),
+      entry("popups.opener", "supported"),
+      entry("network.headersSent", "supported"),
+      entry("input.touch", "supported"),
+      entry("close.runBeforeUnload", "supported"),
       entry("fileChooser", "supported"),
       entry("downloads", "supported"),
       entry("downloads.progress", "unsupported", ["Playwright's WebKit reports a download's start and end only"]),
@@ -637,6 +647,21 @@ const capabilities = (info: Browser.Info) => {
   })
 }
 
+/** The capability under which stock WebKit refuses an override it can't apply. */
+const stockOverrideCapabilities: Readonly<Record<string, string>> = {
+  UserAgent: "emulation.userAgent",
+  Locale: "emulation.locale",
+  TimeZone: "emulation.timezone",
+  Geolocation: "emulation.geolocation",
+  Media: "emulation.media",
+  Offline: "emulation.network.offline",
+  NetworkConditions: "emulation.network.throttling",
+  CpuThrottling: "emulation.cpuSlowdown",
+  JavaScriptEnabled: "emulation.javaScript",
+  Touch: "emulation.touch",
+  FocusEmulation: "emulation.focus"
+}
+
 /**
  * Stock WebKit's (review 22, candidate 7): Playwright's build's table, whose other entries stock WebKit's domains
  * serve as they do there, with what its remote inspector lacks. It has no `Playwright`, `Input`, `Dialog`,
@@ -652,12 +677,27 @@ const stockCapabilities = (info: Browser.Info) => {
     ]],
     isolatedWorlds: ["unsupported", ["stock WebKit's inspector makes no worlds: the engine runs in the page's"]],
     "pauseOnStart.popups": ["unsupported", ["a page the browser opens is found by reading the inspector's list"]],
+    cookies: ["partial", [
+      "a context's list is the cookies its pages' documents and resources are sent (QUIRKS.md, Q225)"
+    ]],
+    "storageState.partitioned": ["partial", [
+      "a frame's storage is restored under its top-level site at the scheme's default port: stock WebKit partitions it by the top-level origin, port included (QUIRKS.md, Q232)"
+    ]],
+    "network.headersSent": ["partial", [
+      "without the Cookie header, which WebKitGTK's network process doesn't report (QUIRKS.md, Q226)"
+    ]],
+    "popups.opener": ["unsupported", [
+      "stock WebKit names no page's opener: a page another opens is reported as the browser's (QUIRKS.md, Q212)"
+    ]],
     "input.native": ["unsupported", [noInput]],
     "input.keyboardLayout": ["unsupported", [noInput]],
     "input.insertText": ["unsupported", [noInput]],
     "input.pointerModifiers": ["unsupported", [noInput]],
     "input.dragAndDrop": ["unsupported", [noInput]],
+    "input.touch": ["unsupported", [noInput]],
     prompts: ["unsupported", ["stock WebKit's inspector has no Dialog domain: a dialog blocks the page unreported"]],
+    "prompts.kind": ["unsupported", ["stock WebKit's inspector has no Dialog domain"]],
+    "close.runBeforeUnload": ["unsupported", ["stock WebKit's inspector closes no pages"]],
     fileChooser: ["unsupported", ["stock WebKit's inspector reports no file chooser"]],
     downloads: ["unsupported", ["stock WebKit's inspector reports no downloads: a navigation that became one ends so"]],
     "downloads.progress": ["unsupported", ["stock WebKit's inspector reports no downloads"]],
@@ -727,7 +767,12 @@ const launchedCapabilities = (info: Browser.Info) => {
     ]],
     "input.pointerModifiers": ["supported", []],
     "input.dragAndDrop": ["unsupported", ["not checked against Automation's pointer"]],
-    prompts: ["partial", ["a dialog's kind isn't reported: every dialog is Unknown (QUIRKS.md, Q206)"]],
+    "input.touch": ["unsupported", ["WebKitGTK builds its Automation without touch (QUIRKS.md, Q214)"]],
+    prompts: ["partial", ["a dialog's kind and default text aren't reported (QUIRKS.md, Q206)"]],
+    "prompts.kind": ["unsupported", [
+      "every dialog is Unknown: stock WebKit's Automation says one is open, not which kind (QUIRKS.md, Q206)"
+    ]],
+    "close.runBeforeUnload": ["unsupported", ["stock WebKit's Automation closes a page without asking it"]],
     fileChooser: ["unsupported", [
       "a chooser a click opens is cancelled by the browser, unreported; a file input's files are set (setInputFiles)"
     ]],
@@ -740,7 +785,12 @@ const launchedCapabilities = (info: Browser.Info) => {
     "emulation.locale": ["unsupported", [
       "the MiniBrowser takes its language from nothing it's given (QUIRKS.md, Q218)"
     ]],
-    "cookies": ["partial", ["read and set through a page of the context, so a context with none open has none to read"]]
+    "cookies": ["partial", [
+      "a context's list is the cookies its open pages' documents and resources are sent (QUIRKS.md, Q225), and a host's cookie is set as its domain's (Q230)"
+    ]],
+    "frames.contentFrame": ["supported", [
+      "the frame Automation resolves, matched to the inspector's by its document's time origin and URL"
+    ]]
   }
   const base = stockCapabilities(info).entries
   const entries = base.map((entry) => {
@@ -946,6 +996,44 @@ export const connect: (
       return document
     }
 
+    // Stock WebKit's error page is a load of its own, about:blank, after the failure (QUIRKS.md, Q199): the failed
+    // navigation's document, never a navigation of its own. A load it refuses before any request, such as to a port
+    // it blocks, shows only the error page: the goto it stands in for failed then
+    const errorPageFor = new Map<FrameEntry, PageNavigation.Id>()
+    const errorLoaders = new Map<string, PageNavigation.Id>()
+    const errorPage = (frame: FrameEntry, loaderId: string, url: string): PageNavigation.Id | undefined => {
+      const known = errorLoaders.get(loaderId)
+      if (known !== undefined || !stock || normalize(url) !== "about:blank") return known
+      const after = errorPageFor.get(frame)
+      if (after !== undefined) {
+        errorPageFor.delete(frame)
+        errorLoaders.set(loaderId, after)
+        return after
+      }
+      if (frame.expected.some((expected) => normalize(expected.url) === "about:blank")) return undefined
+      const refused = frame.expected.shift()
+      if (refused === undefined) return undefined
+      const failed = startNavigationAs(
+        frame,
+        refused.id,
+        `refused:${refused.id}`,
+        refused.url,
+        refused.initiatedAs,
+        false
+      )
+      endNavigation(
+        failed,
+        {
+          _tag: "Failed",
+          error: "WebKit showed its error page instead: a load it refused, such as to a port it blocks",
+          errorDocument: Option.none()
+        },
+        "webkit:Network.requestWillBeSent"
+      )
+      errorLoaders.set(loaderId, refused.id)
+      return refused.id
+    }
+
     const startNavigation = (
       frame: FrameEntry,
       loaderId: string,
@@ -955,28 +1043,6 @@ export const connect: (
     ): NavigationEntry => {
       const normalized = normalize(url)
       const index = frame.expected.findIndex((expected) => normalize(expected.url) === normalized)
-      if (stock && index < 0 && normalized === "about:blank" && frame.expected.length > 0) {
-        // Stock WebKit's error page is about:blank, and a load it refuses before any request, such as to a port it
-        // blocks, shows only that: the goto it stands in for failed (QUIRKS.md, Q199)
-        const refused = frame.expected.shift()!
-        const failed = startNavigationAs(
-          frame,
-          refused.id,
-          `refused:${refused.id}`,
-          refused.url,
-          refused.initiatedAs,
-          false
-        )
-        endNavigation(
-          failed,
-          {
-            _tag: "Failed",
-            error: "WebKit showed its error page instead: a load it refused, such as to a port it blocks",
-            errorDocument: Option.none()
-          },
-          "webkit:Network.requestWillBeSent"
-        )
-      }
       const expected = index >= 0
         ? frame.expected.splice(index, 1)[0]
         : stock && normalized === "about:blank"
@@ -1472,6 +1538,16 @@ export const connect: (
           if (parent === undefined) return
           frame = addFrame(f.id, parent)
         }
+        const failed = navigations.has(f.loaderId) ? undefined : errorPage(frame, f.loaderId, f.url)
+        if (failed !== undefined) {
+          commit(
+            frame,
+            { loaderId: f.loaderId, url: f.url, origin: f.securityOrigin },
+            { _tag: "ErrorPage", navigation: failed },
+            "webkit:Page.frameNavigated"
+          )
+          return
+        }
         const navigation = navigations.get(f.loaderId) ??
           startNavigation(frame, f.loaderId, f.url, "crossDocument", false)
         const document = commit(
@@ -1650,7 +1726,10 @@ export const connect: (
           let navigation: NavigationEntry | undefined
           if (params.type === "Document" && frame !== undefined) {
             navigation = navigations.get(params.loaderId)
-            if (navigation === undefined && frame.document?.loaderId !== params.loaderId) {
+            if (
+              navigation === undefined && frame.document?.loaderId !== params.loaderId &&
+              errorPage(frame, params.loaderId, params.request.url) === undefined
+            ) {
               navigation = startNavigation(frame, params.loaderId, params.request.url, "crossDocument", false)
             }
           }
@@ -1818,6 +1897,7 @@ export const connect: (
             endNavigation(navigation, { _tag: "Download", download: Option.none() }, "webkit:Network.loadingFailed")
           } else {
             failLoad(navigation, params.errorText, "webkit:Network.loadingFailed")
+            if (!params.canceled) errorPageFor.set(navigation.frame, navigation.id)
           }
         }
       },
@@ -2958,18 +3038,28 @@ export const connect: (
       // A node crosses into this realm by its binding, an object of whichever world returned it (review 18,
       // candidate 1)
       const nodes = new Map<string, string>()
+      const resolved: Array<string> = []
       for (const argument of call.arguments) {
         if (argument._tag !== "Node" || nodes.has(argument.node.binding)) continue
+        // Stock WebKit has one world, the page's, whose objects a node's binding already is; its `resolveNode`
+        // takes only a node id
+        if (stock) {
+          nodes.set(argument.node.binding, argument.node.binding)
+          continue
+        }
         const { object } = yield* DOM.resolveNode({
           objectId: argument.node.binding as Runtime.RemoteObjectId,
           ...(realm.contextId === undefined
             ? {}
             : { executionContextId: realm.contextId as Runtime.ExecutionContextId })
         }).pipe(on, Effect.mapError(realmGone))
-        if (object.objectId !== undefined) nodes.set(argument.node.binding, object.objectId)
+        if (object.objectId !== undefined) {
+          nodes.set(argument.node.binding, object.objectId)
+          resolved.push(object.objectId)
+        }
       }
       const released = Effect.forEach(
-        nodes.values(),
+        resolved,
         (objectId) => Runtime.releaseObject({ objectId: objectId as Runtime.RemoteObjectId }).pipe(on, Effect.ignore),
         { discard: true }
       )
@@ -3287,6 +3377,24 @@ export const connect: (
       if (declaration._tag === "FileChooser" && stock) {
         return yield* Effect.fail(unsupported("fileChooser", "stock WebKit reports no file chooser"))
       }
+      if (declaration._tag === "Downloads" && stock) {
+        return yield* Effect.fail(unsupported("downloads", "stock WebKit reports no downloads"))
+      }
+      if (declaration._tag === "Override" && stock) {
+        // Stock WebKit refuses, under its capability, every override it says it can't apply
+        const override = declaration.override
+        const capability = override._tag === "Viewport"
+          ? override.mobile || override.deviceScaleFactor !== 1
+            ? "emulation.viewport.mobile"
+            : "emulation.viewport"
+          : stockOverrideCapabilities[override._tag]
+        const entry = capability === undefined
+          ? undefined
+          : (yield* SubscriptionRef.get(capabilitySet)).entries.find((each) => each.name === capability)
+        if (capability !== undefined && entry?.status === "unsupported") {
+          return yield* Effect.fail(unsupported(capability, entry.limitations.join("; ")))
+        }
+      }
       if (declaration._tag === "InitScript" && declaration.world._tag === "Isolated") {
         return yield* Effect.fail(
           unsupported("initScript.isolatedWorld", "WebKit runs init scripts in the main world only")
@@ -3474,18 +3582,22 @@ export const connect: (
       ))
     })
 
+    // A request's body: base64 from Playwright's build, text from stock WebKit's, which decoded it as UTF-8 or else
+    // Latin-1 (QUIRKS.md, Q221)
+    const bodyOf = (postData: string): Uint8Array => stock ? new TextEncoder().encode(postData) : fromBase64(postData)
+
     const requestBody = (hop: NetworkRequest.HopId) => {
       const request = hops.get(hop)
       if (request === undefined) return Effect.fail(foreign(hop))
       const sent = request.postData[ids.redirectsOf(hop)]
-      return Effect.succeed(sent === undefined ? Option.none<Uint8Array>() : Option.some(fromBase64(sent)))
+      return Effect.succeed(sent === undefined ? Option.none<Uint8Array>() : Option.some(bodyOf(sent)))
     }
 
     const pausedRequestBody = (id: Adapter.ObligationId) => {
       const obligation = obligations.get(id)
       if (obligation?._tag !== "PausedRequest") return Effect.fail(foreign(id))
       return Effect.succeed(
-        obligation.postData === undefined ? Option.none<Uint8Array>() : Option.some(fromBase64(obligation.postData))
+        obligation.postData === undefined ? Option.none<Uint8Array>() : Option.some(bodyOf(obligation.postData))
       )
     }
 
@@ -3717,6 +3829,14 @@ export const connect: (
 
     // A page's two names: Automation's handle and the inspector's target, paired by the document's time origin,
     // which both read and neither writes (review 23, candidate 4; QUIRKS.md, Q219)
+    // Automation's result of a function, as JSON: one that threw is an empty result, not an error (QUIRKS.md, Q227)
+    const resultOf = (result: string): Option.Option<unknown> => {
+      try {
+        return Option.some(JSON.parse(result))
+      } catch {
+        return Option.none()
+      }
+    }
     const pageHandles = new Map<PageEntry, Automation.BrowsingContextHandle>()
     const pairedHandles = new Set<string>()
     const pairing = yield* Semaphore.make(1)
@@ -3743,7 +3863,7 @@ export const connect: (
             function: timeOrigin,
             arguments: []
           })
-        ).pipe(Effect.map(({ result }) => JSON.parse(result) as unknown), Effect.option)
+        ).pipe(Effect.map(({ result }) => resultOf(result)), Effect.orElseSucceed(() => Option.none()))
         if (Option.isSome(theirs) && theirs.value === ours.value) {
           pageHandles.set(page, candidate.handle)
           pairedHandles.add(candidate.handle)
@@ -3776,6 +3896,41 @@ export const connect: (
       yield* watchDialogs(page, handle, process).pipe(Effect.forkIn(adapterScope))
     })
 
+    // A dialog Automation says is open, reported with its message, unless it already is
+    const reportDialog = Effect.fnUntraced(function*(
+      page: PageEntry,
+      handle: Automation.BrowsingContextHandle,
+      process: WebKitAutomation.Process
+    ) {
+      const message = yield* Automation.messageOfCurrentJavaScriptDialog({ browsingContextHandle: handle }).pipe(
+        Protocol.on(process.automation),
+        Effect.map((reply) => reply.message),
+        Effect.orElseSucceed(() => "")
+      )
+      yield* run(() => {
+        if (page.dialog === undefined && !page.ended) promptOpened(page, "unknown", message, "")
+      })
+    })
+
+    /**
+     * Input that opens a dialog returns once the dialog is decided, as on every backend; Automation's returns as it
+     * opens, so the adapter looks for one before the input returns (QUIRKS.md, Q224).
+     */
+    const settleDialog = Effect.fnUntraced(function*(
+      page: PageEntry,
+      handle: Automation.BrowsingContextHandle,
+      process: WebKitAutomation.Process
+    ) {
+      const showing = yield* Automation.isShowingJavaScriptDialog({ browsingContextHandle: handle }).pipe(
+        Protocol.on(process.automation),
+        Effect.map(({ result }) => result),
+        Effect.orElseSucceed(() => false)
+      )
+      if (!showing) return
+      if (page.dialog === undefined) yield* reportDialog(page, handle, process)
+      while (page.dialog !== undefined && !page.ended) yield* Effect.sleep("20 millis")
+    })
+
     // Stock WebKit's Automation reports a dialog only when asked, and not its kind (QUIRKS.md, Q206)
     const watchDialogs = Effect.fnUntraced(function*(
       page: PageEntry,
@@ -3790,14 +3945,7 @@ export const connect: (
           Effect.orElseSucceed(() => false)
         )
         if (showing && page.dialog === undefined) {
-          const message = yield* Automation.messageOfCurrentJavaScriptDialog({ browsingContextHandle: handle }).pipe(
-            Protocol.on(process.automation),
-            Effect.map((reply) => reply.message),
-            Effect.orElseSucceed(() => "")
-          )
-          yield* run(() => {
-            if (page.dialog === undefined && !page.ended) promptOpened(page, "unknown", message, "")
-          })
+          yield* reportDialog(page, handle, process)
         } else if (!showing && page.dialog !== undefined) {
           yield* run(() => promptClosed(page, "webkit:Automation.isShowingJavaScriptDialog"))
         }
@@ -3806,6 +3954,8 @@ export const connect: (
 
     // The window's size less the viewport's, measured once per process: its toolbar (review 23, P5)
     const chrome = new Map<string, { readonly width: number; readonly height: number }>()
+    // Each page's window as it was before its first resize, to restore when the viewport is released
+    const naturalWindows = new WeakMap<PageEntry, { readonly width: number; readonly height: number }>()
     const resizeWindow = (
       page: PageEntry,
       override: Adapter.Override | undefined
@@ -3815,19 +3965,29 @@ export const connect: (
         const process = group?.process(page.context.browserContextId ?? "default")
         if (handle === undefined || process === undefined) return
         const on = Protocol.on(process.automation)
-        let frame = chrome.get(process.key)
-        if (frame === undefined) {
-          const { context } = yield* Automation.getBrowsingContext({ handle }).pipe(on)
-          const { result } = yield* Automation.evaluateJavaScriptFunction({
-            browsingContextHandle: handle,
-            function: "function() { return [innerWidth, innerHeight] }",
-            arguments: []
-          }).pipe(on)
-          const [width, height] = JSON.parse(result) as [number, number]
-          frame = { width: context.windowSize.width - width, height: context.windowSize.height - height }
-          chrome.set(process.key, frame)
+        if (override?._tag !== "Viewport") {
+          const natural = naturalWindows.get(page)
+          if (natural === undefined) return
+          naturalWindows.delete(page)
+          return yield* Automation.setWindowFrameOfBrowsingContext({ handle, size: natural }).pipe(on)
         }
-        if (override?._tag !== "Viewport") return
+        if (!naturalWindows.has(page)) {
+          const { context } = yield* Automation.getBrowsingContext({ handle }).pipe(on)
+          naturalWindows.set(page, context.windowSize)
+          if (!chrome.has(process.key)) {
+            const { result } = yield* Automation.evaluateJavaScriptFunction({
+              browsingContextHandle: handle,
+              function: "function() { return [innerWidth, innerHeight] }",
+              arguments: []
+            }).pipe(on)
+            const [width, height] = Option.getOrElse(resultOf(result), () => [0, 0]) as [number, number]
+            chrome.set(process.key, {
+              width: context.windowSize.width - width,
+              height: context.windowSize.height - height
+            })
+          }
+        }
+        const frame = chrome.get(process.key)!
         yield* Automation.setWindowFrameOfBrowsingContext({
           handle,
           size: { width: override.width + frame.width, height: override.height + frame.height }
@@ -3993,29 +4153,57 @@ export const connect: (
     // Only sources WebKitGTK builds: touch isn't, and a touch source asserts (QUIRKS.md, Q214)
     const source = (kind: "Mouse" | "Keyboard" | "Wheel") =>
       ({ sourceId: kind.toLowerCase(), sourceType: kind }) as unknown as Automation.InputSource
+    // A session's wheel scrolls by the difference between its states, which outlive a sequence: each process's
+    // wheel state so far (QUIRKS.md, Q223)
+    const wheelStates = new Map<string, { width: number; height: number }>()
     const dispatchInputLaunched = Effect.fnUntraced(
       function*(id: L1Target.NavigableId, events: ReadonlyArray<Adapter.InputEvent>, _frame?: unknown) {
         const page = yield* pageOf(id)
+        // What Automation can't type is refused before anything is sent
+        for (const event of events) {
+          if (event._tag === "Touch") {
+            return yield* Effect.fail(
+              unsupported("input.touch", "WebKitGTK builds its Automation without touch (QUIRKS.md, Q214)")
+            )
+          }
+          if (event._tag === "Key" && virtualKeys[event.key] === undefined && [...event.key].length !== 1) {
+            return yield* Effect.fail(
+              unsupported(
+                "input.keyboardLayout",
+                `stock WebKit's Automation types characters and named keys, not ${event.key}`
+              )
+            )
+          }
+        }
         const handle = yield* handleOf(page)
         const process = yield* processOfContext(page.context)
-        const step = (
-          kinds: ReadonlyArray<"Mouse" | "Keyboard" | "Wheel">,
-          states: ReadonlyArray<Record<string, unknown>>
-        ) =>
-          automationOf(
+        let wheel = wheelStates.get(process.key)
+        if (wheel === undefined) wheelStates.set(process.key, wheel = { width: 0, height: 0 })
+        // The events up to text to insert, as one sequence: a sequence's end forgets a click, so a second click
+        // in another is never a double click (QUIRKS.md, Q223)
+        let steps: Array<ReadonlyArray<Record<string, unknown>>> = []
+        const flush = Effect.suspend(() => {
+          if (steps.length === 0) return Effect.void
+          const sent = steps
+          steps = []
+          return automationOf(
             process,
             Automation.performInteractionSequence({
               handle,
-              inputSources: kinds.map(source),
-              steps: [{ states: states as unknown as Array<Automation.InputSourceState> }]
+              inputSources: (["Keyboard", "Mouse", "Wheel"] as const).map(source),
+              steps: sent.map((states) => ({ states: states as unknown as Array<Automation.InputSourceState> }))
             })
-          )
+          ).pipe(Effect.andThen(settleDialog(page, handle, process)))
+        })
+        const insert = (interactions: ReadonlyArray<Automation.KeyboardInteraction>) =>
+          automationOf(process, Automation.performKeyboardInteractions({ handle, interactions: [...interactions] }))
+            .pipe(Effect.andThen(settleDialog(page, handle, process)))
         for (const event of events) {
           switch (event._tag) {
             case "Mouse": {
               // A state makes an event only when it names its interaction; the button is the one it moves
               const button = event.button === "none" ? heldButton(event.buttons) : capitalized(event.button)
-              yield* step(["Keyboard", "Mouse"], [
+              steps.push([
                 { sourceId: "keyboard", pressedVirtualKeys: heldKeys(event.modifiers) },
                 {
                   sourceId: "mouse",
@@ -4028,48 +4216,42 @@ export const connect: (
               break
             }
             case "Wheel":
-              yield* step(["Keyboard", "Wheel"], [
+              wheel.width += Math.round(event.deltaX)
+              wheel.height += Math.round(event.deltaY)
+              steps.push([
                 { sourceId: "keyboard", pressedVirtualKeys: heldKeys(event.modifiers) },
                 {
                   sourceId: "wheel",
                   origin: "Viewport",
                   location: { x: Math.round(event.x), y: Math.round(event.y) },
-                  delta: { width: Math.round(event.deltaX), height: Math.round(event.deltaY) }
+                  delta: { width: wheel.width, height: wheel.height }
                 }
               ])
               break
             case "Key": {
               const named = virtualKeys[event.key]
               const held = heldKeys(event.modifiers)
-              if (named === undefined && [...event.key].length !== 1) {
-                return yield* Effect.fail(
-                  unsupported(
-                    "input.keyboardLayout",
-                    `stock WebKit's Automation types characters and named keys, not ${event.key}`
-                  )
-                )
-              }
               const pressed = event.type === "down"
-              yield* step(["Keyboard"], [{
+              steps.push([{
                 sourceId: "keyboard",
                 pressedVirtualKeys: pressed && named !== undefined && !held.includes(named) ? [...held, named] : held,
                 ...(pressed && named === undefined ? { pressedCharKey: event.key } : {})
               }])
               break
             }
-            case "InsertText":
-              yield* automationOf(
-                process,
-                Automation.performKeyboardInteractions({
-                  handle,
-                  interactions: [{ type: "InsertByKey", text: event.text }]
-                })
-              )
+            case "InsertText": {
+              yield* flush
+              // WebKitGTK types no newline: each is pressed as Enter (QUIRKS.md, Q223)
+              const lines = event.text.split(/\r\n|\r|\n/)
+              yield* insert(lines.flatMap((line, index): Array<Automation.KeyboardInteraction> => [
+                ...(index === 0 ? [] : [{ type: "InsertByKey", key: "Enter" } as Automation.KeyboardInteraction]),
+                ...(line === "" ? [] : [{ type: "InsertByKey", text: line } as Automation.KeyboardInteraction])
+              ]))
               break
-            case "Touch":
-              return yield* Effect.fail(unsupported("emulation.touch", "WebKitGTK's Automation has no touch input"))
+            }
           }
         }
+        yield* flush
       }
     )
 
@@ -4130,37 +4312,37 @@ export const connect: (
       }
       return [...seen.values()]
     })
-    const aPageIn = (id: UserContext.Id) =>
-      Effect.suspend(() => {
-        const page = pagesIn(id)[0]
-        return page === undefined
-          ? Effect.fail(
-            unsupported("cookies", "stock WebKit sets a context's cookies through a page in it, and none is open")
-          )
-          : Effect.succeed(page.target!)
-      })
+    // Set through Automation, on the process's anchor window: the inspector's `setCookie` ends the Automation
+    // session (QUIRKS.md, Q230), and a context with no page open has its cookies set at once
     const setCookiesLaunched = Effect.fnUntraced(function*(id: UserContext.Id, list: ReadonlyArray<Adapter.Cookie>) {
-      const target = yield* aPageIn(id)
+      const process = yield* processOfContext(yield* contextOf(id))
       for (const cookie of list) {
-        yield* protocol(
-          StockPage.setCookie({
+        const expires = Option.getOrUndefined(cookie.expires)
+        yield* automationOf(
+          process,
+          Automation.addSingleCookie({
+            browsingContextHandle: process.anchor,
             cookie: {
               name: cookie.name,
               value: cookie.value,
               domain: cookie.domain,
               path: cookie.path,
-              expires: Option.getOrElse(cookie.expires, () => -1),
-              session: Option.isNone(cookie.expires),
+              expires: expires ?? 0,
+              size: cookie.name.length + Redacted.value(cookie.value).length,
               httpOnly: cookie.httpOnly,
               secure: cookie.secure,
+              session: expires === undefined,
               sameSite: Option.getOrElse(cookie.sameSite, () => "Lax")
-            } as StockPage.Cookie
-          }).pipe(Protocol.on(target.session))
+            }
+          })
         )
       }
     })
+    // What the list shows, removed through a page: a context with none open lists none (QUIRKS.md, Q225)
     const clearCookiesLaunched = Effect.fnUntraced(function*(id: UserContext.Id) {
-      const target = yield* aPageIn(id)
+      const page = pagesIn(id)[0]
+      if (page === undefined) return
+      const target = page.target!
       for (const cookie of yield* cookiesLaunched(id)) {
         const host = cookie.domain.startsWith(".") ? cookie.domain.slice(1) : cookie.domain
         yield* protocol(
@@ -4172,17 +4354,158 @@ export const connect: (
       }
     })
 
-    // A file input's files, through the element Automation finds by its path: nothing is clicked or marked
-    const setInputFilesLaunched = Effect.fnUntraced(function*(node: Adapter.NodeBinding, files: ReadonlyArray<string>) {
-      const document = documents.get(node.document)
-      const frame = document?.frame
-      if (document === undefined || frame === undefined) return yield* Effect.fail(foreign(node.document))
-      if (frame.parent !== undefined) {
-        return yield* Effect.fail(
-          unsupported("fileChooser", "stock WebKit sets files only in a page's main frame here")
-        )
+    // A frame's Automation handle: the main frame's is "", a child's found among its parent's children by its
+    // document, as a page's is by its own (QUIRKS.md, Q219)
+    const frameHandles = new WeakMap<FrameEntry, Automation.FrameHandle>()
+    const mainFrameHandle = "" as Automation.FrameHandle
+    const frameIdentity = "function() { return [performance.timeOrigin, location.href] }"
+
+    /** What the inspector says of a frame's current document: its time origin and URL, in the page's world. */
+    const identityOf = Effect.fnUntraced(function*(frame: FrameEntry) {
+      const realm = pageWorldOf(frame)
+      if (realm === undefined) return Option.none<string>()
+      return yield* Runtime.evaluate({
+        expression: `JSON.stringify((${frameIdentity})())`,
+        contextId: realm.contextId as Runtime.ExecutionContextId,
+        returnByValue: true,
+        doNotPauseOnExceptionsAndMuteConsole: true
+      }).pipe(
+        Protocol.on(realm.session),
+        Effect.map((reply) => reply.result.value as string),
+        Effect.option
+      )
+    })
+
+    /** What Automation says of a frame's document, by its handle. */
+    const automationIdentityOf = (
+      process: WebKitAutomation.Process,
+      handle: Automation.BrowsingContextHandle,
+      frameHandle: Automation.FrameHandle
+    ) =>
+      Automation.evaluateJavaScriptFunction({
+        browsingContextHandle: handle,
+        frameHandle,
+        function: `function() { return JSON.stringify((${frameIdentity})()) }`,
+        arguments: []
+      }).pipe(
+        Protocol.on(process.automation),
+        Effect.map(({ result }) => resultOf(result) as Option.Option<string>),
+        Effect.orElseSucceed(() => Option.none<string>())
+      )
+
+    /** The page's world of a frame's current document. */
+    const pageWorldOf = (frame: FrameEntry) =>
+      [...(frame.document?.realms ?? [])].find((each) =>
+        each.world._tag === "Main" && !each.ended && each.contextId !== undefined
+      )
+
+    /**
+     * Whether Automation's frame is `candidate`: a mark Automation leaves on the frame's window, which the inspector
+     * looks for in the candidate's, removed at once. For two frames whose documents began at the same moment at
+     * the same URL.
+     */
+    const isMarked = Effect.fnUntraced(function*(
+      process: WebKitAutomation.Process,
+      handle: Automation.BrowsingContextHandle,
+      frameHandle: Automation.FrameHandle,
+      candidate: FrameEntry
+    ) {
+      const realm = pageWorldOf(candidate)
+      if (realm === undefined) return false
+      const mark = JSON.stringify(`__strider_frame_${crypto.randomUUID().replaceAll("-", "")}`)
+      const inFrame = (body: string) =>
+        Automation.evaluateJavaScriptFunction({
+          browsingContextHandle: handle,
+          frameHandle,
+          function: `function() { ${body} }`,
+          arguments: []
+        }).pipe(Protocol.on(process.automation))
+      return yield* inFrame(`Object.defineProperty(window, ${mark}, { value: true, configurable: true })`).pipe(
+        Effect.andThen(
+          Runtime.evaluate({
+            expression: `Object.hasOwn(window, ${mark})`,
+            contextId: realm.contextId as Runtime.ExecutionContextId,
+            returnByValue: true,
+            doNotPauseOnExceptionsAndMuteConsole: true
+          }).pipe(Protocol.on(realm.session))
+        ),
+        Effect.map((reply) => reply.result.value === true),
+        Effect.orElseSucceed(() => false),
+        Effect.ensuring(inFrame(`delete window[${mark}]`).pipe(Effect.ignore))
+      )
+    })
+
+    /** Which of `candidates` holds the document Automation's frame shows: the one alike, or the one marked. */
+    const matchFrame = Effect.fnUntraced(function*(
+      process: WebKitAutomation.Process,
+      handle: Automation.BrowsingContextHandle,
+      frameHandle: Automation.FrameHandle,
+      candidates: ReadonlyArray<FrameEntry>
+    ) {
+      const theirs = yield* automationIdentityOf(process, handle, frameHandle)
+      if (Option.isNone(theirs)) return Option.none<FrameEntry>()
+      const alike: Array<FrameEntry> = []
+      for (const candidate of candidates) {
+        if (candidate.removed) continue
+        const ours = yield* identityOf(candidate)
+        if (Option.isSome(ours) && ours.value === theirs.value) alike.push(candidate)
       }
+      if (alike.length <= 1) return Option.fromUndefinedOr(alike[0])
+      for (const candidate of alike) {
+        if (yield* isMarked(process, handle, frameHandle, candidate)) return Option.some(candidate)
+      }
+      return Option.none<FrameEntry>()
+    })
+
+    /** A frame's Automation handle, found by its parent's, from the main frame down. */
+    const frameHandleOf = (
+      frame: FrameEntry,
+      handle: Automation.BrowsingContextHandle,
+      process: WebKitAutomation.Process
+    ): Effect.Effect<Option.Option<Automation.FrameHandle>> =>
+      Effect.gen(function*() {
+        if (frame.parent === undefined) return Option.some(mainFrameHandle)
+        const known = frameHandles.get(frame)
+        if (known !== undefined) return Option.some(known)
+        const parent = yield* frameHandleOf(frame.parent, handle, process)
+        const ours = yield* identityOf(frame)
+        if (Option.isNone(parent) || Option.isNone(ours)) return Option.none()
+        // The parent's frames, as `window.frames` orders them, whose documents are alike
+        const alike: Array<Automation.FrameHandle> = []
+        for (let ordinal = 0; ordinal < 1000; ordinal++) {
+          const child = yield* Automation.resolveChildFrameHandle({
+            browsingContextHandle: handle,
+            frameHandle: parent.value,
+            ordinal
+          }).pipe(Protocol.on(process.automation), Effect.map(({ result }) => result), Effect.option)
+          // Past the last frame, Automation answers with the main frame's handle (QUIRKS.md, Q227)
+          if (Option.isNone(child) || child.value === mainFrameHandle) break
+          const theirs = yield* automationIdentityOf(process, handle, child.value)
+          if (Option.isSome(theirs) && theirs.value === ours.value) alike.push(child.value)
+        }
+        for (const child of alike) {
+          if (alike.length === 1 || (yield* isMarked(process, handle, child, frame))) {
+            frameHandles.set(frame, child)
+            return Option.some(child)
+          }
+        }
+        return Option.none()
+      })
+
+    /** An element as Automation's node handle in its frame, found by its path from the inspector's object. */
+    const nodeHandleOf = Effect.fnUntraced(function*(node: Adapter.NodeBinding) {
+      const document = documents.get(node.document)
+      if (document === undefined) {
+        return yield* Effect.fail(gone({ _tag: "Document", id: node.document }, { _tag: "DocumentReplaced" }))
+      }
+      const frame = document.frame
       const target = yield* targetOf(frame.page)
+      const handle = yield* handleOf(frame.page)
+      const process = yield* processOfContext(frame.page.context)
+      const frameHandle = yield* frameHandleOf(frame, handle, process)
+      if (Option.isNone(frameHandle)) {
+        return yield* Effect.fail(gone({ _tag: "Document", id: node.document }, { _tag: "DocumentReplaced" }))
+      }
       // WebKit's binding is the element's object id, in the page's world
       const { result } = yield* protocol(
         Runtime.callFunctionOn({
@@ -4192,26 +4515,48 @@ export const connect: (
           returnByValue: true
         }).pipe(Protocol.on(target.session))
       )
-      const handle = yield* handleOf(frame.page)
-      const process = yield* processOfContext(frame.page.context)
       const found = yield* automationOf(
         process,
         Automation.evaluateJavaScriptFunction({
           browsingContextHandle: handle,
+          frameHandle: frameHandle.value,
           function: "function(path) { return document.querySelector(path) }",
           arguments: [JSON.stringify(result.value)]
         })
       )
-      const reference = JSON.parse(found.result) as Record<string, string> | null
+      const reference = Option.getOrNull(resultOf(found.result)) as Record<string, string> | null
       const nodeHandle = reference === null ? undefined : Object.values(reference)[0]
       if (nodeHandle === undefined) return yield* Effect.fail(foreign(node.document))
+      return { frame, handle, process, frameHandle: frameHandle.value, nodeHandle: nodeHandle as Automation.NodeHandle }
+    })
+
+    // The frame an iframe holds, as Automation resolves it, then the inspector's frame showing the same document
+    const contentFrameLaunched = Effect.fnUntraced(function*(node: Adapter.NodeBinding) {
+      const { frame, frameHandle, handle, nodeHandle, process } = yield* nodeHandleOf(node)
+      const child = yield* Automation.resolveChildFrameHandle({
+        browsingContextHandle: handle,
+        frameHandle,
+        nodeHandle
+      })
+        .pipe(Protocol.on(process.automation), Effect.map(({ result }) => result), Effect.option)
+      // An element that holds no frame, or one whose document hasn't loaded yet; the main frame's handle is
+      // Automation's answer for no frame at all (QUIRKS.md, Q227)
+      if (Option.isNone(child) || child.value === mainFrameHandle) return Option.none<L1Target.NavigableId>()
+      const matched = yield* matchFrame(process, handle, child.value, [...frame.children])
+      if (Option.isNone(matched)) return Option.none<L1Target.NavigableId>()
+      frameHandles.set(matched.value, child.value)
+      return Option.some(matched.value.id)
+    })
+
+    // A file input's files, through the element Automation finds by its path: nothing is clicked or marked
+    const setInputFilesLaunched = Effect.fnUntraced(function*(node: Adapter.NodeBinding, files: ReadonlyArray<string>) {
+      const { frameHandle, handle, nodeHandle, process } = yield* nodeHandleOf(node)
       yield* automationOf(
         process,
         Automation.setFilesForInputFileUpload({
           browsingContextHandle: handle,
-          // The page's main frame, as WebKit's WebDriver names it
-          frameHandle: "" as Automation.FrameHandle,
-          nodeHandle: nodeHandle as Automation.NodeHandle,
+          frameHandle,
+          nodeHandle,
           filenames: [...files]
         })
       )
@@ -4319,7 +4664,8 @@ export const connect: (
       cookies: cookiesLaunched,
       setCookies: setCookiesLaunched,
       clearCookies: clearCookiesLaunched,
-      setInputFiles: setInputFilesLaunched
+      setInputFiles: setInputFilesLaunched,
+      contentFrame: contentFrameLaunched
     } satisfies Adapter.AdapterConnection
   }
 )

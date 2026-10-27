@@ -54,6 +54,8 @@ export interface Settings {
   readonly headless?: boolean | undefined
   readonly args?: ReadonlyArray<string> | undefined
   readonly userDataDir?: string | undefined
+  /** Wraps each process's Automation transport, as the drift test's recorder does (`test/integration/record.ts`). */
+  readonly wrapAutomation?: ((transport: Transport.Transport) => Transport.Transport) | undefined
 }
 
 /** What a context's process is started with. */
@@ -78,6 +80,8 @@ export interface Process {
   readonly anchor: Automation.BrowsingContextHandle
   /** Ends the process. */
   readonly close: Effect.Effect<void>
+  /** Kills the process outright, as a crash would end it. */
+  readonly kill: Effect.Effect<void>
 }
 
 /** The browser processes of one connection, and the transport of their pages. */
@@ -338,12 +342,13 @@ const startProcess = Effect.fnUntraced(function*(
   const target = yield* Deferred.await(automationReady).pipe(
     Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => refused("The browser never listed its session") })
   )
+  const automationTransport: Transport.Transport = {
+    send: (text) => socket.send({ _tag: "SendMessageToBackend", connection: connectionId, target, message: text }),
+    messages: Stream.fromQueue(automationIncoming).pipe(Stream.interruptWhen(socket.closed)),
+    closed: socket.closed
+  }
   const client = yield* ProtocolClient.make(
-    {
-      send: (text) => socket.send({ _tag: "SendMessageToBackend", connection: connectionId, target, message: text }),
-      messages: Stream.fromQueue(automationIncoming).pipe(Stream.interruptWhen(socket.closed)),
-      closed: socket.closed
-    },
+    settings.wrapAutomation === undefined ? automationTransport : settings.wrapAutomation(automationTransport),
     WebKitWire.wire
   )
   const run = <A>(effect: Effect.Effect<A, Protocols.ProtocolError, never>) =>
@@ -379,8 +384,10 @@ const startProcess = Effect.fnUntraced(function*(
   yield* run(Automation.hideWindowOfBrowsingContext({ handle: anchor }).pipe(Protocols.on(client.root)))
     .pipe(Effect.ignore)
 
+  const handle = launched.handle
   return {
     key,
+    kill: handle.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore),
     closed: socket.closed,
     browserName: browser.browserName,
     browserVersion: browser.browserVersion,

@@ -8,6 +8,7 @@ import { assert, describe, layer } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import * as Engine from "../../../src/internal/engine.ts"
 import { type Backend, makeRecorder, site } from "./harness.ts"
@@ -16,7 +17,7 @@ const timeout = 60_000
 
 const string = (value: string): Adapter.LocalValue => ({ _tag: "Value", value: { type: "string", value } })
 
-/** A page showing `html`, and a function that sends the engine a request in its utility world. */
+/** A page showing `html`, and a function that sends the engine a request in the world the library would use. */
 const open = Effect.fnUntraced(function*(backend: Backend, html: string) {
   const served = yield* site
   const facts = makeRecorder()
@@ -32,7 +33,15 @@ const open = Effect.fnUntraced(function*(backend: Backend, html: string) {
   assert(ended.outcome._tag === "Committed")
   const document = ended.outcome.document
   yield* facts.when("DocumentReadiness", (fact) => fact.document === document && fact.readiness === "complete")
-  const realm = yield* adapter.realm(document, { _tag: "Isolated", name: "__strider_utility__" })
+  // The utility world, or the page's where the backend makes no worlds, as the library chooses (`runtime.ts`)
+  const capabilities = yield* SubscriptionRef.get(adapter.capabilities)
+  const noWorlds = capabilities.entries.some((entry) =>
+    entry.name === "isolatedWorlds" && entry.status === "unsupported"
+  )
+  const realm = yield* adapter.realm(
+    document,
+    noWorlds ? { _tag: "Main" } : { _tag: "Isolated", name: "__strider_utility__" }
+  )
   const call = (functionDeclaration: string, args: ReadonlyArray<Adapter.LocalValue>) =>
     adapter.evaluate(realm, {
       functionDeclaration,

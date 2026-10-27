@@ -15,7 +15,7 @@ import type * as Adapter from "./adapter.ts"
 import * as Evaluation from "./evaluation.ts"
 import type * as Model from "./model.ts"
 import { isAbsolute } from "./paths.ts"
-import type * as Runtime from "./runtime.ts"
+import * as Runtime from "./runtime.ts"
 
 /** A file made in the page: its name, MIME type and bytes. */
 export interface Made {
@@ -127,7 +127,13 @@ export const setMade = (
   }
 ): Effect.Effect<void, Evaluation.Failure> =>
   Effect.gen(function*() {
-    const realm = yield* Evaluation.documentRealm(runtime, node.document, Evaluation.isolatedWorld, options.id)
+    // The library's own function: the page's world where the backend makes no other
+    const realm = yield* Evaluation.documentRealm(
+      runtime,
+      node.document,
+      yield* Runtime.ownWorld(runtime, Evaluation.isolatedWorld),
+      options.id
+    )
     const encoded = files.map((file) => ({
       name: file.name,
       mimeType: file.mimeType,

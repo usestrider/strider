@@ -52,9 +52,14 @@ declare module "../Reason.ts" {
  * - Stock WebKit has no isolated worlds: `evaluate` fails with `Unsupported`, and the engine and init scripts run
  *   in the page's own world, with `evaluateInMainWorld`.
  * - A dialog is `Dialog.Unknown`, with its message: stock WebKit doesn't say which kind it is.
+ * - A page another page opens has no opener, so `Popup.next` fails with `Unsupported`; the page is in the context's
+ *   `pages`.
+ * - A context's cookie list is the cookies its open pages are sent, and a host's cookie is set as its domain's.
+ * - A storage state's partitioned frame storage is restored under its site's default port.
  * - A context costs a browser process, about 0.6 seconds to start.
- * - History traversal, the locale and time zone, downloads, file choosers (`setInputFiles` works), screencasts and
- *   PDFs fail with `Unsupported`. `Browser.capabilities` lists what it offers.
+ * - History traversal, the locale, time zone and user agent, a mobile viewport, touch, keyboard layouts,
+ *   permissions, downloads, file choosers (`setInputFiles` works), screencasts and PDFs fail with `Unsupported`.
+ *   `Browser.capabilities` lists what it offers.
  * - Stock WebKit with an automation mode is Linux's: WebKitGTK and WPE.
  *
  * **Example** (A MiniBrowser for a program, with its platform's sockets)
@@ -152,7 +157,7 @@ export const layerConfig = (
  * - The locator engine and init scripts run in the page's own world, where its scripts can see them.
  * - `goto` navigates by script, `location.href`, and refuses a fragment of the document shown: stock WebKit
  *   reports no same-document navigation, so `page.url` doesn't follow `history.pushState` either.
- * - After a failed load the browser shows its error page, `about:blank`, a navigation of its own.
+ * - After a failed load the browser shows its error page, `about:blank`, as the failed navigation's document.
  * - `screenshot` takes PNG only.
  * - An `alert` the page opens stops its scripts, unreported, until a person dismisses it.
  * - Safari's own inspector, and proxies to it such as ios-webkit-debug-proxy, list their pages another way, which

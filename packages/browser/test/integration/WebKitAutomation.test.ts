@@ -1,23 +1,29 @@
 /**
  * WebKit's Automation protocol against stock WebKitGTK (review 23, its first step): the inspector server's socket
  * (`webkitInspectorSocket.ts`) and the generated Automation commands, before an adapter drives them. A session, a
- * page, trusted input, a screenshot, a dialog, and the page as an inspector target on the same socket.
+ * page, trusted input, a screenshot, a dialog, and the page as an inspector target on the same socket; and the
+ * error replies of both protocols, which the drift test's fixture records (its third step).
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import type * as Protocol from "@usestrider/browser/protocol/Protocol"
+import * as Protocol from "@usestrider/browser/protocol/Protocol"
 import * as Automation from "@usestrider/browser/webkit-automation-protocol/Automation"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import * as ProtocolClient from "../../src/internal/protocolClient.ts"
+import * as WebKitAutomation from "../../src/internal/webkitAutomation.ts"
 import * as InspectorSocket from "../../src/internal/webkitInspectorSocket.ts"
+import * as WebKitWire from "../../src/internal/webkitWire.ts"
 import * as SocketConnector from "../../src/protocol/SocketConnector.ts"
 import { site } from "./adapter/harness.ts"
 import { webkitgtk } from "./browsers.ts"
-import { startMiniBrowserForAutomation } from "./stockWebKit.ts"
+import { fixtures, record } from "./record.ts"
+import { socketConnector } from "./sockets.ts"
+import { startMiniBrowserForAutomation, useXvfb } from "./stockWebKit.ts"
 
 const timeout = 60_000
 
@@ -202,6 +208,97 @@ describe("WebKit's Automation protocol, over stock WebKitGTK's inspector socket"
           const inspector = yield* session.inspect(listed.id)
           const evaluated = yield* inspector("Runtime.evaluate", { expression: "document.title", returnByValue: true })
           assert.strictEqual(evaluated.result.result.value, "true")
+        }).pipe(Effect.scoped),
+      timeout
+    )
+
+    it.effect(
+      "classifies stock WebKit's error replies, its pages' and its Automation target's, with rows of its table",
+      () =>
+        Effect.gen(function*() {
+          yield* useXvfb()
+          const group = yield* WebKitAutomation.start({
+            executablePath: webkitgtk.executable,
+            wrapAutomation: (transport) => record(transport, WebKitWire.wire, fixtures.webkitStock)
+          }).pipe(Effect.provide(socketConnector))
+          // The pages' transport, in Playwright's envelope, whose `Playwright` domain is its own
+          const transport = record(group.transport, WebKitWire.wire, fixtures.webkitStock, {
+            made: (method) => method.startsWith("Playwright.")
+          })
+          const replies = new Map<number, Deferred.Deferred<ProtocolClient.Incoming>>()
+          const created = yield* Deferred.make<Protocol.SessionKey>()
+          yield* transport.messages.pipe(
+            Stream.runForEach((text) =>
+              Effect.suspend(() => {
+                const incoming = WebKitWire.decode(text)
+                if (incoming._tag === "Reply" || incoming._tag === "ErrorReply") {
+                  const reply = replies.get(incoming.id)
+                  return reply === undefined ? Effect.void : Deferred.succeed(reply, incoming)
+                }
+                if (
+                  incoming._tag === "Event" && incoming.method === "Target.targetCreated" &&
+                  incoming.key !== undefined
+                ) {
+                  const { targetInfo } = incoming.params as { readonly targetInfo: { readonly targetId: string } }
+                  const route = WebKitWire.route(incoming.key)
+                  return Deferred.succeed(created, WebKitWire.targetKey(route.pageProxyId, targetInfo.targetId))
+                }
+                return Effect.void
+              })
+            ),
+            Effect.forkScoped
+          )
+          let nextId = 1
+          const call = Effect.fnUntraced(
+            function*(method: string, params: object, key?: Protocol.SessionKey | undefined) {
+              const id = nextId++
+              const reply = yield* Deferred.make<ProtocolClient.Incoming>()
+              replies.set(id, reply)
+              yield* transport.send(WebKitWire.encode(id, method, params, key))
+              return yield* Deferred.await(reply).pipe(Effect.timeout("10 seconds"))
+            }
+          )
+          // The browser's first tab, announced
+          yield* call("Playwright.enable", {})
+          const target = yield* Deferred.await(created).pipe(Effect.timeout("10 seconds"))
+          const row = (error: ProtocolClient.WireError) => ProtocolClient.match(WebKitWire.errors, error)
+          const rowOf = (message: string) => WebKitWire.errors.find((each) => each.match.message === message)
+          // A page's inspector
+          const cases: ReadonlyArray<readonly [string, object, ProtocolClient.ErrorMatcher | undefined]> = [
+            ["Nope.nothing", {}, WebKitWire.errors[0]],
+            ["Runtime.evaluate", {}, WebKitWire.errors[1]],
+            [
+              "Page.getResourceContent",
+              { frameId: "nope", url: "about:blank" },
+              rowOf("Missing frame for given frameId")
+            ],
+            ["DOM.resolveNode", { nodeId: 99999 }, rowOf("Missing node for given nodeId")]
+          ]
+          for (const [method, params, expected] of cases) {
+            const reply = yield* call(method, params, target)
+            assert(reply._tag === "ErrorReply", `${method} should fail`)
+            assert.deepStrictEqual(row(reply.error), expected, `${method}: ${reply.error.message}`)
+          }
+          // The Automation target's: a browsing context it doesn't have, and a dialog that isn't open, which the
+          // table leaves unrecognized
+          const automation = Protocol.on(group.first.automation)
+          const missing = yield* Effect.flip(
+            Automation.getBrowsingContext({ handle: "nope" as never }).pipe(automation)
+          )
+          assert.deepInclude(missing.reason, {
+            _tag: "Rejected",
+            reason: "NoSuchTarget",
+            description: "WindowNotFound"
+          })
+          const { contexts } = yield* Automation.getBrowsingContexts().pipe(automation)
+          const noDialog = yield* Effect.flip(
+            Automation.acceptCurrentJavaScriptDialog({ browsingContextHandle: contexts[0]!.handle }).pipe(automation)
+          )
+          assert.deepInclude(noDialog.reason, {
+            _tag: "Rejected",
+            reason: "Unrecognized",
+            description: "NoJavaScriptDialog"
+          })
         }).pipe(Effect.scoped),
       timeout
     )

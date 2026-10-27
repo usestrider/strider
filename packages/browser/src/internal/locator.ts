@@ -718,10 +718,11 @@ export class LocatorImpl implements Locator.Locator {
       }
       const keys = options?.modifiers ?? []
       const outcome = yield* Effect.gen(function*() {
+        // The library's own function: the page's world where the backend makes no other
         const realm = yield* Evaluation.documentRealm(
           owner.runtime,
           source.routed.document,
-          Evaluation.isolatedWorld,
+          yield* Runtime.ownWorld(owner.runtime, Evaluation.isolatedWorld),
           id
         )
         const rest = yield* Evaluation.toLocal(

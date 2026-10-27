@@ -6,12 +6,16 @@
  * changes what it sends fails the integration tests, and is recorded again.
  *
  * A method with no generated definition fails, unless the coverage report says it was excluded by policy:
- * Chromium 155 still sends deprecated events nothing subscribes to, which are never decoded.
+ * Chromium 155 still sends deprecated events nothing subscribes to, which are never decoded. Stock WebKit's
+ * fixture holds two protocols' traffic, its pages' inspector and its Automation target's (review 23), each
+ * decoded through its own.
  */
 import { assert, describe, it } from "@effect/vitest"
 import * as Bidi from "@usestrider/browser/bidi-protocol"
 import * as Cdp from "@usestrider/browser/cdp"
+import * as WebKitAutomation from "@usestrider/browser/webkit-automation-protocol"
 import * as WebKit from "@usestrider/browser/webkit-protocol"
+import * as WebKitStock from "@usestrider/browser/webkit-stock-protocol"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as fs from "node:fs"
@@ -27,11 +31,11 @@ type Definitions = {
   readonly events: ReadonlyMap<string, Protocol.EventDef<string, unknown>>
 }
 
-/** Every command and event a generated barrel declares, by method. */
-const definitions = (barrel: object): Definitions => {
+/** Every command and event the generated barrels declare, by method. */
+const definitions = (barrels: ReadonlyArray<object>): Definitions => {
   const commands = new Map<string, Protocol.CommandDef<string, unknown, unknown>>()
   const events = new Map<string, Protocol.EventDef<string, unknown>>()
-  for (const module of Object.values(barrel) as ReadonlyArray<Record<string, unknown>>) {
+  for (const module of barrels.flatMap((barrel) => Object.values(barrel)) as ReadonlyArray<Record<string, unknown>>) {
     for (const value of Object.values(module)) {
       if (typeof value === "function" && "method" in value && "Result" in value) {
         const command = value as unknown as Protocol.CommandDef<string, unknown, unknown>
@@ -48,22 +52,27 @@ const definitions = (barrel: object): Definitions => {
 const directory = `${import.meta.dirname}/fixtures/traffic`
 
 const backends = [
-  { fixture: fixtures.cdp, barrel: Cdp, wire: CdpWire.wire, protocol: "cdp" },
-  { fixture: fixtures.bidi, barrel: Bidi, wire: BidiWire.wire, protocol: "bidi" },
-  { fixture: fixtures.webkit, barrel: WebKit, wire: WebKitWire.wire, protocol: "webkit" }
+  { fixture: fixtures.cdp, barrels: [Cdp], wire: CdpWire.wire, protocols: ["cdp"] },
+  { fixture: fixtures.bidi, barrels: [Bidi], wire: BidiWire.wire, protocols: ["bidi"] },
+  { fixture: fixtures.webkit, barrels: [WebKit], wire: WebKitWire.wire, protocols: ["webkit"] },
+  {
+    fixture: fixtures.webkitStock,
+    barrels: [WebKitStock, WebKitAutomation],
+    wire: WebKitWire.wire,
+    protocols: ["webkit-stock", "webkit-automation"]
+  }
 ] as const
 
-/** The methods the coverage report excludes by policy, such as deprecated events. */
-const excluded = (protocol: string): ReadonlySet<string> => {
-  const coverage = JSON.parse(
-    fs.readFileSync(`${import.meta.dirname}/../../tools/codegen/protocols/${protocol}/coverage.json`, "utf8")
-  ) as { readonly entries: ReadonlyArray<{ readonly item: string; readonly verdict: string }> }
-  return new Set(
-    coverage.entries.filter((entry) => entry.verdict === "excluded" && !entry.item.includes(":")).map((entry) =>
-      entry.item.replace("#", ".")
-    )
-  )
-}
+/** The methods the coverage reports exclude by policy, such as deprecated events. */
+const excluded = (protocols: ReadonlyArray<string>): ReadonlySet<string> =>
+  new Set(protocols.flatMap((protocol) => {
+    const coverage = JSON.parse(
+      fs.readFileSync(`${import.meta.dirname}/../../tools/codegen/protocols/${protocol}/coverage.json`, "utf8")
+    ) as { readonly entries: ReadonlyArray<{ readonly item: string; readonly verdict: string }> }
+    return coverage.entries.filter((entry) => entry.verdict === "excluded" && !entry.item.includes(":")).map((
+      entry
+    ) => entry.item.replace("#", "."))
+  }))
 
 const read = (fixture: string): ReadonlyArray<Entry> =>
   fs.readFileSync(`${directory}/${fixture}.ndjson`, "utf8").split("\n").filter((line) => line !== "").map(
@@ -73,11 +82,11 @@ const read = (fixture: string): ReadonlyArray<Entry> =>
 const decode = (codec: Schema.Codec<unknown, unknown> | undefined, value: unknown) =>
   codec === undefined ? Effect.void : Effect.asVoid(Schema.decodeUnknownEffect(codec)(value))
 
-for (const { barrel, fixture, protocol, wire } of backends) {
+for (const { barrels, fixture, protocols, wire } of backends) {
   describe(`recorded traffic: ${fixture}`, () => {
     const entries = read(fixture)
-    const { commands, events } = definitions(barrel)
-    const policy = excluded(protocol)
+    const { commands, events } = definitions(barrels)
+    const policy = excluded(protocols)
 
     it("has some of everything: events, results and error replies", () => {
       assert.isAbove(entries.filter((entry) => entry.kind === "event").length, 20)

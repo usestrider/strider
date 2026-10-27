@@ -9,7 +9,8 @@
  *   is declared again with the new state, so a later document starts where the timeline is. The newer
  *   declaration carries a higher version, and a shim already in a document keeps the newest state it is given.
  * - **The engine is untouched**: it runs in its own world, which keeps the real timers and frames (review 17,
- *   P16), so actionability and expectations run on native rendering.
+ *   P16), so actionability and expectations run on native rendering. Where it shares the page's world, as on
+ *   stock WebKit, the shim leaves the real ones under a symbol the engine takes them from (QUIRKS.md, Q222).
  * - **What it covers**: `Date`, `performance.now`, and in controlled mode `setTimeout`, `setInterval`,
  *   `requestAnimationFrame` and their clears. Not CSS animations or `document.timeline`.
  * - **Workers**, when installed with `workers: true` (review 22): the init script runs in the scope's dedicated
@@ -64,6 +65,19 @@ const shim = (key: string, initial: State, version: number): string => {
   const realCancelFrame = frames ? global.cancelAnimationFrame.bind(global) : () => {}
   const report = (error: unknown) => {
     if (typeof global.reportError === "function") global.reportError(error)
+  }
+  // The real timers, for the engine where it shares this world (`engine.ts`): the first shim's, which found them
+  const real = Symbol.for("@usestrider/browser/clock/real")
+  if (global[real] === undefined) {
+    Object.defineProperty(global, real, {
+      value: {
+        setTimeout: realSetTimeout,
+        clearTimeout: realClearTimeout,
+        requestAnimationFrame: realFrame,
+        now: realPerf
+      },
+      enumerable: false
+    })
   }
 
   interface Timer {

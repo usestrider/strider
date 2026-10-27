@@ -29,13 +29,15 @@ itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm` from the repos
     `test/integration/`: the browser integration tests, which run only in the Nix environment that fixes the
     machine they see. `pnpm test:integration` enters it (`flake.nix`, `devShells.integration`, Linux) with nothing
     of the host's environment, and runs them: the pinned browsers (`test/integration/browsers.json`: Chromium
-    155.0.8059.79, Firefox 158.0, Playwright's WebKit build 2359, and WebKitGTK 2.54.1's MiniBrowser for stock
-    WebKit), fixed fonts, UTC, `C.UTF-8`, an empty home that is deleted after, and no display: the MiniBrowser,
-    which needs one, gets an Xvfb of its own (`test/integration/stockWebKit.ts`). Run anywhere else, they fail and
+    155.0.8059.79, Firefox 158.0, WebKitGTK 2.54.1's MiniBrowser for stock WebKit, and Playwright's WebKit build
+    2359, until review 23 removes it), fixed fonts, UTC, `C.UTF-8`, an empty home that is deleted after, and no
+    display: the MiniBrowser, which needs one, gets an Xvfb of its own (`test/integration/stockWebKit.ts`). Run anywhere else, they fail and
     say so; a browser of another version fails them too. Extra arguments go to Vitest
     (`pnpm test:integration packages/browser/test/integration/WebKit.test.ts`).
     `test/integration/adapter/` is the adapter conformance suite, written once and run against each backend, with
-    the engine's tests; `test/integration/slice/` runs the public API through each backend's layer. With
+    the engine's tests; `test/integration/slice/` runs the public API through each backend's layer. WebKit's are
+    stock WebKit's, the MiniBrowser launched. Where a case depends on what a backend can do, it reads the backend's
+    capability table rather than its name (`slice/capabilities.ts`), checking the refusal where it can't. With
     `STRIDER_RECORD` naming an absolute directory, the integration tests record each browser's traffic for the
     drift test (`test/integration/record.ts`): `pnpm test:integration --no-file-parallelism`, into
     `test/fixtures/traffic/`, when a browser rolls.

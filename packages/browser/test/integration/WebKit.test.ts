@@ -119,8 +119,8 @@ describe("WebKit over its inspector protocol", () => {
           assert(reply._tag === "ErrorReply", `${method} should fail`)
           rows.push(ProtocolClient.match(WebKitWire.errors, reply.error))
         }
-        // Each case matches its own row, in table order, so every row is still produced by this build
-        assert.deepStrictEqual(rows, [...WebKitWire.errors])
+        // Each case matches its own row, in table order, so every row recorded from this build is still produced
+        assert.deepStrictEqual(rows, WebKitWire.errors.filter((row) => row.evidence.includes("Playwright WebKit")))
         // Unknown methods are unsupported at every level a command can go
         const atPageProxy = yield* call("Nope.nothing", {}, pageKey)
         const inTarget = yield* call("Nope.nothing", {}, targetKey)

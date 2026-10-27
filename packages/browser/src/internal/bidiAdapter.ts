@@ -417,6 +417,16 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
         "a dedicated worker's messages are attributed to its page, and shared and service workers' aren't reported"
       ]),
       entry("prompts", "supported"),
+      entry("prompts.kind", "supported"),
+      entry("navigation.sameDocument", "supported"),
+      entry("navigation.traverse", "supported"),
+      entry("frames.contentFrame", "supported"),
+      entry("screenshot.format", "supported"),
+      entry("storageState.partitioned", "supported"),
+      entry("popups.opener", "supported"),
+      entry("network.headersSent", "supported"),
+      entry("input.touch", "supported"),
+      entry("close.runBeforeUnload", "supported"),
       entry(
         "fileChooser",
         "partial",

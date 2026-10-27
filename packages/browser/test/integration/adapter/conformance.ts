@@ -37,6 +37,13 @@ const setup = Effect.fnUntraced(function*(backend: Backend) {
   return { adapter, kill, facts, site: served } satisfies World
 })
 
+/** Whether the backend has a capability, in full or in part. One it lacks says so in its table. */
+const supports = Effect.fnUntraced(function*(world: World, name: string) {
+  const entry = (yield* SubscriptionRef.get(world.adapter.capabilities)).entries.find((each) => each.name === name)
+  assert.isDefined(entry, `${name} is in the capability table`)
+  return entry.status !== "unsupported"
+})
+
 /** The realm of a page's current document in a world, waiting for it if it isn't there yet. */
 const mainRealm = Effect.fnUntraced(function*(world: World, navigable: Target.NavigableId) {
   const committed = world.facts.all("DocumentCommitted").filter((fact) => fact.navigable === navigable).at(-1)
@@ -153,6 +160,7 @@ export const conformance = (backend: Backend) =>
         it.effect("reports same-document navigations with the document they changed", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
+            if (!(yield* supports(world, "navigation.sameDocument"))) return
             const { page } = yield* newPage(world)
             const { outcome } = yield* goto(world, page, `${world.site.origin}/hello`)
             assert(outcome._tag === "Committed")
@@ -196,7 +204,11 @@ export const conformance = (backend: Backend) =>
             const started = world.facts.all("NavigationStarted").filter((fact) =>
               fact.navigable === page
             )
-            assert.deepStrictEqual(started.map((fact) => fact.navigation), [refused.navigation, next.navigation])
+            assert.deepStrictEqual(
+              started.map((fact) => fact.navigation),
+              [refused.navigation, next.navigation],
+              JSON.stringify(started)
+            )
             for (const committed of world.facts.all("DocumentCommitted")) {
               if (committed.createdBy._tag === "ErrorPage") {
                 assert.strictEqual(committed.createdBy.navigation, refused.navigation)
@@ -227,14 +239,22 @@ export const conformance = (backend: Backend) =>
                 fact.document === outcome.document
               )?.url
             }
-            const back = yield* world.adapter.traverse(page, -1)
-            assert(Option.isSome(back), "there is an entry before")
-            const backOutcome = (yield* ended(back.value, "traversal")).outcome
-            assert.strictEqual(urlOf(backOutcome), `${world.site.origin}/hello`)
-            const forward = yield* world.adapter.traverse(page, 1)
-            assert(Option.isSome(forward), "there is an entry after")
-            assert.strictEqual(urlOf((yield* ended(forward.value, "traversal")).outcome), `${world.site.origin}/json`)
-            assert.isTrue(Option.isNone(yield* world.adapter.traverse(page, 1)), "nothing after the last entry")
+            if (yield* supports(world, "navigation.traverse")) {
+              const back = yield* world.adapter.traverse(page, -1)
+              assert(Option.isSome(back), "there is an entry before")
+              const backOutcome = (yield* ended(back.value, "traversal")).outcome
+              assert.strictEqual(urlOf(backOutcome), `${world.site.origin}/hello`)
+              const forward = yield* world.adapter.traverse(page, 1)
+              assert(Option.isSome(forward), "there is an entry after")
+              assert.strictEqual(
+                urlOf((yield* ended(forward.value, "traversal")).outcome),
+                `${world.site.origin}/json`
+              )
+              assert.isTrue(Option.isNone(yield* world.adapter.traverse(page, 1)), "nothing after the last entry")
+            } else {
+              const refused = yield* Effect.flip(world.adapter.traverse(page, -1))
+              assert.deepInclude(refused.reason, { _tag: "Unsupported", capability: "navigation.traverse" })
+            }
             const reload = yield* world.adapter.reload(page, { ignoreCache: false })
             const reloaded = (yield* ended(reload, "reload")).outcome
             assert(reloaded._tag === "Committed", `a reload commits, not ${reloaded._tag}`)
@@ -622,19 +642,32 @@ export const conformance = (backend: Backend) =>
               userActivation: false
             })
             assert(iframe._tag === "Value" && iframe.value.type === "node" && iframe.value.node !== undefined)
-            // Review 18, P3: every backend names the frame an iframe element holds
-            assert.deepStrictEqual(yield* world.adapter.contentFrame(iframe.value.node), Option.some(added.frame))
+            // Review 18, P3: every backend names the frame an iframe element holds, or says it can't
+            const contentFrame = world.adapter.contentFrame(iframe.value.node)
+            if (yield* supports(world, "frames.contentFrame")) {
+              assert.deepStrictEqual(yield* contentFrame, Option.some(added.frame))
+            } else {
+              assert.deepInclude((yield* Effect.flip(contentFrame)).reason, {
+                _tag: "Unsupported",
+                capability: "frames.contentFrame"
+              })
+            }
             // A node returned from one world is an argument in another
-            const committed = world.facts.all("DocumentCommitted").filter((fact) => fact.navigable === page).at(-1)!
-            const isolated = yield* world.adapter.realm(committed.document, { _tag: "Isolated", name: "conformance" })
-            const id = yield* world.adapter.evaluate(isolated, {
-              functionDeclaration: "(element) => element.id",
-              arguments: [{ _tag: "Node", node: iframe.value.node }],
-              awaitPromise: false,
-              result: "value",
-              userActivation: false
-            })
-            assert.deepStrictEqual(id, { _tag: "Value", value: { type: "string", value: "cross" } })
+            if (yield* supports(world, "isolatedWorlds")) {
+              const committed = world.facts.all("DocumentCommitted").filter((fact) => fact.navigable === page).at(-1)!
+              const isolated = yield* world.adapter.realm(committed.document, {
+                _tag: "Isolated",
+                name: "conformance"
+              })
+              const id = yield* world.adapter.evaluate(isolated, {
+                functionDeclaration: "(element) => element.id",
+                arguments: [{ _tag: "Node", node: iframe.value.node }],
+                awaitPromise: false,
+                result: "value",
+                userActivation: false
+              })
+              assert.deepStrictEqual(id, { _tag: "Value", value: { type: "string", value: "cross" } })
+            }
             // Review 18, P1 and P2: input aimed inside a cross-site frame reaches it, on every backend
             const none = { alt: false, control: false, meta: false, shift: false }
             const origin = { x: 100 + 5 + 3, y: 50 + 5 + 3 }
@@ -673,7 +706,13 @@ export const conformance = (backend: Backend) =>
             }).pipe(Effect.forkChild)
             const opened = yield* world.facts.when("ObligationOpened", (fact) =>
               fact.subject._tag === "Prompt")
-            assert.deepInclude(opened.subject, { kind: "prompt", message: "Name?", defaultValue: "anon", page })
+            // A backend that can't say a dialog's kind says it's unknown, with no default text
+            assert.deepInclude(
+              opened.subject,
+              (yield* supports(world, "prompts.kind"))
+                ? { kind: "prompt", message: "Name?", defaultValue: "anon", page }
+                : { kind: "unknown", message: "Name?", defaultValue: "", page }
+            )
             yield* world.adapter.resolve(opened.obligation, { _tag: "Accept", promptText: Option.some("Strider") })
             const result = yield* Fiber.join(answer)
             assert(result._tag === "Value")
@@ -1079,7 +1118,13 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
-            yield* world.adapter.declare({ _tag: "Page", page }, { _tag: "FileChooser" })
+            const declared = world.adapter.declare({ _tag: "Page", page }, { _tag: "FileChooser" })
+            if (!(yield* supports(world, "fileChooser"))) {
+              const error = yield* Effect.flip(declared)
+              assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "fileChooser" })
+              return
+            }
+            yield* declared
             yield* goto(world, page, `${world.site.origin}/form`)
             yield* evaluate(world, page, "() => document.querySelector('#f').click()", true)
             const opened = yield* world.facts.when("ObligationOpened", (fact) =>
@@ -1101,10 +1146,16 @@ export const conformance = (backend: Backend) =>
               import("node:os")
             )).tmpdir() +
               `/strider-downloads-${process.pid}`
-            yield* world.adapter.declare({ _tag: "UserContext", context }, {
+            const declared = world.adapter.declare({ _tag: "UserContext", context }, {
               _tag: "Downloads",
               behavior: { _tag: "Allow", directory }
             })
+            if (!(yield* supports(world, "downloads"))) {
+              const error = yield* Effect.flip(declared)
+              assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "downloads" })
+              return
+            }
+            yield* declared
             yield* goto(world, page, `${world.site.origin}/hello`)
             const { outcome } = yield* goto(world, page, `${world.site.origin}/download`)
             assert.strictEqual(outcome._tag, "Download")
@@ -1163,10 +1214,16 @@ export const conformance = (backend: Backend) =>
             const { context, page } = yield* newPage(world)
             const directory = (yield* Effect.promise(() => import("node:os"))).tmpdir() +
               `/strider-canceled-${process.pid}`
-            yield* world.adapter.declare({ _tag: "UserContext", context }, {
+            const declared = world.adapter.declare({ _tag: "UserContext", context }, {
               _tag: "Downloads",
               behavior: { _tag: "Allow", directory }
             })
+            if (!(yield* supports(world, "downloads"))) {
+              const error = yield* Effect.flip(declared)
+              assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "downloads" })
+              return
+            }
+            yield* declared
             yield* goto(world, page, `${world.site.origin}/hello`)
             yield* world.adapter.navigate(page, `${world.site.origin}/slow-download`, { referrer: Option.none() })
             const started = yield* world.facts.when("DownloadStarted")
@@ -1202,6 +1259,11 @@ export const conformance = (backend: Backend) =>
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
             yield* goto(world, page, `${world.site.origin}/beforeunload`)
+            if (!(yield* supports(world, "close.runBeforeUnload"))) {
+              const error = yield* Effect.flip(world.adapter.closePage(page, { runBeforeUnload: true }))
+              assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "close.runBeforeUnload" })
+              return
+            }
             // A beforeunload prompt needs the page to have been interacted with: a real click, once the page has
             // rendered a frame, since a busy browser drops input that comes before one
             yield* evaluate(world, page, "() => new Promise((resolve) => requestAnimationFrame(() => resolve(true)))")

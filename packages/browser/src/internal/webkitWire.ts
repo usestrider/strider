@@ -65,6 +65,8 @@ export const route = (sessionKey: Protocol.SessionKey): Route => {
 }
 
 const recorded = "Playwright WebKit 2359 (WebKit 26.6), recorded 2026-10-20; checked by test/integration/WebKit.test.ts"
+const stock =
+  "WebKitGTK 2.54.1's MiniBrowser, recorded 2026-10-26; checked by test/integration/WebKitAutomation.test.ts"
 
 /**
  * WebKit's error table. WebKit reports failures as JSON-RPC codes plus English text, so rows match both; a
@@ -77,13 +79,13 @@ export const errors: ReadonlyArray<ErrorMatcher> = [
     match: { code: -32601 },
     becomes: { _tag: "Unsupported" },
     evidence:
-      `JSON-RPC 2.0 §5.1, "Method not found"; "'Nope' domain was not found" and "'Runtime.nope' was not found", at every level, ${recorded}`
+      `JSON-RPC 2.0 §5.1, "Method not found"; "'Nope' domain was not found" and "'Runtime.nope' was not found", at every level, ${recorded}; in a page's target and Automation's, ${stock}`
   },
   {
     match: { code: -32602, message: { includes: "can't be processed" } },
     becomes: { _tag: "Rejected", reason: "InvalidArgument" },
     evidence:
-      `JSON-RPC 2.0 §5.1, "Invalid params"; "Some arguments of method 'Runtime.evaluate' can't be processed", for a missing and a mistyped expression, ${recorded}`
+      `JSON-RPC 2.0 §5.1, "Invalid params"; "Some arguments of method 'Runtime.evaluate' can't be processed", for a missing and a mistyped expression, ${recorded}; for a missing expression, and Automation's missing handle, ${stock}`
   },
   {
     match: { code: -32602, message: "Cannot find page proxy with provided 'pageProxyId'" },
@@ -104,17 +106,23 @@ export const errors: ReadonlyArray<ErrorMatcher> = [
   {
     match: { code: -32000, message: "Missing frame for given frameId" },
     becomes: { _tag: "Rejected", reason: "NoSuchFrame" },
-    evidence: `Page.getResourceContent with an unknown frameId, ${recorded}`
+    evidence: `Page.getResourceContent with an unknown frameId, ${recorded}; and ${stock}`
   },
   {
     match: { code: -32000, message: "Missing node for given nodeId" },
     becomes: { _tag: "Rejected", reason: "NoSuchNode" },
-    evidence: `DOM.resolveNode with an unknown nodeId, ${recorded}`
+    evidence: `DOM.resolveNode with an unknown nodeId, ${recorded}; and ${stock}`
   },
   {
     match: { code: -32000, message: "Node not found" },
     becomes: { _tag: "Rejected", reason: "NoSuchNode" },
     evidence: `DOM.describeNode with an unknown objectId, ${recorded}`
+  },
+  {
+    match: { code: -32000, message: "WindowNotFound" },
+    becomes: { _tag: "Rejected", reason: "NoSuchTarget" },
+    evidence:
+      `Automation's error for a browsing context it doesn't have, and for a frame it doesn't have: getBrowsingContext with an unknown handle, evaluateJavaScriptFunction with an unknown frameHandle, ${stock}`
   }
 ]
 

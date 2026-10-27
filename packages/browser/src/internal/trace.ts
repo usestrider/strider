@@ -100,7 +100,15 @@ interface Frame {
   readonly at: MonotonicInstant.MonotonicInstant
   readonly width: number
   readonly height: number
-  readonly jpeg: Uint8Array
+  /** JPEG, or PNG where the backend writes nothing else (stock WebKit). */
+  readonly image: Uint8Array
+  readonly format: "jpeg" | "png"
+}
+
+/** A PNG's size, from its header. */
+const pngSize = (bytes: Uint8Array): { readonly width: number; readonly height: number } => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  return bytes.length < 24 ? { width: 0, height: 0 } : { width: view.getUint32(16), height: view.getUint32(20) }
 }
 
 /** The operations an action screenshot follows: the ones that change the page. */
@@ -395,17 +403,32 @@ export const start = Effect.fnUntraced(function*(
           Effect.flatMap((control) =>
             Stream.runForEach(control.frames, (frame) =>
               Effect.sync(() =>
-                frames.push({ page: page.id, at: frame.at, width: frame.width, height: frame.height, jpeg: frame.jpeg })
+                frames.push({
+                  page: page.id,
+                  at: frame.at,
+                  width: frame.width,
+                  height: frame.height,
+                  image: frame.jpeg,
+                  format: "jpeg"
+                })
               ))
           ),
           Effect.scoped
         )
         : Effect.gen(function*() {
-          const jpeg: Adapter.ScreenshotOptions = { ...png, format: "jpeg", quality: Option.some(50) }
+          // JPEG, or PNG where the backend's screenshots are PNG only (`screenshot.format`)
+          const formats = (yield* SubscriptionRef.get(runtime.model.adapter.capabilities)).entries.find((entry) =>
+            entry.name === "screenshot.format"
+          )
+          const format = formats === undefined || formats.status === "supported" ? "jpeg" : "png"
+          const options: Adapter.ScreenshotOptions = format === "jpeg"
+            ? { ...png, format: "jpeg", quality: Option.some(50) }
+            : png
           while (true) {
             yield* Effect.sleep(screencast.polled)
-            const shot = yield* runtime.model.adapter.screenshot(page.id, jpeg)
-            frames.push({ page: page.id, at: Adapter.now(), ...Adapter.jpegSize(shot), jpeg: shot })
+            const shot = yield* runtime.model.adapter.screenshot(page.id, options)
+            const size = format === "jpeg" ? Adapter.jpegSize(shot) : pngSize(shot)
+            frames.push({ page: page.id, at: Adapter.now(), ...size, image: shot, format })
           }
         })
     const follow = (page: Model.PageEntry) =>
@@ -519,8 +542,8 @@ export const start = Effect.fnUntraced(function*(
       })
     }
     frames.forEach((frame, index) => {
-      const file = `screencast/${frame.page}-${index}.jpeg`
-      files.push({ path: file, content: frame.jpeg })
+      const file = `screencast/${frame.page}-${index}.${frame.format}`
+      files.push({ path: file, content: frame.image })
       events.push({
         time: frame.at,
         event: {

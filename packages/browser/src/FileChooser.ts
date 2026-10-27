@@ -31,6 +31,7 @@ import * as Access from "./internal/access.ts"
 import type * as Adapter from "./internal/adapter.ts"
 import * as Events from "./internal/events.ts"
 import * as FileInputImpl from "./internal/fileInput.ts"
+import * as Filters from "./internal/filters.ts"
 import * as Handlers from "./internal/handlers.ts"
 import * as Handles from "./internal/handles.ts"
 import type * as Model from "./internal/model.ts"
@@ -142,12 +143,15 @@ const kind = (operation: string): Events.Kind<Model.FileChooserEvent, FileChoose
 })
 
 const subscription = (target: Page.ObservedPage, filter: Filter | undefined, operation: string) =>
-  Effect.sync(() => ({
-    kind: kind(operation),
-    channel: Handles.page(target).entry.events.fileChooser,
-    accepts: (entry: Events.Entry<Model.FileChooserEvent>) =>
-      filter?.multiple === undefined || entry.value.multiple === filter.multiple
-  }))
+  Effect.suspend(() => {
+    const behind = Handles.page(target)
+    return Filters.requires(behind.runtime, operation, "fileChooser").pipe(Effect.as({
+      kind: kind(operation),
+      channel: behind.entry.events.fileChooser,
+      accepts: (entry: Events.Entry<Model.FileChooserEvent>) =>
+        filter?.multiple === undefined || entry.value.multiple === filter.multiple
+    }))
+  })
 
 /**
  * Subscribes to file choosers and returns the first match, latched. Observing doesn't decide it.

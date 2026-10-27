@@ -1,29 +1,37 @@
 /**
- * The adapter conformance suite against Playwright's WebKit: the pinned build (`browsers.ts`), in the Nix
- * environment `pnpm test:integration` enters. The launcher refuses another build by its `protocol.json`.
+ * The adapter conformance suite against stock WebKit (review 23): WebKitGTK's MiniBrowser (`browsers.ts`) launched
+ * in automation mode, a browser process per context, on an X server of the test's own (`stockWebKit.ts`), with
+ * Node's sockets (`sockets.ts`). Its pages' traffic and its Automation target's are recorded as one fixture.
  */
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as WebKitAdapter from "../../../src/internal/webkitAdapter.ts"
-import * as WebKitLauncher from "../../../src/internal/webkitLauncher.ts"
+import * as WebKitAutomation from "../../../src/internal/webkitAutomation.ts"
 import * as WebKitWire from "../../../src/internal/webkitWire.ts"
-import { webkit } from "../browsers.ts"
+import { webkitgtk } from "../browsers.ts"
 import { fixtures, record } from "../record.ts"
+import { socketConnector } from "../sockets.ts"
+import { useXvfb } from "../stockWebKit.ts"
 import { conformance } from "./conformance.ts"
 import { engine } from "./engine.ts"
 import type { Backend } from "./harness.ts"
 
-const executable = webkit.executable
+// The transport presents the pages in Playwright's envelope, whose `Playwright` domain is its own, not the browser's
+const made = (method: string) => method.startsWith("Playwright.")
 
 const backend: Backend = {
-  name: "WebKit (Playwright)",
+  name: "WebKit (stock)",
   connect: Effect.fnUntraced(function*(sink) {
-    const { launched, transport } = yield* WebKitLauncher.launch({ executablePath: executable })
-    const adapter = yield* WebKitAdapter.connect(record(transport, WebKitWire.wire, fixtures.webkit), {
-      sink,
-      ownership: "launched",
-      revision: WebKitLauncher.build.revision
-    })
-    return { adapter, kill: launched.handle.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore) }
+    yield* useXvfb().pipe(Effect.orDie)
+    const group = yield* WebKitAutomation.start({
+      executablePath: webkitgtk.executable,
+      wrapAutomation: (transport) => record(transport, WebKitWire.wire, fixtures.webkitStock)
+    }).pipe(Effect.provide(Layer.merge(socketConnector, Layer.empty)))
+    const adapter = yield* WebKitAdapter.connect(
+      record(group.transport, WebKitWire.wire, fixtures.webkitStock, { made }),
+      { sink, ownership: "launched", profile: "stock", automation: group }
+    )
+    return { adapter, kill: group.first.kill }
   })
 }
 

@@ -177,11 +177,13 @@ const kind = (
 const subscription = (target: Page.Page | UserContext.UserContext, filter: Filter | undefined, operation: string) =>
   Effect.suspend(() => {
     const found = Handles.target(target)
-    return Effect.map(Filters.url(operation, filter?.url), (matches) => ({
+    return Filters.requires(found.behind.runtime, operation, "downloads").pipe(
+      Effect.andThen(Filters.url(operation, filter?.url))
+    ).pipe(Effect.map((matches) => ({
       kind: kind(found.behind.runtime, operation),
       channel: found.behind.entry.events.download,
       accepts: (entry: Events.Entry<Model.DownloadEntry>) => Filters.urlMatches(matches, entry.value.url)
-    }))
+    })))
   })
 
 /**

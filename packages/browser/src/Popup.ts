@@ -67,7 +67,11 @@ const subscribe = <A, R>(
 ): Effect.Effect<A, Subscription.SubscriptionError, R> =>
   Effect.suspend(() => {
     const behind = Handles.page(target)
-    return Effect.flatMap(Filters.url(operation, filter?.url), (matches) => subscribe(behind, matches))
+    // A backend that can't say which page opened a page reports no popups (QUIRKS.md, Q212)
+    return Filters.requires(behind.runtime, operation, "popups.opener").pipe(
+      Effect.andThen(Filters.url(operation, filter?.url)),
+      Effect.flatMap((matches) => subscribe(behind, matches))
+    )
   })
 
 /**

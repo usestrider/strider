@@ -521,7 +521,12 @@ export const make = (owner: PageOwner): Page.Page => {
         const outcome = yield* Effect.gen(function*() {
           yield* adapter.closePage(entry.id, { runBeforeUnload }).pipe(Effect.catch((error) => {
             const mapped = Operation.fromAdapter(error, id, runtime.backend)
-            return mapped._tag === "Gone" ? Effect.void : Effect.die(mapped.reason)
+            // A backend that can't ask the page refuses to, naming the capability (`close.runBeforeUnload`)
+            return mapped._tag === "Gone"
+              ? Effect.void
+              : runBeforeUnload && mapped.reason._tag === "Unsupported"
+              ? Effect.fail(pageError("Page.close", mapped.reason, id))
+              : Effect.die(mapped.reason)
           }))
           return yield* Deferred.await(entry.closed).pipe(
             Effect.as("closed" as const),

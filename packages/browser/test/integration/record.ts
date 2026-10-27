@@ -23,7 +23,8 @@ import { pins } from "./pins.ts"
 export const fixtures = {
   cdp: pins.chromium.fixture,
   bidi: pins.firefox.fixture,
-  webkit: pins.webkit.fixture
+  webkit: pins.webkit.fixture,
+  webkitStock: pins.webkitgtk.fixture
 } as const
 
 /** One recorded message. */
@@ -46,7 +47,16 @@ export const maxLength = 32 * 1024
 // The wrappers WebKit carries a command in, unwrapped to find the command itself
 const wrappers = new Set(["Target.sendMessageToTarget", "Worker.sendMessageToWorker"])
 
-export const record = (transport: Transport.Transport, wire: Wire, fixture: string): Transport.Transport => {
+/**
+ * `made` names the methods the transport makes up itself rather than the browser's, which aren't recorded: stock
+ * WebKit's transport presents its pages in Playwright's envelope, whose `Playwright` domain the browser hasn't got.
+ */
+export const record = (
+  transport: Transport.Transport,
+  wire: Wire,
+  fixture: string,
+  options?: { readonly made?: ((method: string) => boolean) | undefined }
+): Transport.Transport => {
   const directory = process.env["STRIDER_RECORD"]
   if (directory === undefined || directory === "") return transport
   const file = `${directory}/${fixture}.ndjson`
@@ -66,6 +76,7 @@ export const record = (transport: Transport.Transport, wire: Wire, fixture: stri
     }
   }
   const keep = (entry: Entry) => {
+    if (options?.made?.(entry.method) === true) return
     const text = JSON.stringify(entry)
     if (text.length <= maxLength && sample(entry, text)) fs.appendFileSync(file, text + "\n")
   }

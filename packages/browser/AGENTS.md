@@ -66,8 +66,10 @@ the API declares is built.
 - **Stock WebKit launched** is `WebKit.layer({ executablePath: ".../MiniBrowser" })`, which needs a display
   (`DISPLAY`; there is no headless mode) and a `SocketConnector` (`@usestrider/browser/protocol`):
   `SocketConnector.layer((endpoint) => NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port }))`. Clicks
-  and typing work; `evaluate` doesn't (use `evaluateInMainWorld`); dialogs arrive as `Dialog.Unknown`, so a
-  `Dialog.handle` handler matching on `_tag` needs that case; `back` and `forward` are refused.
+  and typing work, and frame locators; `evaluate` doesn't (use `evaluateInMainWorld`); dialogs arrive as
+  `Dialog.Unknown`, so a `Dialog.handle` handler matching on `_tag` needs that case; `back` and `forward` are refused,
+  and `Popup`, `Download` and `FileChooser` waits fail at once with `SubscriptionError{Unsupported}`: a page another
+  opens has no opener there. A context's cookie list is what its open pages are sent.
 - **Errors are per module, with a reason.** Recover with
   `Effect.catchReason("LocatorError", "StrictViolation", …)`. Any operation can also fail with `TargetGone` or
   `Timeout`, which says how far it got (`timeout.phase`); a `waitFor` on a value that settled for good, such as a

@@ -21,6 +21,7 @@ import * as FirefoxLauncher from "../../../src/internal/firefoxLauncher.ts"
 import * as Launch from "../../../src/internal/launch.ts"
 import { site } from "../adapter/harness.ts"
 import { chromium, firefox } from "../browsers.ts"
+import { supports } from "./capabilities.ts"
 
 const timeout = 60_000
 
@@ -195,7 +196,8 @@ export const attaching = (
                 alert("hello"), 50)
             })
             const dialog = yield* dialogs
-            assert.strictEqual(dialog._tag, "Alert")
+            // A backend that can't say a dialog's kind says it's unknown (QUIRKS.md, Q206)
+            assert.strictEqual(dialog._tag, (yield* supports("prompts.kind")) ? "Alert" : "Unknown")
             yield* Effect.sleep("300 millis")
             const status = yield* page.status
             assert.isTrue(status._tag === "Open" && Option.isSome(status.prompt))

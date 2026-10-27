@@ -22,6 +22,7 @@ import * as Stream from "effect/Stream"
 import * as Tracer from "effect/Tracer"
 import * as fs from "node:fs"
 import { site } from "../adapter/harness.ts"
+import { supports } from "./capabilities.ts"
 
 const timeout = 60_000
 
@@ -78,6 +79,8 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(url)
+            // A backend that reports no chooser says so (`modules.ts` checks the refusal)
+            if (!(yield* supports("fileChooser"))) return
             const handler = yield* FileChooser.handle(page, FileChooser.choose(made))
             yield* page.getByRole("button", { name: "Choose" }).click()
             yield* page.getByText("a.txt:text/plain:5:hello|b.csv:text/csv:3:x,y").pipe(Expect.toBeVisible)
@@ -121,6 +124,12 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               yield* page.goto(url)
               // A page prompts before unloading only after the user has interacted with it
               yield* page.getByRole("button", { name: "Edit" }).click()
+              if (!(yield* supports("close.runBeforeUnload"))) {
+                const error = yield* page.close({ runBeforeUnload: true }).pipe(Effect.flip)
+                assert(error._tag === "PageError" && error.reason._tag === "Unsupported", String(error))
+                assert.strictEqual(error.reason.capability, "close.runBeforeUnload")
+                return
+              }
               const staying = yield* Dialog.handle(page, Dialog.dismissAll)
               const canceled = yield* page.close({ runBeforeUnload: true }).pipe(Effect.flip)
               assert(canceled._tag === "PageError", String(canceled))
@@ -185,13 +194,12 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
 
       it.effect("streams the page's frames where the backend has a screencast", () =>
         Effect.gen(function*() {
-          const { info } = yield* Browser.Browser
           const url = yield* fixture(`<p id="t"></p><script>setInterval(() => t.textContent = Date.now(), 50)</script>`)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(url)
             const acquired = yield* page.capability(Capability.Screencast).pipe(Effect.exit)
-            if (info.protocol === "bidi") {
+            if (!(yield* supports("capability.screencast"))) {
               const error = yield* Effect.flip(acquired)
               assert(Capability.isCapabilityError(error), String(error))
               assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "capability.screencast" })

@@ -21,7 +21,6 @@ import {
   NetworkResponse,
   Page,
   PageNavigation,
-  Popup,
   Subscription,
   Target,
   UncaughtException,
@@ -41,6 +40,7 @@ import * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
 import { site } from "../adapter/harness.ts"
+import { supports } from "./capabilities.ts"
 
 const timeout = 60_000
 
@@ -63,6 +63,20 @@ const chooser =
 
 const temporary = () => fs.mkdtempSync(path.join(os.tmpdir(), "strider-saved-"))
 
+/** Where the backend lacks `capability`, a subscription that needs it is refused, naming it: whether it was. */
+const refused = Effect.fnUntraced(function*(
+  capability: string,
+  subscribe: (page: Page.Page) => Effect.Effect<unknown, Subscription.SubscriptionError, Scope.Scope>
+) {
+  if (yield* supports(capability)) return false
+  yield* Effect.scoped(Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const error = yield* Effect.flip(Effect.asVoid(subscribe(page)))
+    assert.deepInclude(error.reason, { _tag: "Unsupported", capability })
+  }))
+  return true
+})
+
 export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} event modules`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
@@ -70,6 +84,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
 
       it.effect("runs call site 5: a download, saved to a path", () =>
         Effect.gen(function*() {
+          if (yield* refused("downloads", (page) => Download.next(page))) return
           const { url } = yield* fixture(() => `<a href="/download" download>Export CSV</a>`)
           const saved = path.join(temporary(), "export.csv")
           yield* Effect.scoped(Effect.gen(function*() {
@@ -90,6 +105,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
 
       it.effect("reads a download's bytes, and its file goes with its context", () =>
         Effect.gen(function*() {
+          if (yield* refused("downloads", (page) => Download.next(page))) return
           const { url } = yield* fixture(() => `<a href="/download" download>Export</a>`)
           const scope = yield* Scope.make()
           const file = yield* Effect.gen(function*() {
@@ -112,6 +128,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         "cancels a download where the backend can, and reports progress where it does",
         () =>
           Effect.gen(function*() {
+            if (yield* refused("downloads", (page) => Download.next(page))) return
             const { url } = yield* fixture(() => `<a href="/slow-download" download>Slow</a>`)
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* Browser.newPage()
@@ -150,6 +167,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
 
       it.effect("answers a file chooser with the page's handler", () =>
         Effect.gen(function*() {
+          if (yield* refused("fileChooser", (page) => FileChooser.next(page))) return
           const { url } = yield* fixture(() => chooser)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
@@ -166,6 +184,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
 
       it.effect("cancels a chooser no handler answers, and reports it", () =>
         Effect.gen(function*() {
+          if (yield* refused("fileChooser", (page) => FileChooser.next(page))) return
           const { url } = yield* fixture(() => chooser)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
@@ -182,6 +201,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
 
       it.effect("cancels a chooser for one file given two", () =>
         Effect.gen(function*() {
+          if (yield* refused("fileChooser", (page) => FileChooser.next(page))) return
           const { url } = yield* fixture(() => chooser)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
@@ -311,6 +331,8 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         "reports a same-document navigation with its URL, and encodes the history",
         () =>
           Effect.gen(function*() {
+            // A backend that reports none says so (QUIRKS.md, Q200)
+            if (!(yield* supports("navigation.sameDocument"))) return
             const { url } = yield* fixture(() => `<a href="#details">Details</a><p id="details">Details here</p>`)
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* Browser.newPage()
@@ -499,7 +521,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             yield* page.goto(url)
             const reads: ReadonlyArray<Effect.Effect<unknown, Subscription.SubscriptionError>> = [
               NetworkRequest.history(page, { url: "https://example.com/:id(" }),
-              Popup.history(page, { url: "https://example.com/:id(" })
+              PageNavigation.history(page, { url: "https://example.com/:id(" })
             ]
             for (const read of reads) {
               const error = yield* Effect.flip(read)

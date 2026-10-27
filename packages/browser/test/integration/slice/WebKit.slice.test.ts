@@ -1,13 +1,16 @@
 /**
- * The slices against Playwright's WebKit, through the public layer: the pinned build (`browsers.ts`), in the
- * Nix environment `pnpm test:integration` enters. The launcher refuses another build by its `protocol.json`.
+ * The slices against stock WebKit (review 23), through the public layer: WebKitGTK's MiniBrowser (`browsers.ts`)
+ * launched in automation mode, on an X server of the layer's own (`stockWebKit.ts`), with Node's sockets
+ * (`sockets.ts`).
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
+import { assert } from "@effect/vitest"
 import { WebKit } from "@usestrider/browser/webkit"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
-import { webkit } from "../browsers.ts"
+import { webkitgtk } from "../browsers.ts"
 import { socketConnector } from "../sockets.ts"
+import { useXvfb } from "../stockWebKit.ts"
 import { attaching } from "./attaching.ts"
 import { contents } from "./contents.ts"
 import { declarations } from "./declarations.ts"
@@ -19,17 +22,25 @@ import { slice } from "./slice.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 
-const backend = WebKit.layer({ executablePath: webkit.executable }).pipe(
-  Layer.provide(Layer.mergeAll(NodeServices.layer, socketConnector))
+// The X server comes up before the browser, and goes after it
+const display = Layer.effectDiscard(useXvfb()).pipe(Layer.provide(NodeServices.layer))
+
+const backend = WebKit.layer({ executablePath: webkitgtk.executable }).pipe(
+  Layer.provide(Layer.mergeAll(NodeServices.layer, socketConnector, display))
 )
 
-slice("WebKit", backend, () => {})
-events("WebKit", backend)
-modules("WebKit", backend)
-interaction("WebKit", backend)
-declarations("WebKit", backend)
-contents("WebKit", backend)
-tooling("WebKit", backend)
-recordings("WebKit", backend)
-toolkit("WebKit", backend)
-attaching("WebKit", backend, Option.none())
+const name = "WebKit"
+
+slice(name, backend, (info) => {
+  assert.strictEqual(info.product, "MiniBrowser (stock WebKit)")
+  assert.strictEqual(info.version, webkitgtk.version)
+})
+events(name, backend)
+modules(name, backend)
+interaction(name, backend)
+declarations(name, backend)
+contents(name, backend)
+tooling(name, backend)
+recordings(name, backend)
+toolkit(name, backend)
+attaching(name, backend, Option.none())

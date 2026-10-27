@@ -9,8 +9,11 @@ interface Pins {
   readonly chromium: { readonly version: string; readonly fixture: string }
   readonly firefox: { readonly version: string; readonly fixture: string }
   readonly webkit: { readonly revision: string; readonly fixture: string }
-  /** Stock WebKit, whose inspector protocol `webkit-stock-protocol` is generated from (`webkitgtk-<version>`). */
-  readonly webkitgtk: { readonly version: string }
+  /**
+   * Stock WebKit, whose inspector and Automation protocols `webkit-stock-protocol` and `webkit-automation-protocol`
+   * are generated from (`webkitgtk-<version>`).
+   */
+  readonly webkitgtk: { readonly version: string; readonly fixture: string }
 }
 
 export const pins = JSON.parse(fs.readFileSync(`${import.meta.dirname}/browsers.json`, "utf8")) as Pins

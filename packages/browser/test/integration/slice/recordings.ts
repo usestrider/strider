@@ -26,6 +26,7 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { site } from "../adapter/harness.ts"
+import { fullySupports, supports } from "./capabilities.ts"
 
 const timeout = 60_000
 
@@ -259,9 +260,10 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
                 await fetch("/echo", { method: "POST", body: data })
                 return true
               })
-              // The headers as sent have the cookie the page set, which Chromium's event leaves out (Q158)
+              // The headers as sent have the cookie the page set, which Chromium's event leaves out (Q158), and
+              // stock WebKit's network process doesn't report (Q226)
               const sent = yield* NetworkRequest.headersSent(page, yield* form)
-              assert.include(sent.cookie, "flavor=oat")
+              if (yield* fullySupports("network.headersSent")) assert.include(sent.cookie, "flavor=oat")
               yield* har.entries.waitFor((count) => count >= 4)
               yield* har.exportHar(out, { include: ["requestBodies"] })
               yield* har.exportHar(redacted)
@@ -430,8 +432,11 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               snapshots.find((each) => each.callId === click.callId && each.phase === phase && each.isMainFrame)
             const before = main("before")
             const after = main("after")
-            assert.isDefined(before, JSON.stringify(snapshots.map((each) => [each.callId, each.phase])))
-            assert.isDefined(after)
+            const seen = JSON.stringify(
+              snapshots.map((each) => [each.callId, each.phase, each.isMainFrame, each.frameUrl])
+            )
+            assert.isDefined(before, seen)
+            assert.isDefined(after, seen)
             const tree = (snapshot: Record<string, any>) => expand(snapshots, snapshot)
             const button = (snapshot: Record<string, any>) => find(tree(snapshot), (node) => node[0] === "BUTTON")!
             assert.strictEqual(textOf(button(before)), "Go")
@@ -492,6 +497,14 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
                 yield* Effect.sleep("1 second")
                 return yield* trace.exportTrace(out)
               })).pipe(Effect.exit)
+              if (
+                screencast === "native" && !(yield* supports("capability.screencast")) &&
+                !(yield* supports("capability.video"))
+              ) {
+                // A browser with neither its own frames nor a video says so; polling is every backend's
+                assert(recorded._tag === "Failure", String(recorded))
+                continue
+              }
               assert(recorded._tag === "Success", String(recorded))
               const files = yield* unzip(out)
               if (screencast === "native" && info.protocol === "bidi") {
@@ -505,7 +518,12 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               }
               const frames = lines(files.get("trace.trace")).filter((event) => event.type === "screencast-frame")
               assert.isAtLeast(frames.length, 2, JSON.stringify(screencast))
-              assert.deepStrictEqual(Array.from(files.get(frames[0].file)!.slice(0, 2)), [0xff, 0xd8])
+              // JPEG, or PNG where the backend's screenshots are PNG only
+              const jpeg = screencast === "native" || (yield* fullySupports("screenshot.format"))
+              assert.deepStrictEqual(
+                Array.from(files.get(frames[0].file)!.slice(0, 2)),
+                jpeg ? [0xff, 0xd8] : [0x89, 0x50]
+              )
               assert.isAbove(frames[0].width, 0)
             }
             assert.isDefined(Capability.Screencast)

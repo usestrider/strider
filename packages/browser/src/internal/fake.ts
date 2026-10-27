@@ -104,6 +104,9 @@ const capabilities = () => {
     entries: [
       entry("userContexts", "supported"),
       entry("prompts", "supported"),
+      entry("prompts.kind", "supported"),
+      entry("popups.opener", "supported"),
+      entry("close.runBeforeUnload", "supported", ["no page has a document to ask"]),
       entry("engine", "unsupported", [noDom]),
       entry("isolatedWorlds", "unsupported", [noDom]),
       entry("input.native", "unsupported", [noDom]),

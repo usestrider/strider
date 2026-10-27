@@ -3,5 +3,5 @@
   "chromium": { "version": "155.0.8059.79", "fixture": "cdp-chromium-155" },
   "firefox": { "version": "158.0", "fixture": "bidi-firefox-158" },
   "webkit": { "revision": "2359", "fixture": "webkit-playwright-2359" },
-  "webkitgtk": { "version": "2.54.1" }
+  "webkitgtk": { "version": "2.54.1", "fixture": "webkitgtk-2.54.1" }
 }

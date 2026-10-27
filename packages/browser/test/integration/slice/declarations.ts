@@ -26,6 +26,7 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { site } from "../adapter/harness.ts"
+import { status, supports } from "./capabilities.ts"
 
 const timeout = 60_000
 
@@ -351,7 +352,13 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage({ emulation: { locale: "de-DE", timezone: "Asia/Tokyo" } })
+            const created = Browser.newPage({ emulation: { locale: "de-DE", timezone: "Asia/Tokyo" } })
+            if (!(yield* supports("emulation.locale")) || !(yield* supports("emulation.timezone"))) {
+              const error = yield* Effect.flip(created)
+              assert(Page.isPageError(error) && error.reason._tag === "Unsupported", String(error))
+              return
+            }
+            const page = yield* created
             assert.deepStrictEqual(
               yield* run(page, origin, "return [navigator.language, Intl.DateTimeFormat().resolvedOptions().timeZone]"),
               ["de-DE", "Asia/Tokyo"]
@@ -399,42 +406,27 @@ export const declarations = (
               touch: yield* attempt({ touch: true }, "return navigator.maxTouchPoints"),
               mobile: yield* attempt({ viewport: { width: 400, height: 700, mobile: true } }, "return 'applied'")
             }
+            // What each field's capability says: applied, or refused under its name
+            const or = (capability: string, applied: unknown) =>
+              Effect.map(status(capability), (found) =>
+                found === "unsupported" ? `unsupported ${capability}` : applied)
             const expected = {
-              Chromium: {
-                viewport: 640,
-                userAgent: "Strider/1.0",
-                timezone: "Asia/Tokyo",
-                media: true,
-                throttling: "applied",
-                cpu: "applied",
-                touch: 5,
-                mobile: "applied"
-              },
-              Firefox: {
-                viewport: 640,
-                userAgent: "Strider/1.0",
-                timezone: "Asia/Tokyo",
-                media: "unsupported emulation.media",
-                throttling: "unsupported emulation.network.throttling",
-                cpu: "unsupported emulation.cpuSlowdown",
-                touch: "unsupported emulation.touch",
-                mobile: "unsupported emulation.viewport.mobile"
-              },
-              WebKit: {
-                viewport: 640,
-                userAgent: "Strider/1.0",
-                timezone: "Asia/Tokyo",
-                media: true,
-                throttling: "unsupported emulation.network.throttling",
-                cpu: "unsupported emulation.cpuSlowdown",
-                touch: "unsupported emulation.touch",
-                mobile: "applied"
-              }
-            }[name]
+              viewport: yield* or("emulation.viewport", 640),
+              userAgent: yield* or("emulation.userAgent", "Strider/1.0"),
+              timezone: yield* or("emulation.timezone", "Asia/Tokyo"),
+              media: yield* or("emulation.media", true),
+              throttling: yield* or("emulation.network.throttling", "applied"),
+              cpu: yield* or("emulation.cpuSlowdown", "applied"),
+              touch: yield* or("emulation.touch", 5),
+              mobile: yield* or("emulation.viewport.mobile", "applied")
+            }
             assert.deepStrictEqual(results, expected)
             // Each call's scope closed, so the page is as it was
             assert.notStrictEqual(yield* run(page, origin, "return innerWidth"), 640)
             // Offline, a page can't be navigated to read it: it says what it sees when asked
+            if (!(yield* supports("emulation.network.offline"))) {
+              return
+            }
             yield* page.goto(fixtureUrl(
               origin,
               `<button onclick="document.getElementById('online').textContent = String(navigator.onLine)">Check</button><p id="online"></p>`
@@ -452,6 +444,11 @@ export const declarations = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
+            if (!(yield* supports("permissions"))) {
+              const error = yield* Effect.flip(page.context.grant(["geolocation"], { origin }))
+              assert(Declaration.isDeclarationError(error) && error.reason._tag === "Unsupported", String(error))
+              return
+            }
             yield* page.context.grant(["geolocation"], { origin })
             yield* page.context.emulate({ geolocation: { latitude: 51.5, longitude: -0.1, accuracy: 10 } })
             assert.deepStrictEqual(
@@ -473,12 +470,17 @@ export const declarations = (
           const query = "return navigator.permissions.query({ name: 'notifications' }).then((p) => p.state)"
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
+            if (!(yield* supports("permissions"))) {
+              const error = yield* Effect.flip(page.context.grant(["notifications"], { origin }))
+              assert(Declaration.isDeclarationError(error) && error.reason._tag === "Unsupported", String(error))
+              return
+            }
             const granted = yield* page.context.grant(["notifications"], { origin })
             assert.strictEqual(yield* run(page, origin, query), "granted")
             yield* granted.remove
             assert.strictEqual(yield* run(page, origin, query), "prompt")
             const everywhere = page.context.grant(["notifications"])
-            if (name === "Firefox") {
+            if (!(yield* supports("permissions.anyOrigin"))) {
               const error = yield* Effect.flip(everywhere)
               assert(Declaration.isDeclarationError(error) && error.reason._tag === "Unsupported", String(error))
             } else {
@@ -494,8 +496,8 @@ export const declarations = (
           yield* Effect.scoped(Effect.gen(function*() {
             const created = Effect.exit(Browser.newPage({ permissions: ["notifications"], focus: "emulated" }))
             const exit = yield* created
-            if (name === "Firefox") {
-              // Every origin, and focus emulation, are what WebDriver BiDi can't do
+            if (!(yield* supports("permissions.anyOrigin")) || !(yield* supports("emulation.focus"))) {
+              // Every origin, and focus emulation, are what WebDriver BiDi and stock WebKit can't do
               assert(exit._tag === "Failure")
               const error = exit.cause.reasons.find((reason) =>
                 reason._tag === "Fail"

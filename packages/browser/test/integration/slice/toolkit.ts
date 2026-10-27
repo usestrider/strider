@@ -13,6 +13,7 @@ import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
 import { site } from "../adapter/harness.ts"
+import { supports } from "./capabilities.ts"
 
 const timeout = 60_000
 
@@ -103,10 +104,16 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               assert.notInclude(again.value.sinceLast.join("\n"), "/missing answered 404")
               // A wait across calls, collected later
               const wait = yield* call(tools, "next", { page: "shop", event: "popup", within: "20 seconds" })
-              assert.strictEqual(wait.value.outcome.wait, "w1")
-              yield* call(tools, "click", { page: "shop", target: `role=button[name="Open"]` })
-              const popup = yield* call(tools, "await", { wait: "w1" })
-              assert.match(popup.value.outcome, /^popup p\d+, at .* so far$/)
+              if (yield* supports("popups.opener")) {
+                assert.strictEqual(wait.value.outcome.wait, "w1")
+                yield* call(tools, "click", { page: "shop", target: `role=button[name="Open"]` })
+                const popup = yield* call(tools, "await", { wait: "w1" })
+                assert.match(popup.value.outcome, /^popup p\d+, at .* so far$/)
+              } else {
+                // A backend that can't say which page opened a page refuses the wait, as data (QUIRKS.md, Q212)
+                assert.isTrue(wait.failed, JSON.stringify(wait.value))
+                assert.include(JSON.stringify(wait.value), "popups.opener")
+              }
               // A dialog decided by a declared handler, and a route that answers a fetch
               const handler = yield* call(tools, "dialog", { page: "shop", decision: "dismiss" })
               assert.strictEqual(handler.value.outcome.registration, "r1")

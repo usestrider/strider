@@ -351,6 +351,23 @@ export function renderText(root: SnapNode): string {
 
 /** The engine. Self-contained: its source is evaluated in the page, with `renderText`'s. */
 export function engine(render: (root: SnapNode) => string) {
+  // ── Time ──────────────────────────────────────────────────────────────────────────────────────────────
+
+  // The page's own timers and frames, never a page clock's (`clock.ts`): where the engine shares the page's world,
+  // a clock installed first leaves the real ones under this symbol, and one installed later finds these taken
+  const realTimers = (globalThis as any)[Symbol.for("@usestrider/browser/clock/real")] as
+    | {
+      readonly setTimeout: (callback: () => void, delay: number) => number
+      readonly clearTimeout: (id: number) => void
+      readonly requestAnimationFrame: (callback: () => void) => number
+      readonly now: () => number
+    }
+    | undefined
+  const setTimer = realTimers?.setTimeout ?? globalThis.setTimeout.bind(globalThis)
+  const clearTimer = realTimers?.clearTimeout ?? globalThis.clearTimeout.bind(globalThis)
+  const onFrame = realTimers?.requestAnimationFrame ?? globalThis.requestAnimationFrame.bind(globalThis)
+  const now = realTimers?.now ?? performance.now.bind(performance)
+
   // ── The tree ──────────────────────────────────────────────────────────────────────────────────────────
 
   const SKIPPED = new Set(["script", "style", "noscript", "template"])
@@ -1226,9 +1243,9 @@ export function engine(render: (root: SnapNode) => string) {
 
   const nextFrame = (timeout: number): Promise<boolean> =>
     new Promise((resume) => {
-      const timer = setTimeout(() => resume(false), Math.max(0, timeout))
-      requestAnimationFrame(() => {
-        clearTimeout(timer)
+      const timer = setTimer(() => resume(false), Math.max(0, timeout))
+      onFrame(() => {
+        clearTimer(timer)
         resume(true)
       })
     })
@@ -1318,7 +1335,7 @@ export function engine(render: (root: SnapNode) => string) {
   // ── Actions ──
 
   const act = async (request: Extract<Request, { op: "act" }>): Promise<Response> => {
-    const end = performance.now() + request.cap
+    const end = now() + request.cap
     const history: Array<NotReady> = []
     const seen = new Set<string>()
     let last: NotReady = { _tag: "NoMatch" }
@@ -1337,7 +1354,7 @@ export function engine(render: (root: SnapNode) => string) {
     let rects: Array<DOMRect> = []
     const action = request.action
     while (true) {
-      const left = end - performance.now()
+      const left = end - now()
       if (left <= 0) return { _tag: "NotReady", reason: last, history, scrolled, checked: history.length > 0 }
       if (!(await nextFrame(left))) {
         // A round the deadline cut too short for any page to render says nothing about rendering
@@ -1642,7 +1659,7 @@ export function engine(render: (root: SnapNode) => string) {
         done = true
         observer.disconnect()
         for (const type of EVENTS) removeEventListener(type, recheck, true)
-        clearTimeout(timer)
+        clearTimer(timer)
         resume({ _tag: "Expected", passed: last.passed, observed: last.observed, changed })
       }
       const recheck = () => {
@@ -1661,10 +1678,10 @@ export function engine(render: (root: SnapNode) => string) {
       const tick = () => {
         if (done) return
         recheck()
-        requestAnimationFrame(tick)
+        onFrame(tick)
       }
-      requestAnimationFrame(tick)
-      const timer = setTimeout(() => finish(true), request.cap)
+      onFrame(tick)
+      const timer = setTimer(() => finish(true), request.cap)
     })
   }
 

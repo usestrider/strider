@@ -318,6 +318,16 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* each event is a step naming its interaction (`Move`, `Down`, `Up`), each step declares only the sources it uses, never a touch one, and touch input is refused.
 - *Reconsider:* nothing.
 
+**Q223. WebKitGTK's Automation forgets a click at each sequence's end, keeps each input source's state across sequences, and types no newline** (Browser). `performInteractionSequence` clears the click count as it finishes (`SimulatedInputDispatcher::finishDispatching`, citing w3c/webdriver#1772), so a second click sent in a sequence of its own is never a double click; a wheel scrolls by the difference between its state and the one before, which outlives the sequence, so a second scroll by the same amount scrolls nothing; and `InsertByKey` with a newline inserts nothing.
+- *Seen:* review 23's third step: the slices' `dblclick`, `mouse.click` with `clickCount: 2`, a second `mouse.wheel`, and `fill("one\ntwo")` into a `textarea`.
+- *We:* one `dispatchInput` is one sequence, a step per event; each browser process's wheel state is kept, and each scroll adds to it; a newline in inserted text is pressed as Enter, which in a form's `input` submits it, where the other backends insert nothing.
+- *Reconsider:* the newline in an `input`, if a use fills one with text that has one.
+
+**Q224. Stock WebKit's Automation finishes input that opens a dialog at once** (Browser). When a dialog opens, Automation answers the input pending on the page (`WebAutomationSession::willShowJavaScriptDialog`), so a click whose handler calls `confirm` returns before the dialog is decided, where every other backend's returns after, and the dialog is reported only when asked (Q206).
+- *Seen:* review 23's third step: on a page with `dialogs: "leaveOpen"`, a click that opened a `confirm` succeeded, rather than failing with `PromptBlocking`.
+- *We:* after each input, the adapter asks whether a dialog is open; if one is, it reports it and waits until it's decided, so input returns once its dialog is decided, as on every backend.
+- *Reconsider:* nothing.
+
 ## Browsers: downloads and file choosers
 
 **Q25. Each browser does something different with a download nobody configured** (Browser). Chromium cancels it; Firefox and WebKit save it into `$HOME/Downloads` (WebKit without reporting the path).
@@ -587,6 +597,16 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* a recording keeps the body as WebKit gave it.
 - *Reconsider:* nothing on our side: the protocol has no other report of a request's body.
 
+**Q221. Stock WebKit gives a request's body as text, where Playwright's build gives base64** (Browser). The protocol says the same of both, "HTTP POST request data", but Playwright's build encodes the bytes in base64, and stock WebKit decodes them as UTF-8, or as Latin-1 where they aren't UTF-8 (`String::fromUTF8WithLatin1Fallback`). Bytes that aren't UTF-8 can't be told from text that was.
+- *Seen:* review 23's third step: the conformance suite's paused `POST` of `hello` had an empty body on stock WebKit, read as base64.
+- *We:* on stock WebKit, a request's body is the text encoded as UTF-8, so a text body is exact and a binary one may not be.
+- *Reconsider:* nothing on our side: the protocol has no other report of a request's body.
+
+**Q226. WebKitGTK reports no `Cookie` among the headers a request was sent with** (Browser). The request event leaves it out, as Playwright's build's does (Q181), and the response's `requestHeaders`, where Playwright's build has the headers as sent, has none either.
+- *Seen:* review 23's third step: the recordings slice's `NetworkRequest.headersSent` had no `cookie` on stock WebKit.
+- *We:* `network.headersSent` is `partial` on stock WebKit, saying so.
+- *Reconsider:* nothing on our side: the protocol has no other report of the headers sent.
+
 ## Browsers: emulation, permissions and declarations
 
 **Q47. WebKit's init scripts run in the main world only** (Browser). `Page.setBootstrapScript` has no world.
@@ -719,6 +739,21 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 22, P1.
 - *We:* a DOM snapshot takes an element as a defined custom element when its name has a hyphen and it matches `:defined`, which every world can ask.
 - *Reconsider:* nothing.
+
+**Q225. Stock WebKit lists only the cookies a page's documents and resources are sent** (Browser). `Page.getCookies` collects the cookies of each URL its page's frames loaded, and Automation's `getAllCookies` those of its document, so a cookie for a path or a domain no page loaded isn't listed.
+- *Seen:* review 23's third step: the contents slice's cookie for `/app` was missing from its context's list, and listed once a page had loaded `/app/page`.
+- *We:* `cookies` is `partial` on stock WebKit, saying so; a context's list and `listFor` are what its open pages are sent, and `remove` and `clear` remove what the list shows.
+- *Reconsider:* nothing on our side: neither protocol lists a cookie store.
+
+**Q230. In automation mode, stock WebKit's `Page.setCookie` ends the Automation session** (Browser). The inspector answers, and the Automation target leaves the server's list, so every later Automation command goes unanswered, whatever the cookie and whether or not the page has loaded anything; `Page.getCookies` and `Page.deleteCookie` leave it be. Automation's own `addSingleCookie` sets a cookie for any domain from any page, an `about:blank` one too, and stores a name's domain with a leading dot, so a host's cookie becomes its domain's; an IP address's stays as it is.
+- *Seen:* review 23's third step: a new context with a storage state's cookies and an origin's storage lost its page as the storage was written; a probe of the raw protocol found the session gone after each `setCookie`.
+- *We:* launched, cookies are set through `addSingleCookie`, on the process's anchor window, so a context with no page open has them set at once; they are listed and removed through the inspector (Q225).
+- *Reconsider:* a host-only cookie, which Automation widens to its domain.
+
+**Q232. Stock WebKit partitions a frame's storage by its top-level origin, port included** (Browser). A cross-site frame's `localStorage` under a page at `http://127.0.0.1:39051` isn't the one it has under `http://127.0.0.1`; Chromium and Firefox key it by the top-level site, which has no port. A storage state records a partition by its site, so restoring it on stock WebKit writes it under the site's default port, where a page at another port doesn't find it.
+- *Seen:* review 23's third step: the slices' call site 1 restored a cross-site frame's storage, which its page at the test server's port didn't see; under a page at port 80 it did.
+- *We:* `storageState.partitioned` is `partial` on stock WebKit, saying so; a partition at a site's default port, as a deployed site's is, round-trips.
+- *Reconsider:* recording a partition's top-level origin beside its site, so a backend that keys by origin can restore it at its port.
 
 ## Browsers: attaching
 
@@ -869,6 +904,16 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 23's second step, GNOME Web 50.4 from the pinned nixpkgs under `dbus-run-session`.
 - *We:* `WebKit.layer` launches only the MiniBrowser; another executable fails with `InvalidInput`, saying so (review 23, decision 3).
 - *Reconsider:* when GNOME Web's automation mode opens windows as asked.
+
+**Q227. Stock WebKit's Automation answers some mistakes as if they weren't** (Browser). `resolveChildFrameHandle` for a frame that doesn't exist answers with the main frame's handle, `""`; `evaluateJavaScriptFunction` of a function that throws answers `""`, which isn't JSON; `setFilesForInputFileUpload` with a node handle it doesn't have succeeds and sets nothing; and a frame handle it doesn't have is `WindowNotFound`, as an unknown browsing context's is.
+- *Seen:* review 23's third step, probing its error replies for the drift test's fixture.
+- *We:* `""` from `resolveChildFrameHandle` is no frame; a result that isn't JSON is none; the node handles the adapter sends are only ever ones Automation gave it; `WindowNotFound` is `NoSuchTarget` in the error table.
+- *Reconsider:* nothing.
+
+**Q229. Stock WebKit's `DOM.resolveNode` takes a node id only** (Browser). Playwright's build added an `objectId` and an `executionContextId`, which the adapter used to move a node into another world; stock WebKit refuses them as arguments it can't process.
+- *Seen:* review 23's third step: `dragTo`, files made in the page, and a trace's snapshot after an action, each passing a node to a function of the library's, failed with `InvalidArgument`.
+- *We:* on stock WebKit, which has one world, a node's binding, already an object there, is passed as it is.
+- *Reconsider:* nothing.
 
 ## Ours: workarounds and odd shapes
 
@@ -1324,3 +1369,22 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* as above (`browser.ts`).
 - *Reconsider:* nothing.
 
+**Q222. On stock WebKit, the page clock's shim leaves the real timers for the engine** (Ours). The engine runs in the page's world there (Q194), where a controlled clock replaces `setTimeout`, `requestAnimationFrame` and `performance.now`, so the engine waited on the clock's frames, which never came.
+- *Seen:* review 23's third step: the slices' call site 10 on stock WebKit, whose click waited 30 s for `Runtime.callFunctionOn`.
+- *We:* the first shim in a document keeps the real timers under a well-known symbol, `@usestrider/browser/clock/real`, and the engine takes its timers from there, or the page's own at its install, before any shim.
+- *Reconsider:* nothing, while the engine shares the page's world; the symbol is the page's to see, as the clock's own is.
+
+**Q228. Launched stock WebKit finds the frame an iframe holds through Automation, by its document** (Ours). The inspector can't say (Q201), and Automation knows frames by handles of its own: the iframe element, found by its path, is resolved to Automation's frame, and its document's time origin and URL are compared with each of the inspector's child frames' documents', read in the page's world. Two frames whose documents began at the same moment at the same URL are told apart by a property Automation sets on one's window, which the inspector looks for, removed at once.
+- *Seen:* review 23's third step: every frame locator failed on stock WebKit, as `contentFrame` was `Unsupported`.
+- *We:* `frames.contentFrame` is `supported` when launched, and each frame's Automation handle is kept, so a file input in a frame has its files set too.
+- *Reconsider:* the mark, which a page's scripts could see for a moment.
+
+**Q231. A trace's polled frames are PNG where a backend's screenshots are** (Ours). Playwright's trace format names its frames JPEG, and stock WebKit writes PNG only; a polled screencast asked it for JPEG, failed, and recorded nothing, unsaid.
+- *Seen:* review 23's third step: the recordings slice's polled trace had no frames on stock WebKit.
+- *We:* where `screenshot.format` isn't `supported`, polled frames are PNG, written as `.png`.
+- *Reconsider:* whether Playwright's trace viewer shows PNG frames, which hasn't been checked.
+
+**Q233. Firefox's conformance test of a navigation after a failure sometimes sees a third navigation start first** (Ours). "Navigates again at once after a failure" expects its page's started navigations to be the refused `goto`'s and the next's; now and then a third, numbered between them, is reported started before both.
+- *Seen:* review 23's third step: in the second full integration run, and twice in three runs of the test alone just after it; then not in 13 runs alone, nor in 3 at the commit before. Which navigation the third is wasn't caught.
+- *We:* the test's assertion prints the navigations it saw, to say which when it recurs.
+- *Reconsider:* when it recurs: likely Firefox's report of a new tab's first `about:blank`, arriving late.
