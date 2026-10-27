@@ -28,7 +28,7 @@ export const errors: ReadonlyArray<ErrorMatcher> = [
     match: { code: "unsupported operation" },
     becomes: { _tag: "Unsupported" },
     evidence:
-      `${spec}: "unsupported operation"; browsingContext.reload with ignoreCache, "Argument \"ignoreCache\" is not supported yet.", ${recorded}`
+      `${spec}: "unsupported operation"; browsingContext.reload with ignoreCache, "Argument "ignoreCache" is not supported yet.", ${recorded}`
   },
   {
     match: { code: "invalid argument" },
