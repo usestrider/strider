@@ -4,13 +4,42 @@ description: Every operation is already a span. A trace adds what the page looke
 order: 2
 ---
 
+An error and its spans say which call failed, not what the page showed or what it sent and received. A trace keeps
+what the page looked like at each step, and a HAR its traffic, in files you open after the run.
+
 ## Spans first
 
-Every operation opens a span named for it, such as `Locator.click` or `Page.goto`, with attributes such as the
-page's id, the locator and a redacted URL. They nest under your `Effect.fn` steps and go to whatever tracer Effect
-has: `effect/observability` exports OTLP, and Effect's DevTools shows them live.
+Spans time each call and place it inside the step that made it, so a slow or failed run shows which call it was,
+with no logging of your own. Every operation opens a span named for it, such as `Locator.click` or `Page.goto`, with
+attributes such as the page's id, the locator and a redacted URL. They nest under your `Effect.fn` steps and go to
+whatever tracer Effect has: `effect/observability` exports OTLP, and Effect's DevTools shows them live.
 
-Traces and HAR files add what spans can't carry: what the page looked like, and the network traffic.
+```ts
+import { NodeHttpClient } from "@effect/platform-node"
+import { Browser, Page } from "@usestrider/browser"
+import { Effect, Layer } from "effect"
+import { DevTools } from "effect/devtools"
+import { Otlp, OtlpSerialization } from "effect/observability"
+
+const Tracing = Otlp.layer({
+  baseUrl: "http://localhost:4318",
+  resource: { serviceName: "shop-checks" }
+}).pipe(Layer.provide([NodeHttpClient.layerUndici, OtlpSerialization.layerJson]))
+
+// Or, while developing, Effect's DevTools, live
+const LiveTracing = DevTools.layer()
+
+// Its span holds Locator.click's
+const addToCart = Effect.fn("addToCart")(function*(page: Page.Page) {
+  yield* page.getByRole("button", { name: "Add to cart" }).click()
+})
+
+const traced = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage()
+  yield* page.goto("https://shop.example.com")
+  yield* addToCart(page)
+})).pipe(Effect.provide(Tracing))
+```
 
 ## Traces
 
@@ -26,6 +55,7 @@ const recorded = Effect.scoped(Effect.gen(function*() {
   const page = yield* Browser.newPage()
   const trace = yield* Trace.record(page, {
     screenshots: "perAction",
+    screencast: { polled: "250 millis" },
     network: true,
     domSnapshots: true
   })
@@ -42,40 +72,64 @@ Each capture is opt-in:
 | ---------------------------- | --------------------------------------------------------------------- |
 | none                         | operations, logs, errors and console output                           |
 | `screenshots: "perAction"`   | a screenshot after each action                                        |
-| `screencast`                 | frames of the page as it renders: `"native"`, or `{ polled: interval }` |
+| `screencast`                 | frames as the page renders: `"native"`, the browser's own where it has them, or `{ polled: "250 millis" }`, screenshots at an interval on any browser |
 | `network: true`              | the page's requests and responses                                     |
 | `domSnapshots: true`         | each frame's DOM before and after every action, which the viewer renders; needs `network` |
 
-DOM snapshots change nothing in the page, and work on an inspected page. They're taken in an isolated world,
-except on WebKit, which has none.
+DOM snapshots change nothing in the page, and work on an [inspected](/docs/pages/attaching#access-is-typed) page.
+They're taken in an [isolated world](/docs/pages/expectations#evaluating-in-the-page), except on WebKit, which has
+none.
 
 ## HAR files
 
-`Har.record` records a page's or context's requests as HAR 1.2, one entry per redirect hop. `content` is required:
-`"embed"` puts bodies in the file, `"attach"` writes a zip with them beside it, `"omit"` leaves them out:
+A trace's `network` shows the traffic only in the trace viewer. A HAR is the traffic alone, in the format HAR tools
+and [`Route.fromHar`](/docs/events/routes#replaying-a-recording) read, so a session recorded once can answer the
+same requests in later runs. `Har.record` records a page's or context's requests as HAR 1.2, one entry per redirect
+hop. `content`, required, says where bodies go:
 
 ```ts
-import { Browser, Har } from "@usestrider/browser"
+import { Browser, Har, NetworkResponse } from "@usestrider/browser"
 import { Effect } from "effect"
 
-const traffic = Effect.scoped(Effect.gen(function*() {
+const apiFixture = Effect.scoped(Effect.gen(function*() {
   const page = yield* Browser.newPage()
-  const har = yield* Har.record(page, { content: "embed", url: "**/api/**" })
+  const har = yield* Har.record(page, {
+    content: "embed",
+    url: "**/api/**",
+    inFlightAtStop: "wait"
+  })
   yield* page.goto("https://shop.example.com")
+  const added = yield* NetworkResponse.next(page, {
+    url: "**/api/cart",
+    method: "POST"
+  })
   yield* page.getByRole("button", { name: "Add to cart" }).click()
+  yield* added
+  yield* Effect.log(`${yield* har.entries} API calls recorded`)
   yield* har.exportHar("fixtures/api.har", { include: ["requestBodies"] })
 }))
 ```
 
-- Timings come from Strider's clock, so they compare across browsers.
-- A recording stops when its scope closes; `entries` counts what it has.
-- A request in flight at export is marked incomplete, unless `inFlightAtStop: "wait"`.
-- A HAR with request bodies can answer the same requests later:
-  [`Route.fromHar`](/docs/events/routes#replaying-a-recording).
+| `content`  | Bodies                                                                 |
+| ---------- | ---------------------------------------------------------------------- |
+| `"embed"`  | in the `.har` itself                                                   |
+| `"attach"` | the export is one zip of `har.har` and the bodies it names, which `Route.fromHar` reads |
+| `"omit"`   | left out                                                               |
+
+`include` keeps a class of secret the export would otherwise redact ([below](#what-exports-leave-out));
+`Route.fromHar` matches on request bodies, so a fixture for it includes them.
+
+- Timings are Strider's own measurements, not the [page clock](/docs/events/routes#the-page-clock)'s, so they
+  compare across browsers.
+- `entries`, a watchable number, counts what the recording has. Wait for the response a fixture is for, as above,
+  rather than for a count, which any call the page load made satisfies.
+- `exportHar` writes what's recorded so far. With `inFlightAtStop: "wait"`, it first waits for the requests in
+  flight; otherwise they're marked incomplete. The recording stops when its scope closes.
 
 ## What exports leave out
 
-A HAR's export redacts each class of secret unless `include` names it:
+A HAR is committed as a fixture or attached to a bug report, so its export leaves out each class of secret unless
+`include` names it:
 
 | Class                    | Redacted unless included                                   |
 | ------------------------ | ---------------------------------------------------------- |
@@ -84,7 +138,7 @@ A HAR's export redacts each class of secret unless `include` names it:
 | `"authorizationHeaders"` | `Authorization` headers                                    |
 | `"requestBodies"`        | the bodies requests sent, which can hold a password        |
 
-- A trace follows the diagnostics preset. Under `strict`, the default, DOM snapshots write password fields and
+- A trace follows the [diagnostics preset](/docs/errors#secrets-and-urls). Under `strict`, the default, DOM snapshots write password fields and
   fields filled with a `Redacted` value as `REDACTED`.
 - Screenshots, bodies and DOM snapshots hold whatever the page showed. Treat them as a screen recording.
 
