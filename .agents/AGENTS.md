@@ -15,8 +15,11 @@ itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm` from the repos
 - Design documents are at the root: `README.md` (goals, principles, status), `API.md` (L2, the public API),
   `CONCEPTS.md` (L1, the native model), `PROTOCOL.md` (L0), `CLI.md` and `PROBES.md`. `QUIRKS.md` lists the weird
   behaviors found while building, browsers' and our own, to reconsider once the library is built.
-- `reviews/` holds one design review per draft; `research/` holds prior-art notes; `upstream/` holds drafts of
-  proposals for other projects, which the maintainer posts. Reviews and research are records of their time: don't
+- `reviews/` holds the design reviews in flight, one per proposal. `docs/` holds what the past ones decided:
+  `docs/reviews.md` indexes every review by number, with the commit that holds its text; `docs/decisions.md` keeps
+  the reasons, the alternatives rejected and the evidence the layer documents leave out; `docs/conventions.md` keeps
+  the Effect conventions. `research/` holds prior-art notes; `upstream/` holds drafts of proposals for other
+  projects, which the maintainer posts. A review in flight and the research are records of their time: don't
   rewrite them.
 - `packages/browser` is the published package:
   - `src/`: one module per file, exported as namespaces. `src/index.ts` and each subpath's `index.ts` are generated.
@@ -91,8 +94,8 @@ Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't 
 
 ## Conventions
 
-Strider follows the Effect core team's conventions; `reviews/07-effect-conventions.md` records them, and API.md's
-Conventions section applies them. Effect's skills in `.repos/effect/.agents/skills` are the reference.
+Strider follows the Effect core team's conventions; `docs/conventions.md` records them, and API.md's Conventions
+section applies them. Effect's skills in `.repos/effect/.agents/skills` are the reference.
 
 - Modules are namespaces with short names inside (`UserContext.Options`); access levels keep full names
   (`Page.ReadonlyPage`).
@@ -119,8 +122,12 @@ is `unstable`, or `experimental` for what rests on an upstream proposal or an in
 
 ## Design changes
 
-A change to the design starts as a review in `reviews/NN-….md`, committed on its own, and is then applied as a
-revision recorded in the README's Status. Keep the documents at even depth and never cut detail to balance them.
+A change to the design starts as a review in `reviews/NN-….md`, numbered after the last in `docs/reviews.md`,
+committed on its own, and is then applied as a revision recorded in the README's Status. Once its last step is
+built, fold it in and delete it, in one commit: what it decided is in the layer documents by then; the reasons, the
+alternatives rejected and the evidence they don't hold go to `docs/decisions.md`; and `docs/reviews.md` gets its
+entry: what it decided, where that lives, and the commits of its text and its build. `reviews/` holds only reviews in
+flight. Keep the documents at even depth and never cut detail to balance them.
 Playwright and other prior art are evidence of what works, not a template.
 
 When a probe or a build turns up something weird (a browser behaving oddly or differently from the others, or a

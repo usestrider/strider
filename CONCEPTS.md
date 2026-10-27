@@ -1,6 +1,6 @@
 # CONCEPTS: the native browser model (L1)
 
-*Revision 5.25, 2026-10-19; checked against the built adapter contract, with how a locator finds elements (§8) and how an action waits (§5), after [review 12](reviews/12-l1-first-slice.md), and the first slice built, 2026-10-22; how events are delivered, popups and dialogs, after [review 13](reviews/13-events-slice.md), built 2026-10-23. A condensed restatement of draft 4 (commit `6cc0bc1`), with [review 4](reviews/04-draft-4.md) folded in. The reasoning behind each contract is in that draft and in [reviews/](reviews/); this document keeps the decisions. Spec anchors: `HTML#x` is `https://html.spec.whatwg.org/#x`; `BIDI#x` is the WebDriver BiDi editor's draft.*
+*Revision 5.25, 2026-10-19; checked against the built adapter contract, with how a locator finds elements (§8) and how an action waits (§5), after [review 12](docs/reviews.md#review-12), and the first slice built, 2026-10-22; how events are delivered, popups and dialogs, after [review 13](docs/reviews.md#review-13), built 2026-10-23. A condensed restatement of draft 4 (commit `6cc0bc1`), with [review 4](docs/reviews.md#review-4) folded in. The reasoning behind each contract is in that draft and in [reviews/](reviews/); this document keeps the decisions. Spec anchors: `HTML#x` is `https://html.spec.whatwg.org/#x`; `BIDI#x` is the WebDriver BiDi editor's draft.*
 
 ## Purpose
 
