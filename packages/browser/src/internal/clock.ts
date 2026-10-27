@@ -23,6 +23,7 @@ import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
 import * as PageClock from "../PageClock.ts"
 import * as Reason from "../Reason.ts"
@@ -371,7 +372,7 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
                   : Effect.void
               ),
               Effect.catch((error) =>
-                typeof error === "string"
+                typeof error === "string" || Deadline.isTimeout(error)
                   ? Effect.fail(error)
                   : error.reason._tag === "Gone"
                   ? Effect.void
@@ -430,11 +431,15 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
       installed.version++
       installed.state = next
       yield* broadcast(run, installed.workers).pipe(
-        Effect.mapError((hint) => clockError(operation, backendFailure("evaluate", hint)))
+        Effect.mapError((hint) =>
+          Deadline.isTimeout(hint) ? hint : clockError(operation, backendFailure("evaluate", hint))
+        )
       )
       const previous = installed.script
       installed.script = yield* declare(installed).pipe(
-        Effect.mapError((error) => clockError(operation, backendFailure("declare", error.message)))
+        Effect.mapError((error) =>
+          Deadline.isTimeout(error) ? error : clockError(operation, backendFailure("declare", error.message))
+        )
       )
       yield* Scope.close(previous, Exit.void)
     }).pipe(Operation.named(operation, {
@@ -445,7 +450,7 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
     install: (mode, options) =>
       Effect.gen(function*() {
         const operation = `${owner.name}.install`
-        const id = Operation.operationId()
+        const { id } = yield* Operation.record
         const fail = (reason: Declaration.DeclarationErrorReason) =>
           new Declaration.DeclarationError({ declaration: operation, reason, diagnostics: Operation.diagnostics(id) })
         if (Option.isSome(timeline.installed)) {
@@ -470,12 +475,14 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
         const scope = yield* Scope.fork(yield* Effect.scope)
         const installed: Installed = { state, version: 1, workers, scope, script: scope }
         installed.script = yield* declare(installed).pipe(
-          Effect.mapError((error) => fail(backendFailure("declare", error.message))),
+          Effect.mapError((error) =>
+            Deadline.isTimeout(error) ? error : fail(backendFailure("declare", error.message))
+          ),
           Effect.onError(() => Scope.close(scope, Exit.void))
         )
         // The documents loaded already get it now; what their scripts captured before keeps real time
         yield* broadcast(`function() { return ${installer(token, state, installed.version)} }`, workers).pipe(
-          Effect.mapError((hint) => fail(backendFailure("evaluate", hint))),
+          Effect.mapError((hint) => Deadline.isTimeout(hint) ? hint : fail(backendFailure("evaluate", hint))),
           Effect.onError(() => Scope.close(scope, Exit.void))
         )
         timeline.installed = Option.some(installed)

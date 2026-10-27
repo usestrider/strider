@@ -9,6 +9,7 @@ import * as Option from "effect/Option"
 import { pipeArguments } from "effect/Pipeable"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import type * as Deadline from "../Deadline.ts"
 import * as Download from "../Download.ts"
 import type * as FileInput from "../FileInput.ts"
 import * as Reason from "../Reason.ts"
@@ -150,16 +151,18 @@ export const make = (runtime: Runtime.Runtime, entry: Model.DownloadEntry): Down
       }).pipe(
         Operation.named("Download.saveAs", { attributes: { "browser.download.id": entry.id, "browser.path": to } })
       ),
-    cancel: Effect.suspend(() => {
-      const id = Operation.operationId()
-      return runtime.model.adapter.cancelDownload(entry.id).pipe(
-        Effect.catch((error) => {
+    cancel: Effect.flatMap(Operation.record, ({ id }) =>
+      runtime.model.adapter.cancelDownload(entry.id).pipe(
+        Effect.catch((error): Effect.Effect<void, Download.DownloadError | Deadline.Timeout> => {
           const mapped = Operation.fromAdapter(error, id, runtime.backend)
           // Its context is gone, which canceled it already
-          return mapped._tag === "Gone" ? Effect.void : Effect.fail(failure("Download.cancel", mapped.reason))
+          return mapped._tag === "Gone"
+            ? Effect.void
+            : mapped._tag === "Timeout"
+            ? Effect.fail(mapped.error)
+            : Effect.fail(failure("Download.cancel", mapped.reason))
         })
-      )
-    }).pipe(Operation.named("Download.cancel", { attributes: { "browser.download.id": entry.id } })),
+      )).pipe(Operation.named("Download.cancel", { attributes: { "browser.download.id": entry.id } })),
     pipe() {
       return pipeArguments(this, arguments)
     },

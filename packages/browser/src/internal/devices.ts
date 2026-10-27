@@ -9,7 +9,7 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as SubscriptionRef from "effect/SubscriptionRef"
-import type * as Deadline from "../Deadline.ts"
+import * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import * as Keyboard from "../Keyboard.ts"
 import * as Mouse from "../Mouse.ts"
@@ -68,7 +68,7 @@ const sending = <E>(
       yield* owner.runtime.model.adapter.dispatchInput(owner.page.id, events as ReadonlyArray<Adapter.InputEvent>).pipe(
         Effect.catch((error) => {
           const mapped = Operation.fromAdapter(error, id, owner.runtime.backend)
-          return Effect.fail(mapped._tag === "Gone" ? mapped.error : fail(mapped.reason, id))
+          return Effect.fail(mapped._tag !== "Reason" ? mapped.error : fail(mapped.reason, id))
         })
       )
       after(state)
@@ -116,11 +116,13 @@ const releasing = (
         Effect.catch((error) =>
           Effect.sync(() => {
             // A page that is gone took its input with it
-            if (error.reason._tag !== "Gone") {
+            if (Deadline.isTimeout(error) || error.reason._tag !== "Gone") {
               state.broken = Option.some({ description: `${describe}: ${error.message}`, release: sent })
             }
           })
-        )
+        ),
+        // A release is cleanup, which no operation's deadline ends
+        Operation.detached
       )
     }))
   })

@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
+import type * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
 import * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
@@ -37,9 +38,13 @@ export const grant = (
   operation: string,
   permissions: ReadonlyArray<UserContext.Permission>,
   options: UserContext.GrantOptions | undefined
-): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope> =>
+): Effect.Effect<
+  Declaration.Registration,
+  Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout,
+  Scope.Scope
+> =>
   Effect.gen(function*() {
-    const id = Operation.operationId()
+    const { id } = yield* Operation.record
     const adapter = runtime.model.adapter
     const fail = (reason: Declaration.DeclarationErrorReason) =>
       new Declaration.DeclarationError({ declaration: operation, reason, diagnostics: Operation.diagnostics(id) })
@@ -55,8 +60,8 @@ export const grant = (
     }
     const mapped = (error: Parameters<typeof Operation.fromAdapter>[0], name?: string) => {
       const failure = Operation.fromAdapter(error, id, runtime.backend)
-      // A context that went is TargetGone, as for every operation on it (QUIRKS.md, Q143)
-      if (failure._tag === "Gone") return failure.error
+      // A context that went is TargetGone, as for every operation on it (QUIRKS.md, Q143); the deadline, Timeout
+      if (failure._tag !== "Reason") return failure.error
       // A name the browser doesn't know is the caller's to fix
       return fail(
         name !== undefined && failure.reason._tag === "BackendFailure"
@@ -79,12 +84,13 @@ export const grant = (
     for (const name of permissions) {
       yield* adapter.grantPermissions(context, where, [name]).pipe(
         Effect.mapError((error) => mapped(error, name)),
-        // What this call granted goes again, with the grants before it
+        // What this call granted goes again, with the grants before it: cleanup, which the deadline doesn't end
         Effect.onError(() =>
           adapter.resetPermissions(context).pipe(
             Effect.andThen(apply(list)),
             Effect.ignore,
-            Effect.andThen(Scope.close(scope, Exit.void))
+            Effect.andThen(Scope.close(scope, Exit.void)),
+            Operation.detached
           )
         )
       )
@@ -96,7 +102,7 @@ export const grant = (
         const index = list.indexOf(entry)
         if (index >= 0) list.splice(index, 1)
         if (list.length === 0) contexts.delete(context)
-        return adapter.resetPermissions(context).pipe(Effect.andThen(apply(list)), Effect.ignore)
+        return adapter.resetPermissions(context).pipe(Effect.andThen(apply(list)), Effect.ignore, Operation.detached)
       })
     )
     return { remove: Scope.close(scope, Exit.void) } satisfies Declaration.Registration

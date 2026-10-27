@@ -1353,7 +1353,7 @@ An entry with no marker is open.
 
 **Q244. A handler's or a route's decision ran under the deadline in force when it was registered** (Ours). `Dialog.handle`, `FileChooser.handle` and `route` run each decision with the context they captured at registration, the deadline included, so a handler registered inside `Deadline.within("5 seconds")` failed its operations with `Timeout` once those five seconds had passed, though its own budget, `Deadline.DefaultBudget` per decision, had barely begun. Its time limit was also on the fiber's clock, which `TestClock` stops.
 - *Seen:* giving every operation a record and a deadline of its own, which would have handed the registration's to every decision too.
-- *We:* a decision runs apart from the operation that registered it, with no record of its own and a deadline of the budget from when it starts (`Operation.deciding`), timed on the browser's clock captured at registration. Work an operation leaves running, a recording's polls and followers, starts with no deadline of the operation's (`Operation.detached`).
+- *We:* a decision runs apart from the operation that registered it, with no record of its own and a deadline of the budget from when it starts (`Operation.apart`, then named `Operation.deciding`), timed on the browser's clock captured at registration. Work an operation leaves running, a recording's polls and followers, starts with no deadline of the operation's (`Operation.detached`).
 - *Reconsider:* nothing.
 - **Resolved** in `7b3c783`, with a test of a handler registered under a 10 ms deadline deciding a dialog later.
 

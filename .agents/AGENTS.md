@@ -109,13 +109,17 @@ section applies them. Effect's skills in `.repos/effect/.agents/skills` are the 
   `Operation.fn`), never `Effect.withSpan` or `Effect.fn`: it gets a record, from which its `Timeout` takes its
   phase, and its span, opened through `src/internal/spans.ts` so `SpanNameGenerator`, `TracerDisabledWhen` and the
   diagnostics preset apply to it; name its target with `browser.page.id`, `browser.context.id` or `browser.realm.id`.
-  Work it leaves running, such as a handler's or a recording's, starts through `Operation.deciding` or
+  Work it leaves running, such as a handler's or a recording's, starts through `Operation.apart` or
   `Operation.detached`, never under the operation's deadline. An operation run inside another is a step of it, and a
   `Timeout` that leaves an operation is its own, so never catch a step's `Timeout` to rename it. The public
   `src/Operation.ts` gives users the same over the internal module; the library reads `Operation.Current` only
   optionally, through `Operation.record` and `Operation.current`.
 - A deadline, and any wait on the browser, reads the browser's clock (`src/internal/browserClock.ts`), never the
   fiber's `Clock`, which `TestClock` replaces: a real browser's is the live clock, `Browser.layerTest`'s Effect's.
+- L1 calls the adapter through `model.adapter`, which `src/internal/boundedAdapter.ts` bounds by the operation a
+  call runs in, so an operation's error type includes `Deadline.Timeout`; map adapter failures with
+  `Operation.fromAdapter`, which passes it through. A new adapter method is classified there as a read, a write, a
+  creation or a release. Cleanup an operation runs, such as a rollback, runs through `Operation.detached`.
 - Nothing implicit (principle 23): every default is stated with `@default`, and nothing hidden waits or retries.
 - Generated files (sections marked `// @barrel:`, `INDEX.md`, `src/cdp/`, the protocol models) are regenerated, never edited.
 - A declaration that isn't built is erased at run time, so a module must not use one as it loads, or re-export one

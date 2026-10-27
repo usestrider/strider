@@ -8,6 +8,7 @@ import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import type * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
 import type * as Emulation from "../Emulation.ts"
 import * as Reason from "../Reason.ts"
@@ -149,7 +150,11 @@ export const declare = (
   owner: Owner,
   overrides: ReadonlyArray<Field>,
   id: ReturnType<typeof Operation.operationId>
-): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope> =>
+): Effect.Effect<
+  Declaration.Registration,
+  Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout,
+  Scope.Scope
+> =>
   Effect.gen(function*() {
     const fail = (reason: Declaration.DeclarationErrorReason) =>
       new Declaration.DeclarationError({ declaration: owner.operation, reason, diagnostics: Operation.diagnostics(id) })
@@ -180,7 +185,7 @@ export const declare = (
       Effect.mapError((error) => {
         const mapped = Operation.fromAdapter(error, id, owner.runtime.backend)
         // A target that went is TargetGone, as for every operation on it (QUIRKS.md, Q143)
-        return mapped._tag === "Gone" ? mapped.error : fail(mapped.reason)
+        return mapped._tag !== "Reason" ? mapped.error : fail(mapped.reason)
       }),
       Effect.onError(() => Scope.close(scope, Exit.void))
     )
@@ -190,7 +195,7 @@ export const declare = (
 /** `emulate`: the settings' fields, as one registration. */
 export const emulate = (owner: Owner, settings: Emulation.Emulation) =>
   Effect.gen(function*() {
-    const id = Operation.operationId()
+    const { id } = yield* Operation.record
     const overrides = fields(settings)
     if (!Array.isArray(overrides)) {
       return yield* Effect.fail(

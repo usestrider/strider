@@ -15,9 +15,11 @@
 import * as Effect from "effect/Effect"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as CookieJar from "../CookieJar.ts"
+import * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as Page from "../Page.ts"
 import * as Reason from "../Reason.ts"
@@ -410,7 +412,7 @@ const sourcesOf = Effect.fnUntraced(function*(runtime: Runtime.Runtime, context:
 export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id) =>
   Effect.gen(function*() {
     const operation = "UserContext.exportStorageState"
-    const id = Operation.operationId()
+    const { id } = yield* Operation.record
     const budget = yield* Operation.budget
     const cookies = yield* runtime.model.adapter.cookies(context).pipe(
       Effect.mapError((error) => {
@@ -542,9 +544,11 @@ export const applyState = (
 ) =>
   Effect.gen(function*() {
     const operation = "Browser.newContext"
-    const budget = yield* Operation.budget
+    const record = yield* Operation.record
+    const budget = record.budget
     const adapterFailure = (error: Parameters<typeof Operation.fromAdapter>[0]) => {
       const mapped = Operation.fromAdapter(error, id, runtime.backend)
+      if (mapped._tag === "Timeout") return mapped.error
       return contextError(
         mapped._tag === "Reason"
           ? mapped.reason
@@ -569,10 +573,12 @@ export const applyState = (
       // The context's own setup: a target that went fails it, as BackendFailure
       const reasonOf = (error: Route.RouteError | Page.PageError | Target.TargetGone) =>
         Target.isTargetGone(error) ? error : error.reason
-      const routeFailure = (error: Route.RouteError | Target.TargetGone) =>
-        contextError(asReason(reasonOf(error), operation), id, operation)
+      const routeFailure = (error: Route.RouteError | Target.TargetGone | Deadline.Timeout) =>
+        Deadline.isTimeout(error) ? error : contextError(asReason(reasonOf(error), operation), id, operation)
       const page = yield* context.newPage.pipe(
-        Effect.mapError((error) => contextError(asReason(reasonOf(error), operation), id, operation))
+        Effect.mapError((error) =>
+          Deadline.isTimeout(error) ? error : contextError(asReason(reasonOf(error), operation), id, operation)
+        )
       )
       const { entry } = Handles.page(page)
       const html = (body: string) =>
@@ -582,19 +588,24 @@ export const applyState = (
         yield* context.route(seed, () => html("<!DOCTYPE html><title>storage state</title>")).pipe(
           Effect.mapError(routeFailure)
         )
+        // The deadline is the operation's Timeout; anything else fails the write
         const write = (failure: unknown) =>
-          contextError(
-            new Reason.BackendFailure({
-              kind: "Rejected",
-              method: operation,
-              metadata: {},
-              hint: `Writing ${origin.origin}'s storage failed: ${
-                String((failure as { message?: string }).message ?? failure)
-              }`
-            }),
-            id,
-            operation
-          )
+          Deadline.isTimeout(failure)
+            ? failure
+            : Predicate.isTagged(failure, "Deadline")
+            ? record.timeout(Option.some(`The page didn't write ${origin.origin}'s storage before the deadline`))
+            : contextError(
+              new Reason.BackendFailure({
+                kind: "Rejected",
+                method: operation,
+                metadata: {},
+                hint: `Writing ${origin.origin}'s storage failed: ${
+                  String((failure as { message?: string }).message ?? failure)
+                }`
+              }),
+              id,
+              operation
+            )
         const data = JSON.stringify(toRead(origin))
         let document: Target.DocumentId
         if (origin.partition._tag === "Unpartitioned") {
@@ -648,7 +659,11 @@ export const applyState = (
         yield* Effect.annotateCurrentSpan(`browser.storage_state.origin.${index}`, origin.origin)
       }
       // Closed and confirmed before the context is returned: Firefox fails a tab created while one closes (QUIRKS.md)
-      yield* page.close().pipe(Effect.mapError((error) => contextError(asReason(error, operation), id, operation)))
+      yield* page.close().pipe(
+        Effect.mapError((error) =>
+          Deadline.isTimeout(error) ? error : contextError(asReason(error, operation), id, operation)
+        )
+      )
     }))
   }).pipe(Operation.named("StorageState.apply", { attributes: { "browser.context.id": context.id } }))
 

@@ -82,6 +82,8 @@ const pay = Effect.fn("pay")(function*(page: Page.Page) {
 }, Deadline.within("5 seconds"))
 ```
 
+- Every command an operation sends waits for its reply until the deadline, a cookie read or a declaration as much
+  as a click.
 - A nested deadline can only be shorter.
 - `Deadline.withDefaultBudget("1 minute")` changes the default for a program.
 - `Deadline.remaining` reads the time left.

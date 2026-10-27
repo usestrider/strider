@@ -368,7 +368,8 @@ export interface ProtocolSession {
    */
   readonly key: SessionKey | undefined
   /**
-   * Sends a command and waits for its reply, for at most `CommandTimeout`. Interrupting the caller, or running
+   * Sends a command and waits for its reply, for at most `CommandTimeout`, or until the deadline of the operation of
+   * `@usestrider/browser` it is sent in. Interrupting the caller, or running
    * out of time, abandons the reply; it never cancels the command, which no protocol can do. A late reply to
    * a command that creates a resource goes to `CurrentLateReplyHandler`.
    *
@@ -530,8 +531,10 @@ export const on: {
  *
  * **Details**
  *
- * It applies to every command, including those the API in `@usestrider/browser` sends under an operation's
- * deadline. `Duration.infinity` waits until the reply arrives or the session ends.
+ * It applies to the commands sent here and outside an operation of `@usestrider/browser`, such as its cleanup.
+ * Inside an operation, the operation's deadline replaces it: each command waits for its reply until the deadline.
+ * It runs on the live clock, as the browser does, so `TestClock` never moves it. `Duration.infinity` waits until
+ * the reply arrives or the session ends.
  *
  * @stability experimental
  * @category references

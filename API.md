@@ -240,8 +240,8 @@ program.pipe(Effect.provide(Chromium.layerConfig({ executablePath: Config.String
 interface Browser {
   readonly info: Info                                   // fixed for the connection: product, version, protocol, revision
   readonly capabilities: Watchable.Watchable<CapabilitySet>   // refined as probes complete
-  newContext(options?: UserContext.Options | undefined): Effect<UserContext.UserContext, UserContext.UserContextError, Scope>   // owned; removed when the scope closes
-  newPage(options?: UserContext.Options | undefined): Effect<Page.Page, Page.PageError | TargetGone, Scope>   // a fresh context + page, released together
+  newContext(options?: UserContext.Options | undefined): Effect<UserContext.UserContext, UserContext.UserContextError | Timeout, Scope>   // owned; removed when the scope closes
+  newPage(options?: UserContext.Options | undefined): Effect<Page.Page, Page.PageError | TargetGone | Timeout, Scope>   // a fresh context + page, released together
   readonly pages: Watchable.Watchable<ReadonlyArray<Page.ObservedPage>>   // attach mode: what exists, and changes
   readonly defaultContext: UserContext.ObservedUserContext   // fixed: exists for the whole connection
 }
@@ -282,16 +282,16 @@ interface ObservedUserContext {                         // a context we don't co
   readonly control: Effect<UserContext, UserContextError, Scope>   // explicit; reading storage needs it too
 }
 interface UserContext extends ObservedUserContext {     // two levels only: reads happen on pages
-  readonly newPage: Effect<Page.Page, Page.PageError | TargetGone, Scope>   // closed with its unsolicited popups when the scope closes
+  readonly newPage: Effect<Page.Page, Page.PageError | TargetGone | Timeout, Scope>   // closed with its unsolicited popups when the scope closes
   readonly pages: Watchable.Watchable<ReadonlyArray<Page.Page>>
   readonly workers: Watchable.Watchable<ReadonlyArray<BrowserWorker.BrowserWorker>>
   readonly cookies: CookieJar.CookieJar                 // a sub-handle bound to the context (Storage, below)
   readonly exportStorageState: Effect<StorageState.StorageState, UserContextError | TargetGone>   // values Redacted in memory
   readonly clock: PageClock.PageClock                   // context-wide timeline (opt-in)
-  route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError | TargetGone, Scope | R>   // asked after the page's own
-  addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, DeclarationError | TargetGone, Scope>
-  emulate(settings: Emulation.Emulation): Effect<Registration, DeclarationError | TargetGone, Scope>
-  grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect<Registration, DeclarationError | TargetGone, Scope>   // default every origin (not on Firefox); ANDed with Permissions Policy
+  route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError | TargetGone | Timeout, Scope | R>   // asked after the page's own
+  addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, DeclarationError | TargetGone | Timeout, Scope>
+  emulate(settings: Emulation.Emulation): Effect<Registration, DeclarationError | TargetGone | Timeout, Scope>
+  grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect<Registration, DeclarationError | TargetGone | Timeout, Scope>   // default every origin (not on Firefox); ANDed with Permissions Policy
 }
 
 interface Options {                                      // UserContext.Options; an unset option keeps the browser's own value unless a default is stated
@@ -370,11 +370,11 @@ interface Page extends ReadonlyPage {
   readonly keyboard: Keyboard.Keyboard
   readonly mouse: Mouse.Mouse
   readonly clock: PageClock.PageClock
-  route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError | TargetGone, Scope | R>
-  addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, Declaration.DeclarationError | TargetGone, Scope>
-  emulate(settings: Emulation.Emulation): Effect<Declaration.Registration, Declaration.DeclarationError | TargetGone, Scope>
-  readonly activate: Effect<void, PageError | TargetGone> // bring to front; rendering-based waits need it
-  close(): Effect<void, TargetGone | Timeout>            // owned teardown: no beforeunload
+  route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError | TargetGone | Timeout, Scope | R>
+  addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, Declaration.DeclarationError | TargetGone | Timeout, Scope>
+  emulate(settings: Emulation.Emulation): Effect<Declaration.Registration, Declaration.DeclarationError | TargetGone | Timeout, Scope>
+  readonly activate: Effect<void, PageError | TargetGone | Timeout> // bring to front; rendering-based waits need it
+  close(): Effect<void, PageError | TargetGone | Timeout>   // owned teardown: no beforeunload
   close(options: { readonly runBeforeUnload: boolean }): Effect<void, PageError | TargetGone | Timeout>
     // the prompt is decided as any dialog is; a handler's stay fails with CloseCanceled, the page usable;
     // browsers prompt only once the user has interacted with the page
@@ -721,13 +721,13 @@ interface Decision<in P extends Phase> {}                // valid at the phases 
 type Intercepted<P> = Extract<RequestPhase | ResponsePhase | AuthPhase, { phase: P }>
 interface Paused {
   readonly request: NetworkRequest.NetworkRequest        // fixed: the request as paused; NetworkRequest.toHttpClientRequest for HttpClient
-  readonly requestBody: Effect<Option<Uint8Array>, RouteError | TargetGone>   // the body as sent, on every backend
+  readonly requestBody: Effect<Option<Uint8Array>, RouteError | TargetGone | Timeout>   // the body as sent, on every backend
 }
 interface RequestPhase extends Paused { readonly phase: "request" }
 interface ResponsePhase extends Paused {
   readonly phase: "response"
   readonly response: NetworkResponse.NetworkResponse     // fixed: status and headers
-  readonly responseBody: Effect<Uint8Array, RouteError | TargetGone>   // interception.responseBody: CDP only
+  readonly responseBody: Effect<Uint8Array, RouteError | TargetGone | Timeout>   // interception.responseBody: CDP only
 }
 interface AuthPhase extends Paused { readonly phase: "auth"; readonly challenge: { origin: string; scheme: string; realm: string } }
 declare const continue: Decision<Phase>                  // at auth: the page gets the challenge's response
@@ -820,17 +820,17 @@ interface Download extends Pipeable, Inspectable {
   readonly finished: Effect<void, DownloadError | TargetGone | Timeout>   // status.waitFor(terminal), under the deadline
   readonly stream: Stream<Uint8Array, DownloadError | TargetGone | Timeout>   // the bytes, once it completes
   saveAs(path: FilePath.Local | string): Effect<void, DownloadError | TargetGone | Timeout>   // always a local path; waits for completion, under the deadline
-  readonly cancel: Effect<void, DownloadError>          // Unsupported where the protocol has no command for it (BiDi)
+  readonly cancel: Effect<void, DownloadError | Timeout>   // Unsupported where the protocol has no command for it (BiDi)
   // the file is in a temporary directory its context owns, deleted when the context closes; saveAs copies it out first
 }
 
 // CookieJar: context.cookies
 interface CookieJar {
-  readonly list: Effect<ReadonlyArray<Cookie>, CookieJarError | TargetGone>         // every cookie in the context
-  listFor(url: Url.Url | string): Effect<ReadonlyArray<Cookie>, CookieJarError | TargetGone>   // what a request to url would send
-  set(cookie: Input): Effect<void, CookieJarError | TargetGone>                     // a change, not a declaration: a scope doesn't undo it
-  remove(match: Match): Effect<void, CookieJarError | TargetGone>                   // name; domain and path default to any
-  readonly clear: Effect<void, CookieJarError | TargetGone>
+  readonly list: Effect<ReadonlyArray<Cookie>, CookieJarError | TargetGone | Timeout>         // every cookie in the context
+  listFor(url: Url.Url | string): Effect<ReadonlyArray<Cookie>, CookieJarError | TargetGone | Timeout>   // what a request to url would send
+  set(cookie: Input): Effect<void, CookieJarError | TargetGone | Timeout>                     // a change, not a declaration: a scope doesn't undo it
+  remove(match: Match): Effect<void, CookieJarError | TargetGone | Timeout>                   // name; domain and path default to any
+  readonly clear: Effect<void, CookieJarError | TargetGone | Timeout>
 }
 declare const toCookie: (cookie: Cookie) => Cookies.Cookie            // to effect/http's Cookie, unredacting the value explicitly
 class Cookie extends Schema.Class<Cookie>("@usestrider/browser/CookieJar/Cookie")({   // Effect's cookie attributes plus what only browsers store
@@ -876,10 +876,10 @@ declare const Json: Schema.Codec<StorageState, string>   // Schema.fromJsonStrin
 ```ts
 // PageClock
 interface PageClock {
-  install(mode: Mode): Effect<Declaration.Registration, Declaration.DeclarationError | TargetGone, Scope>   // needs before-author-script timing
-  adjust(duration: Duration.Input): Effect<void, PageClockError | TargetGone>      // controlled: advances, firing every due timer in order
-  setTime(at: DateTime.DateTime.Input): Effect<void, PageClockError | TargetGone>  // fixed or controlled: jumps; due timers fire at most once, like waking from sleep
-  readonly resume: Effect<void, PageClockError | TargetGone>                       // real time again, from now
+  install(mode: Mode): Effect<Declaration.Registration, Declaration.DeclarationError | TargetGone | Timeout, Scope>   // needs before-author-script timing
+  adjust(duration: Duration.Input): Effect<void, PageClockError | TargetGone | Timeout>      // controlled: advances, firing every due timer in order
+  setTime(at: DateTime.DateTime.Input): Effect<void, PageClockError | TargetGone | Timeout>  // fixed or controlled: jumps; due timers fire at most once, like waking from sleep
+  readonly resume: Effect<void, PageClockError | TargetGone | Timeout>                       // real time again, from now
 }
 type Mode =
   | { readonly mode: "fixed"; readonly at: DateTime.DateTime.Input }       // wall time frozen at `at`; timers run
@@ -897,9 +897,9 @@ type Mode =
 ## Capabilities
 
 ```ts
-page.capability(Capability.AxTree)         // Effect<AxTreeReader, CapabilityError | TargetGone, Scope>   — reason: Unsupported{capability, backend}
-page.capability(Capability.Screencast)     // Effect<ScreencastControl, CapabilityError | TargetGone, Scope>
-page.capability(Capability.Video)          // Effect<VideoRecording, CapabilityError | TargetGone, Scope>
+page.capability(Capability.AxTree)         // Effect<AxTreeReader, CapabilityError | TargetGone | Timeout, Scope>   — reason: Unsupported{capability, backend}
+page.capability(Capability.Screencast)     // Effect<ScreencastControl, CapabilityError | TargetGone | Timeout, Scope>
+page.capability(Capability.Video)          // Effect<VideoRecording, CapabilityError | TargetGone | Timeout, Scope>
 browser.capabilities                       // Watchable<Browser.CapabilitySet>: the current set, with evidence and limitations
 ```
 
@@ -1098,6 +1098,8 @@ locator.click().pipe(
 ```
 
 `Diagnostics.Diagnostics` is the shared envelope: `operationId`, `dispatch`, `progress`, `lastObserved` and `cleanup`. It is rendered under the active preset (README.md). Because every error is a Schema, the CLI and the agent toolkit encode failures as data, envelope and hint included.
+
+Every operation that sends the browser a command can time out, a declaration's or a cookie read's as much as a click's. The command waits for its reply until the operation's deadline, not for `Protocol.CommandTimeout`, which governs only what's sent outside an operation, such as cleanup. A read the browser never answers times out in the phase `resolving`, and a change it never confirmed in `dispatchedUnconfirmed`. A page or context whose creation finishes after the deadline is closed once it exists, and cleanup is never cut short by an operation's deadline.
 
 A `Timeout` that leaves an operation is that operation's. One a step ran out with keeps the step's `phase`, `history` and `hint`, which say where it stopped, and takes the operation's `operation`, `budget` and diagnostics: `progress` lists its steps, each `ok`, `unsent`, `uncertain` or `rejected`, and `dispatch` is the furthest any step got. Inside the operation's body, a step's `Timeout` is still the step's, so `Effect.catchTag("Timeout", …)` around a click catches the click's. A wait bounded by `Operation.bound` times out in the phase the record shows: `postcondition` after a step that sent succeeded, `dispatchedUnconfirmed` after `markSent`, `waitingForCondition` after `observe`, otherwise `resolving`.
 

@@ -23,7 +23,7 @@ import { pipeArguments } from "effect/Pipeable"
 import * as Redacted from "effect/Redacted"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as AriaRole from "../AriaRole.ts"
-import type * as Deadline from "../Deadline.ts"
+import * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as FileInput from "../FileInput.ts"
 import type * as JSHandle from "../JSHandle.ts"
@@ -887,9 +887,15 @@ export class LocatorImpl implements Locator.Locator {
     }
   }
 
-  private adapterFailure(operation: string, error: Adapter.AdapterError, id: Diagnostics.OperationId) {
+  private adapterFailure(
+    operation: string,
+    error: Adapter.AdapterError | Deadline.Timeout,
+    id: Diagnostics.OperationId
+  ) {
     const mapped = Operation.fromAdapter(error, id, this.owner.runtime.backend)
-    return mapped._tag === "Gone" ? mapped.error : this.error(operation, mapped.reason, id, { _tag: "MayHaveBeenSent" })
+    return mapped._tag !== "Reason"
+      ? mapped.error
+      : this.error(operation, mapped.reason, id, { _tag: "MayHaveBeenSent" })
   }
 
   /** Fails with `Unsupported` when the backend reports a capability as unsupported. */
@@ -976,7 +982,7 @@ export class LocatorImpl implements Locator.Locator {
           op: "act",
           steps: this.steps,
           checks: checksFor(pointerChecks, { stable: false, receivesPointer: false }),
-          cap: Math.min(1000, record.left()),
+          cap: Runtime.roundCap(record.left()),
           action: {
             _tag: "Point",
             position: position === undefined ? null : { x: position.x, y: position.y },
@@ -1221,21 +1227,32 @@ export class LocatorImpl implements Locator.Locator {
       const budget = record.budget
       const checks = checksFor(defaults, options?.checks)
       const emulatesFocus = yield* Filters.supported(owner.runtime, "emulation.focus")
+      // These actions happen in the round that applies them: once it is sent, the action may have happened, and
+      // its answer says whether it did
+      const inRound = action._tag === "Focus" || action._tag === "Scroll" || action._tag === "Fill" ||
+        action._tag === "Select"
       const round = (cap: number, apply: boolean) =>
-        Runtime.sendRouted(
-          owner.runtime,
-          owner.page,
-          { op: "act", steps: this.steps, checks, cap, action, apply },
-          id,
-          budget.at
-        )
-          .pipe(
-            Effect.mapError((failure) =>
-              failure._tag === "Deadline"
-                ? failure
-                : this.sendFailure(operation, failure, record)
-            )
+        Effect.suspend(() => {
+          if (apply && inRound) record.markSent()
+          return Runtime.sendRouted(
+            owner.runtime,
+            owner.page,
+            { op: "act", steps: this.steps, checks, cap, action, apply },
+            id,
+            budget.at
           )
+        }).pipe(
+          Effect.tap((answer) =>
+            Effect.sync(() => {
+              if (apply && inRound && answer.response._tag !== "Ready") record.markNotSent()
+            })
+          ),
+          Effect.mapError((failure) =>
+            failure._tag === "Deadline"
+              ? failure
+              : this.sendFailure(operation, failure, record)
+          )
+        )
       // The record's phase says where the action stopped; the hint says why, from what it saw
       const hint = (noDocument?: string): Option.Option<string> => {
         // Input that may have reached the page: a timeout after it can't say the action didn't happen
@@ -1322,8 +1339,8 @@ export class LocatorImpl implements Locator.Locator {
               events,
               frame === undefined ? undefined : { frame: frame.frame, origin: ready.origin }
             ).pipe(
-              Effect.mapError((error): Runtime.SendFailure =>
-                Operation.fromAdapter(error, id, owner.runtime.backend)
+              Effect.mapError((error) =>
+                Runtime.fromAdapter(error, id, owner.runtime.backend)
               ),
               Effect.raceFirst(Runtime.promptBlocked(owner.page, true)),
               Effect.mapError((failure) =>
@@ -1351,7 +1368,7 @@ export class LocatorImpl implements Locator.Locator {
       while (true) {
         const left = record.left()
         if (left <= 0) return yield* Effect.fail(timedOut())
-        const first = yield* round(Math.min(1000, left), false).pipe(
+        const first = yield* round(Runtime.roundCap(left), false).pipe(
           Effect.flatMap(settle),
           Effect.catch((failure) =>
             failure._tag === "Deadline" ? Effect.fail(timedOut(failure.hint)) : Effect.fail(failure)
@@ -1361,7 +1378,7 @@ export class LocatorImpl implements Locator.Locator {
         // Input to a page is serialized; acquiring the permit takes from the deadline, and the checks run again
         const outcome = yield* owner.page.input.withPermit(Effect.gen({ self: this }, function*() {
           const apply = options?.trial !== true
-          const answer = yield* round(Math.min(1000, record.left()), apply).pipe(
+          const answer = yield* round(Runtime.roundCap(record.left()), apply).pipe(
             Effect.catch((failure) =>
               failure._tag === "Deadline" ? Effect.fail(timedOut(failure.hint)) : Effect.fail(failure)
             )

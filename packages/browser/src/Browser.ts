@@ -25,6 +25,7 @@ import * as Predicate from "effect/Predicate"
 import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
+import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as FilePath from "./FilePath.ts"
 import * as BrowserImpl from "./internal/browser.ts"
@@ -165,7 +166,7 @@ export interface Browser {
    */
   newContext(
     options?: UserContext.Options | undefined
-  ): Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Scope.Scope>
+  ): Effect.Effect<UserContext.UserContext, UserContext.UserContextError | Deadline.Timeout, Scope.Scope>
   /**
    * Creates a context and a page in it, released together: `newContext`, then its `newPage`.
    *
@@ -184,7 +185,7 @@ export interface Browser {
    */
   newPage(
     options?: UserContext.Options | undefined
-  ): Effect.Effect<Page.Page, Page.PageError | Target.TargetGone, Scope.Scope>
+  ): Effect.Effect<Page.Page, Page.PageError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
   /**
    * Every page of the browser, kept up to date as pages open and close. A page this connection created, or whose
    * context it created, is a `Page`. Any other, such as a launched browser's first tab or an attached browser's
@@ -255,7 +256,7 @@ export const isBrowser = (u: unknown): u is Browser => Predicate.hasProperty(u, 
  */
 export const newPage = (
   options?: UserContext.Options | undefined
-): Effect.Effect<Page.Page, Page.PageError | Target.TargetGone, Browser | Scope.Scope> =>
+): Effect.Effect<Page.Page, Page.PageError | Target.TargetGone | Deadline.Timeout, Browser | Scope.Scope> =>
   Effect.flatMap(Effect.service(Browser), (browser) => browser.newPage(options))
 
 /**
@@ -283,7 +284,7 @@ export const newPage = (
  */
 export const newContext = (
   options?: UserContext.Options | undefined
-): Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Browser | Scope.Scope> =>
+): Effect.Effect<UserContext.UserContext, UserContext.UserContextError | Deadline.Timeout, Browser | Scope.Scope> =>
   Effect.flatMap(Effect.service(Browser), (browser) => browser.newContext(options))
 
 /**

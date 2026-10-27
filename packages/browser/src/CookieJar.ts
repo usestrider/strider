@@ -15,6 +15,7 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
+import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
 import * as Reason from "./Reason.ts"
@@ -205,7 +206,7 @@ export interface CookieJar {
    * })
    * ```
    */
-  readonly list: Effect.Effect<ReadonlyArray<Cookie>, CookieJarError | Target.TargetGone>
+  readonly list: Effect.Effect<ReadonlyArray<Cookie>, CookieJarError | Target.TargetGone | Deadline.Timeout>
   /**
    * The cookies a request to `url` would send.
    *
@@ -221,7 +222,9 @@ export interface CookieJar {
    * })
    * ```
    */
-  listFor(url: Url.Url | string): Effect.Effect<ReadonlyArray<Cookie>, CookieJarError | Target.TargetGone>
+  listFor(
+    url: Url.Url | string
+  ): Effect.Effect<ReadonlyArray<Cookie>, CookieJarError | Target.TargetGone | Deadline.Timeout>
   /**
    * Sets a cookie. A change, not a declaration: it isn't undone when a scope closes.
    *
@@ -241,7 +244,7 @@ export interface CookieJar {
    * })
    * ```
    */
-  set(cookie: Input): Effect.Effect<void, CookieJarError | Target.TargetGone>
+  set(cookie: Input): Effect.Effect<void, CookieJarError | Target.TargetGone | Deadline.Timeout>
   /**
    * Removes the cookies that match.
    *
@@ -257,7 +260,7 @@ export interface CookieJar {
    * })
    * ```
    */
-  remove(match: Match): Effect.Effect<void, CookieJarError | Target.TargetGone>
+  remove(match: Match): Effect.Effect<void, CookieJarError | Target.TargetGone | Deadline.Timeout>
   /**
    * Removes every cookie in the context.
    *
@@ -273,7 +276,7 @@ export interface CookieJar {
    * })
    * ```
    */
-  readonly clear: Effect.Effect<void, CookieJarError | Target.TargetGone>
+  readonly clear: Effect.Effect<void, CookieJarError | Target.TargetGone | Deadline.Timeout>
 }
 
 /**

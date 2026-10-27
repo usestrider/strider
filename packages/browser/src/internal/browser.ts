@@ -27,6 +27,7 @@ import type * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Browser from "../Browser.ts"
 import * as CookieJar from "../CookieJar.ts"
+import * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import * as Ledger from "../Ledger.ts"
@@ -135,12 +136,14 @@ const makeContext = (
     closed: Deferred.await(entry.closed),
     control: access.control,
     newPage: Effect.gen(function*() {
-      const id = Operation.operationId()
+      const { id } = yield* Operation.record
       const scope = yield* Effect.scope
       const created = yield* Effect.acquireRelease(
         adapter.createPage(entry.id).pipe(Effect.mapError((error) => {
           const mapped = Operation.fromAdapter(error, id, runtime.backend)
-          return mapped._tag === "Gone"
+          return mapped._tag === "Timeout"
+            ? mapped.error
+            : mapped._tag === "Gone"
             ? new Page.PageError({
               operation: "UserContext.newPage",
               reason: new Page.InitializationFailed({ step: "create the page", hint: mapped.error.message }),
@@ -496,9 +499,9 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
 
   const newContext = (
     options?: UserContext.Options
-  ): Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Scope.Scope> =>
+  ): Effect.Effect<UserContext.UserContext, UserContext.UserContextError | Deadline.Timeout, Scope.Scope> =>
     Effect.gen(function*() {
-      const id = Operation.operationId()
+      const { id } = yield* Operation.record
       // A partition the backend can't set fails the context before it exists: nothing is applied partly
       if (options?.storageState !== undefined) {
         const partitions = yield* StorageStates.unsupportedPartitions(runtime, options.storageState)
@@ -513,11 +516,15 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           ))
         }
       }
-      const failed = (error: Adapter.AdapterError) => {
+      const failed = (
+        error: Adapter.AdapterError | Deadline.Timeout
+      ): Effect.Effect<never, UserContext.UserContextError | Deadline.Timeout> => {
         const mapped = Operation.fromAdapter(error, id, runtime.backend)
         // The browser itself ended: every operation on it ends with the connection, a defect here
         return mapped._tag === "Gone"
           ? Effect.die(mapped.error)
+          : mapped._tag === "Timeout"
+          ? Effect.fail(mapped.error)
           : Effect.fail(contextError("Browser.newContext", mapped.reason, id))
       }
       // A directory the context owns for its downloads, made first so it is removed after the context;
@@ -611,20 +618,27 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             : fields,
           id
         ).pipe(Effect.mapError((error) =>
-          contextError("Browser.newContext", asContextReason(Target.isTargetGone(error) ? error : error.reason), id)
+          Deadline.isTimeout(error)
+            ? error
+            : contextError("Browser.newContext", asContextReason(Target.isTargetGone(error) ? error : error.reason), id)
         ))
       }
       if (options?.permissions !== undefined) {
         yield* Grants.grant(runtime, created, "Browser.newContext", options.permissions, undefined).pipe(
           Effect.mapError((error) =>
-            contextError("Browser.newContext", asContextReason(Target.isTargetGone(error) ? error : error.reason), id)
+            Deadline.isTimeout(error)
+              ? error
+              : contextError(
+                "Browser.newContext",
+                asContextReason(Target.isTargetGone(error) ? error : error.reason),
+                id
+              )
           )
         )
       }
       const context: UserContext.UserContext = makeContext(runtime, entry, {
         grant: Option.none(),
-        page: (pageEntry) =>
-          Option.getOrThrow(runtime.page(pageEntry)),
+        page: (pageEntry) => Option.getOrThrow(runtime.page(pageEntry)),
         control: Effect.sync(() => context)
       })
       contexts.set(created, context)
@@ -650,15 +664,17 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
     }),
     newContext,
     newPage: Operation.fn("Browser.newPage")(function*(options?: UserContext.Options) {
-      const context = yield* newContext(options).pipe(Effect.mapError((error) =>
-        new Page.PageError({
-          operation: "Browser.newPage",
-          reason: error.reason._tag === "Incompatible"
-            ? new Page.InitializationFailed({ step: "create the context", hint: error.reason.message })
-            : error.reason,
-          diagnostics: error.diagnostics
-        })
-      ))
+      const context = yield* newContext(options).pipe(
+        Effect.mapError((error) =>
+          Deadline.isTimeout(error) ? error : new Page.PageError({
+            operation: "Browser.newPage",
+            reason: error.reason._tag === "Incompatible"
+              ? new Page.InitializationFailed({ step: "create the context", hint: error.reason.message })
+              : error.reason,
+            diagnostics: error.diagnostics
+          })
+        )
+      )
       return yield* context.newPage
     }),
     pages: Watchable.make({

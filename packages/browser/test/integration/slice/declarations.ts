@@ -558,6 +558,7 @@ export const declarations = (
             const refused = yield* Effect.flip(
               page.addInitScript({ source: "self.__after = 1" }, { workers: true, after: [documentsOnly] })
             )
+            assert(Declaration.isDeclarationError(refused), String(refused))
             assert.strictEqual(refused.reason._tag, "InvalidInput")
           }))
         }), timeout)

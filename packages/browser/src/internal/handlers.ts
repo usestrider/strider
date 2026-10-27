@@ -107,7 +107,7 @@ export const register = <S, P, D, E, R>(
         const fiber = yield* FiberSet.run(
           fibers,
           Effect.provideContext(
-            options.handler(options.pending(subject)).pipe(Operation.deciding(options.name, budget)),
+            options.handler(options.pending(subject)).pipe(Operation.apart(options.name, budget)),
             context
           )
         )

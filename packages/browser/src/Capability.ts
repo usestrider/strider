@@ -12,6 +12,7 @@ import type * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as Stream from "effect/Stream"
+import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as FilePath from "./FilePath.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
@@ -83,7 +84,7 @@ export interface AxTreeReader {
    * })
    * ```
    */
-  readonly read: Effect.Effect<AxNode, CapabilityError | Target.TargetGone>
+  readonly read: Effect.Effect<AxNode, CapabilityError | Target.TargetGone | Deadline.Timeout>
 }
 
 /**
@@ -141,7 +142,7 @@ export interface VideoRecording {
   /**
    * The file, once the capability's scope has closed and the browser has written it.
    */
-  readonly file: Effect.Effect<FilePath.Local, CapabilityError | Target.TargetGone>
+  readonly file: Effect.Effect<FilePath.Local, CapabilityError | Target.TargetGone | Deadline.Timeout>
 }
 
 /**

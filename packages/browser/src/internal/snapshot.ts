@@ -12,6 +12,7 @@
 import * as Effect from "effect/Effect"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
+import * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Snapshot from "../Snapshot.ts"
@@ -114,8 +115,11 @@ export const take = (
     const frameTree = Effect.fnUntraced(function*(iframe: ReadonlyArray<Engine.Step>, level: number) {
       const found = yield* Runtime.element(owner.runtime, owner.page, iframe, id, at)
       if (found._tag !== "Found") return []
+      // A frame the browser can't name is left out; the deadline ends the snapshot
       const frame = yield* owner.runtime.model.adapter.contentFrame(found.node).pipe(
-        Effect.orElseSucceed(() => Option.none<Target.NavigableId>())
+        Effect.catch((error) =>
+          Deadline.isTimeout(error) ? Effect.fail<Runtime.SendFailure>({ _tag: "Deadline" }) : Effect.succeedNone
+        )
       )
       if (Option.isNone(frame)) return []
       const document = yield* owner.runtime.model.documentOf(frame.value)

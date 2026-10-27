@@ -152,6 +152,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
               }
               if (name === "Firefox") {
                 const refused = yield* file.cancel.pipe(Effect.flip)
+                assert(Download.isDownloadError(refused), String(refused))
                 assert.strictEqual(refused.reason._tag, "Unsupported")
                 yield* file.finished
                 return

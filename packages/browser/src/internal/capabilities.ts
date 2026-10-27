@@ -10,6 +10,7 @@ import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Capability from "../Capability.ts"
+import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as FilePath from "../FilePath.ts"
 import type * as Pixels from "../Pixels.ts"
@@ -33,10 +34,10 @@ const capabilityError = (capability: string, reason: Capability.CapabilityErrorR
 /** An adapter failure, as a capability's: the page's end, or the capability's error. */
 const fromAdapter = (runtime: Runtime.Runtime, capability: string, id: Diagnostics.OperationId) =>
 (
-  error: Adapter.AdapterError
-): Capability.CapabilityError | Target.TargetGone => {
+  error: Adapter.AdapterError | Deadline.Timeout
+): Capability.CapabilityError | Target.TargetGone | Deadline.Timeout => {
   const mapped = Operation.fromAdapter(error, id, runtime.backend)
-  return mapped._tag === "Gone" ? mapped.error : capabilityError(capability, mapped.reason, id)
+  return mapped._tag !== "Reason" ? mapped.error : capabilityError(capability, mapped.reason, id)
 }
 
 /** The page's end, as a `TargetGone`. */
@@ -48,9 +49,9 @@ export const acquire = <H>(
   runtime: Runtime.Runtime,
   page: Model.PageEntry,
   capability: Capability.Capability<H>
-): Effect.Effect<H, Capability.CapabilityError | Target.TargetGone, Scope.Scope> =>
+): Effect.Effect<H, Capability.CapabilityError | Target.TargetGone | Deadline.Timeout, Scope.Scope> =>
   Effect.gen(function*() {
-    const id = Operation.operationId()
+    const { id } = yield* Operation.record
     const which = known[capability.name]
     if (which === undefined) {
       return yield* Effect.fail(capabilityError(
@@ -83,13 +84,11 @@ export const acquire = <H>(
     switch (capability.name) {
       case "AxTree": {
         const reader: Capability.AxTreeReader = {
-          read: Effect.suspend(() => {
-            const id = Operation.operationId()
-            return adapter.accessibilityTree(page.id).pipe(
+          read: Effect.flatMap(Operation.record, ({ id }) =>
+            adapter.accessibilityTree(page.id).pipe(
               Effect.mapError(fromAdapter(runtime, capability.name, id)),
               Effect.raceFirst(Runtime.pageEnded(page, id))
-            )
-          }).pipe(Operation.named("Capability.AxTree.read", { attributes }))
+            )).pipe(Operation.named("Capability.AxTree.read", { attributes }))
         }
         return reader as H
       }

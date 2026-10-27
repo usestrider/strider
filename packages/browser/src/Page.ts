@@ -659,7 +659,7 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
    */
   capability<H>(
     capability: Capability.Capability<H>
-  ): Effect.Effect<H, Capability.CapabilityError | Target.TargetGone, Scope.Scope>
+  ): Effect.Effect<H, Capability.CapabilityError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
 }
 
 /**
@@ -876,7 +876,7 @@ export interface Page extends ReadonlyPage {
     pattern: Url.Pattern | string,
     handler: Route.Handler<E, R, P>,
     options?: Route.Options<P> | undefined
-  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone, Scope.Scope | R>
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
   /**
    * Runs a script in every new document of this page, before its own scripts, while the registration lives.
    *
@@ -903,7 +903,11 @@ export interface Page extends ReadonlyPage {
   addInitScript(
     script: InitScript.Source,
     options?: InitScript.Options | undefined
-  ): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>
+  ): Effect.Effect<
+    InitScript.InitScript,
+    Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
   /**
    * Overrides the given settings while the registration lives.
    *
@@ -928,7 +932,11 @@ export interface Page extends ReadonlyPage {
    */
   emulate(
     settings: Emulation.Emulation
-  ): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>
+  ): Effect.Effect<
+    Declaration.Registration,
+    Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
   /**
    * Brings the page to the front.
    *
@@ -956,7 +964,7 @@ export interface Page extends ReadonlyPage {
    * })
    * ```
    */
-  readonly activate: Effect.Effect<void, PageError | Target.TargetGone>
+  readonly activate: Effect.Effect<void, PageError | Target.TargetGone | Deadline.Timeout>
   /**
    * Closes the page without running `beforeunload`, so no prompt opens.
    *
@@ -975,7 +983,7 @@ export interface Page extends ReadonlyPage {
    * })
    * ```
    */
-  close(): Effect.Effect<void, Target.TargetGone | Deadline.Timeout>
+  close(): Effect.Effect<void, PageError | Target.TargetGone | Deadline.Timeout>
   /**
    * Closes the page, running its `beforeunload` handlers first when `runBeforeUnload` is `true`.
    *

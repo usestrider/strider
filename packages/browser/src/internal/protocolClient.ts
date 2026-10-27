@@ -22,18 +22,22 @@
  *   doesn't match its codec fails that caller or subscriber, not the connection.
  */
 import * as Cause from "effect/Cause"
+import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as FiberSet from "effect/FiberSet"
+import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Schema from "effect/Schema"
 import type * as SchemaAST from "effect/SchemaAST"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
+import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Protocol from "../protocol/Protocol.ts"
 import * as Transport from "../protocol/Transport.ts"
 import { ConnectionLost } from "../protocol/Transport.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Tracing from "./tracing.ts"
 
 /** An error reply, as the browser sent it. */
@@ -98,6 +102,16 @@ export interface Limits {
 
 /** 10,000 events or 256 MiB per session. */
 export const defaultLimits: Limits = { events: 10_000, bytes: 256 * 1024 * 1024 }
+
+/**
+ * The deadline of the operation a command is sent in, which replaces `Protocol.CommandTimeout` for it
+ * (`boundedAdapter.ts`): the command waits for its reply until then, on the live clock, and then fails with
+ * `NoReply`. A command in a region that can't be interrupted ends at the deadline too.
+ */
+export const CommandDeadline: Context.Reference<Option.Option<MonotonicInstant.MonotonicInstant>> = Context.Reference(
+  "@usestrider/browser/internal/ProtocolClient/CommandDeadline",
+  { defaultValue: () => Option.none() }
+)
 
 /** Why a session's model can't be trusted any more. */
 export type IntegrityFailure =
@@ -676,7 +690,10 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
       : yield* Schema.encodeUnknownEffect(definition.Params)(params).pipe(
         Effect.mapError((error) => failure(new Protocol.Encode({ method, issue: error.message })))
       )
-    const timeout = yield* Protocol.CommandTimeout
+    const deadline = yield* CommandDeadline
+    const timeout = Option.isSome(deadline)
+      ? Duration.millis(BrowserClock.millisLeft(BrowserClock.live, deadline.value))
+      : yield* Protocol.CommandTimeout
     const onLate = definition.traits.createsResource === true ? yield* Protocol.CurrentLateReplyHandler : undefined
     const decode = definition.Result === undefined
       ? undefined
@@ -694,11 +711,12 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
         runLate(entry, onLate)
       }
     })
+    // On the live clock: the browser is another process, which `TestClock` doesn't move
     const awaited = Duration.isFinite(timeout)
       ? Effect.timeoutOrElse(Deferred.await(entry.reply), {
         duration: timeout,
         orElse: () => Effect.andThen(abandon, Effect.fail(failure(new Protocol.NoReply({ method, timeout }))))
-      })
+      }).pipe(BrowserClock.onLive)
       : Deferred.await(entry.reply)
     const exchange = transport.send(wire.encode(entry.id, method, encoded, state.key)).pipe(
       Effect.catch(() =>

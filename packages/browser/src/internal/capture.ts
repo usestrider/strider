@@ -29,6 +29,7 @@ import * as Option from "effect/Option"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import type * as Model from "./model.ts"
 import * as Runtime from "./runtime.ts"
 
@@ -383,7 +384,12 @@ const call = (
     }
     if (result._tag === "Exception") return yield* Effect.fail(new CaptureFailed({ message: result.text }))
     return result.value
-  }).pipe(Effect.catchTag("AdapterError", (error) => Effect.fail(new CaptureFailed({ message: error.message }))))
+  }).pipe(
+    Effect.catchTags({
+      AdapterError: (error) => Effect.fail(new CaptureFailed({ message: error.message })),
+      Timeout: (error) => Effect.fail(new CaptureFailed({ message: error.message }))
+    })
+  )
 
 const text = (value: string): Adapter.LocalValue => ({ _tag: "Value", value: { type: "string", value } })
 
@@ -463,11 +469,12 @@ export const capturePage = (
     const captures = yield* Effect.forEach(documents, ({ document, frame, main }) =>
       captureDocument(runtime, document, { stream, reset: failed.has(document) }, target).pipe(
         // A capture is best-effort: one the page holds up is given up, and the next starts afresh
-        Effect.timeoutOrElse({
-          duration: "5 seconds",
-          orElse: () =>
-            Effect.fail(new CaptureFailed({ message: "The capture took longer than 5 seconds" }))
-        }),
+        BrowserClock.timeoutOption(5000),
+        Effect.flatMap(Option.match({
+          onNone: () =>
+            Effect.fail(new CaptureFailed({ message: "The capture took longer than 5 seconds" })),
+          onSome: Effect.succeed
+        })),
         Effect.map((captured): Option.Option<FrameCapture> => {
           failed.delete(document)
           return Option.some({ frame, main, captured })

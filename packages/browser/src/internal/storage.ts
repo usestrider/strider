@@ -36,10 +36,10 @@ const cookieError = (operation: string, reason: CookieJar.CookieJarErrorReason, 
 /** An adapter's failure, as a cookie jar's: a context that ended is `TargetGone` (QUIRKS.md, Q131). */
 const cookieFailure = (runtime: Runtime.Runtime, operation: string, id: Diagnostics.OperationId) =>
 (
-  error: Adapter.AdapterError
-): CookieJar.CookieJarError | Target.TargetGone => {
+  error: Adapter.AdapterError | Deadline.Timeout
+): CookieJar.CookieJarError | Target.TargetGone | Deadline.Timeout => {
   const mapped = Operation.fromAdapter(error, id, runtime.backend)
-  return mapped._tag === "Gone" ? mapped.error : cookieError(operation, mapped.reason, id)
+  return mapped._tag !== "Reason" ? mapped.error : cookieError(operation, mapped.reason, id)
 }
 
 /** A cookie as the adapter has it, as the `Cookie` schema says it. */

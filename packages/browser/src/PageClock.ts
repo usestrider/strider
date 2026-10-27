@@ -29,6 +29,7 @@ import type * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
+import type * as Deadline from "./Deadline.ts"
 import type * as Declaration from "./Declaration.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
@@ -116,7 +117,11 @@ export interface PageClock {
   install(
     mode: Mode,
     options?: InstallOptions | undefined
-  ): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>
+  ): Effect.Effect<
+    Declaration.Registration,
+    Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
   /**
    * Advances a controlled clock, firing every due timer in order, an interval as often as it falls due. Fails with
    * `WrongMode` on a `fixed` or `offset` clock.
@@ -137,7 +142,7 @@ export interface PageClock {
    * })
    * ```
    */
-  adjust(duration: Duration.Input): Effect.Effect<void, PageClockError | Target.TargetGone>
+  adjust(duration: Duration.Input): Effect.Effect<void, PageClockError | Target.TargetGone | Deadline.Timeout>
   /**
    * Jumps a fixed or controlled clock to `at`; due timers fire at most once.
    *
@@ -155,7 +160,7 @@ export interface PageClock {
    * })
    * ```
    */
-  setTime(at: DateTime.DateTime.Input): Effect.Effect<void, PageClockError | Target.TargetGone>
+  setTime(at: DateTime.DateTime.Input): Effect.Effect<void, PageClockError | Target.TargetGone | Deadline.Timeout>
   /**
    * Lets the clock run in real time again, from the time it shows now: it becomes an `offset` clock, and the
    * timers waiting on a controlled clock become real timers.
@@ -174,7 +179,7 @@ export interface PageClock {
    * })
    * ```
    */
-  readonly resume: Effect.Effect<void, PageClockError | Target.TargetGone>
+  readonly resume: Effect.Effect<void, PageClockError | Target.TargetGone | Deadline.Timeout>
 }
 
 /**

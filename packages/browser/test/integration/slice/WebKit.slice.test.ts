@@ -13,6 +13,7 @@ import { socketConnector } from "../sockets.ts"
 import { useXvfb } from "../stockWebKit.ts"
 import { attaching } from "./attaching.ts"
 import { contents } from "./contents.ts"
+import { deadlines } from "./deadlines.ts"
 import { declarations } from "./declarations.ts"
 import { events } from "./events.ts"
 import { interaction } from "./interaction.ts"
@@ -43,4 +44,5 @@ contents(name, backend)
 tooling(name, backend)
 recordings(name, backend)
 toolkit(name, backend)
+deadlines(name, backend)
 attaching(name, backend, Option.none())

@@ -22,6 +22,7 @@ import type * as Path from "effect/Path"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as BrowserWorker from "../BrowserWorker.ts"
+import * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as Download from "../Download.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
@@ -98,9 +99,15 @@ export interface Runtime {
   ) => Effect.Effect<PageNavigation.PageNavigation, Page.PageError>
 }
 
+/**
+ * How long a round of checks in the page may wait for its condition: a second at most, and in the operation's last
+ * second half of what's left, so the round's answer, with what it saw, comes back before the deadline does.
+ */
+export const roundCap = (left: number): number => Math.max(0, left > 1000 ? 1000 : left / 2)
+
 /** Why a request to the engine didn't get an answer. */
 export type SendFailure =
-  | Operation.Failure
+  | Exclude<Operation.Failure, { readonly _tag: "Timeout" }>
   | { readonly _tag: "Reason"; readonly reason: Reason.PromptBlocking }
   /** The deadline passed; `hint` says why when the page never had a document to send to. */
   | { readonly _tag: "Deadline"; readonly hint?: string | undefined }
@@ -250,8 +257,19 @@ const retarget = (request: Engine.Request, steps: ReadonlyArray<Engine.Step>, mi
   }
 }
 
-const isMoved = (error: Adapter.AdapterError) =>
-  error.reason._tag === "Gone" && (error.reason.target._tag === "Document" || error.reason.target._tag === "Realm")
+const isMoved = (error: Adapter.AdapterError | Deadline.Timeout) =>
+  !Deadline.isTimeout(error) && error.reason._tag === "Gone" &&
+  (error.reason.target._tag === "Document" || error.reason.target._tag === "Realm")
+
+/** An adapter's failure, as a request's: a call the browser didn't answer before the deadline is `Deadline`. */
+export const fromAdapter = (
+  error: Adapter.AdapterError | Deadline.Timeout,
+  id: Diagnostics.OperationId,
+  backend: string
+): SendFailure => {
+  const mapped = Operation.fromAdapter(error, id, backend)
+  return mapped._tag === "Timeout" ? { _tag: "Deadline" } : mapped
+}
 
 /**
  * The engine's realm in a document, and a call to it; `None` when the document or its realm went, or the realm
@@ -267,12 +285,12 @@ const callEngine = (
   engineRealm(runtime, document).pipe(
     Effect.flatMap((realm) => call(runtime, realm, functionDeclaration, [string(request)])),
     Effect.map(Option.some),
-    Effect.catch((error: Adapter.AdapterError) => {
+    Effect.catch((error: Adapter.AdapterError | Deadline.Timeout) => {
       if (isMoved(error)) {
         runtime.model.engineRealms.delete(document)
         return Effect.succeed(Option.none<Adapter.RemoteResult>())
       }
-      return Effect.fail<SendFailure>(Operation.fromAdapter(error, id, runtime.backend))
+      return Effect.fail(fromAdapter(error, id, runtime.backend))
     }),
     Effect.flatMap(Option.match({
       onNone: () => Effect.succeed(Option.none<Adapter.RemoteValue>()),
@@ -362,7 +380,7 @@ const route = (
         Effect.catch((error) =>
           isMoved(error)
             ? Effect.succeed(Option.none<Option.Option<Target.NavigableId>>())
-            : Effect.fail<SendFailure>(Operation.fromAdapter(error, id, runtime.backend))
+            : Effect.fail(fromAdapter(error, id, runtime.backend))
         )
       )
       if (Option.isNone(frame)) return Option.none()

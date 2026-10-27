@@ -265,7 +265,7 @@ describe("Operation", () => {
     it.effect("decides under a budget of its own, from when it starts", () =>
       Effect.gen(function*() {
         const remaining = yield* Deadline.remaining.pipe(
-          Internal.deciding("Test.decision", Duration.seconds(30)),
+          Internal.apart("Test.decision", Duration.seconds(30)),
           Internal.named("Test.operation"),
           Deadline.within("10 millis")
         )

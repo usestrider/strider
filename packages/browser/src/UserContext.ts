@@ -25,6 +25,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as BrowserWorker from "./BrowserWorker.ts"
 import type * as CookieJar from "./CookieJar.ts"
+import type * as Deadline from "./Deadline.ts"
 import type * as Declaration from "./Declaration.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as Emulation from "./Emulation.ts"
@@ -215,7 +216,7 @@ export interface UserContext extends ObservedUserContext {
    * })
    * ```
    */
-  readonly newPage: Effect.Effect<Page.Page, Page.PageError | Target.TargetGone, Scope.Scope>
+  readonly newPage: Effect.Effect<Page.Page, Page.PageError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
   readonly pages: Watchable.Watchable<ReadonlyArray<Page.Page>>
   readonly workers: Watchable.Watchable<ReadonlyArray<BrowserWorker.BrowserWorker>>
   /**
@@ -264,7 +265,7 @@ export interface UserContext extends ObservedUserContext {
     pattern: Url.Pattern | string,
     handler: Route.Handler<E, R, P>,
     options?: Route.Options<P> | undefined
-  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone, Scope.Scope | R>
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
   /**
    * Runs a script in every new document of every page while the registration lives.
    *
@@ -284,7 +285,11 @@ export interface UserContext extends ObservedUserContext {
   addInitScript(
     script: InitScript.Source,
     options?: InitScript.Options | undefined
-  ): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>
+  ): Effect.Effect<
+    InitScript.InitScript,
+    Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
   /**
    * Overrides the given settings for every page while the registration lives.
    *
@@ -301,7 +306,11 @@ export interface UserContext extends ObservedUserContext {
    */
   emulate(
     settings: Emulation.Emulation
-  ): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>
+  ): Effect.Effect<
+    Declaration.Registration,
+    Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
   /**
    * Grants permissions while the registration lives. Grants are combined (AND) with Permissions Policy.
    *
@@ -325,7 +334,11 @@ export interface UserContext extends ObservedUserContext {
   grant(
     permissions: ReadonlyArray<Permission>,
     options?: GrantOptions | undefined
-  ): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>
+  ): Effect.Effect<
+    Declaration.Registration,
+    Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
 }
 
 /**

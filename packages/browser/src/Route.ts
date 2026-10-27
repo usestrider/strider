@@ -23,6 +23,7 @@ import type * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
+import type * as Deadline from "./Deadline.ts"
 import type * as Declaration from "./Declaration.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as FilePath from "./FilePath.ts"
@@ -121,7 +122,7 @@ export interface Paused {
    * })
    * ```
    */
-  readonly requestBody: Effect.Effect<Option.Option<Uint8Array>, RouteError | Target.TargetGone>
+  readonly requestBody: Effect.Effect<Option.Option<Uint8Array>, RouteError | Target.TargetGone | Deadline.Timeout>
 }
 
 /**
@@ -174,7 +175,7 @@ export interface ResponsePhase extends Paused {
    * })
    * ```
    */
-  readonly responseBody: Effect.Effect<Uint8Array, RouteError | Target.TargetGone>
+  readonly responseBody: Effect.Effect<Uint8Array, RouteError | Target.TargetGone | Deadline.Timeout>
 }
 
 /**

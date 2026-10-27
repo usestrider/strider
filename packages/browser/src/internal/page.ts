@@ -180,9 +180,9 @@ export const make = (owner: PageOwner): Page.Page => {
       ? pageError(operation, failure.reason, record.id)
       : record.timeout(Option.fromUndefinedOr(failure.hint))
 
-  const failure = (operation: string, id: Diagnostics.OperationId, error: Adapter.AdapterError) => {
+  const failure = (operation: string, id: Diagnostics.OperationId, error: Adapter.AdapterError | Deadline.Timeout) => {
     const mapped = Operation.fromAdapter(error, id, runtime.backend)
-    return mapped._tag === "Gone" ? mapped.error : pageError(operation, mapped.reason, id)
+    return mapped._tag !== "Reason" ? mapped.error : pageError(operation, mapped.reason, id)
   }
 
   /** Waits for a navigation the adapter started, then for `waitUntil` on the document it committed. */
@@ -191,7 +191,7 @@ export const make = (owner: PageOwner): Page.Page => {
     url: Option.Option<Url.Url>,
     start: (
       id: Diagnostics.OperationId
-    ) => Effect.Effect<Option.Option<PageNavigation.Id>, Target.TargetGone | Page.PageError>,
+    ) => Effect.Effect<Option.Option<PageNavigation.Id>, Target.TargetGone | Page.PageError | Deadline.Timeout>,
     waitUntil: PageNavigation.LoadState,
     accept: ReadonlyArray<"download" | "noContent"> = []
   ) =>
@@ -472,13 +472,12 @@ export const make = (owner: PageOwner): Page.Page => {
     activate: Effect.gen(function*() {
       const { id } = yield* Operation.record
       yield* adapter.activatePage(entry.id).pipe(
-        Effect.catch((error): Effect.Effect<never, Page.PageError | Target.TargetGone> => {
+        Effect.catch((error): Effect.Effect<never, Page.PageError | Target.TargetGone | Deadline.Timeout> => {
           const mapped = Operation.fromAdapter(error, id, runtime.backend)
-          if (mapped._tag === "Gone") return Effect.fail(mapped.error)
-          // A backend that can't bring a page forward says so, as attached stock WebKit does; anything else is a defect
-          return mapped.reason._tag === "Unsupported"
+          // A backend that can't bring a page forward says so, as attached stock WebKit does
+          return mapped._tag === "Reason"
             ? Effect.fail(pageError("Page.activate", mapped.reason, id))
-            : Effect.die(mapped.reason)
+            : Effect.fail(mapped.error)
         })
       )
     }).pipe(Operation.named("Page.activate", { attributes: { "browser.page.id": entry.id } })),
@@ -495,14 +494,17 @@ export const make = (owner: PageOwner): Page.Page => {
         if (runBeforeUnload) entry.stayed.add(onStay)
         record.markSent()
         const outcome = yield* Effect.gen(function*() {
-          yield* adapter.closePage(entry.id, { runBeforeUnload }).pipe(Effect.catch((error) => {
+          yield* adapter.closePage(entry.id, { runBeforeUnload }).pipe(Effect.catch((error): Effect.Effect<
+            void,
+            Page.PageError | Deadline.Timeout
+          > => {
             const mapped = Operation.fromAdapter(error, id, runtime.backend)
             // A backend that can't ask the page refuses to, naming the capability (`close.runBeforeUnload`)
             return mapped._tag === "Gone"
               ? Effect.void
-              : runBeforeUnload && mapped.reason._tag === "Unsupported"
-              ? Effect.fail(pageError("Page.close", mapped.reason, id))
-              : Effect.die(mapped.reason)
+              : mapped._tag === "Timeout"
+              ? Effect.fail(mapped.error)
+              : Effect.fail(pageError("Page.close", mapped.reason, id))
           }))
           return yield* Deferred.await(entry.closed).pipe(
             Effect.as("closed" as const),

@@ -17,7 +17,7 @@ import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import { pipeArguments } from "effect/Pipeable"
 import * as Scope from "effect/Scope"
-import type * as Deadline from "../Deadline.ts"
+import * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import * as JSHandle from "../JSHandle.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
@@ -46,6 +46,16 @@ export type Failure =
   | { readonly _tag: "Gone"; readonly error: Target.TargetGone }
   | { readonly _tag: "Reason"; readonly reason: EvaluationReason }
   | { readonly _tag: "Deadline" }
+
+/** An adapter's failure, as an evaluation's: a call the browser didn't answer before the deadline is `Deadline`. */
+const fromAdapter = (
+  error: Adapter.AdapterError | Deadline.Timeout,
+  id: Diagnostics.OperationId,
+  backend: string
+): Failure => {
+  const mapped = Operation.fromAdapter(error, id, backend)
+  return mapped._tag === "Timeout" ? { _tag: "Deadline" } : mapped
+}
 
 /** An exception's name and message, from the text the browser gives (`Uncaught TypeError: boom`). */
 export const exception = (result: Extract<Adapter.RemoteResult, { readonly _tag: "Exception" }>) => {
@@ -144,7 +154,7 @@ export const call = (runtime: Runtime.Runtime, options: Call): Effect.Effect<Ada
       ...(options.group === undefined ? {} : { group: options.group }),
       userActivation: options.userActivation
     }).pipe(
-      Effect.mapError((error): Failure => Operation.fromAdapter(error, options.id, runtime.backend)),
+      Effect.mapError((error) => fromAdapter(error, options.id, runtime.backend)),
       BrowserClock.until(options.at),
       Effect.flatMap(Option.match({
         onNone: () => Effect.fail<Failure>({ _tag: "Deadline" }),
@@ -196,11 +206,11 @@ export const pageRealm = (
       const realm = yield* runtime.model.adapter.realm(open.document.id, world).pipe(
         Effect.map(Option.some),
         Effect.catch((error) => {
-          const reason = error.reason
-          if (reason._tag === "Gone" && (reason.target._tag === "Document" || reason.target._tag === "Realm")) {
+          const reason = Deadline.isTimeout(error) ? undefined : error.reason
+          if (reason?._tag === "Gone" && (reason.target._tag === "Document" || reason.target._tag === "Realm")) {
             return Effect.succeed(Option.none<Target.RealmId>())
           }
-          return Effect.fail<Failure>(Operation.fromAdapter(error, id, runtime.backend))
+          return Effect.fail(fromAdapter(error, id, runtime.backend))
         })
       )
       if (Option.isSome(realm)) return realm.value
@@ -215,7 +225,7 @@ export const documentRealm = (
   id: Diagnostics.OperationId
 ): Effect.Effect<Target.RealmId, Failure> =>
   runtime.model.adapter.realm(document, world).pipe(
-    Effect.mapError((error): Failure => Operation.fromAdapter(error, id, runtime.backend))
+    Effect.mapError((error) => fromAdapter(error, id, runtime.backend))
   )
 
 // ── Handles ───────────────────────────────────────────────────────────────────────────────────────────────

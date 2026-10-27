@@ -54,7 +54,7 @@ export const make = (runtime: Runtime.Runtime, entry: Model.WorkerEntry): Browse
       }).pipe(
         Effect.catch((error) => {
           const mapped = Operation.fromAdapter(error, id, runtime.backend)
-          return Effect.fail(mapped._tag === "Gone" ? mapped.error : failure(mapped.reason, id))
+          return Effect.fail(mapped._tag !== "Reason" ? mapped.error : failure(mapped.reason, id))
         }),
         (calling) =>
           record.bound(

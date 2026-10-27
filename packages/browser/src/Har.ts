@@ -12,6 +12,7 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
+import * as Deadline from "./Deadline.ts"
 import type * as Declaration from "./Declaration.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as FilePath from "./FilePath.ts"
@@ -193,12 +194,12 @@ export interface Recording extends Declaration.Registration {
 export const record = (
   target: UserContext.UserContext | Page.Page,
   options: Options
-): Effect.Effect<Recording, HarError | Target.TargetGone, Scope.Scope> =>
+): Effect.Effect<Recording, HarError | Target.TargetGone | Deadline.Timeout, Scope.Scope> =>
   Effect.gen(function*() {
     const scope = yield* Effect.scope
     const found = Handles.target(target)
     const { runtime, grant } = found.behind
-    const id = Operation.operationId()
+    const { id } = yield* Operation.record
     const fail = (reason: HarErrorReason) => new HarError({ reason, diagnostics: Operation.diagnostics(id) })
     yield* Access.check(grant)
     let matches: (url: string) => boolean = () => true
@@ -226,7 +227,7 @@ export const record = (
       options.content === "omit" ? ["request"] : ["request", "response"],
       yield* NetworkResponse.BodyLimit,
       id
-    ).pipe(Effect.mapError(fail))
+    ).pipe(Effect.mapError((error) => Deadline.isTimeout(error) ? error : fail(error)))
     const { recorder, stop } = yield* HarImpl.start(runtime, found.behind.entry, {
       content: options.content,
       requestBodies: true,

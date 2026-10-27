@@ -200,7 +200,7 @@ export interface Download extends Pipeable.Pipeable, Inspectable.Inspectable {
    * })
    * ```
    */
-  readonly cancel: Effect.Effect<void, DownloadError>
+  readonly cancel: Effect.Effect<void, DownloadError | Deadline.Timeout>
 }
 
 /**

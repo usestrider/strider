@@ -10,6 +10,7 @@ import * as Option from "effect/Option"
 import { assertPinned, firefox } from "../browsers.ts"
 import { attaching, firefoxAttachable } from "./attaching.ts"
 import { contents } from "./contents.ts"
+import { deadlines } from "./deadlines.ts"
 import { declarations } from "./declarations.ts"
 import { events } from "./events.ts"
 import { interaction } from "./interaction.ts"
@@ -32,4 +33,5 @@ contents("Firefox", backend)
 tooling("Firefox", backend)
 recordings("Firefox", backend)
 toolkit("Firefox", backend)
+deadlines("Firefox", backend)
 attaching("Firefox", backend, Option.some(firefoxAttachable((endpoint) => Firefox.layerConnect(endpoint))))

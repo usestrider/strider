@@ -9,6 +9,7 @@ import * as Option from "effect/Option"
 import { assertPinned, chromium } from "../browsers.ts"
 import { attaching, chromiumAttachable } from "./attaching.ts"
 import { contents } from "./contents.ts"
+import { deadlines } from "./deadlines.ts"
 import { declarations } from "./declarations.ts"
 import { events } from "./events.ts"
 import { interaction } from "./interaction.ts"
@@ -29,4 +30,5 @@ contents("Chromium", backend)
 tooling("Chromium", backend)
 recordings("Chromium", backend)
 toolkit("Chromium", backend)
+deadlines("Chromium", backend)
 attaching("Chromium", backend, Option.some(chromiumAttachable((endpoint) => Chromium.layerConnect(endpoint))))

@@ -24,6 +24,7 @@ import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as Har from "../Har.ts"
 import type * as NetworkConnection from "../NetworkConnection.ts"
@@ -80,7 +81,7 @@ export const collect = (
   bodies: ReadonlyArray<"request" | "response">,
   limit: ByteSize.ByteSize,
   id: Diagnostics.OperationId
-): Effect.Effect<void, Reason.BackendFailure | Reason.Unsupported, Scope.Scope> => {
+): Effect.Effect<void, Reason.BackendFailure | Reason.Unsupported | Deadline.Timeout, Scope.Scope> => {
   const scope: Adapter.DeclarationScope = found._tag === "Page"
     ? { _tag: "Page", page: (found.behind.entry as Model.PageEntry).id }
     : { _tag: "UserContext", context: (found.behind.entry as Model.ContextEntry).id }
@@ -93,7 +94,9 @@ export const collect = (
       Effect.asVoid,
       Effect.mapError((error) => {
         const mapped = Operation.fromAdapter(error, id, runtime.backend)
-        return mapped._tag === "Gone"
+        return mapped._tag === "Timeout"
+          ? mapped.error
+          : mapped._tag === "Gone"
           ? new Reason.BackendFailure({
             kind: "Rejected",
             method: "BodyCollection",

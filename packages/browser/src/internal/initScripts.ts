@@ -9,6 +9,7 @@ import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import type * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
 import type * as InitScript from "../InitScript.ts"
 import * as Reason from "../Reason.ts"
@@ -84,9 +85,13 @@ export const add = (
   context: string,
   script: InitScript.Source,
   options: InitScript.Options | undefined
-): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError | Target.TargetGone, Scope.Scope> =>
+): Effect.Effect<
+  InitScript.InitScript,
+  Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout,
+  Scope.Scope
+> =>
   Effect.gen(function*() {
-    const id = Operation.operationId()
+    const { id } = yield* Operation.record
     const fail = (reason: Declaration.DeclarationErrorReason) =>
       new Declaration.DeclarationError({ declaration: owner.operation, reason, diagnostics: Operation.diagnostics(id) })
     const source = yield* sourceOf(owner.runtime, script).pipe(Effect.mapError(fail))
@@ -161,7 +166,7 @@ export const add = (
       Effect.mapError((error) => {
         const mapped = Operation.fromAdapter(error, id, owner.runtime.backend)
         // A target that went is TargetGone, as for every operation on it (QUIRKS.md, Q143)
-        return mapped._tag === "Gone" ? mapped.error : fail(mapped.reason)
+        return mapped._tag !== "Reason" ? mapped.error : fail(mapped.reason)
       }),
       Effect.onError(() => Scope.close(scope, Exit.void))
     )

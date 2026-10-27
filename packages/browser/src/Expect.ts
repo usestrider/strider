@@ -686,10 +686,13 @@ const explainBudget = 1000
 const explain = (subject: InPage, id: Diagnostics.OperationId): Effect.Effect<Explained> => {
   const none: Explained = { nearest: Option.none(), suggestions: [] }
   if (subject.steps.length === 0) return Effect.succeed(none)
+  // After the expectation's deadline, under a budget of its own
   return Effect.flatMap(
-    BrowserClock.after(explainBudget),
-    (at) => Runtime.send(subject.runtime, subject.page, { op: "explain", steps: subject.steps }, id, at)
+    Operation.record,
+    (record) =>
+      Runtime.send(subject.runtime, subject.page, { op: "explain", steps: subject.steps }, id, record.budget.at)
   ).pipe(
+    Operation.apart("Expect.explain", Duration.millis(explainBudget)),
     Effect.map((response): Explained => {
       if (response._tag !== "Explained" || response.matched) return none
       const boundary = subject.steps.findLastIndex((step) => step._tag === "Frame")
@@ -774,7 +777,7 @@ const expectIn = (subject: InPage, expectation: Engine.Expectation, matcherName:
       const response = yield* Runtime.send(
         subject.runtime,
         subject.page,
-        { op: "expect", steps: subject.steps, expectation, cap: Math.max(0, Math.min(1000, left)) },
+        { op: "expect", steps: subject.steps, expectation, cap: Runtime.roundCap(left) },
         id,
         budget.at
       ).pipe(

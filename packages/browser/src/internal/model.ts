@@ -40,6 +40,7 @@ import type * as Target from "../Target.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
+import * as BoundedAdapter from "./boundedAdapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Events from "./events.ts"
 import * as Input from "./input.ts"
@@ -330,7 +331,8 @@ export interface NavigationEntry {
 }
 
 export interface Model {
-  readonly adapter: Adapter.AdapterConnection
+  /** The adapter, its calls bounded by the operation they run in (`boundedAdapter.ts`). */
+  readonly adapter: BoundedAdapter.Bounded
   readonly contexts: Map<UserContext.Id, ContextEntry>
   /** A context's entry, made now if its fact hasn't arrived yet, as when its creation's reply comes first. */
   readonly context: (id: UserContext.Id) => Effect.Effect<ContextEntry>
@@ -1291,7 +1293,7 @@ export const make = Effect.fnUntraced(function*() {
       adapter = connected
       yield* connected.closed.pipe(Effect.andThen(loseConnection), Effect.forkScoped)
       return {
-        adapter: connected,
+        adapter: BoundedAdapter.make(connected),
         contexts,
         context: (id) => context(id, false),
         pages,

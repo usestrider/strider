@@ -71,13 +71,26 @@ export const diagnostics = (
   })
 }
 
-/** A failure an operation reports through its module's error: the shared reasons, or its target's end. */
+/**
+ * A failure an operation reports: the shared reasons, through its module's error, or its target's end or its
+ * deadline, as they are.
+ */
 export type Failure =
   | { readonly _tag: "Reason"; readonly reason: Reason.Unsupported | Reason.BackendFailure }
   | { readonly _tag: "Gone"; readonly error: Target.TargetGone }
+  | { readonly _tag: "Timeout"; readonly error: Deadline.Timeout }
 
-/** Maps an adapter's failure: an ended target, a capability the browser lacks, or what the browser refused. */
-export const fromAdapter = (error: AdapterError, id: Diagnostics.OperationId, backend: string): Failure => {
+/**
+ * Maps an adapter's failure: an ended target, a capability the browser lacks, or what the browser refused; or the
+ * operation's `Timeout`, which a call the browser didn't answer before the deadline fails with
+ * (`boundedAdapter.ts`).
+ */
+export const fromAdapter = (
+  error: AdapterError | Deadline.Timeout,
+  id: Diagnostics.OperationId,
+  backend: string
+): Failure => {
+  if (Deadline.isTimeout(error)) return { _tag: "Timeout", error }
   const reason = error.reason
   switch (reason._tag) {
     case "Gone":
@@ -348,11 +361,12 @@ export const named =
     }).pipe(Spans.operation(name, options))
 
 /**
- * Runs `self` as a handler's decision: apart from the operation that registered it, as an operation of its own named
- * `name`, under a deadline of its own, `budget` from when it starts (`Deadline.DefaultBudget` as read at
- * registration), on the browser's clock.
+ * Runs `self` apart from the operation it is in, as an operation of its own named `name`, under a deadline of its
+ * own, `budget` from when it starts, on the browser's clock: a handler's decision, whose budget is
+ * `Deadline.DefaultBudget` as read at registration, or what an operation gathers to explain its failure once its own
+ * deadline has passed.
  */
-export const deciding =
+export const apart =
   (name: string, budget: Duration.Duration) =>
   <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, Operation.Current>> =>
     Effect.flatMap(

@@ -2194,6 +2194,17 @@ export const connect: (
     const protocol = <A, R>(effect: Effect.Effect<A, Protocol.ProtocolError, R>) =>
       Effect.mapError(effect, protocolError)
 
+    /**
+     * A command's reply, or `None` where the browser refused it or its target went; one that got no reply, as when
+     * its operation's deadline passed, still fails.
+     */
+    const answered = <A, R>(effect: Effect.Effect<A, Protocol.ProtocolError, R>) =>
+      effect.pipe(
+        Effect.map(Option.some),
+        Effect.catchIf((error) => error.reason._tag !== "NoReply", () => Effect.succeedNone),
+        protocol
+      )
+
     const expect = (frame: FrameEntry, url: string, initiatedAs: Adapter.InitiatedAs = "crossDocument") => {
       const id = ids.navigation()
       frame.expected.push({ id, url, initiatedAs })
@@ -2733,7 +2744,7 @@ export const connect: (
       const seen = new Map<string, Adapter.Cookie>()
       for (const page of pages.values()) {
         if (page.target === undefined || page.ended) continue
-        const reply = yield* Page.getCookies().pipe(Protocol.on(page.target.session), Effect.option)
+        const reply = yield* answered(Page.getCookies().pipe(Protocol.on(page.target.session)))
         if (reply._tag === "None") continue
         for (const cookie of reply.value.cookies) {
           seen.set(`${cookie.name}|${cookie.domain}|${cookie.path}`, {
@@ -3247,7 +3258,7 @@ export const connect: (
     const cookiesLaunched = Effect.fnUntraced(function*(id: UserContext.Id) {
       const seen = new Map<string, Adapter.Cookie>()
       for (const page of pagesIn(id)) {
-        const reply = yield* Page.getCookies().pipe(Protocol.on(page.target!.session), Effect.option)
+        const reply = yield* answered(Page.getCookies().pipe(Protocol.on(page.target!.session)))
         if (reply._tag === "None") continue
         for (const cookie of reply.value.cookies) {
           seen.set(`${cookie.name}|${cookie.domain}|${cookie.path}`, {
@@ -3418,7 +3429,7 @@ export const connect: (
       frame: FrameEntry,
       handle: Automation.BrowsingContextHandle,
       process: WebKitAutomation.Process
-    ): Effect.Effect<Option.Option<Automation.FrameHandle>> =>
+    ): Effect.Effect<Option.Option<Automation.FrameHandle>, Adapter.AdapterError> =>
       Effect.gen(function*() {
         if (frame.parent === undefined) return Option.some(mainFrameHandle)
         const known = frameHandles.get(frame)
@@ -3433,7 +3444,7 @@ export const connect: (
             browsingContextHandle: handle,
             frameHandle: parent.value,
             ordinal
-          }).pipe(Protocol.on(process.automation), Effect.map(({ result }) => result), Effect.option)
+          }).pipe(Protocol.on(process.automation), Effect.map(({ result }) => result), answered)
           // Past the last frame, Automation answers with the main frame's handle (QUIRKS.md, Q227)
           if (Option.isNone(child) || child.value === mainFrameHandle) break
           const theirs = yield* automationIdentityOf(process, handle, child.value)
@@ -3494,7 +3505,7 @@ export const connect: (
         frameHandle,
         nodeHandle
       })
-        .pipe(Protocol.on(process.automation), Effect.map(({ result }) => result), Effect.option)
+        .pipe(Protocol.on(process.automation), Effect.map(({ result }) => result), answered)
       // An element that holds no frame, or one whose document hasn't loaded yet; the main frame's handle is
       // Automation's answer for no frame at all (QUIRKS.md, Q227)
       if (Option.isNone(child) || child.value === mainFrameHandle) return Option.none<L1Target.NavigableId>()

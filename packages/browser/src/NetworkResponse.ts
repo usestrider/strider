@@ -378,7 +378,11 @@ const delivery = <B, DE, DR>(
       )
     }
     const bytes = yield* runtime.model.adapter.responseBody(response.hop).pipe(
-      Effect.mapError((error) => unavailable(url, "evicted", `The browser no longer has it: ${error.message}`))
+      Effect.mapError((error) =>
+        Deadline.isTimeout(error)
+          ? unavailable(url, "streaming", "The browser didn't hand the body over before the deadline")
+          : unavailable(url, "evicted", `The browser no longer has it: ${error.message}`)
+      )
     )
     const message = captured(response, bytes, undefined)
     const body = yield* Effect.provideContext(decoder(message), context)
@@ -392,7 +396,7 @@ const collect = (
   found: ReturnType<typeof Handles.target>,
   operation: string,
   limit: number
-): Effect.Effect<void, Subscription.SubscriptionError, Scope.Scope> => {
+): Effect.Effect<void, Subscription.SubscriptionError | Deadline.Timeout, Scope.Scope> => {
   const { runtime, entry } = found.behind
   const scope: Adapter.DeclarationScope = found._tag === "Page"
     ? { _tag: "Page", page: (entry as Model.PageEntry).id }
@@ -400,8 +404,9 @@ const collect = (
   return runtime.model.adapter.declare(scope, { _tag: "BodyCollection", bodies: ["response"], maxBytes: limit }).pipe(
     Effect.asVoid,
     Effect.mapError((error) => {
-      const mapped = Operation.fromAdapter(error, Operation.operationId(), runtime.backend)
-      return new Subscription.SubscriptionError({
+      const id = Operation.operationId()
+      const mapped = Operation.fromAdapter(error, id, runtime.backend)
+      return mapped._tag === "Timeout" ? mapped.error : new Subscription.SubscriptionError({
         operation,
         reason: mapped._tag === "Gone"
           ? new Reason.BackendFailure({
@@ -411,7 +416,7 @@ const collect = (
             hint: mapped.error.message
           })
           : mapped.reason,
-        diagnostics: Operation.diagnostics(Operation.operationId())
+        diagnostics: Operation.diagnostics(id)
       })
     })
   )
@@ -471,7 +476,7 @@ export const next: {
       CapturedResponse<B>,
       DE | PE | ResponseError | Target.TargetGone | Deadline.Timeout
     >,
-    Subscription.SubscriptionError,
+    Subscription.SubscriptionError | Deadline.Timeout,
     Scope.Scope | DR | PR
   >
   <PE = never, PR = never>(
@@ -543,7 +548,7 @@ export const stream: {
     where?: Subscription.Where<CapturedResponse<B>, PE, PR> | undefined
   ): Effect.Effect<
     Stream.Stream<CapturedResponse<B>, DE | PE | ResponseError | Subscription.EventOverflow | Target.TargetGone>,
-    Subscription.SubscriptionError,
+    Subscription.SubscriptionError | Deadline.Timeout,
     Scope.Scope | DR | PR
   >
   <PE = never, PR = never>(

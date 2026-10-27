@@ -127,6 +127,21 @@ clock for a real browser, even under `TestClock`, and Effect's clock for `Browse
 - **Rejected:** `Effect.timeout` around each operation, which interrupts and loses what the operation knew; and one
   clock for both, either way round.
 
+**An operation's deadline bounds every command it sends.** L1 calls the adapter through one wrapper
+(`src/internal/boundedAdapter.ts`): inside an operation, each call ends at the operation's deadline with its
+`Timeout`, and each command waits for its reply until that instant rather than for `Protocol.CommandTimeout`. Each
+adapter method is classified once by what it does to the browser: a read, a write (marked sent before it goes), a
+creation (run to completion apart, and closed if it finishes after the deadline), or a release (never bounded by an
+operation, so cleanup happens after a deadline passed). A new method doesn't compile until it's classified.
+
+- **Why.** Each operation bounded its own calls by hand, and 32 of 44 didn't: a cookie read, a declaration or a
+  page's creation waited for the protocol's 30 seconds whatever the deadline, then failed as a `BackendFailure` the
+  browser never sent, and under `TestClock` waited forever. A command a backend sends where it can't be interrupted
+  has to end by itself, so the deadline is the command's, not only a race around the call.
+- **Rejected:** bounding each call site by hand, the pattern that missed them; keeping `CommandTimeout` inside
+  operations, which cuts a command short of a longer deadline and needs a reason of its own for "no reply"; and
+  marking a read as sent, which would tell the caller something may have changed when nothing did.
+
 **An operation keeps a record, and its `Timeout` comes from it.** An operation notes facts as they happen: what it
 observed, that its input or call may have reached the browser, that the browser confirmed it. Its `Timeout` takes its
 phase from them, by the meanings `Deadline.Timeout` documents, and a wait inside it is bounded in one place, the

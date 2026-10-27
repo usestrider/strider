@@ -154,7 +154,7 @@ export const screenshot = (
     }
     record.markSent()
     return yield* runtime.model.adapter.screenshot(page.id, captureOptions).pipe(
-      Effect.mapError((error) => failed(operation, record)(Operation.fromAdapter(error, id, runtime.backend))),
+      Effect.mapError((error) => failed(operation, record)(Runtime.fromAdapter(error, id, runtime.backend))),
       (capturing) =>
         record.bound(capturing, () => Option.some("The browser didn't finish the capture before the deadline"))
     )
@@ -236,7 +236,7 @@ export const pdf = (
       footer: Option.fromUndefinedOr(options?.footer),
       preferCssPageSize: options?.preferCssPageSize ?? false
     }).pipe(
-      Effect.mapError((error) => failed(operation, record)(Operation.fromAdapter(error, id, runtime.backend))),
+      Effect.mapError((error) => failed(operation, record)(Runtime.fromAdapter(error, id, runtime.backend))),
       (printing) => record.bound(printing, () => Option.some("The browser didn't finish printing before the deadline"))
     )
   }).pipe(

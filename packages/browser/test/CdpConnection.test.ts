@@ -9,12 +9,12 @@ import * as Target from "@usestrider/browser/cdp/Target"
 import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol"
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
-import { TestClock } from "effect/testing"
 import { type FakeBrowser, makeBrowser } from "./utils/FakeBrowser.ts"
 
 const version = {
@@ -336,27 +336,31 @@ describe("CdpConnection", () => {
       const cdp = yield* CdpConnection.make(browser.transport)
       const fiber = yield* Browser.getVersion().pipe(
         Protocol.on(cdp.browser),
-        Protocol.withCommandTimeout("1 second"),
+        Protocol.withCommandTimeout("200 millis"),
         Effect.forkChild
       )
       const sent = yield* browser.next
-      yield* TestClock.adjust("1 second")
       assert.deepInclude(reasonOf(yield* Fiber.await(fiber)), { _tag: "NoReply", method: "Browser.getVersion" })
       yield* browser.receive({ id: sent.id, result: version })
       yield* browser.delivered
       assert.strictEqual(yield* browser.pending, 0)
     }))
 
-  it.effect("waits 30 seconds by default", () =>
+  it.effect("waits 30 seconds by default, in real time even under TestClock", () =>
     Effect.gen(function*() {
+      assert.isTrue(Duration.equals(yield* Protocol.CommandTimeout, Duration.seconds(30)))
       const browser = yield* makeBrowser
       const cdp = yield* CdpConnection.make(browser.transport)
-      const fiber = yield* Browser.getVersion().pipe(Protocol.on(cdp.browser), Effect.forkChild)
-      yield* browser.next
-      yield* TestClock.adjust("29 seconds")
-      assert.isUndefined(fiber.pollUnsafe())
-      yield* TestClock.adjust("1 second")
-      assert.strictEqual(reasonOf(yield* Fiber.await(fiber))._tag, "NoReply")
+      // TestClock is in force and never moves: the browser is another process, whose replies come in real time
+      const started = performance.now()
+      const exit = yield* Browser.getVersion().pipe(
+        Protocol.on(cdp.browser),
+        Protocol.withCommandTimeout("200 millis"),
+        Effect.exit
+      )
+      const elapsed = performance.now() - started
+      assert.strictEqual(reasonOf(exit)._tag, "NoReply")
+      assert.isTrue(elapsed >= 150 && elapsed < 5000, `${elapsed} ms`)
     }))
 
   it.effect("releases a resource whose reply arrives after its caller stopped waiting", () =>
@@ -381,11 +385,10 @@ describe("CdpConnection", () => {
       const fiber = yield* Runtime.evaluate({ expression: "document.body" }).pipe(
         Protocol.on(page),
         Protocol.withLateReplyHandler((reply) => Deferred.succeed(late, reply).pipe(Effect.asVoid)),
-        Protocol.withCommandTimeout("1 second"),
+        Protocol.withCommandTimeout("200 millis"),
         Effect.forkChild
       )
       const sent = yield* browser.next
-      yield* TestClock.adjust("1 second")
       assert.strictEqual(reasonOf(yield* Fiber.await(fiber))._tag, "NoReply")
       const result = { result: { type: "object", subtype: "node", objectId: "O1" } }
       yield* browser.receive({ id: sent.id, result, sessionId: "S1" })

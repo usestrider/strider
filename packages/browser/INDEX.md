@@ -82,8 +82,8 @@ The `Browser` service, which every backend provides, with its accessors and the 
   - `readonly [TypeId]: typeof TypeId`
   - `readonly info: Info`
   - `readonly capabilities: Watchable.Watchable<CapabilitySet>`
-  - `newContext(options?: UserContext.Options | undefined): Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Scope.Scope>`
-  - `newPage(options?: UserContext.Options | undefined): Effect.Effect<Page.Page, Page.PageError | Target.TargetGone, Scope.Scope>`
+  - `newContext(options?: UserContext.Options | undefined): Effect.Effect<UserContext.UserContext, UserContext.UserContextError | Deadline.Timeout, Scope.Scope>`
+  - `newPage(options?: UserContext.Options | undefined): Effect.Effect<Page.Page, Page.PageError | Target.TargetGone | Deadline.Timeout, Scope.Scope>`
   - `readonly pages: Watchable.Watchable<ReadonlyArray<Page.ObservedPage>>`
   - `readonly defaultContext: UserContext.ObservedUserContext`
 
@@ -93,8 +93,8 @@ The `Browser` service, which every backend provides, with its accessors and the 
 
 *accessors*
 
-- `const newPage: (options?: UserContext.Options | undefined) => Effect.Effect<Page.Page, Page.PageError | Target.TargetGone, Browser | Scope.Scope>`
-- `const newContext: (options?: UserContext.Options | undefined) => Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Browser | Scope.Scope>`
+- `const newPage: (options?: UserContext.Options | undefined) => Effect.Effect<Page.Page, Page.PageError | Target.TargetGone | Deadline.Timeout, Browser | Scope.Scope>`
+- `const newContext: (options?: UserContext.Options | undefined) => Effect.Effect<UserContext.UserContext, UserContext.UserContextError | Deadline.Timeout, Browser | Scope.Scope>`
 
 *layers*
 
@@ -211,7 +211,7 @@ Features that only some backends have, each reached through a handle bound to on
   - `readonly properties: Readonly<Record<string, unknown>>`
   - `readonly children: ReadonlyArray<AxNode>`
 - `interface AxTreeReader`
-  - `readonly read: Effect.Effect<AxNode, CapabilityError | Target.TargetGone>`
+  - `readonly read: Effect.Effect<AxNode, CapabilityError | Target.TargetGone | Deadline.Timeout>`
 - `interface ScreencastFrame`
   - `readonly at: MonotonicInstant.MonotonicInstant`
   - `readonly width: Pixels.Device`
@@ -220,7 +220,7 @@ Features that only some backends have, each reached through a handle bound to on
 - `interface ScreencastControl`
   - `readonly frames: Stream.Stream<ScreencastFrame, Target.TargetGone>`
 - `interface VideoRecording`
-  - `readonly file: Effect.Effect<FilePath.Local, CapabilityError | Target.TargetGone>`
+  - `readonly file: Effect.Effect<FilePath.Local, CapabilityError | Target.TargetGone | Deadline.Timeout>`
 - `type CapabilityErrorReason = typeof CapabilityErrorReason.Type`
 
 *schemas*
@@ -319,11 +319,11 @@ A context's cookies: reading, setting and removing them.
   - `readonly domain?: Domain | string | undefined`
   - `readonly path?: string | undefined`
 - `interface CookieJar`
-  - `readonly list: Effect.Effect<ReadonlyArray<Cookie>, CookieJarError | Target.TargetGone>`
-  - `listFor(url: Url.Url | string): Effect.Effect<ReadonlyArray<Cookie>, CookieJarError | Target.TargetGone>`
-  - `set(cookie: Input): Effect.Effect<void, CookieJarError | Target.TargetGone>`
-  - `remove(match: Match): Effect.Effect<void, CookieJarError | Target.TargetGone>`
-  - `readonly clear: Effect.Effect<void, CookieJarError | Target.TargetGone>`
+  - `readonly list: Effect.Effect<ReadonlyArray<Cookie>, CookieJarError | Target.TargetGone | Deadline.Timeout>`
+  - `listFor(url: Url.Url | string): Effect.Effect<ReadonlyArray<Cookie>, CookieJarError | Target.TargetGone | Deadline.Timeout>`
+  - `set(cookie: Input): Effect.Effect<void, CookieJarError | Target.TargetGone | Deadline.Timeout>`
+  - `remove(match: Match): Effect.Effect<void, CookieJarError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly clear: Effect.Effect<void, CookieJarError | Target.TargetGone | Deadline.Timeout>`
 - `type CookieJarErrorReason = typeof CookieJarErrorReason.Type`
 
 *schemas*
@@ -496,7 +496,7 @@ The files a page or context downloads: waiting for one, following its progress, 
   - `readonly finished: Effect.Effect<void, DownloadError | Target.TargetGone | Deadline.Timeout>`
   - `readonly stream: Stream.Stream<Uint8Array, DownloadError | Target.TargetGone | Deadline.Timeout>`
   - `saveAs(path: FilePath.Local | string): Effect.Effect<void, DownloadError | Target.TargetGone | Deadline.Timeout>`
-  - `readonly cancel: Effect.Effect<void, DownloadError>`
+  - `readonly cancel: Effect.Effect<void, DownloadError | Deadline.Timeout>`
 - `interface Filter`
   - `readonly url?: Url.Pattern | string | undefined`
 - `type DownloadErrorReason = typeof DownloadErrorReason.Type`
@@ -732,7 +732,7 @@ HAR recordings: a page's or context's network traffic, exported as an HTTP Archi
 
 *constructors*
 
-- `const record: (target: UserContext.UserContext | Page.Page, options: Options) => Effect.Effect<Recording, HarError | Target.TargetGone, Scope.Scope>` (experimental)
+- `const record: (target: UserContext.UserContext | Page.Page, options: Options) => Effect.Effect<Recording, HarError | Target.TargetGone | Deadline.Timeout, Scope.Scope>` (experimental)
 
 *guards*
 
@@ -1353,7 +1353,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
   - `readonly localStorage: OriginStorage.ReadonlyOriginStorage`
   - `readonly sessionStorage: OriginStorage.ReadonlyOriginStorage`
   - `evaluate<Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args): Effect.Effect<JSHandle.Serialized<A>, PageError | Targe…`
-  - `capability<H>(capability: Capability.Capability<H>): Effect.Effect<H, Capability.CapabilityError | Target.TargetGone, Scope.Scope>`
+  - `capability<H>(capability: Capability.Capability<H>): Effect.Effect<H, Capability.CapabilityError | Target.TargetGone | Deadline.Timeout, Scope.Scope>`
 - `interface Page extends ReadonlyPage`
   - `getByRole(role: AriaRole.AriaRole, options?: Locator.RoleOptions | undefined): Locator.Locator`
   - `getByText(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator`
@@ -1379,10 +1379,10 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
   - `readonly mouse: Mouse.Mouse`
   - `readonly clock: PageClock.PageClock`
   - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect.…`
-  - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError | Target.…`
-  - `emulate(settings: Emulation.Emulation): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>`
-  - `readonly activate: Effect.Effect<void, PageError | Target.TargetGone>`
-  - `close(): Effect.Effect<void, Target.TargetGone | Deadline.Timeout>`
+  - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect< InitScript.InitScript, Declaration.DeclarationError | Target…`
+  - `emulate(settings: Emulation.Emulation): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout, Scope.Sco…`
+  - `readonly activate: Effect.Effect<void, PageError | Target.TargetGone | Deadline.Timeout>`
+  - `close(): Effect.Effect<void, PageError | Target.TargetGone | Deadline.Timeout>`
   - `close(options: { readonly runBeforeUnload: boolean }): Effect.Effect<void, PageError | Target.TargetGone | Deadline.Timeout>`
 - `type PageErrorReason = typeof PageErrorReason.Type`
 
@@ -1427,10 +1427,10 @@ Page time: the clock a page's scripts read, under your control.
 - `interface InstallOptions`
   - `readonly workers?: boolean | undefined`
 - `interface PageClock`
-  - `install(mode: Mode, options?: InstallOptions | undefined): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scop…`
-  - `adjust(duration: Duration.Input): Effect.Effect<void, PageClockError | Target.TargetGone>`
-  - `setTime(at: DateTime.DateTime.Input): Effect.Effect<void, PageClockError | Target.TargetGone>`
-  - `readonly resume: Effect.Effect<void, PageClockError | Target.TargetGone>`
+  - `install(mode: Mode, options?: InstallOptions | undefined): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Target.TargetGone | Deadline…`
+  - `adjust(duration: Duration.Input): Effect.Effect<void, PageClockError | Target.TargetGone | Deadline.Timeout>`
+  - `setTime(at: DateTime.DateTime.Input): Effect.Effect<void, PageClockError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly resume: Effect.Effect<void, PageClockError | Target.TargetGone | Deadline.Timeout>`
 - `type PageClockErrorReason = typeof PageClockErrorReason.Type`
 
 *schemas*
@@ -1572,13 +1572,13 @@ Routes intercept a page's or context's requests, and a route's handler decides w
   - `readonly realm: string`
 - `interface Paused`
   - `readonly request: NetworkRequest.NetworkRequest`
-  - `readonly requestBody: Effect.Effect<Option.Option<Uint8Array>, RouteError | Target.TargetGone>`
+  - `readonly requestBody: Effect.Effect<Option.Option<Uint8Array>, RouteError | Target.TargetGone | Deadline.Timeout>`
 - `interface RequestPhase extends Paused`
   - `readonly phase: "request"`
 - `interface ResponsePhase extends Paused`
   - `readonly phase: "response"`
   - `readonly response: NetworkResponse.NetworkResponse`
-  - `readonly responseBody: Effect.Effect<Uint8Array, RouteError | Target.TargetGone>`
+  - `readonly responseBody: Effect.Effect<Uint8Array, RouteError | Target.TargetGone | Deadline.Timeout>`
 - `interface AuthPhase extends Paused`
   - `readonly phase: "auth"`
   - `readonly challenge: Challenge`
@@ -1783,7 +1783,7 @@ Recordings of what happened on a page, exported as traces that Playwright's trac
 
 *constructors*
 
-- `const record: (target: UserContext.UserContext | Page.Page, options?: Options | undefined) => Effect.Effect<Recording, TraceError | Target.TargetGone, Scope.Scope>` (experimental)
+- `const record: (target: UserContext.UserContext | Page.Page, options?: Options | undefined) => Effect.Effect<Recording, TraceError | Target.TargetGone | Deadline.Timeout, Scope.Scope>` (experimental)
 
 *guards*
 
@@ -1853,16 +1853,16 @@ User contexts: isolated browser sessions, at two access levels.
 - `interface GrantOptions`
   - `readonly origin?: Url.Origin | string | undefined`
 - `interface UserContext extends ObservedUserContext`
-  - `readonly newPage: Effect.Effect<Page.Page, Page.PageError | Target.TargetGone, Scope.Scope>`
+  - `readonly newPage: Effect.Effect<Page.Page, Page.PageError | Target.TargetGone | Deadline.Timeout, Scope.Scope>`
   - `readonly pages: Watchable.Watchable<ReadonlyArray<Page.Page>>`
   - `readonly workers: Watchable.Watchable<ReadonlyArray<BrowserWorker.BrowserWorker>>`
   - `readonly cookies: CookieJar.CookieJar`
   - `readonly exportStorageState: Effect.Effect<StorageState.StorageState, UserContextError | Target.TargetGone>`
   - `readonly clock: PageClock.PageClock`
   - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect.…`
-  - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError | Target.…`
-  - `emulate(settings: Emulation.Emulation): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>`
-  - `grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Targe…`
+  - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect< InitScript.InitScript, Declaration.DeclarationError | Target…`
+  - `emulate(settings: Emulation.Emulation): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout, Scope.Sco…`
+  - `grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Targ…`
 - `interface Options`
   - `readonly storageState?: StorageState.StorageState | undefined`
   - `readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined`
