@@ -534,8 +534,8 @@ const attachedCapabilities = (info: Browser.Info) => {
         "a context's list is the cookies its pages' documents and resources are sent (QUIRKS.md, Q225)"
       ]),
       entry("cookies.partitioned", "unsupported", ["WebKit doesn't report partitioned cookies"]),
-      entry("storageState.partitioned", "partial", [
-        "a frame's storage is restored under its top-level site at the scheme's default port: stock WebKit partitions it by the top-level origin, port included (QUIRKS.md, Q232)"
+      entry("storageState.partitioned", "supported", [
+        "stock WebKit keys a frame's storage by its top-level origin, port included (QUIRKS.md, Q232): a state saved without one is restored at its site's default port"
       ]),
       entry("permissions", "unsupported", [noEmulation]),
       entry("permissions.anyOrigin", "unsupported", [noEmulation]),

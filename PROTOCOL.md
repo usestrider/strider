@@ -940,6 +940,14 @@ Adapter responsibilities:
   - **`strider browsers` doesn't run a MiniBrowser for its version** (Q234).
 - **Tests.** `test/Launchers.test.ts` checks what the stock launch takes and refuses; `test/Browsers.test.ts` finds a Nix profile's MiniBrowser and its version; `WebKitAutomation.test.ts` checks every row of the error table; the stock fixture is recorded again. Integration tests: 517, all passing in one full run, a file at a time; the 3 of `WebKit.test.ts` went with the build.
 
+**Built** (2026-10-26, after [review 24](reviews/24-storage-partitions-by-origin.md)): storage partitions by origin.
+
+- **`StorageState.OriginState.topLevelOrigin`,** an optional key: for a partitioned origin, the origin of the top-level document it was read under. A state saved before has none, and decodes as it did.
+- **Export** records it from the page each origin is read under; an origin is still read once per top-level site. **Restore** writes a partitioned origin from a frame of a page at it, or, with none, at the site's default port, as before (`internal/storageState.ts`).
+- **`storageState.partitioned`** is `supported` on stock WebKit, whose partitions are keyed by origin (Q232), saying that a state with no top-level origin is restored at the site's default port.
+- **Where the build differs from the review:** nowhere.
+- **Tests.** The slices' call site 1 checks the restored frame's storage on every backend again, and passes on all three; `test/Errors.test.ts` decodes a state saved without the key, and one with it. Integration tests: 517, all passing in one full run, a file at a time.
+
 ### Pause-on-start granularity
 
 Before-author-script setup for *new* targets needs them paused at creation. Granularity differs by backend, and the access model depends on it.

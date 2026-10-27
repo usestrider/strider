@@ -53,7 +53,6 @@ declare module "../Reason.ts" {
  * - A page another page opens has no opener, so `Popup.next` fails with `Unsupported`; the page is in the context's
  *   `pages`.
  * - A context's cookie list is the cookies its open pages are sent, and a host's cookie is set as its domain's.
- * - A storage state's partitioned frame storage is restored under its site's default port.
  * - A context costs a browser process, about 0.6 seconds to start.
  * - History traversal, the locale, time zone and user agent, a mobile viewport, touch, keyboard layouts,
  *   permissions, downloads, file choosers (`setInputFiles` works), screencasts and PDFs fail with `Unsupported`.

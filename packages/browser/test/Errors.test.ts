@@ -85,4 +85,34 @@ describe("StorageState.Json", () => {
       assert.isDefined(cookie)
       assert.strictEqual(Redacted.value(cookie.value), "s3cret")
     }))
+
+  it.effect("reads a partitioned origin's top-level origin, and a state saved before it had one", () =>
+    Effect.gen(function*() {
+      const partitioned = {
+        origin: Url.Origin.make("https://widget.example"),
+        partition: {
+          _tag: "Partitioned" as const,
+          topLevelSite: Url.Site.make("https://news.example"),
+          crossSiteAncestor: Option.some(true)
+        },
+        localStorage: [["seen", Redacted.make("1")] as const],
+        indexedDb: []
+      }
+      // Saved before review 24: no key, as a state saved then has none
+      const before = yield* Schema.encodeEffect(StorageState.Json)(
+        new StorageState.StorageState({ cookies: [], origins: [partitioned] })
+      )
+      assert.notInclude(before, "topLevelOrigin")
+      assert.isUndefined((yield* Schema.decodeEffect(StorageState.Json)(before)).origins[0]?.topLevelOrigin)
+      const after = yield* Schema.encodeEffect(StorageState.Json)(
+        new StorageState.StorageState({
+          cookies: [],
+          origins: [{ ...partitioned, topLevelOrigin: Url.Origin.make("https://news.example:8443") }]
+        })
+      )
+      assert.strictEqual(
+        (yield* Schema.decodeEffect(StorageState.Json)(after)).origins[0]?.topLevelOrigin,
+        "https://news.example:8443"
+      )
+    }))
 })

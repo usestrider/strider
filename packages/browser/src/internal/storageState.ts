@@ -365,6 +365,8 @@ interface Source {
   readonly document: Target.DocumentId
   readonly origin: string
   readonly partition: CookieJar.PartitionKey
+  /** The origin of the page it was found under (review 24). */
+  readonly topLevelOrigin: string
 }
 
 /** One document per origin and partition, of the documents open in the context's pages and frames. */
@@ -399,7 +401,7 @@ const sourcesOf = Effect.fnUntraced(function*(runtime: Runtime.Runtime, context:
         ? { _tag: "Unpartitioned" }
         : { _tag: "Partitioned", topLevelSite: Url.Site.make(topSite), crossSiteAncestor: Option.some(true) }
       const key = `${url.origin} ${partition._tag === "Partitioned" ? partition.topLevelSite : ""}`
-      if (!sources.has(key)) sources.set(key, { document, origin: url.origin, partition })
+      if (!sources.has(key)) sources.set(key, { document, origin: url.origin, partition, topLevelOrigin: top.origin })
     }
   }
   return [...sources.values()]
@@ -472,6 +474,8 @@ export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id) =
       origins.push({
         origin: Url.Origin.make(source.origin),
         partition: source.partition,
+        // Where the partition's key is an origin, as stock WebKit's is, the restore needs it (review 24)
+        ...(source.partition._tag === "Partitioned" ? { topLevelOrigin: Url.Origin.make(source.topLevelOrigin) } : {}),
         localStorage: answer.read.local.map(([key, value]) => [key, Redacted.make(value)] as const),
         indexedDb: answer.read.indexedDb.map((database) => ({
           name: database.name,
@@ -601,7 +605,8 @@ export const applyState = (
           document = state.document.id
         } else {
           // A partition is written from a frame of a page at its top-level site
-          const top = `${origin.partition.topLevelSite}${seedPath}/${index}/top`
+          // At the top-level origin it was read under, or, saved without one, its site's default port (review 24)
+          const top = `${origin.topLevelOrigin ?? origin.partition.topLevelSite}${seedPath}/${index}/top`
           yield* context.route(
             top,
             () => html(`<!DOCTYPE html><title>storage state</title><iframe src="${seed}"></iframe>`)

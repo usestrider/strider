@@ -1049,10 +1049,8 @@ document.getElementById("form").addEventListener("submit", (event) => {
             ))
             yield* page.getByText("Welcome").pipe(Expect.toBeVisible)
             assert.deepStrictEqual(yield* page.localStorage.get("user"), Option.some("me@example.com"))
-            // A partition restored under its site's default port, where the backend keys it by origin (Q232)
-            if (yield* fullySupports("storageState.partitioned")) {
-              yield* page.frame(page.locator("#widget")).locator("#out").pipe(Expect.toHaveText("w1"))
-            }
+            // Restored under the origin it was read under, where the backend keys it by origin (review 24, Q232)
+            yield* page.frame(page.locator("#widget")).locator("#out").pipe(Expect.toHaveText("w1"))
             const record = yield* page.evaluateInMainWorld(() =>
               new Promise<
                 {

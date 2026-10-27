@@ -48,6 +48,13 @@ export const IndexedDbDatabase = Schema.Struct({
 /**
  * Schema for one origin's storage within one partition.
  *
+ * **Details**
+ *
+ * `topLevelOrigin` is, for a partitioned origin, the origin of the top-level document it was read under (review 24):
+ * stock WebKit keys a partition by that origin, port included, where Chromium and Firefox key it by `partition`'s
+ * site. A restore writes the origin's storage under a page there; a state saved without it, under the site's
+ * default port.
+ *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
@@ -55,6 +62,7 @@ export const IndexedDbDatabase = Schema.Struct({
 export const OriginState = Schema.Struct({
   origin: Url.Origin,
   partition: CookieJar.PartitionKey,
+  topLevelOrigin: Schema.optionalKey(Url.Origin),
   localStorage: Schema.Array(Schema.Tuple([Schema.String, Schema.Redacted(Schema.String)])),
   indexedDb: Schema.Array(IndexedDbDatabase)
 })
