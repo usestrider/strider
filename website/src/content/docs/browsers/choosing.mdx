@@ -4,6 +4,10 @@ description: Three engines, what each can do, and how to run one program on all 
 order: 1
 ---
 
+Each browser's protocol lets Strider do a different set of things, so a step that passes on Chromium can fail with
+`Unsupported` on Firefox or WebKit. Knowing what each backend can do lets you pick the one a program needs, and run
+one program on all three, skipping only what a browser lacks.
+
 ## Three backends
 
 | Backend  | Engine | Protocol                              | Launches                       | Attaches to                                  |
@@ -19,8 +23,9 @@ The rest of the guide works on all three, except where a browser lacks a capabil
   or PDFs.
 - **[Firefox](/docs/browsers/firefox)** runs over WebDriver BiDi, the W3C standard, which covers less emulation and
   interception than CDP.
-- **[WebKit](/docs/browsers/webkit)** is stock WebKitGTK and WPE, Linux only. It supports the least: no popups'
-  openers, downloads, file choosers or history.
+- **[WebKit](/docs/browsers/webkit)** is stock WebKitGTK and WPE, Linux only. It supports the least: no
+  [`Popup.next`](/docs/events/events#popups), since WebKit names no opener; no downloads or file choosers; and no
+  [`back`](/docs/api/browser/Page#Page.back) or [`forward`](/docs/api/browser/Page#Page.forward).
 
 ## What each can do
 
@@ -34,7 +39,9 @@ lists WebDriver input.
 ## One program, every browser
 
 A program needs a `Browser`, which a layer provides, so the same program or tests run on every backend by changing
-the layer. Provide all the platform services the three need, and the layers are interchangeable:
+the layer. Each backend requires its own [platform services](/docs/installation#platform-services), WebKit's
+including a [`SocketConnector`](/docs/browsers/webkit#launching); provide them all, and the layers are
+interchangeable:
 
 ```ts
 import { NodeServices, NodeSocket } from "@effect/platform-node"
@@ -83,34 +90,41 @@ run them in parallel.
 
 ## Checking what a browser can do
 
-`browser.capabilities` is the connected browser's list, and `has` says whether an entry is fully supported:
+A step a backend can't do fails with `Unsupported`, so a program meant for every backend has to know where to do
+without it. Check the capability first when the answer changes what the program does; recover from `Unsupported`
+when the step can be skipped. [`browser.capabilities`](/docs/api/browser/Browser#Browser.capabilities) is the
+connected browser's list, and `has` says whether an entry is fully supported. It takes a capability's name, the one
+an [`Unsupported` reason's `capability`](/docs/errors#recovering) gives, such as `"emulation.media"`:
 
 ```ts
 import { Browser, Page } from "@usestrider/browser"
 import { Effect } from "effect"
 
+// Where the browser can't emulate the setting, use the site's own switch
 const darkMode = Effect.fn("darkMode")(function*(page: Page.Page) {
   const browser = yield* Browser.Browser
   const capabilities = yield* browser.capabilities
-  if (!capabilities.has("emulation.media")) return false
-  yield* page.emulate({ media: { colorScheme: "dark" } })
-  return true
+  if (capabilities.has("emulation.media")) {
+    yield* page.emulate({ media: { colorScheme: "dark" } })
+  } else {
+    yield* page.getByRole("button", { name: "Dark theme" }).click()
+  }
 })
 ```
 
-Or try it and recover from `Unsupported`, which any module's error can carry:
+Or try it and recover from `Unsupported`, which any module's error can carry: here `DeclarationError`, the error
+of a [declaration](/docs/events/routes#declarations) such as `emulate`:
 
 ```ts
 import { Page } from "@usestrider/browser"
 import { Effect } from "effect"
 
-const darkModeIfSupported = Effect.fn("darkModeIfSupported")(
-  function*(page: Page.Page) {
-    yield* page.emulate({ media: { colorScheme: "dark" } }).pipe(
-      Effect.catchReason("DeclarationError", "Unsupported", () => Effect.void)
-    )
-  }
-)
+// A screenshot is steadier without animations, but can be taken without
+const steadyScreenshot = Effect.fn("steadyScreenshot")(function*(page: Page.Page) {
+  yield* page.emulate({ media: { reducedMotion: "reduce" } }).pipe(
+    Effect.catchReason("DeclarationError", "Unsupported", () => Effect.void)
+  )
+  return yield* page.screenshot()
+})
 ```
 
-Check when the result changes what the program does; recover when the step can be skipped.
