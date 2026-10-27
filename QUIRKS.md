@@ -134,6 +134,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 22's fifth step: a `goto` right after a refused one was credited with the error page's commit, and one to port 1 committed `about:blank`.
 - *We:* on stock WebKit, an `about:blank` navigation claims no `goto` to another URL; one that starts while a `goto` waits in the frame fails that `goto`, saying WebKit showed its error page instead. The tests wait for the error page before going on.
 - *Reconsider:* a `goto` started just before an earlier failure's error page commits fails with it.
+- **Revised** in `508e013` (review 23's third step): after a load that failed, the `about:blank` that follows is the failed navigation's document (`ErrorPage`), as Chromium's error page is (Q1), never a navigation of its own; after a load refused before any request, it fails the `goto` waiting in the frame and is that navigation's document.
 
 **Q200. Stock WebKit reports no same-document navigation** (Browser). Its `Page` domain has no `navigatedWithinDocument`: a fragment or `history.pushState` changes the page's URL unseen.
 - *Seen:* review 22's fifth step: a `goto` to a fragment of the document shown waited until its deadline, and `page.url` kept the URL before `pushState`.
@@ -144,6 +145,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 22's fifth step, against the vendored protocol and in the MiniBrowser.
 - *We:* load events are the main frame's (`frames.readiness`, `partial`); `contentFrame` is `Unsupported`; an adopted page's `document.readyState` is asked as its target is set up, so a page attached after its load is `complete`.
 - *Reconsider:* asking a child frame's readiness in its realm, if a use waits on one.
+- **Revised** in `508e013` (review 23's third step): launched, `contentFrame` is found through Automation and matched by the frame's document (Q228), so frame locators work; attached, it stays `Unsupported`.
 
 **Q211. A page stock WebKit's Automation just opened is still loading, and a navigation sent then returns when that load ends** (Browser). `createBrowsingContext` answers while the new page loads its first `about:blank`; a `navigateBrowsingContext` sent at once, with the `Normal` load strategy, is answered when that load completes, and the navigation it asked for commits after, unloading the document the next command runs in ("Callback was not called before the unload event").
 - *Seen:* review 23's first step: its integration test failed every time once the machine was quiet, and passed in the probes, which did more before navigating.
@@ -302,6 +304,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 23, P6, and its first step's measurement.
 - *We:* review 23 decided: symbolic breakpoints if their cost is small, else `Dialog.Unknown`. Their cost is Q207's, so the adapter (its second step) asks every 100 ms whether a dialog is open and reports it as `Dialog.Unknown`, with its message.
 - *Reconsider:* when WebKitGTK ships its WebDriver BiDi, whose `userPromptOpened` has both.
+- **Revised** in `508e013` (review 23's third step): `prompts.kind`, new on every backend, is `unsupported` here, and input that opens a dialog returns once it's decided, as on every backend (Q224).
 
 **Q207. A debugger slows a stock WebKit page's JavaScript by about 80%, and a symbolic breakpoint can't see a native call's arguments** (Browser). With `Debugger.enable`, a benchmark of loops, sorting, strings, DOM and recursion ran in 38 ms instead of 21 (median of seven); symbolic breakpoints on `alert`, `confirm` and `prompt` added nothing more. A breakpoint's probe names the dialog's kind, but it fires for any function of that name, the page's own included, and evaluates in the caller's frame, where `arguments` doesn't exist, so a prompt's default value can't be read.
 - *Seen:* review 23's first step, against WebKitGTK 2.54.1's MiniBrowser.
@@ -312,11 +315,13 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 23's second step.
 - *We:* launched, a page the connection didn't ask for is reported opened, with no opener: `Popup` events of a context see it, a page's own don't.
 - *Reconsider:* reading `window.opener` where the popup is same-origin.
+- **Revised** in `508e013` (review 23's third step): `Popup.next`, `stream` and `history` fail at once with `SubscriptionError{Unsupported}`, naming `popups.opener`, new on every backend, rather than waiting out their deadline.
 
 **Q214. WebKitGTK's Automation builds no touch, and a mouse state makes an event only when it names its interaction** (Browser). `ENABLE_WEBDRIVER_TOUCH_INTERACTIONS` is off for WebKitGTK, and the dispatcher's touch path is a release assertion; a mouse source's state with a button and a location but no `mouseInteraction` moves nothing.
 - *Seen:* review 23's second step: the first clicks didn't reach the page; WebKitGTK 2.54.1's `OptionsGTK.cmake` and `SimulatedInputDispatcher.cpp`.
 - *We:* each event is a step naming its interaction (`Move`, `Down`, `Up`), each step declares only the sources it uses, never a touch one, and touch input is refused.
 - *Reconsider:* nothing.
+- **Revised** in `508e013` (review 23's third step): an input call is one sequence, a step per event, declaring the keyboard, the mouse and the wheel, so a double click is one (Q223); touch is refused under `input.touch`, new on every backend.
 
 **Q223. WebKitGTK's Automation forgets a click at each sequence's end, keeps each input source's state across sequences, and types no newline** (Browser). `performInteractionSequence` clears the click count as it finishes (`SimulatedInputDispatcher::finishDispatching`, citing w3c/webdriver#1772), so a second click sent in a sequence of its own is never a double click; a wheel scrolls by the difference between its state and the one before, which outlives the sequence, so a second scroll by the same amount scrolls nothing; and `InsertByKey` with a newline inserts nothing.
 - *Seen:* review 23's third step: the slices' `dblclick`, `mouse.click` with `clickCount: 2`, a second `mouse.wheel`, and `fill("one\ntwo")` into a `textarea`.
@@ -667,6 +672,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 23, P5.
 - *We:* review 23's capabilities list a user agent for the document already loaded, and throttling, as unsupported.
 - *Reconsider:* whether requests carry the override, in the adapter's step.
+- **Revised** in `508e013` (review 23's third step): launched, an override stock WebKit can't apply is refused under its capability, the user agent's (`emulation.userAgent`) and throttling's among them, where before some were ignored.
 
 **Q218. A launched MiniBrowser takes its time zone at launch and its language from neither the environment nor the protocol** (Browser). `--time-zone` sets the page's time zone, and nothing changes it after; `LANG`, `LANGUAGE` and `LC_ALL` leave `navigator.language` `en-US`.
 - *Seen:* review 23's second step's probe.
@@ -1352,6 +1358,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 22's fifth step.
 - *We:* `isolatedWorlds` is `unsupported`, and `WebKit.layerAttach`'s documentation says where the engine runs; a caller's function never moves there: `evaluate` fails `Unsupported`, and `evaluateInMainWorld` runs.
 - *Reconsider:* nothing while stock WebKit makes no worlds.
+- **Revised** in `508e013` (review 23's third step): the library's own functions given a node, a drag's and those that set files made in the page, run there too, with the node passed as its binding (Q229); and the engine takes the page's real timers where a page clock shares its world (Q222).
 
 **Q210. Every WebKit protocol's generated header named the patched build's directory** (Ours). The emitter wrote `protocols/<dialect>`, and the stock and Automation protocols are in WebKit's dialect, so their modules said to correct `protocols/webkit`.
 - *Seen:* review 22's fifth step, noticed after its commit.
