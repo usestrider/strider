@@ -68,7 +68,7 @@ export const settle = (
         operation,
         new PageNavigation.NoContent({
           url,
-          hint: "The server answered without content, so the page stayed where it was"
+          hint: "the page stayed where it was; goto with accept: [\"noContent\"] returns it as a navigation"
         }),
         id
       ))

@@ -433,6 +433,6 @@ export class NoContent extends Schema.Error<NoContent>("@usestrider/browser/Page
   hint: Schema.String
 }) {
   override get message(): string {
-    return `The server answered 204 No Content (${this.hint})`
+    return `The server answered without content, 204 or 205 (${this.hint})`
   }
 }
