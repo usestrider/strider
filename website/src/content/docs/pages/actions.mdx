@@ -4,6 +4,9 @@ description: Clicking, typing, choosing and uploading; the checks each action ma
 order: 2
 ---
 
+Input sent to an element that's hidden, moving or covered misses it or lands on something else, and a sleep before
+each step only makes that less likely. An action waits until its element can take the input, then sends it once.
+
 ## Actions
 
 An action is a locator method, with settings as an optional last argument:
@@ -17,17 +20,20 @@ const editProfile = Effect.fn("editProfile")(function*(page: Page.Page) {
   yield* page.getByLabel("Country").selectOption({ label: "United Kingdom" })
   yield* page.getByLabel("Send me the newsletter").check()
   yield* page.getByRole("button", { name: "Save" }).click()
-  const row = page.getByRole("row").filter({ hasText: "Ada Lovelace" })
+})
+
+const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: string) {
+  const row = page.getByRole("row").filter({ hasText: name })
   yield* row.click({ button: "right" })
 })
 ```
 
 | Action                        | Does                                                                      |
 | ----------------------------- | ------------------------------------------------------------------------- |
-| `click()`, `dblclick()`       | moves the pointer to the element, presses and releases                     |
-| `tap()`                       | a touch start and end                                                      |
-| `hover()`                     | moves the pointer over the element                                         |
-| `check()`, `uncheck()`        | clicks a checkbox or radio unless it's already in that state, then confirms the change |
+| `click()`, [`dblclick()`](/docs/api/browser/Locator#Locator.dblclick) | moves the pointer to the element, presses and releases                     |
+| [`tap()`](/docs/api/browser/Locator#Locator.tap) | a touch start and end                                                      |
+| [`hover()`](/docs/api/browser/Locator#Locator.hover) | moves the pointer over the element                                         |
+| `check()`, [`uncheck()`](/docs/api/browser/Locator#Locator.uncheck) | clicks a checkbox or radio unless it's already in that state, then confirms the change |
 | `fill(value)`                 | focuses a field, selects its contents and inserts the value; `""` empties it |
 | `clear()`                     | empties a field                                                            |
 | `press(key)`                  | focuses the element and presses a key                                      |
@@ -35,9 +41,10 @@ const editProfile = Effect.fn("editProfile")(function*(page: Page.Page) {
 | `selectOption(choice)`        | chooses a `<select>`'s option by `value`, `label` or `index`                |
 | `setInputFiles(files)`        | sets a file input's files                                                  |
 | `dragTo(target)`              | presses on the element, moves to the target with the button held, releases |
-| `focus()`, `scrollIntoView()` | focuses it, or scrolls it into view                                        |
+| [`focus()`](/docs/api/browser/Locator#Locator.focus), [`scrollIntoView()`](/docs/api/browser/Locator#Locator.scrollIntoView) | focuses it, or scrolls it into view                                        |
 
-An action sends its input at most once. If it fails after the input may have reached the page, the error says so.
+An action sends its input at most once. If it fails after the input may have reached the page, the error's
+[`diagnostics.dispatch`](/docs/errors#diagnostics) says so.
 
 ## Checks
 
@@ -53,27 +60,44 @@ Before sending anything, an action waits, checking at each animation frame, unti
 | `setInputFiles`                                                   | none                                                                     |
 
 - "Stable": stopped moving. "In the viewport": scrolled there. "Receives the pointer": nothing covers the point.
+  "Not inert": not under an `inert` attribute, nor outside an open modal dialog.
 - After the checks pass, it checks once more and sends. If something covers a click's target in between, the page
   never sees the click, and the action checks again.
 - A timeout names the last failed check: `Another element covers the element's action point: div.toast "Saved"`.
 
-Turn single checks off with `checks`; there's no blanket `force`. `trial: true` runs the checks and sends nothing:
+An element that never passes a check, such as a button that pulses forever, times out. Turn single checks off with
+`checks`, by key: `visible`, `stable`, `enabled`, `editable`, `notInert`,
+`inViewport` and `receivesPointer`. There's no blanket `force`: turning off one check rather than all keeps the
+rest guarding the action. `trial: true` runs the checks and sends nothing, to learn whether an action would go
+through without causing it:
 
 ```ts
-import { Page } from "@usestrider/browser"
+import { Deadline, Page } from "@usestrider/browser"
+import { Effect } from "effect"
 
-declare const page: Page.Page
+const claimOffer = Effect.fn("claimOffer")(function*(page: Page.Page) {
+  const pulsing = page.getByRole("button", { name: "Claim offer" })
+  yield* pulsing.click({ checks: { stable: false } })
+})
 
-const close = page.getByRole("button", { name: "Close" })
-const behindOverlay = close.click({ checks: { receivesPointer: false } })
-const dryRun = page.getByRole("button", { name: "Delete" }).click({ trial: true })
+const canDelete = Effect.fn("canDelete")(function*(page: Page.Page) {
+  const remove = page.getByRole("button", { name: "Delete" })
+  return yield* remove.click({ trial: true }).pipe(
+    Deadline.within("2 seconds"),
+    Effect.as(true),
+    Effect.catchTag("Timeout", () => Effect.succeed(false))
+  )
+})
 ```
+
+A trial that passes succeeds; one whose checks never pass times out, like the action would.
 
 ## Typing
 
 - `fill` inserts text as pasting would: the page sees input events, not key presses. A date, color or range input
-  has its value set, and a value it refuses fails with `InvalidInput`.
-- `pressSequentially` sends a key per character, for fields that react to each keystroke. `delay` spaces them.
+  has its value set, and a value it refuses fails with [`InvalidInput`](/docs/errors#three-kinds-of-failure).
+- `pressSequentially` sends a key per character, for fields that react to each keystroke. `delay` spaces them, for
+  a field that drops keys typed faster than it handles them.
 - Pass secrets as `Redacted`. The value is typed, and never appears in errors, spans, logs or traces:
 
 ```ts
@@ -84,6 +108,20 @@ const logIn = Effect.fn("logIn")(function*(page: Page.Page) {
   yield* page.getByLabel("Email").fill("ada@example.com")
   yield* page.getByLabel("Password").fill(yield* Config.Redacted("APP_PASSWORD"))
   yield* page.getByRole("button", { name: "Sign in" }).click()
+})
+```
+
+For an autocomplete:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const chooseCity = Effect.fn("chooseCity")(function*(page: Page.Page) {
+  const city = page.getByRole("combobox", { name: "City" })
+  yield* city.clear()
+  yield* city.pressSequentially("Lisb", { delay: "50 millis" })
+  yield* page.getByRole("option", { name: "Lisbon, Portugal" }).click()
 })
 ```
 
@@ -100,58 +138,91 @@ const copyAll = Effect.fn("copyAll")(function*(page: Page.Page) {
   const editor = page.getByRole("textbox", { name: "Notes" })
   yield* editor.press("a", { modifiers: ["Control"] })
   yield* editor.press("c", { modifiers: ["Control"] })
-  yield* editor.press("Enter")
 })
 ```
 
-Typing uses a US layout unless the context sets another: `Browser.newPage({ keyboardLayout: "de" })`, with Shift,
-AltGr and dead keys. Layouts: `us`, `uk`, `de`, `fr`, `es`, `it`. Firefox sends only the keys' values; WebKit has no
-layouts.
+Typing uses a US layout unless the context sets another. A character the layout has no key for, such as `ß`, is
+typed as a key of its own with an empty `code`, which a page that reads `code` won't expect. Set the layout the
+page's users have, and Shift, AltGr and dead keys type as they would:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const germanAddress = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage({ keyboardLayout: "de" })
+  yield* page.goto("https://shop.example.de/checkout")
+  yield* page.getByLabel("Straße").pressSequentially("Hauptstraße 5")
+}))
+```
+
+Layouts: `us`, `uk`, `de`, `fr`, `es`, `it`. Firefox sends only the keys' values; WebKit has no layouts.
 
 ## Files
 
-`setInputFiles` takes `FileInput`s:
+`setInputFiles` takes `FileInput`s. `FileInput.local` names a file on this machine; `FileInput.bytes` makes the
+file in the page, so it also works with a browser on another machine:
 
 ```ts
 import { FileInput, Page } from "@usestrider/browser"
 import { Effect } from "effect"
 
-const upload = Effect.fn("upload")(function*(page: Page.Page, csv: string) {
+const changeAvatar = Effect.fn("changeAvatar")(function*(page: Page.Page) {
   yield* page.getByLabel("Avatar").setInputFiles(FileInput.local("./avatar.png"))
-  yield* page.getByLabel("Report").setInputFiles(
-    FileInput.bytes("report.csv", "text/csv", new TextEncoder().encode(csv))
+})
+
+const importReport = Effect.fn("importReport")(function*(page: Page.Page, csv: string) {
+  const report = FileInput.bytes(
+    "report.csv",
+    "text/csv",
+    new TextEncoder().encode(csv)
   )
+  yield* page.getByLabel("Report").setInputFiles(report)
 })
 ```
 
-- `FileInput.local` names a file on this machine.
-- `FileInput.bytes` makes the file in the page, so it works with a browser on another machine.
-- An upload through a file chooser, not an input, is answered with `FileChooser.handle`
-  ([Events](/docs/events/events#dialogs)).
+An upload through a file chooser, not an input, is answered with `FileChooser.handle`
+([Events](/docs/events/events#dialogs)).
 
 ## Dragging
 
 `dragTo` drags with the pointer. A native HTML drag (`draggable="true"`) finishes only on Chromium;
-`html: "synthetic"` has the page dispatch the drag's events instead, on every browser, untrusted:
-
-```ts
-import { Page } from "@usestrider/browser"
-
-declare const page: Page.Page
-
-const card = page.getByRole("listitem").filter({ hasText: "Write the guide" })
-const done = page.getByRole("list", { name: "Done" })
-const moved = card.dragTo(done, { html: "synthetic" })
-```
-
-## The keyboard and the mouse
-
-`page.keyboard` types into whatever has focus; `page.mouse` acts at coordinates, for canvases and maps. Neither
-checks anything. Holding a key or button is scoped, so a failed step never leaves it held:
+`html: "synthetic"` has the page dispatch the drag's events instead, on every browser. They're untrusted: their
+`isTrusted` is `false`, so a page that checks it can tell them from a user's:
 
 ```ts
 import { Page } from "@usestrider/browser"
 import { Effect } from "effect"
+
+const moveToDone = Effect.fn("moveToDone")(function*(page: Page.Page, title: string) {
+  const card = page.getByRole("listitem").filter({ hasText: title })
+  const done = page.getByRole("list", { name: "Done" })
+  yield* card.dragTo(done, { html: "synthetic" })
+})
+```
+
+## The keyboard and the mouse
+
+`page.keyboard` types into whatever has focus, for a shortcut the page itself handles. Its `insertText` adds text
+at the caret with no key events, as an input method would, where `fill` replaces the field's contents.
+`page.mouse` acts at coordinates, for canvases and maps. Neither checks anything. Holding a key or button is
+scoped, so a failed step never leaves it held:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const openShortcuts = Effect.fn("openShortcuts")(function*(page: Page.Page) {
+  yield* page.keyboard.press("?")
+  yield* page.getByRole("dialog", { name: "Keyboard shortcuts" }).pipe(
+    Expect.toBeVisible
+  )
+})
+
+const searchNearTokyo = Effect.fn("searchNearTokyo")(function*(page: Page.Page) {
+  yield* page.getByRole("searchbox").fill("Hotels near ")
+  yield* page.keyboard.insertText("東京")
+})
 
 const selectRange = Effect.fn("selectRange")(function*(page: Page.Page) {
   yield* page.getByRole("option", { name: "Apples" }).click()
@@ -167,12 +238,17 @@ const sketch = Effect.fn("sketch")(function*(page: Page.Page) {
     yield* page.mouse.hold("left")
     yield* page.mouse.move({ x: 220, y: 140 }, { steps: 12 })
   }))
-  yield* page.mouse.wheel({ x: 0, y: 400 })
+})
+
+const zoomMap = Effect.fn("zoomMap")(function*(page: Page.Page) {
+  yield* page.mouse.move({ x: 400, y: 300 })
+  yield* page.mouse.wheel({ x: 0, y: -240 })
 })
 ```
 
 A click while Shift is held is a Shift-click; moves while a button is held are a drag. Input to one page goes one
-gesture at a time.
+gesture at a time, so two fibers acting on one page never interleave their presses: the second
+[waits its turn](/docs/deadlines#setting-a-deadline), within its deadline.
 
 ## Browser differences
 
