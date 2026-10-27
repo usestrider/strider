@@ -23,7 +23,7 @@ import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
-import type * as Deadline from "../Deadline.ts"
+import * as Deadline from "../Deadline.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Subscription from "../Subscription.ts"
 import * as Target from "../Target.ts"
@@ -213,7 +213,8 @@ export const next = <A, B, PE, PR, DE = never>(
   Scope.Scope | PR
 > =>
   Effect.gen(function*() {
-    const budget = yield* Operation.budget
+    // The wait is an operation of its own, which outlives `next`: its deadline is the one in force now
+    const record = yield* Operation.start(kind.operation)
     const context = yield* Effect.context<PR>()
     const since = channel.published
     const subscribed = now()
@@ -243,24 +244,10 @@ export const next = <A, B, PE, PR, DE = never>(
       )
     }
     yield* take.pipe(
-      Effect.timeoutOption(Operation.millisLeft(budget.at)),
-      Effect.flatMap(Option.match({
-        onNone: () =>
-          Deferred.fail(
-            deferred,
-            Operation.timeout({
-              operation: kind.operation,
-              id: Operation.operationId(),
-              phase: "waitingForEvent",
-              budget: budget.budget,
-              history: [],
-              hint: missed()
-            })
-          ),
-        onSome: (event) => Deferred.succeed(deferred, event)
-      })),
+      (waiting) => record.bound(waiting, missed, "waitingForEvent"),
+      Effect.flatMap((event) => Deferred.succeed(deferred, event)),
       Effect.catch((failure) => {
-        if (Target.isTargetGone(failure)) return Deferred.fail(deferred, failure)
+        if (Deadline.isTimeout(failure) || Target.isTargetGone(failure)) return Deferred.fail(deferred, failure)
         if (Cause.isDone(failure)) {
           // Its target ended normally, which a wait still fails on; or its scope closed, which interrupts it
           return Option.isSome(channel.end)

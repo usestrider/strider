@@ -52,7 +52,6 @@ import * as Operation from "./operation.ts"
 import * as Routes from "./routes.ts"
 import * as Runtime from "./runtime.ts"
 import * as Snapshots from "./snapshot.ts"
-import * as Spans from "./spans.ts"
 import * as Storage from "./storage.ts"
 import * as Watchable from "./watchable.ts"
 
@@ -174,22 +173,12 @@ export const make = (owner: PageOwner): Page.Page => {
   const declared: Adapter.DeclarationScope = { _tag: "Page", page: entry.id }
 
   /** A request to the engine that got no answer, as the page's errors say it. */
-  const fromSend = (operation: string, id: Diagnostics.OperationId, budget: Operation.Budget) =>
-  (
-    failure: Runtime.SendFailure
-  ) =>
+  const fromSend = (operation: string, record: Operation.Record) => (failure: Runtime.SendFailure) =>
     failure._tag === "Gone"
       ? failure.error
       : failure._tag === "Reason"
-      ? pageError(operation, failure.reason, id)
-      : Operation.timeout({
-        operation,
-        id,
-        phase: "resolving",
-        budget: budget.budget,
-        history: [],
-        hint: Option.fromUndefinedOr(failure.hint)
-      })
+      ? pageError(operation, failure.reason, record.id)
+      : record.timeout(Option.fromUndefinedOr(failure.hint))
 
   const failure = (operation: string, id: Diagnostics.OperationId, error: Adapter.AdapterError) => {
     const mapped = Operation.fromAdapter(error, id, runtime.backend)
@@ -207,22 +196,24 @@ export const make = (owner: PageOwner): Page.Page => {
     accept: ReadonlyArray<"download" | "noContent"> = []
   ) =>
     Effect.gen(function*() {
-      const id = Operation.operationId()
-      const budget = yield* Operation.budget
-      const timedOut = (phase: "postcondition", hint: string) =>
-        Operation.timeout({ operation, id, phase, budget: budget.budget, history: [], hint: Option.some(hint) })
-      const started = yield* start(id)
-      if (Option.isNone(started)) return Option.none<PageNavigation.PageNavigation>()
-      const navigation = model.navigation(started.value)
-      const outcome = yield* Deferred.await(navigation.outcome).pipe(
-        Effect.timeoutOption(Operation.millisLeft(budget.at)),
-        Effect.ensuring(Effect.sync(() => model.forget(started.value)))
+      const record = yield* Operation.record
+      const id = record.id
+      const budget = record.budget
+      // The command that starts it is bounded too: a browser that never answers it can't keep the caller waiting
+      record.markSent()
+      const started = yield* record.bound(
+        start(id),
+        () => Option.some("The browser didn't answer the navigation before the deadline; it may have started")
       )
-      if (Option.isNone(outcome)) {
-        return yield* Effect.fail(timedOut("postcondition", "The navigation had no outcome before the deadline"))
-      }
+      if (Option.isNone(started)) return Option.none<PageNavigation.PageNavigation>()
+      record.markConfirmed()
+      const navigation = model.navigation(started.value)
+      const outcome = yield* record.bound(
+        Deferred.await(navigation.outcome),
+        () => Option.some("The navigation had no outcome before the deadline")
+      ).pipe(Effect.ensuring(Effect.sync(() => model.forget(started.value))))
       // Where it ended: the document's URL, which a same-document navigation set, or where it was going
-      const document = "document" in outcome.value ? model.documents.get(outcome.value.document) : undefined
+      const document = "document" in outcome ? model.documents.get(outcome.document) : undefined
       const at = document?.url ?? Option.getOrElse(url, () => "")
       const result = yield* Navigation.settle(
         model,
@@ -231,17 +222,17 @@ export const make = (owner: PageOwner): Page.Page => {
         entry.id,
         url,
         at,
-        outcome.value,
+        outcome,
         id,
         accept
       )
       if (!(yield* Navigated.reached(model, result, waitUntil, Option.some(budget.at)))) {
-        return yield* Effect.fail(timedOut("postcondition", `The document committed but didn't reach ${waitUntil}`))
+        return yield* Effect.fail(record.timeout(Option.some(`The document committed but didn't reach ${waitUntil}`)))
       }
       return Option.some(result)
     }).pipe(
       Effect.raceFirst(Runtime.pageEnded(entry, Operation.operationId())),
-      Spans.operation(operation, {
+      Operation.named(operation, {
         attributes: {
           "browser.page.id": entry.id,
           "browser.navigation.wait_until": waitUntil,
@@ -263,16 +254,16 @@ export const make = (owner: PageOwner): Page.Page => {
     then: (realm: Target.RealmId, value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>
   ): Effect.Effect<B, Page.PageError | Target.TargetGone | Deadline.Timeout, R> =>
     Effect.gen(function*() {
-      const id = Operation.operationId()
-      const budget = yield* Operation.budget
+      const record = yield* Operation.record
+      const id = record.id
+      const budget = record.budget
       const gesture = world._tag === "Main" && (yield* Effect.service(Page.UserGesture))
-      // Set once the call is on its way: a deadline after it can't say the function didn't run
-      let called = false
       return yield* Effect.gen(function*() {
         const realm = yield* Evaluation.pageRealm(runtime, entry, world, id, budget.at)
         const values = yield* Evaluation.toLocal(args, realm)
         const group = yield* Evaluation.groupFor(runtime, realm, result)
-        called = true
+        // The call is on its way: a deadline after it can't say the function didn't run
+        record.markSent()
         const value = yield* Evaluation.call(runtime, {
           realm,
           functionDeclaration: fn.toString(),
@@ -290,25 +281,17 @@ export const make = (owner: PageOwner): Page.Page => {
           failure._tag === "Gone"
             ? failure.error
             : failure._tag === "Deadline"
-            ? Operation.timeout({
-              operation,
-              id,
-              phase: called ? "dispatchedUnconfirmed" : "resolving",
-              budget: budget.budget,
-              history: [],
-              hint: Option.some(
-                called
-                  ? "The page didn't answer before the deadline; the function may still be running"
-                  : "The page had no document to evaluate in before the deadline"
-              ),
-              dispatch: called ? { _tag: "MayHaveBeenSent" } : { _tag: "NotSent" }
-            })
+            ? record.timeout(Option.some(
+              record.dispatch._tag === "MayHaveBeenSent"
+                ? "The page didn't answer before the deadline; the function may still be running"
+                : "The page had no document to evaluate in before the deadline"
+            ))
             : pageError(operation, failure.reason, id)
         ),
         Effect.annotateSpans({ "browser.evaluation.user_gesture": gesture })
       )
     }).pipe(
-      Spans.operation(operation, {
+      Operation.named(operation, {
         attributes: {
           "browser.page.id": entry.id,
           "browser.evaluation.world": world._tag === "Main" ? "main" : world.name
@@ -322,52 +305,39 @@ export const make = (owner: PageOwner): Page.Page => {
     frame: (iframe) => LocatorImpl.pageFrame({ runtime, page: entry, grant: owner.grant }, iframe),
     get title() {
       return Effect.gen(function*() {
-        const id = Operation.operationId()
-        const budget = yield* Operation.budget
-        const response = yield* Runtime.send(runtime, entry, { op: "title" }, id, budget.at).pipe(
-          Effect.mapError((failure) =>
-            failure._tag === "Gone"
-              ? failure.error
-              : failure._tag === "Reason"
-              ? pageError("Page.title", failure.reason, id)
-              : Operation.timeout({
-                operation: "Page.title",
-                id,
-                phase: "resolving",
-                budget: budget.budget,
-                history: [],
-                hint: Option.none()
-              })
-          )
+        const record = yield* Operation.record
+        const response = yield* Runtime.send(runtime, entry, { op: "title" }, record.id, record.budget.at).pipe(
+          Effect.mapError(fromSend("Page.title", record))
         )
         return response._tag === "Title" ? response.title : yield* Effect.die(new Error(`Page.title: ${response._tag}`))
-      }).pipe(Spans.operation("Page.title", { attributes: { "browser.page.id": entry.id } }))
+      }).pipe(Operation.named("Page.title", { attributes: { "browser.page.id": entry.id } }))
     },
     get readHtml() {
       return Effect.gen(function*() {
-        const id = Operation.operationId()
-        const budget = yield* Operation.budget
-        const response = yield* Runtime.send(runtime, entry, { op: "html" }, id, budget.at).pipe(
-          Effect.mapError(fromSend("Page.readHtml", id, budget))
+        const record = yield* Operation.record
+        const response = yield* Runtime.send(runtime, entry, { op: "html" }, record.id, record.budget.at).pipe(
+          Effect.mapError(fromSend("Page.readHtml", record))
         )
         return response._tag === "Read" && typeof response.value === "string"
           ? response.value
           : yield* Effect.die(new Error(`Page.readHtml: ${response._tag}`))
-      }).pipe(Spans.operation("Page.readHtml", { attributes: { "browser.page.id": entry.id } }))
+      }).pipe(Operation.named("Page.readHtml", { attributes: { "browser.page.id": entry.id } }))
     },
     snapshot: (options) =>
       Effect.gen(function*() {
-        const id = Operation.operationId()
-        const budget = yield* Operation.budget
-        const taken = yield* Snapshots.take({ runtime, page: entry, grant: owner.grant }, null, options, id, budget.at)
-          .pipe(
-            Effect.mapError(fromSend("Page.snapshot", id, budget))
-          )
+        const record = yield* Operation.record
+        const taken = yield* Snapshots.take(
+          { runtime, page: entry, grant: owner.grant },
+          null,
+          options,
+          record.id,
+          record.budget.at
+        ).pipe(Effect.mapError(fromSend("Page.snapshot", record)))
         return taken._tag === "Taken"
           ? taken.snapshot as Snapshot.Snapshot<Locator.Locator>
           : yield* Effect.die(new Error(`Page.snapshot: ${taken.response._tag}`))
       }).pipe(
-        Spans.operation("Page.snapshot", {
+        Operation.named("Page.snapshot", {
           attributes: {
             "browser.page.id": entry.id,
             "browser.snapshot.sources": options?.sources ?? "aria+interactivity"
@@ -500,24 +470,25 @@ export const make = (owner: PageOwner): Page.Page => {
       InitScripts.add({ runtime, scope: declared, operation: "Page.addInitScript" }, entry.context, script, options),
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "Page.emulate" }, settings),
     activate: Effect.gen(function*() {
-      const id = Operation.operationId()
+      const { id } = yield* Operation.record
       yield* adapter.activatePage(entry.id).pipe(Effect.catch((error) => {
         const mapped = Operation.fromAdapter(error, id, runtime.backend)
         // Bringing a page to the front has no failure of its own: anything but its end is a defect
         return mapped._tag === "Gone" ? Effect.fail(mapped.error) : Effect.die(mapped.reason)
       }))
-    }).pipe(Spans.operation("Page.activate", { attributes: { "browser.page.id": entry.id } })),
+    }).pipe(Operation.named("Page.activate", { attributes: { "browser.page.id": entry.id } })),
     close: ((options?: { readonly runBeforeUnload: boolean }) => {
       const runBeforeUnload = options?.runBeforeUnload === true
       return Effect.gen(function*() {
-        const id = Operation.operationId()
-        const budget = yield* Operation.budget
+        const record = yield* Operation.record
+        const id = record.id
         if (Option.isSome(yield* Deferred.poll(entry.closed))) return
         // `runBeforeUnload` (review 20, candidate 1): the prompt is decided as any dialog is, and a handler's
         // stay ends the close with the page open
         const stayed = yield* Deferred.make<void>()
         const onStay = () => Deferred.doneUnsafe(stayed, Exit.void)
         if (runBeforeUnload) entry.stayed.add(onStay)
+        record.markSent()
         const outcome = yield* Effect.gen(function*() {
           yield* adapter.closePage(entry.id, { runBeforeUnload }).pipe(Effect.catch((error) => {
             const mapped = Operation.fromAdapter(error, id, runtime.backend)
@@ -530,33 +501,27 @@ export const make = (owner: PageOwner): Page.Page => {
           }))
           return yield* Deferred.await(entry.closed).pipe(
             Effect.as("closed" as const),
-            Effect.raceFirst(Effect.as(Deferred.await(stayed), "stayed" as const)),
-            Effect.timeoutOption(Operation.millisLeft(budget.at))
+            Effect.raceFirst(Effect.as(Deferred.await(stayed), "stayed" as const))
           )
-        }).pipe(Effect.ensuring(Effect.sync(() => entry.stayed.delete(onStay))))
-        if (Option.isSome(outcome) && outcome.value === "stayed") {
+        }).pipe(
+          (closing) =>
+            record.bound(closing, () =>
+              Option.some(
+                runBeforeUnload
+                  ? "The browser was asked to close the page, and hadn't confirmed it by the deadline; a " +
+                    "beforeunload prompt nothing decided keeps it open"
+                  : "The browser was asked to close the page, and hadn't confirmed it by the deadline"
+              )),
+          Effect.ensuring(Effect.sync(() => entry.stayed.delete(onStay)))
+        )
+        if (outcome === "stayed") {
           return yield* Effect.fail(pageError(
             "Page.close",
             new Page.CloseCanceled({ hint: "The page's beforeunload prompt was answered with stay" }),
             id
           ))
         }
-        if (Option.isNone(outcome)) {
-          return yield* Effect.fail(Operation.timeout({
-            operation: "Page.close",
-            id,
-            phase: "dispatchedUnconfirmed",
-            budget: budget.budget,
-            history: [],
-            hint: Option.some(
-              runBeforeUnload
-                ? "The browser was asked to close the page, and hadn't confirmed it by the deadline; a beforeunload " +
-                  "prompt nothing decided keeps it open"
-                : "The browser was asked to close the page, and hadn't confirmed it by the deadline"
-            )
-          }))
-        }
-      }).pipe(Spans.operation("Page.close", {
+      }).pipe(Operation.named("Page.close", {
         attributes: { "browser.page.id": entry.id, "browser.close.run_before_unload": runBeforeUnload }
       }))
     }) as Page.Page["close"]

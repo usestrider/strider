@@ -19,7 +19,7 @@ import * as Events from "./internal/events.ts"
 import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
 import type * as Model from "./internal/model.ts"
-import * as Spans from "./internal/spans.ts"
+import * as Operation from "./internal/operation.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
 import type * as Target from "./Target.ts"
@@ -127,7 +127,7 @@ export const next: {
     (behind, matches) =>
       Events.next(kind(behind, "Popup.next"), behind.entry.events.popup, accepts(behind, matches), where)
   ).pipe(
-    Spans.operation("Popup.next")
+    Operation.named("Popup.next")
   )) as typeof next
 
 /**

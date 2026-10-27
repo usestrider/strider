@@ -202,6 +202,6 @@ export const emulate = (owner: Owner, settings: Emulation.Emulation) =>
       )
     }
     return yield* declare(owner, overrides, id)
-  }).pipe(Spans.operation(owner.operation, {
+  }).pipe(Operation.named(owner.operation, {
     attributes: { ...Spans.scopeAttributes(owner.scope), "browser.emulation": Object.keys(settings).join(",") }
   }))

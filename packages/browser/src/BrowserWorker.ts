@@ -24,8 +24,8 @@ import * as Events from "./internal/events.ts"
 import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
 import type * as Model from "./internal/model.ts"
+import * as Operation from "./internal/operation.ts"
 import type * as Runtime from "./internal/runtime.ts"
-import * as Spans from "./internal/spans.ts"
 import type * as JSHandle from "./JSHandle.ts"
 import type * as Page from "./Page.ts"
 import * as Reason from "./Reason.ts"
@@ -200,7 +200,7 @@ export const next: {
   Effect.flatMap(
     subscription(target, filter, "BrowserWorker.next"),
     ({ accepts, channel, kind }) => Events.next(kind, channel, accepts, where)
-  ).pipe(Spans.operation("BrowserWorker.next"))) as typeof next
+  ).pipe(Operation.named("BrowserWorker.next"))) as typeof next
 
 /**
  * Subscribes to workers and emits every match from now on, with their owner's access.

@@ -16,12 +16,12 @@ import * as Mouse from "../Mouse.ts"
 import * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Input from "./input.ts"
 import * as Keys from "./keys.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
-import * as Spans from "./spans.ts"
 
 type Failure = Reason.InvalidInput | Reason.Unsupported | Reason.BackendFailure
 
@@ -39,22 +39,14 @@ const sending = <E>(
   after: (state: Input.State) => void = () => {}
 ): Effect.Effect<void, E | Target.TargetGone | Deadline.Timeout> =>
   Effect.gen(function*() {
-    const id = Operation.operationId()
-    const budget = yield* Operation.budget
-    const timedOut = () =>
-      Operation.timeout({
-        operation,
-        id,
-        phase: "dispatchedUnconfirmed",
-        budget: budget.budget,
-        history: [],
-        hint: Option.some(
-          "The browser hadn't confirmed the input by the deadline; a dialog it opened may still be deciding"
-        ),
-        dispatch: { _tag: "MayHaveBeenSent" }
-      })
-    const sent = yield* owner.page.input.withPermit(Effect.gen(function*() {
+    const record = yield* Operation.record
+    const id = record.id
+    // Input to a page is serialized: until the permit comes, the operation waits on another's input
+    record.observe({ _tag: "InputBusy" })
+    yield* owner.page.input.withPermit(Effect.gen(function*() {
       const state = owner.page.inputState
+      // From here input may reach the page, a held one's release included
+      record.markSent()
       const unknown = yield* Input.recover(
         state,
         (events) => owner.runtime.model.adapter.dispatchInput(owner.page.id, events)
@@ -80,9 +72,15 @@ const sending = <E>(
         })
       )
       after(state)
-    })).pipe(Effect.timeoutOption(Operation.millisLeft(budget.at)))
-    if (Option.isNone(sent)) return yield* Effect.fail(timedOut())
-  }).pipe(Spans.operation(operation, { attributes: { "browser.page.id": owner.page.id } }))
+    })).pipe((sending) =>
+      record.bound(sending, () =>
+        Option.some(
+          record.dispatch._tag === "MayHaveBeenSent"
+            ? "The browser hadn't confirmed the input by the deadline; a dialog it opened may still be deciding"
+            : "Another action held the page's input until the deadline"
+        ))
+    )
+  }).pipe(Operation.named(operation, { attributes: { "browser.page.id": owner.page.id } }))
 
 /** Whether the backend reports a capability as unsupported, with its limitations. */
 const unsupported = (owner: Owner, capability: string) =>
@@ -160,7 +158,10 @@ export const keyboard = (owner: Owner): Keyboard.Keyboard => ({
     const delay = options?.delay === undefined ? Duration.zero : Duration.fromInputUnsafe(options.delay)
     return Effect.forEach(characters, (character, index) =>
       Effect.andThen(
-        index > 0 && Duration.isGreaterThan(delay, Duration.zero) ? Effect.sleep(delay) : Effect.void,
+        // On the browser's clock: Effect's would stop under TestClock (QUIRKS.md, Q235)
+        index > 0 && Duration.isGreaterThan(delay, Duration.zero)
+          ? BrowserClock.sleep(Duration.toMillis(delay))
+          : Effect.void,
         sending(
           owner,
           "Keyboard.pressSequentially",
@@ -168,7 +169,7 @@ export const keyboard = (owner: Owner): Keyboard.Keyboard => ({
           (state) => Input.type(state, character, layoutOf(owner.runtime, owner.page))!
         )
       ), { discard: true }).pipe(
-        Spans.operation("Keyboard.pressSequentially", {
+        Operation.named("Keyboard.pressSequentially", {
           attributes: { "browser.page.id": owner.page.id, "browser.action.redacted": Redacted.isRedacted(text) }
         })
       )

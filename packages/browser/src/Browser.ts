@@ -17,6 +17,7 @@
  * @stability unstable
  * @since 0.1.0
  */
+import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -27,6 +28,7 @@ import type * as Scope from "effect/Scope"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as FilePath from "./FilePath.ts"
 import * as BrowserImpl from "./internal/browser.ts"
+import * as BrowserClock from "./internal/browserClock.ts"
 import * as Fake from "./internal/fake.ts"
 import * as Tracing from "./internal/tracing.ts"
 import type * as LaunchProfile from "./LaunchProfile.ts"
@@ -272,7 +274,9 @@ export interface ConnectOptions {
  * **Details**
  *
  * The timeline is marble-style, after RxJS's `TestScheduler`, and runs on Effect's clock, so under `TestClock`
- * it moves only as the test adjusts it. The first page opened plays it:
+ * it moves only as the test adjusts it. Deadlines run on the clock the browser runs on, so here they are on
+ * Effect's clock too: a `next` within 200 ms times out when the test adjusts the clock past it, never before. The
+ * first page opened plays it:
  *
  * - `-` is a tick of 10 ms;
  * - `commit` commits a document at `https://example.test/`, and `load` makes it interactive, then complete;
@@ -309,7 +313,15 @@ export interface ConnectOptions {
  * @since 0.1.0
  */
 export const layerTest = (timeline: string): Layer.Layer<Browser> =>
-  Layer.unwrap(Effect.sync(() => BrowserImpl.layer(Fake.connect(Fake.parse(timeline)))))
+  Layer.unwrap(Clock.clockWith((clock) =>
+    Effect.sync(() =>
+      // Its browser is a timeline on Effect's clock, which its deadlines are on too (review 26, candidate 1)
+      Layer.provideMerge(
+        BrowserImpl.layer(Fake.connect(Fake.parse(timeline))),
+        Layer.succeed(BrowserClock.CurrentClock, BrowserClock.fromClock(clock))
+      )
+    )
+  ))
 
 /**
  * What a span is about, as given to `SpanNameGenerator` and `TracerDisabledWhen`.

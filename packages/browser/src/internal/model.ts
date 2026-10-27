@@ -41,6 +41,7 @@ import type * as Target from "../Target.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Events from "./events.ts"
 import * as Input from "./input.ts"
 import * as Operation from "./operation.ts"
@@ -754,9 +755,7 @@ export const make = Effect.fnUntraced(function*() {
       return adapter.closePage(page, { runBeforeUnload: false }).pipe(
         Effect.ignore,
         Effect.andThen(Operation.budget),
-        Effect.flatMap((budget) =>
-          Deferred.await(entry.closed).pipe(Effect.timeoutOption(Operation.millisLeft(budget.at)))
-        ),
+        Effect.flatMap((budget) => Deferred.await(entry.closed).pipe(BrowserClock.until(budget.at))),
         Effect.asVoid
       )
     })

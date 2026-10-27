@@ -34,6 +34,7 @@ import * as SocketConnector from "../protocol/SocketConnector.ts"
 import * as Transport from "../protocol/Transport.ts"
 import * as Reason from "../Reason.ts"
 import * as Automation from "../webkit-automation-protocol/Automation.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Launch from "./launch.ts"
 import * as ProtocolClient from "./protocolClient.ts"
 import * as Envelope from "./webkitEnvelope.ts"
@@ -221,7 +222,7 @@ const startProcess = Effect.fnUntraced(function*(
         for (let tries = 0; tries < 100; tries++) {
           const opened = yield* connector.connect({ host: "127.0.0.1", port }).pipe(Scope.provide(own), Effect.option)
           if (Option.isSome(opened)) return { _tag: "Connected" as const, connection: opened.value }
-          yield* Effect.sleep("100 millis")
+          yield* BrowserClock.live.sleep(100)
         }
         return { _tag: "Silent" as const }
       }),

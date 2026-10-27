@@ -1440,7 +1440,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Reconsider:* nothing, once review 26's second step is built.
 
 **Q238. A WebKit HAR sometimes has no body for the document the page left at once** (Ours). The slices' HAR test records a `goto` and then another; the first document's entry had no body, in one full integration run of review 22's sixth step, where Q179's resolution reads it as its load finishes.
-- *Seen:* review 22's sixth step, the second full run; not in 5 runs of the test alone after it. The read's failure, if it failed, isn't reported: the entry is written without a body.
+- *Seen:* review 22's sixth step, the second full run; not in 5 runs of the test alone after it. The read's failure, if it failed, isn't reported: the entry is written without a body. Again in review 26's second step's full run, 1 of the WebKit slice's 126, on a step that changed neither the read nor the navigation's commands.
 - *We:* nothing yet.
 - *Reconsider:* when it recurs, which of two it is: the read, sent over the inspector as the document's load finishes, answered after the next `goto`'s navigation, sent over Automation, has committed and cleared the document's resources; or the read sent to a target a process swap had just replaced. The first would be fixed by a navigation the adapter sends waiting for its page's reads in flight; either needs the read's error, which the adapter could log.
 
@@ -1470,3 +1470,8 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 25's comparison scripts: The Internet's `h2` was to be `getByRole("heading", { level: 2 })`, which doesn't type-check; both versions read `locator("h2")`.
 - *We:* nothing yet.
 - *Reconsider:* the states as `RoleOptions`, from the accessibility tree the engine already computes, in a review.
+
+**Q244. A handler's or a route's decision ran under the deadline in force when it was registered** (Ours). `Dialog.handle`, `FileChooser.handle` and `route` run each decision with the context they captured at registration, the deadline included, so a handler registered inside `Deadline.within("5 seconds")` failed its operations with `Timeout` once those five seconds had passed, though its own budget, `Deadline.DefaultBudget` per decision, had barely begun. Its time limit was also on the fiber's clock, which `TestClock` stops.
+- *Seen:* review 26's second step, which gives every operation a record and a deadline of its own, and would have handed the registration's to every decision too.
+- *We:* a decision runs apart from the operation that registered it, with no record of its own and a deadline of the budget from when it starts (`Operation.deciding`), timed on the browser's clock captured at registration. Work an operation leaves running, a recording's polls and followers, starts with no deadline of the operation's (`Operation.detached`).
+- *Reconsider:* nothing.

@@ -30,6 +30,7 @@ import type * as NetworkConnection from "../NetworkConnection.ts"
 import type * as NetworkRequest from "../NetworkRequest.ts"
 import * as Reason from "../Reason.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Events from "./events.ts"
 import type * as Handles from "./handles.ts"
 import type * as Model from "./model.ts"
@@ -166,7 +167,7 @@ export const start = (
         yield* FiberSet.run(hops, follow(recorded))
         yield* SubscriptionRef.set(count, entries.length)
       }
-    }).pipe(Effect.ignore, Effect.forkIn(own))
+    }).pipe(Effect.ignore, Operation.detached, Effect.forkIn(own))
     if (settings.webSocketFrames) {
       const connections = yield* Events.recorded(
         target.events.connection,
@@ -183,20 +184,20 @@ export const start = (
           const frames = yield* Events.recorded(connection.frames, () => true).pipe(Scope.provide(own))
           yield* Effect.gen(function*() {
             while (true) handshake.frames.push((yield* Queue.take(frames)).value)
-          }).pipe(Effect.ignore, Effect.forkIn(own))
+          }).pipe(Effect.ignore, Operation.detached, Effect.forkIn(own))
         }
-      }).pipe(Effect.ignore, Effect.forkIn(own))
+      }).pipe(Effect.ignore, Operation.detached, Effect.forkIn(own))
     }
     const settle = Effect.gen(function*() {
       const { at } = yield* Operation.budget
-      yield* FiberSet.awaitEmpty(hops).pipe(Effect.timeoutOption(Operation.millisLeft(at)), Effect.asVoid)
+      yield* FiberSet.awaitEmpty(hops).pipe(BrowserClock.until(at), Effect.asVoid)
     })
     // A hop that ended has its body read at once; an export waits for that, never for a hop in flight
     const flush = Effect.gen(function*() {
       const { at } = yield* Operation.budget
       const ended = entries.filter((recorded) => Option.exists(recorded.hop, (hop) => Deferred.isDoneUnsafe(hop.end)))
       yield* Effect.forEach(ended, (recorded) => Deferred.await(recorded.done), { discard: true }).pipe(
-        Effect.timeoutOption(Operation.millisLeft(at)),
+        BrowserClock.until(at),
         Effect.asVoid
       )
     })

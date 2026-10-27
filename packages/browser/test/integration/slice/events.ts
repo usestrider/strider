@@ -26,6 +26,7 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
+import { TestClock } from "effect/testing"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
 
@@ -180,6 +181,21 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             assert.match(hint, /a popup came \d+ ms before Popup\.next subscribed/)
           }))
         }), timeout)
+
+      // A real browser runs in real time, so its deadlines do too: TestClock never moves them (QUIRKS.md, Q235)
+      it.effect("times an event wait out on the browser's clock, under TestClock", () =>
+        Effect.gen(function*() {
+          if (yield* popupsRefused()) return
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const started = performance.now()
+            const wait = yield* Popup.next(page).pipe(Deadline.within("300 millis"))
+            const error = yield* Effect.flip(wait)
+            assert(Deadline.isTimeout(error), String(error))
+            assert.strictEqual(error.phase, "waitingForEvent")
+            assert.isBelow(performance.now() - started, 10_000)
+          }))
+        }).pipe(Effect.provide(TestClock.layer())), timeout)
 
       it.effect("closes a popup with the scope that acquired its opener", () =>
         Effect.gen(function*() {

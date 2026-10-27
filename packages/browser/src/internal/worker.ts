@@ -19,7 +19,6 @@ import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
 import * as Serialization from "./serialization.ts"
-import * as Spans from "./spans.ts"
 
 const TypeId = "~@usestrider/browser/BrowserWorker"
 
@@ -27,13 +26,13 @@ export const make = (runtime: Runtime.Runtime, entry: Model.WorkerEntry): Browse
   const failure = (reason: BrowserWorker.BrowserWorkerErrorReason, id = Operation.operationId()) =>
     new BrowserWorker.BrowserWorkerError({ reason, diagnostics: Operation.diagnostics(id) })
 
-  const evaluate = Spans.fn("BrowserWorker.evaluate", { attributes: { "browser.realm.id": entry.realm } })(
+  const evaluate = Operation.fn("BrowserWorker.evaluate", { attributes: { "browser.realm.id": entry.realm } })(
     function*<Args extends ReadonlyArray<unknown>, B>(fn: (...args: Args) => B | Promise<B>, ...args: Args) {
-      const id = Operation.operationId()
+      const record = yield* Operation.record
+      const id = record.id
       yield* Filters.requires(runtime, "BrowserWorker.evaluate", "workers.evaluate").pipe(
         Effect.mapError((error) => failure(error.reason as Reason.Unsupported, id))
       )
-      const budget = yield* Operation.budget
       let values: ReadonlyArray<Adapter.LocalValue>
       try {
         values = args.map((arg, index) => ({
@@ -44,6 +43,8 @@ export const make = (runtime: Runtime.Runtime, entry: Model.WorkerEntry): Browse
         if (!(error instanceof Serialization.Unserializable)) throw error
         return yield* Effect.fail(failure(new Reason.NotSerializable({ path: error.path, hint: error.hint }), id))
       }
+      // The call is on its way: a deadline after it can't say the function didn't run
+      record.markSent()
       const result = yield* runtime.model.adapter.evaluate(entry.realm, {
         functionDeclaration: fn.toString(),
         arguments: values,
@@ -51,34 +52,27 @@ export const make = (runtime: Runtime.Runtime, entry: Model.WorkerEntry): Browse
         result: "value",
         userActivation: false
       }).pipe(
-        Effect.timeoutOption(Operation.millisLeft(budget.at)),
         Effect.catch((error) => {
           const mapped = Operation.fromAdapter(error, id, runtime.backend)
           return Effect.fail(mapped._tag === "Gone" ? mapped.error : failure(mapped.reason, id))
-        })
+        }),
+        (calling) =>
+          record.bound(
+            calling,
+            () => Option.some("The worker didn't answer before the deadline; the function may still be running")
+          )
       )
-      if (Option.isNone(result)) {
-        return yield* Effect.fail(Operation.timeout({
-          operation: "BrowserWorker.evaluate",
-          id,
-          phase: "dispatchedUnconfirmed",
-          budget: budget.budget,
-          history: [],
-          hint: Option.some("The worker didn't answer before the deadline; the function may still be running"),
-          dispatch: { _tag: "MayHaveBeenSent" }
-        }))
-      }
-      if (result.value._tag === "Exception") {
+      if (result._tag === "Exception") {
         return yield* Effect.fail(failure(
           new Reason.EvaluationThrown({
-            exception: exception(result.value),
+            exception: exception(result),
             hint: "The function threw in the worker, or returned a promise that rejected"
           }),
           id
         ))
       }
       try {
-        return Serialization.fromRemote(result.value.value) as JSHandle.Serialized<B>
+        return Serialization.fromRemote(result.value) as JSHandle.Serialized<B>
       } catch (error) {
         if (!(error instanceof Serialization.Unserializable)) throw error
         return yield* Effect.fail(failure(new Reason.NotSerializable({ path: error.path, hint: error.hint }), id))

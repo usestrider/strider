@@ -3,11 +3,13 @@
  * and a bounded wait ends on the deadline's clock, which `TestClock` doesn't move.
  */
 import { assert, describe, it } from "@effect/vitest"
-import { Deadline } from "@usestrider/browser"
+import { Browser, Deadline, Dialog, Popup } from "@usestrider/browser"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
+import { TestClock } from "effect/testing"
 import * as Operation from "../src/internal/operation.ts"
 
 /** The `Timeout` an operation's record gives after `record` has run on it. */
@@ -120,5 +122,62 @@ describe("Operation", () => {
           )
         assert.strictEqual(value, 1)
       }))
+  })
+
+  describe("work an operation leaves behind", () => {
+    it.effect("runs detached with no record and no deadline of the operation's", () =>
+      Effect.gen(function*() {
+        const [record, deadline] = yield* Effect.all([
+          Effect.service(Operation.Current),
+          Effect.service(Deadline.CurrentDeadline)
+        ]).pipe(Operation.detached, Operation.named("Test.operation"), Deadline.within("1 second"))
+        assert.isTrue(Option.isNone(record))
+        assert.isTrue(Option.isNone(deadline))
+      }))
+
+    it.effect("decides under a budget of its own, from when it starts", () =>
+      Effect.gen(function*() {
+        const remaining = yield* Deadline.remaining.pipe(
+          Operation.deciding(Duration.seconds(30)),
+          Operation.named("Test.operation"),
+          Deadline.within("10 millis")
+        )
+        assert.isTrue(Option.exists(remaining, (left) => Duration.isGreaterThan(left, Duration.seconds(29))))
+      }))
+  })
+
+  describe("on Browser.layerTest, whose browser runs on Effect's clock", () => {
+    it.effect("times an event wait out when the test clock reaches its deadline, never before", () =>
+      Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const popups = yield* Popup.next(page).pipe(Deadline.within("200 millis"))
+        const fiber = yield* Effect.forkChild(Effect.flip(popups))
+        // A second of real time, which the test clock doesn't see
+        yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 1000)))
+        assert.isUndefined(fiber.pollUnsafe())
+        yield* TestClock.adjust("200 millis")
+        const timeout = yield* Fiber.join(fiber)
+        assert(Deadline.isTimeout(timeout), String(timeout))
+        assert.strictEqual(timeout.phase, "waitingForEvent")
+      })).pipe(Effect.provide(Browser.layerTest(""))))
+
+    it.effect("gives a handler its own budget, not the deadline in force when it was registered", () =>
+      Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const seen: Array<Option.Option<Duration.Duration>> = []
+        const handler = yield* Dialog.handle(
+          page,
+          (dialog) =>
+            Effect.gen(function*() {
+              seen.push(yield* Deadline.remaining)
+              return yield* Dialog.dismissAll(dialog)
+            })
+        ).pipe(Deadline.within("10 millis"))
+        // The dialog opens at 30 ms, well past the registration's deadline
+        yield* TestClock.adjust("40 millis")
+        assert.strictEqual(yield* handler.handled, 1)
+        assert.strictEqual(seen.length, 1)
+        assert.isTrue(Option.exists(seen[0]!, (left) => Duration.isGreaterThan(left, Duration.seconds(29))))
+      })).pipe(Effect.provide(Browser.layerTest("---dialog(confirm)"))))
   })
 })

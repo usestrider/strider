@@ -239,11 +239,11 @@ export const record = (
               diagnostics: Operation.diagnostics(Operation.operationId())
             })
           ),
-          Spans.operation("Har.exportHar", { attributes: { ...Spans.scopeAttributes(scopeOf), "browser.path": path } })
+          Operation.named("Har.exportHar", { attributes: { ...Spans.scopeAttributes(scopeOf), "browser.path": path } })
         )
     }
     return yield* Access.track<Recording>(grant)(recording)
-  }).pipe(Spans.operation("Har.record", {
+  }).pipe(Operation.named("Har.record", {
     attributes: { "browser.har.content": options.content, "browser.har.detail": options.detail ?? "full" }
   }))
 

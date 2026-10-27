@@ -21,7 +21,7 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Diagnostics from "./Diagnostics.ts"
-import * as DeadlineClock from "./internal/deadlineClock.ts"
+import * as BrowserClock from "./internal/browserClock.ts"
 import type * as MonotonicInstant from "./MonotonicInstant.ts"
 
 /**
@@ -62,7 +62,7 @@ export const within: {
 } = dual(
   2,
   <A, E, R>(self: Effect.Effect<A, E, R>, duration: Duration.Input): Effect.Effect<A, E, R> =>
-    Effect.flatMap(Effect.all([CurrentDeadlineEffect, DeadlineClockEffect]), ([enclosing, clock]) => {
+    Effect.flatMap(Effect.all([CurrentDeadlineEffect, BrowserClockEffect]), ([enclosing, clock]) => {
       const own =
         (clock.now() + Duration.toMillis(Duration.fromInputUnsafe(duration)) * 1e6) as MonotonicInstant.MonotonicInstant
       const deadline = Option.match(enclosing, { onNone: () => own, onSome: (at) => Math.min(at, own) })
@@ -102,8 +102,8 @@ export const withDefaultBudget: {
  */
 export const remaining: Effect.Effect<Option.Option<Duration.Duration>> = Effect.suspend(() =>
   Effect.map(
-    Effect.all([CurrentDeadlineEffect, DeadlineClockEffect]),
-    ([enclosing, clock]) => Option.map(enclosing, (at) => Duration.millis(DeadlineClock.millisLeft(clock, at)))
+    Effect.all([CurrentDeadlineEffect, BrowserClockEffect]),
+    ([enclosing, clock]) => Option.map(enclosing, (at) => Duration.millis(BrowserClock.millisLeft(clock, at)))
   )
 )
 
@@ -126,7 +126,7 @@ export const CurrentDeadline: Context.Reference<Option.Option<MonotonicInstant.M
 
 const CurrentDeadlineEffect = Effect.service(CurrentDeadline)
 
-const DeadlineClockEffect = Effect.service(DeadlineClock.CurrentClock)
+const BrowserClockEffect = Effect.service(BrowserClock.CurrentClock)
 
 /**
  * Reference to the budget an operation gets when no deadline encloses it; 30 seconds unless set.

@@ -13,6 +13,7 @@ import * as Schedule from "effect/Schedule"
 import type * as Scope from "effect/Scope"
 import * as Browser from "../Browser.ts"
 import * as Transport from "../protocol/Transport.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Launch from "./launch.ts"
 import * as Profiles from "./profiles.ts"
 
@@ -87,7 +88,9 @@ export const launchWithPort = Effect.fnUntraced(function*(
       until: () => launched.handle.isRunning.pipe(Effect.map((running) => !running), Effect.orElseSucceed(() => true))
     }),
     Effect.timeoutOption(timeout),
-    Effect.catch(() => Effect.succeedNone)
+    Effect.catch(() => Effect.succeedNone),
+    // The browser starts in real time, whatever clock the program's fiber has (QUIRKS.md, Q235)
+    BrowserClock.onLive
   )
   if (active._tag === "None") {
     return yield* Launch.notReady(

@@ -437,7 +437,7 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
         Effect.mapError((error) => clockError(operation, backendFailure("declare", error.message)))
       )
       yield* Scope.close(previous, Exit.void)
-    }).pipe(Spans.operation(operation, {
+    }).pipe(Operation.named(operation, {
       attributes: { ...Spans.scopeAttributes(owner.scope), "browser.clock.mode": next.mode }
     }))
 
@@ -482,7 +482,7 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
         // Removing it affects later documents only: those it reached keep the shim (CONCEPTS.md §7)
         yield* Scope.addFinalizer(scope, Effect.sync(() => (timeline.installed = Option.none())))
         return { remove: Scope.close(scope, Exit.void) } satisfies Declaration.Registration
-      }).pipe(Spans.operation(`${owner.name}.install`, {
+      }).pipe(Operation.named(`${owner.name}.install`, {
         attributes: { ...Spans.scopeAttributes(owner.scope), "browser.clock.mode": mode.mode }
       })),
     adjust: Effect.fnUntraced(function*(duration: Duration.Input) {

@@ -70,19 +70,3 @@ export const operation = (name: string, options: Options = {}) => <A, E, R>(self
       { attributes }
     )
   })
-
-/** `Effect.fn` with the operation's span: a function whose effect opens it. */
-export const fn =
-  (name: string, options: Options = {}) =>
-  <Eff extends Effect.Effect<any, any, any>, AEff, Args extends Array<any>>(
-    body: (...args: Args) => Generator<Eff, AEff, never>
-  ): (
-    ...args: Args
-  ) => Effect.Effect<
-    AEff,
-    [Eff] extends [never] ? never : [Eff] extends [Effect.Effect<infer _A, infer E, infer _R>] ? E : never,
-    [Eff] extends [never] ? never : [Eff] extends [Effect.Effect<infer _A, infer _E, infer R>] ? R : never
-  > => {
-    const untraced = Effect.fnUntraced(body)
-    return (...args) => operation(name, options)(untraced(...args))
-  }

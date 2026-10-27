@@ -19,7 +19,6 @@ import type * as Adapter from "./adapter.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
-import * as Spans from "./spans.ts"
 
 /** Each capability: its support table entry, and the backends that have it. */
 const known: Readonly<Record<string, { readonly entry: string; readonly backends: string }>> = {
@@ -90,7 +89,7 @@ export const acquire = <H>(
               Effect.mapError(fromAdapter(runtime, capability.name, id)),
               Effect.raceFirst(Runtime.pageEnded(page, id))
             )
-          }).pipe(Spans.operation("Capability.AxTree.read", { attributes }))
+          }).pipe(Operation.named("Capability.AxTree.read", { attributes }))
         }
         return reader as H
       }
@@ -129,6 +128,6 @@ export const acquire = <H>(
         return control as H
       }
     }
-  }).pipe(Spans.operation("Page.capability", {
+  }).pipe(Operation.named("Page.capability", {
     attributes: { "browser.page.id": page.id, "browser.capability": capability.name }
   }))

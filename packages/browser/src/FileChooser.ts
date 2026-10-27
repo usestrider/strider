@@ -37,7 +37,6 @@ import * as Handles from "./internal/handles.ts"
 import type * as Model from "./internal/model.ts"
 import * as Operation from "./internal/operation.ts"
 import type * as Runtime from "./internal/runtime.ts"
-import * as Spans from "./internal/spans.ts"
 import type * as Page from "./Page.ts"
 import * as Reason from "./Reason.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -172,7 +171,7 @@ export const next = <PE = never, PR = never>(
   Effect.flatMap(
     subscription(target, filter, "FileChooser.next"),
     ({ accepts, channel, kind }) => Events.next(kind, channel, accepts, where)
-  ).pipe(Spans.operation("FileChooser.next"))
+  ).pipe(Operation.named("FileChooser.next"))
 
 /**
  * Subscribes to file choosers and emits every match from now on. Observing doesn't decide them.
@@ -303,25 +302,19 @@ const setMade = Effect.fnUntraced(function*(
   node: Adapter.NodeBinding,
   files: ReadonlyArray<FileInputImpl.Made>
 ) {
-  const id = Operation.operationId()
-  const budget = yield* Operation.budget
-  yield* FileInputImpl.setMade(runtime, node, files, { page: Option.some(page), at: budget.at, id }).pipe(
-    Effect.mapError((failure) =>
-      failure._tag === "Gone"
-        ? failure.error
-        : failure._tag === "Reason"
-        ? failure.reason
-        : Operation.timeout({
-          operation: "FileChooser.handle",
-          id,
-          phase: "dispatchedUnconfirmed",
-          budget: budget.budget,
-          history: [],
-          hint: Option.some("The page didn't answer before the deadline; the files may have been set"),
-          dispatch: { _tag: "MayHaveBeenSent" }
-        })
+  // Part of the handler's decision, under its deadline
+  const record = yield* Operation.start("FileChooser.handle")
+  record.markSent()
+  yield* FileInputImpl.setMade(runtime, node, files, { page: Option.some(page), at: record.budget.at, id: record.id })
+    .pipe(
+      Effect.mapError((failure) =>
+        failure._tag === "Gone"
+          ? failure.error
+          : failure._tag === "Reason"
+          ? failure.reason
+          : record.timeout(Option.some("The page didn't answer before the deadline; the files may have been set"))
+      )
     )
-  )
   return { _tag: "Cancel" } satisfies Adapter.Decision as Adapter.Decision
 })
 

@@ -27,7 +27,6 @@ import * as Evaluation from "./evaluation.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
-import * as Spans from "./spans.ts"
 
 // ── Cookies ───────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -179,13 +178,14 @@ export const cookieJar = (runtime: Runtime.Runtime, context: UserContext.Id): Co
       Effect.mapError(cookieFailure(runtime, operation, id))
     )
   const attributes = { attributes: { "browser.context.id": context } }
-  const span = (operation: string) => Spans.operation(operation, attributes)
   return {
     get list() {
-      return Effect.suspend(() => list("CookieJar.list", Operation.operationId())).pipe(span("CookieJar.list"))
+      return Effect.flatMap(Operation.record, ({ id }) => list("CookieJar.list", id)).pipe(
+        Operation.named("CookieJar.list", attributes)
+      )
     },
-    listFor: Spans.fn("CookieJar.listFor", attributes)(function*(url: Url.Url | string) {
-      const id = Operation.operationId()
+    listFor: Operation.fn("CookieJar.listFor", attributes)(function*(url: Url.Url | string) {
+      const { id } = yield* Operation.record
       let parsed: URL
       try {
         parsed = new URL(url)
@@ -203,15 +203,15 @@ export const cookieJar = (runtime: Runtime.Runtime, context: UserContext.Id): Co
       const now = Date.now()
       return (yield* list("CookieJar.listFor", id)).filter((cookie) => sends(parsed, cookie, now))
     }),
-    set: Spans.fn("CookieJar.set", attributes)(function*(input: CookieJar.Input) {
-      const id = Operation.operationId()
+    set: Operation.fn("CookieJar.set", attributes)(function*(input: CookieJar.Input) {
+      const { id } = yield* Operation.record
       const cookie = fromInput(input)
       if (cookie instanceof Reason.InvalidInput) return yield* Effect.fail(cookieError("CookieJar.set", cookie, id))
       if (Option.isSome(cookie.partitionKey)) yield* requirePartitions(runtime, "CookieJar.set", id)
       yield* adapter.setCookies(context, [cookie]).pipe(Effect.mapError(cookieFailure(runtime, "CookieJar.set", id)))
     }),
-    remove: Spans.fn("CookieJar.remove", attributes)(function*(match: CookieJar.Match) {
-      const id = Operation.operationId()
+    remove: Operation.fn("CookieJar.remove", attributes)(function*(match: CookieJar.Match) {
+      const { id } = yield* Operation.record
       const matching = (yield* adapter.cookies(context).pipe(
         Effect.mapError(cookieFailure(runtime, "CookieJar.remove", id))
       )).filter((cookie) =>
@@ -227,10 +227,10 @@ export const cookieJar = (runtime: Runtime.Runtime, context: UserContext.Id): Co
       ).pipe(Effect.mapError(cookieFailure(runtime, "CookieJar.remove", id)))
     }),
     get clear() {
-      return Effect.suspend(() => {
-        const id = Operation.operationId()
-        return adapter.clearCookies(context).pipe(Effect.mapError(cookieFailure(runtime, "CookieJar.clear", id)))
-      }).pipe(span("CookieJar.clear"))
+      return Effect.flatMap(
+        Operation.record,
+        ({ id }) => adapter.clearCookies(context).pipe(Effect.mapError(cookieFailure(runtime, "CookieJar.clear", id)))
+      ).pipe(Operation.named("CookieJar.clear", attributes))
     }
   }
 }
@@ -256,22 +256,19 @@ const storageError = (operation: string, reason: OriginStorage.OriginStorageErro
   new OriginStorage.OriginStorageError({ operation, reason, diagnostics: Operation.diagnostics(id) })
 
 /** An evaluation's failure, as origin storage's: what the page threw is the browser refusing. */
-const storageFailure = (operation: string, id: Diagnostics.OperationId, budget: Operation.Budget) =>
+const storageFailure = (operation: string, record: Operation.Record) =>
 (
   failure: Evaluation.Failure
 ): OriginStorage.OriginStorageError | Target.TargetGone | Deadline.Timeout => {
+  const id = record.id
   if (failure._tag === "Gone") return failure.error
-  // The deadline is a Timeout, as everywhere else (QUIRKS.md, Q131): the call was sent, so a write may have happened
+  // The deadline is a Timeout, as everywhere else (QUIRKS.md, Q131): once the call was sent, a write may have happened
   if (failure._tag === "Deadline") {
-    return Operation.timeout({
-      operation,
-      id,
-      phase: "dispatchedUnconfirmed",
-      budget: budget.budget,
-      history: [],
-      hint: Option.some("The page didn't answer before the deadline; a write may have happened"),
-      dispatch: { _tag: "MayHaveBeenSent" }
-    })
+    return record.timeout(
+      record.dispatch._tag === "MayHaveBeenSent"
+        ? Option.some("The page didn't answer before the deadline; a write may have happened")
+        : Option.none()
+    )
   }
   const reason = failure.reason
   if (reason._tag === "EvaluationThrown") {
@@ -315,8 +312,9 @@ export const originStorage = (
   const run = <A>(member: string, fn: string, args: ReadonlyArray<string>, decode: (value: unknown) => A) => {
     const operation = `Page.${name}.${member}`
     return Effect.gen(function*() {
-      const id = Operation.operationId()
-      const budget = yield* Operation.budget
+      const record = yield* Operation.record
+      const id = record.id
+      const budget = record.budget
       return yield* Effect.gen(function*() {
         const realm = yield* Evaluation.pageRealm(
           runtime,
@@ -325,6 +323,7 @@ export const originStorage = (
           id,
           budget.at
         )
+        record.markSent()
         const value = yield* Evaluation.call(runtime, {
           realm,
           functionDeclaration: fn,
@@ -336,8 +335,8 @@ export const originStorage = (
           id
         })
         return decode(yield* Evaluation.fromRemote(value))
-      }).pipe(Effect.mapError(storageFailure(operation, id, budget)))
-    }).pipe(Spans.operation(operation, { attributes: { "browser.page.id": page.id } }))
+      }).pipe(Effect.mapError(storageFailure(operation, record)))
+    }).pipe(Operation.named(operation, { attributes: { "browser.page.id": page.id } }))
   }
   const areaOf = `(area) => area === "local" ? localStorage : sessionStorage`
   return {

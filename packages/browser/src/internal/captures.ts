@@ -17,7 +17,6 @@ import * as LocatorImpl from "./locator.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
-import * as Spans from "./spans.ts"
 
 const pageError = (operation: string, reason: Page.PageErrorReason, id: Diagnostics.OperationId) =>
   new Page.PageError({ operation, reason, diagnostics: Operation.diagnostics(id) })
@@ -26,22 +25,12 @@ const invalid = (operation: string, id: Diagnostics.OperationId, input: string, 
   pageError(operation, new Reason.InvalidInput({ input, expected, hint }), id)
 
 /** A failure to reach the engine or the adapter, as the page's errors say it. */
-const failed = (operation: string, id: Diagnostics.OperationId, budget: Operation.Budget) =>
-(
-  failure: Runtime.SendFailure
-) =>
+const failed = (operation: string, record: Operation.Record) => (failure: Runtime.SendFailure) =>
   failure._tag === "Gone"
     ? failure.error
     : failure._tag === "Reason"
-    ? pageError(operation, failure.reason, id)
-    : Operation.timeout({
-      operation,
-      id,
-      phase: "resolving",
-      budget: budget.budget,
-      history: [],
-      hint: Option.some("The page didn't answer before the deadline")
-    })
+    ? pageError(operation, failure.reason, record.id)
+    : record.timeout(Option.some("The page didn't answer before the deadline"))
 
 type Box = { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
 
@@ -121,8 +110,9 @@ export const screenshot = (
   const area = options?.area ?? { _tag: "Viewport" as const }
   const format = options?.format ?? { _tag: "Png" as const }
   return Effect.gen(function*() {
-    const id = Operation.operationId()
-    const budget = yield* Operation.budget
+    const record = yield* Operation.record
+    const id = record.id
+    const budget = record.budget
     if (format._tag === "Jpeg" && !(Number.isInteger(format.quality) && format.quality >= 0 && format.quality <= 100)) {
       return yield* Effect.fail(
         invalid(operation, id, "format", "a JPEG quality from 0 to 100", `${format.quality} isn't one`)
@@ -144,7 +134,7 @@ export const screenshot = (
         return yield* Effect.die(new Error("Page.screenshot: the element's locator belongs to another page"))
       }
       const box = yield* elementBox(runtime, page, locator, operation, id, budget.at).pipe(
-        Effect.mapError(failed(operation, id, budget))
+        Effect.mapError(failed(operation, record))
       )
       if (Page.isPageError(box)) return yield* Effect.fail(box)
       if (Option.isNone(box)) {
@@ -162,24 +152,15 @@ export const screenshot = (
       scale: options?.scale ?? "device",
       omitBackground: options?.omitBackground ?? false
     }
-    const captured = yield* runtime.model.adapter.screenshot(page.id, captureOptions).pipe(
-      Effect.mapError((error) => failed(operation, id, budget)(Operation.fromAdapter(error, id, runtime.backend))),
-      Effect.timeoutOption(Operation.millisLeft(budget.at))
+    record.markSent()
+    return yield* runtime.model.adapter.screenshot(page.id, captureOptions).pipe(
+      Effect.mapError((error) => failed(operation, record)(Operation.fromAdapter(error, id, runtime.backend))),
+      (capturing) =>
+        record.bound(capturing, () => Option.some("The browser didn't finish the capture before the deadline"))
     )
-    if (Option.isNone(captured)) {
-      return yield* Effect.fail(Operation.timeout({
-        operation,
-        id,
-        phase: "dispatchedUnconfirmed",
-        budget: budget.budget,
-        history: [],
-        hint: Option.some("The browser didn't finish the capture before the deadline")
-      }))
-    }
-    return captured.value
   }).pipe(
     Effect.raceFirst(Runtime.pageEnded(page, Operation.operationId())),
-    Spans.operation(operation, {
+    Operation.named(operation, {
       attributes: {
         "browser.page.id": page.id,
         "browser.screenshot.area": area._tag,
@@ -222,8 +203,8 @@ export const pdf = (
 ): Effect.Effect<Uint8Array, Page.PageError | Target.TargetGone | Deadline.Timeout> => {
   const operation = "Page.pdf"
   return Effect.gen(function*() {
-    const id = Operation.operationId()
-    const budget = yield* Operation.budget
+    const record = yield* Operation.record
+    const id = record.id
     const paper = options?.paper ?? "letter"
     const size = typeof paper === "string"
       ? papers[paper]
@@ -237,7 +218,8 @@ export const pdf = (
     }
     const margin = (length: Page.Length | undefined) => length === undefined ? 0 : inches(length)
     const margins = options?.margins
-    const printed = yield* runtime.model.adapter.pdf(page.id, {
+    record.markSent()
+    return yield* runtime.model.adapter.pdf(page.id, {
       landscape: options?.landscape ?? false,
       printBackground: options?.background ?? false,
       scale,
@@ -254,22 +236,11 @@ export const pdf = (
       footer: Option.fromUndefinedOr(options?.footer),
       preferCssPageSize: options?.preferCssPageSize ?? false
     }).pipe(
-      Effect.mapError((error) => failed(operation, id, budget)(Operation.fromAdapter(error, id, runtime.backend))),
-      Effect.timeoutOption(Operation.millisLeft(budget.at))
+      Effect.mapError((error) => failed(operation, record)(Operation.fromAdapter(error, id, runtime.backend))),
+      (printing) => record.bound(printing, () => Option.some("The browser didn't finish printing before the deadline"))
     )
-    if (Option.isNone(printed)) {
-      return yield* Effect.fail(Operation.timeout({
-        operation,
-        id,
-        phase: "dispatchedUnconfirmed",
-        budget: budget.budget,
-        history: [],
-        hint: Option.some("The browser didn't finish printing before the deadline")
-      }))
-    }
-    return printed.value
   }).pipe(
     Effect.raceFirst(Runtime.pageEnded(page, Operation.operationId())),
-    Spans.operation(operation, { attributes: { "browser.page.id": page.id } })
+    Operation.named(operation, { attributes: { "browser.page.id": page.id } })
   )
 }

@@ -25,7 +25,6 @@ import type * as Model from "./internal/model.ts"
 import * as Navigated from "./internal/navigated.ts"
 import * as Operation from "./internal/operation.ts"
 import type * as Runtime from "./internal/runtime.ts"
-import * as Spans from "./internal/spans.ts"
 import * as NetworkResponse from "./NetworkResponse.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -252,7 +251,7 @@ export const next = <PE = never, PR = never>(
     }
     return Events.next(kind, channel, matches, where, delivery)
   }).pipe(
-    Spans.operation("PageNavigation.next", {
+    Operation.named("PageNavigation.next", {
       attributes: { "browser.navigation.wait_until": filter?.waitUntil ?? "commit" }
     })
   )

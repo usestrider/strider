@@ -20,7 +20,9 @@ import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Deadline from "../Deadline.ts"
 import type * as Declaration from "../Declaration.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import type * as Model from "./model.ts"
+import * as Operation from "./operation.ts"
 import * as Watchable from "./watchable.ts"
 
 /** Logs a handler that didn't decide, at Effect's level for unhandled failures, unless it was interrupted. */
@@ -66,17 +68,19 @@ export const register = <S, P, D, E, R>(
   Effect.gen(function*() {
     const context = yield* Effect.context<R>()
     const budget = yield* Effect.service(Deadline.DefaultBudget)
+    const clock = yield* Effect.service(BrowserClock.CurrentClock)
     // The handler's fibers end with its scope, which leaves an undecided obligation to the policy
     const fibers = yield* FiberSet.make<D, E>()
     const handled = yield* SubscriptionRef.make(0)
     const id = options.page.id
     const registration: Model.Handler<S> = {
       decide: Effect.fnUntraced(function*(subject: S) {
+        // Each decision has the handler's budget from when it starts, not the deadline in force at registration
         const fiber = yield* FiberSet.run(
           fibers,
-          Effect.provideContext(options.handler(options.pending(subject)), context)
+          Effect.provideContext(options.handler(options.pending(subject)).pipe(Operation.deciding(budget)), context)
         )
-        const exit = yield* Fiber.await(fiber).pipe(Effect.timeoutOption(budget))
+        const exit = yield* Fiber.await(fiber).pipe(BrowserClock.timeoutOn(clock, Duration.toMillis(budget)))
         const described = `${options.name}: the handler of ${id} didn't decide the ${options.noun(subject)}`
         if (Option.isNone(exit)) {
           yield* Fiber.interrupt(fiber)

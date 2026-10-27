@@ -105,9 +105,14 @@ section applies them. Effect's skills in `.repos/effect/.agents/skills` are the 
   union of `Schema.Error` classes; reasons several modules share live in `Reason`.
 - Library code uses `Effect.fnUntraced`; examples use `Effect.fn("name")`. A function that returns `Effect.gen` is a
   compile error.
-- An operation's span is opened through `src/internal/spans.ts` (`Spans.operation(name, { attributes })` or
-  `Spans.fn`), never `Effect.withSpan` or `Effect.fn`, so `SpanNameGenerator`, `TracerDisabledWhen` and the
+- An operation runs through `src/internal/operation.ts` (`Operation.named(name, { attributes })` or
+  `Operation.fn`), never `Effect.withSpan` or `Effect.fn`: it gets a record, from which its `Timeout` takes its
+  phase, and its span, opened through `src/internal/spans.ts` so `SpanNameGenerator`, `TracerDisabledWhen` and the
   diagnostics preset apply to it; name its target with `browser.page.id`, `browser.context.id` or `browser.realm.id`.
+  Work it leaves running, such as a handler's or a recording's, starts through `Operation.deciding` or
+  `Operation.detached`, never under the operation's deadline (review 26).
+- A deadline, and any wait on the browser, reads the browser's clock (`src/internal/browserClock.ts`), never the
+  fiber's `Clock`, which `TestClock` replaces: a real browser's is the live clock, `Browser.layerTest`'s Effect's.
 - Nothing implicit (principle 23): every default is stated with `@default`, and nothing hidden waits or retries.
 - Generated files (sections marked `// @barrel:`, `INDEX.md`, `src/cdp/`, the protocol models) are regenerated, never edited.
 - A declaration that isn't built is erased at run time, so a module must not use one as it loads, or re-export one

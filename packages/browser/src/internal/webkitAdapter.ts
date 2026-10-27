@@ -54,6 +54,7 @@ import * as Runtime from "../webkit-stock-protocol/Runtime.ts"
 import * as Target from "../webkit-stock-protocol/Target.ts"
 import * as Worker from "../webkit-stock-protocol/Worker.ts"
 import * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as ConsoleFormat from "./consoleFormat.ts"
 import * as Declarations from "./declarations.ts"
 import * as Launch from "./launch.ts"
@@ -2864,7 +2865,7 @@ export const connect: (
         if (page.ended) break
         const found = yield* pairing.withPermits(1)(pairOnce(page))
         if (Option.isSome(found)) return found.value
-        yield* Effect.sleep("50 millis")
+        yield* BrowserClock.live.sleep(50)
       }
       return yield* Effect.fail(
         gone({ _tag: "Page", id: page.id }, page.closing ?? { _tag: "PageClosed", by: "browser" })
@@ -2914,7 +2915,7 @@ export const connect: (
       )
       if (!showing) return
       if (page.dialog === undefined) yield* reportDialog(page, handle, process)
-      while (page.dialog !== undefined && !page.ended) yield* Effect.sleep("20 millis")
+      while (page.dialog !== undefined && !page.ended) yield* BrowserClock.live.sleep(20)
     })
 
     // Stock WebKit's Automation reports a dialog only when asked, and not its kind (QUIRKS.md, Q206)
@@ -2924,7 +2925,7 @@ export const connect: (
       process: WebKitAutomation.Process
     ) {
       while (!page.ended) {
-        yield* Effect.sleep("100 millis")
+        yield* BrowserClock.live.sleep(100)
         const showing = yield* Automation.isShowingJavaScriptDialog({ browsingContextHandle: handle }).pipe(
           Protocol.on(process.automation),
           Effect.map(({ result }) => result),
@@ -3038,7 +3039,7 @@ export const connect: (
           const paired = yield* pairing.withPermits(1)(pairOnce(page))
           if (Option.isSome(paired) && paired.value === handle) return page.id
         }
-        yield* Effect.sleep("50 millis")
+        yield* BrowserClock.live.sleep(50)
       }
       return yield* Effect.fail(gone({ _tag: "Browser" }, { _tag: "PageClosed", by: "browser" }))
     })

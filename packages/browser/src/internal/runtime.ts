@@ -32,7 +32,7 @@ import * as Reason from "../Reason.ts"
 import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as Adapter from "./adapter.ts"
-import * as DeadlineClock from "./deadlineClock.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Engine from "./engine.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
@@ -391,9 +391,9 @@ const routing = <A>(
   Effect.gen(function*() {
     const { frames, last } = split(steps)
     while (true) {
-      if (Operation.millisLeft(at) <= 0) return yield* Effect.fail<SendFailure>({ _tag: "Deadline" })
+      if ((yield* BrowserClock.left(at)) <= 0) return yield* Effect.fail<SendFailure>({ _tag: "Deadline" })
       const open = yield* openState(page, id).pipe(
-        DeadlineClock.until(at),
+        BrowserClock.until(at),
         Effect.flatMap(Option.match({
           onNone: () =>
             Effect.fail<SendFailure>({

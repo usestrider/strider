@@ -26,6 +26,7 @@ import * as Route from "../Route.ts"
 import type * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Handlers from "./handlers.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
@@ -258,6 +259,7 @@ export const register = <E, R, P extends Route.Phase>(
     })
     const context = yield* Effect.context<R>()
     const budget = yield* Effect.service(Deadline.DefaultBudget)
+    const clock = yield* Effect.service(BrowserClock.CurrentClock)
     const scope = yield* Scope.fork(yield* Effect.scope)
     yield* adapter.declare(owner.scope, { _tag: "Intercept", patterns: [covering(pattern)], phases: [phase] }).pipe(
       Scope.provide(scope),
@@ -276,8 +278,12 @@ export const register = <E, R, P extends Route.Phase>(
       ask: Effect.fnUntraced(function*(obligation, paused) {
         yield* SubscriptionRef.update(hits, (count) => count + 1)
         const given = intercepted(owner, pattern, obligation, paused) as Route.Intercepted<P>
-        const fiber = yield* FiberSet.run(fibers, Effect.provideContext(handler(given), context))
-        const exit = yield* Fiber.await(fiber).pipe(Effect.timeoutOption(budget))
+        // Each decision has the route's budget from when it starts, not the deadline in force at `route`
+        const fiber = yield* FiberSet.run(
+          fibers,
+          Effect.provideContext(handler(given).pipe(Operation.deciding(budget)), context)
+        )
+        const exit = yield* Fiber.await(fiber).pipe(BrowserClock.timeoutOn(clock, Duration.toMillis(budget)))
         const described =
           `${owner.operation}: the route ${pattern} didn't decide ${paused.request.method} ${paused.request.url}`
         const failed = (why: string, cause: Cause.Cause<unknown> = Cause.empty) =>
@@ -318,7 +324,7 @@ export const register = <E, R, P extends Route.Phase>(
     }
     return registration
   }).pipe(
-    Spans.operation(owner.operation, {
+    Operation.named(owner.operation, {
       attributes: {
         ...Spans.scopeAttributes(owner.scope),
         "browser.route.pattern": pattern,

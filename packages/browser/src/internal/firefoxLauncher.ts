@@ -12,6 +12,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Browser from "../Browser.ts"
 import * as Transport from "../protocol/Transport.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Launch from "./launch.ts"
 import * as Profiles from "./profiles.ts"
 
@@ -84,7 +85,9 @@ export const launch = Effect.fnUntraced(function*(options: Options) {
   const timeout = options.timeout ?? "30 seconds"
   const listening = yield* launched.stderrLine(/WebDriver BiDi listening on (ws:\/\/\S+)/).pipe(
     Effect.timeoutOption(timeout),
-    Effect.map(Option.flatten)
+    Effect.map(Option.flatten),
+    // The browser starts in real time, whatever clock the program's fiber has (QUIRKS.md, Q235)
+    BrowserClock.onLive
   )
   if (Option.isNone(listening)) {
     return yield* Launch.notReady(

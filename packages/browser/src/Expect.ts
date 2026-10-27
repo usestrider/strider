@@ -30,6 +30,7 @@ import * as Diagnostics from "./Diagnostics.ts"
 import * as Access from "./internal/access.ts"
 import { now } from "./internal/adapter.ts"
 import * as AriaPatterns from "./internal/ariaPattern.ts"
+import * as BrowserClock from "./internal/browserClock.ts"
 import * as ConditionImpl from "./internal/condition.ts"
 import type * as Engine from "./internal/engine.ts"
 import * as Handles from "./internal/handles.ts"
@@ -37,10 +38,8 @@ import { LocatorImpl } from "./internal/locator.ts"
 import type * as Model from "./internal/model.ts"
 import * as Operation from "./internal/operation.ts"
 import * as Runtime from "./internal/runtime.ts"
-import * as Spans from "./internal/spans.ts"
 import { describeSteps } from "./internal/steps.ts"
 import type * as Locator from "./Locator.ts"
-import type * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Page from "./Page.ts"
 import type * as Target from "./Target.ts"
 import type * as Watchable from "./Watchable.ts"
@@ -480,8 +479,10 @@ const explainBudget = 1000
 const explain = (subject: InPage, id: Diagnostics.OperationId): Effect.Effect<Explained> => {
   const none: Explained = { nearest: Option.none(), suggestions: [] }
   if (subject.steps.length === 0) return Effect.succeed(none)
-  const at = (now() + explainBudget * 1e6) as MonotonicInstant.MonotonicInstant
-  return Runtime.send(subject.runtime, subject.page, { op: "explain", steps: subject.steps }, id, at).pipe(
+  return Effect.flatMap(
+    BrowserClock.after(explainBudget),
+    (at) => Runtime.send(subject.runtime, subject.page, { op: "explain", steps: subject.steps }, id, at)
+  ).pipe(
     Effect.map((response): Explained => {
       if (response._tag !== "Explained" || response.matched) return none
       const boundary = subject.steps.findLastIndex((step) => step._tag === "Frame")
@@ -543,8 +544,9 @@ const expectLocator = (
 const expectIn = (subject: InPage, expectation: Engine.Expectation, matcherName: string, condition: string) =>
   Effect.gen(function*() {
     yield* Access.check(subject.grant)
-    const id = Operation.operationId()
-    const budget = yield* Operation.budget
+    const record = yield* Operation.record
+    const id = record.id
+    const budget = record.budget
     const started = now()
     const history: Array<Diagnostics.ObservedValue> = []
     const triggers = new Set<"initial" | "change" | "interval">(["initial"])
@@ -559,7 +561,7 @@ const expectIn = (subject: InPage, expectation: Engine.Expectation, matcherName:
           Effect.fail(failure(id, subject.description, condition, started, history, checks, triggers, explained))
       )
     while (true) {
-      const left = Operation.millisLeft(budget.at)
+      const left = record.left()
       if (left <= 0 && checks > 0) return yield* failed()
       checks++
       const response = yield* Runtime.send(
@@ -615,7 +617,7 @@ const expectIn = (subject: InPage, expectation: Engine.Expectation, matcherName:
           Operation.appendObservation(history, { error: `unexpected answer ${response._tag}` })
       }
     }
-  }).pipe(Spans.operation(`Expect.${matcherName}`, {
+  }).pipe(Operation.named(`Expect.${matcherName}`, {
     attributes: { "browser.page.id": subject.page.id, "browser.subject": subject.description }
   }))
 
@@ -628,8 +630,8 @@ const watching = <A>(
   condition: string
 ): Effect.Effect<void, ExpectationFailed | Target.TargetGone> =>
   Effect.gen(function*() {
-    const id = Operation.operationId()
-    const budget = yield* Operation.budget
+    const record = yield* Operation.record
+    const id = record.id
     const started = now()
     const history: Array<Diagnostics.ObservedValue> = []
     const triggers = new Set<"initial" | "change" | "interval">(["initial"])
@@ -642,21 +644,22 @@ const watching = <A>(
         return holds(value)
       }),
       Stream.runHead,
-      Effect.timeoutOption(Operation.millisLeft(budget.at))
+      BrowserClock.until(record.budget.at)
     )
     if (Option.isSome(found) && Option.isSome(found.value)) return
     return yield* Effect.fail(failure(id, description, condition, started, history, checks, triggers))
-  }).pipe(Spans.operation(`Expect.${matcherName}`, { attributes: { "browser.subject": description } }))
+  }).pipe(Operation.named(`Expect.${matcherName}`, { attributes: { "browser.subject": description } }))
 
 /**
  * An expectation on any other effect: run again at `CheckInterval` until its value holds or the deadline ends.
  * The subject runs under the expectation's deadline, so a check still running at it, or failing with it, is a
  * check that didn't finish, and the expectation fails with what the others saw.
  */
-const polling = Spans.fn("Expect.that")(
+const polling = Operation.fn("Expect.that")(
   function*<A, E, R>(subject: Effect.Effect<A, E, R>, condition: Condition.Condition<A>) {
-    const id = Operation.operationId()
-    const budget = yield* Operation.budget
+    const record = yield* Operation.record
+    const id = record.id
+    const budget = record.budget
     const interval = Duration.toMillis(yield* Effect.service(CheckInterval))
     const started = now()
     const history: Array<Diagnostics.ObservedValue> = []
@@ -670,10 +673,10 @@ const polling = Spans.fn("Expect.that")(
         Effect.map(Option.some),
         // A shorter deadline inside the subject is the subject's own failure
         Effect.catchIf(
-          (error: E) => Deadline.isTimeout(error) && Operation.millisLeft(budget.at) <= 0,
+          (error: E) => Deadline.isTimeout(error) && record.left() <= 0,
           () => Effect.succeedNone
         ),
-        Effect.timeoutOption(Operation.millisLeft(budget.at)),
+        BrowserClock.timeoutOn(record.clock, record.left()),
         Effect.map(Option.flatten)
       )
       if (Option.isNone(checked)) {
@@ -682,10 +685,11 @@ const polling = Spans.fn("Expect.that")(
       }
       Operation.appendObservation(history, checked.value)
       if (ConditionImpl.holds(condition, checked.value)) return
-      const left = Operation.millisLeft(budget.at)
+      const left = record.left()
       if (left <= 0) return yield* Effect.fail(failed())
       triggers.add("interval")
-      yield* Effect.sleep(Math.min(interval, left))
+      // On the browser's clock: Effect's would stop under TestClock (QUIRKS.md, Q235)
+      yield* record.clock.sleep(Math.min(interval, left))
     }
   }
 )

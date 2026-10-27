@@ -33,6 +33,7 @@ import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import type * as Target from "../Target.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
 import * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Capabilities from "./capabilities.ts"
 import * as Capture from "./capture.ts"
 import * as Events from "./events.ts"
@@ -296,13 +297,10 @@ export const start = Effect.fnUntraced(function*(
 
   /** The action's target, by its locator, now: `None` where it matches no one element. */
   const targetOf = (page: Model.PageEntry, subject: Recorders.Subject) =>
-    Runtime.element(
-      runtime,
-      page,
-      subject.steps,
-      Operation.operationId(),
-      // A second, in the monotonic clock's nanoseconds
-      (Adapter.now() + 1e9) as MonotonicInstant.MonotonicInstant
+    // A second on the browser's clock
+    Effect.flatMap(
+      BrowserClock.after(1000),
+      (at) => Runtime.element(runtime, page, subject.steps, Operation.operationId(), at)
     ).pipe(
       Effect.map((found): Option.Option<Capture.CaptureTarget> =>
         found._tag === "Found" ? Option.some({ node: found.node, secret: subject.secret }) : Option.none()
@@ -375,11 +373,11 @@ export const start = Effect.fnUntraced(function*(
   const messages = yield* Events.recorded(target.entry.events.console, () => true).pipe(Scope.provide(own))
   yield* Effect.gen(function*() {
     while (true) consoles.push({ message: (yield* Queue.take(messages)).value })
-  }).pipe(Effect.ignore, Effect.forkIn(own))
+  }).pipe(Effect.ignore, Operation.detached, Effect.forkIn(own))
   const thrown = yield* Events.recorded(target.entry.events.exception, () => true).pipe(Scope.provide(own))
   yield* Effect.gen(function*() {
     while (true) exceptions.push((yield* Queue.take(thrown)).value)
-  }).pipe(Effect.ignore, Effect.forkIn(own))
+  }).pipe(Effect.ignore, Operation.detached, Effect.forkIn(own))
 
   // Screencast frames, from each page of the target as it appears
   const screencast = settings.screencast
@@ -425,7 +423,7 @@ export const start = Effect.fnUntraced(function*(
             ? { ...png, format: "jpeg", quality: Option.some(50) }
             : png
           while (true) {
-            yield* Effect.sleep(screencast.polled)
+            yield* BrowserClock.sleep(Duration.toMillis(Duration.fromInputUnsafe(screencast.polled)))
             const shot = yield* runtime.model.adapter.screenshot(page.id, options)
             const size = format === "jpeg" ? Adapter.jpegSize(shot) : pngSize(shot)
             frames.push({ page: page.id, at: Adapter.now(), ...size, image: shot, format })
@@ -435,7 +433,7 @@ export const start = Effect.fnUntraced(function*(
       Effect.suspend(() => {
         if (seen.has(page.id)) return Effect.void
         seen.add(page.id)
-        return cast(page).pipe(Effect.ignore, Effect.forkIn(own), Effect.asVoid)
+        return cast(page).pipe(Effect.ignore, Operation.detached, Effect.forkIn(own), Effect.asVoid)
       })
     if (target._tag === "Page") yield* follow(target.entry)
     else {
@@ -445,6 +443,7 @@ export const start = Effect.fnUntraced(function*(
             discard: true
           })
         ),
+        Operation.detached,
         Effect.forkIn(own)
       )
     }

@@ -22,7 +22,6 @@ import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
 import * as HarImpl from "./internal/har.ts"
 import * as Operation from "./internal/operation.ts"
-import * as Spans from "./internal/spans.ts"
 import * as TraceImpl from "./internal/trace.ts"
 import * as NetworkResponse from "./NetworkResponse.ts"
 import type * as Page from "./Page.ts"
@@ -181,11 +180,11 @@ export const record = (
               diagnostics: Operation.diagnostics(Operation.operationId())
             })
           ),
-          Spans.operation("Trace.exportTrace", { attributes: { "browser.path": path } })
+          Operation.named("Trace.exportTrace", { attributes: { "browser.path": path } })
         )
     }
     return yield* Access.track<Recording>(grant)(recording)
-  }).pipe(Spans.operation("Trace.record", {
+  }).pipe(Operation.named("Trace.record", {
     attributes: { "browser.trace.screenshots": options?.screenshots ?? "off" }
   }))
 

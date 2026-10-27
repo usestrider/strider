@@ -84,7 +84,7 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 
 ### One deadline per operation
 
-Each user-visible operation has one monotonic deadline covering everything it does: queueing for input, setting up observation, resolving the locator, actionability, dispatch and the postcondition. An explicit `Deadline.within` encloses everything inside it, and nested calls can only shorten it; an operation with no enclosing deadline gets the default budget (30 seconds, `Deadline.withDefaultBudget`). Cleanup gets its own bounded budget. Deadlines run on a live clock even inside `TestClock` tests, and every option accepts `Duration.Input`.
+Each user-visible operation has one monotonic deadline covering everything it does: queueing for input, setting up observation, resolving the locator, actionability, dispatch and the postcondition. An explicit `Deadline.within` encloses everything inside it, and nested calls can only shorten it; an operation with no enclosing deadline gets the default budget (30 seconds, `Deadline.withDefaultBudget`). Cleanup gets its own bounded budget. Deadlines run on the clock the browser runs on (review 26): a real browser's live clock even inside `TestClock` tests, and Effect's clock for `Browser.layerTest`, whose timeline runs on it, and every option accepts `Duration.Input`.
 
 ### Errors
 

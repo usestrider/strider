@@ -31,13 +31,13 @@ import * as Stream from "effect/Stream"
 import * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as Adapter from "./internal/adapter.ts"
+import * as BrowserClock from "./internal/browserClock.ts"
 import * as Events from "./internal/events.ts"
 import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
 import type * as Model from "./internal/model.ts"
 import * as Operation from "./internal/operation.ts"
 import type * as Runtime from "./internal/runtime.ts"
-import * as Spans from "./internal/spans.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import * as NetworkRequest from "./NetworkRequest.ts"
 import type * as Page from "./Page.ts"
@@ -330,7 +330,8 @@ const delivery = <B, DE, DR>(
     }
     const ended = yield* Option.match(wait, {
       onNone: () => Effect.map(Deferred.await(hop.end), Option.some),
-      onSome: (duration) => Effect.timeoutOption(Deferred.await(hop.end), duration)
+      // On the browser's clock, which TestClock doesn't move (QUIRKS.md, Q235)
+      onSome: (duration) => Deferred.await(hop.end).pipe(BrowserClock.timeoutOption(Duration.toMillis(duration)))
     })
     if (Option.isNone(ended)) {
       return yield* Effect.fail(unavailable(
@@ -472,7 +473,7 @@ export const next: {
         delivery(found.behind.runtime, decoder, context, limit, Option.none())
       )
     })
-  }).pipe(Spans.operation("NetworkResponse.next"))) as typeof next
+  }).pipe(Operation.named("NetworkResponse.next"))) as typeof next
 
 /**
  * Subscribes to responses and emits every match from now on, with bodies when `body` is given.

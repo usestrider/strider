@@ -13,8 +13,8 @@ import type * as PageNavigation from "../PageNavigation.ts"
 import type * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import type * as Model from "./model.ts"
-import * as Operation from "./operation.ts"
 
 /** A navigation that got somewhere, at `at` (where it ended); `None` for one that didn't. */
 export const succeeded = (
@@ -76,6 +76,6 @@ export const reached = (
   )
   return Option.match(deadline, {
     onNone: () => wait,
-    onSome: (at) => wait.pipe(Effect.timeoutOption(Operation.millisLeft(at)), Effect.map(Option.getOrElse(() => false)))
+    onSome: (at) => wait.pipe(BrowserClock.until(at), Effect.map(Option.getOrElse(() => false)))
   })
 }

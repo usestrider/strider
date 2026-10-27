@@ -25,7 +25,6 @@ import * as Events from "./internal/events.ts"
 import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
 import * as Operation from "./internal/operation.ts"
-import * as Spans from "./internal/spans.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -248,7 +247,7 @@ export const next = <PE = never, PR = never>(
   Effect.flatMap(
     subscription(target, filter, "NetworkRequest.next"),
     ({ accepts, channel, kind }) => Events.next(kind, channel, accepts, where)
-  ).pipe(Spans.operation("NetworkRequest.next"))
+  ).pipe(Operation.named("NetworkRequest.next"))
 
 /**
  * Subscribes to requests and emits every match from now on.
@@ -340,19 +339,11 @@ export const headersSent = (
     const { runtime } = Handles.target(target as Page.Page | UserContext.UserContext).behind
     const hop = runtime.model.hop(request.hop)
     if (Option.isNone(hop)) return request.headers
-    const budget = yield* Operation.budget
-    const known = yield* Deferred.await(hop.value.sentKnown).pipe(
-      Effect.timeoutOption(Operation.millisLeft(budget.at))
+    const record = yield* Operation.record
+    yield* record.bound(
+      Deferred.await(hop.value.sentKnown),
+      () => Option.some("The browser hadn't said which headers it sent by the deadline"),
+      "waitingForEvent"
     )
-    if (Option.isNone(known)) {
-      return yield* Effect.fail(Operation.timeout({
-        operation: "NetworkRequest.headersSent",
-        id: Operation.operationId(),
-        phase: "waitingForEvent",
-        budget: budget.budget,
-        history: [],
-        hint: Option.some("The browser hadn't said which headers it sent by the deadline")
-      }))
-    }
     return Option.getOrElse(hop.value.sent, () => request.headers)
-  }).pipe(Spans.operation("NetworkRequest.headersSent", { attributes: { "browser.hop.id": request.hop } }))
+  }).pipe(Operation.named("NetworkRequest.headersSent", { attributes: { "browser.hop.id": request.hop } }))

@@ -46,7 +46,6 @@ import * as Operation from "./operation.ts"
 import * as Recorders from "./recorders.ts"
 import * as Runtime from "./runtime.ts"
 import * as Snapshots from "./snapshot.ts"
-import * as Spans from "./spans.ts"
 import { describeSteps, matcher, queries, type Relative, roleStep } from "./steps.ts"
 
 // ── Locators ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -361,10 +360,10 @@ export class LocatorImpl implements Locator.Locator {
     const operation = "Locator.snapshot"
     return Effect.gen({ self: this }, function*() {
       yield* Access.check(this.owner.grant)
-      const id = Operation.operationId()
-      const budget = yield* Operation.budget
-      const taken = yield* Snapshots.take(this.owner, this.steps, options, id, budget.at).pipe(
-        Effect.mapError((failure) => this.sendFailure(operation, failure, id, budget))
+      const record = yield* Operation.record
+      const id = record.id
+      const taken = yield* Snapshots.take(this.owner, this.steps, options, id, record.budget.at).pipe(
+        Effect.mapError((failure) => this.sendFailure(operation, failure, record))
       )
       if (taken._tag === "Taken") return taken.snapshot as Snapshot.Snapshot<Locator.Locator>
       if (taken.response._tag === "NoMatch") {
@@ -375,7 +374,7 @@ export class LocatorImpl implements Locator.Locator {
         ))
       }
       return yield* this.unmatched(operation, taken.response, id)
-    }).pipe(Spans.operation(operation, {
+    }).pipe(Operation.named(operation, {
       attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
     }))
   }
@@ -393,10 +392,11 @@ export class LocatorImpl implements Locator.Locator {
     const owner = this.owner
     return Effect.gen({ self: this }, function*() {
       yield* Access.check(owner.grant)
-      const id = Operation.operationId()
-      const budget = yield* Operation.budget
+      const record = yield* Operation.record
+      const id = record.id
+      const budget = record.budget
       const found = yield* Runtime.element(owner.runtime, owner.page, this.steps, id, budget.at).pipe(
-        Effect.mapError((failure) => this.sendFailure(operation, failure, id, budget))
+        Effect.mapError((failure) => this.sendFailure(operation, failure, record))
       )
       if (found._tag === "Response") {
         const response = found.response
@@ -421,6 +421,8 @@ export class LocatorImpl implements Locator.Locator {
           id
         )
         const rest = yield* Evaluation.toLocal(args, realm, 1)
+        // The call is on its way: a deadline after it can't say the function didn't run
+        record.markSent()
         const result = yield* Evaluation.call(owner.runtime, {
           realm,
           functionDeclaration: fn.toString(),
@@ -436,19 +438,15 @@ export class LocatorImpl implements Locator.Locator {
         failure._tag === "Gone"
           ? failure.error
           : failure._tag === "Deadline"
-          ? Operation.timeout({
-            operation,
-            id,
-            phase: "dispatchedUnconfirmed",
-            budget: budget.budget,
-            history: [],
-            hint: Option.some("The page didn't answer before the deadline; the function may still be running"),
-            dispatch: { _tag: "MayHaveBeenSent" }
-          })
+          ? record.timeout(
+            record.dispatch._tag === "MayHaveBeenSent"
+              ? Option.some("The page didn't answer before the deadline; the function may still be running")
+              : Option.none()
+          )
           : this.error(operation, failure.reason, id)
       ))
       return value as JSHandle.Serialized<B>
-    }).pipe(Spans.operation(operation, {
+    }).pipe(Operation.named(operation, {
       attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
     }))
   }
@@ -618,7 +616,7 @@ export class LocatorImpl implements Locator.Locator {
           }
           const budget = record.budget
           const found = yield* Runtime.element(owner.runtime, owner.page, this.steps, id, budget.at).pipe(
-            Effect.mapError((failure) => this.sendFailure("Locator.setInputFiles", failure, id, budget))
+            Effect.mapError((failure) => this.sendFailure("Locator.setInputFiles", failure, record))
           )
           // The input went between the checks and now: check again
           if (found._tag !== "Found") return { retry: { _tag: "NoMatch" } } as const
@@ -692,7 +690,7 @@ export class LocatorImpl implements Locator.Locator {
       const budget = record.budget
       const resolve = (locator: LocatorImpl) =>
         Runtime.element(owner.runtime, owner.page, locator.steps, id, budget.at).pipe(
-          Effect.mapError((failure) => this.sendFailure(operation, failure, id, budget)),
+          Effect.mapError((failure) => this.sendFailure(operation, failure, record)),
           Effect.flatMap((found) =>
             found._tag === "Found"
               ? Effect.succeed(found)
@@ -873,28 +871,15 @@ export class LocatorImpl implements Locator.Locator {
     }
   }
 
-  /** Maps a failure to send a request onto the operation's errors. */
-  sendFailure(
-    operation: string,
-    failure: Runtime.SendFailure,
-    id: Diagnostics.OperationId,
-    budget: Operation.Budget | undefined,
-    phase: Deadline.Timeout["phase"] = "resolving"
-  ) {
+  /** Maps a failure to send a request onto the operation's errors: a deadline as the record's `Timeout`. */
+  sendFailure(operation: string, failure: Runtime.SendFailure, record: Operation.Record) {
     switch (failure._tag) {
       case "Gone":
         return failure.error
       case "Reason":
-        return this.error(operation, failure.reason, id)
+        return this.error(operation, failure.reason, record.id)
       case "Deadline":
-        return Operation.timeout({
-          operation,
-          id,
-          phase,
-          budget: budget?.budget ?? Duration.zero,
-          history: [],
-          hint: Option.fromUndefinedOr(failure.hint)
-        })
+        return record.timeout(Option.fromUndefinedOr(failure.hint))
     }
   }
 
@@ -937,7 +922,7 @@ export class LocatorImpl implements Locator.Locator {
         Effect.mapError((failure) =>
           failure._tag === "Deadline"
             ? record.timeout(Option.fromUndefinedOr(failure.hint))
-            : this.sendFailure(operation, failure, id, record.budget)
+            : this.sendFailure(operation, failure, record)
         )
       )
       if (response._tag === "InvalidSelector") {
@@ -977,8 +962,9 @@ export class LocatorImpl implements Locator.Locator {
   pointOf(position: Mouse.Point | undefined) {
     return Effect.gen({ self: this }, function*() {
       yield* Access.check(this.owner.grant)
-      const id = Operation.operationId()
-      const budget = yield* Operation.budget
+      // A drag's target, found inside the drag: its record, and its deadline
+      const record = yield* Operation.record
+      const id = record.id
       const answer = yield* Runtime.sendRouted(
         this.owner.runtime,
         this.owner.page,
@@ -986,7 +972,7 @@ export class LocatorImpl implements Locator.Locator {
           op: "act",
           steps: this.steps,
           checks: checksFor(pointerChecks, { stable: false, receivesPointer: false }),
-          cap: Math.min(1000, Operation.millisLeft(budget.at)),
+          cap: Math.min(1000, record.left()),
           action: {
             _tag: "Point",
             position: position === undefined ? null : { x: position.x, y: position.y },
@@ -995,10 +981,8 @@ export class LocatorImpl implements Locator.Locator {
           apply: false
         },
         id,
-        budget.at
-      ).pipe(
-        Effect.mapError((failure) => this.sendFailure("Locator.dragTo", failure, id, budget, "waitingForCondition"))
-      )
+        record.budget.at
+      ).pipe(Effect.mapError((failure) => this.sendFailure("Locator.dragTo", failure, record)))
       const response = answer.response
       if (response._tag !== "Ready" || response.point === null) return Option.none()
       if (answer.routed.hops.length === 0) return Option.some(response.point)
@@ -1007,9 +991,7 @@ export class LocatorImpl implements Locator.Locator {
         response.point,
         { inViewport: true, receivesPointer: false },
         id
-      ).pipe(
-        Effect.mapError((failure) => this.sendFailure("Locator.dragTo", failure, id, budget, "waitingForCondition"))
-      )
+      ).pipe(Effect.mapError((failure) => this.sendFailure("Locator.dragTo", failure, record)))
       return translated._tag === "Point" ? Option.some(translated.point) : Option.none()
     })
   }
@@ -1038,11 +1020,11 @@ export class LocatorImpl implements Locator.Locator {
             expected,
             hint: "The click reached it and its state didn't change; the page may prevent it"
           }),
-          Operation.operationId(),
+          (yield* Operation.record).id,
           { _tag: "MayHaveBeenSent" }
         ))
       }
-    }).pipe(Spans.operation(operation, {
+    }).pipe(Operation.named(operation, {
       attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
     }))
   }
@@ -1246,7 +1228,7 @@ export class LocatorImpl implements Locator.Locator {
             Effect.mapError((failure) =>
               failure._tag === "Deadline"
                 ? failure
-                : this.sendFailure(operation, failure, id, budget, "waitingForCondition")
+                : this.sendFailure(operation, failure, record)
             )
           )
       // The record's phase says where the action stopped; the hint says why, from what it saw
@@ -1295,7 +1277,7 @@ export class LocatorImpl implements Locator.Locator {
                 Effect.mapError((failure) =>
                   failure._tag === "Deadline"
                     ? failure
-                    : this.sendFailure(operation, failure, id, budget, "waitingForCondition")
+                    : this.sendFailure(operation, failure, record)
                 )
               )
               if (translated._tag === "NotReady") return notReady(translated.reason)

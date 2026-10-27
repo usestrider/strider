@@ -47,6 +47,7 @@ import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
 import * as BidiWire from "./bidiWire.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Declarations from "./declarations.ts"
 import * as Launch from "./launch.ts"
 import * as ProtocolClient from "./protocolClient.ts"
@@ -1510,7 +1511,9 @@ export const connect: (
       version = created.capabilities.browserVersion
       // Firefox keeps a session after its socket closes, and allows one: a session this connection started ends
       // with it, or every later client is refused until the browser restarts (review 19, P6)
-      yield* Effect.addFinalizer(() => Session.end().pipe(on, Effect.timeoutOption("1 second"), Effect.ignore))
+      yield* Effect.addFinalizer(() =>
+        Session.end().pipe(on, Effect.timeoutOption("1 second"), Effect.ignore, BrowserClock.onLive)
+      )
     }
     const info = new Browser.Info({ product, version, protocol: "bidi", revision: version })
     // The default context is mapped before subscribing: Firefox reports the contexts that exist as the subscription

@@ -17,7 +17,6 @@ import type * as Url from "../Url.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
-import * as Spans from "./spans.ts"
 import * as Watchable from "./watchable.ts"
 
 const TypeId = "~@usestrider/browser/Download"
@@ -40,24 +39,17 @@ export const make = (runtime: Runtime.Runtime, entry: Model.DownloadEntry): Down
 
   /** Waits for the download to end, under the deadline in force: where it was written, once completed. */
   const completed = Effect.fnUntraced(function*(operation: string) {
-    const id = Operation.operationId()
-    const budget = yield* Operation.budget
+    const record = yield* Operation.record
+    record.observe(yield* SubscriptionRef.get(entry.status))
     const terminal = yield* SubscriptionRef.changes(entry.status).pipe(
       Stream.filter((status) => status._tag !== "InProgress"),
       Stream.runHead,
-      Effect.timeoutOption(Operation.millisLeft(budget.at))
+      (waiting) => record.bound(waiting, () => Option.some("The download was still in progress at the deadline"))
     )
-    if (Option.isNone(terminal) || Option.isNone(terminal.value)) {
-      return yield* Effect.fail(Operation.timeout({
-        operation,
-        id,
-        phase: "waitingForCondition",
-        budget: budget.budget,
-        history: [Operation.observed(yield* SubscriptionRef.get(entry.status))],
-        hint: Option.some("The download was still in progress at the deadline")
-      }))
+    if (Option.isNone(terminal)) {
+      return yield* Effect.fail(record.timeout(Option.some("The download was still in progress at the deadline")))
     }
-    const status = terminal.value.value
+    const status = terminal.value
     switch (status._tag) {
       case "Canceled": {
         const gone = yield* contextGone
@@ -140,18 +132,23 @@ export const make = (runtime: Runtime.Runtime, entry: Model.DownloadEntry): Down
     }),
     finished: completed("Download.finished").pipe(
       Effect.asVoid,
-      Spans.operation("Download.finished", { attributes: { "browser.download.id": entry.id } })
+      Operation.named("Download.finished", { attributes: { "browser.download.id": entry.id } })
     ),
-    stream: Stream.unwrap(Effect.map(file("Download.stream"), ({ fs, path }) =>
-      fs.stream(path).pipe(
-        Stream.catch((error) => Stream.fromEffect(unreadable("Download.stream", error.message)))
-      ))),
+    stream: Stream.unwrap(Effect.map(
+      file("Download.stream").pipe(
+        Operation.named("Download.stream", { attributes: { "browser.download.id": entry.id } })
+      ),
+      ({ fs, path }) =>
+        fs.stream(path).pipe(
+          Stream.catch((error) => Stream.fromEffect(unreadable("Download.stream", error.message)))
+        )
+    )),
     saveAs: (to) =>
       Effect.gen(function*() {
         const { fs, path } = yield* file("Download.saveAs")
         yield* fs.copyFile(path, to).pipe(Effect.catch((error) => unreadable("Download.saveAs", error.message)))
       }).pipe(
-        Spans.operation("Download.saveAs", { attributes: { "browser.download.id": entry.id, "browser.path": to } })
+        Operation.named("Download.saveAs", { attributes: { "browser.download.id": entry.id, "browser.path": to } })
       ),
     cancel: Effect.suspend(() => {
       const id = Operation.operationId()
@@ -162,7 +159,7 @@ export const make = (runtime: Runtime.Runtime, entry: Model.DownloadEntry): Down
           return mapped._tag === "Gone" ? Effect.void : Effect.fail(failure("Download.cancel", mapped.reason))
         })
       )
-    }).pipe(Spans.operation("Download.cancel", { attributes: { "browser.download.id": entry.id } })),
+    }).pipe(Operation.named("Download.cancel", { attributes: { "browser.download.id": entry.id } })),
     pipe() {
       return pipeArguments(this, arguments)
     },

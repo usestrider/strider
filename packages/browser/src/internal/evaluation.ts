@@ -24,12 +24,12 @@ import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import { isolatedWorld } from "./initScripts.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
 import * as Serialization from "./serialization.ts"
-import * as Spans from "./spans.ts"
 
 export { isolatedWorld }
 
@@ -145,7 +145,7 @@ export const call = (runtime: Runtime.Runtime, options: Call): Effect.Effect<Ada
       userActivation: options.userActivation
     }).pipe(
       Effect.mapError((error): Failure => Operation.fromAdapter(error, options.id, runtime.backend)),
-      Effect.timeoutOption(Operation.millisLeft(options.at)),
+      BrowserClock.until(options.at),
       Effect.flatMap(Option.match({
         onNone: () => Effect.fail<Failure>({ _tag: "Deadline" }),
         onSome: Effect.succeed
@@ -185,9 +185,9 @@ export const pageRealm = (
 ): Effect.Effect<Target.RealmId, Failure> =>
   Effect.gen(function*() {
     while (true) {
-      if (Operation.millisLeft(at) <= 0) return yield* Effect.fail<Failure>({ _tag: "Deadline" })
+      if ((yield* BrowserClock.left(at)) <= 0) return yield* Effect.fail<Failure>({ _tag: "Deadline" })
       const open = yield* Runtime.openState(page, id).pipe(
-        Effect.timeoutOption(Operation.millisLeft(at)),
+        BrowserClock.until(at),
         Effect.mapError((failure): Failure => failure._tag === "Gone" ? failure : { _tag: "Deadline" }),
         Effect.flatMap(
           Option.match({ onNone: () => Effect.fail<Failure>({ _tag: "Deadline" }), onSome: Effect.succeed })
@@ -226,22 +226,16 @@ const handleError = (operation: string, reason: JSHandle.JSHandleErrorReason, id
   new JSHandle.JSHandleError({ operation, reason, diagnostics: Operation.diagnostics(id) })
 
 /** A handle operation's failure, as the handle's error, its realm's end, or the deadline. */
-const asHandleFailure = (operation: string, id: Diagnostics.OperationId, budget: Operation.Budget) =>
-(
-  failure: Failure
-) =>
-  failure._tag === "Gone"
+const asHandleFailure = (operation: string, record: Operation.Record) => (failure: Failure) => {
+  const id = record.id
+  return failure._tag === "Gone"
     ? failure.error
     : failure._tag === "Deadline"
-    ? Operation.timeout({
-      operation,
-      id,
-      phase: "dispatchedUnconfirmed",
-      budget: budget.budget,
-      history: [],
-      hint: Option.some("The realm didn't answer before the deadline; the function may still be running"),
-      dispatch: { _tag: "MayHaveBeenSent" }
-    })
+    ? record.timeout(
+      record.dispatch._tag === "MayHaveBeenSent"
+        ? Option.some("The realm didn't answer before the deadline; the function may still be running")
+        : Option.none()
+    )
     : failure.reason._tag === "PromptBlocking"
     // A handle's operations have no `PromptBlocking`: a dialog nothing decides holds the realm as a failure would
     ? handleError(
@@ -250,6 +244,7 @@ const asHandleFailure = (operation: string, id: Diagnostics.OperationId, budget:
       id
     )
     : handleError(operation, failure.reason, id)
+}
 
 /** A handle: a remote object in one realm, or a primitive held here; released once. */
 export class HandleImpl<A> implements JSHandle.JSHandle<A> {
@@ -284,11 +279,14 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
   ): Effect.Effect<B, JSHandle.JSHandleError | Target.TargetGone | Deadline.Timeout, R> {
     return Effect.gen({ self: this }, function*() {
       if (this.released) return yield* Effect.die(new Error(`${operation}: the handle was released`))
-      const id = Operation.operationId()
-      const budget = yield* Operation.budget
+      const record = yield* Operation.record
+      const id = record.id
+      const budget = record.budget
       const group = yield* groupFor(this.runtime, this.realm, result)
       return yield* Effect.gen({ self: this }, function*() {
         const rest = yield* toLocal(args, this.realm, 1)
+        // The call is on its way: a deadline after it can't say the function didn't run
+        record.markSent()
         const value = yield* call(this.runtime, {
           realm: this.realm,
           functionDeclaration: fn.toString(),
@@ -301,8 +299,8 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
           id
         })
         return yield* then(value)
-      }).pipe(Effect.mapError(asHandleFailure(operation, id, budget)))
-    }).pipe(Spans.operation(operation, { attributes: { "browser.realm.id": this.realm } }))
+      }).pipe(Effect.mapError(asHandleFailure(operation, record)))
+    }).pipe(Operation.named(operation, { attributes: { "browser.realm.id": this.realm } }))
   }
 
   evaluate<Args extends ReadonlyArray<unknown>, B>(fn: (value: A, ...args: Args) => B | Promise<B>, ...args: Args) {

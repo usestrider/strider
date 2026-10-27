@@ -9,7 +9,6 @@ import * as Option from "effect/Option"
 import type * as Predicate from "effect/Predicate"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
-import type * as Diagnostics from "../Diagnostics.ts"
 import * as Target from "../Target.ts"
 import * as Watchable from "../Watchable.ts"
 import * as Operation from "./operation.ts"
@@ -53,24 +52,19 @@ export const make = <S, A>(source: Source<S, A>): Watchable.Watchable<A> => {
     Stream.changesWith(Equal.equals)
   )
   const waitFor = Effect.fnUntraced(function*(predicate: Predicate.Predicate<A>) {
-    const id = Operation.operationId()
-    const { at, budget } = yield* Operation.budget
-    const history: Array<Diagnostics.ObservedValue> = []
+    const record = yield* Operation.start(source.operation)
+    const hint = () => Option.some("The value never satisfied the predicate; history lists what it was")
     const outcome = yield* states(source).pipe(
       Stream.mapEffect((state): Effect.Effect<Option.Option<A>, Target.TargetGone | Watchable.Ended> => {
         const value = source.project(state)
         if (Option.isSome(value)) {
-          Operation.appendObservation(history, value.value)
+          record.observe(value.value)
           if (predicate(value.value)) return Effect.succeed(Option.some(value.value))
         }
         const ended = source.ended(state)
         if (Option.isSome(ended)) {
           return Effect.fail(
-            new Target.TargetGone({
-              target: source.target,
-              reason: ended.value,
-              diagnostics: Operation.diagnostics(id, { last: Option.fromNullishOr(history.at(-1)) })
-            })
+            new Target.TargetGone({ target: source.target, reason: ended.value, diagnostics: record.diagnostics() })
           )
         }
         return source.final?.(state) === true
@@ -78,26 +72,17 @@ export const make = <S, A>(source: Source<S, A>): Watchable.Watchable<A> => {
             new Watchable.Ended({
               operation: source.operation,
               value: Option.getOrUndefined(value),
-              diagnostics: Operation.diagnostics(id, { last: Option.fromNullishOr(history.at(-1)) })
+              diagnostics: record.diagnostics()
             })
           )
           : Effect.succeed(Option.none<A>())
       }),
       Stream.filterMap(Filter.fromPredicateOption((found: Option.Option<A>) => found)),
       Stream.runHead,
-      Effect.timeoutOption(Operation.millisLeft(at))
+      (waiting) => record.bound(waiting, hint, "waitingForCondition")
     )
-    if (Option.isSome(outcome) && Option.isSome(outcome.value)) return outcome.value.value
-    return yield* Effect.fail(
-      Operation.timeout({
-        operation: source.operation,
-        id,
-        phase: "waitingForCondition",
-        budget,
-        history,
-        hint: Option.some("The value never satisfied the predicate; history lists what it was")
-      })
-    )
+    if (Option.isSome(outcome)) return outcome.value
+    return yield* Effect.fail(record.timeout(hint(), "waitingForCondition"))
   })
   return Object.assign(Effect.suspend(() => read), {
     "~@usestrider/browser/Watchable": "~@usestrider/browser/Watchable" as const,

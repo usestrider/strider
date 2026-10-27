@@ -174,6 +174,6 @@ export const add = (
     // Its dependents stop with it: L0 runs a script only after what it comes after ran
     yield* Scope.addFinalizer(scope, Effect.sync(() => (entry.live = false)))
     return handle
-  }).pipe(Spans.operation(owner.operation, {
+  }).pipe(Operation.named(owner.operation, {
     attributes: { ...Spans.scopeAttributes(owner.scope), "browser.initScript.world": options?.world ?? "main" }
   }))

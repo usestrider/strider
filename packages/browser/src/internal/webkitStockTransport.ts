@@ -28,6 +28,7 @@ import * as Scope from "effect/Scope"
 import * as Socket from "effect/socket/Socket"
 import * as Stream from "effect/Stream"
 import * as Transport from "../protocol/Transport.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Envelope from "./webkitEnvelope.ts"
 
 /**
@@ -219,7 +220,7 @@ export const connect = Effect.fnUntraced(function*(endpoint: URL, options: Optio
         enabled = true
         yield* poll
         yield* Effect.forkIn(
-          poll.pipe(Effect.delay(options.poll), Effect.forever, Effect.catch(unanswered)),
+          poll.pipe(Effect.delay(options.poll), Effect.forever, Effect.catch(unanswered), BrowserClock.onLive),
           scope
         )
       }

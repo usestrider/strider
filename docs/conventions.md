@@ -21,7 +21,7 @@ A user's Effect knowledge carries over: the types they already know, and the ser
 | Strider | Closest in Effect | Why Strider's stays |
 |---|---|---|
 | `Watchable<A>` | `SubscriptionRef`, `reactivity/Atom` | Effect 4 has no read-only view of a `SubscriptionRef`, and `Atom` needs a registry and is built for UI state. A `Watchable` is built over a `SubscriptionRef`, as an effect value with its members attached, since Effect 4 has no public way to subclass `Effect` |
-| `Deadline` | `Effect.timeout` | Effect has no deadline that nested calls inherit and can only shorten. `Effect.timeout` interrupts from outside, so an operation can't fail with its own evidence of how far it got. A `Deadline` lives in `Deadline.CurrentDeadline`, an absolute instant on a live clock; operations read the time left and fail with `Timeout{phase}` (`Deadline.ts`'s module doc) |
+| `Deadline` | `Effect.timeout` | Effect has no deadline that nested calls inherit and can only shorten. `Effect.timeout` interrupts from outside, so an operation can't fail with its own evidence of how far it got. A `Deadline` lives in `Deadline.CurrentDeadline`, an absolute instant on the clock the browser runs on (the live clock for a real browser, Effect's for `Browser.layerTest`); operations read the time left and fail with `Timeout{phase}`, taken from what their record shows (`Deadline.ts`'s module doc; review 26) |
 | subscription buffers that fail when full | `PubSub` | `PubSub`'s bounded strategies either apply backpressure, which would stall the fold, or drop and slide, which lose events silently. It also offers every message to every subscriber, so filters would run after buffering. Each subscription has a `Queue` of its own that the fold offers to without suspending, and a full one fails with `EventOverflow` (CONCEPTS.md §9) |
 | `Registration` handles | a child `Scope` | A child scope can release early, but principle 19 asks for a handle with `remove` and, where useful, state such as `hits` |
 | `Url.Url`, a branded string | `URL`, and `effect/http`'s `Url` helpers | A `URL` can be changed in place and compares by reference; a branded string is immutable and equal by value, as Effect's own `HttpClientRequest.url` is. `effect/http`'s `Url` module is how one is changed |
@@ -252,7 +252,7 @@ Effect puts operations on handles as members (`client.get`, `handle.kill`), and 
 - Its knobs are references: `SpanNameGenerator`, `TracerDisabledWhen`, `TracerHeaderFilter` and `Headers.CurrentRedactedNames` (`http/HttpClient.ts:705–760`).
 
 **Strider.**
-- **One span per user-visible operation,** named like `Locator.click`. It is opened through `src/internal/spans.ts`, with `Spans.operation(name, { attributes })` or `Spans.fn(name)`, never with `Effect.withSpan` or `Effect.fn` directly. That way `SpanNameGenerator`, `TracerDisabledWhen` and the diagnostics preset apply, and recordings learn of each operation.
+- **One span per user-visible operation,** named like `Locator.click`. The operation runs through `src/internal/operation.ts`, with `Operation.named(name, { attributes })` or `Operation.fn(name)`, which gives it a record and opens its span through `src/internal/spans.ts`; never `Effect.withSpan` or `Effect.fn` directly. That way `SpanNameGenerator`, `TracerDisabledWhen` and the diagnostics preset apply, and recordings learn of each operation (review 26). Launching and connecting open theirs with `Spans.operation`, since they start the connection's long-lived fibers.
 - **Attributes are in OpenTelemetry's style.** `browser.operation`, and the operation's target as `browser.page.id`, `browser.context.id` or `browser.realm.id`. `url.full` and `browser.endpoint` are redacted by the preset: under `"strict"`, a URL keeps its origin and path, each query value `REDACTED`, with no credentials or fragment.
 - **Everything beneath an operation is `Effect.fnUntraced`.** Protocol commands get child spans only when `Browser.TraceProtocolCommands` is on, because they are a hot path.
 - **The knobs are references,** as on `HttpClient`: `Browser.SpanNameGenerator` and `Browser.TracerDisabledWhen` rename or suppress spans.
@@ -265,7 +265,7 @@ Effect puts operations on handles as members (`client.get`, `handle.kill`), and 
 
 **Strider.**
 - `tsconfig.base.json` sets the same options (`effectFn: ["untraced"]`, `effectFnOpportunity: "error"`), under TypeScript 7 patched with Effect's language service (`effect-tsgo patch`).
-- Library code uses `Effect.fnUntraced`, and an operation uses `Spans.fn`, which wraps one.
+- Library code uses `Effect.fnUntraced`, and an operation uses `Operation.fn`, which wraps one.
 - Examples and acceptance scenarios, written for users, use `Effect.fn("name")(function*(page: Page.Page) { … })`. That also shows users the shape their own helpers should take.
 
 ## Documentation
