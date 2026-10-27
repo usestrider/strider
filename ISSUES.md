@@ -151,3 +151,14 @@ guidance says: many processes beside busy loops, traced from the protocol's mess
 **I33.** The HAR recording slice (`records a HAR with statuses, protocols, bodies and the library's timings,
 redacted`) failed once in a full `pnpm test:integration packages/browser/test/integration/slice` run, on a backend
 the summary didn't name, and passed alone on all three and in the next full run. Reproduce it as I32.
+
+## API changes decided
+
+**I34. A handler's decisions are Effects.** A route's, dialog's or file chooser's decision is a plain value
+(`Route.abort()`, `Route.continue`, `Route.fulfill(…)`, a pending dialog's `accept`), and a handler must return an
+Effect, so every one-line handler wraps it: `() => Effect.succeed(Route.abort())`, in the scenarios, the guides and
+`Dialog.acceptAll`. Decided 2026-10-27: every decision is an `Effect<Decision<…>>` instead, so `() => Route.abort()`
+is a handler, and one that decides after work of its own ends with `return yield* Route.abort()`. It covers `Route`'s
+decisions, `Dialog.Pending`'s and `FileChooser`'s, `Dialog.acceptAll` and `dismissAll`, API.md, the guides, the
+scenarios and the JSDoc examples. Rejected: a handler that may return a decision or an Effect of one, a union return
+unlike Effect's own callbacks; and a decision that is itself an Effect, as `Exit` is, which needs Effect's internals.
