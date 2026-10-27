@@ -67,8 +67,17 @@
             STRIDER_CHROMIUM = lib.getExe pinnedBrowsers.chromium;
             STRIDER_FIREFOX = lib.getExe pinnedBrowsers.firefox;
             STRIDER_WEBKITGTK = "${pinnedBrowsers.webkitgtk}/libexec/webkitgtk-6.0/MiniBrowser";
+            # The MiniBrowser isn't wrapped: GIO finds a TLS backend only where this says, or HTTPS fails with
+            # "TLS support is not available" (QUIRKS.md, Q237)
+            GIO_EXTRA_MODULES = "${pkgs.glib-networking}/lib/gio/modules";
+            # No sound card: an ALSA configuration that defines no device, so the browsers reach no audio server
+            # of the host's, as on a machine without one. Through the host's, Firefox's screencasts hung the
+            # browser (QUIRKS.md, Q236)
+            ALSA_CONFIG_PATH = "${pkgs.writeText "strider-no-sound-card.conf" ""}";
             # A display of its own for the MiniBrowser, which a test starts on a free display number
             STRIDER_XVFB = lib.getExe' pkgs.xvfb "Xvfb";
+            # A self-signed certificate for the TLS fixture, made as a test starts (review 22, candidate 8)
+            STRIDER_OPENSSL = lib.getExe pkgs.openssl;
             # Fonts, time zone and locale, which pages measure text and format dates and numbers with
             FONTCONFIG_FILE = pkgs.makeFontsConf {
               fontDirectories = [

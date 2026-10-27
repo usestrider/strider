@@ -1648,10 +1648,12 @@ export const connect: (
     const neverStarted = Effect.fnUntraced(
       function*(navigable: NavigableEntry, id: PageNavigation.Id, url: string, error: string) {
         yield* client.root.drainObserved
-        const index = navigable.expected.findIndex((expected) => expected.id === id)
-        if (index < 0) return
-        navigable.expected.splice(index, 1)
+        // Taken and reported in one step: Firefox can report the start after its error reply, and the event's
+        // handler then either takes the expectation first or finds it reported, never a gap between (Q233)
         yield* run(() => {
+          const index = navigable.expected.findIndex((expected) => expected.id === id)
+          if (index < 0) return
+          navigable.expected.splice(index, 1)
           emit({
             _tag: "NavigationStarted",
             navigation: id,

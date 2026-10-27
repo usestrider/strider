@@ -948,6 +948,11 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* nothing yet; the test hangs until Vitest stops it. `goto`'s deadline doesn't bound the command that starts its navigation (`adapter.navigate`), so it waits past the deadline too; review 26's second step bounds every wait an operation makes.
 - *Reconsider:* what Firefox is doing, from the protocol's messages; and whether `Trace.record` should return once the video has started, so a caller's next command never races it.
 
+**Q237. WebKitGTK's MiniBrowser run outside its package's wrapper has no TLS on Nix** (Browser). GIO finds a TLS backend among the modules on its default path and on `GIO_EXTRA_MODULES`; Nix's WebKitGTK names none, so every HTTPS load fails with "TLS support is not available", which reads like a network error, before any certificate is checked.
+- *Seen:* review 22's sixth step: the TLS fixture's navigation failed on stock WebKit, as it should, but for that reason, not its certificate.
+- *We:* the integration environment sets `GIO_EXTRA_MODULES` to `glib-networking`'s modules, after which an untrusted certificate fails as one ("Unacceptable TLS certificate"); `WebKit.layer`'s documentation says a MiniBrowser from Nix needs the same. Other distributions install GIO's modules where it looks.
+- *Reconsider:* nothing on our side: the library starts the browser in the program's environment.
+
 ## Ours: workarounds and odd shapes
 
 **Q58. `PromptBlocking` carries the dialog's kind and text, not `Page.Prompt`** (Ours). `Reason` is a leaf module, and importing `Page` into it makes a load cycle.
@@ -1428,3 +1433,8 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 26, P1: `Popup.next` with a 200 ms deadline on `Browser.layerTest`, under `it.effect`, hadn't failed after a second of real time, and failed once the test clock moved.
 - *We:* a deadline runs on the clock the browser runs on (review 26, candidate 1), read from one reference, live unless set. Since review 26's first step, actions, reads, the runtime's wait for a document and `pressSequentially`'s `delay` use it. The other waits move in its second step, when `Browser.layerTest` also sets Effect's clock, on which its timeline runs.
 - *Reconsider:* nothing, once review 26's second step is built.
+
+**Q238. A WebKit HAR sometimes has no body for the document the page left at once** (Ours). The slices' HAR test records a `goto` and then another; the first document's entry had no body, in one full integration run of review 22's sixth step, where Q179's resolution reads it as its load finishes.
+- *Seen:* review 22's sixth step, the second full run; not in 5 runs of the test alone after it. The read's failure, if it failed, isn't reported: the entry is written without a body.
+- *We:* nothing yet.
+- *Reconsider:* when it recurs, which of two it is: the read, sent over the inspector as the document's load finishes, answered after the next `goto`'s navigation, sent over Automation, has committed and cleared the document's resources; or the read sent to a target a process swap had just replaced. The first would be fixed by a navigation the adapter sends waiting for its page's reads in flight; either needs the read's error, which the adapter could log.

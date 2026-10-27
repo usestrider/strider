@@ -5,7 +5,8 @@ BiDi and the WebKit inspector protocol directly. It is pre-release. L0, the prot
 run through L1 and L2 on every backend (reviews 12, 13, 14, 16, 17, 18, 19 and 20's three steps: actions, events,
 every event module, interacting and asserting, declarations, a page's contents, attaching and access, the rest of the
 API surface with capabilities and the test layers, recordings, and the agent toolkit with the `strider` CLI); review
-21 walked the quirks, and review 22's steps built what was deferred, the last of it attaching to stock WebKit. Every
+21 walked the quirks, and review 22's steps built what was deferred, the last of it the open quirks' checks. Review 23
+made stock WebKit the WebKit backend, with nothing of Playwright's, and review 24 keyed storage partitions by origin. Every
 member the API declares is built. One a later review declares before building fails as the defect `NotBuilt`, naming
 itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm` from the repository root.
 
@@ -29,7 +30,7 @@ itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm` from the repos
     `test/integration/`: the browser integration tests, which run only in the Nix environment that fixes the
     machine they see. `pnpm test:integration` enters it (`flake.nix`, `devShells.integration`, Linux) with nothing
     of the host's environment, and runs them: the pinned browsers (`test/integration/browsers.json`: Chromium
-    155.0.8059.79, Firefox 158.0 and WebKitGTK 2.54.1's MiniBrowser for stock WebKit), fixed fonts, UTC, `C.UTF-8`, an empty home that is deleted after, and no
+    155.0.8059.79, Firefox 158.0 and WebKitGTK 2.54.1's MiniBrowser for stock WebKit), fixed fonts, UTC, `C.UTF-8`, an empty home that is deleted after, no sound card, and no
     display: the MiniBrowser, which needs one, gets an Xvfb of its own (`test/integration/stockWebKit.ts`). Run anywhere else, they fail and
     say so; a browser of another version fails them too. Extra arguments go to Vitest
     (`pnpm test:integration packages/browser/test/integration/WebKit.test.ts`).

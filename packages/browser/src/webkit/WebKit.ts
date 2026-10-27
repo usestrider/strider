@@ -58,6 +58,8 @@ declare module "../Reason.ts" {
  *   permissions, downloads, file choosers (`setInputFiles` works), screencasts and PDFs fail with `Unsupported`.
  *   `Browser.capabilities` lists what it offers.
  * - Stock WebKit with an automation mode is Linux's: WebKitGTK and WPE.
+ * - A MiniBrowser from Nix needs `glib-networking`'s modules on `GIO_EXTRA_MODULES` for HTTPS, which otherwise
+ *   fails with "TLS support is not available"; other distributions install them where GIO looks.
  *
  * **Example** (A MiniBrowser for a program, with its platform's sockets)
  *

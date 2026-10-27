@@ -8,11 +8,17 @@ import type * as FileSystem from "effect/FileSystem"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Scope from "effect/Scope"
 import type * as Socket from "effect/socket/Socket"
+import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
+import * as fs from "node:fs"
 import * as http from "node:http"
+import * as https from "node:https"
 import type * as net from "node:net"
+import * as os from "node:os"
+import * as path from "node:path"
 import type * as Browser from "../../../src/Browser.ts"
 import type * as Adapter from "../../../src/internal/adapter.ts"
+import { openssl } from "../browsers.ts"
 
 // ── The site ──
 
@@ -242,6 +248,52 @@ export const site: Effect.Effect<Site, never, Scope.Scope> = Effect.acquireRelea
       server.close(() => resume(Effect.void))
     })
 ).pipe(Effect.map(({ site }) => site))
+
+/**
+ * A site over TLS whose certificate nothing trusts, for the scope: self-signed, for `127.0.0.1`, made with the Nix
+ * environment's OpenSSL as the scope starts and deleted as it ends (review 22, candidate 8).
+ */
+export const tlsSite: Effect.Effect<{ readonly origin: string }, never, Scope.Scope> = Effect.acquireRelease(
+  Effect.callback<{ server: https.Server; directory: string; origin: string }>((resume) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-tls-"))
+    const key = path.join(directory, "key.pem")
+    const cert = path.join(directory, "cert.pem")
+    execFileSync(openssl, [
+      "req",
+      "-x509",
+      "-newkey",
+      "ec",
+      "-pkeyopt",
+      "ec_paramgen_curve:prime256v1",
+      "-nodes",
+      "-keyout",
+      key,
+      "-out",
+      cert,
+      "-days",
+      "1",
+      "-subj",
+      "/CN=127.0.0.1",
+      "-addext",
+      "subjectAltName=IP:127.0.0.1"
+    ], { stdio: "ignore" })
+    const server = https.createServer({ key: fs.readFileSync(key), cert: fs.readFileSync(cert) }, (_, response) => {
+      html(response, "<title>secure</title><p>secure</p>")
+    })
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address() as net.AddressInfo
+      resume(Effect.succeed({ server, directory, origin: `https://127.0.0.1:${port}` }))
+    })
+  }),
+  ({ directory, server }) =>
+    Effect.callback<void>((resume) => {
+      server.closeAllConnections()
+      server.close(() => {
+        fs.rmSync(directory, { recursive: true, force: true })
+        resume(Effect.void)
+      })
+    })
+).pipe(Effect.map(({ origin }) => ({ origin })))
 
 // ── Facts ──
 

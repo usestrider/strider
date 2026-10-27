@@ -69,7 +69,8 @@ waiting for a popup, a download or a file chooser, and most emulation; attached,
   and typing work, and frame locators; `evaluate` doesn't (use `evaluateInMainWorld`); dialogs arrive as
   `Dialog.Unknown`, so a `Dialog.handle` handler matching on `_tag` needs that case; `back` and `forward` are refused,
   and `Popup`, `Download` and `FileChooser` waits fail at once with `SubscriptionError{Unsupported}`: a page another
-  opens has no opener there. A context's cookie list is what its open pages are sent.
+  opens has no opener there. A context's cookie list is what its open pages are sent. A MiniBrowser from Nix needs
+  `GIO_EXTRA_MODULES` naming `glib-networking`'s modules, or HTTPS fails with "TLS support is not available".
 - **Errors are per module, with a reason.** Recover with
   `Effect.catchReason("LocatorError", "StrictViolation", …)`. Any operation can also fail with `TargetGone` or
   `Timeout`, which says how far it got (`timeout.phase`); a `waitFor` on a value that settled for good, such as a

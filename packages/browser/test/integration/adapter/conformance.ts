@@ -18,7 +18,7 @@ import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import type * as PageNavigation from "../../../src/PageNavigation.ts"
 import type * as Target from "../../../src/Target.ts"
-import { type Backend, json, makeRecorder, type Recorder, type Site, site } from "./harness.ts"
+import { type Backend, json, makeRecorder, type Recorder, type Site, site, tlsSite } from "./harness.ts"
 
 const timeout = 60_000
 
@@ -216,6 +216,21 @@ export const conformance = (backend: Backend) =>
             }
           }), timeout)
 
+        it.effect("fails a navigation to a site whose certificate isn't trusted, at the URL it was going to", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            const { origin } = yield* tlsSite
+            const url = `${origin}/secure`
+            const { navigation, outcome } = yield* goto(world, page, url)
+            const started = world.facts.all("NavigationStarted").find((fact) =>
+              fact.navigation === navigation
+            )
+            // Where it was going, never an error page's own URL (QUIRKS.md, Q2)
+            assert.strictEqual(started?.url, url, JSON.stringify(started))
+            assert.strictEqual(outcome._tag, "Failed", JSON.stringify(outcome))
+          }), timeout)
+
         it.effect("reloads, and moves through history: back, forward, and nowhere past the end", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
@@ -279,7 +294,8 @@ export const conformance = (backend: Backend) =>
             yield* goto(world, page, `${world.site.origin}/cache?again`)
             const cached = yield* world.facts.when(
               "ResponseReceived",
-              (fact) => fact.response.url === script && fact.response.hop !== fresh.response.hop
+              (fact) =>
+                fact.response.url === script && fact.response.hop !== fresh.response.hop
             )
             assert.strictEqual(cached.response.servedBy, precise ? "cache" : "cacheOrServiceWorker")
             // A route first, on a page no worker controls: WebKit's intercepts don't see a controlled page's requests
@@ -291,7 +307,8 @@ export const conformance = (backend: Backend) =>
             const routed = yield* evaluate(world, page, "() => fetch('/json').then((r) => r.text())").pipe(
               Effect.forkChild
             )
-            const paused = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "PausedRequest")
+            const paused = yield* world.facts.when("ObligationOpened", (fact) =>
+              fact.subject._tag === "PausedRequest")
             yield* world.adapter.resolve(paused.obligation, {
               _tag: "Fulfill",
               status: 200,

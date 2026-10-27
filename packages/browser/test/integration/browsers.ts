@@ -23,6 +23,9 @@ export const chromium = { executable: named("STRIDER_CHROMIUM"), ...pins.chromiu
 /** Firefox: its executable and the version it must be. */
 export const firefox = { executable: named("STRIDER_FIREFOX"), ...pins.firefox }
 
+/** OpenSSL, which makes the TLS fixture's certificate (`adapter/harness.ts`). */
+export const openssl = named("STRIDER_OPENSSL")
+
 /** Stock WebKit: WebKitGTK's MiniBrowser, the version it must be, and the X server it runs on. */
 export const webkitgtk = { executable: named("STRIDER_WEBKITGTK"), xvfb: named("STRIDER_XVFB"), ...pins.webkitgtk }
 

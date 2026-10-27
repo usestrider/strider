@@ -948,6 +948,19 @@ Adapter responsibilities:
 - **Where the build differs from the review:** nowhere.
 - **Tests.** The slices' call site 1 checks the restored frame's storage on every backend again, and passes on all three; `test/Errors.test.ts` decodes a state saved without the key, and one with it. Integration tests: 517, all passing in one full run, a file at a time.
 
+**Built** (2026-10-26, after [review 22](reviews/22-everything-deferred.md), its sixth step): the open quirks' checks (candidate 8).
+
+- **A TLS fixture** (`test/integration/adapter/harness.ts`, `tlsSite`): an HTTPS server on `127.0.0.1` with a self-signed certificate the Nix environment's OpenSSL makes as the scope starts (`STRIDER_OPENSSL`), deleted as it ends. The conformance suite navigates to it on every backend: the navigation fails, reported for the URL it was going to. Chromium fails it `net::ERR_CERT_AUTHORITY_INVALID` with its error page, Firefox `MOZILLA_PKIX_ERROR_SELF_SIGNED_CERT`, reported where it was going (Q2), and stock WebKit "Unacceptable TLS certificate" with its error page.
+- **Where the build differs from the review.**
+  - **The fixture found stock WebKit without TLS** in the integration environment, until `GIO_EXTRA_MODULES` named `glib-networking`'s modules (Q237): every HTTPS load had failed before a certificate was checked.
+  - **The integration environment has no sound card** (`ALSA_CONFIG_PATH`, an empty configuration): the first full run with the fixture failed the slices' Firefox video tests, which had passed that day, because Firefox's `startScreencast` hung the browser while its audio reached the desktop's PipeWire (Q236).
+  - **Q233's cause was found:** the conformance test's assertion, printing the navigations it saw, caught Firefox replying to `browsingContext.navigate` for a port it refuses (`deniedPortAccess`) with an error, and reporting the navigation's start and its error page after. The BiDi adapter's `neverStarted`, which reports a navigation whose command failed, took its expectation outside the adapter's serialized step, so an event handled in between started the navigation again under a new id. It now takes and reports it in one step: the test failed twice in 12 runs alone before, and in none of 15 after.
+  - **Q238 is new:** the second full run's WebKit HAR missed the body of the document the page left at once, which 5 runs alone didn't repeat.
+  - **Q72 needed no check against Playwright's client:** stock WebKit resolved it (review 23).
+  - **Q82 and Q103 are measured by review 25's comparison scripts,** which are the scenario work review 22 deferred them to.
+  - **Q180 stays open,** as the maintainer decided, and **Q14** waits for Firefox.
+- **Tests.** The conformance suite's TLS test, on every backend. Integration tests: 520, all passing in one full run, a file at a time; it was the third: the first failed the slices' Firefox video tests (Q236), and the second Q233's test and the WebKit HAR test (Q238).
+
 ### Pause-on-start granularity
 
 Before-author-script setup for *new* targets needs them paused at creation. Granularity differs by backend, and the access model depends on it.
