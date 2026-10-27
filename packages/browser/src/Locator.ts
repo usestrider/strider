@@ -282,6 +282,11 @@ export interface ReadonlyLocator
   /**
    * Enters an iframe inside this locator's matches, found by `iframe`'s query.
    *
+   * **Gotchas**
+   *
+   * An `iframe` from another page or frame is a mistake in the program, so it throws at once instead of failing as an
+   * effect.
+   *
    * **Example** (Filling a card field in a checkout's iframe)
    *
    * ```ts import.meta.vitest
@@ -317,6 +322,11 @@ export interface ReadonlyLocator
   /**
    * Elements that match both locators.
    *
+   * **Gotchas**
+   *
+   * A locator from another page or frame is a mistake in the program, so it throws at once instead of failing as an
+   * effect.
+   *
    * **Example** (Clicking a button that also has a tooltip)
    *
    * ```ts import.meta.vitest
@@ -332,6 +342,11 @@ export interface ReadonlyLocator
   and(other: ReadonlyLocator): ReadonlyLocator
   /**
    * Elements that match either locator.
+   *
+   * **Gotchas**
+   *
+   * A locator from another page or frame is a mistake in the program, so it throws at once instead of failing as an
+   * effect.
    *
    * **Example** (Waiting for whichever appears first)
    *
@@ -1103,8 +1118,10 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Gotchas**
    *
-   * In a synthetic drag, only Firefox lets `dragend` see the `dropEffect` the target set: Chromium and WebKit
-   * ignore a `dropEffect` set on a `DataTransfer` that a script made, so `dragend` sees `"none"` there.
+   * - In a synthetic drag, only Firefox lets `dragend` see the `dropEffect` the target set: Chromium and WebKit
+   *   ignore a `dropEffect` set on a `DataTransfer` that a script made, so `dragend` sees `"none"` there.
+   * - A `target` from another page is a mistake in the program, so it throws at once instead of failing as an
+   *   effect.
    *
    * **Example** (Moving a card to another column)
    *
@@ -1200,6 +1217,11 @@ export interface ReadonlyFrameLocator extends Queries<ReadonlyLocator> {
   readonly owner: ReadonlyLocator
   /**
    * Enters a nested iframe, found by a locator built from this frame locator.
+   *
+   * **Gotchas**
+   *
+   * An `iframe` from another page or frame is a mistake in the program, so it throws at once instead of failing as an
+   * effect.
    *
    * **Example** (Reaching a card field two iframes deep)
    *
