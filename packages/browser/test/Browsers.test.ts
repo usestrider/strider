@@ -9,9 +9,6 @@ import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Browsers from "../src/internal/browsers.ts"
 import * as Cli from "../src/internal/cli.ts"
-import { build } from "../src/internal/webkitBuild.ts"
-
-const vendored = `${import.meta.dirname}/../../tools/codegen/protocols/webkit/source/protocol.json`
 
 describe("strider browsers", () => {
   layer(NodeServices.layer, { excludeTestServices: true })((it) => {
@@ -49,33 +46,20 @@ describe("strider browsers", () => {
         )
       }))
 
-    it.effect("finds Playwright's cache where its installer puts it, and its WebKit and Chromium builds", () =>
+    it.effect("looks for WebKit's MiniBrowser where its packages put it, on Linux only", () =>
       Effect.sync(() => {
-        assert.deepStrictEqual(
-          Browsers.playwrightCache("linux", { PLAYWRIGHT_BROWSERS_PATH: "/browsers", HOME: "/home/a" }),
-          Option.some("/browsers")
+        const linux = Browsers.webkitCandidates("linux", { HOME: "/home/a", USER: "a" }).map((candidate) =>
+          candidate.path
         )
-        assert.deepStrictEqual(
-          Browsers.playwrightCache("linux", { HOME: "/home/a" }),
-          Option.some("/home/a/.cache/ms-playwright")
-        )
-        assert.deepStrictEqual(
-          Browsers.playwrightCache("darwin", { HOME: "/Users/a" }),
-          Option.some("/Users/a/Library/Caches/ms-playwright")
-        )
-        assert.deepStrictEqual(Browsers.playwrightCache("linux", {}), Option.none())
-        assert.deepStrictEqual(Browsers.playwrightCandidates("win32", "C:\\pw", "webkit-2359"), [
-          { backend: "webkit", path: "C:\\pw\\webkit-2359\\Playwright.exe", foundBy: "playwright" }
-        ])
-        assert.deepStrictEqual(
-          Browsers.playwrightCandidates("linux", "/pw", "chromium-1243").map((candidate) => candidate.path),
-          ["/pw/chromium-1243/chrome-linux64/chrome", "/pw/chromium-1243/chrome-linux/chrome"]
-        )
-        assert.deepStrictEqual(Browsers.playwrightCandidates("linux", "/pw", "chromium_headless_shell-1243"), [])
-        assert.deepStrictEqual(Browsers.playwrightCandidates("linux", "/pw", "ffmpeg-1011"), [])
+        assert.include(linux, "/usr/libexec/webkitgtk-6.0/MiniBrowser")
+        assert.include(linux, "/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/MiniBrowser")
+        assert.include(linux, "/usr/lib/wpe-webkit-2.0/MiniBrowser")
+        assert.include(linux, "/home/a/.nix-profile/libexec/webkitgtk-6.0/MiniBrowser")
+        assert.include(linux, "/etc/profiles/per-user/a/libexec/webkitgtk-6.0/MiniBrowser")
+        assert.deepStrictEqual(Browsers.webkitCandidates("darwin", { HOME: "/Users/a" }), [])
       }))
 
-    it.effect("reports each browser once, by the path found first, with its version and the build check", () =>
+    it.effect("reports each browser once, by the path found first, with its version", () =>
       Effect.gen(function*() {
         const fs = yield* FileSystem.FileSystem
         // Real, so a temporary directory behind a link (macOS's /var) doesn't read as a link itself
@@ -93,63 +77,57 @@ describe("strider browsers", () => {
         yield* fs.symlink(`${root}/store/chromium`, `${root}/bin/chromium-browser`)
         yield* fs.makeDirectory(`${root}/bin/firefox`)
         yield* browser(`${root}/bin/firefox-nightly`, "Mozilla Firefox 160.0a1")
-        // Playwright's cache: the build the adapter needs, and another
-        for (const revision of [build.revision, "2311"]) {
-          yield* fs.makeDirectory(`${root}/pw/webkit-${revision}`, { recursive: true })
-          yield* browser(`${root}/pw/webkit-${revision}/pw_run.sh`, "never asked")
-        }
-        yield* fs.copyFile(vendored, `${root}/pw/webkit-${build.revision}/protocol.json`)
-        yield* fs.writeFileString(`${root}/pw/webkit-2311/protocol.json`, "{}")
+        // A Nix profile's MiniBrowser, which leads to a store path that names its version; it's never run
+        const store = `${root}/store/abc-webkitgtk-2.54.1+abi=6.0/libexec/webkitgtk-6.0`
+        yield* fs.makeDirectory(store, { recursive: true })
+        yield* browser(`${store}/MiniBrowser`, "never asked")
+        yield* fs.makeDirectory(`${root}/.nix-profile/libexec`, { recursive: true })
+        yield* fs.symlink(store, `${root}/.nix-profile/libexec/webkitgtk-6.0`)
 
-        const found = yield* Browsers.find("linux", { PATH: `${root}/bin`, PLAYWRIGHT_BROWSERS_PATH: `${root}/pw` })
+        // Only what this machine of scripts has: the real one's own browsers are left out
+        const found = (yield* Browsers.find("linux", { PATH: `${root}/bin`, HOME: root })).filter((browser) =>
+          browser.path.startsWith(root)
+        )
         const real = yield* fs.realPath(`${root}/store/chromium`)
+        const miniBrowser = yield* fs.realPath(`${root}/.nix-profile/libexec/webkitgtk-6.0/MiniBrowser`)
         assert.deepStrictEqual(found, [
           {
             backend: "chromium",
             path: `${root}/bin/chromium`,
             resolved: Option.some(real),
             foundBy: "PATH",
-            version: Option.some("Chromium 155.0.8059.79"),
-            matchesAdapter: Option.none()
+            version: Option.some("Chromium 155.0.8059.79")
           },
           {
             backend: "firefox",
             path: `${root}/bin/firefox-nightly`,
             resolved: Option.none(),
             foundBy: "PATH",
-            version: Option.some("Mozilla Firefox 160.0a1"),
-            matchesAdapter: Option.none()
+            version: Option.some("Mozilla Firefox 160.0a1")
           },
           {
             backend: "webkit",
-            path: `${root}/pw/webkit-2311/pw_run.sh`,
-            resolved: Option.none(),
-            foundBy: "playwright",
-            version: Option.some("Playwright WebKit build 2311"),
-            matchesAdapter: Option.some(false)
-          },
-          {
-            backend: "webkit",
-            path: `${root}/pw/webkit-${build.revision}/pw_run.sh`,
-            resolved: Option.none(),
-            foundBy: "playwright",
-            version: Option.some(`Playwright WebKit build ${build.revision}`),
-            matchesAdapter: Option.some(true)
+            path: `${root}/.nix-profile/libexec/webkitgtk-6.0/MiniBrowser`,
+            resolved: Option.some(miniBrowser),
+            foundBy: "installer",
+            version: Option.some("WebKitGTK 2.54.1")
           }
         ])
 
-        const text = Cli.render(found, Option.some(`${root}/pw`))
+        const text = Cli.render(found)
         assert.include(text, `  ${root}/bin/chromium\n    Chromium 155.0.8059.79 · on PATH · leads to ${real}`)
         assert.include(text, `Firefox.layer\n  ${root}/bin/firefox-nightly`)
-        assert.include(text, `not build ${build.revision}, which the WebKit adapter needs, so WebKit.layer refuses it`)
-        assert.include(text, "the build the WebKit adapter needs")
+        assert.include(
+          text,
+          `WebKit.layer\n  ${root}/.nix-profile/libexec/webkitgtk-6.0/MiniBrowser\n    WebKitGTK 2.54.1 · where its installer or package puts it`
+        )
       }))
 
     it.effect("says when it finds nothing", () =>
       Effect.sync(() => {
-        const text = Cli.render([], Option.none())
+        const text = Cli.render([])
         assert.include(text, "Chromium.layer\n  none found")
-        assert.include(text, "WebKit.layer\n  none found; Playwright's installer")
+        assert.include(text, "WebKit.layer\n  none found; WebKitGTK's and WPE's packages put a MiniBrowser")
       }))
   })
 })

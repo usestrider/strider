@@ -8,7 +8,6 @@ import * as fs from "node:fs"
 interface Pins {
   readonly chromium: { readonly version: string; readonly fixture: string }
   readonly firefox: { readonly version: string; readonly fixture: string }
-  readonly webkit: { readonly revision: string; readonly fixture: string }
   /**
    * Stock WebKit, whose inspector and Automation protocols `webkit-stock-protocol` and `webkit-automation-protocol`
    * are generated from (`webkitgtk-<version>`).

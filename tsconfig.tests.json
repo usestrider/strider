@@ -30,7 +30,6 @@
       "@usestrider/browser/protocol": ["./packages/browser/src/protocol/index.ts"],
       "@usestrider/browser/test": ["./packages/browser/src/test/index.ts"],
       "@usestrider/browser/webkit": ["./packages/browser/src/webkit/index.ts"],
-      "@usestrider/browser/webkit-protocol": ["./packages/browser/src/webkit-protocol/index.ts"],
       "@usestrider/browser/webkit-stock-protocol": ["./packages/browser/src/webkit-stock-protocol/index.ts"],
       "@usestrider/browser/webkit-automation-protocol": ["./packages/browser/src/webkit-automation-protocol/index.ts"],
       "@usestrider/browser/*": ["./packages/browser/src/*.ts"],

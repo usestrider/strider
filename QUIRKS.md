@@ -921,6 +921,11 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* on stock WebKit, which has one world, a node's binding, already an object there, is passed as it is.
 - *Reconsider:* nothing.
 
+**Q234. WebKitGTK's MiniBrowser starts GTK before it reads its options, so `--version` needs a display** (Browser). Without one it prints only GTK's warning that it can't open a display, and with one it would open a window before answering.
+- *Seen:* review 23's last step, asking the pinned MiniBrowser its version for `strider browsers`.
+- *We:* `strider browsers` never runs a MiniBrowser: its version is read from the path it leads to, where that names one, as a Nix store path does, and is otherwise not reported.
+- *Reconsider:* nothing.
+
 ## Ours: workarounds and odd shapes
 
 **Q58. `PromptBlocking` carries the dialog's kind and text, not `Page.Prompt`** (Ours). `Reason` is a leaf module, and importing `Page` into it makes a load cycle.

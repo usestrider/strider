@@ -1,12 +1,12 @@
 /**
  * The WebKit backend (`@usestrider/browser/webkit`): stock WebKit, launched in automation mode or attached through
- * its inspector, and, until review 23's last step removes it, Playwright's patched build.
+ * its inspector (reviews 22 and 23).
  *
  * A launch runs the executable it names, and nothing is looked up or downloaded. WebKitGTK's or WPE's MiniBrowser is
  * launched in automation mode and driven through its inspector server's socket, with WebKit's Automation protocol
  * and its inspector protocol, both generated from WebKitGTK's source (`@usestrider/browser/webkit-automation-protocol`,
- * `/webkit-stock-protocol`); a Playwright build is checked by its `protocol.json`. An attach reaches an inspector
- * server over HTTP. Protocol failures carry the inspector error under `metadata.webkit`.
+ * `/webkit-stock-protocol`). An attach reaches an inspector server over HTTP. Protocol failures carry the inspector
+ * error under `metadata.webkit`.
  *
  * @stability unstable
  * @since 0.1.0
@@ -15,7 +15,6 @@ import type * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import type * as Layer from "effect/Layer"
-import * as Option from "effect/Option"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Socket from "effect/socket/Socket"
 import type * as Browser from "../Browser.ts"
@@ -24,7 +23,6 @@ import * as Connect from "../internal/connect.ts"
 import * as LaunchOptions from "../internal/launchOptions.ts"
 import * as WebKitAdapter from "../internal/webkitAdapter.ts"
 import * as WebKitAutomation from "../internal/webkitAutomation.ts"
-import * as WebKitLauncher from "../internal/webkitLauncher.ts"
 import type * as SocketConnector from "../protocol/SocketConnector.ts"
 import type * as Url from "../Url.ts"
 
@@ -36,8 +34,8 @@ declare module "../Reason.ts" {
 }
 
 /**
- * Launches WebKit and provides it as `Browser`: WebKitGTK's or WPE's MiniBrowser, stock WebKit in automation mode
- * (review 23), or, until that review's last step, a Playwright-patched build (`pw_run.sh`).
+ * Launches stock WebKit and provides it as `Browser`: WebKitGTK's or WPE's MiniBrowser, in automation mode
+ * (review 23). Another executable fails with `InvalidInput`.
  *
  * **Details**
  *
@@ -93,18 +91,11 @@ export const layer = (
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | SocketConnector.SocketConnector
 > =>
   BrowserImpl.layer((sink) =>
-    Option.isSome(WebKitAutomation.automationArguments(options.executablePath))
-      // Stock WebKit in automation mode, a browser process per context (review 23)
-      ? Effect.flatMap(
-        WebKitAutomation.start(options),
-        (group) =>
-          WebKitAdapter.connect(group.transport, { sink, ownership: "launched", profile: "stock", automation: group })
-      )
-      : Effect.flatMap(
-        WebKitLauncher.launch(LaunchOptions.settings(options)),
-        ({ transport }) =>
-          WebKitAdapter.connect(transport, { sink, ownership: "launched", revision: WebKitLauncher.build.revision })
-      )
+    // A browser process per context (review 23)
+    Effect.flatMap(
+      WebKitAutomation.start(LaunchOptions.settings(options)),
+      (group) => WebKitAdapter.connect(group.transport, { sink, ownership: "launched", automation: group })
+    )
   )
 
 /**
@@ -188,6 +179,6 @@ export const layerAttach = (
   BrowserImpl.layer((sink) =>
     Effect.flatMap(
       Connect.webkitInspector(endpoint, options),
-      (transport) => WebKitAdapter.connect(transport, { sink, ownership: "attached", profile: "stock" })
+      (transport) => WebKitAdapter.connect(transport, { sink, ownership: "attached" })
     )
   )

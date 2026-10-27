@@ -19,7 +19,7 @@ import { splitId } from "./Model.ts"
 export interface Source {
   /** Where the spec came from, for the generated header. */
   readonly description: string
-  /** The output directory under `packages/browser/src`, which also keys brands: `cdp`, `bidi-protocol`, `webkit-protocol`. */
+  /** The output directory under `packages/browser/src`, which also keys brands: `cdp`, `bidi-protocol`, `webkit-stock-protocol`. */
   readonly output: string
   /** The protocol's directory under `packages/tools/codegen/protocols`, where its model is corrected. */
   readonly directory: string

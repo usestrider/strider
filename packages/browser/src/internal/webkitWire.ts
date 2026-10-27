@@ -1,11 +1,12 @@
 /**
- * The wire of Playwright's WebKit build: the JSON envelope, nested three levels deep, the session lifecycle
- * its events announce, and the error table.
+ * The WebKit adapter's wire: the envelope stock WebKit's pages reach it in (`webkitEnvelope.ts`), nested three
+ * levels deep, the session lifecycle its events announce, and the error table. The transports present each page
+ * this way, as WebKit's own inspector proxies reach a page (review 22, candidate 7; review 23).
  *
  * - **The browser session** is the connection itself: `{ id, method, params }`, replies `{ id, result }` or
- *   `{ id, error: { code, message, data } }`, events `{ method, params }`. The `Playwright` domain lives here.
- * - **A page proxy** (one page, in the UI process) adds `pageProxyId` to the envelope, in both directions.
- *   `Playwright.pageProxyCreated` announces it and `Playwright.pageProxyDestroyed` ends it.
+ *   `{ id, error: { code, message, data } }`, events `{ method, params }`. The `Envelope` domain lives here.
+ * - **A page proxy** (one page) adds `pageProxyId` to the envelope, in both directions.
+ *   `Envelope.pageProxyCreated` announces it and `Envelope.pageProxyDestroyed` ends it.
  * - **An inspector target** (the page's web process, which a cross-site navigation replaces) is reached
  *   through its page proxy: a command is wrapped in `Target.sendMessageToTarget`, and everything it sends
  *   comes back wrapped in `Target.dispatchMessageFromTarget`. `Target.targetCreated` announces it;
@@ -15,10 +16,9 @@
  *   `Worker.dispatchMessageFromWorker`, and announced by `Worker.workerCreated`.
  *
  * A wrapper is a command of its own, with an id. Each one takes the negated id of the command it carries:
- * the browser accepts negative ids (Playwright's own client sends -9999), and the wrapped command's reply
- * still comes with the positive id. The wrapper's own reply is ignored when it succeeds, and becomes the
- * wrapped command's error when it fails, because then the wrapped command never arrived. Unwrapping never
- * publishes the wrapper events themselves.
+ * WebKit accepts negative ids, and the wrapped command's reply still comes with the positive id. The wrapper's
+ * own reply is ignored when it succeeds, and becomes the wrapped command's error when it fails, because then the
+ * wrapped command never arrived. Unwrapping never publishes the wrapper events themselves.
  */
 import * as Predicate from "effect/Predicate"
 import type * as Protocol from "../protocol/Protocol.ts"
@@ -64,39 +64,32 @@ export const route = (sessionKey: Protocol.SessionKey): Route => {
   }
 }
 
-const recorded = "Playwright WebKit 2359 (WebKit 26.6), recorded 2026-10-20; checked by test/integration/WebKit.test.ts"
-const stock =
+const recorded =
   "WebKitGTK 2.54.1's MiniBrowser, recorded 2026-10-26; checked by test/integration/WebKitAutomation.test.ts"
 
 /**
  * WebKit's error table. WebKit reports failures as JSON-RPC codes plus English text, so rows match both; a
- * reworded message falls through to `Unrecognized` and fails the integration test, never a guess. The same
- * text can come with two codes: a page proxy that is gone is `-32602` when the envelope names it and `-32000`
- * when a parameter does.
+ * reworded message falls through to `Unrecognized` and fails the integration test, never a guess. One row is the
+ * transports' own: a page proxy that is gone, answered as WebKit's inspector proxies answer one.
  */
 export const errors: ReadonlyArray<ErrorMatcher> = [
   {
     match: { code: -32601 },
     becomes: { _tag: "Unsupported" },
     evidence:
-      `JSON-RPC 2.0 §5.1, "Method not found"; "'Nope' domain was not found" and "'Runtime.nope' was not found", at every level, ${recorded}; in a page's target and Automation's, ${stock}`
+      `JSON-RPC 2.0 §5.1, "Method not found"; "'Nope' domain was not found" and "'Automation.nope' was not found", in a page's target and Automation's, ${recorded}`
   },
   {
     match: { code: -32602, message: { includes: "can't be processed" } },
     becomes: { _tag: "Rejected", reason: "InvalidArgument" },
     evidence:
-      `JSON-RPC 2.0 §5.1, "Invalid params"; "Some arguments of method 'Runtime.evaluate' can't be processed", for a missing and a mistyped expression, ${recorded}; for a missing expression, and Automation's missing handle, ${stock}`
+      `JSON-RPC 2.0 §5.1, "Invalid params"; "Some arguments of method 'Runtime.evaluate' can't be processed", for a missing expression, and Automation's missing handle, ${recorded}`
   },
   {
     match: { code: -32602, message: "Cannot find page proxy with provided 'pageProxyId'" },
     becomes: { _tag: "SessionEnded", why: "detached" },
     evidence:
-      `Dialog.enable, and a command to a target, after Playwright.closePage, and on an unknown pageProxyId, ${recorded}`
-  },
-  {
-    match: { code: -32000, message: "Cannot find page proxy with provided 'pageProxyId'" },
-    becomes: { _tag: "Rejected", reason: "NoSuchTarget" },
-    evidence: `Playwright.navigate with an unknown pageProxyId, ${recorded}`
+      "the transports' answer to a command for a page that is gone (webkitStockTransport.ts, webkitAutomation.ts)"
   },
   {
     match: { code: -32000, message: "Missing target for given targetId" },
@@ -106,23 +99,18 @@ export const errors: ReadonlyArray<ErrorMatcher> = [
   {
     match: { code: -32000, message: "Missing frame for given frameId" },
     becomes: { _tag: "Rejected", reason: "NoSuchFrame" },
-    evidence: `Page.getResourceContent with an unknown frameId, ${recorded}; and ${stock}`
+    evidence: `Page.getResourceContent with an unknown frameId, ${recorded}`
   },
   {
     match: { code: -32000, message: "Missing node for given nodeId" },
     becomes: { _tag: "Rejected", reason: "NoSuchNode" },
-    evidence: `DOM.resolveNode with an unknown nodeId, ${recorded}; and ${stock}`
-  },
-  {
-    match: { code: -32000, message: "Node not found" },
-    becomes: { _tag: "Rejected", reason: "NoSuchNode" },
-    evidence: `DOM.describeNode with an unknown objectId, ${recorded}`
+    evidence: `DOM.resolveNode with an unknown nodeId, ${recorded}`
   },
   {
     match: { code: -32000, message: "WindowNotFound" },
     becomes: { _tag: "Rejected", reason: "NoSuchTarget" },
     evidence:
-      `Automation's error for a browsing context it doesn't have, and for a frame it doesn't have: getBrowsingContext with an unknown handle, evaluateJavaScriptFunction with an unknown frameHandle, ${stock}`
+      `Automation's error for a browsing context it doesn't have, and for a frame it doesn't have: getBrowsingContext with an unknown handle, evaluateJavaScriptFunction with an unknown frameHandle, ${recorded}`
   }
 ]
 
@@ -196,12 +184,12 @@ export const wire: Wire = {
     if (!isRecord(params)) return
     const at = event.key === undefined ? undefined : route(event.key)
     switch (event.method) {
-      case "Playwright.pageProxyCreated":
+      case "Envelope.pageProxyCreated":
         if (at === undefined && typeof params.pageProxyId === "string") {
           sessions.attached(pageProxyKey(params.pageProxyId), undefined)
         }
         return
-      case "Playwright.pageProxyDestroyed":
+      case "Envelope.pageProxyDestroyed":
         if (at === undefined && typeof params.pageProxyId === "string") {
           sessions.ended(pageProxyKey(params.pageProxyId), "targetDestroyed")
         }

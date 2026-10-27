@@ -21,11 +21,11 @@ every event module (`Popup`, `Dialog`, `FileChooser`, `Download`, `ConsoleMessag
 (`Browser.SpanNameGenerator`, `TracerDisabledWhen`, `TraceProtocolCommands`) and `Diagnostics.withPreset`, and the
 test layers (`Browser.layerTest`, and `VitestBrowser.layer` from `@usestrider/vitest`), recordings (`Har.record`, `Trace.record`), the agent toolkit
 (`BrowserToolkit`, `CapturePolicy`) and the `strider` command (CLI.md) work on every backend. What a backend can't do or report
-fails with `Unsupported`, naming the capability: modifiers on WebKit's pointer, an HTML drag anywhere but
-Chromium, a CSS-pixel or transparent screenshot and a PDF's header on Firefox, a PDF on WebKit, a partitioned
-cookie anywhere but Chromium, `Capability.AxTree` anywhere but Chromium, `Capability.Screencast` on Firefox, and on
-stock WebKit input, dialogs, new pages and `evaluate` (`WebKit.layerAttach`'s documentation lists them). Every member
-the API declares is built.
+fails with `Unsupported`, naming the capability: an HTML drag anywhere but Chromium, a CSS-pixel or transparent
+screenshot and a PDF's header on Firefox, a partitioned cookie anywhere but Chromium, `Capability.AxTree` anywhere but
+Chromium, `Capability.Screencast` on Firefox, and on WebKit, which is stock WebKit, `evaluate`, a PDF, a screencast,
+waiting for a popup, a download or a file chooser, and most emulation; attached, input, dialogs and new pages too
+(`WebKit.layer`'s and `WebKit.layerAttach`'s documentation list them). Every member the API declares is built.
 
 ## Shape
 

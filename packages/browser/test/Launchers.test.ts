@@ -1,6 +1,6 @@
 /**
  * The launchers, without a browser: the executable each accepts (an absolute path, and nothing looked up), the
- * arguments and profiles it passes, how it fails, and WebKit's revision check. The integration tests launch the real browsers.
+ * arguments and profiles it passes, and how it fails. The integration tests launch the real browsers.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
@@ -12,8 +12,8 @@ import * as Option from "effect/Option"
 import * as ChromiumLauncher from "../src/internal/chromiumLauncher.ts"
 import * as FirefoxLauncher from "../src/internal/firefoxLauncher.ts"
 import * as Launch from "../src/internal/launch.ts"
-import * as WebKitLauncher from "../src/internal/webkitLauncher.ts"
-import { pins } from "./integration/pins.ts"
+import * as WebKitAutomation from "../src/internal/webkitAutomation.ts"
+import * as SocketConnector from "../src/protocol/SocketConnector.ts"
 
 describe("Chromium launcher", () => {
   layer(NodeServices.layer, { excludeTestServices: true })((it) => {
@@ -101,40 +101,44 @@ describe("Firefox launcher", () => {
 })
 
 describe("WebKit launcher", () => {
-  layer(NodeServices.layer, { excludeTestServices: true })((it) => {
-    it.effect("is pinned to the build the adapter is generated from", () =>
+  // Nothing here reaches a socket: a launch fails before it would open one
+  const services = Layer.merge(
+    NodeServices.layer,
+    SocketConnector.layer(() => Effect.die(new Error("no socket in these tests")))
+  )
+  layer(services, { excludeTestServices: true })((it) => {
+    it.effect("launches the MiniBrowser in automation mode, and nothing else", () =>
       Effect.sync(() => {
-        assert.strictEqual(pins.webkit.revision, WebKitLauncher.build.revision)
+        assert.deepStrictEqual(
+          WebKitAutomation.automationArguments("/usr/libexec/webkitgtk-6.0/MiniBrowser"),
+          Option.some(["--automation"])
+        )
+        assert.isTrue(Option.isNone(WebKitAutomation.automationArguments("/usr/bin/epiphany")))
       }))
 
     it.effect("fails with ExecutableNotFound for a path that doesn't exist", () =>
       Effect.gen(function*() {
-        const error = yield* WebKitLauncher.launch({ executablePath: "/nowhere/pw_run.sh" }).pipe(Effect.flip)
+        const error = yield* Effect.scoped(WebKitAutomation.start({ executablePath: "/nowhere/MiniBrowser" })).pipe(
+          Effect.flip
+        )
         assert(error.reason._tag === "ExecutableNotFound")
-        assert.deepStrictEqual(error.reason.searched, ["/nowhere/pw_run.sh"])
+        assert.deepStrictEqual(error.reason.searched, ["/nowhere/MiniBrowser"])
       }))
 
-    it.effect("passes the inspector pipe and the profile", () =>
-      Effect.sync(() => {
-        assert.deepStrictEqual(WebKitLauncher.argsFor({}, "/p"), [
-          "--inspector-pipe",
-          "--headless",
-          "--user-data-dir=/p"
-        ])
-      }))
-
-    it.effect("fails with IncompatibleRevision for a build whose protocol differs, or that has none", () =>
+    it.effect("fails with InvalidInput for another executable, and for headless", () =>
       Effect.gen(function*() {
         const fs = yield* FileSystem.FileSystem
         const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-test-" })
-        yield* fs.writeFileString(`${directory}/pw_run.sh`, "#!/bin/sh\nexit 1\n")
-        const missing = yield* WebKitLauncher.launch({ executablePath: `${directory}/pw_run.sh` }).pipe(Effect.flip)
-        assert(missing.reason._tag === "IncompatibleRevision")
-        assert.strictEqual(missing.reason.revision, "unknown")
-        yield* fs.writeFileString(`${directory}/protocol.json`, "[]")
-        const other = yield* WebKitLauncher.launch({ executablePath: `${directory}/pw_run.sh` }).pipe(Effect.flip)
-        assert(other.reason._tag === "IncompatibleRevision")
-        assert.match(other.reason.revision, /^protocol\.json [0-9a-f]{12}$/)
+        yield* fs.writeFileString(`${directory}/epiphany`, "#!/bin/sh\nexit 1\n")
+        yield* fs.chmod(`${directory}/epiphany`, 0o755)
+        const other = yield* Effect.scoped(WebKitAutomation.start({ executablePath: `${directory}/epiphany` })).pipe(
+          Effect.flip
+        )
+        assert.deepInclude(other.reason, { _tag: "InvalidInput", input: "executablePath" })
+        const headless = yield* Effect.scoped(
+          WebKitAutomation.start({ executablePath: `${directory}/MiniBrowser`, headless: true })
+        ).pipe(Effect.flip)
+        assert.deepInclude(headless.reason, { _tag: "InvalidInput", input: "headless" })
       }))
   })
 })

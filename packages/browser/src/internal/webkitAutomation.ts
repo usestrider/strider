@@ -8,7 +8,7 @@
  * - **Each process's Automation session** is a protocol client of its own over the session's target: its root
  *   session takes the generated `Automation` commands.
  * - **Each process's pages** are the inspector's `WebPage` targets on the same socket, presented to the WebKit
- *   adapter on one transport in Playwright's envelope, as `webkitStockTransport.ts` presents an attached
+ *   adapter on one transport in our envelope (`webkitEnvelope.ts`), as `webkitStockTransport.ts` presents an attached
  *   browser's: a page proxy's id is the process's and the target's, its context the process's, and its ids are
  *   qualified as that transport qualifies them (QUIRKS.md, Q195).
  * - **An anchor.** A browser exits when its last window closes (QUIRKS.md, Q213), so each process keeps a window of its own,
@@ -36,6 +36,7 @@ import * as Reason from "../Reason.ts"
 import * as Automation from "../webkit-automation-protocol/Automation.ts"
 import * as Launch from "./launch.ts"
 import * as ProtocolClient from "./protocolClient.ts"
+import * as Envelope from "./webkitEnvelope.ts"
 import * as InspectorSocket from "./webkitInspectorSocket.ts"
 import * as WebKitStockTransport from "./webkitStockTransport.ts"
 import * as WebKitWire from "./webkitWire.ts"
@@ -86,7 +87,7 @@ export interface Process {
 
 /** The browser processes of one connection, and the transport of their pages. */
 export interface Group {
-  /** Every process's pages, for the WebKit adapter, in Playwright's envelope. */
+  /** Every process's pages, for the WebKit adapter, in our envelope (`webkitEnvelope.ts`). */
   readonly transport: Transport.Transport
   /** The default context's process. */
   readonly first: Process
@@ -118,8 +119,8 @@ const makePages = Effect.fnUntraced(function*() {
         const message = JSON.parse(text) as Record<string, unknown>
         const { pageProxyId, ...rest } = message
         if (typeof pageProxyId !== "string") {
-          if (message.method === "Playwright.enable") {
-            // The pages open now are announced before the reply, as Playwright's build does
+          if (message.method === Envelope.enable.method) {
+            // The pages open now are announced before the reply
             enabled = true
             for (const each of held.splice(0)) deliver(each)
             deliver({ id: message.id, result: {} })
@@ -155,11 +156,11 @@ const makePages = Effect.fnUntraced(function*() {
       route: (message: string) => Effect.Effect<void, Transport.TransportError>
     ) => {
       routes.set(pageProxyId, route)
-      announce({ method: "Playwright.pageProxyCreated", params: { pageProxyId, browserContextId } })
+      announce({ method: Envelope.pageProxyCreated.method, params: { pageProxyId, browserContextId } })
     },
     destroyed: (pageProxyId: string) => {
       if (!routes.delete(pageProxyId)) return
-      announce({ method: "Playwright.pageProxyDestroyed", params: { pageProxyId } })
+      announce({ method: Envelope.pageProxyDestroyed.method, params: { pageProxyId } })
     },
     message: (pageProxyId: string, text: string) =>
       announce({

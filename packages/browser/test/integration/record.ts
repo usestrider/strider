@@ -23,7 +23,6 @@ import { pins } from "./pins.ts"
 export const fixtures = {
   cdp: pins.chromium.fixture,
   bidi: pins.firefox.fixture,
-  webkit: pins.webkit.fixture,
   webkitStock: pins.webkitgtk.fixture
 } as const
 
@@ -49,7 +48,7 @@ const wrappers = new Set(["Target.sendMessageToTarget", "Worker.sendMessageToWor
 
 /**
  * `made` names the methods the transport makes up itself rather than the browser's, which aren't recorded: stock
- * WebKit's transport presents its pages in Playwright's envelope, whose `Playwright` domain the browser hasn't got.
+ * WebKit's transport presents its pages in our envelope, whose `Envelope` domain the browser hasn't got.
  */
 export const record = (
   transport: Transport.Transport,

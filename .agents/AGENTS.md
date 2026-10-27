@@ -29,8 +29,7 @@ itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm` from the repos
     `test/integration/`: the browser integration tests, which run only in the Nix environment that fixes the
     machine they see. `pnpm test:integration` enters it (`flake.nix`, `devShells.integration`, Linux) with nothing
     of the host's environment, and runs them: the pinned browsers (`test/integration/browsers.json`: Chromium
-    155.0.8059.79, Firefox 158.0, WebKitGTK 2.54.1's MiniBrowser for stock WebKit, and Playwright's WebKit build
-    2359, until review 23 removes it), fixed fonts, UTC, `C.UTF-8`, an empty home that is deleted after, and no
+    155.0.8059.79, Firefox 158.0 and WebKitGTK 2.54.1's MiniBrowser for stock WebKit), fixed fonts, UTC, `C.UTF-8`, an empty home that is deleted after, and no
     display: the MiniBrowser, which needs one, gets an Xvfb of its own (`test/integration/stockWebKit.ts`). Run anywhere else, they fail and
     say so; a browser of another version fails them too. Extra arguments go to Vitest
     (`pnpm test:integration packages/browser/test/integration/WebKit.test.ts`).
@@ -48,7 +47,6 @@ itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm` from the repos
 - `packages/tools/codegen`: protocol code generation. `protocols/<backend>/` holds the vendored spec (`source/`),
   corrections (`patches/`), our annotations (`overlay/`), and the generated `model.json` and `coverage.json`. Its
   output is `packages/browser/src/cdp/`, `packages/browser/src/bidi-protocol/`,
-  `packages/browser/src/webkit-protocol/` (Playwright's WebKit build, until review 23 removes it),
   `packages/browser/src/webkit-stock-protocol/` (stock WebKit's inspector, from WebKitGTK's source) and
   `packages/browser/src/webkit-automation-protocol/` (stock WebKit's Automation domain). Never edit generated files:
   change a correction or an annotation and run `pnpm codegen:protocol`. A correction says what the spec states,

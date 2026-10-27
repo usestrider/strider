@@ -5,17 +5,15 @@
  * for its inspector targets, and commands to them wrapped in `Target.sendMessageToTarget`.
  *
  * - **Pages are page proxies.** The transport polls the list and connects to each page it hasn't, and speaks to
- *   the WebKit adapter in Playwright's envelope, which the WebKit wire routes (`webkitWire.ts`): a page's messages
- *   carry its `pageProxyId`, and its arrival and end are `Playwright.pageProxyCreated` and
- *   `Playwright.pageProxyDestroyed`, in the default context. One adapter serves both builds.
- * - **There is no browser session.** `Playwright.enable` is answered as Playwright's build does: the pages open
- *   are announced, then the reply, and the list is read for new ones from then on. Any other command with no page
- *   proxy is answered `Method not found`, which the wire reads as `Unsupported`; one to a page whose WebSocket
- *   closed, as Playwright's build answers a page proxy that is gone.
+ *   the WebKit adapter in our envelope (`webkitEnvelope.ts`), which the WebKit wire routes (`webkitWire.ts`): a
+ *   page's messages carry its `pageProxyId`, and its arrival and end are `Envelope.pageProxyCreated` and
+ *   `Envelope.pageProxyDestroyed`, in the default context.
+ * - **There is no browser session.** `Envelope.enable` announces the pages open, then replies, and the list is
+ *   read for new ones from then on. Any other command with no page proxy is answered `Method not found`, which the
+ *   wire reads as `Unsupported`; one to a page whose WebSocket closed, as a page proxy that is gone.
  * - **Ids are a target's own.** Stock WebKit numbers frames, loaders and requests from `0.1` in each web process
- *   (QUIRKS.md, Q195), and a page's targets are its processes, where Playwright's build numbers them for the
- *   browser: the transport qualifies a target's with its page proxy's and its own id, on the paths the adapter
- *   reads, and takes the qualification off a command's.
+ *   (QUIRKS.md, Q195), and a page's targets are its processes: the transport qualifies a target's with its page
+ *   proxy's and its own id, on the paths the adapter reads, and takes the qualification off a command's.
  * - **The connection** lives while the inspector server answers: a list that can't be read ends it.
  */
 import * as Deferred from "effect/Deferred"
@@ -30,6 +28,7 @@ import * as Scope from "effect/Scope"
 import * as Socket from "effect/socket/Socket"
 import * as Stream from "effect/Stream"
 import * as Transport from "../protocol/Transport.ts"
+import * as Envelope from "./webkitEnvelope.ts"
 
 /**
  * The pages an inspector server lists, by their WebSocket's path, from each Inspect button's script. The list
@@ -155,7 +154,7 @@ export const connect = Effect.fnUntraced(function*(endpoint: URL, options: Optio
       })
     )
 
-  // A page's WebSocket: its messages in Playwright's envelope, then its end
+  // A page's WebSocket: its messages in the envelope, then its end
   const attach = Effect.fnUntraced(function*(path: string) {
     const pageProxyId = pageProxyIdOf(path)
     const own = yield* Scope.fork(scope)
@@ -169,7 +168,7 @@ export const connect = Effect.fnUntraced(function*(endpoint: URL, options: Optio
     ).pipe(Scope.provide(own), Effect.provideService(Socket.WebSocketConstructor, constructor), Effect.option)
     if (transport._tag === "None") return yield* Scope.close(own, Exit.void)
     pages.set(pageProxyId, transport.value)
-    deliver({ method: "Playwright.pageProxyCreated", params: { pageProxyId, browserContextId: "default" } })
+    deliver({ method: Envelope.pageProxyCreated.method, params: { pageProxyId, browserContextId: "default" } })
     yield* transport.value.messages.pipe(
       Stream.runForEach((text) =>
         Effect.sync(() => {
@@ -186,7 +185,7 @@ export const connect = Effect.fnUntraced(function*(endpoint: URL, options: Optio
         if (Exit.isFailure(listed)) {
           yield* unanswered({ message: "a page's WebSocket closed, and the list can't be read" })
         } else {
-          deliver({ method: "Playwright.pageProxyDestroyed", params: { pageProxyId } })
+          deliver({ method: Envelope.pageProxyDestroyed.method, params: { pageProxyId } })
         }
         yield* Scope.close(own, Exit.void)
       })),
@@ -236,7 +235,7 @@ export const connect = Effect.fnUntraced(function*(endpoint: URL, options: Optio
       const message = JSON.parse(text) as Record<string, unknown>
       const { pageProxyId, ...rest } = message
       if (typeof pageProxyId !== "string") {
-        if (message.method === "Playwright.enable") return enable(message.id)
+        if (message.method === Envelope.enable.method) return enable(message.id)
         deliver({ id: message.id, error: { code: -32601, message: `'${String(message.method)}' was not found` } })
         return Effect.void
       }

@@ -16,8 +16,8 @@ import { conformance } from "./conformance.ts"
 import { engine } from "./engine.ts"
 import type { Backend } from "./harness.ts"
 
-// The transport presents the pages in Playwright's envelope, whose `Playwright` domain is its own, not the browser's
-const made = (method: string) => method.startsWith("Playwright.")
+// The transport presents the pages in our envelope, whose `Envelope` domain is its own, not the browser's
+const made = (method: string) => method.startsWith("Envelope.")
 
 const backend: Backend = {
   name: "WebKit (stock)",
@@ -29,7 +29,7 @@ const backend: Backend = {
     }).pipe(Effect.provide(Layer.merge(socketConnector, Layer.empty)))
     const adapter = yield* WebKitAdapter.connect(
       record(group.transport, WebKitWire.wire, fixtures.webkitStock, { made }),
-      { sink, ownership: "launched", profile: "stock", automation: group }
+      { sink, ownership: "launched", automation: group }
     )
     return { adapter, kill: group.first.kill }
   })

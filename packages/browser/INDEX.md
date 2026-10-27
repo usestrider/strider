@@ -2185,24 +2185,6 @@ Transports carry a browser connection's messages (L0): framed text in both direc
 - `class ConnectFailed: Schema.Error { description }` (experimental)
 - `class ConnectionLost: Schema.Error { initiator, description }` (experimental)
 
-### WebKitConnection
-
-A raw connection to Playwright's WebKit build (L0): the browser's own session, a session per page proxy, and one per inspector target and worker inside it, over one `Transport`.
-
-*models*
-
-- `interface WebKitConnection` (experimental)
-  - `readonly browser: Protocol.ProtocolSession`
-  - `readonly pageProxy: (pageProxyId: Playwright.PageProxyID) => Effect.Effect<Protocol.ProtocolSession, Protocol.ProtocolError>`
-  - `readonly targets: (pageProxyId: Playwright.PageProxyID) => Effect.Effect<ReadonlyArray<string>>`
-  - `readonly target: (pageProxyId: Playwright.PageProxyID, targetId: string) => Effect.Effect<Protocol.ProtocolSession, Protocol.ProtocolError>`
-  - `readonly worker: (pageProxyId: Playwright.PageProxyID, targetId: string, workerId: string) => Effect.Effect<Protocol.ProtocolSession, Protocol.ProtocolError>`
-  - `readonly closed: Effect.Effect<Transport.ConnectionLost>`
-
-*constructors*
-
-- `const make: (transport: Transport.Transport) => Effect.Effect<WebKitConnection, never, Scope.Scope>` (experimental)
-
 ## `@usestrider/browser/test`
 
 ### TestRun
@@ -2232,7 +2214,7 @@ Runner-agnostic test support (`@usestrider/browser/test`).
 
 ### WebKit
 
-The WebKit backend (`@usestrider/browser/webkit`): stock WebKit, launched in automation mode or attached through its inspector, and, until review 23's last step removes it, Playwright's patched build.
+The WebKit backend (`@usestrider/browser/webkit`): stock WebKit, launched in automation mode or attached through its inspector (reviews 22 and 23).
 
 *layers*
 
@@ -2243,10 +2225,6 @@ The WebKit backend (`@usestrider/browser/webkit`): stock WebKit, launched in aut
 ## `@usestrider/browser/webkit-automation-protocol`
 
 1 generated modules: Automation. Their declarations are in the API reference.
-
-## `@usestrider/browser/webkit-protocol`
-
-33 generated modules: Animation, Audit, Browser, Canvas, Console, CPUProfiler, CSS, Debugger, Dialog, DOM, DOMDebugger, DOMStorage, Emulation, GenericTypes, Heap, IndexedDB, Input, Inspector, LayerTree, Memory, Network, Page, Playwright, Recording, Runtime, Screencast, ScriptProfiler, Security, ServiceWorker, Storage, Target, Timeline, Worker. Their declarations are in the API reference.
 
 ## `@usestrider/browser/webkit-stock-protocol`
 

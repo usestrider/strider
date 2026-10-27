@@ -221,9 +221,9 @@ describe("WebKit's Automation protocol, over stock WebKitGTK's inspector socket"
             executablePath: webkitgtk.executable,
             wrapAutomation: (transport) => record(transport, WebKitWire.wire, fixtures.webkitStock)
           }).pipe(Effect.provide(socketConnector))
-          // The pages' transport, in Playwright's envelope, whose `Playwright` domain is its own
+          // The pages' transport, in our envelope, whose `Envelope` domain is its own
           const transport = record(group.transport, WebKitWire.wire, fixtures.webkitStock, {
-            made: (method) => method.startsWith("Playwright.")
+            made: (method) => method.startsWith("Envelope.")
           })
           const replies = new Map<number, Deferred.Deferred<ProtocolClient.Incoming>>()
           const created = yield* Deferred.make<Protocol.SessionKey>()
@@ -259,26 +259,26 @@ describe("WebKit's Automation protocol, over stock WebKitGTK's inspector socket"
             }
           )
           // The browser's first tab, announced
-          yield* call("Playwright.enable", {})
+          yield* call("Envelope.enable", {})
           const target = yield* Deferred.await(created).pipe(Effect.timeout("10 seconds"))
           const row = (error: ProtocolClient.WireError) => ProtocolClient.match(WebKitWire.errors, error)
-          const rowOf = (message: string) => WebKitWire.errors.find((each) => each.match.message === message)
-          // A page's inspector
-          const cases: ReadonlyArray<readonly [string, object, ProtocolClient.ErrorMatcher | undefined]> = [
-            ["Nope.nothing", {}, WebKitWire.errors[0]],
-            ["Runtime.evaluate", {}, WebKitWire.errors[1]],
-            [
-              "Page.getResourceContent",
-              { frameId: "nope", url: "about:blank" },
-              rowOf("Missing frame for given frameId")
-            ],
-            ["DOM.resolveNode", { nodeId: 99999 }, rowOf("Missing node for given nodeId")]
+          const { pageProxyId } = WebKitWire.route(target)
+          // A page's inspector, and the transport's answer for a page that is gone: each row of the table, in order
+          const cases: ReadonlyArray<readonly [string, object, Protocol.SessionKey]> = [
+            ["Nope.nothing", {}, target],
+            ["Runtime.evaluate", {}, target],
+            ["Runtime.evaluate", { expression: "1" }, WebKitWire.pageProxyKey("gone")],
+            ["Runtime.evaluate", { expression: "1" }, WebKitWire.targetKey(pageProxyId, "page-999999")],
+            ["Page.getResourceContent", { frameId: "nope", url: "about:blank" }, target],
+            ["DOM.resolveNode", { nodeId: 99999 }, target]
           ]
-          for (const [method, params, expected] of cases) {
-            const reply = yield* call(method, params, target)
+          const rows: Array<ProtocolClient.ErrorMatcher | undefined> = []
+          for (const [method, params, key] of cases) {
+            const reply = yield* call(method, params, key)
             assert(reply._tag === "ErrorReply", `${method} should fail`)
-            assert.deepStrictEqual(row(reply.error), expected, `${method}: ${reply.error.message}`)
+            rows.push(row(reply.error))
           }
+          assert.deepStrictEqual(rows, WebKitWire.errors.slice(0, cases.length))
           // The Automation target's: a browsing context it doesn't have, and a dialog that isn't open, which the
           // table leaves unrecognized
           const automation = Protocol.on(group.first.automation)
@@ -290,6 +290,7 @@ describe("WebKit's Automation protocol, over stock WebKitGTK's inspector socket"
             reason: "NoSuchTarget",
             description: "WindowNotFound"
           })
+          assert.strictEqual(WebKitWire.errors.length, cases.length + 1, "every row is checked here")
           const { contexts } = yield* Automation.getBrowsingContexts().pipe(automation)
           const noDialog = yield* Effect.flip(
             Automation.acceptCurrentJavaScriptDialog({ browsingContextHandle: contexts[0]!.handle }).pipe(automation)

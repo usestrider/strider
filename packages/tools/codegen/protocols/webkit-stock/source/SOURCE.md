@@ -2,7 +2,7 @@
 
 The 28 domain files of `Source/JavaScriptCore/inspector/protocol/` in WebKitGTK 2.54.1's source release, unchanged:
 the inspector protocol of stock WebKit, which WebKitGTK's and WPE's remote inspector speak, without the domains and
-commands Playwright's patches add (`protocols/webkit`).
+commands Playwright's patched build adds, which the WebKit backend drove until review 23.
 
 - **Release:** `webkitgtk-2.54.1.tar.xz`, as nixpkgs packages it (`webkitgtk_6_0.src`), the WebKitGTK the integration
   tests run.
@@ -13,7 +13,6 @@ commands Playwright's patches add (`protocols/webkit`).
   (`LICENSE`, from `inspector/scripts/codegen/generator.py`), and JavaScriptCore as a whole is also distributed under
   the GNU LGPL 2 (`COPYING.LIB`).
 
-Each file is one domain in CDP's JSON format with WebKit's keys (`debuggableTypes`, `targetTypes`, `condition`), as
-`protocols/webkit/source/protocol.json` is a list of them. Unlike Playwright's build, stock WebKit has no `Playwright`,
-`Input`, `Dialog`, `Emulation` or `Screencast` domain, no `Page.navigate` or `Page.createUserWorld`, and no frame
-attachment, same-document navigation or file chooser events.
+Each file is one domain in CDP's JSON format with WebKit's keys (`debuggableTypes`, `targetTypes`, `condition`).
+Unlike Playwright's build, stock WebKit has no `Playwright`, `Input`, `Dialog`, `Emulation` or `Screencast` domain, no
+`Page.navigate` or `Page.createUserWorld`, and no frame attachment, same-document navigation or file chooser events.

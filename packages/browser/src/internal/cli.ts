@@ -17,7 +17,6 @@ import * as Browsers from "./browsers.ts"
 import * as Client from "./cli/client.ts"
 import * as Node from "./cli/node.ts"
 import * as Session from "./cli/session.ts"
-import { build } from "./webkitBuild.ts"
 
 // The platform and environment, where the runtime has them; the package doesn't assume Node.
 const host = (globalThis as {
@@ -32,15 +31,11 @@ const layers: { readonly [B in Browsers.Backend]: string } = {
 
 const sources: { readonly [S in Browsers.Source]: string } = {
   PATH: "on PATH",
-  installer: "where its installer puts it",
-  playwright: "in Playwright's cache"
+  installer: "where its installer or package puts it"
 }
 
 /** The text `strider browsers` prints. */
-export const render = (
-  found: ReadonlyArray<Browsers.Found>,
-  cache: Option.Option<string>
-): string => {
+export const render = (found: ReadonlyArray<Browsers.Found>): string => {
   const lines = ["Browsers found on this machine. Pass one as executablePath to its backend's layer.", ""]
   for (const backend of Browsers.Backend.literals) {
     lines.push(layers[backend])
@@ -48,7 +43,7 @@ export const render = (
     if (ofBackend.length === 0) {
       lines.push(
         backend === "webkit"
-          ? `  none found; Playwright's installer puts its WebKit builds in its cache (build ${build.revision} is Playwright 1.63's)`
+          ? "  none found; WebKitGTK's and WPE's packages put a MiniBrowser under their library directory, on Linux"
           : "  none found"
       )
     }
@@ -56,11 +51,7 @@ export const render = (
       const facts = [
         Option.getOrElse(browser.version, () => "version not reported"),
         sources[browser.foundBy],
-        ...Option.toArray(Option.map(browser.resolved, (resolved) => `leads to ${resolved}`)),
-        ...Option.toArray(Option.map(browser.matchesAdapter, (matches) =>
-          matches
-            ? `the build the WebKit adapter needs`
-            : `not build ${build.revision}, which the WebKit adapter needs, so WebKit.layer refuses it`))
+        ...Option.toArray(Option.map(browser.resolved, (resolved) => `leads to ${resolved}`))
       ]
       lines.push(`  ${browser.path}`, `    ${facts.join(" · ")}`)
     }
@@ -69,9 +60,7 @@ export const render = (
   lines.push(
     `Searched PATH for ${
       [...Browsers.commandNames.chromium, ...Browsers.commandNames.firefox].join(", ")
-    }; the locations Chrome's, Edge's and Firefox's installers use; and Playwright's cache${
-      Option.match(cache, { onNone: () => "", onSome: (path) => ` at ${path}` })
-    }.`,
+    }; the locations Chrome's, Edge's and Firefox's installers use; and, on Linux, where WebKitGTK's and WPE's packages put their MiniBrowser.`,
     `For code that runs on several machines, read the path from each one's environment, as in Chromium.layerConfig({ executablePath: Config.string("CHROMIUM_PATH") }).`
   )
   return lines.join("\n")
@@ -93,7 +82,7 @@ export const browsers = Command.make(
     yield* Console.log(
       json
         ? JSON.stringify(Schema.encodeSync(Schema.Array(Browsers.Found))(found), null, 2)
-        : render(found, Browsers.playwrightCache(platform, env))
+        : render(found)
     )
   })
 ).pipe(

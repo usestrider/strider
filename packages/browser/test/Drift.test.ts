@@ -14,7 +14,6 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Bidi from "@usestrider/browser/bidi-protocol"
 import * as Cdp from "@usestrider/browser/cdp"
 import * as WebKitAutomation from "@usestrider/browser/webkit-automation-protocol"
-import * as WebKit from "@usestrider/browser/webkit-protocol"
 import * as WebKitStock from "@usestrider/browser/webkit-stock-protocol"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
@@ -54,7 +53,6 @@ const directory = `${import.meta.dirname}/fixtures/traffic`
 const backends = [
   { fixture: fixtures.cdp, barrels: [Cdp], wire: CdpWire.wire, protocols: ["cdp"] },
   { fixture: fixtures.bidi, barrels: [Bidi], wire: BidiWire.wire, protocols: ["bidi"] },
-  { fixture: fixtures.webkit, barrels: [WebKit], wire: WebKitWire.wire, protocols: ["webkit"] },
   {
     fixture: fixtures.webkitStock,
     barrels: [WebKitStock, WebKitAutomation],

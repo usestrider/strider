@@ -1,11 +1,9 @@
 /**
  * The browsers the integration tests run against: the pinned builds (`pins.ts`), which the Nix environment
- * (`flake.nix`, `devShells.integration`) names in `STRIDER_CHROMIUM`, `STRIDER_FIREFOX`, `STRIDER_WEBKIT` and
- * `STRIDER_WEBKITGTK`, with the X server stock WebKit's MiniBrowser needs in `STRIDER_XVFB`.
- * Nothing else is looked up, and nothing is skipped: outside that environment the integration tests don't run
- * (`environment.ts`), and a browser that isn't the pinned version fails them, saying which version it found.
- *
- * WebKit's pin is a Playwright build, which its launcher checks by the `protocol.json` the build ships.
+ * (`flake.nix`, `devShells.integration`) names in `STRIDER_CHROMIUM`, `STRIDER_FIREFOX` and `STRIDER_WEBKITGTK`,
+ * with the X server stock WebKit's MiniBrowser needs in `STRIDER_XVFB`. Nothing else is looked up, and nothing is
+ * skipped: outside that environment the integration tests don't run (`environment.ts`), and a browser that isn't
+ * the pinned version fails them, saying which version it found.
  */
 import { pins } from "./pins.ts"
 
@@ -24,9 +22,6 @@ export const chromium = { executable: named("STRIDER_CHROMIUM"), ...pins.chromiu
 
 /** Firefox: its executable and the version it must be. */
 export const firefox = { executable: named("STRIDER_FIREFOX"), ...pins.firefox }
-
-/** Playwright's WebKit: its `pw_run.sh` and the build it must be. */
-export const webkit = { executable: named("STRIDER_WEBKIT"), ...pins.webkit }
 
 /** Stock WebKit: WebKitGTK's MiniBrowser, the version it must be, and the X server it runs on. */
 export const webkitgtk = { executable: named("STRIDER_WEBKITGTK"), xvfb: named("STRIDER_XVFB"), ...pins.webkitgtk }
