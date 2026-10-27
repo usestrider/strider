@@ -979,6 +979,26 @@ Adapter responsibilities:
   - **No store cache:** each run downloads the toolchain, and the integration run its browsers, from the Nix binary cache, as the review allowed; a cache would need a third party's action more.
 - **Tests.** `pnpm pack-check` passes after a clean `pnpm build`, and failed before the two fixes, naming each file; `pnpm all` passes. The workflows run once pushed. The integration tests didn't run again: nothing a browser runs changed.
 
+**Built** (2026-10-26, after [review 25](reviews/25-release-readiness.md), its third step, before its second): the comparison scripts (candidate 4).
+
+- **`packages/scenarios`,** private, never published: ten scenarios, each written with Strider and with Playwright as each library's documentation would write it (`src/scenarios.ts`, between `#region` markers the report copies): the README's program, a login reused through storage state, a popup with a dialog, a route blocking analytics, an upload from bytes, a response's body, the navigation a click causes, a HAR recorded and replayed, and two public demo sites, TodoMVC's demo and The Internet's login. Each scenario's first run is its outcome, compared with what it should read, and the next ten, the libraries taking turns going first, its wall time.
+- **Playwright is `playwright-core` 1.64.1,** the package's dependency alone. It installs no browser and launches the integration environment's Chromium by its `executablePath`; no Playwright build is downloaded or run, and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`, which the review named, has nothing to skip.
+- **`pnpm scenarios`** enters the integration environment, as `pnpm test:integration` does, and writes `packages/scenarios/RESULTS.md` with the date, the browser, both libraries' versions and the machine, which `dprint` leaves as written, as it does `INDEX.md`. `--runs` sets the timed runs, and `--only` runs one scenario without the measurements.
+- **The demo sites are recorded once,** by `pnpm scenarios --record`, which visits them live and records each with `Har.record`, cookies and requests' bodies included, into `.data/scenarios/`; every other run replays them, each library with its own HAR replay (`Route.fromHar`, `routeFromHAR`), aborting what the recording lacks, and fails without them, saying to record them.
+- **The measurements:** Q82, as the renderers' CPU time per second, read from `/proc` for the processes the run started, while each library waits for an element a page animating 200 of its 3000 elements shows after 3 seconds, and while each leaves it alone as long; Q103, as a page with 300 images loaded to its `load` event, with no route and with a route matching nothing; and the tells a page's own script reads (`navigator.webdriver`, the user agent, whether a console argument's `stack` is read as `Runtime.enable` would read it, `window.chrome`, plugins, languages, the window's and screen's sizes, notification permission, the WebGL renderer, and the globals the page didn't make), with the arguments each launched Chromium with.
+- **What it found** (RESULTS.md, 2026-10-27):
+  - **Strider took longer** in 8 of the 10 scenarios, 1.4 to 2.4 times, and to launch, 201 ms to 130 (Q242); where the time goes is the next thing to find.
+  - **Q82 costs the page a little:** 287 ms of renderer CPU a second while Strider's expectation waited, to 256 idle; Playwright's wait, 246 to 253.
+  - **Q103 costs a load what a route costs Playwright:** 106 ms with Strider's interceptor always installed, 73 with Playwright's none, and 111 once a Playwright route is declared.
+  - **The tells were the same** but for the window: Strider's headless window is 780 by 580 on an 800 by 600 screen, its page 87 pixels shorter, as a window with a toolbar's is; Playwright's viewport, 1280 by 720, is its window and its screen too. Neither made a global in the page's world, and neither enabled `Runtime` where the probe saw it. Playwright launches Chromium with `--no-sandbox`; Strider keeps the sandbox.
+  - **Writing the scenarios found Q241,** an element of no opacity hidden to Strider's actions, which TodoMVC's checkbox is, and **Q243,** `getByRole` without Playwright's state filters, such as `level`.
+- **Where the build differs from the review.**
+  - **The third step came before the second:** the reference site waits on the maintainer, since another thread's documentation site builds one with Astro, which the review didn't adopt.
+  - **The recordings aren't committed:** they hold the demo sites' own files, Apache-2.0 and MIT, which the repository would redistribute with their notices; the licence work is deferred, so each machine records once.
+  - **Two demo sites, not a list:** TodoMVC's demo and The Internet, the ones the review named.
+  - **No `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`,** which `playwright-core` doesn't need.
+- **Tests.** The scenarios are a script a person runs, not tests (the review's "Considered and not adopted"); `pnpm all` type-checks them. Every outcome read what it should with both libraries.
+
 ### Pause-on-start granularity
 
 Before-author-script setup for *new* targets needs them paused at creation. Granularity differs by backend, and the access model depends on it.

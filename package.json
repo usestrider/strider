@@ -18,6 +18,7 @@
     "api-reference": "strider-docs api-reference",
     "strider": "node packages/browser/src/bin/strider.ts",
     "pack-check": "node packages/tools/utils/src/bin.mjs pack-check",
+    "scenarios": "nix develop .#integration --ignore-environment --keep TERM --command node packages/scenarios/src/bin.ts",
     "all": "pnpm check && pnpm lint && pnpm test --run && pnpm test-types && pnpm reference",
     "reference": "pnpm jsdocs && pnpm examples && pnpm index && pnpm api-reference",
     "codegen:protocol": "strider-codegen generate cdp && strider-codegen generate bidi && strider-codegen generate webkit-stock && strider-codegen generate webkit-automation",

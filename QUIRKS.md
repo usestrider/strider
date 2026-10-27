@@ -1453,3 +1453,18 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* `BackendMetadata` has an index of its own, `Metadata`'s values or `undefined`, and the package check type-checks the packages without `exactOptionalPropertyTypes` or `skipLibCheck`.
 - *Reconsider:* nothing.
 - **Resolved** in `7583260` (review 25's first step).
+
+**Q241. An element of no opacity is hidden to Strider's actions, and visible to Playwright's** (Ours). CONCEPTS.md §8 defines visible with `checkVisibility({ opacityProperty: true })`, so `opacity: 0` is hidden, and an action that checks `visible` waits for it out its deadline. A styled checkbox is often an `opacity: 0` input under its label, which receives the pointer: TodoMVC's is. Playwright counts an element of no opacity as visible, so its `check` checks it.
+- *Seen:* review 25's comparison scripts: `check()` on TodoMVC's first todo timed out `waitingForCondition`, its last observation `NotVisible`; Playwright's passed.
+- *We:* the rule stands; the scenario turns the check off at its call site, `check({ checks: { visible: false } })`, and its note says why.
+- *Reconsider:* whether an action's `visible` should ignore opacity, as `receivesPointer` already says whether the pointer reaches the element; `Expect.toBeVisible` could keep it, which reads as a person would see it. A design change, for a review.
+
+**Q242. A scenario takes Strider longer than Playwright, on the same Chromium** (Ours). Over 10 runs each, 8 of the comparison's 10 scenarios took 1.4 to 2.4 times as long with Strider, contexts and pages made and closed in each: the README's program 173 ms to Playwright's 98, a popup with a dialog 311 to 145, TodoMVC 424 to 176; a route blocking analytics took the same, and a HAR recorded and replayed 139 to 152. A launch with a first page took 201 ms to 130. Where the time goes isn't known.
+- *Seen:* review 25's comparison scripts (`packages/scenarios/RESULTS.md`), on the maintainer's desktop at `nice 19`.
+- *We:* nothing yet.
+- *Reconsider:* where the time goes, from one scenario's protocol commands and spans (`TraceProtocolCommands`) beside Playwright's: a context's and a page's setup (`Fetch.enable`, the utility world and its engine, init scripts), an action's checks (`stable` waits animation frames), and an expectation's first evaluation are the candidates.
+
+**Q243. `getByRole` matches a role and a name, and none of the states Playwright's filters by** (Ours). `Locator.RoleOptions` has `name`, `exact` and `includeHidden`; Playwright's also has `level`, `checked`, `pressed`, `expanded`, `selected` and `disabled`, so a heading's level or a checked box is a CSS selector or a filter in Strider.
+- *Seen:* review 25's comparison scripts: The Internet's `h2` was to be `getByRole("heading", { level: 2 })`, which doesn't type-check; both versions read `locator("h2")`.
+- *We:* nothing yet.
+- *Reconsider:* the states as `RoleOptions`, from the accessibility tree the engine already computes, in a review.

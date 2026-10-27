@@ -42,6 +42,10 @@ itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm` from the repos
     drift test (`test/integration/record.ts`): `pnpm test:integration --no-file-parallelism`, into
     `test/fixtures/traffic/`, when a browser rolls.
   - `INDEX.md`: every declaration and member, generated.
+- `packages/scenarios`: private, never published: Strider and Playwright side by side on the integration
+  environment's Chromium (review 25). `pnpm scenarios` writes its `RESULTS.md`; `pnpm scenarios --record` visits
+  the public demo sites once, live, into `.data/scenarios/`. Playwright (`playwright-core`) is this package's
+  dependency alone: never import it elsewhere.
 - `packages/tools/docs`: the JSDoc checker (vendored from Effect; don't edit it), the example check, `INDEX.md` and
   the API reference dataset.
 - `packages/tools/utils`: barrel codegen; `clean`, which `pnpm build` runs first, so no earlier build's output is

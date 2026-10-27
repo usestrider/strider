@@ -6,6 +6,7 @@
     "**/vitest.*.ts",
     "./packages/*/test/**/*.ts",
     "./packages/*/scenarios/**/*.ts",
+    "./packages/scenarios/src/**/*.ts",
     "./packages/tools/*/test/**/*.ts"
   ],
   "exclude": ["**/node_modules/**", "**/dist/**"],

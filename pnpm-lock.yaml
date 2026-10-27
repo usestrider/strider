@@ -227,6 +227,24 @@ importers:
         specifier: ^4.0.6
         version: 4.0.6
 
+  packages/scenarios:
+    devDependencies:
+      '@effect/platform-node':
+        specifier: ^4.0.6
+        version: 4.0.6(effect@4.0.6)(redis@6.3.0)
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      '@usestrider/browser':
+        specifier: workspace:^
+        version: link:../browser
+      effect:
+        specifier: ^4.0.6
+        version: 4.0.6
+      playwright-core:
+        specifier: 1.64.1
+        version: 1.64.1
+
   packages/tools/codegen:
     dependencies:
       '@effect/platform-node':
@@ -1334,6 +1352,11 @@ packages:
     resolution: {integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==}
     engines: {node: '>=12'}
 
+  playwright-core@1.64.1:
+    resolution: {integrity: sha512-BC4s8y6SEVA6Q1rSxZTto8hI1KUI3xXlHGZgvGqP4IqPdI/a6FX9H29IDNz7vKo9l21b6LfYosScPL6M3xxyDQ==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   postcss@8.5.31:
     resolution: {integrity: sha512-YUbWYCgErwnMAVkjUnYa+KlMBzGpHwiIt/DE7f0G33AuX2LH9UcTk6KgWxd3zRU+pN3u/C+Xl3EnMLM4Hea7Sg==}
     engines: {node: ^10 || ^12 || >=14}
@@ -2389,6 +2412,8 @@ snapshots:
   picocolors@1.1.1: {}
 
   picomatch@4.0.7: {}
+
+  playwright-core@1.64.1: {}
 
   postcss@8.5.31:
     dependencies:
