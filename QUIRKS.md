@@ -1030,6 +1030,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 16's revision.
 - *We:* accept the cost, for one rule.
 - *Reconsider:* frames only for layout conditions, if pages with many waiting expectations slow down.
+- *Measured* in `cd969df` (review 25's comparison scripts, `packages/scenarios/RESULTS.md`): on a page animating 200 of its 3000 elements each frame, its renderers used 287 ms of CPU a second while an expectation waited, and 256 idle; Playwright's `locator.waitFor()`, 246 to 253. Open: a page with many waiting expectations is still unmeasured.
 
 **Q83. A shadow root's mutations don't wake an expectation** (Ours). The `MutationObserver` watches the document, and doesn't see into shadow roots; the next frame, or in a page that renders none the next round, catches the change.
 - *Seen:* review 16's revision.
@@ -1072,6 +1073,7 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 17's revision: one request in 40 went past a route under load before; none in 160 after.
 - *We:* `Fetch.enable` from each page target's start, never disabled.
 - *Reconsider:* whether an interceptor always installed costs anything measurable; and whether Chromium can say when its interceptor is in force.
+- *Measured* in `cd969df` (review 25's comparison scripts, `packages/scenarios/RESULTS.md`): a page with 300 images loaded in 106 ms with the interceptor always installed and no route, and 110 with a route; Playwright's, 73 with no route and 111 once a route is declared. The interceptor costs a load what Playwright's route does. Open: whether Chromium can say when its interceptor is in force.
 
 **Q104. A decision a backend can't apply lets the request through** (Ours). `Route.abort("timedOut")` on Firefox, or a fulfill at the response phase there, is a handler failure, so the default, continue, applies, logged and published as an `AutoResolution`: the route fails open.
 - *Seen:* review 17's revision.
