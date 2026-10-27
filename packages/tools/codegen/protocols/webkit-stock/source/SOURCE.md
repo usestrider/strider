@@ -9,9 +9,10 @@ commands Playwright's patched build adds.
 - **Fetched:** 2026-10-26.
 - **SHA-256** of the files' own SHA-256 lines, `sha256sum *.json | sha256sum`:
   `f993e9fcc9c76ebdd600e95d7c7fe8296da7c29441ea369c17e35a2bf9f5ea92`.
-- **License.** The protocol files carry no header. The inspector code around them is under Apple's BSD-style license
-  (`LICENSE`, from `inspector/scripts/codegen/generator.py`), and JavaScriptCore as a whole is also distributed under
-  the GNU LGPL 2 (`COPYING.LIB`).
+- **License.** The protocol files carry no header. Debian's per-file audit of WebKitGTK lists none of them among its
+  exceptions, so they are under WebKit's default, BSD-2-clause; `LICENSE` is the notice of the inspector code beside
+  them (`inspector/scripts/codegen/generator.py`), copyright Apple Inc. and the University of Washington. The LGPL
+  covers only the JavaScriptCore files the audit names.
 
 Each file is one domain in CDP's JSON format with WebKit's keys (`debuggableTypes`, `targetTypes`, `condition`).
 Unlike Playwright's build, stock WebKit has no `Playwright`, `Input`, `Dialog`, `Emulation` or `Screencast` domain, no

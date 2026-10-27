@@ -138,7 +138,7 @@ that says how far it got.
 
 Built through all three layers on Chromium (CDP), Firefox (WebDriver BiDi) and stock WebKit (WebKitGTK and WPE, launched through their MiniBrowser or attached through their remote inspector). What a backend can't do is in its capability table; what isn't built is marked in the layer documents.
 
-- **The packages:** `@usestrider/browser`, with the CLI (`strider`) and the agent toolkit, and `@usestrider/vitest`. Neither is published, and there is no licence yet. `pnpm pack-check` checks what would be published.
+- **The packages:** `@usestrider/browser`, with the CLI (`strider`) and the agent toolkit, and `@usestrider/vitest`. Neither is published. Both are under the MIT license ([LICENSE](LICENSE)); `@usestrider/browser`'s generated protocol modules and keyboard layouts also carry their sources' notices ([THIRD_PARTY_NOTICES.md](packages/browser/THIRD_PARTY_NOTICES.md)). `pnpm pack-check` checks what would be published.
 - **Tests:** `pnpm all` runs the checks that need no browser. `pnpm test:integration` runs the adapter conformance suite and the slices in the Nix environment (`flake.nix`), against Chromium 155.0.8059.79, Firefox 158.0 and WebKitGTK 2.54.1. CI runs `pnpm all`, the build and the package check on every push, and the integration tests nightly when `main` has changed, or on demand.
 - **Compared with Playwright:** `pnpm scenarios` runs the same scenarios with both libraries on the same stock Chromium and writes [packages/scenarios/RESULTS.md](packages/scenarios/RESULTS.md).
 - **Upstream:** drafted reports and proposals for browsers and Effect are in `upstream/`, not yet sent.

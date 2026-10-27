@@ -4,6 +4,7 @@
 // - every `exports` target and `bin` of the packed `package.json` exists, a `.d.ts` beside each `.js`;
 // - the tarball holds only what `files` names: no tests, fixtures or `.data`, and no output of an earlier build
 //   whose source is gone;
+// - it packs a `LICENSE`, the repository's, which `pnpm pack` copies into a package that has none, and declares MIT;
 // - no `dependencies`: only peers;
 // - a project with only the packages and their peers installed imports every subpath under Node, type-checks an
 //   import of each with `moduleResolution: "nodenext"`, and runs `strider --help`, which, without its optional
@@ -114,6 +115,9 @@ export const packCheck = (root) => {
           fail(`${name}: ${file} is packed, which is the workspace's`)
         }
       }
+      // Its license
+      if (!files.includes("LICENSE")) fail(`${name}: LICENSE isn't packed`)
+      if (pkg.license !== "MIT") fail(`${name}: license ${pkg.license}, not MIT`)
       // What it needs
       if (Object.keys(pkg.dependencies ?? {}).length > 0) {
         fail(`${name}: dependencies ${Object.keys(pkg.dependencies).join(", ")}; only peers are allowed`)

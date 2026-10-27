@@ -26,3 +26,6 @@ on your machine, run `npx strider browsers` in a project that has the package; i
 its version.
 
 The design, its principles and the full API are in the repository: https://github.com/usestrider/strider.
+
+MIT licensed. The protocol modules and keyboard layouts are generated from others' definitions, whose notices are
+in `THIRD_PARTY_NOTICES.md`.

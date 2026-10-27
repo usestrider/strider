@@ -37,6 +37,8 @@ and stock WebKit, and every member the API declares is built. One declared befor
     drift test (`test/integration/record.ts`): `pnpm test:integration --no-file-parallelism`, into
     `test/fixtures/traffic/`, when a browser rolls.
   - `INDEX.md`: every declaration and member, generated.
+  - `THIRD_PARTY_NOTICES.md`: the notices of what its generated code comes from, published with it. Both packages,
+    like the repository, are under the MIT license (`LICENSE`), which `pnpm pack` copies into each.
 - `packages/scenarios`: private, never published: Strider and Playwright side by side on the integration
   environment's Chromium. `pnpm scenarios` writes its `RESULTS.md`; `pnpm scenarios --record` visits
   the public demo sites once, live, into `.data/scenarios/`. Playwright (`playwright-core`) is this package's
@@ -46,7 +48,8 @@ and stock WebKit, and every member the API declares is built. One declared befor
   and guide block (`code.json`).
 - `packages/tools/utils`: barrel codegen; `clean`, which `pnpm build` runs first, so no earlier build's output is
   published; and `pack-check`, which checks what the published packages would be: each one packed, installed in a
-  project of its own with only its peers, imported under Node and type-checked under `nodenext`.
+  project of its own with only its peers, imported under Node and type-checked under `nodenext`, with its MIT
+  `LICENSE`.
 - `packages/tools/codegen`: protocol code generation. `protocols/<backend>/` holds the vendored spec (`source/`),
   corrections (`patches/`), our annotations (`overlay/`), and the generated `model.json` and `coverage.json`. Its
   output is `packages/browser/src/cdp/`, `packages/browser/src/bidi-protocol/`,
@@ -55,7 +58,8 @@ and stock WebKit, and every member the API declares is built. One declared befor
   change a correction or an annotation and run `pnpm codegen:protocol`. A correction says what the spec states,
   what the wire does, and the evidence. On a roll, `pnpm codegen:audit` lists the corrections the new spec has
   absorbed. `keyboards/source/` holds Unicode CLDR's keyboard layouts, which `pnpm codegen:keyboards` turns into
-  `packages/browser/src/internal/keyboardLayouts.ts`.
+  `packages/browser/src/internal/keyboardLayouts.ts`. Each `source/` keeps its license beside it; a new source
+  whose output is published adds its notice to `packages/browser/THIRD_PARTY_NOTICES.md`, and a roll updates it.
 - `.github/workflows/`: CI. `checks.yml` runs `pnpm all`, `pnpm build` and `pnpm pack-check` on every push and
   pull request, in the Nix environment's default shell; `integration.yml` runs the integration tests nightly when
   `main` has changed, and on demand, keeping the log of a failed run.
