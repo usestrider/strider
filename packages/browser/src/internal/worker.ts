@@ -1,5 +1,5 @@
 /**
- * A worker's handle (review 14, candidate 10): its realm, kind and URL, its end, and evaluation in it. Workers
+ * A worker's handle: its realm, kind and URL, its end, and evaluation in it. Workers
  * have no isolated world, so evaluating in one needs control of its owner, which is why only a `Page` or a
  * `UserContext` hands one out.
  */

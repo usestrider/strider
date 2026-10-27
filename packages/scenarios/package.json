@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Strider and Playwright side by side on the same stock Chromium: scenarios, two costs and the automation tells (review 25); never published",
+  "description": "Strider and Playwright side by side on the same stock Chromium: scenarios, two costs and the automation tells; never published",
   "devDependencies": {
     "@effect/platform-node": "^4.0.6",
     "@types/node": "^26.6.5",

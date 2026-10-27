@@ -1,6 +1,6 @@
 # Bug for Firefox: `userContext: null` in events about windows
 
-*Draft, 2026-10-25, for the maintainer to file in Bugzilla (Remote Protocol :: WebDriver BiDi). Not filed. Search for an existing report first. From Strider's QUIRKS.md, Q178; seen on Firefox 158.0, headless, in review 21's build.*
+*Draft, 2026-10-25, for the maintainer to file in Bugzilla (Remote Protocol :: WebDriver BiDi). Not filed. Search for an existing report first. From Strider's QUIRKS.md, Q178; seen on Firefox 158.0, headless.*
 
 ## Steps
 

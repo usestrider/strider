@@ -1,6 +1,6 @@
 /**
- * Where trace recordings learn of operations (review 20, candidate 4): the span helper reports each one to the
- * recordings that cover its target, with the span it runs in. Ids are unique within the process (review 20),
+ * Where trace recordings learn of operations: the span helper reports each one to the
+ * recordings that cover its target, with the span it runs in. Ids are unique within the process,
  * so a recording matches an operation by the ids in its attributes.
  */
 import * as Context from "effect/Context"
@@ -11,7 +11,7 @@ import type * as Tracer from "effect/Tracer"
 import type * as Engine from "./engine.ts"
 
 /**
- * What an action acts on, for a recording's DOM snapshots (review 22): its locator's steps, and whether the value
+ * What an action acts on, for a recording's DOM snapshots: its locator's steps, and whether the value
  * it enters is a secret. A locator's actions provide it around their operation.
  */
 export interface Subject {

@@ -1,5 +1,5 @@
 /**
- * GVariant, GLib's serialization format, for WebKitGTK's and WPE's remote inspector socket (review 23). Values are
+ * GVariant, GLib's serialization format, for WebKitGTK's and WPE's remote inspector socket. Values are
  * encoded and decoded from their type strings, with GVariant's alignment and framing offsets, without GLib: the
  * basic types, strings, variants, maybes, arrays, tuples and dictionary entries.
  *

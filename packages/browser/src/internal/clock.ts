@@ -1,5 +1,5 @@
 /**
- * The page clock (review 17, candidate 7): no backend has an application clock to drive, so it is a shim of
+ * The page clock: no backend has an application clock to drive, so it is a shim of
  * ours, installed in each document's main world before its scripts by an environment-phase init script, and
  * driven by evaluation there.
  *
@@ -8,12 +8,12 @@
  *   operation is applied to every current document of the scope, every frame's included, and the init script
  *   is declared again with the new state, so a later document starts where the timeline is. The newer
  *   declaration carries a higher version, and a shim already in a document keeps the newest state it is given.
- * - **The engine is untouched**: it runs in its own world, which keeps the real timers and frames (review 17,
- *   P16), so actionability and expectations run on native rendering. Where it shares the page's world, as on
+ * - **The engine is untouched**: it runs in its own world, which keeps the real timers and frames, so
+ *   actionability and expectations run on native rendering. Where it shares the page's world, as on
  *   stock WebKit, the shim leaves the real ones under a symbol the engine takes them from (QUIRKS.md, Q222).
  * - **What it covers**: `Date`, `performance.now`, and in controlled mode `setTimeout`, `setInterval`,
  *   `requestAnimationFrame` and their clears. Not CSS animations or `document.timeline`.
- * - **Workers**, when installed with `workers: true` (review 22): the init script runs in the scope's dedicated
+ * - **Workers**, when installed with `workers: true`: the init script runs in the scope's dedicated
  *   workers too, and each operation reaches the current ones as it reaches documents.
  */
 import * as DateTime from "effect/DateTime"

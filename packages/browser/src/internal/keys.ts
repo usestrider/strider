@@ -1,11 +1,11 @@
 /**
- * Keys, as UI Events names them (review 16, candidate 3): the named keys from a table of ours, and the characters
- * a keyboard layout types, from Unicode CLDR's (review 22, candidate 6d; `keyboardLayouts.ts`, generated).
+ * Keys, as UI Events names them: the named keys from a table of ours, and the characters
+ * a keyboard layout types, from Unicode CLDR's (`keyboardLayouts.ts`, generated).
  *
  * - **A character** is typed by the key its layout types it with, Shift or AltGr held where the layout says. One
  *   only a dead key reaches is two strokes: the dead key (`key: "Dead"`, no text), then the other key, whose
  *   `key` and text are the character it composes. One the layout lacks, such as `é` on `us`, is a key whose
- *   text is the character and whose `code` is empty, which every backend types (review 16, P3).
+ *   text is the character and whose `code` is empty, which every backend types.
  * - **A named key** (`Enter`, `ArrowDown`, `Shift`) is the same on every layout. Anything else isn't a key.
  */
 import type * as Keyboard from "../Keyboard.ts"

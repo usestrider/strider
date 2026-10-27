@@ -44,10 +44,7 @@ export const diagnostics = (step: string): Diagnostics.Diagnostics =>
 export const fail = (reason: Browser.BrowserErrorReason, step: string) =>
   Effect.fail(new Browser.BrowserError({ reason, diagnostics: diagnostics(step) }))
 
-/**
- * A launch's span: the executable it named and, where the backend has them, the launch profile it used
- * (review 20, candidate 1).
- */
+/** A launch's span: the executable it named and, where the backend has them, the launch profile it used. */
 export const span = (
   name: string,
   options: { readonly executablePath?: string | undefined; readonly profile?: string | undefined },
@@ -67,7 +64,7 @@ const lookup = "`strider browsers` lists the browsers it can find, by absolute p
 
 /**
  * The executable a launch names, checked: an absolute path to a file that exists. Nothing else is looked up,
- * so a launch never runs a browser nobody named (reviews 10 and 11). A relative path, whose meaning depends on
+ * so a launch never runs a browser nobody named. A relative path, whose meaning depends on
  * the working directory, and a bare command name, which the process spawner would look up on `PATH`, fail with
  * `InvalidInput`, as does a missing path from a caller the types don't reach, such as plain JavaScript.
  */
@@ -101,7 +98,7 @@ export const executable = Effect.fnUntraced(function*(executablePath: string | u
 export const profileDirectory = Effect.fnUntraced(function*(userDataDir: string | undefined, prefix: string) {
   const fs = yield* FileSystem.FileSystem
   if (userDataDir !== undefined) return userDataDir
-  // In the ledger while it exists: the finalizer that forgets it runs after the one that removes it (review 22)
+  // In the ledger while it exists: the finalizer that forgets it runs after the one that removes it
   const ledger = yield* Ledger.CurrentLedger
   let made: string | undefined
   yield* Effect.addFinalizer(() => made === undefined ? Effect.void : ledger.remove({ _tag: "Directory", path: made }))
@@ -136,7 +133,7 @@ export const spawn = Effect.fnUntraced(function*(
     readonly env?: Readonly<Record<string, string>> | undefined
   }
 ) {
-  // In the ledger while it runs, known by the profile its command line names (review 22)
+  // In the ledger while it runs, known by the profile its command line names
   const ledger = yield* Ledger.CurrentLedger
   let launched: Ledger.Item | undefined
   yield* Effect.addFinalizer(() => launched === undefined ? Effect.void : ledger.remove(launched))

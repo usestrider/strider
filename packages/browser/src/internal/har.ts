@@ -1,11 +1,11 @@
 /**
- * HAR recordings (review 20, candidate 4): a page's or context's requests from the event model, one entry per
+ * HAR recordings: a page's or context's requests from the event model, one entry per
  * hop, written as HAR 1.2.
  *
  * - **What is recorded.** Each request the target's channel delivers while the recording lives, with the
  *   response its hop got and how the hop ended; as the hop finishes, the body its request sent is read, and its
  *   response's unless `content` is `omit`. A recording keeps every entry: its subscription has no bound.
- * - **Timings** come from the library's clock, so they mean the same on every backend (P2): `send` is 0, `wait`
+ * - **Timings** come from the library's clock, so they mean the same on every backend: `send` is 0, `wait`
  *   runs from the request to its response, and `receive` from the response to the hop's end. The phases no
  *   backend reports alike (`blocked`, `dns`, `connect`, `ssl`) are -1.
  * - **Redaction.** Cookie values, `Authorization` and `Proxy-Authorization`, and a URL's credentials are
@@ -44,7 +44,7 @@ export interface Recorded {
   readonly hop: Option.Option<Model.HopEntry>
   end: Option.Option<Model.HopEnd>
   body: Option.Option<Uint8Array>
-  /** The body the hop's request sent (review 22, Q164). */
+  /** The body the hop's request sent (Q164). */
   requestBody: Option.Option<Uint8Array>
   /** A WebSocket's frames, on its handshake's entry. */
   readonly frames: Array<NetworkConnection.Frame>
@@ -328,7 +328,7 @@ const textual = (mimeType: string) =>
   /^text\/|[+/](json|xml|javascript|ecmascript)\b|^application\/(x-www-form-urlencoded|graphql)/i.test(mimeType)
 
 /**
- * A request's body as HAR's `postData` (review 22, Q164): text where its type is textual, with a form's `params`;
+ * A request's body as HAR's `postData` (Q164): text where its type is textual, with a form's `params`;
  * otherwise base64 with `_encoding` where bodies are embedded, or a file beside the HAR where they are attached.
  */
 const postDataOf = (

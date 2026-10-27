@@ -1,5 +1,5 @@
 /**
- * The clock the browser runs on (review 26, candidate 1), which every deadline and every wait on the browser reads,
+ * The clock the browser runs on, which every deadline and every wait on the browser reads,
  * never the fiber's `Clock`. A real browser's is the live monotonic clock, which `TestClock` never moves: the
  * browser is another process, so a deadline on the test clock would never fire and a poll would never come round.
  * `Browser.layerTest`'s browser is a timeline on Effect's clock, so its clock is the `Clock` its layer was built with.

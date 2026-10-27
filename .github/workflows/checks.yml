@@ -1,4 +1,4 @@
-# The standard checks, on every push and pull request (review 25, candidate 1): in the Nix environment's default
+# The standard checks, on every push and pull request: in the Nix environment's default
 # shell, so Node and pnpm are the pinned ones, as on a maintainer's machine.
 name: Checks
 
@@ -30,7 +30,7 @@ jobs:
       # reference's checks
       - name: pnpm all
         run: nix develop --command pnpm all
-      # The published packages, built, packed and installed in a project of their own (candidate 2)
+      # The published packages, built, packed and installed in a project of their own
       - name: Build
         run: nix develop --command pnpm build
       - name: Package checks

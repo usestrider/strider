@@ -1,5 +1,5 @@
 /**
- * The adapter conformance suite (review 08, candidate 13): one set of tests, written against the adapter
+ * The adapter conformance suite: one set of tests, written against the adapter
  * contract and the facts, run against every backend with a local site. A behavior a backend lacks is asserted
  * as `Unsupported`, never skipped silently.
  */
@@ -109,7 +109,7 @@ export const conformance = (backend: Backend) =>
             assert.strictEqual(added.context, world.adapter.defaultContext)
             const capabilities = yield* SubscriptionRef.get(world.adapter.capabilities)
             assert.isTrue(capabilities.has("userContexts"))
-            // The browser's own first tab is adopted into the default context, which exists before it (review 19, P8)
+            // The browser's own first tab is adopted into the default context, which exists before it
             const adopted = yield* world.facts.when("PageAdded", (fact) => fact.origin._tag === "Adopted")
             assert.strictEqual(adopted.context, world.adapter.defaultContext)
             assert.isFalse(world.facts.all("UserContextAdded").some((fact) => !fact.isDefault))
@@ -183,7 +183,7 @@ export const conformance = (backend: Backend) =>
             const noContent = yield* goto(world, page, `${world.site.origin}/204`)
             assert(noContent.outcome._tag === "NoContent", String(noContent.outcome._tag))
             assert.strictEqual(noContent.outcome.status, 204)
-            // The response's hop, which a goto that accepts no content returns (review 20, candidate 1)
+            // The response's hop, which a goto that accepts no content returns
             assert(Option.isSome(noContent.outcome.response), "the 204's hop")
             const refused = yield* goto(world, page, "http://127.0.0.1:9/refused")
             assert.strictEqual(refused.outcome._tag, "Failed")
@@ -583,12 +583,12 @@ export const conformance = (backend: Backend) =>
               modifiers: none,
               buttons
             })
-            // Review 16, P9: the CDP adapter sent no buttons, and WebKit's forgot them between calls
+            // The buttons held are sent with each event, and kept between calls
             yield* world.adapter.dispatchInput(page, [mouse("move", 5, 0), mouse("down", 5, 1)])
             yield* world.adapter.dispatchInput(page, [mouse("move", 10, 1), mouse("move", 15, 1)])
             yield* world.adapter.dispatchInput(page, [mouse("up", 15, 0), mouse("move", 20, 0)])
             yield* evaluate(world, page, "() => document.querySelector('#t').focus()")
-            // Review 16, P2: BiDi's Enter was the numpad's
+            // Enter is the main Enter key, not the numpad's
             yield* world.adapter.dispatchInput(page, [
               {
                 _tag: "Key",
@@ -659,7 +659,7 @@ export const conformance = (backend: Backend) =>
               userActivation: false
             })
             assert(iframe._tag === "Value" && iframe.value.type === "node" && iframe.value.node !== undefined)
-            // Review 18, P3: every backend names the frame an iframe element holds, or says it can't
+            // Every backend names the frame an iframe element holds, or says it can't
             const contentFrame = world.adapter.contentFrame(iframe.value.node)
             if (yield* supports(world, "frames.contentFrame")) {
               assert.deepStrictEqual(yield* contentFrame, Option.some(added.frame))
@@ -685,7 +685,7 @@ export const conformance = (backend: Backend) =>
               })
               assert.deepStrictEqual(id, { _tag: "Value", value: { type: "string", value: "cross" } })
             }
-            // Review 18, P1 and P2: input aimed inside a cross-site frame reaches it, on every backend
+            // Input aimed inside a cross-site frame reaches it, on every backend
             const none = { alt: false, control: false, meta: false, shift: false }
             const origin = { x: 100 + 5 + 3, y: 50 + 5 + 3 }
             const x = origin.x + 40
@@ -794,7 +794,7 @@ export const conformance = (backend: Backend) =>
             const capabilities = yield* SubscriptionRef.get(world.adapter.capabilities)
             const decode = (bytes: Uint8Array) =>
               new TextDecoder().decode(bytes)
-            // Review 17, P10: every backend has the body as it was sent; P3: a new body sends its own length
+            // Every backend has the body as it was sent; a new body sends its own length
             yield* Effect.scoped(Effect.gen(function*() {
               yield* world.adapter.declare({ _tag: "UserContext", context }, {
                 _tag: "Intercept",
@@ -845,7 +845,7 @@ export const conformance = (backend: Backend) =>
             if (!capabilities.has("interception.auth")) {
               return
             }
-            // Review 17, P6: a challenge is asked about, once the request it came for is intercepted as it starts
+            // A challenge is asked about, once the request it came for is intercepted as it starts
             yield* Effect.scoped(Effect.gen(function*() {
               yield* world.adapter.declare({ _tag: "UserContext", context }, {
                 _tag: "Intercept",
@@ -879,7 +879,7 @@ export const conformance = (backend: Backend) =>
             const { context, page } = yield* newPage(world)
             const origin = world.site.origin
             const capabilities = yield* SubscriptionRef.get(world.adapter.capabilities)
-            // Review 17, P4: CDP left a navigation failed with "aborted" without an end
+            // A navigation whose request is failed, or aborted where the backend can, still ends
             yield* Effect.scoped(Effect.gen(function*() {
               yield* world.adapter.declare({ _tag: "UserContext", context }, {
                 _tag: "Intercept",
@@ -1036,7 +1036,7 @@ export const conformance = (backend: Backend) =>
               fact.message.text === "hello 42")
             assert.strictEqual(hello.message.level, "log")
             assert.deepStrictEqual(hello.message.origin, { _tag: "Page", page })
-            // 1-based, as stack traces print it: the page is one line (review 14, P9)
+            // 1-based, as stack traces print it: the page is one line
             assert.strictEqual(Option.getOrThrow(hello.message.location).line, 1)
             const bad = yield* world.facts.when("ConsoleMessage", (fact) =>
               fact.message.text === "bad")
@@ -1044,7 +1044,7 @@ export const conformance = (backend: Backend) =>
             const thrown = yield* world.facts.when("UncaughtException")
             assert.strictEqual(thrown.exception.name, "TypeError")
             assert.strictEqual(thrown.exception.message, "thrown here")
-            // A thrown value that isn't an Error reads as an Error whose message is the value (review 14, P10)
+            // A thrown value that isn't an Error reads as an Error whose message is the value
             yield* evaluate(world, page, "() => { setTimeout(() => { throw 'a string' }) }")
             const raw = yield* world.facts.when("UncaughtException", (fact) =>
               fact.exception.message === "a string")
@@ -1193,7 +1193,7 @@ export const conformance = (backend: Backend) =>
             const realm = yield* world.facts.when("RealmAdded", (fact) => fact.kind._tag === "Worker")
             assert(realm.kind._tag === "Worker")
             assert.strictEqual(realm.kind.worker._tag, "Dedicated")
-            // A dedicated worker belongs to its page, and so to its context (review 14, candidate 1)
+            // A dedicated worker belongs to its page, and so to its context
             assert.deepStrictEqual([realm.kind.page, realm.kind.context], [Option.some(page), Option.some(context)])
             const message = yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text === "from the worker")
             // Firefox 158 attributes a dedicated worker's console to its owner, the window realm (recorded 2026-10-20)
@@ -1220,7 +1220,7 @@ export const conformance = (backend: Backend) =>
             assert.deepStrictEqual(sent.frame.payload, { _tag: "Text", text: "ping" })
             yield* world.facts.when("ConnectionFrame", (fact) => fact.frame.direction === "received")
             yield* world.facts.when("ConnectionClosed", (fact) => fact.connection === opened.connection)
-            // The close handshake's control frames aren't messages (review 14, P15)
+            // The close handshake's control frames aren't messages
             const frames = world.facts.all("ConnectionFrame").filter((fact) => fact.connection === opened.connection)
             assert.deepStrictEqual(frames.map((fact) => fact.frame.payload._tag), ["Text", "Text"])
           }), timeout)

@@ -1,5 +1,5 @@
 /**
- * The `strider` command (CLI.md; review 20, candidate 6), run as a person or an agent runs it: as processes, with a
+ * The `strider` command (CLI.md), run as a person or an agent runs it: as processes, with a
  * session's daemon in between. A session started on the pinned Chromium is driven by page name and target,
  * waits across commands, declares routes and dialog decisions, runs a segment, saves its state, exports a test
  * and stops; a second session forks the first's state; a daemon killed outright is listed and pruned; and the
@@ -221,7 +221,7 @@ describe("strider", () => {
         const again = yield* run("start", "--name", "first", "--chromium", chromium.executable)
         assert.notStrictEqual(again.code, 0)
         assert.include(again.err, "strider prune first")
-        // The ledger lists what the dead daemon launched, and --yes reclaims it (review 22)
+        // The ledger lists what the dead daemon launched, and --yes reclaims it
         const listed = yield* run("prune")
         assert.include(listed.out, "which has ended:")
         assert.include(listed.out, firefox.executable)

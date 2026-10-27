@@ -7,7 +7,7 @@
  * the navigation came from `goto` or was awaited with `next`.
  *
  * A navigation is an event when it ends, including those `goto` starts. A page's own navigations are its events,
- * and with `frames: "all"` its frames' too (review 22), each naming the navigable it happened in.
+ * and with `frames: "all"` its frames' too, each naming the navigable it happened in.
  *
  * @stability unstable
  * @since 0.1.0
@@ -65,7 +65,7 @@ export type Id = typeof Id.Type
  *
  * `url` is where the page went: the committed document's URL, after any redirects, or the URL a same-document
  * navigation set; for `BecameDownload` and `NoContent`, the URL it was going to. `frame` is the navigable it
- * happened in: the page's own id, or a frame's (review 22).
+ * happened in: the page's own id, or a frame's.
  *
  * @stability unstable
  * @category schemas
@@ -135,7 +135,7 @@ export interface Filter {
    */
   readonly url?: Url.Pattern | string | undefined
   /**
-   * Whose navigations: the page's own, or its frames' too (review 22).
+   * Whose navigations: the page's own, or its frames' too.
    *
    * @default "main"
    */

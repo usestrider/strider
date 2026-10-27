@@ -139,7 +139,7 @@ const deliver = (event: Model.AutoResolutionEvent): AutoResolution => {
         at: event.at
       })
     case "PausedRequest":
-      // No route decided a request one matched (review 17, candidate 1)
+      // No route decided a request one matched
       return new AutoResolution({
         subject: { _tag: "PausedRequest", request: event.request },
         decision: event.decision,

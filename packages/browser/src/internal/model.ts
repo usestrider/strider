@@ -1,19 +1,18 @@
 /**
- * L1's model (CONCEPTS.md §2; review 12, candidate 2): one per connection, folded from the adapter's facts. The
+ * L1's model (CONCEPTS.md §2): one per connection, folded from the adapter's facts. The
  * fold is the adapter's sink, so it runs in receive order, before the adapter publishes the event, and it is
  * the only writer of entity state. Each entity is its fixed fields, one `SubscriptionRef` and a `Deferred`
  * for its end.
  *
  * It folds what the built operations read: contexts, pages, their active documents and readiness, navigations,
  * the realms the engine is installed in, and the responses of navigation requests. Frames are folded as far
- * as attribution and frame locators need: which page each belongs to, its parent, and its current document
- * (review 18, candidate 2).
+ * as attribution and frame locators need: which page each belongs to, its parent, and its current document.
  *
- * Events (reviews 13 and 14): the fold publishes every event kind to channels on its page and its context
- * (`events.ts`), so it keeps which page and context each navigable, realm and request belongs to (review 14,
- * candidate 1). A dialog or a file chooser is decided by the page's latest handler, or else by a policy, by a
- * resolver in the model's scope; a popup of an owned page is released with its opener's scope. Downloads,
- * workers and connections are entities of their own, whose handles the public modules make.
+ * Events: the fold publishes every event kind to channels on its page and its context
+ * (`events.ts`), so it keeps which page and context each navigable, realm and request belongs to. A dialog or a
+ * file chooser is decided by the page's latest handler, or else by a policy, by a resolver in the model's scope;
+ * a popup of an owned page is released with its opener's scope. Downloads, workers and connections are entities
+ * of their own, whose handles the public modules make.
  */
 import * as DateTime from "effect/DateTime"
 import * as Deferred from "effect/Deferred"
@@ -58,7 +57,7 @@ export type PageState =
     readonly url: string
     readonly document: Page.DocumentStatus
     readonly prompt: Option.Option<Page.Prompt>
-    /** The open prompt, when nothing will decide it: no handler, and a `"leaveOpen"` policy (review 13). */
+    /** The open prompt, when nothing will decide it: no handler, and a `"leaveOpen"` policy. */
     readonly undecided: Option.Option<UndecidedPrompt>
   }
   | { readonly _tag: "Closed"; readonly reason: Target.CloseReason; readonly url: string }
@@ -69,7 +68,7 @@ export interface UndecidedPrompt {
   readonly text: string
 }
 
-/** A popup, as its opener's channel has it; its URL arrives with its first navigation (review 13, candidate 4). */
+/** A popup, as its opener's channel has it; its URL arrives with its first navigation. */
 export interface PopupEvent {
   readonly page: PageEntry
   url: Option.Option<string>
@@ -112,7 +111,7 @@ export interface Handler<A> {
   readonly decide: (subject: A) => Effect.Effect<Option.Option<Adapter.Decision>>
 }
 
-/** A request paused for a decision (review 17). */
+/** A request paused for a decision. */
 export type PausedRequestEvent = Extract<Adapter.ObligationSubject, { readonly _tag: "PausedRequest" }>
 
 /** What a route said about a paused request. */
@@ -122,7 +121,7 @@ export type RouteAnswer =
   /** It failed, was interrupted, ran out of time or returned what isn't a decision; it logged why. */
   | { readonly _tag: "Failed" }
 
-/** A route, as the model asks it (review 17, candidate 1). */
+/** A route, as the model asks it. */
 export interface RouteEntry {
   readonly phase: "request" | "response" | "auth"
   readonly matches: (url: string) => boolean
@@ -130,10 +129,10 @@ export interface RouteEntry {
   readonly ask: (obligation: Adapter.ObligationId, paused: PausedRequestEvent) => Effect.Effect<RouteAnswer>
 }
 
-/** A navigation of a page, when it ended (review 14, candidate 6). */
+/** A navigation of a page, when it ended. */
 export interface NavigationEvent {
   readonly navigation: PageNavigation.Id
-  /** The navigable it happened in: the page's own id, or a frame's (review 22). */
+  /** The navigable it happened in: the page's own id, or a frame's. */
   readonly frame: Target.NavigableId
   /** Where it ended: the committed document's URL, or the one a same-document navigation set; else where it was going. */
   readonly url: string
@@ -167,7 +166,7 @@ export interface HopEntry {
   sent: Option.Option<Headers.Headers>
   /**
    * Done once the headers as sent are known, which every adapter reports, or once the hop ends without them
-   * (`NetworkRequest.headersSent`, review 22).
+   * (`NetworkRequest.headersSent`).
    */
   readonly sentKnown: Deferred.Deferred<void>
   /** The headers as the network received them, likewise. */
@@ -213,7 +212,7 @@ export interface ConnectionEntry {
   readonly closed: Deferred.Deferred<Target.CloseReason>
 }
 
-/** The events of a page: one channel per kind (reviews 13 and 14). */
+/** The events of a page: one channel per kind. */
 export interface PageEvents {
   readonly popup: Events.Channel<PopupEvent>
   readonly dialog: Events.Channel<PromptEvent>
@@ -248,7 +247,7 @@ export interface PageEntry {
   readonly closed: Deferred.Deferred<Target.CloseReason>
   /** Input to one page is serialized (CONCEPTS.md §5). */
   readonly input: Semaphore.Semaphore
-  /** The keys and buttons held and the pointer's position, which every gesture is built from (review 16). */
+  /** The keys and buttons held and the pointer's position, which every gesture is built from. */
   readonly inputState: Input.State
   /**
    * The scope that releases the page, when the library owns it (CONCEPTS.md §3): its creator's, or for a popup,
@@ -262,11 +261,11 @@ export interface PageEntry {
   readonly chooserHandlers: Array<Handler<FileChooserEvent>>
   /** Told when a handler answers the page's `beforeunload` prompt with stay: a `close` waiting on it fails. */
   readonly stayed: Set<() => void>
-  /** Its routes, oldest first: the most recent is asked first (review 17). */
+  /** Its routes, oldest first: the most recent is asked first. */
   readonly routes: Array<RouteEntry>
   /** Its dedicated workers. */
   readonly workers: SubscriptionRef.SubscriptionRef<ReadonlyArray<WorkerEntry>>
-  /** Its frame tree: its URL, its frames in the order they were added, and its end (review 18, candidate 2). */
+  /** Its frame tree: its URL, its frames in the order they were added, and its end. */
   readonly tree: SubscriptionRef.SubscriptionRef<FrameTreeState>
 }
 
@@ -306,12 +305,12 @@ export interface ContextEntry {
   policy: Option.Option<DialogPolicy>
   /** Events retained per kind and target, for `history` (`UserContext.Options.eventLog`). */
   eventLog: number
-  /** The layout its pages' keyboards type with (`UserContext.Options.keyboardLayout`, review 22). */
+  /** The layout its pages' keyboards type with (`UserContext.Options.keyboardLayout`). */
   keyboardLayout: Keyboard.Layout
   readonly events: ContextEvents
   /** Its workers: its pages' dedicated workers, and its shared and service workers. */
   readonly workers: SubscriptionRef.SubscriptionRef<ReadonlyArray<WorkerEntry>>
-  /** Its routes, oldest first: asked after a page's own (review 17). */
+  /** Its routes, oldest first: asked after a page's own. */
   readonly routes: Array<RouteEntry>
 }
 
@@ -343,7 +342,7 @@ export interface Model {
   readonly forget: (id: PageNavigation.Id) => void
   /** The response of a navigation request, by hop. */
   readonly response: (hop: NetworkRequest.HopId) => Option.Option<NetworkResponse.NetworkResponse>
-  /** A hop the model still keeps, by id: its request, its response so far, and its end (review 20's recordings). */
+  /** A hop the model still keeps, by id: its request, its response so far, and its end. */
   readonly hop: (hop: NetworkRequest.HopId) => Option.Option<HopEntry>
   /** The realm the engine is installed in, per document, until the realm or the document ends. */
   readonly engineRealms: Map<Target.DocumentId, Target.RealmId>
@@ -386,7 +385,7 @@ const endOf = (reason: Target.CloseReason): Events.End => ({
   reason
 })
 
-/** A URL a popup reports before it navigates, which says nothing about where it was opened to (review 13, P1). */
+/** A URL a popup reports before it navigates, which says nothing about where it was opened to. */
 const placeholder = (url: string) => url === "" || url === "about:blank"
 
 const workerKinds = { Dedicated: "dedicated", Shared: "shared", Service: "service" } as const
@@ -407,9 +406,9 @@ export const make = Effect.fnUntraced(function*() {
   const modelScope = yield* Effect.scope
   const contexts = new Map<UserContext.Id, ContextEntry>()
   const pages = new Map<Target.NavigableId, PageEntry>()
-  // Every page of the browser, in the order they were added (review 19, candidate 3)
+  // Every page of the browser, in the order they were added
   const pageList = yield* SubscriptionRef.make<ReadonlyArray<Target.NavigableId>>([])
-  // Frames, by the page they belong to (review 14, candidate 1)
+  // Frames, by the page they belong to
   const frames = new Map<Target.NavigableId, PageEntry>()
   const documents = new Map<Target.DocumentId, DocumentEntry>()
   const navigations = new Map<PageNavigation.Id, NavigationEntry>()
@@ -527,7 +526,7 @@ export const make = Effect.fnUntraced(function*() {
     yield* Deferred.succeed(connection.closed, reason)
   })
 
-  /** Ends a download its context took with it, unless it already ended (review 14, P3). */
+  /** Ends a download its context took with it, unless it already ended. */
   const cancelDownload = (download: DownloadEntry) =>
     SubscriptionRef.update(
       download.status,
@@ -620,7 +619,7 @@ export const make = Effect.fnUntraced(function*() {
     adapter === undefined ? Effect.void : adapter.resolve(obligation, decision).pipe(Effect.ignore)
 
   /**
-   * Decides a dialog (review 13, candidate 6), apart from the fold and from any handler's fiber: the page's
+   * Decides a dialog, apart from the fold and from any handler's fiber: the page's
    * latest handler, chosen now; else, or if it doesn't decide, the context's policy, reported as an
    * `AutoResolution`; else nothing, and operations on the page fail with `PromptBlocking`.
    */
@@ -663,7 +662,7 @@ export const make = Effect.fnUntraced(function*() {
   })
 
   /**
-   * Decides a file chooser (review 14, candidate 9), as a dialog is decided: the page's latest handler, else
+   * Decides a file chooser, as a dialog is decided: the page's latest handler, else
    * cancel, reported as an `AutoResolution`, in a context the library created. A chooser in another context is
    * left as the browser has it.
    */
@@ -683,7 +682,7 @@ export const make = Effect.fnUntraced(function*() {
   })
 
   /**
-   * Decides a paused request (review 17, candidate 1): its page's routes, then its context's, the most recent
+   * Decides a paused request: its page's routes, then its context's, the most recent
    * first, until one decides. The default, continue, applies when none matches; when every one that matched
    * fell through or failed, or the backend refused a decision, it is also published as an `AutoResolution`.
    */
@@ -697,7 +696,7 @@ export const make = Effect.fnUntraced(function*() {
       ...(Option.isSome(owner.page) ? [...owner.page.value.routes].reverse() : []),
       ...(Option.isSome(owner.context) ? [...owner.context.value.routes].reverse() : [])
     ].filter((route) => route.phase === paused.phase && route.matches(url))
-    // Never the browser's own prompt at a challenge: headless, it waits forever (review 17, P6)
+    // Never the browser's own prompt at a challenge: headless, it waits forever
     const fallback: Adapter.Decision = paused.phase === "auth"
       ? { _tag: "CancelAuth" }
       : { _tag: "Continue", overrides: Option.none() }
@@ -712,13 +711,13 @@ export const make = Effect.fnUntraced(function*() {
         if (Exit.isSuccess(sent)) return
         const failure = sent.cause.reasons.find((reason) => reason._tag === "Fail")
         // A request that ended has nothing left to decide; one the backend refused a decision for still waits
-        // for one, so it gets the default (review 17's build)
+        // for one, so it gets the default
         if (failure === undefined || failure.error.reason._tag === "Gone" || failure.error.reason._tag === "Foreign") {
           return
         }
         const level = yield* References.UnhandledLogLevel
         if (level !== undefined) {
-          // The URL as the diagnostics preset shows it (review 20, candidate 1)
+          // The URL as the diagnostics preset shows it
           const shown = Spans.redactUrl(url, yield* Diagnostics.CurrentPreset)
           yield* Effect.logWithLevel(level)(
             `A route's decision for ${shown} couldn't be applied, so it continues: ${failure.error.message}`
@@ -847,7 +846,7 @@ export const make = Effect.fnUntraced(function*() {
             tree: yield* SubscriptionRef.make<FrameTreeState>({ url: fact.url, frames: [], closed: Option.none() })
           }
           pages.set(fact.page, entry)
-          // A popup is reported to its opener, when the backend names one (review 13, candidate 4); before the
+          // A popup is reported to its opener, when the backend names one; before the
           // context's pages change, so a caller woken by that change subscribes after it, as with every event
           const opener = fact.kind === "popup" && fact.origin._tag === "Opened"
             ? Option.flatMap(fact.origin.opener, (id) => Option.fromNullishOr(pages.get(id)))
@@ -892,7 +891,7 @@ export const make = Effect.fnUntraced(function*() {
             pending.entry.value.url = Option.some(fact.url)
             Events.revise(pending.channel, pending.entry)
           }
-          // A page's navigations are its events, and since review 22 its frames' too, each naming its navigable
+          // A page's navigations are its events, and its frames' too, each naming its navigable
           const page = pages.get(fact.navigable) ?? frames.get(fact.navigable)
           if (page !== undefined) {
             started.set(fact.navigation, { page, frame: fact.navigable, url: fact.url })
@@ -914,7 +913,7 @@ export const make = Effect.fnUntraced(function*() {
           const page = pages.get(fact.navigable)
           const owner = frames.get(fact.navigable)
           if (page === undefined && owner !== undefined) {
-            // A frame's document (review 18, candidate 2): the frame's entry follows it
+            // A frame's document: the frame's entry follows it
             documents.set(fact.document, {
               id: fact.document,
               navigable: fact.navigable,
@@ -1036,7 +1035,7 @@ export const make = Effect.fnUntraced(function*() {
         }
         case "NavigationEnded": {
           // The event first, then the outcome: `goto` returns once the outcome is latched, and a `next` its caller
-          // subscribes then must not see the navigation `goto` made (found by review 16's build)
+          // subscribes then must not see the navigation `goto` made
           const start = started.get(fact.navigation)
           if (start !== undefined) {
             started.delete(fact.navigation)
@@ -1189,7 +1188,7 @@ export const make = Effect.fnUntraced(function*() {
           return
         }
         case "DownloadEnded": {
-          // What a backend reports after the download's context ended is ignored (review 14, P3)
+          // What a backend reports after the download's context ended is ignored
           const download = downloads.get(fact.download)
           if (download === undefined) return
           downloads.delete(fact.download)

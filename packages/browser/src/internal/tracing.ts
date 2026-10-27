@@ -1,5 +1,5 @@
 /**
- * The references that shape the library's spans (review 20, candidate 1), defined apart from `Browser` so the
+ * The references that shape the library's spans, defined apart from `Browser` so the
  * protocol client can read one without importing the public modules. `Browser` exports them.
  */
 import * as Context from "effect/Context"

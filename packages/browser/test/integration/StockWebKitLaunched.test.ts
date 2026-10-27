@@ -1,5 +1,5 @@
 /**
- * Stock WebKit launched in automation mode (review 23, its second step), through the public layer: `WebKit.layer`
+ * Stock WebKit launched in automation mode, through the public layer: `WebKit.layer`
  * with WebKitGTK's MiniBrowser (`browsers.ts`), a browser process per context, on an X server this process's
  * environment names (`stockWebKit.ts`), with Node's sockets (`sockets.ts`).
  */

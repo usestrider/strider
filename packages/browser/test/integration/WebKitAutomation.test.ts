@@ -1,8 +1,8 @@
 /**
- * WebKit's Automation protocol against stock WebKitGTK (review 23, its first step): the inspector server's socket
+ * WebKit's Automation protocol against stock WebKitGTK: the inspector server's socket
  * (`webkitInspectorSocket.ts`) and the generated Automation commands, before an adapter drives them. A session, a
  * page, trusted input, a screenshot, a dialog, and the page as an inspector target on the same socket; and the
- * error replies of both protocols, which the drift test's fixture records (its third step).
+ * error replies of both protocols, which the drift test's fixture records.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"

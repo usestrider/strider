@@ -1,5 +1,5 @@
 /**
- * Locators as data (review 12, candidate 3): the engine's steps each query appends, how they read in code, and
+ * Locators as data: the engine's steps each query appends, how they read in code, and
  * the relative locators `filter({ has })` takes. It imports only types, so `Locator` can use it too.
  */
 import type * as AriaRole from "../AriaRole.ts"

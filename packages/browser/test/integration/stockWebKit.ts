@@ -1,7 +1,7 @@
 /**
- * Stock WebKit for the integration tests (review 22, candidate 7): WebKitGTK's MiniBrowser (`browsers.ts`), which
+ * Stock WebKit for the integration tests: WebKitGTK's MiniBrowser (`browsers.ts`), which
  * has no headless mode (QUIRKS.md, Q202), on an X server of its own, with its remote inspector on a free port. Both
- * stop with the scope. In automation mode (review 23), its inspector server is the socket WebKit's WebDriver speaks.
+ * stop with the scope. In automation mode, its inspector server is the socket WebKit's WebDriver speaks.
  */
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -68,7 +68,7 @@ export const startMiniBrowser = Effect.fnUntraced(function*(...urls: ReadonlyArr
 })
 
 /**
- * The MiniBrowser in automation mode (review 23), with its inspector server's socket on a free port
+ * The MiniBrowser in automation mode, with its inspector server's socket on a free port
  * (`WEBKIT_INSPECTOR_SERVER`), once it listens: its port, and its process.
  */
 export const startMiniBrowserForAutomation = Effect.fnUntraced(function*() {

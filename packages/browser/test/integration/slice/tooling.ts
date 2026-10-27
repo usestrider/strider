@@ -1,5 +1,5 @@
 /**
- * Review 20's first step on every backend's layer: files made in the page, the outcomes `goto` accepts, a close
+ * Tooling on every backend's layer: files made in the page, the outcomes `goto` accepts, a close
  * that runs `beforeunload`, the capabilities each backend has and the `Unsupported` of the others, and a span per
  * protocol command.
  */
@@ -177,7 +177,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             const tree = acquired.value
             assert.strictEqual(tree.role, "RootWebArea")
             assert.isTrue(findNode(tree, (node) => node.role === "button" && node.name === "Save"))
-            // Each iframe's tree is under it, in process or out (review 22)
+            // Each iframe's tree is under it, in process or out
             for (const name of ["In frame", "Cross site"]) {
               assert.isTrue(
                 findNode(tree, (node) =>

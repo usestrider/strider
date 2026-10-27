@@ -1,6 +1,6 @@
 # Bug for Firefox: page coordinates over a cross-site iframe reach nothing in it
 
-*Draft, 2026-10-25, for the maintainer to file in Bugzilla (Remote Protocol :: WebDriver BiDi). Not filed. Search for an existing report first. From Strider's QUIRKS.md, Q111; seen on Firefox 158.0 in review 18, P1 and P2.*
+*Draft, 2026-10-25, for the maintainer to file in Bugzilla (Remote Protocol :: WebDriver BiDi). Not filed. Search for an existing report first. From Strider's QUIRKS.md, Q111; seen on Firefox 158.0.*
 
 ## Steps
 

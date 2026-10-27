@@ -1,4 +1,4 @@
-// Checks what the published packages would be (review 25, candidate 2): each package `pnpm pack` writes, in a
+// Checks what the published packages would be: each package `pnpm pack` writes, in a
 // temporary directory, with nothing of the workspace's. Run from the repository root after `pnpm build`.
 //
 // - every `exports` target and `bin` of the packed `package.json` exists, a `.d.ts` beside each `.js`;

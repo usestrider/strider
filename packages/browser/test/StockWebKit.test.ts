@@ -1,5 +1,5 @@
 /**
- * Stock WebKit's transport (review 22, candidate 7), without a browser: the inspector server's list, and the ids
+ * Stock WebKit's transport, without a browser: the inspector server's list, and the ids
  * each target numbers for itself (QUIRKS.md, Q195 and Q196).
  */
 import { assert, describe, it } from "@effect/vitest"

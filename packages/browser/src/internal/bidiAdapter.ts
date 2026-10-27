@@ -1,5 +1,5 @@
 /**
- * The WebDriver BiDi backend adapter (PROTOCOL.md, Backend adapters; review 08), for Firefox and any BiDi
+ * The WebDriver BiDi backend adapter (PROTOCOL.md, Backend adapters), for Firefox and any BiDi
  * endpoint. It keeps the tables from BiDi's ids to L1's, folds BiDi's events into facts, and carries out L1's
  * operations.
  *
@@ -76,7 +76,7 @@ interface NavigableEntry {
   readonly pendingRealms: Array<RealmEntry>
   /**
    * A traversal that replied before its restored document's realm arrived, waiting for it: under load, Firefox
-   * can reply first (review 14's revision).
+   * can reply first.
    */
   restoring: ((realm: RealmEntry) => void) | undefined
   /** Navigations started by a command that the browser hasn't announced yet, oldest first. */
@@ -148,7 +148,7 @@ type ObligationEntry =
     readonly id: Adapter.ObligationId
     readonly request: string
     readonly phase: "request" | "response" | "auth"
-    /** The headers it was sent with, which a new body's `Content-Length` replaces one of (review 17, P3). */
+    /** The headers it was sent with, which a new body's `Content-Length` replaces one of. */
     readonly headers: ReadonlyArray<Network.Header>
   }
   | {
@@ -248,7 +248,7 @@ const webdriverKeys: Readonly<Record<string, string>> = {
   Backspace: "\uE003",
   Tab: "\uE004",
   Clear: "\uE005",
-  // WebDriver's Return; its Enter (U+E007) is the numpad's, which Firefox reports as `NumpadEnter` (review 16, P2)
+  // WebDriver's Return; its Enter (U+E007) is the numpad's, which Firefox reports as `NumpadEnter`
   Enter: "\uE006",
   Shift: "\uE008",
   Control: "\uE009",
@@ -307,7 +307,7 @@ const errorPage = (url: string) => url.startsWith("about:neterror") || url.start
 
 /**
  * Where a navigation was going: an error page's `u` parameter, since Firefox starts a navigation it refuses at
- * once (a port browsers don't use, say) as its error page (review 14's revision).
+ * once (a port browsers don't use, say) as its error page.
  */
 const intended = (url: string) => {
   if (!errorPage(url)) return url
@@ -352,7 +352,7 @@ const toLocalValue = (
   handles: ReadonlyMap<Adapter.HandleId, { readonly handle: string }>
 ): Script.LocalValue => {
   if (local._tag === "Handle") return { handle: handles.get(local.handle)?.handle ?? "" } as Script.LocalValue
-  // A shared id names a node in every realm of its document (review 18, candidate 1)
+  // A shared id names a node in every realm of its document
   if (local._tag === "Node") return { sharedId: local.node.binding } as Script.LocalValue
   return localOf(local.value)
 }
@@ -434,7 +434,7 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
         ownership === "launched"
           ? ["the input gets a cancel event as the chooser opens, before any decision"]
           : [
-            "an attached session leaves file choosers to the browser, since a session's prompt settings are the whole browser's and dismissing would cancel the user's own (review 19)"
+            "an attached session leaves file choosers to the browser, since a session's prompt settings are the whole browser's and dismissing would cancel the user's own"
           ]
       ),
       entry("downloads", "supported"),
@@ -468,7 +468,6 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
       entry("cookies", "supported"),
       entry("permissions", "supported", ["granted per origin; reset sets the ones granted here back to prompt"]),
       entry("permissions.anyOrigin", "unsupported", ["WebDriver BiDi grants a permission to one origin"]),
-      // Review 17
       entry("interception.responseBody", "unsupported", [
         "WebDriver BiDi has no body for a response paused as it starts"
       ]),
@@ -491,19 +490,16 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
       entry("emulation.javaScript", "unsupported", ["Firefox doesn't implement emulation.setScriptingEnabled"]),
       entry("emulation.touch", "unsupported", ["Firefox doesn't implement emulation.setTouchOverride"]),
       entry("emulation.focus", "unsupported", ["WebDriver BiDi has no focus emulation"]),
-      // Review 18
       entry("screenshot.cssScale", "unsupported", ["WebDriver BiDi captures device pixels only"]),
       entry("screenshot.omitBackground", "unsupported", ["WebDriver BiDi has no background override"]),
       entry("pdf.headerFooter", "unsupported", ["WebDriver BiDi prints no header or footer"]),
       entry("pdf.preferCssPageSize", "unsupported", ["WebDriver BiDi prints at the size it is given"]),
       entry("cookies.partitioned", "unsupported", ["Firefox doesn't say which partition a cookie is in"]),
       entry("snapshot.clickListeners", "unsupported", ["WebDriver BiDi can't list event listeners"]),
-      // Review 20
       entry("capability.axTree", "unsupported", ["WebDriver BiDi has no accessibility tree"]),
       entry("capability.screencast", "unsupported", [
         "Firefox's browsingContext.startScreencast records a WebM file on the browser's host, and streams no frames"
       ]),
-      // Review 22
       ownership === "launched"
         ? entry("capability.video", "supported", ["written where the page's context downloads to"])
         : entry("capability.video", "unsupported", [
@@ -1120,7 +1116,7 @@ export const connect: (
             _tag: "UncaughtException",
             realm: Option.fromUndefinedOr(realm?.id),
             exception: new UncaughtException.UncaughtException({
-              // Firefox reports a rejection exactly as a throw (review 14, P10)
+              // Firefox reports a rejection exactly as a throw
               kind: "unknown",
               name,
               message,
@@ -1180,7 +1176,7 @@ export const connect: (
           at: Adapter.now()
         })
         emit({ _tag: "RequestSent", request: snapshot })
-        // The headers the request event gives are the ones sent, cookies included (review 22)
+        // The headers the request event gives are the ones sent, cookies included
         emit({ _tag: "HopHeaders", hop: snapshot.hop, phase: "request", headers: snapshot.headers })
         if (params.isBlocked) pause(params, "request", snapshot, Option.none())
       },
@@ -1196,7 +1192,7 @@ export const connect: (
           httpVersion: Option.fromUndefinedOr(params.response.protocol || undefined),
           headers: headersOf(params.response.headers),
           // BiDi says only whether the network served it: Firefox's fromCache is true for a service
-          // worker's response too (review 09)
+          // worker's response too
           servedBy: request.fulfilled ? "route" : params.response.fromCache ? "cacheOrServiceWorker" : "network",
           at: Adapter.now()
         })
@@ -1499,7 +1495,7 @@ export const connect: (
         capabilities: {
           alwaysMatch: {
             // A session's prompt settings are the whole browser's: an attached one leaves the user's file choosers
-            // alone (review 19, candidate 1)
+            // alone
             unhandledPromptBehavior: {
               default: "ignore",
               file: options.ownership === "launched" ? "dismiss" : "ignore"
@@ -1510,14 +1506,14 @@ export const connect: (
       product = created.capabilities.browserName
       version = created.capabilities.browserVersion
       // Firefox keeps a session after its socket closes, and allows one: a session this connection started ends
-      // with it, or every later client is refused until the browser restarts (review 19, P6)
+      // with it, or every later client is refused until the browser restarts
       yield* Effect.addFinalizer(() =>
         Session.end().pipe(on, Effect.timeoutOption("1 second"), Effect.ignore, BrowserClock.onLive)
       )
     }
     const info = new Browser.Info({ product, version, protocol: "bidi", revision: version })
     // The default context is mapped before subscribing: Firefox reports the contexts that exist as the subscription
-    // is answered, and a tab in `"default"` mapped before it would land in a context of its own (review 19, P8)
+    // is answered, and a tab in `"default"` mapped before it would land in a context of its own
     const defaultContext = ids.userContext()
     const defaultEntry: ContextEntry = { id: defaultContext, bidi: "default", removing: false }
     contexts.set(defaultContext, defaultEntry)
@@ -1613,7 +1609,7 @@ export const connect: (
     const createPage = Effect.fnUntraced(function*(id: UserContext.Id) {
       const context = yield* contextOf(id)
       // A window of its own, as Chromium's pages are (QUIRKS.md, Q70): a tab behind another renders about once a
-      // second, too seldom to act on, and a window keeps rendering whichever page came last (review 21, P2; Q71)
+      // second, too seldom to act on, and a window keeps rendering whichever page came last (Q71)
       const created = yield* protocol(
         BrowsingContext.create({
           type: "window",
@@ -1930,7 +1926,7 @@ export const connect: (
       return { _tag: "Value", value: toRemote(reply.result, realm, keep) } satisfies Adapter.RemoteResult
     })
 
-    // A realm's handles go in one command (review 22, QUIRKS.md, Q132)
+    // A realm's handles go in one command (QUIRKS.md, Q132)
     const releaseHandles = (list: ReadonlyArray<Adapter.HandleId>) =>
       Effect.suspend(() => {
         const byRealm = new Map<string, Array<Script.Handle>>()
@@ -1956,7 +1952,7 @@ export const connect: (
       ) {
         const navigable = yield* navigableById(id)
         // Firefox doesn't deliver page coordinates into a cross-site frame, so input aimed inside a frame goes to
-        // the frame's own context, in its own coordinates (review 18, P1 and P2)
+        // the frame's own context, in its own coordinates
         const target = frame === undefined ? undefined : navigablesById.get(frame.frame)
         const context = (target ?? navigable.page).bidi as BrowsingContext.BrowsingContext
         const dx = target === undefined || frame === undefined ? 0 : frame.origin.x
@@ -1994,7 +1990,7 @@ export const connect: (
               break
             case "Key":
               // WebDriver BiDi sends a key as its value alone: it has no AltGr or dead key, and the character a
-              // layout's strokes type is sent as itself (review 22)
+              // layout's strokes type is sent as itself
               if (event.key === "AltGraph" || event.key === "Dead") break
               batch("key").push({
                 type: event.type === "down" ? "keyDown" : "keyUp",
@@ -2055,7 +2051,7 @@ export const connect: (
                       ...(overrides.headers === undefined ? {} : { headers: bidiHeaders(overrides.headers) })
                     }).pipe(on)
                 }
-                // Firefox aborts a request continued with a new URL (review 17, P3)
+                // Firefox aborts a request continued with a new URL
                 if (overrides?.url !== undefined) {
                   return Effect.fail(
                     new Protocol.ProtocolError({
@@ -2063,7 +2059,7 @@ export const connect: (
                     })
                   )
                 }
-                // Firefox keeps the old Content-Length with a new body, which breaks the request (review 17, P3)
+                // Firefox keeps the old Content-Length with a new body, which breaks the request
                 const headers = overrides?.body === undefined
                   ? overrides?.headers === undefined ? undefined : bidiHeaders(overrides.headers)
                   : [
@@ -2086,7 +2082,7 @@ export const connect: (
                   ...(Option.isSome(decision.headers) ? { headers: bidiHeaders(decision.headers.value) } : {})
                 } as Network.ContinueResponseParameters).pipe(on)
               case "Fulfill": {
-                // Firefox has no fulfill at the response phase, and leaves a refused one paused (review 17, P5)
+                // Firefox has no fulfill at the response phase, and leaves a refused one paused
                 if (obligation.phase === "response") {
                   return Effect.fail(
                     new Protocol.ProtocolError({
@@ -2105,7 +2101,7 @@ export const connect: (
                 } as Network.ProvideResponseParameters).pipe(on)
               }
               case "Fail":
-                // WebDriver BiDi has one failure for every reason (review 17, P4)
+                // WebDriver BiDi has one failure for every reason
                 return decision.error === "failed"
                   ? Network.failRequest({ request }).pipe(on)
                   : Effect.fail(
@@ -2218,7 +2214,7 @@ export const connect: (
       const next: Array<string> = []
       for (const entry of entries) {
         // Each script is a preload of its own, so what ran is kept where the next can look: a script runs only
-        // after what it comes after ran without throwing (review 17, candidate 4)
+        // after what it comes after ran without throwing
         const ran = `(globalThis[Symbol.for(${JSON.stringify(ranKey)})] ??= new Set())`
         const body = `try { ${entry.declaration.source}\n;${ran}.add(${JSON.stringify(entry.id)}) } catch (error) { ` +
           `typeof reportError === "function" ? reportError(error) : console.error(error) }`
@@ -2378,10 +2374,10 @@ export const connect: (
     })
 
     const collectors = new Map<Adapter.RegistrationId, string>()
-    /** A request data collector for each intercept with a request phase, so a route can read a body (P10). */
+    /** A request data collector for each intercept with a request phase, so a route can read a body. */
     const requestCollectors = new Map<Adapter.RegistrationId, Network.Collector>()
 
-    /** What Firefox can't do, refused before anything is declared (review 17). */
+    /** What Firefox can't do, refused before anything is declared. */
     const refusal = (declaration: Adapter.Declaration): Adapter.AdapterError | undefined => {
       if (declaration._tag !== "Override") return undefined
       const override = declaration.override
@@ -2491,14 +2487,14 @@ export const connect: (
           break
         case "FileChooser":
           // File dialogs are always reported, and dismissed so none stays open (unhandledPromptBehavior.file is
-          // "dismiss"; review 14, P5 and P6): the page sees `cancel` before the decision, and files set after it
+          // "dismiss"): the page sees `cancel` before the decision, and files set after it
           // still arrive
           break
       }
       return id
     })
 
-    // An iframe's window proxy names its browsing context, which is the frame (review 18, P3)
+    // An iframe's window proxy names its browsing context, which is the frame
     const contentFrame = Effect.fnUntraced(function*(node: Adapter.NodeBinding) {
       const document = [...navigablesById.values()].find((each) => each.document?.id === node.document)
       if (document === undefined) {
@@ -2551,7 +2547,6 @@ export const connect: (
       )
 
     // A WebM file Firefox writes where the context downloads to, which a launched browser shares with the program
-    // (review 22, P2)
     const video = Effect.fnUntraced(function*(id: L1Target.NavigableId) {
       const navigable = yield* navigableById(id)
       if (options.ownership !== "launched") {

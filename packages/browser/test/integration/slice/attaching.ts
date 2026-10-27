@@ -1,5 +1,5 @@
 /**
- * The seventh slice (review 19): attaching and access, through the public API. Access on every backend, through a
+ * The seventh slice: attaching and access, through the public API. Access on every backend, through a
  * launched browser's own first tab and its default context; call site 7 on Chromium and Firefox, against a browser
  * the test starts with two tabs and a layer attaches to; and Firefox's one session.
  */

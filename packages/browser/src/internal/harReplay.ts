@@ -1,5 +1,5 @@
 /**
- * HAR replay (review 22, candidate 5c): a route handler that answers requests from a recorded HAR.
+ * HAR replay: a route handler that answers requests from a recorded HAR.
  *
  * - **Reading.** The file is read once, as the handler is made: a HAR, or the zip `content: "attach"` writes,
  *   told apart by the zip's signature, never by the file's extension. Bodies come from an entry's `text`, base64

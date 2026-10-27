@@ -1,5 +1,5 @@
 /**
- * `strider browsers`, without a browser (review 11): where it looks, and what it reports about a machine made of
+ * `strider browsers`, without a browser: where it looks, and what it reports about a machine made of
  * scripts in a temporary directory, which print a version as a browser does.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"

@@ -2,7 +2,7 @@
 
 The 28 domain files of `Source/JavaScriptCore/inspector/protocol/` in WebKitGTK 2.54.1's source release, unchanged:
 the inspector protocol of stock WebKit, which WebKitGTK's and WPE's remote inspector speak, without the domains and
-commands Playwright's patched build adds, which the WebKit backend drove until review 23.
+commands Playwright's patched build adds.
 
 - **Release:** `webkitgtk-2.54.1.tar.xz`, as nixpkgs packages it (`webkitgtk_6_0.src`), the WebKitGTK the integration
   tests run.

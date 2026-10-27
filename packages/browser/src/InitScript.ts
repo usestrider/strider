@@ -104,7 +104,7 @@ export interface Options {
   readonly timing?: "beforeAuthorScript" | "bestEffort" | undefined
   /**
    * Whether it also runs in the dedicated workers of the scope's pages started from now on, before their own
-   * script (review 22). It must run in the main world, after only scripts that run in workers too. `Unsupported`
+   * script. It must run in the main world, after only scripts that run in workers too. `Unsupported`
    * on Firefox (`initScripts.workers`): WebDriver BiDi's preload scripts run in documents only.
    *
    * @default false

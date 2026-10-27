@@ -1,5 +1,5 @@
 /**
- * The TCP sockets `WebKit.layer` opens to stock WebKit's inspector server (review 23), from Node's.
+ * The TCP sockets `WebKit.layer` opens to stock WebKit's inspector server, from Node's.
  */
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { SocketConnector } from "@usestrider/browser/protocol"

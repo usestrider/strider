@@ -1,5 +1,5 @@
 /**
- * Keyboard layouts from CLDR's legacy XML (review 22, candidate 6d): the maps read, the escapes, and dead keys.
+ * Keyboard layouts from CLDR's legacy XML: the maps read, the escapes, and dead keys.
  */
 import { assert, describe, it } from "@effect/vitest"
 import * as Keyboards from "../src/Keyboards.ts"

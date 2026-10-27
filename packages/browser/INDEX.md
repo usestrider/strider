@@ -845,7 +845,7 @@ Launch profiles: a browser's flags and preferences, as values you can inspect.
 
 ### Ledger
 
-A record of what a program owns outside itself: the browsers it launched and the directories it made for them (CONCEPTS.md §3, Ownership ledger; review 22). A program that ends normally removes what it made and its record; one that dies leaves both, and `strider prune` reads the records whose program is gone and reclaims what they name.
+A record of what a program owns outside itself: the browsers it launched and the directories it made for them (CONCEPTS.md §3, Ownership ledger). A program that ends normally removes what it made and its record; one that dies leaves both, and `strider prune` reads the records whose program is gone and reclaims what they name.
 
 *layers*
 
@@ -2120,7 +2120,7 @@ The protocol layer's client contract (L0): commands and events as data, the sess
 
 ### SocketConnector
 
-Opens scoped socket connections to endpoints chosen at run time, such as the inspector server of a stock WebKit browser `WebKit.layer` launched (review 23).
+Opens scoped socket connections to endpoints chosen at run time, such as the inspector server of a stock WebKit browser `WebKit.layer` launched.
 
 *services*
 
@@ -2215,7 +2215,7 @@ Runner-agnostic test support (`@usestrider/browser/test`).
 
 ### WebKit
 
-The WebKit backend (`@usestrider/browser/webkit`): stock WebKit, launched in automation mode or attached through its inspector (reviews 22 and 23).
+The WebKit backend (`@usestrider/browser/webkit`): stock WebKit, launched in automation mode or attached through its inspector.
 
 *layers*
 

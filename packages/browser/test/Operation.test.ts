@@ -1,5 +1,5 @@
 /**
- * An operation's record (review 26, candidate 1): the `Timeout` takes its phase from what the operation recorded,
+ * An operation's record: the `Timeout` takes its phase from what the operation recorded,
  * and a bounded wait ends on the deadline's clock, which `TestClock` doesn't move.
  */
 import { assert, describe, it } from "@effect/vitest"
@@ -97,7 +97,7 @@ describe("Operation", () => {
   })
 
   describe("a bounded wait", () => {
-    // TestClock is in force here and never moves: the deadline is the browser's, on the live clock (P1)
+    // TestClock is in force here and never moves: the deadline is the browser's, on the live clock
     it.effect("times out on the live clock under TestClock, with the record's phase and hint", () =>
       Effect.gen(function*() {
         const started = performance.now()

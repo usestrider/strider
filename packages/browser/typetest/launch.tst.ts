@@ -1,5 +1,5 @@
 /**
- * A launch names its browser by its executable's path (reviews 10 and 11): there are no channels, and nothing
+ * A launch names its browser by its executable's path: there are no channels, and nothing
  * is looked up, so a launch that names nothing doesn't compile.
  */
 import { Chromium } from "@usestrider/browser/chromium"

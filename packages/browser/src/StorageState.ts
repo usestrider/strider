@@ -50,7 +50,7 @@ export const IndexedDbDatabase = Schema.Struct({
  *
  * **Details**
  *
- * `topLevelOrigin` is, for a partitioned origin, the origin of the top-level document it was read under (review 24):
+ * `topLevelOrigin` is, for a partitioned origin, the origin of the top-level document it was read under:
  * stock WebKit keys a partition by that origin, port included, where Chromium and Firefox key it by `partition`'s
  * site. A restore writes the origin's storage under a page there; a state saved without it, under the site's
  * default port.

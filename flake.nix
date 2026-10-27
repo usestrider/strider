@@ -76,7 +76,7 @@
             ALSA_CONFIG_PATH = "${pkgs.writeText "strider-no-sound-card.conf" ""}";
             # A display of its own for the MiniBrowser, which a test starts on a free display number
             STRIDER_XVFB = lib.getExe' pkgs.xvfb "Xvfb";
-            # A self-signed certificate for the TLS fixture, made as a test starts (review 22, candidate 8)
+            # A self-signed certificate for the TLS fixture, made as a test starts
             STRIDER_OPENSSL = lib.getExe pkgs.openssl;
             # Fonts, time zone and locale, which pages measure text and format dates and numbers with
             FONTCONFIG_FILE = pkgs.makeFontsConf {

@@ -9,7 +9,7 @@
  *   phase, broader scopes first, then registration order. Each script runs in its own `try`, so one that
  *   throws doesn't stop the rest, and is reported with `reportError`, as the page's uncaught exception. A
  *   script runs only if each script it comes `after` ran in this document without throwing, so one whose
- *   dependency is gone, or threw, doesn't run (review 17, candidate 4).
+ *   dependency is gone, or threw, doesn't run.
  * - **Intercepts** are the union of every pattern in scope, per phase.
  */
 import type * as Target from "../Target.ts"
@@ -65,7 +65,7 @@ export interface Registry {
   readonly overrides: (placement: Placement) => ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
   /**
    * The init-script bundle for a dedicated worker: the main world's scripts declared for workers, in the same
-   * order, or `undefined` where there are none (review 22).
+   * order, or `undefined` where there are none.
    */
   readonly workerBundle: (placement: Placement) => string | undefined
   /** The init-script bundle for each world, by world key. */

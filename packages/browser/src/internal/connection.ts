@@ -1,5 +1,5 @@
 /**
- * A WebSocket's or EventSource's handle (review 14, candidate 11): fixed at open, its frames as a channel of
+ * A WebSocket's or EventSource's handle: fixed at open, its frames as a channel of
  * their own, and its end.
  */
 import * as Deferred from "effect/Deferred"

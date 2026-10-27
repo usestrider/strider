@@ -1,6 +1,6 @@
 /**
- * `pnpm scenarios`: Strider and Playwright side by side on the integration environment's Chromium (review 25,
- * candidate 4), writing `packages/scenarios/RESULTS.md`.
+ * `pnpm scenarios`: Strider and Playwright side by side on the integration environment's Chromium, writing
+ * `packages/scenarios/RESULTS.md`.
  *
  *   pnpm scenarios                 every scenario and measurement, 10 timed runs each
  *   pnpm scenarios --runs 3        fewer runs

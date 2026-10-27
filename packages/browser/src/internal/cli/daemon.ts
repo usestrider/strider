@@ -1,5 +1,5 @@
 /**
- * A session's daemon (CLI.md; review 20, candidate 6). `strider start` starts one per session, in the session's
+ * A session's daemon (CLI.md). `strider start` starts one per session, in the session's
  * directory: it holds the browser, the session's one context and the toolkit's pages, snapshots, waits and
  * registrations, and serves the session's commands over its Unix socket, one connection each.
  *
@@ -455,7 +455,7 @@ const commands = (daemon: Daemon) => {
         }))
     ])
   )
-  // The browser's own tabs: an attached browser's, or a launched one's first (review 22, candidate 4a)
+  // The browser's own tabs: an attached browser's, or a launched one's first
   const tabs = Command.make(
     "tabs",
     {},
@@ -641,7 +641,7 @@ const segment = Effect.fnUntraced(function*(daemon: Daemon, file: string) {
       daemon.session.page(name).pipe(
         Effect.mapError((failure) => new CurrentSession.PageNotFound({ name, hint: failure.message }))
       ),
-    // The page's ownership moves to the session's scope, which then closes it (review 22, candidate 4b)
+    // The page's ownership moves to the session's scope, which then closes it
     keep: Effect.fnUntraced(function*(page: Page.Page, name?: CurrentSession.PageName | string) {
       const named = yield* daemon.session.name(page, name).pipe(
         Effect.mapError((failure) => new CurrentSession.NameTaken({ name: name ?? "", hint: failure.message }))
@@ -985,7 +985,7 @@ const start = Command.make(
       // The session's own profile directory, made here: a launcher uses a directory it is given as it is
       if (Option.isNone(flags.userDataDir)) yield* fs.makeDirectory(paths.profile).pipe(Effect.mapError(failedWith))
       const userDataDir = Option.getOrElse(flags.userDataDir, () => paths.profile)
-      // What the session launches and makes is in the CLI's ledger, which strider prune reads if it dies (review 22)
+      // What the session launches and makes is in the CLI's ledger, which strider prune reads if it dies
       const os = yield* Effect.promise(() => Node.os())
       const ledger = yield* Layer.build(Ledger.layer(Session.ledgerRoot(process.env, os.homedir())))
       const services = yield* Layer.build(layerOf(browser, userDataDir)).pipe(
@@ -1000,7 +1000,7 @@ const start = Command.make(
       const context = yield* instance.newContext({
         ...Option.match(initial, { onNone: () => ({}), onSome: (storageState) => ({ storageState }) }),
         focus,
-        // The session's own directory, which strider stop --keep keeps (review 22, candidate 4c)
+        // The session's own directory, which strider stop --keep keeps
         downloads: { directory: paths.downloads }
       }).pipe(
         Effect.mapError(failedWith)

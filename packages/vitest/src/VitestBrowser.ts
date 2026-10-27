@@ -1,6 +1,6 @@
 /**
- * The Vitest adapter (`@usestrider/vitest`, a package of its own since review 22, so `@usestrider/browser` depends on
- * nothing but Effect; peer dependency: `vitest` 5).
+ * The Vitest adapter (`@usestrider/vitest`, a package of its own, so `@usestrider/browser` depends on nothing but
+ * Effect; peer dependency: `vitest` 5).
  *
  * When etest ships, an etest adapter attaches the same layers with `Test.provide`.
  *

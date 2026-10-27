@@ -315,7 +315,7 @@ export interface ConnectOptions {
 export const layerTest = (timeline: string): Layer.Layer<Browser> =>
   Layer.unwrap(Clock.clockWith((clock) =>
     Effect.sync(() =>
-      // Its browser is a timeline on Effect's clock, which its deadlines are on too (review 26, candidate 1)
+      // Its browser is a timeline on Effect's clock, which its deadlines are on too
       Layer.provideMerge(
         BrowserImpl.layer(Fake.connect(Fake.parse(timeline))),
         Layer.succeed(BrowserClock.CurrentClock, BrowserClock.fromClock(clock))

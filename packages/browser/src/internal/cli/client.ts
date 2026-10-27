@@ -1,5 +1,5 @@
 /**
- * The `strider` client (CLI.md; review 20, candidate 6): it forwards a command to its session's daemon over the
+ * The `strider` client (CLI.md): it forwards a command to its session's daemon over the
  * session's Unix socket, without loading Effect, and prints what the daemon answers. Ctrl-C interrupts the
  * command, never the session. The commands that need no session (`browsers`, `sessions`, `prune`, and `start`,
  * which starts one) run in this process, with Effect.
@@ -179,7 +179,7 @@ export const ask = async (
 }
 
 /**
- * One of the toolkit's tools, called on a session's daemon as a model calls it (`strider mcp`, review 22): its
+ * One of the toolkit's tools, called on a session's daemon as a model calls it (`strider mcp`): its
  * result encoded by the tool's Schema, or why there is none.
  */
 export const callTool = async (

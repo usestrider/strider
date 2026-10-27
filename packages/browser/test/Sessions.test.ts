@@ -1,5 +1,5 @@
 /**
- * Review 22's CLI sessions, without a browser: the ledger a program keeps, `strider mcp`'s arguments, and how an
+ * The CLI sessions, without a browser: the ledger a program keeps, `strider mcp`'s arguments, and how an
  * exported test marks a tab the session took with control.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"

@@ -1,5 +1,5 @@
 /**
- * `strider export test` (CLI.md; review 20, candidate 6): a session's successful commands as one Vitest test.
+ * `strider export test` (CLI.md): a session's successful commands as one Vitest test.
  * Every command is one statement against the public API, so the test reads as the session ran: a ref becomes
  * the locator its snapshot names, a `%name%` secret its `Config.Redacted`, and a wait the `next` it started.
  * Reads (`pages`, `snapshot`, `screenshot`, `history`) aren't repeated.
@@ -28,12 +28,12 @@ const quote = (text: string) => JSON.stringify(text)
 /**
  * A session's context's focus: emulated where the backend has focus emulation, which WebDriver BiDi and stock
  * WebKit haven't, so every page keeps rendering while another is in front (QUIRKS.md, Q19). Stock WebKit's pages are
- * windows of their own (review 23). The daemon and the exported test agree.
+ * windows of their own. The daemon and the exported test agree.
  */
 export const focusFor = (browser: Browser): "emulated" | "system" =>
   browser.backend === "chromium" ? "emulated" : "system"
 
-/** Whether a session launches WebKit, which reaches its browser over TCP (review 23). */
+/** Whether a session launches WebKit, which reaches its browser over TCP. */
 const launchesWebKit = (browser: Browser) => browser._tag === "Launch" && browser.backend === "webkit"
 
 /** A locator expression for a target, on the page variable `page`; a ref as its snapshot named it. */

@@ -1,5 +1,5 @@
 /**
- * The adapter conformance suite against stock WebKit (review 23): WebKitGTK's MiniBrowser (`browsers.ts`) launched
+ * The adapter conformance suite against stock WebKit: WebKitGTK's MiniBrowser (`browsers.ts`) launched
  * in automation mode, a browser process per context, on an X server of the test's own (`stockWebKit.ts`), with
  * Node's sockets (`sockets.ts`). Its pages' traffic and its Automation target's are recorded as one fixture.
  */

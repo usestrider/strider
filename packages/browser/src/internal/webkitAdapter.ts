@@ -1,5 +1,5 @@
 /**
- * The WebKit backend adapter, for stock WebKit (PROTOCOL.md, Backend adapters; reviews 08, 22 and 23). It keeps the
+ * The WebKit backend adapter, for stock WebKit (PROTOCOL.md, Backend adapters). It keeps the
  * correlation tables from WebKit's ids to L1's, folds WebKit's events into facts, configures every new target
  * before its scripts run, and carries out L1's operations. Attached, it looks through a browser's remote
  * inspector (`webkitStockTransport.ts`); launched, WebKit's Automation protocol drives it as well
@@ -183,15 +183,15 @@ interface RequestEntry {
   readonly finished: Deferred.Deferred<void, string>
   /** A route fulfilled it. */
   fulfilled: boolean
-  /** What its events called it: a pause doesn't say (review 17, P11). */
+  /** What its events called it: a pause doesn't say. */
   readonly resourceType: NetworkRequest.ResourceType
-  /** Each hop's body, as `Network.requestWillBeSent` carried it, text (review 17, P10; review 22, Q164; Q221). */
+  /** Each hop's body, as `Network.requestWillBeSent` carried it, text (Q164; Q221). */
   readonly postData: Array<string | undefined>
-  /** The current hop's headers as the request event gave them, which leave its cookies out (review 22, Q158). */
+  /** The current hop's headers as the request event gave them, which leave its cookies out (Q158). */
   requestHeaders: Network.Headers
   /**
    * A document's response body, read as its load finished where a body collection is declared: WebKit forgets it
-   * once the page navigates on (review 22, Q179).
+   * once the page navigates on (Q179).
    */
   kept: Deferred.Deferred<Uint8Array, Adapter.AdapterError> | undefined
 }
@@ -203,7 +203,7 @@ type ObligationEntry =
     readonly target: TargetEntry
     readonly requestId: string
     readonly phase: "request" | "response"
-    /** The request's body, as stock WebKit's text (review 17, P10; QUIRKS.md, Q221). */
+    /** The request's body, as stock WebKit's text (QUIRKS.md, Q221). */
     readonly postData: string | undefined
   }
   | {
@@ -218,7 +218,7 @@ type ObligationEntry =
 interface HandleEntry {
   readonly session: ProtocolClient.Session
   readonly objectId: string
-  /** The object group it was made in (review 22, Q132). */
+  /** The object group it was made in (Q132). */
   readonly group: string | undefined
 }
 
@@ -435,7 +435,7 @@ const withBindings = (
 // ── Capabilities ──────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Stock WebKit's, attached (review 22, candidate 7): what its remote inspector serves. It has no `Input`, `Dialog`,
+ * Stock WebKit's, attached: what its remote inspector serves. It has no `Input`, `Dialog`,
  * `Emulation` or `Screencast` domain, no navigate command, no worlds of its own and no `DOM.describeNode`, and no
  * events for a frame's attachment, a same-document navigation, a file chooser or a download.
  */
@@ -597,7 +597,7 @@ const overrideCapability = (override: Adapter.Override): string | undefined => {
 }
 
 /**
- * Stock WebKit launched in automation mode (review 23): the attached table, with what its Automation
+ * Stock WebKit launched in automation mode: the attached table, with what its Automation
  * session drives: contexts as browser processes, pages, history, trusted input, dialogs whose kind it doesn't say,
  * the window's size as the viewport, and file inputs.
  */
@@ -676,7 +676,7 @@ export interface Options extends Adapter.ConnectOptions {
   /** The browser's version, where the transport knows it: an attached browser's inspector doesn't say. */
   readonly revision?: string | undefined
   /**
-   * Stock WebKit launched in automation mode (review 23): its browser processes, a context's each, whose Automation
+   * Stock WebKit launched in automation mode: its browser processes, a context's each, whose Automation
    * sessions make and drive pages. Without it, the adapter is attached through the remote inspector, and only looks.
    */
   readonly automation?: WebKitAutomation.Group | undefined
@@ -716,7 +716,7 @@ export const connect: (
     const obligations = new Map<Adapter.ObligationId, ObligationEntry>()
     const handles = new Map<Adapter.HandleId, HandleEntry>()
     const groups = Groups.make()
-    // Each object group's anchor, an object made in it, by the group's name (review 22, QUIRKS.md, Q132 and Q185)
+    // Each object group's anchor, an object made in it, by the group's name (QUIRKS.md, Q132 and Q185)
     const anchors = new Map<string, Deferred.Deferred<string, Adapter.AdapterError>>()
     const connections = new Map<string, NetworkConnection.Id>()
     const pausedRequests = new Map<TargetEntry, number>()
@@ -1717,7 +1717,7 @@ export const connect: (
       })
     }
 
-    // What answered, from the response's source (review 09); a route's response is `inspector-override`
+    // What answered, from the response's source; a route's response is `inspector-override`
     const servedBy = (request: RequestEntry | undefined, response: Network.Response): NetworkResponse.ServedBy => {
       if (request?.fulfilled === true) return "route"
       switch (response.source) {
@@ -1742,7 +1742,7 @@ export const connect: (
       frame: Network.WebSocketFrame
     ) => {
       const id = connections.get(requestKey(session, requestId))
-      // Control frames (close, ping, pong) aren't messages; WebKit reports the close handshake (review 14, P15)
+      // Control frames (close, ping, pong) aren't messages; WebKit reports the close handshake
       if (id === undefined || frame.opcode >= 8) return
       emit({
         _tag: "ConnectionFrame",
@@ -1933,7 +1933,7 @@ export const connect: (
           concurrency: "unbounded",
           discard: true
         }).pipe(Effect.ignore)
-        // A new worker waits for `Worker.initialized`, so this runs before its own script (review 22, 6b)
+        // A new worker waits for `Worker.initialized`, so this runs before its own script
         const bundle = registry.workerBundle(placement(worker.target.page))
         if (bundle !== undefined) yield* Runtime.evaluate({ expression: bundle }).pipe(on, Effect.ignore)
         return { through: 0, apply: Effect.void } satisfies ProtocolClient.Synced
@@ -2131,7 +2131,7 @@ export const connect: (
     })
     const failConnect = (error: Protocol.ProtocolError) =>
       Launch.fail(new Browser.ConnectionFailed({ stage: "handshake", hint: error.message }), "connect")
-    // Launched, the session names the browser (review 23); attached, the inspector server says nothing of it, and
+    // Launched, the session names the browser; attached, the inspector server says nothing of it, and
     // has no session of its own to ask (QUIRKS.md, Q203)
     const info = options.automation !== undefined
       ? new Browser.Info({
@@ -2422,7 +2422,7 @@ export const connect: (
       } satisfies Adapter.RemoteResult
     })
 
-    // A group given whole goes in one command, its anchor with it (review 22, QUIRKS.md, Q132)
+    // A group given whole goes in one command, its anchor with it (QUIRKS.md, Q132)
     const releaseHandles = (list: ReadonlyArray<Adapter.HandleId>) =>
       Effect.forEach(Groups.release(groups, handles, list), (released) => {
         if (released._tag === "Group") anchors.delete(released.group)
@@ -2483,7 +2483,7 @@ export const connect: (
                 return obligation.phase === "request"
                   ? decision.error === "failed"
                     ? Network.interceptRequestWithError({ requestId, errorType: "General" }).pipe(on)
-                    // WebKit reports every reason as "Blocked by Web Inspector" (review 17, P4)
+                    // WebKit reports every reason as "Blocked by Web Inspector"
                     : Effect.fail(
                       new Protocol.ProtocolError({
                         reason: new Protocol.Unsupported({ method: "interception.abortReason" })
@@ -2648,7 +2648,7 @@ export const connect: (
       return yield* request.kept === undefined ? readBody(request) : Deferred.await(request.kept)
     })
 
-    // ── Attached (review 22, candidate 7) ──
+    // ── Attached ──
 
     const refuse = (capability: string, hint: string) => () => Effect.fail(unsupported(capability, hint))
 
@@ -2796,7 +2796,7 @@ export const connect: (
       }
     })
 
-    // ── Launched (review 23) ──
+    // ── Launched ──
 
     const group = options.automation
     const adapterScope = yield* Effect.scope
@@ -2815,7 +2815,7 @@ export const connect: (
     ) => protocol(command.pipe(Protocol.on(process.automation)))
 
     // A page's two names: Automation's handle and the inspector's target, paired by the document's time origin,
-    // which both read and neither writes (review 23, candidate 4; QUIRKS.md, Q219)
+    // which both read and neither writes (QUIRKS.md, Q219)
     // Automation's result of a function, as JSON: one that threw is an empty result, not an error (QUIRKS.md, Q227)
     const resultOf = (result: string): Option.Option<unknown> => {
       try {
@@ -2939,7 +2939,7 @@ export const connect: (
       }
     })
 
-    // The window's size less the viewport's, measured once per process: its toolbar (review 23, P5)
+    // The window's size less the viewport's, measured once per process: its toolbar
     const chrome = new Map<string, { readonly width: number; readonly height: number }>()
     // Each page's window as it was before its first resize, to restore when the viewport is released
     const naturalWindows = new WeakMap<PageEntry, { readonly width: number; readonly height: number }>()
@@ -3095,7 +3095,7 @@ export const connect: (
       return id
     })
 
-    // Input as Automation simulates it: each event a step of the input sources' states, trusted (review 23, P2)
+    // Input as Automation simulates it: each event a step of the input sources' states, trusted
     const virtualKeys: Readonly<Record<string, Automation.VirtualKey>> = {
       Shift: "Shift",
       Control: "Control",
@@ -3241,7 +3241,7 @@ export const connect: (
       }
     )
 
-    // A context's cookies, through a page of its own: each context is a browser of its own (review 23)
+    // A context's cookies, through a page of its own: each context is a browser of its own
     const pagesIn = (id: UserContext.Id) =>
       [...pages.values()].filter((page) => page.context.id === id && page.target !== undefined && !page.ended)
     const cookiesLaunched = Effect.fnUntraced(function*(id: UserContext.Id) {

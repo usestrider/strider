@@ -51,7 +51,7 @@ const accepts =
     Option.isNone(matches) || (Option.isSome(entry.value.url) && matches.value(entry.value.url.value))
 
 // A popup is delivered as its handle: a `Page` when the connection controls it for life, as it does an owned page's
-// popups, and an observed page otherwise, `LeaveOpen` (review 19, candidate 3)
+// popups, and an observed page otherwise, `LeaveOpen`
 const kind = (behind: Behind, operation: string): Events.Kind<Model.PopupEvent, Page.Page> => ({
   operation,
   noun: "a popup",

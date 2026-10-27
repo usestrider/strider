@@ -1,5 +1,5 @@
 /**
- * What HAR and trace recordings share (review 20, candidate 4): the clock their times are read on, where their
+ * What HAR and trace recordings share: the clock their times are read on, where their
  * files go, and the zip they are written as.
  *
  * Times come from the library's monotonic clock, never Effect's `Clock`, so a recording made under `TestClock`

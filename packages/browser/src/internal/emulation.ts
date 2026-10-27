@@ -1,5 +1,5 @@
 /**
- * Emulation (review 17, candidate 5): one registration per call, one override per field, each a capability
+ * Emulation: one registration per call, one override per field, each a capability
  * named for its public field. A field the backend can't apply fails the call before anything is applied.
  */
 import * as Duration from "effect/Duration"

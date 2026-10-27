@@ -1,18 +1,18 @@
 /**
- * Trace recordings (review 20, candidate 4): a page's or context's operations as the steps of a Playwright trace,
+ * Trace recordings: a page's or context's operations as the steps of a Playwright trace,
  * format version 9 (research/playwright-trace-format.md), which trace.playwright.dev opens.
  *
  * - **Steps.** Each library operation on the target is a step, through the span helper: its name, its
  *   attributes as params, its duration and its error. A span of the caller's that encloses one is a step too, so
  *   the trace nests as the program did; it spans the operations recorded inside it.
  * - **Events.** Console messages, uncaught exceptions as `pageError`s, a screenshot after each action, and
- *   screencast frames, native or polled, or on Firefox its video of each page (review 22).
- * - **DOM snapshots** (review 22, `capture.ts`): every frame of the action's page captured before and after each
+ *   screencast frames, native or polled, or on Firefox its video of each page.
+ * - **DOM snapshots** (`capture.ts`): every frame of the action's page captured before and after each
  *   action, the target, resolved by the action's locator, marked in the one after. A snapshot's secret values
  *   are redacted at export under the strict preset.
  * - **Network.** The HAR's entries, in `trace.network`, with their bodies in `resources/`.
  *
- * Times come from the library's monotonic clock, never Effect's `Clock` (review 20); params are redacted under
+ * Times come from the library's monotonic clock, never Effect's `Clock`; params are redacted under
  * the diagnostics preset in force at export.
  */
 import * as Cause from "effect/Cause"
@@ -169,7 +169,7 @@ const digest = (text: string) =>
 
 /**
  * A snapshot with its secret values flagged by the capture: unflagged, and under the strict preset redacted, a
- * password input's value or a field's filled with `Redacted` text (review 22).
+ * password input's value or a field's filled with `Redacted` text.
  */
 const redactSecrets = (node: unknown, preset: Diagnostics.Preset): unknown => {
   if (!Array.isArray(node) || typeof node[0] !== "string") return node
@@ -381,7 +381,7 @@ export const start = Effect.fnUntraced(function*(
 
   // Screencast frames, from each page of the target as it appears
   const screencast = settings.screencast
-  // Firefox has a video of its own where the other backends stream frames (review 22)
+  // Firefox has a video of its own where the other backends stream frames
   const video = screencast === "native" && (yield* Filters.supported(runtime, "capability.video"))
   if (screencast !== "off") {
     const seen = new Set<Target.NavigableId>()

@@ -1,5 +1,5 @@
 /**
- * The span every operation opens (review 20, candidate 1). One helper, so `Browser.SpanNameGenerator` names each
+ * The span every operation opens. One helper, so `Browser.SpanNameGenerator` names each
  * span and `Browser.TracerDisabledWhen` can suppress it, attributes are written as OpenTelemetry writes them
  * (`browser.operation`, and `url.full` under the diagnostics preset), and recordings learn of each operation.
  */

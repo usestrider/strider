@@ -1,8 +1,8 @@
 /**
- * Files to upload, as the library reads them (review 14, candidate 9): where their bytes come from, and the
+ * Files to upload, as the library reads them: where their bytes come from, and the
  * path the browser is given. A local path is on this machine and a remote one on the browser's host; a launched
  * browser shares this machine, so both reach it as they are, once a relative local path is resolved. A file of
- * bytes is made in the page instead (review 20, candidate 1), so it needs no file system the browser shares.
+ * bytes is made in the page instead, so it needs no file system the browser shares.
  */
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/encoding/Base64"
@@ -113,7 +113,7 @@ function setMadeFiles(
 }
 
 /**
- * Sets files made in the page on a file input (review 20, P1): their bytes cross into the caller's isolated world
+ * Sets files made in the page on a file input: their bytes cross into the caller's isolated world
  * as base64 and become `File`s, set through a `DataTransfer`, with `input` and `change` dispatched.
  */
 export const setMade = (

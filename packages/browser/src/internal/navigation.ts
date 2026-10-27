@@ -1,6 +1,6 @@
 /**
  * A navigation's outcome as callers see it, shared by `goto`, `reload`, `back` and `forward` and by
- * `PageNavigation.next` (review 14, candidate 6), so recovery reads the same whichever way the navigation came:
+ * `PageNavigation.next`, so recovery reads the same whichever way the navigation came:
  * a `PageNavigation` for one that got somewhere, and the `PageError` reason `goto` gives for one that didn't.
  * `PageNavigation` reaches it through `Runtime.settle`, since importing `Page` there would be a load cycle;
  * what needs no `Page` is in `navigated.ts`.
@@ -42,7 +42,7 @@ export const settle = (
     case "Activated":
       return Effect.succeed(Option.getOrThrow(Navigated.succeeded(model, navigation, frame, at, outcome)))
     case "Download":
-      // `goto({ accept })` (review 20, candidate 1): the outcomes the caller asked for are navigations
+      // `goto({ accept })`: the outcomes the caller asked for are navigations
       if (accept.includes("download")) {
         return Effect.succeed({ _tag: "BecameDownload", id: navigation, frame, url: at as Url.Url })
       }

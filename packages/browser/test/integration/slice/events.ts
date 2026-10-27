@@ -1,6 +1,6 @@
 /**
- * The second slice (review 13): events, through the public API on every backend's layer. Call site 3 of
- * API.md, a popup with a dialog inside it, and around it what the review says the mechanism does: popups
+ * The second slice: events, through the public API on every backend's layer. Call site 3 of
+ * API.md, a popup with a dialog inside it, and around it what the design says the mechanism does: popups
  * matched by URL and owned by their opener's scope, late subscriptions diagnosed, dialogs decided by the latest
  * handler or else by the policy and reported, streams that end with their page or overflow, and operations a
  * dialog nothing will decide blocks.

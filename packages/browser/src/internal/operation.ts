@@ -1,7 +1,7 @@
 /**
  * What every L1 operation shares (CONCEPTS.md §9): an operation id, one deadline captured when it starts, the
- * diagnostic envelope its errors carry, and the mapping of an adapter's failures onto the public reasons. Since
- * review 26, an operation run through `named` keeps a record of what it did, from which its `Timeout` is built.
+ * diagnostic envelope its errors carry, and the mapping of an adapter's failures onto the public reasons. An
+ * operation run through `named` keeps a record of what it did, from which its `Timeout` is built.
  */
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
@@ -123,7 +123,7 @@ export const appendObservation = (
   history.push(observed(value))
 }
 
-// ── Records (review 26, candidate 1) ──
+// ── Records ──
 
 /** Where an operation stopped. */
 export type Phase = Deadline.Timeout["phase"]
@@ -166,7 +166,7 @@ export class Record {
     if (this.dispatch._tag === "NotSent") this.dispatch = { _tag: "MayHaveBeenSent" }
   }
 
-  /** What was sent never reached the page: a gesture the guard stopped (review 16, candidate 5). */
+  /** What was sent never reached the page: a gesture the guard stopped. */
   markNotSent(): void {
     this.dispatch = { _tag: "NotSent" }
   }
@@ -261,7 +261,7 @@ export const start = (name: string): Effect.Effect<Record> =>
   })
 
 /**
- * Runs `self` as an operation (review 26, candidate 1): mints its id, reads its deadline once, gives everything
+ * Runs `self` as an operation: mints its id, reads its deadline once, gives everything
  * inside that deadline and a record, and opens its span.
  */
 export const named = (name: string, options: Spans.Options = {}) => <A, E, R>(self: Effect.Effect<A, E, R>) =>

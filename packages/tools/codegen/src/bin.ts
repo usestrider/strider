@@ -8,7 +8,7 @@
  *   strider-codegen audit <backend> [--check]      which corrections the vendored spec has absorbed; run on
  *                                                  each roll (`--check` fails if any has)
  *   strider-codegen keyboards [--check]            packages/browser/src/internal/keyboardLayouts.ts, from
- *                                                  CLDR's keyboard data in keyboards/source (review 22)
+ *                                                  CLDR's keyboard data in keyboards/source
  *   strider-codegen trace-contract <checkout>      whether a Playwright checkout's snapshot files are the ones the
  *                                                  trace capture's contract was read from (trace-contract.json;
  *                                                  research/playwright-trace-snapshots.md); run on each roll

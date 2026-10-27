@@ -7,7 +7,7 @@
  *
  * A method with no generated definition fails, unless the coverage report says it was excluded by policy:
  * Chromium 155 still sends deprecated events nothing subscribes to, which are never decoded. Stock WebKit's
- * fixture holds two protocols' traffic, its pages' inspector and its Automation target's (review 23), each
+ * fixture holds two protocols' traffic, its pages' inspector and its Automation target's, each
  * decoded through its own.
  */
 import { assert, describe, it } from "@effect/vitest"

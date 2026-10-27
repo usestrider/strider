@@ -1,5 +1,5 @@
 /**
- * The first slice through all three layers (review 12, candidate 8): the README's program, launched, navigated,
+ * The first slice through all three layers: the README's program, launched, navigated,
  * clicked and checked through the public API only, written once and run against every backend's layer, with
  * the cases around it that the design says how to handle.
  */
@@ -171,7 +171,7 @@ export const slice = (
             assert(Expect.isExpectationFailed(error), String(error))
             assert.strictEqual(error.subject, `page.getByText("item")`)
             assert.deepStrictEqual(error.history.map((each) => each.value), [{ matches: 2, visible: 2 }])
-            // One round waited in the page, checking again on each frame, for the whole deadline (review 16)
+            // One round waited in the page, checking again on each frame, for the whole deadline
             assert.isAtLeast(error.checks.count, 1)
             assert.include(error.checks.triggeredBy, "change")
             yield* page.getByText("3 items").pipe(Expect.toBeHidden)

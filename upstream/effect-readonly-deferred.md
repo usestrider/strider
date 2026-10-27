@@ -2,7 +2,7 @@
 
 *Draft, 2026-10-19, for the maintainer to post. Not posted. Written against Effect `main` at `93abf0208`.*
 
-> **Withdrawn, 2026-10-23** ([review 15](../docs/reviews.md#review-15)). Strider's `next` now hands out `Deferred.await(deferred)`, an `Effect`: every caller only ever awaited the result, so the read side bought nothing it needed. Kept as a record; not to be posted.
+> **Withdrawn, 2026-10-23.** Strider's `next` now hands out `Deferred.await(deferred)`, an `Effect`: every caller only ever awaited the result, so the read side bought nothing it needed. Kept as a record; not to be posted.
 
 ## Problem
 

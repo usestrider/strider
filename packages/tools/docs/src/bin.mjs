@@ -9,7 +9,7 @@ import * as path from "node:path"
 
 const [command, ...args] = process.argv.slice(2)
 const root = process.cwd()
-// The public packages: @usestrider/browser, and @usestrider/vitest since review 22
+// The public packages: @usestrider/browser and @usestrider/vitest
 const packages = ["browser", "vitest"].map((name) => ({ name, dir: path.join(root, "packages", name) }))
 switch (command) {
   case "jsdocs": {

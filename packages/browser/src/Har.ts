@@ -2,7 +2,7 @@
  * HAR recordings: a page's or context's network traffic, exported as an HTTP Archive.
  *
  * Exports are redacted unless a class of secret is included by name. A recorded HAR is replayed by a route,
- * `Route.fromHar` (review 22).
+ * `Route.fromHar`.
  *
  * @stability experimental
  * @since 0.1.0
@@ -35,7 +35,7 @@ import type * as WatchableApi from "./Watchable.ts"
 
 /**
  * A class of secret that an export can include on request: a URL's credentials, cookie values, `Authorization`
- * headers, text typed into a trace, or the bodies requests sent (review 22, Q164).
+ * headers, text typed into a trace, or the bodies requests sent (Q164).
  *
  * @stability experimental
  * @category models
@@ -266,7 +266,7 @@ export class WriteFailed extends Schema.Error<WriteFailed>("@usestrider/browser/
 }
 
 /**
- * Reason for a HAR that couldn't be read for replay (review 22).
+ * Reason for a HAR that couldn't be read for replay.
  *
  * @stability experimental
  * @category reasons

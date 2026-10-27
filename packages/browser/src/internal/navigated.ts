@@ -1,5 +1,5 @@
 /**
- * What a navigation's event needs and `Page` doesn't (review 14, candidate 6): a navigation that got somewhere as a
+ * What a navigation's event needs and `Page` doesn't: a navigation that got somewhere as a
  * `PageNavigation`, and the wait for the readiness `waitUntil` asks of the document it committed. `PageNavigation`
  * imports it, so it imports no `Page`.
  */

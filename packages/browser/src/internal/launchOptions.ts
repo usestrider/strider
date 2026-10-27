@@ -1,5 +1,5 @@
 /**
- * The public launch options, as each launcher takes them (`Browser.LaunchOptions`; reviews 10 and 11).
+ * The public launch options, as each launcher takes them (`Browser.LaunchOptions`).
  */
 import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"

@@ -1,12 +1,11 @@
 /**
- * Connecting to a browser this program didn't start (review 19, candidate 1). An endpoint is resolved to the
+ * Connecting to a browser this program didn't start. An endpoint is resolved to the
  * browser's WebSocket and the adapter connects as attached: it adopts what is open, and leaves it open.
  *
- * - **Chromium** takes its WebSocket URL, or its HTTP endpoint, whose `/json/version` names the WebSocket (P4).
+ * - **Chromium** takes its WebSocket URL, or its HTTP endpoint, whose `/json/version` names the WebSocket.
  * - **Firefox** takes its remote agent's WebSocket; `/session` is added when the URL has no path.
  * - **Any WebDriver BiDi endpoint** is taken as given.
- * - **Stock WebKit** takes its inspector server's HTTP endpoint, whose list names a WebSocket per page (review 22,
- *   candidate 7).
+ * - **Stock WebKit** takes its inspector server's HTTP endpoint, whose list names a WebSocket per page.
  *
  * The headers go with the WebSocket handshake, and with Chromium's and WebKit's HTTP requests.
  */

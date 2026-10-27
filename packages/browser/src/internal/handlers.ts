@@ -1,5 +1,5 @@
 /**
- * Handlers that decide a page's obligations (review 13, candidate 6; review 14, candidate 9): `Dialog.handle`
+ * Handlers that decide a page's obligations: `Dialog.handle`
  * and `FileChooser.handle` register the same way.
  *
  * The page's latest registration still in its scope decides, chosen when the obligation opens. It runs in a

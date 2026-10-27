@@ -1,5 +1,5 @@
 /**
- * Review 20's agent toolkit on every backend's layer, called as a model calls it: pages by name, refs from the
+ * The agent toolkit on every backend's layer, called as a model calls it: pages by name, refs from the
  * latest snapshot and locator strings, secrets substituted and never echoed, the digest of what happened since
  * the previous call, waits across calls, declared routes and dialog decisions, and failures returned as data.
  */

@@ -1,5 +1,5 @@
 /**
- * What the `strider` client and its daemons share (CLI.md; review 20, candidate 6): where a session lives, the
+ * What the `strider` client and its daemons share (CLI.md): where a session lives, the
  * names it may have, and the lines they exchange over its socket. Nothing here loads Effect, so the client
  * forwards a command without it.
  *
@@ -33,7 +33,7 @@ export const paths = (rootDir: string, name: string) => {
 }
 
 /**
- * Where the CLI keeps its ledger (`Ledger`, review 22): `$XDG_STATE_HOME/strider/ledger`, else
+ * Where the CLI keeps its ledger (`Ledger`): `$XDG_STATE_HOME/strider/ledger`, else
  * `~/.local/state/strider/ledger`. It outlives a session's directory, which is in the runtime directory.
  */
 export const ledgerRoot = (env: Readonly<Record<string, string | undefined>>, home: string): string =>
@@ -45,7 +45,7 @@ export const ledgerRoot = (env: Readonly<Record<string, string | undefined>>, ho
 export type Request =
   | { readonly _tag: "Command"; readonly argv: ReadonlyArray<string>; readonly cwd: string }
   | { readonly _tag: "Interrupt" }
-  /** One of the toolkit's tools, called as a model calls it: `strider mcp` forwards these (review 22). */
+  /** One of the toolkit's tools, called as a model calls it: `strider mcp` forwards these. */
   | { readonly _tag: "Tool"; readonly tool: string; readonly params: unknown }
 
 /** What a daemon answers, one JSON line each: output, then the exit code, which ends the answer. */

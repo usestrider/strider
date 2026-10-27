@@ -15,7 +15,7 @@
  *
  * **Gotchas**
  *
- * - Workers keep real time unless the clock is installed with `workers: true` (review 22), which Firefox can't
+ * - Workers keep real time unless the clock is installed with `workers: true`, which Firefox can't
  *   do; CSS animations and `document.timeline` always do.
  * - A document loaded before `install` gets the clock then; what its scripts captured before keeps real time.
  * - A page's clock and its context's can't both be installed: one timeline covers a page.
@@ -62,7 +62,7 @@ export type Mode =
 export interface InstallOptions {
   /**
    * Whether dedicated workers started from now on get the clock too, before their own script, on the same
-   * timeline: `adjust`, `setTime` and `resume` reach them as they reach documents (review 22). `Unsupported` on
+   * timeline: `adjust`, `setTime` and `resume` reach them as they reach documents. `Unsupported` on
    * Firefox (`initScripts.workers`).
    *
    * @default false

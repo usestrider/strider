@@ -1,5 +1,5 @@
 /**
- * Keyboard layouts (review 22, candidate 6d): the strokes that type a character on each layout, from CLDR's data.
+ * Keyboard layouts: the strokes that type a character on each layout, from CLDR's data.
  */
 import { assert, describe, it } from "@effect/vitest"
 import * as Keys from "../src/internal/keys.ts"

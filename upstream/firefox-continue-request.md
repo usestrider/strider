@@ -1,6 +1,6 @@
 # Bug for Firefox: `network.continueRequest` aborts a request given a new `url`, and cuts a new `body`
 
-*Draft, 2026-10-25, for the maintainer to file in Bugzilla (Remote Protocol :: WebDriver BiDi). Not filed. Search for an existing report first. From Strider's QUIRKS.md, Q92; seen on Firefox 158.0 in review 17, P3, through Strider's adapter and over raw WebDriver BiDi.*
+*Draft, 2026-10-25, for the maintainer to file in Bugzilla (Remote Protocol :: WebDriver BiDi). Not filed. Search for an existing report first. From Strider's QUIRKS.md, Q92; seen on Firefox 158.0 through Strider's adapter and over raw WebDriver BiDi.*
 
 ## Steps
 

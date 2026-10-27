@@ -230,7 +230,7 @@ export interface ResponseChange {
 
 /**
  * Lets the request continue, changed by `change`; only what changed is sent. At the `response` phase, the
- * response continues with its status or headers changed and its body as the server sent it (review 22).
+ * response continues with its status or headers changed and its body as the server sent it.
  *
  * **Gotchas**
  *

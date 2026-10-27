@@ -1,5 +1,5 @@
 /**
- * Object groups (review 22, QUIRKS.md, Q132): which handles each group holds, so a release given every handle a
+ * Object groups (QUIRKS.md, Q132): which handles each group holds, so a release given every handle a
  * group still holds goes as one command, and any other handle alone. The CDP and WebKit adapters share it.
  */
 import type * as Adapter from "./adapter.ts"

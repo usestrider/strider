@@ -1,13 +1,13 @@
 /**
- * The `Browser` service and the contexts it creates (API.md, Entry points; review 12, candidate 7), and the
+ * The `Browser` service and the contexts it creates (API.md, Entry points), and the
  * layer every backend builds: launch, connect the adapter, fold its facts into the model, provide `Browser`.
  *
  * Built: `info`, `capabilities`, `newContext`, `newPage`, and a context's `newPage`, `pages`, `workers`,
  * `closed` and `control`. What a context or page owns is released when the scope that acquired it closes, and
- * a page's popups with it (review 13). The other members fail as `NotBuilt`.
+ * a page's popups with it. The other members fail as `NotBuilt`.
  *
  * A context the library creates allows downloads into a temporary directory it owns, made before the context
- * and removed after it, and has its file choosers reported and decided (review 14, candidates 8 and 9).
+ * and removed after it, and has its file choosers reported and decided.
  *
  * Each page, download, worker and connection has one handle per connection, made on first use from its model
  * entry (`Runtime`), so `newPage`, a context's `pages` and `Popup` hand out the same `Page`, and every event
@@ -91,7 +91,7 @@ const objectMembers = (name: string, id: string) => ({
   }
 })
 
-/** How a context handle reaches its pages and gains control (review 19, candidate 2). */
+/** How a context handle reaches its pages and gains control. */
 interface ContextAccess {
   /** `None` for a context the connection created, controlled for its whole life. */
   readonly grant: Option.Option<Access.Grant>
@@ -108,7 +108,7 @@ const makeContext = (
   access: ContextAccess
 ): UserContext.UserContext => {
   const adapter = runtime.model.adapter
-  /** Where the context's declarations apply (review 17). */
+  /** Where the context's declarations apply. */
   const declared: Adapter.DeclarationScope = { _tag: "UserContext", context: entry.id }
   const context: UserContext.UserContext = {
     [UserContextTypeId]: UserContextTypeId,
@@ -168,7 +168,7 @@ const makeContext = (
       scope: declared,
       pages: () => [...runtime.model.pages.values()].filter((page) => page.context === entry.id),
       name: "UserContext.clock",
-      // One timeline covers a page (review 17, candidate 7)
+      // One timeline covers a page
       conflicting: () =>
         [...runtime.model.pages.values()].some((page) => page.context === entry.id && Clock.isInstalled(page))
           ? Option.some("Page.clock")
@@ -255,8 +255,8 @@ const makeObservedContext = (
 }
 
 /**
- * The context of a page whose context the caller doesn't control: what needs control fails with `NotPermitted`
- * (review 19, candidate 2), and `control` gains it.
+ * The context of a page whose context the caller doesn't control: what needs control fails with `NotPermitted`,
+ * and `control` gains it.
  */
 const makeDeniedContext = (
   runtime: Runtime.Runtime,
@@ -361,7 +361,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
   const adapter = model.adapter
   // The contexts this connection created, controlled for their whole lives, with their pages
   const contexts = new Map<UserContext.Id, UserContext.UserContext>()
-  // The handle of each page controlled for its life, and of each page only observed (review 19, candidate 2)
+  // The handle of each page controlled for its life, and of each page only observed
   const handles = new WeakMap<Model.PageEntry, Page.Page>()
   const observedHandles = new WeakMap<Model.PageEntry, Page.ObservedPage>()
   const denied = new WeakMap<Model.ContextEntry, UserContext.UserContext>()
@@ -487,7 +487,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
     download: cached((entry: Model.DownloadEntry) => DownloadImpl.make(runtime, entry)),
     worker: cached((entry: Model.WorkerEntry) => WorkerImpl.make(runtime, entry)),
     connection: cached((entry: Model.ConnectionEntry) => ConnectionImpl.make(entry)),
-    // A launched browser's layer has both; one it connects to may not (review 14, candidates 8 and 9)
+    // A launched browser's layer has both; one it connects to may not
     fileSystem: yield* Effect.serviceOption(FileSystem.FileSystem),
     path: yield* Effect.serviceOption(Path.Path),
     settle: (operation, navigation, frame, url, at, outcome, id) =>
@@ -520,9 +520,9 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           ? Effect.die(mapped.error)
           : Effect.fail(contextError("Browser.newContext", mapped.reason, id))
       }
-      // A directory the context owns for its downloads, made first so it is removed after the context
-      // (review 14, candidate 8); or the caller's, or none (review 22, candidate 4c)
-      // A backend that reports no downloads, such as stock WebKit (review 23), gets none by default; asked for,
+      // A directory the context owns for its downloads, made first so it is removed after the context;
+      // or the caller's, or none
+      // A backend that reports no downloads, such as stock WebKit, gets none by default; asked for,
       // they fail as the adapter refuses them (QUIRKS.md, Q220)
       const capabilities = (yield* SubscriptionRef.get(model.adapter.capabilities)).entries
       const reports = (name: string) =>
@@ -588,7 +588,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       entry.eventLog = options?.eventLog ?? entry.eventLog
       entry.keyboardLayout = options?.keyboardLayout ?? entry.keyboardLayout
       const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: created }
-      // Where file choosers aren't reported, as on stock WebKit (review 23), the browser cancels them itself
+      // Where file choosers aren't reported, as on stock WebKit, the browser cancels them itself
       if (reports("fileChooser")) yield* adapter.declare(scope, { _tag: "FileChooser" }).pipe(Effect.catch(failed))
       if (asked === "deny") {
         yield* adapter.declare(scope, { _tag: "Downloads", behavior: { _tag: "Deny" } }).pipe(Effect.catch(failed))
@@ -598,7 +598,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           .pipe(Effect.catch(failed))
         yield* Effect.annotateCurrentSpan("browser.context.downloads", downloads.value)
       }
-      // The options that are declarations, held for the context's life, before its first page (review 17)
+      // The options that are declarations, held for the context's life, before its first page
       if (options?.emulation !== undefined || options?.focus === "emulated") {
         const fields = Emulation.fields(options.emulation ?? {})
         if (!Array.isArray(fields)) {

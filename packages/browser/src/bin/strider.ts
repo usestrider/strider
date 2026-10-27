@@ -44,7 +44,7 @@ const runLocal = async () => {
       Effect.provide(Layer.mergeAll(
         NodeServices.layer,
         NodeSocket.layerWebSocketConstructor,
-        // Stock WebKit's inspector server is a TCP socket (review 23)
+        // Stock WebKit's inspector server is a TCP socket
         SocketConnector.layer((endpoint) => NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port }))
       )),
       NodeRuntime.runMain
@@ -52,7 +52,7 @@ const runLocal = async () => {
     return
   }
   if (command === "mcp") {
-    // An MCP server over standard input and output, for a client that launches it (review 22)
+    // An MCP server over standard input and output, for a client that launches it
     const [{ run }, NodeStdio] = await Promise.all([
       import("../internal/cli/mcp.ts"),
       import("@effect/platform-node/NodeStdio")

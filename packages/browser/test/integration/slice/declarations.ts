@@ -1,5 +1,5 @@
 /**
- * The fifth slice (review 17): declarations, through the public API on every backend's layer. Routes at each
+ * The fifth slice: declarations, through the public API on every backend's layer. Routes at each
  * phase, init scripts and their order, emulation, permission grants and the page clock, with call sites 6, 7,
  * 10 and 11, and `Unsupported` wherever a backend can't do something.
  */

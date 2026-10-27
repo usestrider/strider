@@ -1,7 +1,7 @@
 // Removes what `pnpm build` writes for the published packages, so a build starts from nothing: `tsc -b` never
-// deletes an output whose source is gone, so a module renamed or removed would stay in `dist` and be published
-// (review 25, candidate 2). The build information goes too, without which `tsc -b` would think the deleted
-// output current. Run from the repository root; `pnpm build` runs it first.
+// deletes an output whose source is gone, so a module renamed or removed would stay in `dist` and be published.
+// The build information goes too, without which `tsc -b` would think the deleted output current. Run from the
+// repository root; `pnpm build` runs it first.
 import * as fs from "node:fs"
 import * as path from "node:path"
 

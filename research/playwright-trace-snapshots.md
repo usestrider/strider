@@ -1,6 +1,6 @@
 # Playwright's trace snapshots: the contract a capture writes to
 
-*Research for review 22's first candidate (DOM snapshots in traces, captured our own way). Read, not run, from
+*Research for DOM snapshots in traces, captured our own way. Read, not run, from
 `microsoft/playwright` at the release tag `v1.64.1` (2026-10-14), the release trace.playwright.dev serves, fetched
 2026-10-26. Paths are relative to the repository. Playwright is Apache-2.0; nothing here is copied into Strider:
 this note records what the viewer expects, which our own capture writes.*

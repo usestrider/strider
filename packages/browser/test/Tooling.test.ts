@@ -1,5 +1,5 @@
 /**
- * Review 20's first step, without a browser: launch profiles as values, the diagnostics presets, the span helper
+ * The tooling, without a browser: launch profiles as values, the diagnostics presets, the span helper
  * and its references, roles, made files, `Browser.layerTest`'s fake and the Vitest adapter.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"

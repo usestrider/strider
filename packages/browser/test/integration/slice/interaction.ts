@@ -1,5 +1,5 @@
 /**
- * The fourth slice (review 16): interacting and asserting, through the public API on every backend's layer.
+ * The fourth slice: interacting and asserting, through the public API on every backend's layer.
  * Call site 1 up to its storage state, every action, the guard on the first trusted event, held input released
  * with its scope, every read and matcher, the keyboard and the mouse, and two pages of one context.
  */
@@ -453,8 +453,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* first.goto(url)
             const second = yield* first.context.newPage
             yield* second.goto(url)
-            // Each page is a window of its own, which keeps rendering behind another: Chromium's since review 16
-            // (P10), Firefox's since review 21 (QUIRKS.md, Q71), where a tab behind another rendered about once a second
+            // Each page is a window of its own, which keeps rendering behind another: a tab behind another
+            // rendered about once a second in Firefox (QUIRKS.md, Q71)
             yield* first.getByRole("button", { name: "Click me" }).click().pipe(Deadline.within("5 seconds"))
             yield* first.getByText("clicked", { exact: true }).pipe(Expect.toBeVisible)
           }))

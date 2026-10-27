@@ -1,6 +1,6 @@
 /**
  * Builds `Watchable`s over an entity's state ref (CONCEPTS.md §9, State). Effect 4 has no public way to
- * subclass `Effect`, so a watchable is an effect value, the read, with its members attached (review 12).
+ * subclass `Effect`, so a watchable is an effect value, the read, with its members attached.
  */
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"

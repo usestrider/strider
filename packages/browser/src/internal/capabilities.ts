@@ -1,5 +1,5 @@
 /**
- * Capabilities (review 20, candidate 2): features only some backends have, acquired from a page for the caller's
+ * Capabilities: features only some backends have, acquired from a page for the caller's
  * scope. Acquiring one the backend lacks fails with `Unsupported`, read from its support table, naming the
  * backends that have it.
  */

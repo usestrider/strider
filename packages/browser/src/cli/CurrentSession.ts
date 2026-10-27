@@ -51,8 +51,8 @@ export interface CurrentSession {
   page(name: PageName | string): Effect.Effect<Page.Page, PageNotFound>
   /**
    * Keeps a page the segment opened once the segment ends: its ownership moves from the segment's scope to the
-   * session's, and it is named into the session, `name` or the next `p1`, `p2`…, whose name it returns
-   * (review 22). A page the segment returns is named without being kept, so it closes with the segment unless
+   * session's, and it is named into the session, `name` or the next `p1`, `p2`…, whose name it returns.
+   * A page the segment returns is named without being kept, so it closes with the segment unless
    * something else owns it, such as a session page that opened it as a popup.
    */
   keep(page: Page.Page, name?: PageName | string): Effect.Effect<PageName, NameTaken>

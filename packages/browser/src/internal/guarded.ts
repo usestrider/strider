@@ -1,7 +1,7 @@
 /**
- * Which members of a page and a context a grant guards (review 19, candidate 2): the ones observing gives are left
+ * Which members of a page and a context a grant guards: the ones observing gives are left
  * as they are, and the ones that make a declaration have it removed with the grant. Every other member fails
- * with `TargetGone{AccessReleased}` once the grant is released, as every member declares (review 21; QUIRKS.md,
+ * with `TargetGone{AccessReleased}` once the grant is released, as every member declares (QUIRKS.md,
  * Q143).
  */
 import type * as Access from "./access.ts"

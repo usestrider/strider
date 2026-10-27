@@ -1,5 +1,5 @@
 /**
- * Stock WebKit's remote inspector as one transport (review 22, candidate 7). WebKitGTK's and WPE's inspector
+ * Stock WebKit's remote inspector as one transport. WebKitGTK's and WPE's inspector
  * server (`WEBKIT_INSPECTOR_HTTP_SERVER`) lists its pages at `/`, as HTML, and reaches each through a WebSocket of
  * its own, `/socket/<connection>/<target>/WebPage`, speaking the inspector protocol of that page: `Target` events
  * for its inspector targets, and commands to them wrapped in `Target.sendMessageToTarget`.

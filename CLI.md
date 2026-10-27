@@ -1,6 +1,6 @@
 # CLI: driving a live session from the command line
 
-*Revision 5.25, 2026-10-19; built 2026-10-24, after [review 20](docs/reviews.md#review-20) (Built, below, says where the build differs). These are sketches, like API.md: names are provisional, and `@usestrider/browser/cli` is declared in [packages/browser/src/cli/](packages/browser/src/cli/). The command is `strider`, the project's name. Strider CD, a continuous-deployment server abandoned in 2022, also installed a `strider` command; few machines will have both.*
+*Revision 5.25, 2026-10-19; built 2026-10-24 (Built, below, says where the build differs). These are sketches, like API.md: names are provisional, and `@usestrider/browser/cli` is declared in [packages/browser/src/cli/](packages/browser/src/cli/). The command is `strider`, the project's name. Strider CD, a continuous-deployment server abandoned in 2022, also installed a `strider` command; few machines will have both.*
 
 ## Purpose
 
@@ -118,7 +118,7 @@ export default Effect.gen(function*() {
 })
 ```
 
-A page the segment opens itself belongs to the segment's scope, and closes with it, unless the segment keeps it: `yield* session.keep(page, "receipt")` moves it into the session (review 22).
+A page the segment opens itself belongs to the segment's scope, and closes with it, unless the segment keeps it: `yield* session.keep(page, "receipt")` moves it into the session.
 
 ## Contracts
 
@@ -126,7 +126,7 @@ A page the segment opens itself belongs to the segment's scope, and closes with 
 - **Every command names its session.** It comes from `--session`/`-s` or `STRIDER_SESSION`, and the flag wins. There is no fallback, even when only one session is running, because with several agents on one machine "the only session" is a race. The error lists the running sessions. Agent shells often don't keep environment variables between calls, so documentation and skills use the flag.
 - **Names are the ids.** They are unique, and starting a name that is taken fails instead of attaching. Handles belong to their session, so `p1` in one session has nothing to do with `p1` in another.
 - **Every page command names its page** with `--page`/`-p`. There is no current page and no fallback, even when the session has one page, for the same reason as sessions: an implicit selection is how agents act on the wrong tab (Stagehand followed focus; Chrome DevTools MCP raced on a global selected page). Pages take an optional `--name` when created, and the handle is that name or else `p1`. A page opened without one, such as a popup, is named later with `strider -s checkout -p p2 page name consent`.
-- **`start` names its browser** ([review 11](docs/reviews.md#review-11)): exactly one of `--chromium <path>`, `--firefox <path>` and `--webkit <path>`, absolute, or `--attach <endpoint>`. There is no default browser and nothing is looked up; the session's spec prints the path back, with the version the browser reports.
+- **`start` names its browser:** exactly one of `--chromium <path>`, `--firefox <path>` and `--webkit <path>`, absolute, or `--attach <endpoint>`. There is no default browser and nothing is looked up; the session's spec prints the path back, with the version the browser reports.
 - **`strider browsers` finds a path.** It lists the browsers on the machine, by backend, with their versions and where each path leads, and `--json` prints the same as data. It is one of the commands that need no session and no daemon, with `sessions` and `prune`.
 - **One context per session.** `--state` and `--fork` apply to it. Two logins at once, such as two users of a chat, are two sessions.
 - **One daemon and one browser per session.** Contexts share launch flags, the downloads directory and OS focus (API.md, Testing), so separate browsers keep concurrent agents apart, and a crash ends one session.
@@ -135,7 +135,7 @@ A page the segment opens itself belongs to the segment's scope, and closes with 
 **Storage**
 - **The session directory is temporary by default.** It sits at a predictable path, so an agent can find a session's artifacts without being told. It is acquired before the browser starts and deleted after the browser exits, like the library's own temporary profile (API.md, Modules and backends). `strider stop --keep` leaves it and prints its path.
 - **`--user-data-dir` moves the profile to a directory you own.** We never delete it. The browser locks it, so only one running session can use it.
-- **Hard kills are reported, never reclaimed automatically.** After a SIGKILL or a power loss, the directory remains and nobody holds its lock. `strider sessions` reports it with its size. Starting that name again fails with a hint, and `strider prune <name>` removes the directory and any browser still running from it. This follows the ownership ledger's rule (CONCEPTS.md §3): candidates for reclaim, never automatic deletion. Since review 22, every session's daemon also keeps a ledger record, in `$XDG_STATE_HOME/strider/ledger` (`~/.local/state` when unset), of the browser it launched and the directories it made. `strider prune` with no name lists what each dead program's record names, and `--yes` reclaims it: a browser still running from its profile is killed, and its directories removed. A program using the library writes records only if it provides `Ledger.layer`.
+- **Hard kills are reported, never reclaimed automatically.** After a SIGKILL or a power loss, the directory remains and nobody holds its lock. `strider sessions` reports it with its size. Starting that name again fails with a hint, and `strider prune <name>` removes the directory and any browser still running from it. This follows the ownership ledger's rule (CONCEPTS.md §3): candidates for reclaim, never automatic deletion. Every session's daemon also keeps a ledger record, in `$XDG_STATE_HOME/strider/ledger` (`~/.local/state` when unset), of the browser it launched and the directories it made. `strider prune` with no name lists what each dead program's record names, and `--yes` reclaims it: a browser still running from its profile is killed, and its directories removed. A program using the library writes records only if it provides `Ledger.layer`.
 - **A fork copies storage state into a new session.** `--fork` copies from a running session in memory. `--state` reads a file that `strider state save` wrote with mode 0600.
   - Storage state covers cookies, localStorage and IndexedDB. Playwright made IndexedDB opt-in in 1.51 because Firebase Auth keeps its tokens there; ours includes it, because `exportStorageState` promises the full restorable state.
   - It doesn't carry sessionStorage, service workers, the HTTP cache, in-memory state, or logins bound to the device or a client certificate. Sites that depend on those need `--user-data-dir`.
@@ -157,7 +157,7 @@ A page the segment opens itself belongs to the segment's scope, and closes with 
 - **Segments belong to the CLI.** `CurrentSession` comes from `@usestrider/browser/cli`, and only `strider run` provides it. Programs and tests pass pages around as values, as they always do, and never construct a session.
 - **`strider run` provides `CurrentSession`, `Scope` and the daemon's platform services.** A segment that requires anything else fails with an error naming the missing service.
 - **The CLI doesn't type-check.** A segment is a file in your project, so your `tsc` checks it against the same Strider version the daemon runs from. Agent skills run `tsc --noEmit` before `strider run`, because a segment that fails halfway leaves its earlier steps done.
-- **It runs in its own scope, like a script.** Its routes, handlers and waits end with it. Handles it returns are named into the session; a page it opened itself closes with the segment unless it keeps it with `CurrentSession.keep`, which is the explicit transfer CONCEPTS.md §3 defines (review 22: before it, returning a page was described as transferring it, which the build never did, Q173).
+- **It runs in its own scope, like a script.** Its routes, handlers and waits end with it. Handles it returns are named into the session; a page it opened itself closes with the segment unless it keeps it with `CurrentSession.keep`, which is the explicit transfer CONCEPTS.md §3 defines (Q173).
 - **Segments use locators, not refs.** A ref only means something inside its session.
 
 **Export**
@@ -169,45 +169,31 @@ A page the segment opens itself belongs to the segment's scope, and closes with 
 
 ## Built
 
-*2026-10-24, after [review 20](docs/reviews.md#review-20), its third step.* The commands above run as written: a daemon per session (`src/internal/cli/daemon.ts`), started detached by `strider start`, holding the browser, the session's one context and the agent toolkit's session; the client (`src/internal/cli/client.ts`), which forwards a command over the session's socket without loading Effect; and `browsers`, `sessions` and `prune`, which run in the client's process.
+The commands above run as written: a daemon per session (`src/internal/cli/daemon.ts`), started detached by `strider start`, holding the browser, the session's one context and the agent toolkit's session; the client (`src/internal/cli/client.ts`), which forwards a command over the session's socket without loading Effect; and `browsers`, `sessions` and `prune`, which run in the client's process.
 
 - **Starting.** The daemon parses `start`'s flags with `effect/cli`, claims the session's directory (taken while it exists, its `lock` naming the daemon), reads `--secret name=VARIABLE` from the environment the command ran in, creates the context from `--state` or from `--fork`'s session (asked for its state over its socket), and writes one JSON line on its standard output: the spec, once it serves, or why it couldn't start, which the client prints with an exit code (QUIRKS.md, Q170). Its own output then goes to `daemon.log`.
 - **Commands.** Each is parsed in the daemon by one `effect/cli` tree whose shared flags are `-s`, `-p` and `--json`; the toolkit's tools are its page commands, and `page new`, `page name`, `remove`, `run`, `state save`, `export test` and `stop` are the session's. Results print as one line, `clicked e9 on shop · 412 ms`, with `since last:` after it; a screenshot is written to `artifacts/` and its path printed; `--json` prints one JSON line. A failure prints its tag and message, and exits with its module's code: 10 `LocatorError`, 11 `PageError`, 12 `Timeout`, 13 `TargetGone`, 14 `ExpectationFailed`, 15 `InvalidInput`, 16 `PageNotFound`, 17 `NotPermitted`, 20 for no such session, 2 for a command that doesn't parse. Ctrl-C sends an `Interrupt` line that interrupts the command alone.
 - **Lifetime.** The idle timeout and `--owner-pid` are checked each second. Stopping closes the browser and deletes the session's directory, or, with `--keep`, only its socket and lock. A daemon killed outright leaves its directory, which `sessions` lists with its size and `prune` removes, after ending any process whose command line names it (Linux).
-- **Segments.** `run` imports the file afresh (Q175), checks that its default export is an `Effect`, and runs it with `CurrentSession` and a scope of its own; pages it returns are named into the session (Q173).
-- **Export.** `export test` writes the session's successful commands: a context, from the `--state` file when the session started from one; each page; each tool call as its statement, a ref as the role-and-name locator its snapshot gave it, a `%name%` as `Config.Redacted` of its variable, and each `run` as a marked placeholder, which the command lists.
-- **Where the build differs from this document.**
-  - **The socket carries JSON lines** of arguments, output and an exit code, not an `effect/rpc` group (Q171).
-  - **`--attach` reads its backend from the endpoint** (Q168), and the session's context is its own, so `control` isn't built (Q169).
-  - **A page a segment opens ends with it** (Q173).
-  - **`history` has no `--level` or `--failed`**; it lists what the page's log recorded of a kind.
-  - **Every page tool brings its page to the front first** (Q167).
-  - **The session's context emulates focus** on Chromium and WebKit, so a page keeps rendering behind a popup, and `start` says so (`focus emulated`); Firefox opens every page as a window, which does the same (review 21, its second step; Q19, Q71). An exported test makes its context the same way.
-- **Not built:** an MCP server command, which `McpServer.toolkit(BrowserToolkit.toolkit)` covers for a program today; `control`; and a session's `downloads/` as its context's download directory, which the daemon creates and doesn't use yet. All three since built (review 22, below).
-
-*2026-10-26, after [review 22](docs/reviews.md#review-22), its first step.*
-
+- **Segments.** `run` imports the file afresh (Q175), checks that its default export is an `Effect`, and runs it with `CurrentSession` and a scope of its own; pages it returns are named into the session (Q173). A page a segment opens ends with it unless it is kept: `CurrentSession.keep` names the page into the session and transfers it to the session's scope.
+- **Export.** `export test` writes the session's successful commands: a context, from the `--state` file when the session started from one; each page; each tool call as its statement, a ref as the role-and-name locator its snapshot gave it, a `%name%` as `Config.Redacted` of its variable, and each `run` as a marked placeholder, which the command lists. A controlled tab is marked with a placeholder.
 - **Tabs and control** (Q169). The daemon gives the toolkit the browser, so `strider tabs` lists the pages the session doesn't hold, `control <id>` or `--url <pattern>` takes one with `Page.control` in a scope of its own and names it, and `release -p <name>` closes that scope: the tab's declarations end, and it stays open. An exported test marks a controlled tab with a placeholder.
 - **`find`** searches the page's latest snapshot, taking one if there is none, for refs whose name or text contains the query, or equals it with `--exact`, narrowed by `--role`; a match without a ref of its own, such as text, is its nearest element with one.
-- **`history --level` and `--failed`**, through `ConsoleMessage`'s filter, and the digest's rule for a failed request.
-- **Downloads** go to the session's `downloads/`, through the context's new `downloads` option.
-- **Keeping a segment's page** (Q173). `CurrentSession.keep` names the page into the session and transfers it to the session's scope: the model's release closes a page only for the scope that still owns it.
+- **`history`** filters by `--level` through `ConsoleMessage`'s filter, and by `--failed` with the digest's rule for a failed request.
+- **Downloads** go to the session's `downloads/`, through the context's `downloads` option.
 - **`strider mcp`** runs in a process of its own, with Effect: `effect/ai`'s `McpServer` over standard input and output, with the toolkit's tools, each forwarded to the daemon as a `Tool` request over the session's socket and answered with its result encoded by the tool's Schema. Standard output is the client's, so `start`'s spec and every log go to standard error. Tools with no parameters use `Tool.EmptyParams`, whose JSON Schema an MCP client reads as an object.
 - **The ledger** (`Ledger`, Q146). The daemon builds its browser's layer with `Ledger.layer` on the CLI's ledger directory; `prune` with no name reads it, tells a dead program from a reused process id by its start time where `/proc` says it, and with `--yes` kills what still runs from a recorded profile and removes recorded directories.
-- **Where the build differs from review 22.**
+- **Stock WebKit.** `start --webkit <path>` with WebKitGTK's or WPE's MiniBrowser launches stock WebKit in automation mode, as `WebKit.layer` does: its window needs a display (`DISPLAY`), and the daemon provides its TCP socket from Node's. Its pages are windows of their own, so the session's context doesn't emulate focus, and `start` says `focus system`. An exported test of such a session provides `SocketConnector` too. On stock WebKit, `next` with `event: "popup"` or `"download"` fails at once, as data naming the capability (`popups.opener`, `downloads`): stock WebKit doesn't say which page opened a page (QUIRKS.md, Q212), and reports no downloads. For the same reason the digest notes no popup there.
+- **Where the build differs from this document.**
+  - **The socket carries JSON lines** of arguments, output and an exit code, not an `effect/rpc` group (Q171).
+  - **`--attach` reads its backend from the endpoint** (Q168), and doesn't reach stock WebKit: its inspector server is an HTTP endpoint too, which the flag reads as Chromium's. Telling the two apart takes a flag per protocol, not yet decided; a program attaches with `WebKit.layerAttach` meanwhile.
+  - **Every page tool brings its page to the front first** (Q167).
+  - **The session's context emulates focus** on Chromium, so a page keeps rendering behind a popup, and `start` says so (`focus emulated`); Firefox opens every page as a window, which does the same (Q19, Q71), and so does stock WebKit (`focus system`). An exported test makes its context the same way.
   - **Firefox user contexts on an attached browser aren't recorded:** removing one needs a new WebDriver BiDi session, which Firefox refuses while a dead program's session lingers (Q137).
   - **The toolkit takes the browser as an option,** `browser`, so a model reaches beyond its context only when given it; without it, `tabs` and `control` fail with `NotPermitted`.
-
-*2026-10-26, after [review 22](docs/reviews.md#review-22), its fifth step.* `--attach` doesn't reach stock WebKit, which the library now attaches to (`WebKit.layerAttach`): its inspector server is an HTTP endpoint too, which the flag reads as Chromium's (Q168). Telling the two apart takes a flag per protocol, which the review didn't decide; a program attaches with `WebKit.layerAttach` meanwhile.
-
-*2026-10-26, after [review 23](docs/reviews.md#review-23), its second step.* `start --webkit <path>` with WebKitGTK's or WPE's MiniBrowser launches stock WebKit in automation mode, as `WebKit.layer` does: its window needs a display (`DISPLAY`), and the daemon provides its TCP socket from Node's. Its pages are windows of their own, so the session's context doesn't emulate focus, and `start` says `focus system`. An exported test of such a session provides `SocketConnector` too.
-
-*2026-10-26, after [review 23](docs/reviews.md#review-23), its third step.* On stock WebKit, `next` with `event: "popup"` or `"download"` fails at once, as data naming the capability (`popups.opener`, `downloads`): stock WebKit doesn't say which page opened a page (QUIRKS.md, Q212), and reports no downloads. For the same reason the digest notes no popup there.
 
 ## Open questions
 
 None. Type-checking was settled by leaving it to the project's own `tsc`, and failed requests by the rule under Commands.
 
-Candidates, not yet designed:
-- **Page-provided tools (WebMCP).** When a page registers tools for agents, one call can replace a sequence of clicks that a banner might block. Their names, schemas and results come from the page, so they are untrusted input. Designed in review 22 (candidate 3c), and built once a browser ships the API.
-- **Searching a snapshot** instead of printing it, to keep output small. It would query the structured `Snapshot`, not grep its text. Built since (review 22): `strider find`.
+Candidates:
+- **Page-provided tools (WebMCP).** When a page registers tools for agents, one call can replace a sequence of clicks that a banner might block. Their names, schemas and results come from the page, so they are untrusted input. Designed (docs/decisions.md), and built once a browser ships the API.

@@ -1,11 +1,11 @@
 /**
- * Cookies and origin storage (review 18, candidate 6). Cookies are a context's, through the adapter; origin
- * storage is a document's, read and written from the caller's isolated world, which shares the page's storage
- * (P6). A change acts once: a scope doesn't undo it.
+ * Cookies and origin storage. Cookies are a context's, through the adapter; origin
+ * storage is a document's, read and written from the caller's isolated world, which shares the page's storage.
+ * A change acts once: a scope doesn't undo it.
  *
  * - **A cookie's `sameSite`** is `None` where the cookie didn't say, since the browsers' defaults differ; WebKit
- *   reports `Lax` for it (P5). `priority` is Chromium's alone, and only CDP reports a partition.
- * - **`remove`** sets each match again with an expiry in the past, which every backend removes (P5).
+ *   reports `Lax` for it. `priority` is Chromium's alone, and only CDP reports a partition.
+ * - **`remove`** sets each match again with an expiry in the past, which every backend removes.
  * - **`listFor`** filters the context's cookies as a top-level request to the URL would send them: by domain, path,
  *   `Secure` and expiry, and a partitioned cookie only in its own top-level site.
  */
@@ -220,7 +220,7 @@ export const cookieJar = (runtime: Runtime.Runtime, context: UserContext.Id): Co
         (match.path === undefined || cookie.path === match.path)
       )
       if (matching.length === 0) return
-      // An expiry in the past removes it on every backend (P5)
+      // An expiry in the past removes it on every backend
       yield* adapter.setCookies(
         context,
         matching.map((cookie) => ({ ...cookie, value: Redacted.make(""), expires: Option.some(1) }))
@@ -302,7 +302,7 @@ const storageFailure = (operation: string, record: Operation.Record) =>
   )
 }
 
-/** One area of the page's current document's origin storage, from the isolated world (P6). */
+/** One area of the page's current document's origin storage, from the isolated world. */
 export const originStorage = (
   runtime: Runtime.Runtime,
   page: Model.PageEntry,

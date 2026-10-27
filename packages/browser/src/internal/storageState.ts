@@ -1,15 +1,15 @@
 /**
- * Storage state (review 18, candidate 7): a context's cookies, and the `localStorage` and IndexedDB of every origin
+ * Storage state: a context's cookies, and the `localStorage` and IndexedDB of every origin
  * of a document open in its pages and frames, exported; and the same written into a new context before its first
  * page.
  *
  * - **Export** reads each origin's storage in one of its documents, from the isolated world. A cross-site frame's
  *   storage is its page's top-level site's partition, and says so.
  * - **IndexedDB records** cross in an encoding of ours (`readOrigin`), so what JSON can't write survives. Firefox
- *   gives the isolated world the page's objects, so types are told by their tag, not `instanceof` (P7). A value
+ *   gives the isolated world the page's objects, so types are told by their tag, not `instanceof`. A value
  *   that can't be encoded fails the export with `Unsupported`, naming its database and store.
  * - **Import** sets the cookies, then writes each origin's storage from a page of the new context whose document a
- *   route of ours fulfills (P8), from a frame of a page at the partition's top-level site where it is partitioned.
+ *   route of ours fulfills, from a frame of a page at the partition's top-level site where it is partitioned.
  *   The page and the routes are gone when the context is returned.
  */
 import * as Effect from "effect/Effect"
@@ -127,7 +127,7 @@ export async function readOrigin(): Promise<string> {
     if (seen.has(object)) throw new Unencodable("a value that refers to itself")
     seen.add(object)
     try {
-      // By tag, not `instanceof`: Firefox gives the isolated world the page's objects (P7)
+      // By tag, not `instanceof`: Firefox gives the isolated world the page's objects
       const tag = Object.prototype.toString.call(object).slice(8, -1)
       if (tag === "Date") {
         const time = (object as Date).getTime()
@@ -364,7 +364,7 @@ interface Source {
   readonly document: Target.DocumentId
   readonly origin: string
   readonly partition: CookieJar.PartitionKey
-  /** The origin of the page it was found under (review 24). */
+  /** The origin of the page it was found under. */
   readonly topLevelOrigin: string
 }
 
@@ -473,7 +473,7 @@ export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id) =
       origins.push({
         origin: Url.Origin.make(source.origin),
         partition: source.partition,
-        // Where the partition's key is an origin, as stock WebKit's is, the restore needs it (review 24)
+        // Where the partition's key is an origin, as stock WebKit's is, the restore needs it
         ...(source.partition._tag === "Partitioned" ? { topLevelOrigin: Url.Origin.make(source.topLevelOrigin) } : {}),
         localStorage: answer.read.local.map(([key, value]) => [key, Redacted.make(value)] as const),
         indexedDb: answer.read.indexedDb.map((database) => ({
@@ -604,7 +604,7 @@ export const applyState = (
           document = state.document.id
         } else {
           // A partition is written from a frame of a page at its top-level site
-          // At the top-level origin it was read under, or, saved without one, its site's default port (review 24)
+          // At the top-level origin it was read under, or, saved without one, its site's default port
           const top = `${origin.topLevelOrigin ?? origin.partition.topLevelSite}${seedPath}/${index}/top`
           yield* context.route(
             top,

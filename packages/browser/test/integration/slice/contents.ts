@@ -1,5 +1,5 @@
 /**
- * The sixth slice (review 18): a page's contents, through the public API on every backend's layer. Evaluation and
+ * The sixth slice: a page's contents, through the public API on every backend's layer. Evaluation and
  * handles, frames, snapshots and `toMatchAria` (call site 16), captures, and storage with call site 1 to the end,
  * and `Unsupported` wherever a backend can't do something.
  */
@@ -1049,7 +1049,7 @@ document.getElementById("form").addEventListener("submit", (event) => {
             ))
             yield* page.getByText("Welcome").pipe(Expect.toBeVisible)
             assert.deepStrictEqual(yield* page.localStorage.get("user"), Option.some("me@example.com"))
-            // Restored under the origin it was read under, where the backend keys it by origin (review 24, Q232)
+            // Restored under the origin it was read under, where the backend keys it by origin (Q232)
             yield* page.frame(page.locator("#widget")).locator("#out").pipe(Expect.toHaveText("w1"))
             const record = yield* page.evaluateInMainWorld(() =>
               new Promise<

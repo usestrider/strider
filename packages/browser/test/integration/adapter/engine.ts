@@ -1,5 +1,5 @@
 /**
- * The query and actionability engine (review 12), in each browser: the same requests, against the same pages,
+ * The query and actionability engine, in each browser: the same requests, against the same pages,
  * must give the same answers on every backend, because the engine is ours and runs in the page.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"

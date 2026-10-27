@@ -1,7 +1,7 @@
 /**
  * The WebKit adapter's wire: the envelope stock WebKit's pages reach it in (`webkitEnvelope.ts`), nested three
  * levels deep, the session lifecycle its events announce, and the error table. The transports present each page
- * this way, as WebKit's own inspector proxies reach a page (review 22, candidate 7; review 23).
+ * this way, as WebKit's own inspector proxies reach a page.
  *
  * - **The browser session** is the connection itself: `{ id, method, params }`, replies `{ id, result }` or
  *   `{ id, error: { code, message, data } }`, events `{ method, params }`. The `Envelope` domain lives here.

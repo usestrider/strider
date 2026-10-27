@@ -1,5 +1,5 @@
 /**
- * `strider mcp` (review 22, candidate 3a): an MCP server over standard input and output, for a client that runs no
+ * `strider mcp`: an MCP server over standard input and output, for a client that runs no
  * commands of its own, such as Claude Desktop, which launches it from its configuration. It is a front end to a
  * session, never a second way to hold a browser: each tool call goes to the session's daemon, so the client and
  * the CLI share pages, refs and waits.

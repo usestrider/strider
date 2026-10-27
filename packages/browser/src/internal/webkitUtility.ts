@@ -224,7 +224,7 @@ export const call = (fn: string, mode: "value" | "handle", awaitResult: boolean)
 
 /**
  * The function declaration that runs `fn` through the helper, called on another object with the helper first, the
- * argument kinds next and the arguments after: its result joins that object's group (review 22, Q132).
+ * argument kinds next and the arguments after: its result joins that object's group (Q132).
  */
 export const callBeside = (fn: string, mode: "value" | "handle", awaitResult: boolean): string =>
   `function(helper, kinds, ...args) { return helper.run((${fn}), kinds, args, ${

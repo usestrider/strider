@@ -1,7 +1,7 @@
 /**
  * Retrying expectations: each `Expect.to*` checks until it passes or the deadline ends.
  *
- * A locator's expectation waits in the page (review 16, candidate 7): it checks once, then again on each change
+ * A locator's expectation waits in the page: it checks once, then again on each change
  * the page makes (a DOM mutation, an `input`, `change` or focus event, an animation frame), so there is no
  * polling cadence and no change is missed between checks. A page's URL is a `Watchable`, checked on each
  * change. `Expect.that` checks a `Watchable` on each change, and runs any other effect again at
@@ -463,7 +463,7 @@ const failure = (
     diagnostics: Operation.diagnostics(id, { last: Option.fromNullishOr(history.at(-1)) })
   })
 
-/** What a failed expectation says when nothing matched its locator (review 18, candidate 4). */
+/** What a failed expectation says when nothing matched its locator. */
 interface Explained {
   readonly nearest: Option.Option<string>
   readonly suggestions: ReadonlyArray<string>
@@ -509,7 +509,7 @@ const explain = (subject: InPage, id: Diagnostics.OperationId): Effect.Effect<Ex
 interface InPage {
   readonly runtime: Runtime.Runtime
   readonly page: Model.PageEntry
-  /** The grant the subject's handle was made under (review 19). */
+  /** The grant the subject's handle was made under. */
   readonly grant: Option.Option<Access.Grant>
   readonly steps: ReadonlyArray<Engine.Step>
   readonly description: string
@@ -538,7 +538,7 @@ const expectLocator = (
   })
 
 /**
- * An expectation that waits in the page (review 16, candidate 7): rounds of up to a second, each checking once
+ * An expectation that waits in the page: rounds of up to a second, each checking once
  * and then again on each change the page makes, until it holds or the deadline ends.
  */
 const expectIn = (subject: InPage, expectation: Engine.Expectation, matcherName: string, condition: string) =>
@@ -602,11 +602,11 @@ const expectIn = (subject: InPage, expectation: Engine.Expectation, matcherName:
           })
           return yield* failed()
         case "Strict":
-          // An iframe on the way matches more than one element (review 18, candidate 2): waiting may narrow it
+          // An iframe on the way matches more than one element: waiting may narrow it
           Operation.appendObservation(history, { error: `an iframe on the way matches ${response.count} elements` })
           break
         case "StaleRef":
-          // A ref never rebinds, so waiting can't mend it (review 18, candidate 3)
+          // A ref never rebinds, so waiting can't mend it
           Operation.appendObservation(history, { error: `stale ref (${response.why})` })
           return yield* failed()
         case "Final":

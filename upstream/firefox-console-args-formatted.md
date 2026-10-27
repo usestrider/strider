@@ -1,6 +1,6 @@
 # Bug for Firefox: `log.entryAdded` sends a console call's formatted text as its only argument
 
-*Draft, 2026-10-25, for the maintainer to file in Bugzilla (Remote Protocol :: WebDriver BiDi). Not filed. Search for an existing report first. From Strider's QUIRKS.md, Q33; seen on Firefox 158.0 in review 21's build.*
+*Draft, 2026-10-25, for the maintainer to file in Bugzilla (Remote Protocol :: WebDriver BiDi). Not filed. Search for an existing report first. From Strider's QUIRKS.md, Q33; seen on Firefox 158.0.*
 
 ## Steps
 

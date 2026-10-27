@@ -1,5 +1,5 @@
 /**
- * Init scripts (review 17, candidate 4). L0 orders a world's scripts (the environment phase first, broader
+ * Init scripts. L0 orders a world's scripts (the environment phase first, broader
  * scopes first, then registration order), which the probes confirm on every backend, so `after` never
  * reorders: it validates, a dependency in force and of equal or broader scope, and it gates, since L0 runs a
  * script only if each script it comes after ran in that document without throwing.
@@ -28,7 +28,7 @@ export interface Owner {
   readonly operation: string
 }
 
-/** `Unsupported` where the backend can't run a script in a worker before the worker's own (review 22). */
+/** `Unsupported` where the backend can't run a script in a worker before the worker's own. */
 export const inWorkers = (runtime: Runtime.Runtime): Effect.Effect<void, Reason.Unsupported> =>
   Effect.flatMap(SubscriptionRef.get(runtime.model.adapter.capabilities), (capabilities) => {
     const entry = capabilities.entries.find((each) => each.name === "initScripts.workers")
@@ -93,7 +93,7 @@ export const add = (
     const world: Adapter.World = options?.world === "isolated" ? isolatedWorld : { _tag: "Main" }
     const workers = options?.workers === true
     if (workers) {
-      // A worker has one world, its own (review 22)
+      // A worker has one world, its own
       if (world._tag !== "Main") {
         return yield* Effect.fail(fail(
           new Reason.InvalidInput({

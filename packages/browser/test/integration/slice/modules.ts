@@ -1,6 +1,6 @@
 /**
- * The third slice (review 14): the other event modules, through the public API on every backend's layer. Call
- * sites 2, 4 + 9, 5 and 8 of API.md, and around them what the review says each module does: downloads saved,
+ * The third slice: the other event modules, through the public API on every backend's layer. Call
+ * sites 2, 4 + 9, 5 and 8 of API.md, and around them what the design says each module does: downloads saved,
  * read and canceled, file choosers answered or canceled, console messages and exceptions attributed and
  * encoded, navigations that end well or badly, requests and bodies, workers evaluated in, WebSocket frames, and
  * `Unsupported` wherever a backend can't report something.

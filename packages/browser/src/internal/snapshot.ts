@@ -1,5 +1,5 @@
 /**
- * Snapshots (review 18, candidate 3): the engine's accessibility tree of a document, the same on every backend and
+ * Snapshots: the engine's accessibility tree of a document, the same on every backend and
  * the one `getByRole` matches, with each frame's tree stitched in under its iframe.
  *
  * - **Refs.** The engine gives every element node a ref, which names that node for as long as its document lives.

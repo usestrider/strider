@@ -97,7 +97,7 @@ const routes: Record<string, Route> = {
     response.writeHead(200, { "content-type": "application/json", "x-test": "yes" })
     response.end(`{"hello":"world"}`)
   },
-  // The request as the site saw it: method, URL, headers and body (review 17)
+  // The request as the site saw it: method, URL, headers and body
   "/echo": (request, response) => {
     const chunks: Array<Buffer> = []
     request.on("data", (chunk: Buffer) => chunks.push(chunk))
@@ -111,7 +111,7 @@ const routes: Record<string, Route> = {
       }))
     })
   },
-  // A redirect that keeps the method and body, to the echo (review 22)
+  // A redirect that keeps the method and body, to the echo
   "/to-echo": (request, response) => {
     request.resume()
     request.on("end", () => {
@@ -119,7 +119,7 @@ const routes: Record<string, Route> = {
       response.end()
     })
   },
-  // Basic authentication: "strider" and "secret" (review 17)
+  // Basic authentication: "strider" and "secret"
   "/auth": (request, response) => {
     const expected = `Basic ${Buffer.from("strider:secret").toString("base64")}`
     if (request.headers.authorization === expected) return html(response, `<title>auth</title><p>signed in</p>`)
@@ -251,7 +251,7 @@ export const site: Effect.Effect<Site, never, Scope.Scope> = Effect.acquireRelea
 
 /**
  * A site over TLS whose certificate nothing trusts, for the scope: self-signed, for `127.0.0.1`, made with the Nix
- * environment's OpenSSL as the scope starts and deleted as it ends (review 22, candidate 8).
+ * environment's OpenSSL as the scope starts and deleted as it ends.
  */
 export const tlsSite: Effect.Effect<{ readonly origin: string }, never, Scope.Scope> = Effect.acquireRelease(
   Effect.callback<{ server: https.Server; directory: string; origin: string }>((resume) => {

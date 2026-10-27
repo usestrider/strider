@@ -1,5 +1,5 @@
 /**
- * Stock WebKit launched in automation mode (review 23, candidates 3, 4 and 6): a browser process for each context,
+ * Stock WebKit launched in automation mode: a browser process for each context,
  * each reached through its inspector server's socket (`webkitInspectorSocket.ts`), as WebKit's own WebDriver
  * reaches it.
  *
@@ -44,8 +44,8 @@ import * as WebKitWire from "./webkitWire.ts"
 
 /**
  * How a browser takes automation mode, by its executable's name; `None` for one this doesn't launch. WebKitGTK's
- * and WPE's MiniBrowser only: GNOME Web's automation mode opens no second page, and aborts as one closes (review 23,
- * decision 3; QUIRKS.md, Q217).
+ * and WPE's MiniBrowser only: GNOME Web's automation mode opens no second page, and aborts as one closes
+ * (QUIRKS.md, Q217).
  */
 export const automationArguments = (executablePath: string): Option.Option<ReadonlyArray<string>> =>
   executablePath.split(/[\\/]/).at(-1) === "MiniBrowser" ? Option.some(["--automation"]) : Option.none()

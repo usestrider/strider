@@ -1,12 +1,12 @@
 /**
- * Pages (API.md, Pages; review 12, candidate 7). Built: the state (`status`, `url`, `frames`, `workers`, `closed`), the
+ * Pages (API.md, Pages). Built: the state (`status`, `url`, `frames`, `workers`, `closed`), the
  * queries and `frame`, `goto`, `reload`, `back` and `forward`, `title`, `readHtml`, `snapshot`, `screenshot`, `pdf`,
- * origin storage, evaluation (review 18), the declarations (review 17), `activate`, `close`, the keyboard and mouse,
- * and `inspect` and `control` (review 19), and `capability` (review 20).
+ * origin storage, evaluation, the declarations, `activate`, `close`, the keyboard and mouse,
+ * `inspect`, `control` and `capability`.
  *
  * Every handle for a page shares its observe members (`observeMembers`). A page the connection controls for its life
  * has one `Page`; any other page has an observed handle, and `inspect` and `control` make handles under a grant,
- * whose other members `Access.guard` checks (review 19, candidate 2).
+ * whose other members `Access.guard` checks.
  *
  * A navigation resolves at commit, with the outcome the adapter reports for the navigation it started, or with
  * the readiness `waitUntil` asks for of the document it committed, all under one deadline; a navigation with
@@ -75,7 +75,7 @@ const frameTree = (page: Target.NavigableId, state: Model.FrameTreeState): Page.
     state.frames.filter((frame) => frame.parent === parent).map((frame) => ({
       id: frame.id,
       url: frame.url as Url.Url,
-      // No backend reports a frame's name, and `window.name` is its document's to read (review 18, candidate 2)
+      // No backend reports a frame's name, and `window.name` is its document's to read
       name: Option.none(),
       children: children(frame.id)
     }))
@@ -85,7 +85,7 @@ const frameTree = (page: Target.NavigableId, state: Model.FrameTreeState): Page.
 const pageError = (operation: string, reason: Page.PageErrorReason, id: Diagnostics.OperationId) =>
   new Page.PageError({ operation, reason, diagnostics: Operation.diagnostics(id) })
 
-/** What any handle for a page is made from: its runtime and entry, and how it gains access (review 19). */
+/** What any handle for a page is made from: its runtime and entry, and how it gains access. */
 export interface ObservedOwner {
   readonly runtime: Runtime.Runtime
   readonly entry: Model.PageEntry
@@ -157,7 +157,7 @@ const observeMembers = (owner: ObservedOwner) => {
   }
 }
 
-/** A page the connection observes: its state, its events, and the upgrades (review 19, candidate 2). */
+/** A page the connection observes: its state, its events, and the upgrades. */
 export const observed = (owner: ObservedOwner): Page.ObservedPage => {
   const page = observeMembers(owner) as unknown as Page.ObservedPage
   Handles.registerPage(page, { runtime: owner.runtime, entry: owner.entry, grant: Option.none() })
@@ -169,7 +169,7 @@ export const make = (owner: PageOwner): Page.Page => {
   const model = runtime.model
   const adapter = model.adapter
   const queries = LocatorImpl.pageQueries({ runtime, page: entry, grant: owner.grant })
-  /** Where the page's declarations apply (review 17). */
+  /** Where the page's declarations apply. */
   const declared: Adapter.DeclarationScope = { _tag: "Page", page: entry.id }
 
   /** A request to the engine that got no answer, as the page's errors say it. */
@@ -242,7 +242,7 @@ export const make = (owner: PageOwner): Page.Page => {
     )
 
   /**
-   * Calls a function in a world of the page's current document (review 18, candidate 1): the caller's isolated
+   * Calls a function in a world of the page's current document: the caller's isolated
    * world, or the main world with user activation inside `Page.withUserGesture`.
    */
   const evaluation = <B, R>(
@@ -443,7 +443,7 @@ export const make = (owner: PageOwner): Page.Page => {
       scope: declared,
       pages: () => [entry],
       name: "Page.clock",
-      // One timeline covers a page (review 17, candidate 7)
+      // One timeline covers a page
       conflicting: () => {
         const context = runtime.model.contexts.get(entry.context)
         return context !== undefined && Clock.isInstalled(context) ? Option.some("UserContext.clock") : Option.none()
@@ -483,7 +483,7 @@ export const make = (owner: PageOwner): Page.Page => {
         const record = yield* Operation.record
         const id = record.id
         if (Option.isSome(yield* Deferred.poll(entry.closed))) return
-        // `runBeforeUnload` (review 20, candidate 1): the prompt is decided as any dialog is, and a handler's
+        // `runBeforeUnload`: the prompt is decided as any dialog is, and a handler's
         // stay ends the close with the page open
         const stayed = yield* Deferred.make<void>()
         const onStay = () => Deferred.doneUnsafe(stayed, Exit.void)

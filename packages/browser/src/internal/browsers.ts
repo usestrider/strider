@@ -1,7 +1,7 @@
 /**
- * Finds the browsers on a machine, for `strider browsers` (review 11): on `PATH` under the command names their
+ * Finds the browsers on a machine, for `strider browsers`: on `PATH` under the command names their
  * packages install, where vendors' installers put them, and where WebKitGTK's and WPE's packages put their
- * MiniBrowser (review 23). It reports what it finds and how, with the version each prints; only the command calls
+ * MiniBrowser. It reports what it finds and how, with the version each prints; only the command calls
  * it, and a launch never looks anything up.
  *
  * The tables are search hints, not claims about what a browser is: two of Firefox's channels share an install

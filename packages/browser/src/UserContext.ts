@@ -246,7 +246,7 @@ export interface Options {
    */
   readonly focus?: "system" | "emulated" | undefined
   /**
-   * The keyboard layout `type` and `press` use for its pages (review 22). On Firefox the page sees the layout's
+   * The keyboard layout `type` and `press` use for its pages. On Firefox the page sees the layout's
    * `key`, but the `code` Firefox gives that key on a US keyboard, and no AltGr or dead-key presses
    * (`input.keyboardLayout`).
    *

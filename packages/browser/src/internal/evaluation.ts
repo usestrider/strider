@@ -1,6 +1,6 @@
 /**
- * Evaluation in a page's documents (review 18, candidate 1). A function crosses as its source; its arguments
- * and its result cross by value through the serializer review 14 built for workers, or the result stays where it
+ * Evaluation in a page's documents. A function crosses as its source; its arguments
+ * and its result cross by value through the serializer workers share, or the result stays where it
  * is, as a handle the caller's scope owns.
  *
  * - **`page.evaluate`** calls in the isolated world for the caller's code, `__strider_isolated__`, which
@@ -10,7 +10,7 @@
  *   that ends during it is `TargetGone`, since the function may have run partly, and nothing runs it again.
  * - **A handle** is a remote object in one realm, released by `release` or when its scope closes, once.
  *   A primitive result has no remote object, and its handle holds the value. A scope's handles in a realm are
- *   one object group, which its close releases in one command (review 22, QUIRKS.md, Q132).
+ *   one object group, which its close releases in one command (QUIRKS.md, Q132).
  */
 import * as Effect from "effect/Effect"
 import * as Inspectable from "effect/Inspectable"
@@ -356,7 +356,7 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
   }
 }
 
-/** A scope's handles in one realm: an object group, released together as the scope closes (review 22, Q132). */
+/** A scope's handles in one realm: an object group, released together as the scope closes (Q132). */
 export interface Group {
   readonly name: string
   readonly handles: Set<HandleImpl<unknown>>

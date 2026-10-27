@@ -1,5 +1,5 @@
 /**
- * What every event module's filter shares (review 14, candidates 3 and 4): checking it, which fails `next`,
+ * What every event module's filter shares: checking it, which fails `next`,
  * `stream` and `history` alike with `SubscriptionError` before any event, and matching it.
  *
  * - A filter that doesn't compile, such as a URL pattern, is `InvalidInput`.

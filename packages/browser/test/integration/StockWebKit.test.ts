@@ -1,5 +1,5 @@
 /**
- * Stock WebKit (review 22, candidate 7), through the public layer: WebKitGTK's MiniBrowser (`browsers.ts`), on an X
+ * Stock WebKit, through the public layer: WebKitGTK's MiniBrowser (`browsers.ts`), on an X
  * server of its own (`stockWebKit.ts`), attached through its remote inspector by `WebKit.layerAttach`. Its
  * inspector is for looking, not driving: what it can't do is refused, saying so, and the rest is checked here.
  */

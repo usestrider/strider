@@ -1,5 +1,5 @@
 /**
- * WebKitGTK's and WPE's remote inspector server over its socket (review 23, candidate 2): the server a browser starts
+ * WebKitGTK's and WPE's remote inspector server over its socket: the server a browser starts
  * at `WEBKIT_INSPECTOR_SERVER`, which WebKit's WebDriver server speaks to a browser in automation mode, and which
  * Strider speaks itself.
  *

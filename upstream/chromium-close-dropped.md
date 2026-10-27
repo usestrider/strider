@@ -1,6 +1,6 @@
 # Bug for Chromium: `Target.closeTarget` sent as a navigation commits is answered and ignored
 
-*Draft, 2026-10-25, for the maintainer to file at crbug.com (DevTools > Protocol). Not filed. Search for an existing report first. From Strider's QUIRKS.md, Q149; seen on Chromium 155.0.8059.79, headless, Linux, in review 21's build.*
+*Draft, 2026-10-25, for the maintainer to file at crbug.com (DevTools > Protocol). Not filed. Search for an existing report first. From Strider's QUIRKS.md, Q149; seen on Chromium 155.0.8059.79, headless, Linux.*
 
 ## Steps
 

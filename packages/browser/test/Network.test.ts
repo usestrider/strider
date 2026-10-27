@@ -1,5 +1,5 @@
 /**
- * Review 22's network pieces, without a browser: the intercept a `URLPattern` route declares, requests' bodies as
+ * The network pieces, without a browser: the intercept a `URLPattern` route declares, requests' bodies as
  * a HAR writes them, and replay's reading and matching.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"

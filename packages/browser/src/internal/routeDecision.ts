@@ -1,6 +1,6 @@
 /**
  * What a `Route.Decision` is at run time: what was decided, under a key of its own beside the public TypeId,
- * whose type only carries the phases it is valid at (review 17, candidate 2).
+ * whose type only carries the phases it is valid at.
  */
 import type * as Headers from "effect/http/Headers"
 import type * as HttpClientRequest from "effect/http/HttpClientRequest"

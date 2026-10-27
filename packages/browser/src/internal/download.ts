@@ -1,6 +1,6 @@
 /**
- * A download's handle (review 14, candidate 8): its status, folded by the model, and what reads it. Every
- * browser writes a download into a partial file and renames it when it completes (P2), so its bytes are read
+ * A download's handle: its status, folded by the model, and what reads it. Every
+ * browser writes a download into a partial file and renames it when it completes, so its bytes are read
  * once it has: `finished`, `saveAs` and `stream` wait for that under the deadline in force when called.
  */
 import * as Effect from "effect/Effect"

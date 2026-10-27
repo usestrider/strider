@@ -1,5 +1,5 @@
 /**
- * Values that cross into and out of an evaluation by value (review 14, candidate 10), as WebDriver BiDi
+ * Values that cross into and out of an evaluation by value, as WebDriver BiDi
  * serializes them: what `JSHandle.Serialized` says arrives. Arguments become local values, and results come
  * back as JavaScript values. Something that can't cross fails with the path to it, for `NotSerializable`.
  *

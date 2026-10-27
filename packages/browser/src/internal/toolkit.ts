@@ -1,5 +1,5 @@
 /**
- * The agent toolkit's handlers (review 20, candidate 5): the tools of `tools.ts`, bound to one context.
+ * The agent toolkit's handlers: the tools of `tools.ts`, bound to one context.
  *
  * - **Pages by name.** A page is named when it is created (`newPage`'s `name`, or `p1`, `p2`…) or first seen,
  *   as a popup is. Every page tool names its page; there is no current one.
@@ -146,7 +146,7 @@ const parseTarget = (
     }
   })
 
-/** The pages, snapshots and digest a toolkit keeps, which the CLI's session commands share (review 20). */
+/** The pages, snapshots and digest a toolkit keeps, which the CLI's session commands share. */
 export interface Session {
   readonly toolkit: Toolkit.WithHandler<Tools.Tools>
   /** Names a page: `given`, which must be free, or the next `p1`, `p2`…; a named page keeps its name. */
@@ -388,7 +388,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       }
     })
 
-  // ── The browser's other pages, taken with control (review 22, candidate 4a) ──
+  // ── The browser's other pages, taken with control ──
   // Each controlled page's grant lives in a scope of its own, which release closes
   const controlled = new Map<string, Scope.Closeable>()
   const browserPages = Effect.suspend(() =>

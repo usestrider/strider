@@ -1,5 +1,5 @@
 /**
- * Events (CONCEPTS.md §9, Subscriptions and Event logs; review 13, candidate 1): one mechanism under every
+ * Events (CONCEPTS.md §9, Subscriptions and Event logs): one mechanism under every
  * event module's `next`, `stream` and `history`.
  *
  * The model's fold publishes each event to a channel, one per kind and target (a page's popups, a context's
@@ -12,7 +12,7 @@
  * are delivered, and filter on what an entry knows, which can grow: a popup's URL arrives with its first
  * navigation, so `revise` offers the entry again to the subscriptions it now matches.
  *
- * Delivering can take an effect (review 14, candidate 2): a response's body loads after the response, and a
+ * Delivering can take an effect: a response's body loads after the response, and a
  * navigation waited for until `load` ends after it commits. It runs in the subscriber, as `where` does, and its
  * failure fails the wait or the stream. `history` only projects, and never waits.
  */
@@ -161,7 +161,7 @@ const subscribe = <A>(
   })
 
 /**
- * Every entry the filter accepts from now on, with no bound, for a recording that keeps them all (review 20):
+ * Every entry the filter accepts from now on, with no bound, for a recording that keeps them all:
  * its queue ends when the channel's target ends normally or the scope closes, and fails with `TargetGone` on
  * another end.
  */
@@ -196,7 +196,7 @@ const immediate = <A, B>(kind: Kind<A, B>): Delivery<A, B, never> => ({
 })
 
 /**
- * `next`: subscribed when it returns, with the wait as its value (review 15). The first event the filter and
+ * `next`: subscribed when it returns, with the wait as its value. The first event the filter and
  * `where` accept completes the deferred the wait reads, or the deadline in force now fails it with
  * `Timeout{waitingForEvent}`, or its target's end with `TargetGone`. Closing the scope first interrupts it. The
  * wait is latched: running it again gives the same result.

@@ -1,6 +1,6 @@
 # Scenarios: Strider and Playwright, side by side
 
-A private workspace package, never published (review 25, candidate 4). It runs the same scenarios with Strider
+A private workspace package, never published. It runs the same scenarios with Strider
 and with Playwright against the same stock Chromium, the one the integration environment pins, and writes what it
 found to [RESULTS.md](RESULTS.md):
 

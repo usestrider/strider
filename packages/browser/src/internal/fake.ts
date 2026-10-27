@@ -1,5 +1,5 @@
 /**
- * `Browser.layerTest` (review 20, candidate 3): an adapter with no browser behind it, whose first page plays a
+ * `Browser.layerTest`: an adapter with no browser behind it, whose first page plays a
  * marble timeline. Its facts are folded by the same model as a real backend's, so events, waits and lifetimes
  * behave as they do with a browser; it has no DOM, so a request for the engine fails with `Unsupported`.
  *

@@ -1,5 +1,5 @@
 /**
- * The CDP backend adapter (PROTOCOL.md, Backend adapters; review 08). It keeps the correlation tables from
+ * The CDP backend adapter (PROTOCOL.md, Backend adapters). It keeps the correlation tables from
  * CDP's ids to L1's, folds CDP's events into facts, configures every new target before its scripts run, and
  * carries out L1's operations.
  *
@@ -13,7 +13,7 @@
  *   a paused popup blocks its opener.
  * - **Identity.** Frames are keyed by frame id, documents by loader id, realms by `uniqueId` (context ids repeat
  *   after a process swap), navigations by loader id, requests by session and request id.
- * - **Facts** follow the evidence in review 08: realms are created after commit, the initial `about:blank`
+ * - **Facts** follow what CDP does: realms are created after commit, the initial `about:blank`
  *   realm survives into the first same-origin document, children of a replaced document end without a CDP
  *   event, and navigation outcomes are reported only on affirmative evidence.
  */
@@ -174,16 +174,16 @@ interface RequestEntry {
   servedFromCache: boolean
   /** A route fulfilled it, which the browser reports as an ordinary response. */
   fulfilled: boolean
-  /** What the `Network` domain calls it: `Fetch` calls a `fetch()` an `XHR` (review 17, P11). */
+  /** What the `Network` domain calls it: `Fetch` calls a `fetch()` an `XHR`. */
   readonly resourceType: NetworkRequest.ResourceType
-  /** The current hop's headers as received, from `responseReceivedExtraInfo` (review 20; QUIRKS.md, Q158). */
+  /** The current hop's headers as received, from `responseReceivedExtraInfo` (QUIRKS.md, Q158). */
   received: Network.Headers | undefined
   /** The current hop's headers as the request event gave them, and whether the headers sent were reported. */
   requestHeaders: Network.Headers
   sentReported: boolean
   /**
    * Each hop's request body: whether it had one, and its bytes as the event carried them, kept where a body
-   * collection covers the page (review 22, Q164).
+   * collection covers the page (Q164).
    */
   readonly sentBodies: Array<{ readonly hasBody: boolean; readonly carried: Option.Option<Uint8Array> }>
   /**
@@ -202,7 +202,7 @@ type ObligationEntry =
     readonly phase: "request" | "response" | "auth"
     /** The request the `Network` domain knows it as, when `Fetch` names it. */
     readonly request: RequestEntry | undefined
-    /** The request's body, as `Fetch.requestPaused` carried it (review 17, P10). */
+    /** The request's body, as `Fetch.requestPaused` carried it. */
     readonly body: Option.Option<Uint8Array>
     /** The `Network` domain's id for it, which a body too large to carry is read by. */
     readonly networkId: string | undefined
@@ -233,7 +233,7 @@ interface DownloadEntry {
 interface HandleEntry {
   readonly target: TargetEntry
   readonly objectId: string
-  /** The object group it was made in (review 22, Q132). */
+  /** The object group it was made in (Q132). */
   readonly group: string | undefined
 }
 
@@ -442,8 +442,8 @@ const fetchHeaders = (headers: Readonly<Record<string, string>>): Array<Fetch.He
   )
 
 /**
- * A request's body as an event carries it: its entries' bytes (review 17, P10). An entry without bytes, such as a
- * file's, leaves the body to be read by the request's id (review 22, Q164).
+ * A request's body as an event carries it: its entries' bytes. An entry without bytes, such as a
+ * file's, leaves the body to be read by the request's id (Q164).
  */
 const postData = (request: Network.Request): Option.Option<Uint8Array> => {
   if (
@@ -650,7 +650,6 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
       entry("cookies", "supported"),
       entry("permissions", "supported"),
       entry("permissions.anyOrigin", "supported"),
-      // Review 17
       entry("interception.responseBody", "supported"),
       entry("interception.responseFulfill", "supported"),
       entry("interception.responseHeaders", "supported"),
@@ -671,14 +670,12 @@ const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["own
       entry("emulation.javaScript", "supported", ["a document already loaded keeps running its scripts"]),
       entry("emulation.touch", "supported", ["touch event handlers appear at the next document"]),
       entry("emulation.focus", "supported"),
-      // Review 18
       entry("screenshot.cssScale", "supported"),
       entry("screenshot.omitBackground", "supported"),
       entry("pdf.headerFooter", "supported"),
       entry("pdf.preferCssPageSize", "supported"),
       entry("cookies.partitioned", "supported"),
       entry("snapshot.clickListeners", "unsupported", ["not built: it would take a command per element"]),
-      // Review 20
       entry("capability.axTree", "supported"),
       entry("capability.screencast", "supported"),
       entry("capability.video", "unsupported", ["Chromium streams frames, and writing a video file needs an encoder"])
@@ -740,7 +737,7 @@ export const connect: (
     const handles = new Map<Adapter.HandleId, HandleEntry>()
     const groups = Groups.make()
     const connections = new Map<string, NetworkConnection.Id>()
-    // HTML drags Chromium started and the adapter intercepted, by page, until they are dropped (review 16, candidate 4)
+    // HTML drags Chromium started and the adapter intercepted, by page, until they are dropped
     // `stale`: announced after the gesture that started it was released (QUIRKS.md, Q88)
     const drags = new Map<
       L1Target.NavigableId,
@@ -1173,7 +1170,7 @@ export const connect: (
         // The session's own end, delivered by `ended`, carries everything
       },
       // A dedicated worker paused before its first script by its gate's breakpoint: its init scripts run, and it
-      // goes on (review 22, candidate 6b)
+      // goes on
       [Debugger.paused.method]: (target, params: Debugger.PausedParams) => {
         if (target === undefined || target.kind !== "worker" || params.reason !== "instrumentation") return
         const on = Protocol.on(target.session)
@@ -1668,7 +1665,7 @@ export const connect: (
           }
         }
       },
-      // The headers as sent and received (review 20): to the request's current hop, or kept until it is sent
+      // The headers as sent and received: to the request's current hop, or kept until it is sent
       [Network.requestWillBeSentExtraInfo.method]: (target, params: Network.RequestWillBeSentExtraInfoParams) => {
         if (target === undefined) return
         rawHeaders(requestKey(target, params.requestId), "request", params.headers)
@@ -1688,13 +1685,13 @@ export const connect: (
         const request = requests.get(requestKey(target, params.requestId))
         if (request === undefined) return
         // A response that says no ExtraInfo will come, as one from a cache, was sent with the request event's
-        // headers, if it was sent at all (review 22)
+        // headers, if it was sent at all
         if (!params.hasExtraInfo && !request.sentReported) {
           request.sentReported = true
           emit({ _tag: "HopHeaders", hop: request.hop, phase: "request", headers: headersOf(request.requestHeaders) })
         }
         // The network's headers, `Set-Cookie` among them, come in an `ExtraInfo` the response says will follow;
-        // it is reported with them (review 21, P6; QUIRKS.md, Q158). A response from a cache, a service worker
+        // it is reported with them (QUIRKS.md, Q158). A response from a cache, a service worker
         // or a route can say so too and get none, so only the network's waits
         if (params.hasExtraInfo && request.received === undefined && servedBy(request, params.response) === "network") {
           request.held = { response: params.response, after: [] }
@@ -1712,7 +1709,7 @@ export const connect: (
           encodedBytes: params.encodedDataLength,
           at: Adapter.now()
         }
-        // An image's `ExtraInfo` can come after its load finished (review 21, P6)
+        // An image's `ExtraInfo` can come after its load finished
         if (request.held !== undefined) request.held.after.push(finished)
         else emit(finished)
         Deferred.doneUnsafe(request.finished, Effect.void)
@@ -1812,7 +1809,7 @@ export const connect: (
           ? "response"
           : "request"
         // Authentication intercepts every request so the browser asks about its challenges; a request no
-        // intercept of this phase wants goes on at once (review 17, P6)
+        // intercept of this phase wants goes on at once
         const intercepts = target.page === undefined ? undefined : registry.intercepts(placement(target.page))
         const wanted = intercepts === undefined ||
           (phase === "request" ? intercepts.request : intercepts.response).some((pattern) =>
@@ -1955,7 +1952,7 @@ export const connect: (
       })
     }
 
-    // What answered, from the response's flags and what came before it (review 09)
+    // What answered, from the response's flags and what came before it
     const servedBy = (request: RequestEntry, response: Network.Response): NetworkResponse.ServedBy =>
       request.fulfilled
         ? "route"
@@ -2137,7 +2134,7 @@ export const connect: (
     const workerGate = Effect.fnUntraced(function*(target: TargetEntry, waiting: boolean) {
       const on = Protocol.on(target.session)
       // A dedicated worker that gets init scripts pauses before its first script, where its global is whole: one
-      // waiting for the debugger has no timers yet (review 22, candidate 6b; QUIRKS.md, Q187)
+      // waiting for the debugger has no timers yet (QUIRKS.md, Q187)
       const scripted = target.kind === "worker" && target.page !== undefined && waiting &&
         registry.workerBundle(placement(target.page)) !== undefined
       if (scripted) {
@@ -2163,7 +2160,7 @@ export const connect: (
     }
 
     // Requests fail offline, and `navigator.onLine` says so. Throttling is the same command, so the two are
-    // applied together (review 17)
+    // applied together
     const network = (
       session: ProtocolClient.Session,
       offline: boolean,
@@ -2315,7 +2312,7 @@ export const connect: (
       if (key === target.intercepts) return
       const on = Protocol.on(target.session)
       // A challenge is asked about only for a request intercepted as it starts: an auth pattern pauses there too,
-      // and the request goes on at once unless a request-phase intercept wants it (review 17, P6)
+      // and the request goes on at once unless a request-phase intercept wants it
       const patterns = [
         ...[...new Set([...intercepts.request, ...intercepts.auth])].map((urlPattern) => ({
           urlPattern,
@@ -2347,7 +2344,7 @@ export const connect: (
     })
 
     // Chromium keeps a response's body on its own, until the page moves on: where bodies are collected, it keeps
-    // them in the browser, past the next navigation (review 21, P5; QUIRKS.md, Q160)
+    // them in the browser, past the next navigation (QUIRKS.md, Q160)
     // A request's body is kept as its event carried it where a body collection covers the page and it fits
     const sentBody = (target: TargetEntry, request: Network.Request) => {
       const limit = target.page === undefined ? undefined : registry.bodyLimit(placement(target.page), "request")
@@ -2539,7 +2536,7 @@ export const connect: (
         Target.createTarget({
           url: "about:blank",
           // A window of its own, so a page opened after it doesn't put it in the background, where headless
-          // Chromium renders nothing (review 16, P4 and P10)
+          // Chromium renders nothing
           newWindow: true,
           ...(context.isDefault || context.browserContextId === undefined
             ? {}
@@ -2559,7 +2556,7 @@ export const connect: (
     // Chromium says a page isn't attached for a moment while it swaps documents, as just after a navigation
     // commits (recorded 2026-10-20); a command refused for that never ran, so it is sent again as the refusal
     // comes back, with no delay of ours: the browser's answers pace it. After a commit the moment is a fraction of a
-    // millisecond (review 21, P7); a back/forward-cache restore's is longer (QUIRKS.md, Q6)
+    // millisecond; a back/forward-cache restore's is longer (QUIRKS.md, Q6)
     const whileSwapping = <A>(effect: Effect.Effect<A, Protocol.ProtocolError>) =>
       effect.pipe(Effect.retry({
         while: (error) =>
@@ -2707,7 +2704,7 @@ export const connect: (
       if (realm === undefined || realm.ended) {
         return yield* Effect.fail(gone({ _tag: "Realm", id }, { _tag: "RealmDestroyed" }))
       }
-      // A node crosses into this realm by its binding, from whichever world returned it (review 18, candidate 1)
+      // A node crosses into this realm by its binding, from whichever world returned it
       const nodes = new Map<string, string>()
       for (const argument of call.arguments) {
         if (argument._tag !== "Node" || nodes.has(argument.node.binding)) continue
@@ -2769,7 +2766,7 @@ export const connect: (
       return { _tag: "Value", value: value(reply.result) } satisfies Adapter.RemoteResult
     })
 
-    // A group given whole goes in one command (review 22, QUIRKS.md, Q132)
+    // A group given whole goes in one command (QUIRKS.md, Q132)
     const releaseHandles = (list: ReadonlyArray<Adapter.HandleId>) =>
       Effect.forEach(Groups.release(groups, handles, list), (released) => {
         const target = released._tag === "Group" ? released.first.target : released.handle.target
@@ -2782,7 +2779,7 @@ export const connect: (
           )
       }, { concurrency: "unbounded", discard: true })
 
-    // Page coordinates reach every frame, out of process too (review 18, P1), so a frame changes nothing here
+    // Page coordinates reach every frame, out of process too, so a frame changes nothing here
     const dispatchInput = Effect.fnUntraced(
       function*(id: L1Target.NavigableId, events: ReadonlyArray<Adapter.InputEvent>, _frame?: unknown) {
         const page = yield* pageOf(id)
@@ -2838,7 +2835,7 @@ export const connect: (
                   y: event.y,
                   // A move names the button held, as a platform's drag does: Chromium starts an HTML drag only then
                   button: event.type === "move" ? heldButton(event.buttons) : event.button,
-                  // What L1 says is held: Chromium reports none on a move otherwise (review 16, P9)
+                  // What L1 says is held: Chromium reports none on a move otherwise
                   buttons: event.buttons,
                   clickCount: event.clickCount,
                   modifiers: modifierBits(event.modifiers)
@@ -2938,7 +2935,7 @@ export const connect: (
                   body: base64(decision.body)
                 }).pipe(on)
               case "Fail":
-                // An abort is ended by what follows it, which a route's abort lacks (review 17, P4)
+                // An abort is ended by what follows it, which a route's abort lacks
                 if (obligation.networkId !== undefined) {
                   routeFailed.add(requestKey(obligation.target, obligation.networkId))
                 }
@@ -3038,7 +3035,7 @@ export const connect: (
           clip = { x: 0, y: 0, width: metrics.cssContentSize.width, height: metrics.cssContentSize.height }
         }
         if (options.scale === "css") {
-          // A CSS pixel each: the capture scaled by the device pixel ratio's inverse (review 18, candidate 5).
+          // A CSS pixel each: the capture scaled by the device pixel ratio's inverse.
           // The layout metrics don't say the ratio, so the page is asked, without side effects
           const ratio = yield* protocol(
             Runtime.evaluate({ expression: "window.devicePixelRatio", returnByValue: true }).pipe(on)
@@ -3070,7 +3067,7 @@ export const connect: (
       return fromBase64(data)
     })
 
-    // The full tree, ignored nodes left out and their children given to their parent (review 20, P3)
+    // The full tree, ignored nodes left out and their children given to their parent
     const accessibilityTree = Effect.fnUntraced(function*(id: L1Target.NavigableId) {
       const page = yield* pageOf(id)
       const main = frames.get(page.targetId)
@@ -3080,8 +3077,8 @@ export const connect: (
         : { role: "RootWebArea", name: "", properties: {}, children: converted }
     })
 
-    // A frame's tree, read on the session that owns the frame, with each iframe's frame stitched in under it
-    // (review 22, candidate 6c): Chromium reads a frame's tree alone
+    // A frame's tree, read on the session that owns the frame, with each iframe's frame stitched in under it:
+    // Chromium reads a frame's tree alone
     const frameTree = (
       owner: TargetEntry,
       frameId: string | undefined
@@ -3133,7 +3130,7 @@ export const connect: (
         return root === undefined ? [] : convert(root)
       })
 
-    // Frames as Chromium paints them; the next comes once this one is acknowledged (review 20, P4)
+    // Frames as Chromium paints them; the next comes once this one is acknowledged
     const screencast = Effect.fnUntraced(function*(id: L1Target.NavigableId) {
       const page = yield* pageOf(id)
       const session = page.target.session

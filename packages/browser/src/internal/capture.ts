@@ -1,5 +1,5 @@
 /**
- * DOM snapshots for traces (review 22, candidate 1): a capture of our own, written from scratch to the trace
+ * DOM snapshots for traces: a capture of our own, written from scratch to the trace
  * viewer's format (research/playwright-trace-snapshots.md), run in each document's engine world, apart from the
  * page, which can neither see it nor change what it reads.
  *

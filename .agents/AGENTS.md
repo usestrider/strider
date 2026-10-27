@@ -1,26 +1,18 @@
 # Strider
 
 This repository is Strider (`@usestrider/browser` on npm): Effect-native browser automation that speaks CDP, WebDriver
-BiDi and the WebKit inspector protocol directly. It is pre-release. L0, the protocol layer, is built, and ten slices
-run through L1 and L2 on every backend (reviews 12, 13, 14, 16, 17, 18, 19 and 20's three steps: actions, events,
-every event module, interacting and asserting, declarations, a page's contents, attaching and access, the rest of the
-API surface with capabilities and the test layers, recordings, and the agent toolkit with the `strider` CLI); review
-21 walked the quirks, and review 22's steps built what was deferred, the last of it the open quirks' checks. Review 23
-made stock WebKit the WebKit backend, with nothing of Playwright's, and review 24 keyed storage partitions by origin. Every
-member the API declares is built. One a later review declares before building fails as the defect `NotBuilt`, naming
-itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm` from the repository root.
+BiDi and the WebKit inspector protocol directly. It is pre-release. All three layers are built, on Chromium, Firefox
+and stock WebKit, and every member the API declares is built. One declared before it is built fails as the defect
+`NotBuilt`, naming itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm` from the repository root.
 
 ## Layout
 
 - Design documents are at the root: `README.md` (goals, principles, status), `API.md` (L2, the public API),
   `CONCEPTS.md` (L1, the native model), `PROTOCOL.md` (L0), `CLI.md` and `PROBES.md`. `QUIRKS.md` lists the weird
   behaviors found while building, browsers' and our own, to reconsider once the library is built.
-- `reviews/` holds the design reviews in flight, one per proposal. `docs/` holds what the past ones decided:
-  `docs/reviews.md` indexes every review by number, with the commit that holds its text; `docs/decisions.md` keeps
-  the reasons, the alternatives rejected and the evidence the layer documents leave out; `docs/conventions.md` keeps
-  the Effect conventions. `research/` holds prior-art notes; `upstream/` holds drafts of proposals for other
-  projects, which the maintainer posts. A review in flight and the research are records of their time: don't
-  rewrite them.
+- `docs/decisions.md` holds the principles and architectural decisions, with their reasons and the alternatives
+  rejected; `docs/conventions.md` holds the Effect conventions. `research/` holds prior-art notes, a record of its
+  time: don't rewrite it. `upstream/` holds drafts of proposals for other projects, which the maintainer posts.
 - `packages/browser` is the published package:
   - `src/`: one module per file, exported as namespaces. `src/index.ts` and each subpath's `index.ts` are generated.
     `src/internal/` is implementation that no subpath exports, such as the protocol client, each backend's wire,
@@ -46,14 +38,14 @@ itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm` from the repos
     `test/fixtures/traffic/`, when a browser rolls.
   - `INDEX.md`: every declaration and member, generated.
 - `packages/scenarios`: private, never published: Strider and Playwright side by side on the integration
-  environment's Chromium (review 25). `pnpm scenarios` writes its `RESULTS.md`; `pnpm scenarios --record` visits
+  environment's Chromium. `pnpm scenarios` writes its `RESULTS.md`; `pnpm scenarios --record` visits
   the public demo sites once, live, into `.data/scenarios/`. Playwright (`playwright-core`) is this package's
   dependency alone: never import it elsewhere.
 - `packages/tools/docs`: the JSDoc checker (vendored from Effect; don't edit it), the example check, `INDEX.md` and
   the API reference dataset.
 - `packages/tools/utils`: barrel codegen; `clean`, which `pnpm build` runs first, so no earlier build's output is
   published; and `pack-check`, which checks what the published packages would be: each one packed, installed in a
-  project of its own with only its peers, imported under Node and type-checked under `nodenext` (review 25).
+  project of its own with only its peers, imported under Node and type-checked under `nodenext`.
 - `packages/tools/codegen`: protocol code generation. `protocols/<backend>/` holds the vendored spec (`source/`),
   corrections (`patches/`), our annotations (`overlay/`), and the generated `model.json` and `coverage.json`. Its
   output is `packages/browser/src/cdp/`, `packages/browser/src/bidi-protocol/`,
@@ -62,7 +54,7 @@ itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm` from the repos
   change a correction or an annotation and run `pnpm codegen:protocol`. A correction says what the spec states,
   what the wire does, and the evidence. On a roll, `pnpm codegen:audit` lists the corrections the new spec has
   absorbed. `keyboards/source/` holds Unicode CLDR's keyboard layouts, which `pnpm codegen:keyboards` turns into
-  `packages/browser/src/internal/keyboardLayouts.ts` (review 22).
+  `packages/browser/src/internal/keyboardLayouts.ts`.
 - `.github/workflows/`: CI. `checks.yml` runs `pnpm all`, `pnpm build` and `pnpm pack-check` on every push and
   pull request, in the Nix environment's default shell; `integration.yml` runs the integration tests nightly when
   `main` has changed, and on demand, keeping the log of a failed run.
@@ -110,7 +102,7 @@ section applies them. Effect's skills in `.repos/effect/.agents/skills` are the 
   phase, and its span, opened through `src/internal/spans.ts` so `SpanNameGenerator`, `TracerDisabledWhen` and the
   diagnostics preset apply to it; name its target with `browser.page.id`, `browser.context.id` or `browser.realm.id`.
   Work it leaves running, such as a handler's or a recording's, starts through `Operation.deciding` or
-  `Operation.detached`, never under the operation's deadline (review 26).
+  `Operation.detached`, never under the operation's deadline.
 - A deadline, and any wait on the browser, reads the browser's clock (`src/internal/browserClock.ts`), never the
   fiber's `Clock`, which `TestClock` replaces: a real browser's is the live clock, `Browser.layerTest`'s Effect's.
 - Nothing implicit (principle 23): every default is stated with `@default`, and nothing hidden waits or retries.
@@ -127,17 +119,17 @@ is `unstable`, or `experimental` for what rests on an upstream proposal or an in
 
 ## Design changes
 
-A change to the design starts as a review in `reviews/NN-….md`, numbered after the last in `docs/reviews.md`,
-committed on its own, and is then applied as a revision recorded in the README's Status. Once its last step is
-built, fold it in and delete it, in one commit: what it decided is in the layer documents by then; the reasons, the
-alternatives rejected and the evidence they don't hold go to `docs/decisions.md`; and `docs/reviews.md` gets its
-entry: what it decided, where that lives, and the commits of its text and its build. `reviews/` holds only reviews in
-flight. Keep the documents at even depth and never cut detail to balance them.
+Review and fix in a loop: find what's wrong, fix it, check again. Don't write a review up as a document or commit
+one. Ask the maintainer in conversation when a change needs their decision. When the work settles a principle or an
+architectural decision, state it in the layer document it belongs to, with its reasons and the alternatives rejected
+in `docs/decisions.md`; what was found wrong along the way stays in the commits and `QUIRKS.md`.
+`reviews/26-operations.md` is left from an earlier practice: delete it once its last step is built.
+Keep the documents at even depth and never cut detail to balance them.
 Playwright and other prior art are evidence of what works, not a template.
 
 When a probe or a build turns up something weird (a browser behaving oddly or differently from the others, or a
 compromise in Strider it forced), add it to `QUIRKS.md` in the same commit, with the next number: what it is, where
 it was seen, what Strider does now, and what to reconsider. Entries are never removed, only marked **Resolved**,
-**Kept** or **Reported**, as `QUIRKS.md` says. A test that fails only in full runs is a quirk too: reproduce it by
-running that test in many processes at once beside busy loops, trace it from the protocol's messages, and fix the
-cause, never with a retry or a delay (review 21 found Q69 and Q149 this way).
+**Kept** or **Reported**, as `QUIRKS.md` says. A test that fails only in full runs is a quirk too: trace it from the protocol's messages and fix the cause, never
+with a retry or a delay. Reproducing it under load (many processes beside busy loops) makes the machine unusable,
+so ask the maintainer first.

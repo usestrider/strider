@@ -1,5 +1,5 @@
 /**
- * The backend adapter contract (PROTOCOL.md, Backend adapters; review 08): what every backend gives L1.
+ * The backend adapter contract (PROTOCOL.md, Backend adapters): what every backend gives L1.
  *
  * - **Facts.** The adapter's fold turns protocol events into facts: protocol-neutral observations about the
  *   model, in L1's ids, delivered to a sink in receive order, before the events are published. L1's fold
@@ -49,7 +49,7 @@ export type RegistrationId = string & { readonly RegistrationId: unique symbol }
 
 /**
  * Mints a connection's ids: opaque, short, never a protocol id, and unique within the process, so no two
- * connections mint the same one and an operation's span names its target unambiguously (review 20).
+ * connections mint the same one and an operation's span names its target unambiguously.
  */
 export interface Ids {
   readonly userContext: () => UserContext.Id
@@ -290,14 +290,14 @@ export type Fact =
     readonly _tag: "RequestFinished"
     readonly hop: NetworkRequest.HopId
     readonly encodedBytes: number
-    /** The response's protocol, where the backend says it only as the response ends (WebKit, review 20, P2). */
+    /** The response's protocol, where the backend says it only as the response ends (WebKit). */
     readonly httpVersion?: string | undefined
     readonly at: MonotonicInstant.MonotonicInstant
   }
   | {
     /**
      * A hop's headers as the network sent or received them, where the backend reports them apart from the
-     * request and response (CDP's `ExtraInfo` events, which carry `Cookie` and `Set-Cookie`; review 20).
+     * request and response (CDP's `ExtraInfo` events, which carry `Cookie` and `Set-Cookie`).
      */
     readonly _tag: "HopHeaders"
     readonly hop: NetworkRequest.HopId
@@ -419,7 +419,7 @@ export type RemoteValue =
 
 /**
  * An argument for an evaluation: a value to serialize, a handle the caller holds, or a node by its binding,
- * resolved in the realm called, whichever world it came from (review 18, candidate 1).
+ * resolved in the realm called, whichever world it came from.
  */
 export type LocalValue =
   | { readonly _tag: "Value"; readonly value: RemoteValue }
@@ -437,7 +437,7 @@ export interface EvaluationCall {
   readonly result: "value" | "handle"
   /**
    * The object group a handle result joins: `releaseHandles` given every handle of a group releases them in one
-   * command (review 22, QUIRKS.md, Q132).
+   * command (QUIRKS.md, Q132).
    */
   readonly group?: string | undefined
   /** Grants transient user activation for the call. */
@@ -486,14 +486,14 @@ export type Override =
     readonly features: Readonly<Record<string, string>>
   }
   | { readonly _tag: "Offline"; readonly offline: boolean }
-  /** Throughput in bytes per second and latency in milliseconds; CDP's alone (review 17). */
+  /** Throughput in bytes per second and latency in milliseconds; CDP's alone. */
   | {
     readonly _tag: "NetworkConditions"
     readonly download: number
     readonly upload: number
     readonly latency: number
   }
-  /** A slowdown factor for the page's CPU, 1 for none; CDP's alone (review 17). */
+  /** A slowdown factor for the page's CPU, 1 for none; CDP's alone. */
   | { readonly _tag: "CpuThrottling"; readonly rate: number }
   | { readonly _tag: "ExtraHeaders"; readonly headers: Readonly<Record<string, string>> }
   | { readonly _tag: "JavaScriptEnabled"; readonly enabled: boolean }
@@ -510,12 +510,12 @@ export type Declaration =
     readonly world: World
     /** `environment` scripts (library shims such as the page clock) run before `user` scripts. */
     readonly phase: "environment" | "user"
-    /** Whether it also runs in dedicated workers, before their own script (`initScripts.workers`, review 22). */
+    /** Whether it also runs in dedicated workers, before their own script (`initScripts.workers`). */
     readonly workers: boolean
     readonly timing: "beforeAuthorScript" | "bestEffort"
     /**
      * Scripts this one depends on, by registration: it runs in a document only if each of them ran there
-     * without throwing (review 17, candidate 4).
+     * without throwing.
      */
     readonly after: ReadonlyArray<RegistrationId>
   }
@@ -533,7 +533,7 @@ export type Declaration =
   | { readonly _tag: "FileChooser" }
   | {
     readonly _tag: "BodyCollection"
-    /** Which bodies are kept: requests' (review 22, Q164), responses', or both. */
+    /** Which bodies are kept: requests' (Q164), responses', or both. */
     readonly bodies: ReadonlyArray<"request" | "response">
     /** Bytes kept per body, at most; larger ones aren't kept. */
     readonly maxBytes: number
@@ -558,7 +558,7 @@ export type Decision =
   }
   /**
    * A response paused at the response phase continues with its status or headers replaced, and its body as the
-   * server sent it (`interception.responseHeaders`, review 22, Q93). Several cookies are one `set-cookie` value,
+   * server sent it (`interception.responseHeaders`, Q93). Several cookies are one `set-cookie` value,
    * a line each.
    */
   | {
@@ -568,7 +568,7 @@ export type Decision =
   }
   /**
    * The request fails. `failed` is what every backend can say; the other reasons are CDP's alone
-   * (`interception.abortReason`, review 17).
+   * (`interception.abortReason`).
    */
   | { readonly _tag: "Fail"; readonly error: Route.AbortReason }
   | { readonly _tag: "ProvideCredentials"; readonly username: string; readonly password: string }
@@ -601,7 +601,7 @@ export type InputEvent =
     readonly modifiers: Modifiers
     /**
      * The buttons held during the event, as `MouseEvent.buttons` counts them (left 1, right 2, middle 4): L1
-     * keeps the page's input state, and adapters keep none of their own (review 16, candidate 1).
+     * keeps the page's input state, and adapters keep none of their own.
      */
     readonly buttons: number
   }
@@ -645,7 +645,7 @@ export interface ScreenshotOptions {
   >
   /** The whole page, beyond the viewport. */
   readonly fullPage: boolean
-  /** One image pixel per CSS pixel, or per device pixel (`screenshot.cssScale`; review 18, candidate 5). */
+  /** One image pixel per CSS pixel, or per device pixel (`screenshot.cssScale`). */
   readonly scale: "css" | "device"
   /** The default white background made transparent (`screenshot.omitBackground`). */
   readonly omitBackground: boolean
@@ -661,7 +661,7 @@ export interface PdfOptions {
   readonly paperHeight: number
   readonly margins: { readonly top: number; readonly bottom: number; readonly left: number; readonly right: number }
   readonly pageRanges: Option.Option<string>
-  /** HTML templates for each page's header and footer (`pdf.headerFooter`; review 18, candidate 5). */
+  /** HTML templates for each page's header and footer (`pdf.headerFooter`). */
   readonly header: Option.Option<string>
   readonly footer: Option.Option<string>
   /** The page's CSS `@page` size over `paperWidth` and `paperHeight` (`pdf.preferCssPageSize`). */
@@ -681,7 +681,7 @@ export interface Cookie {
   readonly sameSite: Option.Option<"Strict" | "Lax" | "None">
   /**
    * A partitioned cookie's partition: its top-level site, and whether a cross-site frame set it where the backend
-   * says (`cookies.partitioned`; review 18, candidate 6).
+   * says (`cookies.partitioned`).
    */
   readonly partitionKey: Option.Option<{
     readonly topLevelSite: string
@@ -838,7 +838,7 @@ export interface AdapterConnection {
   readonly evaluate: (realm: Target.RealmId, call: EvaluationCall) => Effect.Effect<RemoteResult, AdapterError>
   /**
    * Releases handles: a group given whole in one command (CDP's and WebKit's `Runtime.releaseObjectGroup`), the
-   * handles of a realm on BiDi in one `script.disown`, and any other one at a time (review 22, Q132).
+   * handles of a realm on BiDi in one `script.disown`, and any other one at a time (Q132).
    */
   readonly releaseHandles: (handles: ReadonlyArray<HandleId>) => Effect.Effect<void>
 
@@ -846,14 +846,14 @@ export interface AdapterConnection {
   /**
    * Sends input to a page, in its viewport's coordinates. Input aimed inside a frame names it, with the frame's
    * viewport origin in the page's coordinates: a backend that can't deliver page coordinates into a frame sends
-   * the frame's own (BiDi, review 18, P1 and P2).
+   * the frame's own (BiDi).
    */
   readonly dispatchInput: (
     page: Target.NavigableId,
     events: ReadonlyArray<InputEvent>,
     frame?: { readonly frame: Target.NavigableId; readonly origin: { readonly x: number; readonly y: number } }
   ) => Effect.Effect<void, AdapterError>
-  /** The frame an iframe element holds, by the element's binding; `None` while it holds none (review 18, P3). */
+  /** The frame an iframe element holds, by the element's binding; `None` while it holds none. */
   readonly contentFrame: (node: NodeBinding) => Effect.Effect<Option.Option<Target.NavigableId>, AdapterError>
 
   // Obligations and declarations
@@ -871,7 +871,7 @@ export interface AdapterConnection {
   ) => Effect.Effect<Uint8Array, AdapterError>
   readonly pdf: (page: Target.NavigableId, options: PdfOptions) => Effect.Effect<Uint8Array, AdapterError>
 
-  // Capabilities (review 20, candidate 2): what only some backends have; the others fail with `Unsupported`
+  // Capabilities: what only some backends have; the others fail with `Unsupported`
   /**
    * The browser's own accessibility tree of a page's main frame: its nodes, an ignored one's children given to
    * its parent (`capability.axTree`).
@@ -886,8 +886,7 @@ export interface AdapterConnection {
   ) => Effect.Effect<Stream.Stream<ScreencastFrame, AdapterError>, AdapterError, Scope.Scope>
   /**
    * Records a page to a video file while the scope lives, where its context's downloads go: what it returns
-   * completes with the file's path once the scope has closed and the browser has written it (`capability.video`,
-   * review 22).
+   * completes with the file's path once the scope has closed and the browser has written it (`capability.video`).
    */
   readonly video: (
     page: Target.NavigableId
@@ -903,15 +902,15 @@ export interface AdapterConnection {
   readonly resetPermissions: (context: UserContext.Id) => Effect.Effect<void, AdapterError>
   readonly responseBody: (hop: NetworkRequest.HopId) => Effect.Effect<Uint8Array, AdapterError>
   /**
-   * The body a hop's request sent; `None` without one (review 22, Q164). Kept only where `BodyCollection` was
+   * The body a hop's request sent; `None` without one (Q164). Kept only where `BodyCollection` was
    * declared before the request started; `Unsupported` (`body.notCollected`, `body.redirect`) where it wasn't kept.
    */
   readonly requestBody: (hop: NetworkRequest.HopId) => Effect.Effect<Option.Option<Uint8Array>, AdapterError>
-  /** The body of a paused request, as it was sent; `None` without one (review 17). */
+  /** The body of a paused request, as it was sent; `None` without one. */
   readonly pausedRequestBody: (obligation: ObligationId) => Effect.Effect<Option.Option<Uint8Array>, AdapterError>
   /**
    * The body of a response paused at the response phase; `Unsupported` where the protocol can't read it
-   * (`interception.responseBody`, review 17).
+   * (`interception.responseBody`).
    */
   readonly pausedResponseBody: (obligation: ObligationId) => Effect.Effect<Uint8Array, AdapterError>
   readonly setInputFiles: (

@@ -1,6 +1,6 @@
 /**
  * The `strider` commands that need no session (CLI.md): `browsers`, which lists the browsers it can find, so a person
- * or an agent can copy a path into `executablePath` (review 11); `sessions`; and `prune` (review 20). A session's
+ * or an agent can copy a path into `executablePath`; `sessions`; and `prune`. A session's
  * own commands are its daemon's (`cli/daemon.ts`).
  */
 import * as Argument from "effect/cli/Argument"
@@ -194,7 +194,7 @@ const stillRunning = Effect.fnUntraced(function*(fs: FileSystem.FileSystem, owne
   return Option.isNone(started) || Math.abs(started.value - owner.startedAt) < 3000
 })
 
-/** `strider prune` with no name: what the ledger's ended programs left, reclaimed with `--yes` (review 22). */
+/** `strider prune` with no name: what the ledger's ended programs left, reclaimed with `--yes`. */
 const pruneLedger = Effect.fnUntraced(function*(yes: boolean) {
   const fs = yield* FileSystem.FileSystem
   const os = yield* Effect.promise(() => Node.os())

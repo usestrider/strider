@@ -1,5 +1,5 @@
 /**
- * A page's keyboard and mouse (review 16, candidate 8): input to whatever has focus, and pointer input by
+ * A page's keyboard and mouse: input to whatever has focus, and pointer input by
  * coordinates, with no element to check. Both build their events from the page's input state (`input.ts`) under
  * its input permit, as actions do, and hold keys and buttons as scoped acquisitions, released in the scope's
  * finalizer, so a failed step never leaves Shift held down.
@@ -140,7 +140,7 @@ const unknownKey = (key: string) =>
     hint: `${JSON.stringify(key)} isn't a key`
   })
 
-/** The layout a page's context types with (review 22). */
+/** The layout a page's context types with. */
 export const layoutOf = (runtime: Runtime.Runtime, page: Model.PageEntry): Keyboard.Layout =>
   runtime.model.contexts.get(page.context)?.keyboardLayout ?? "us"
 

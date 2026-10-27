@@ -1,5 +1,5 @@
 /**
- * The query and actionability engine (review 12): one engine of ours, evaluated in each document's utility
+ * The query and actionability engine: one engine of ours, evaluated in each document's utility
  * world, the same on every backend, so a locator means the same thing in every browser.
  *
  * `engine` is self-contained: it refers to nothing outside its own body but the page's globals, because its
@@ -8,8 +8,8 @@
  *
  * - **The tree** is the document's elements and those of every open shadow root, in tree order, a shadow
  *   root's elements right after its host. Closed shadow roots are invisible to scripts, so to the engine too;
- *   iframes are entered only through `frame()`, whose steps L1 resolves with the engine of each document on the
- *   way (review 18, candidate 2).
+ *   iframes are entered only through `frame()`, whose steps L1 resolves with the engine of each document
+ *   on the way.
  * - **Text** is an element's text content in the flat tree (a shadow host's shadow tree, a slot's assigned
  *   nodes), skipping `script`, `style`, `noscript` and `template`, with a button-like `input`'s value, and
  *   whitespace collapsed and trimmed. Not `innerText`, which depends on layout and differs between engines.
@@ -54,12 +54,12 @@ export type Step =
   | { readonly _tag: "And"; readonly other: ReadonlyArray<Step> }
   | { readonly _tag: "Or"; readonly other: ReadonlyArray<Step> }
   /**
-   * A frame boundary (review 18, candidate 2): the steps before it find an iframe, and those after it resolve in
+   * A frame boundary: the steps before it find an iframe, and those after it resolve in
    * the iframe's document. L1 splits a locator's steps at each one, so the engine never sees it.
    */
   | { readonly _tag: "Frame" }
   /**
-   * A snapshot's ref (review 18, candidate 3): the one node it was given to, in the document and engine that gave
+   * A snapshot's ref: the one node it was given to, in the document and engine that gave
    * it, never another. L1 checks the document; the engine its generation and the node.
    */
   | { readonly _tag: "Ref"; readonly document: string; readonly generation: number; readonly ref: string }
@@ -88,7 +88,7 @@ export type NotReady =
   | { readonly _tag: "NotStable" }
   | { readonly _tag: "NoRenderingOpportunity" }
   | { readonly _tag: "Covered"; readonly by: string }
-  /** The guard stopped the gesture: its first trusted event landed on another element (review 16, candidate 5). */
+  /** The guard stopped the gesture: its first trusted event landed on another element. */
   | { readonly _tag: "Intercepted"; readonly by: string }
   | { readonly _tag: "NoSuchOption"; readonly option: string }
 
@@ -99,7 +99,7 @@ export type Choice =
   | { readonly index: number }
 
 /**
- * What an action does in the page once its checks pass (review 16, candidate 4): answer the action point, and
+ * What an action does in the page once its checks pass: answer the action point, and
  * guard the gesture that follows; or focus, scroll, prepare a fill, choose options, or read whether it is checked.
  */
 export type Action =
@@ -116,7 +116,7 @@ export type Action =
   | { readonly _tag: "FileInput" }
   | { readonly _tag: "None" }
 
-/** A one-shot read of the one match (review 16, candidate 6). */
+/** A one-shot read of the one match. */
 export type Read =
   | { readonly _tag: "Text" }
   | { readonly _tag: "Value" }
@@ -125,7 +125,7 @@ export type Read =
   | { readonly _tag: "Enabled" }
   | { readonly _tag: "Checked" }
 
-/** What an expectation waits for (review 16, candidate 7). */
+/** What an expectation waits for. */
 export type Expectation =
   | { readonly _tag: "Visible" }
   | { readonly _tag: "Hidden" }
@@ -141,7 +141,7 @@ export type Expectation =
   | { readonly _tag: "Attribute"; readonly name: string; readonly expected: TextMatcher | null }
   | { readonly _tag: "Count"; readonly count: number }
   | { readonly _tag: "Title"; readonly expected: TextMatcher }
-  /** The one match's accessibility tree matches a pattern (review 18, candidate 4). */
+  /** The one match's accessibility tree matches a pattern. */
   | { readonly _tag: "Aria"; readonly pattern: Pattern }
 
 /** A pattern over the accessibility tree, as `AriaPattern` builds it. */
@@ -158,7 +158,7 @@ export type PatternChildren =
 /** Why a ref no longer points at its node (`Locator.StaleRef`). */
 export type Stale = "Replaced" | "Detached" | "Suspended" | "BindingLost" | "OtherSnapshot"
 
-/** A node of a document's accessibility tree (review 18, candidate 3). */
+/** A node of a document's accessibility tree. */
 export interface SnapNode {
   readonly ref: string | null
   readonly role:
@@ -214,7 +214,7 @@ export type Request =
   | { readonly op: "title" }
   | { readonly op: "role"; readonly steps: ReadonlyArray<Step> }
   /**
-   * An iframe on the way to a frame's element (review 18, candidate 2): its content box's origin in this
+   * An iframe on the way to a frame's element: its content box's origin in this
    * document's viewport, after scrolling it into view when asked and it isn't; and, given a point in the
    * frame's viewport, what the pointer would hit there in this document.
    */
@@ -225,7 +225,7 @@ export type Request =
     readonly point: { readonly x: number; readonly y: number } | null
   }
   /**
-   * The accessibility tree of the document, or of the one match's subtree (review 18, candidate 3), with inferred
+   * The accessibility tree of the document, or of the one match's subtree, with inferred
    * interactivity when asked, down to `depth` levels below the root.
    */
   | {
@@ -234,7 +234,7 @@ export type Request =
     readonly interactivity: boolean
     readonly depth: number | null
   }
-  /** Why a locator matches nothing (review 18, candidate 4): the nearest match of its steps, and close names. */
+  /** Why a locator matches nothing: the nearest match of its steps, and close names. */
   | { readonly op: "explain"; readonly steps: ReadonlyArray<Step> }
   /** The one match's box in its viewport, and its document's scroll offset. */
   | { readonly op: "rect"; readonly steps: ReadonlyArray<Step> }
@@ -326,7 +326,7 @@ export type Response =
   | { readonly _tag: "StaleRef"; readonly why: Stale }
 
 /**
- * A snapshot tree as text: indented YAML, one line per node (review 18, candidate 3). Self-contained, so the engine
+ * A snapshot tree as text: indented YAML, one line per node. Self-contained, so the engine
  * takes its source too.
  */
 export function renderText(root: SnapNode): string {
@@ -953,7 +953,7 @@ export function engine(render: (root: SnapNode) => string) {
   const isStale = (error: unknown): error is StaleMarker =>
     typeof error === "object" && error !== null && "staleRef" in error
 
-  // ── Refs (review 18, candidate 3) ─────────────────────────────────────────────────────────────────────
+  // ── Refs ──────────────────────────────────────────────────────────────────────────────────────────────
 
   /** This engine's ref table: a ref names one node while the document lives, and this number names the table. */
   const generation = Math.floor(Math.random() * 2 ** 31)
@@ -1138,7 +1138,7 @@ export function engine(render: (root: SnapNode) => string) {
     return true
   }
 
-  /** Text inputs whose value is typed; the other input types have it set (review 16, candidate 4). */
+  /** Text inputs whose value is typed; the other input types have it set. */
   const TYPED = new Set(["", "text", "search", "email", "password", "tel", "url", "number"])
 
   const typed = (element: Element): element is HTMLInputElement | HTMLTextAreaElement =>
@@ -1278,7 +1278,7 @@ export function engine(render: (root: SnapNode) => string) {
       ? `label ${JSON.stringify(choice.label)}`
       : `index ${choice.index}`
 
-  // ── The guard on the first trusted event (review 16, candidate 5) ──
+  // ── The guard on the first trusted event ──
 
   /** The gesture's events a guard watches, on the window, capturing. */
   const GUARDED = [
@@ -1503,7 +1503,7 @@ export function engine(render: (root: SnapNode) => string) {
     }
   }
 
-  // ── Reads (review 16, candidate 6) ──
+  // ── Reads ──
 
   const read = (request: Extract<Request, { op: "read" }>): Response => {
     const found = resolve(request.steps)
@@ -1534,7 +1534,7 @@ export function engine(render: (root: SnapNode) => string) {
     }
   }
 
-  // ── Expectations, waiting in the page (review 16, candidate 7) ──
+  // ── Expectations, waiting in the page ──
 
   const expected = (matcher: TextMatcher, text: string): boolean =>
     matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(text) : text === collapse(matcher.value)
@@ -1685,7 +1685,7 @@ export function engine(render: (root: SnapNode) => string) {
     })
   }
 
-  // ── Snapshots (review 18, candidates 3 and 4) ─────────────────────────────────────────────────────────
+  // ── Snapshots ─────────────────────────────────────────────────────────────────────────────────────────
 
   const INTERACTIVE = new Set([
     "button",

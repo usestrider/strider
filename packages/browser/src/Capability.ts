@@ -131,7 +131,7 @@ export const AxTree: Capability<AxTreeReader> = make("AxTree")
 export const Screencast: Capability<ScreencastControl> = make("Screencast")
 
 /**
- * A video file of the page, recorded by the browser; Firefox's (review 22).
+ * A video file of the page, recorded by the browser; Firefox's.
  *
  * **Details**
  *

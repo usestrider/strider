@@ -1,5 +1,5 @@
 /**
- * Routes (review 17, candidates 1 and 2): handlers of paused requests at one phase, registered as
+ * Routes: handlers of paused requests at one phase, registered as
  * `Dialog.handle`'s handlers are. Each declares an intercept wide enough for its pattern, which L0 pauses for,
  * and matches the pattern itself with `Url.Pattern`'s rules. The model asks a paused request's routes in
  * precedence order (`Model.decideRequest`); asking one runs its handler in a fiber of the registration's scope,
@@ -48,7 +48,7 @@ export interface Owner {
 
 /**
  * The L0 intercept that covers a pattern. A glob is passed as it is, since L0's `*` matches more than ours (`/`
- * included); a URL as itself; a `URLPattern`, which L0 can't read, as its fixed prefix (review 22, Q106).
+ * included); a URL as itself; a `URLPattern`, which L0 can't read, as its fixed prefix (Q106).
  */
 export const covering = (pattern: string): string =>
   pattern.includes("*") || !/:[a-zA-Z_]/.test(pattern.replace(/^[a-z][a-z0-9+.-]*:/i, ""))
@@ -130,7 +130,7 @@ const toAdapter = (
             !Object.keys(changed.headers).some((name) => name.toLowerCase() === "content-type")
           ? { ...(headers ?? plain(original.headers)), "content-type": contentType }
           : headers
-        // The browser says a body's length: Chromium refuses the header from a client (review 17's build)
+        // The browser says a body's length: Chromium refuses the header from a client
         const withType = typed === undefined
           ? typed
           : Object.fromEntries(Object.entries(typed).filter(([name]) => name.toLowerCase() !== "content-length"))

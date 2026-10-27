@@ -1,10 +1,10 @@
 /**
- * Each page's input state (CONCEPTS.md §5; review 16, candidate 1): the keys and buttons held, and where the
+ * Each page's input state (CONCEPTS.md §5): the keys and buttons held, and where the
  * pointer is. Every gesture is built from it, and every event carries what is held, so the adapters keep no
- * state of their own: the CDP adapter never sent the buttons held, and WebKit's forgot them between calls (P9).
+ * state of their own: the CDP adapter never sent the buttons held, and WebKit's forgot them between calls.
  *
  * Modifiers are keys. A gesture with modifiers presses the ones not already held before it and releases them
- * after, in the same dispatch, and also sets the events' flags, which Firefox ignores (P1).
+ * after, in the same dispatch, and also sets the events' flags, which Firefox ignores.
  *
  * Callers hold the page's input permit while they build and send, so the state matches what was sent.
  */
@@ -130,7 +130,7 @@ export const press = (
 }
 
 /**
- * A key or a character typed on a layout (review 22): each stroke with the Shift its layout holds for it, and
+ * A key or a character typed on a layout: each stroke with the Shift its layout holds for it, and
  * AltGr pressed around it as a key of its own, with the caller's modifiers; `undefined` for what isn't a key.
  */
 export const type = (
@@ -209,7 +209,7 @@ export const move = (
   return path(state.position, to, steps).map((point) => mouse("move", point, "none", 0, flags, buttons(state)))
 }
 
-/** A move to `point`, then `clickCount` clicks there, the n-th with `clickCount: n` (review 16, P1). */
+/** A move to `point`, then `clickCount` clicks there, the n-th with `clickCount: n`. */
 export const click = (
   state: State,
   point: Point,
@@ -246,7 +246,7 @@ export const drag = (
   ]
 }
 
-/** A touch at `point`: start and end (review 16, P6). */
+/** A touch at `point`: start and end. */
 export const tap = (
   state: State,
   point: Point,

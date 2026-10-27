@@ -125,7 +125,7 @@ The hazards are catalogued in `research/platform-concept-model.md` §4.
 | H14 a dialog blocks sibling pages | confirmed vs suspected blocking; a pending prompt resolution is waitable; auto-resolutions reported |
 | H15 beforeunload needs activation | `CloseCanceled`; the page stays usable |
 | H16 back/forward-cache restore | document continuity correlated; handles proven separately |
-| H17 a service worker answers a request | the response's `servedBy` (review 09); every backend recorded sends the request before a worker's response; bypass capability (not built: interception of a controlled page is `partial` on WebKit) |
+| H17 a service worker answers a request | the response's `servedBy`; every backend recorded sends the request before a worker's response; bypass capability (not built: interception of a controlled page is `partial` on WebKit) |
 | H18 service worker restart | realm cycles under a stable registration |
 | H19 rendering-based waits hang in hidden tabs | `NoRenderingOpportunity`; `activate()`; `LaunchProfile.concurrent` (probe 26) |
 | H20 the click lands elsewhere | pre-check plus a guard on the trusted event |

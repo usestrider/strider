@@ -1,5 +1,5 @@
 /**
- * A console call's text from its arguments, as the Console Standard's formatter makes it (review 21; QUIRKS.md,
+ * A console call's text from its arguments, as the Console Standard's formatter makes it (QUIRKS.md,
  * Q33): `%s`, `%d`, `%i`, `%f`, `%o`, `%O` and `%c` in a first argument that is a string take the arguments after
  * it, and the rest follow, separated by spaces. Firefox applies them itself; CDP and WebKit give the arguments as
  * the page passed them, so their adapters format with this.

@@ -1,5 +1,5 @@
 /**
- * Members the public interfaces declare that aren't built yet (review 12, candidate 6). Each fails as a defect
+ * Members the public interfaces declare that aren't built yet. Each fails as a defect
  * that names it: a gap in the library, not a condition of the browser a caller could handle, and never a
  * silent no-op. PROTOCOL.md lists what is built.
  */

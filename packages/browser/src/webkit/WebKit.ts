@@ -1,6 +1,6 @@
 /**
  * The WebKit backend (`@usestrider/browser/webkit`): stock WebKit, launched in automation mode or attached through
- * its inspector (reviews 22 and 23).
+ * its inspector.
  *
  * A launch runs the executable it names, and nothing is looked up or downloaded. WebKitGTK's or WPE's MiniBrowser is
  * launched in automation mode and driven through its inspector server's socket, with WebKit's Automation protocol
@@ -34,8 +34,8 @@ declare module "../Reason.ts" {
 }
 
 /**
- * Launches stock WebKit and provides it as `Browser`: WebKitGTK's or WPE's MiniBrowser, in automation mode
- * (review 23). Another executable fails with `InvalidInput`.
+ * Launches stock WebKit and provides it as `Browser`: WebKitGTK's or WPE's MiniBrowser, in automation mode.
+ * Another executable fails with `InvalidInput`.
  *
  * **Details**
  *
@@ -92,7 +92,7 @@ export const layer = (
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | SocketConnector.SocketConnector
 > =>
   BrowserImpl.layer((sink) =>
-    // A browser process per context (review 23)
+    // A browser process per context
     Effect.flatMap(
       WebKitAutomation.start(LaunchOptions.settings(options)),
       (group) => WebKitAdapter.connect(group.transport, { sink, ownership: "launched", automation: group })

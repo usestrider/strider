@@ -1,5 +1,5 @@
 /**
- * Permission grants (review 17, candidate 6). L0's reset clears every grant in a context, so L1 keeps the grants
+ * Permission grants. L0's reset clears every grant in a context, so L1 keeps the grants
  * in force per context and recomputes on each change: a removal resets, then grants what remains. Each name is
  * granted on its own, so a name a backend rejects (Firefox's list is shorter) fails naming it.
  */

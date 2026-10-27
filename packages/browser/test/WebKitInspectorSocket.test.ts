@@ -1,5 +1,5 @@
 /**
- * WebKitGTK's remote inspector socket without a browser (review 23): GVariant against the specification's examples
+ * WebKitGTK's remote inspector socket without a browser: GVariant against the specification's examples
  * and the frames WebKitGTK 2.54.1's MiniBrowser sent and accepted, recorded in its first probe, and a connection to a
  * server that plays them.
  */

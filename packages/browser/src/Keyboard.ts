@@ -47,7 +47,7 @@ export type Key = typeof Key.Type
 export type Modifier = "Alt" | "Control" | "Meta" | "Shift"
 
 /**
- * A keyboard layout, from Unicode CLDR's Windows layouts (review 22): which key, with which modifiers, types each
+ * A keyboard layout, from Unicode CLDR's Windows layouts: which key, with which modifiers, types each
  * character.
  *
  * **Details**

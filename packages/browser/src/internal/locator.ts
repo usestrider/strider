@@ -1,9 +1,9 @@
 /**
- * Locators (API.md, Locators, actions and actionability; reviews 12, 16 and 18). A locator is data: the engine's
+ * Locators (API.md, Locators, actions and actionability). A locator is data: the engine's
  * steps, resolved again on every attempt. Built: the queries and chainers, frames, every read, every action,
  * `evaluate` and `snapshot`.
  *
- * A frame locator is a boundary in the steps (review 18, candidate 2): the runtime resolves each document's part
+ * A frame locator is a boundary in the steps: the runtime resolves each document's part
  * with that document's engine. An action in a frame answers its point in the frame's viewport; the origin of each
  * iframe on the way is added to it, outermost last, and the pointer must reach the iframe at that point in each
  * parent document as well as the element in its own.
@@ -11,7 +11,7 @@
  * An action checks in rounds in the page, at each frame, until its checks pass; then it takes the page's input
  * permit, checks once more and does its part in the page (focus, select, scroll), and sends its input, built from
  * the page's input state (`input.ts`). A pointer gesture is guarded: if its first trusted event lands outside the
- * element, the page never sees it, and the action checks again (review 16, candidate 5).
+ * element, the page never sees it, and the action checks again.
  */
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -130,7 +130,7 @@ const explain = (reason: Engine.NotReady, frames: number): string => {
   }
 }
 
-/** A ref that no longer points at its node, and what to do about it (review 18, candidate 3). */
+/** A ref that no longer points at its node, and what to do about it. */
 export const staleRef = (why: Engine.Stale): Locator.StaleRef =>
   new Locator.StaleRef({
     why,
@@ -147,7 +147,7 @@ export const staleRef = (why: Engine.Stale): Locator.StaleRef =>
 
 const LocatorTypeId = "~@usestrider/browser/Locator"
 
-/** The page a locator belongs to, and the grant it was made under (review 19). */
+/** The page a locator belongs to, and the grant it was made under. */
 export interface Owner {
   readonly runtime: Runtime.Runtime
   readonly page: Model.PageEntry
@@ -156,7 +156,7 @@ export interface Owner {
 }
 
 /**
- * An HTML drag the page dispatches (review 22, candidate 6e), run in the isolated world with the element and the
+ * An HTML drag the page dispatches, run in the isolated world with the element and the
  * target: untrusted events sharing one `DataTransfer`, in the order HTML's drag-and-drop model fires them, with a
  * drop only where the `dragover` was canceled. Its points are the positions given, from each padding box, or the
  * centres; the target's events go to the element at its point when that is in the target. Returns what came of it.
@@ -355,7 +355,7 @@ export class LocatorImpl implements Locator.Locator {
   get isChecked() {
     return this.readOne("Locator.isChecked", { _tag: "Checked" }, (value) => value as boolean)
   }
-  /** A snapshot of the one match's subtree, now (review 18, candidate 3): a read, so it never waits. */
+  /** A snapshot of the one match's subtree, now: a read, so it never waits. */
   snapshot(options?: Snapshot.Options) {
     const operation = "Locator.snapshot"
     return Effect.gen({ self: this }, function*() {
@@ -380,8 +380,8 @@ export class LocatorImpl implements Locator.Locator {
   }
 
   /**
-   * Calls `fn` in the caller's isolated world of the one match's document, with the match first (review 18,
-   * candidate 1): resolved now, as a read is, and passed by its node binding, since the engine's world isn't the
+   * Calls `fn` in the caller's isolated world of the one match's document, with the match first:
+   * resolved now, as a read is, and passed by its node binding, since the engine's world isn't the
    * caller's.
    */
   evaluate<Args extends ReadonlyArray<unknown>, B>(
@@ -451,7 +451,7 @@ export class LocatorImpl implements Locator.Locator {
     }))
   }
 
-  /** A one-shot read of the one match (review 16, candidate 6): strict, and immediate. */
+  /** A one-shot read of the one match: strict, and immediate. */
   private readOne<A>(operation: string, what: Engine.Read, value: (read: unknown) => A) {
     return this.read(operation, { op: "read", steps: this.steps, read: what }, (response, id) => {
       switch (response._tag) {
@@ -656,7 +656,7 @@ export class LocatorImpl implements Locator.Locator {
         target: Effect.suspend(() => to.pointOf(options?.targetPosition)),
         draggable: (record, io) =>
           html === "native"
-            // An HTML drag is a capability: Firefox never drops one, and WebKit's protocol can't (review 16, P5)
+            // An HTML drag is a capability: Firefox never drops one, and WebKit's protocol can't
             ? Effect.as(
               this.requires(
                 "Locator.dragTo",
@@ -679,8 +679,8 @@ export class LocatorImpl implements Locator.Locator {
   }
 
   /**
-   * An HTML drag the page dispatches (review 22, candidate 6e): the element and the target resolved now, in one
-   * document, and the drag's events sent there from the isolated world, sharing one `DataTransfer` (P3).
+   * An HTML drag the page dispatches: the element and the target resolved now, in one
+   * document, and the drag's events sent there from the isolated world, sharing one `DataTransfer`.
    */
   private syntheticDrag(to: LocatorImpl, options: Locator.DragOptions | undefined, record: Operation.Record) {
     const operation = "Locator.dragTo"
@@ -1140,7 +1140,7 @@ export class LocatorImpl implements Locator.Locator {
   }
 
   /**
-   * An action point in a frame, in the page's viewport (review 18, candidate 2): each iframe's content-box origin
+   * An action point in a frame, in the page's viewport: each iframe's content-box origin
    * added, innermost first, each iframe scrolled into view in its parent when the checks ask for the viewport, and,
    * when they ask for the pointer, the iframe hit at the point in its parent. `NotReady` when one isn't.
    */
@@ -1182,7 +1182,7 @@ export class LocatorImpl implements Locator.Locator {
   }
 
   /**
-   * An action (reviews 12, 16 and 18): rounds of checks in the page at each frame until they pass, then the page's
+   * An action: rounds of checks in the page at each frame until they pass, then the page's
    * input permit, the checks once more with the action's part done in the page, and `perform`, which sends the
    * input once. `perform` may ask for another round, only when a guard proved the page never saw the input. In a
    * frame, each round's point is translated into the page's viewport (`translate`), and input names the frame.
@@ -1393,7 +1393,7 @@ export class LocatorImpl implements Locator.Locator {
           ...(extra.redacted === true ? { "browser.action.redacted": true } : {})
         }
       }),
-      // What a recording's DOM snapshots mark as the action's target (review 22)
+      // What a recording's DOM snapshots mark as the action's target
       Effect.provideService(
         Recorders.CurrentSubject,
         Option.some({ steps: this.steps, secret: extra.redacted === true })
@@ -1433,7 +1433,7 @@ const startsWith = (steps: ReadonlyArray<Engine.Step>, prefix: ReadonlyArray<Eng
   prefix.length <= steps.length && JSON.stringify(steps.slice(0, prefix.length)) === JSON.stringify(prefix)
 
 /**
- * An iframe's document, entered by its element (review 18, candidate 2): the iframe's steps and a boundary, which
+ * An iframe's document, entered by its element: the iframe's steps and a boundary, which
  * every locator it makes begins with.
  */
 export const frameLocator = (owner: Owner, steps: ReadonlyArray<Engine.Step>): Locator.FrameLocator => {

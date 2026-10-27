@@ -1,7 +1,7 @@
 {
   "spec": "browsingContext.NavigationInfo's userContext, where present, is a browser.UserContext, and browsingContext.Info requires userContext: browser.UserContext (editor's draft at f922e6a).",
   "wire": "Firefox 158.0 sends userContext: null in browsingContext.navigationStarted and navigationCommitted for the tab it opens, and closes at once, in a window browsingContext.create({ type: \"window\" }) makes in a user context, before that tab's contextCreated; and in browsingContext.contextDestroyed for a window whose user context browser.removeUserContext removed. So the member is nullable on the wire in both.",
-  "evidence": "Recorded 2026-10-25 from Firefox 158.0 (review 21's build, QUIRKS.md Q178): navigationStarted {\"context\":\u2026,\"navigation\":\u2026,\"timestamp\":\u2026,\"url\":\"about:newtab\",\"userContext\":null}, then contextCreated for that context with userContext \"default\"; and contextDestroyed {\"children\":[],\"context\":\u2026,\"originalOpener\":null,\"url\":\"about:blank\",\"userContext\":null,\"clientWindow\":\u2026,\"parent\":null}. Undecodable, each made the adapter rebuild its model from browsingContext.getTree.",
+  "evidence": "Recorded 2026-10-25 from Firefox 158.0 (QUIRKS.md Q178): navigationStarted {\"context\":\u2026,\"navigation\":\u2026,\"timestamp\":\u2026,\"url\":\"about:newtab\",\"userContext\":null}, then contextCreated for that context with userContext \"default\"; and contextDestroyed {\"children\":[],\"context\":\u2026,\"originalOpener\":null,\"url\":\"about:blank\",\"userContext\":null,\"clientWindow\":\u2026,\"parent\":null}. Undecodable, each made the adapter rebuild its model from browsingContext.getTree.",
   "operations": [
     {
       "op": "replace",

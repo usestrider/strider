@@ -56,7 +56,7 @@ export const report = (m: Measurements): string => {
   out.push("# Strider and Playwright, side by side")
   out.push("")
   out.push(
-    `*Written by \`pnpm scenarios\` (review 25, candidate 4) on ${m.date}: ${m.browser}, the integration environment's, driven headless by Strider at \`${m.striderCommit}\` and by Playwright ${m.playwright} through \`playwright-core\`, whose own browsers are never installed; Node ${m.node}; ${m.machine}. Timings are each scenario's wall time over ${m.runs} runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Don't edit: run \`pnpm scenarios\` again.*`
+    `*Written by \`pnpm scenarios\` on ${m.date}: ${m.browser}, the integration environment's, driven headless by Strider at \`${m.striderCommit}\` and by Playwright ${m.playwright} through \`playwright-core\`, whose own browsers are never installed; Node ${m.node}; ${m.machine}. Timings are each scenario's wall time over ${m.runs} runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Don't edit: run \`pnpm scenarios\` again.*`
   )
   out.push("")
   out.push("## Scenarios")

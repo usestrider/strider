@@ -1,6 +1,6 @@
 /**
  * Opens scoped socket connections to endpoints chosen at run time, such as the inspector server of a stock WebKit
- * browser `WebKit.layer` launched (review 23).
+ * browser `WebKit.layer` launched.
  *
  * **Details**
  *

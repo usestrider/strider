@@ -1,5 +1,5 @@
 /**
- * Access held by a scope (review 19, candidate 2; CONCEPTS.md §3). A page the connection created, or one in a
+ * Access held by a scope (CONCEPTS.md §3). A page the connection created, or one in a
  * context it created, is controlled for its whole life. Any other page is observed, and `inspect` or `control`
  * acquires a grant in the caller's scope: while it lives, the handle it made can do what its level allows; once
  * the scope closes, every member above observe fails with `TargetGone{AccessReleased}`, and the declarations made

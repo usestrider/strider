@@ -2,7 +2,7 @@
 
 `Automation.json`, from `Source/WebKit/UIProcess/Automation/` in WebKitGTK 2.54.1's source release, unchanged: the
 protocol of a browser's automation session, which WebKit's WebDriver servers (`WebKitWebDriver`, `safaridriver`) and
-Strider speak to a browser in automation mode, over its remote inspector server (review 23).
+Strider speak to a browser in automation mode, over its remote inspector server.
 
 - **Release:** `webkitgtk-2.54.1.tar.xz`, as nixpkgs packages it (`webkitgtk_6_0.src`), the WebKitGTK the integration
   tests run.

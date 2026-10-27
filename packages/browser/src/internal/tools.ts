@@ -1,5 +1,5 @@
 /**
- * The agent toolkit's tool definitions (review 20, candidate 5): `effect/ai` tools with Schemas for their
+ * The agent toolkit's tool definitions: `effect/ai` tools with Schemas for their
  * parameters, results and failures, and failure mode `"return"`, so a failure reaches the model as data.
  *
  * Every page tool names its page. Every result is the call's outcome and a digest, `sinceLast`: what the event

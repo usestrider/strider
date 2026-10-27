@@ -13,7 +13,7 @@ import type * as Runtime from "./runtime.ts"
 export interface Behind<E> {
   readonly runtime: Runtime.Runtime
   readonly entry: E
-  /** The grant the handle was made under (review 19); `None` for one controlled for its life, or observed. */
+  /** The grant the handle was made under; `None` for one controlled for its life, or observed. */
   readonly grant: Option.Option<Access.Grant>
 }
 

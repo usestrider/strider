@@ -1,5 +1,5 @@
 /**
- * Captures (review 18, candidate 5): a page's options mapped onto the contract's. A screenshot's area is the
+ * Captures: a page's options mapped onto the contract's. A screenshot's area is the
  * viewport, the full page, a clip in the document's CSS pixels, or an element's box, which the engine measures in
  * its frame and each iframe's origin carries into the page's document. A PDF's paper and margins are inches.
  * What a backend can't do fails with `Unsupported`, from the adapter.

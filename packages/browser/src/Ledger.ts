@@ -1,6 +1,6 @@
 /**
  * A record of what a program owns outside itself: the browsers it launched and the directories it made for them
- * (CONCEPTS.md §3, Ownership ledger; review 22). A program that ends normally removes what it made and its
+ * (CONCEPTS.md §3, Ownership ledger). A program that ends normally removes what it made and its
  * record; one that dies leaves both, and `strider prune` reads the records whose program is gone and reclaims
  * what they name.
  *

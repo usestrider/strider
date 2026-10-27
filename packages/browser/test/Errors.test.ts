@@ -98,7 +98,7 @@ describe("StorageState.Json", () => {
         localStorage: [["seen", Redacted.make("1")] as const],
         indexedDb: []
       }
-      // Saved before review 24: no key, as a state saved then has none
+      // Saved without the key, as older states are: it decodes with no top-level origin
       const before = yield* Schema.encodeEffect(StorageState.Json)(
         new StorageState.StorageState({ cookies: [], origins: [partitioned] })
       )

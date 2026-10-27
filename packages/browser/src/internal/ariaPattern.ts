@@ -1,5 +1,5 @@
 /**
- * `AriaPattern`s as data the engine reads (review 18, candidate 4). The public values carry no members, so their
+ * `AriaPattern`s as data the engine reads. The public values carry no members, so their
  * data is kept here, by value.
  */
 import type * as AriaPattern from "../AriaPattern.ts"

@@ -1,4 +1,4 @@
-# The browser integration tests (review 25, candidate 1): nightly when `main` has changed since the last run, and
+# The browser integration tests: nightly when `main` has changed since the last run, and
 # on demand. They run in `devShells.integration`, a file at a time, as on a maintainer's machine, with the browsers
 # the flake pins, from the Nix binary cache.
 name: Integration

@@ -1,15 +1,15 @@
 /**
  * What the public objects of one connection share: the model, the backend's name for errors, and a channel to
- * the engine in a page's current document (review 12, candidate 3).
+ * the engine in a page's current document.
  *
  * A request goes to the engine in the utility world of the page's active document, or of a frame's, which a
- * locator's frame boundaries lead to (review 18, candidate 2): each iframe on the way is found by the engine of
+ * locator's frame boundaries lead to: each iframe on the way is found by the engine of
  * the document it is in, and the adapter names the frame it holds. The engine is installed in a document on first
  * use; when a document on the way changes under a request (a navigation committed, the realm went), the request
  * goes again from the page's document, within the operation's deadline. Nothing the engine does dispatches input,
  * so sending a request again is always safe. A frame that isn't there yet is a request that matches nothing.
  *
- * A dialog pauses its page, and on some backends every evaluation with it (review 13, P2). A request waits for
+ * A dialog pauses its page, and on some backends every evaluation with it. A request waits for
  * a dialog that a handler or the policy is deciding, within its deadline, and fails at once with
  * `PromptBlocking` when the page has one nothing will decide.
  */
@@ -40,7 +40,7 @@ import * as Operation from "./operation.ts"
 /** The utility world the engine runs in. */
 export const utilityWorld: Adapter.World = { _tag: "Isolated", name: "__strider_utility__" }
 
-/** Whether the backend makes no worlds, as stock WebKit's inspector doesn't (review 22; QUIRKS.md, Q194). */
+/** Whether the backend makes no worlds, as stock WebKit's inspector doesn't (QUIRKS.md, Q194). */
 const makesNoWorlds = (runtime: Runtime): Effect.Effect<boolean> =>
   Effect.map(
     SubscriptionRef.get(runtime.model.adapter.capabilities),
@@ -70,14 +70,14 @@ export interface Runtime {
   readonly page: (entry: Model.PageEntry) => Option.Option<Page.Page>
   /**
    * The connection's handle for any page: the `Page`, for one it controls for life, or an observed handle, the same
-   * each time (review 19, candidate 2).
+   * each time.
    */
   readonly observed: (entry: Model.PageEntry) => Page.ObservedPage
-  /** The connection's handle for a download, the same each time (review 14, candidate 8). */
+  /** The connection's handle for a download, the same each time. */
   readonly download: (entry: Model.DownloadEntry) => Download.Download
-  /** The connection's handle for a worker, the same each time (review 14, candidate 10). */
+  /** The connection's handle for a worker, the same each time. */
   readonly worker: (entry: Model.WorkerEntry) => BrowserWorker.BrowserWorker
-  /** The connection's handle for a WebSocket or EventSource, the same each time (review 14, candidate 11). */
+  /** The connection's handle for a WebSocket or EventSource, the same each time. */
   readonly connection: (entry: Model.ConnectionEntry) => NetworkConnection.NetworkConnection
   /** The program's file system, which a launched browser shares: a download is copied out with it. */
   readonly fileSystem: Option.Option<FileSystem.FileSystem>
@@ -185,7 +185,7 @@ const engineRealm = Effect.fnUntraced(function*(runtime: Runtime, document: Targ
   return realm
 })
 
-/** One iframe on the way to a frame's document (review 18, candidate 2). */
+/** One iframe on the way to a frame's document. */
 export interface Hop {
   /** The document the iframe is in. */
   readonly document: Target.DocumentId
@@ -221,7 +221,7 @@ const stepsOf = (request: Engine.Request): ReadonlyArray<Engine.Step> =>
   "steps" in request && request.steps !== null ? request.steps : []
 
 /**
- * A ref resolved in another document than the one that gave it (review 18, candidate 3): stale, since a ref never
+ * A ref resolved in another document than the one that gave it: stale, since a ref never
  * rebinds. Its node and the engine's table are the engine's to check.
  */
 const replaced = (document: Target.DocumentId, steps: ReadonlyArray<Engine.Step>): Option.Option<Engine.Response> => {
@@ -497,7 +497,7 @@ export type Found =
 
 /**
  * The one match of `steps`, now, by value from the engine, so its node binding comes with it: what the adapter's
- * `setInputFiles` takes (review 16, P7), and what `Locator.evaluate` passes (review 18, candidate 1).
+ * `setInputFiles` takes, and what `Locator.evaluate` passes.
  */
 export const element = (
   runtime: Runtime,

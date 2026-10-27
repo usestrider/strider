@@ -45,14 +45,14 @@ export interface Options {
   readonly screenshots?: "perAction" | "off" | undefined
   /**
    * Frames as the browser renders them, or polled screenshots at an interval. On Firefox, `"native"` is the
-   * browser's own video of each page (`Capability.Video`, review 22).
+   * browser's own video of each page (`Capability.Video`).
    *
    * @default "off"
    */
   readonly screencast?: "native" | { readonly polled: Duration.Input } | "off" | undefined
   /**
    * DOM snapshots of every frame of the page before and after each action and navigation, which the trace viewer
-   * renders (review 22). They render with the recorded network, so they need `network: true`.
+   * renders. They render with the recorded network, so they need `network: true`.
    *
    * @default false
    */

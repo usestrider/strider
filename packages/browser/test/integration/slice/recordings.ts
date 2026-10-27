@@ -1,8 +1,8 @@
 /**
- * Review 20's recordings on every backend's layer: a HAR with its timings, bodies, statuses and redactions, as
+ * Recordings on every backend's layer: a HAR with its timings, bodies, statuses and redactions, as
  * one file or a zip with the bodies beside it; and a trace whose steps nest in the program's spans, with
- * screenshots, console messages, exceptions, network entries and screencast frames. Review 22's: the bodies
- * requests sent and the headers they were sent with, and a HAR replayed as a route.
+ * screenshots, console messages, exceptions, network entries and screencast frames; the bodies
+ * requests sent and the headers they were sent with; and a HAR replayed as a route.
  */
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { assert, describe, layer } from "@effect/vitest"
@@ -508,7 +508,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               assert(recorded._tag === "Success", String(recorded))
               const files = yield* unzip(out)
               if (screencast === "native" && info.protocol === "bidi") {
-                // Firefox's own video of the page (review 22), WebM, with its size read from the file
+                // Firefox's own video of the page, WebM, with its size read from the file
                 const videos = lines(files.get("trace.trace")).filter((event) => event.type === "video")
                 assert.strictEqual(videos.length, 1)
                 assert.deepStrictEqual(Array.from(files.get(videos[0].file)!.slice(0, 4)), [0x1a, 0x45, 0xdf, 0xa3])
