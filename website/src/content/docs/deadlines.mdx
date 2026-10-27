@@ -1,0 +1,94 @@
+---
+title: Deadlines
+description: One budget for everything an operation does, what a Timeout says about how far it got, and operations of your own.
+order: 4
+---
+
+A wait for something that never happens would hang a program, and a limit on each step would add up to more than
+you meant. So each operation has one deadline, and a `Timeout` that says how far it got.
+
+## Setting a deadline
+
+An operation has one deadline for everything it does, from waiting its turn at the page's input to confirming the
+result. Without one around it, it gets the default budget, 30 seconds.
+
+`Deadline.within` sets one deadline for everything inside, shared rather than per step:
+
+```ts
+import { Deadline, Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const pay = Effect.fn("pay")(function*(page: Page.Page) {
+  yield* page.getByRole("button", { name: "Pay" }).click()
+  yield* page.getByText("Payment received").pipe(Expect.toBeVisible)
+}, Deadline.within("5 seconds"))
+```
+
+- Every command an operation sends waits for its reply until the deadline, a cookie read or a declaration as much
+  as a click.
+- A nested deadline can only be shorter.
+- `Deadline.withDefaultBudget("1 minute")` changes the default for a program.
+- `Deadline.remaining` reads the time left.
+- A real browser's deadlines run on the real clock, even under `TestClock`; `Browser.layerTest`'s on Effect's.
+
+## Timeouts
+
+A `Timeout`'s `phase` says how far the operation got:
+
+| Phase                   | The operation                                                              |
+| ----------------------- | -------------------------------------------------------------------------- |
+| `resolving`             | never found a matching element                                              |
+| `waitingForCondition`   | found it, but it never became ready: hidden, disabled, covered, moving      |
+| `dispatchedUnconfirmed` | sent the input, but couldn't confirm the result                             |
+| `postcondition`         | acted, and what should follow never did, such as a navigation committing    |
+| `waitingForEvent`       | waited for an event, such as a popup, that never came                       |
+
+Before `dispatchedUnconfirmed`, nothing reached the page and retrying is safe. After it, check the page first:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const submitOnce = Effect.fn("submitOnce")(function*(page: Page.Page) {
+  yield* page.getByRole("button", { name: "Submit" }).click().pipe(
+    Effect.catchTag("Timeout", (timeout) =>
+      Effect.gen(function*() {
+        if (timeout.phase !== "dispatchedUnconfirmed") {
+          return yield* Effect.fail(timeout)
+        }
+        yield* page.getByText("Submitted").pipe(Expect.toBeVisible)
+      }))
+  )
+})
+```
+
+Strider never retries input that may have reached the page. It retries only a gesture it stopped before the page
+saw it, such as a click that would have hit a toast.
+
+## Operations of your own
+
+`Operation.fn` is `Effect.fn` for an operation: the caller of your helper gets one deadline for all of it, and a
+`Timeout` named for it that says how far it got.
+
+```ts
+import { Deadline, Operation, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkout = Operation.fn("checkout")(
+  function*(page: Page.Page, confirmed: Effect.Effect<string>) {
+    yield* page.getByLabel("Card number").fill("4242 4242 4242 4242")
+    yield* page.getByRole("button", { name: "Pay" }).click()
+    return yield* Operation.bound(confirmed)
+  },
+  Deadline.within("20 seconds")
+)
+```
+
+- Each operation inside is a step. If the click runs out of time, the caller gets `checkout`'s `Timeout`, in the
+  click's phase, and `diagnostics.progress` lists `Locator.fill` as `ok`.
+- Inside the body, a step's `Timeout` is still the step's: catching one around the click catches the click's.
+- `Operation.bound` ends a wait of your own at the deadline. Past it, this `Timeout` is in the phase
+  `postcondition`: the click went out, and the confirmation didn't come.
+- `Operation.markSent` notes a side effect of your own, such as a call to your API, and `Operation.observe` notes
+  why the operation isn't done yet. They compile only inside an operation.
+- `Operation.named("cartCount")` makes an effect an operation, as `Effect.withSpan` makes it a span.

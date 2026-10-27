@@ -60,7 +60,7 @@ checks again. [Actions](/docs/pages/actions) lists each action's checks, and
 ## Expectations
 
 The cart can change after `click` returns, so a check that reads once can run too early. `Expect.toBeVisible`
-checks now and on each change to the page, until it passes or [the deadline](/docs/errors#deadlines) does. It's the
+checks now and on each change to the page, until it passes or [the deadline](/docs/deadlines) does. It's the
 program's only waiting: no sleeps.
 
 `locator.pipe(Expect.toBeVisible)` and `Expect.toBeVisible(locator)` are the same. Matchers with arguments are dual:
