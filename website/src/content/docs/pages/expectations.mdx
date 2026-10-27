@@ -147,7 +147,7 @@ const summary = Effect.fn("summary")(function*(page: Page.Page) {
 ## State that changes
 
 A page's status, URL and frames, a download's progress and a browser's pages are `Watchable`s: an `Effect` that
-reads the current value, with `changes`, a stream of values, and `waitFor`, which waits for a predicate:
+reads the current value, with `changes`, a stream of the latest values, and `waitFor`, which waits for a predicate:
 
 ```ts
 import { Page } from "@usestrider/browser"

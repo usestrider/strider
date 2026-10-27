@@ -25,8 +25,9 @@ const TypeId = "~@usestrider/browser/Watchable"
  * **Details**
  *
  * - `yield*` reads the current value.
- * - `changes` starts with the current value, skips consecutive repeats, and ends after the terminal state, which
- *   is emitted as data.
+ * - `changes` starts with the current value, then gives the latest value each time the consumer takes one: a slow
+ *   consumer skips the values in between, and never sees one repeated. It ends after the terminal state, which is
+ *   emitted as data. For every event, use an event module's `stream`.
  * - `waitFor` checks the current value first, then each change. It runs under the deadline.
  * - `map` derives a watchable from the same source, so derived values never disagree with their source.
  *
@@ -49,9 +50,9 @@ const TypeId = "~@usestrider/browser/Watchable"
 export interface Watchable<A> extends Effect.Effect<A> {
   readonly [TypeId]: typeof TypeId
   /**
-   * The current value, then each change; ends after the terminal state.
+   * The current value, then the latest whenever the consumer takes one; ends after the terminal state.
    *
-   * **Example** (Logging each URL a page visits)
+   * **Example** (Logging the page's URL as it changes)
    *
    * ```ts import.meta.vitest
    * import { Page } from "@usestrider/browser"

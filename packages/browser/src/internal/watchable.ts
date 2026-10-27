@@ -47,8 +47,11 @@ export const make = <S, A>(source: Source<S, A>): Watchable.Watchable<A> => {
       onSome: Effect.succeed
     })
   )
+  // Conflated (README, principle 16): the newest value replaces one the consumer hasn't taken yet, so a slow consumer
+  // sees the present, not every value since. Repeats are dropped after, against what the consumer last took
   const changes = states(source).pipe(
     Stream.filterMap(Filter.fromPredicateOption(source.project)),
+    Stream.buffer({ capacity: 1, strategy: "sliding" }),
     Stream.changesWith(Equal.equals)
   )
   const waitFor = Effect.fnUntraced(function*(predicate: Predicate.Predicate<A>) {
