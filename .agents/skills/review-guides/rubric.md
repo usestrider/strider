@@ -63,7 +63,8 @@ appears in a code block on the page, or the page links to where it's shown.
   stop reading as one task.
 
 An example is a realistic task (`exportCsv`, `deleteAccount`), never `foo`; a module of its own that type-checks;
-written as the guide's other blocks are (`website/README.md`, "Guides").
+written as the guide's other blocks are (`website/README.md`, "Guides"). It reads data through its types, such as a
+body decoded with a Schema and its fields read, never `JSON.stringify`.
 
 ## Severity
 
