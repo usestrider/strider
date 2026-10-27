@@ -11,8 +11,8 @@ import * as Path from "node:path"
 import { fileURLToPath } from "node:url"
 
 // The repository's root, where the build runs: the site reads the API reference, generated from the packages there.
-// Relative to where Alchemy runs, so the stack's props are the same on every machine and a deploy from CI after one
-// from a maintainer's changes nothing
+// Relative to where Alchemy runs, so the stack's props are the same on every machine; a clean checkout has no built
+// site, so a deploy from CI always builds, and uploads only what changed
 const root = Path.relative(process.cwd(), fileURLToPath(new URL("..", import.meta.url))) || "."
 
 export default Alchemy.Stack(

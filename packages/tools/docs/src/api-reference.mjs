@@ -80,6 +80,8 @@ export const apiReference = async (repo, root, out = path.join(repo, ".data/api-
     excludeProtected: true,
     blockTags: [...OptionDefaults.blockTags, "@stability"],
     gitRevision: revision,
+    // Source paths from the repository's root, as the source links on GitHub need them
+    displayBasePath: repo,
     validation: { invalidLink: false, notDocumented: false, notExported: false },
     logLevel: "Warn"
   })
