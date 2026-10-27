@@ -16,7 +16,8 @@ pnpm exec strider-docs audit --json [page…]   # give it to a reviewer
 ```
 
 It lists candidates per page, in reading order: split flags, sections with a short lead before their code, and
-names the prose mentions that no block on the page shows. It can't judge; the reviewer does.
+names the prose mentions that no block on the page shows. It can't judge; the reviewer does. It also lists links to
+a guide or heading that doesn't exist, which must be none before a commit.
 
 ## 2. Splits first
 
@@ -28,8 +29,8 @@ proposal: for each page, its new pages, what moves where and the sidebar's order
 
 A split, once agreed: write each new page with its frontmatter (`title`, `description`, `order`), renumber the
 chapter's `order`s, move the sections and their examples, give each page its own opening, update every link to a
-moved section (`grep -rn '](/docs/' website/src/content/docs`), and update the chapter table in
-`website/README.md`, "Guides".
+moved section (the audit's `broken` lines list what's left), and update the chapter table in `website/README.md`,
+"Guides".
 
 ## 3. Each page, in reading order
 
@@ -45,10 +46,13 @@ moved section (`grep -rn '](/docs/' website/src/content/docs`), and update the c
    pnpm lint-fix && pnpm reference && pnpm website:check
    ```
 
-   `pnpm lint-fix` formats the blocks; `pnpm reference` type-checks them (`pnpm examples`) and links them.
-4. **Review again,** with a new subagent, given the earlier findings and what was done with each. The page is done
-   when a round raises nothing new. Stop after three rounds; a finding that comes back after it was fixed goes to
-   the maintainer instead of a fourth.
+   `pnpm lint-fix` formats the blocks; `pnpm reference` type-checks them (`pnpm examples`) and links them. The
+   audit must list no broken links. A link into the reference (`/docs/api/…#…`) isn't checked by either: build
+   the site (`pnpm website:build`) and look for the anchor's `id` in `website/dist/`.
+4. **Review again,** with a new subagent, given the earlier findings and what was done with each, and the audit
+   run again, since lines move. The page is done when a round raises nothing new. Stop after three rounds: fix
+   what the third raises, check and commit, with no fourth review. A finding that comes back after it was fixed
+   goes to the maintainer instead.
 5. **Commit** the page on its own, `Guides: <page>: <what changed>`, with what was added and why in the body. No
    review document.
 

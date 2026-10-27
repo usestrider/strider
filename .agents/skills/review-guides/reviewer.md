@@ -11,7 +11,7 @@ Read these files and no others:
 - the rubric: .agents/skills/review-guides/rubric.md
 - the page: <file>
 - the pages before it, in reading order: <files>
-- the audit of the page: <JSON from `pnpm exec strider-docs audit --json <id>`>
+- the audit of the page: <JSON from `pnpm exec strider-docs audit --json <id>`, run for this round>
 
 Don't read API.md, CONCEPTS.md, the source, the reference or anything else: a gap you'd fill from them is a gap
 the reader falls into. Don't run commands.

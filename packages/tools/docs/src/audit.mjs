@@ -1,7 +1,7 @@
 // Lists, for each guide in reading order, what a reviewer of the guides checks: a page that may hold more than one
 // concept, sections with few words before their first code, and names the prose mentions that no block on the page
 // shows, with where else the guides show them. These are candidates for a reviewer to judge, not errors, so the
-// audit never fails.
+// audit never fails. It also lists links to a guide or a heading that doesn't exist, which a split leaves behind.
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { codeBlocks, typescriptLanguages } from "./guides.mjs"
@@ -14,7 +14,7 @@ export const manySections = 7
 export const shortLead = 15
 
 const fenceLine = /^ {0,3}(?:> ?)*\s*(`{3,}|~{3,})/
-const heading = /^(#{2,3}) (.+)$/
+const heading = /^(#{2,6}) (.+)$/
 const inlineCode = /`([^`]+)`/g
 const words = (text) => text.match(/\S+/g)?.length ?? 0
 const strings = /"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g
@@ -72,6 +72,10 @@ const namesIn = (span) => {
 
 const lastPart = (name) => name.slice(name.lastIndexOf(".") + 1)
 
+/** A heading's anchor, as the site's rehypeHeadingIds makes it with github-slugger */
+const slug = (text) =>
+  text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, "").replace(/ /g, "-")
+
 /** The page's frontmatter, its lines after it, and how many lines the frontmatter took */
 const parse = (text) => {
   const lines = text.replace(/\r\n?/g, "\n").split("\n")
@@ -106,7 +110,9 @@ const read = (file, id, known) => {
     codeLines: typescript.reduce((n, block) => n + block.code.split("\n").length, 0),
     code: new Set(typescript.flatMap((block) => identifiers(block.code))),
     commands: blocks.filter((block) => !typescriptLanguages.has(block.lang)).map((block) => block.code),
-    links: new Set()
+    links: new Set(),
+    hrefs: [],
+    anchors: new Set()
   }
   let fenced = false
   let current = page.lead
@@ -119,12 +125,21 @@ const read = (file, id, known) => {
     }
     if (fenced || /^\s*import .* from /.test(raw)) continue
     const head = heading.exec(raw)
+    if (head !== null) {
+      const base = slug(head[2])
+      let anchor = base
+      for (let n = 1; page.anchors.has(anchor); n++) anchor = `${base}-${n}`
+      page.anchors.add(anchor)
+    }
     if (head?.[1] === "##") {
       current = { title: head[2], line, words: 0, lead: 0, code: false }
       page.sections.push(current)
       continue
     }
-    for (const [, link] of raw.matchAll(/\]\((\/docs[^)#\s]*)/g)) page.links.add(link)
+    for (const [, link, anchor] of raw.matchAll(/\]\((\/docs[^)#\s]*)(?:#([^)\s]*))?\)/g)) {
+      page.links.add(link)
+      page.hrefs.push({ path: link, anchor, line })
+    }
     const table = raw.trimStart().startsWith("|")
     for (const [, span] of raw.matchAll(inlineCode)) {
       const text = span.trim()
@@ -192,6 +207,16 @@ export const auditGuides = async (root, dir) => {
         linkedTo: shownIn.filter((other) => page.links.has(route(other))).map((other) => other.id)
       }
     })
+    const broken = page.hrefs.filter(({ path: href }) => !href.startsWith("/docs/api")).flatMap(
+      ({ path: href, anchor, line }) => {
+        const target = pages.find((other) => route(other) === href)
+        if (target === undefined) return [{ href, line, problem: "no such guide" }]
+        if (anchor !== undefined && !target.anchors.has(anchor)) {
+          return [{ href: `${href}#${anchor}`, line, problem: "no such heading" }]
+        }
+        return []
+      }
+    )
     return {
       id: page.id,
       section: page.section,
@@ -209,7 +234,8 @@ export const auditGuides = async (root, dir) => {
         leadWords: code ? lead : null,
         short: code && lead < shortLead
       })),
-      unshown
+      unshown,
+      broken
     }
   })
 }
@@ -249,6 +275,7 @@ const report = (audits) => {
         out.push(`    :${String(item.line).padEnd(4)} ${item.name.padEnd(width)}  ${where(item)}${table}`)
       }
     }
+    for (const link of page.broken) out.push(`  broken   :${link.line} ${link.href}: ${link.problem}`)
     out.push("")
   }
   const sum = (f) => audits.reduce((n, page) => n + f(page), 0)
@@ -262,7 +289,8 @@ const report = (audits) => {
       `${unshown((item) => operation(item) && !item.table && item.shownIn.length === 0)} shown nowhere and ` +
       `${unshown((item) => operation(item) && !item.table && item.shownIn.length > 0 && item.linkedTo.length === 0)} ` +
       `shown elsewhere but not linked, in prose; ` +
-      `${unshown((item) => operation(item) && item.table)} more in tables.`
+      `${unshown((item) => operation(item) && item.table)} more in tables.`,
+    `Broken links to guides: ${sum((page) => page.broken.length)}.`
   )
   return out.join("\n") + "\n"
 }
