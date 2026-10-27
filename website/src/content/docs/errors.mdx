@@ -13,48 +13,60 @@ you expect.
 | Error                  | Means                                                         | Carries                                 |
 | ---------------------- | ------------------------------------------------------------- | --------------------------------------- |
 | the module's own error | the operation couldn't do what it was asked                    | a `reason`, a class with its own fields |
-| `TargetGone`           | something it needed ended: the page closed, the frame detached | `reason`: why it ended                  |
+| [`TargetGone`](/docs/api/browser/Target#TargetGone) | something it needed ended: the page closed, the frame detached | `reason`: why it ended                  |
 | `Timeout`              | the [deadline](/docs/deadlines) passed                         | `phase`: [how far it got](/docs/deadlines#timeouts) |
 
-Each module has one error: `LocatorError` for a click, `PageError` for a navigation, `DownloadError`,
+Each module has one error: `LocatorError` for a click, `PageError` for a navigation,
+[`DownloadError`](/docs/api/browser/Download#DownloadError),
 `ExpectationFailed`. Every reason has a `hint`, and the message includes it:
 
 ```
 click page.getByRole("button", { name: "Save" }): 2 matches (2 elements match and 1 of them is visible; add .filter({ visible: true }))
 ```
 
-Some reasons belong to one module, such as `Locator.StrictViolation`. These are shared, in `Reason`:
+Some reasons belong to one module, such as [`Locator.StrictViolation`](#strict-by-default): the locator matched
+more than one element. Others are shared, in `Reason`:
 
 - `InvalidInput`: an argument the operation can't use, such as a malformed selector. Fails at once.
-- `Unsupported`: this backend can't do it. The reason names the capability.
+- `Unsupported`: this backend [can't do it](/docs/browsers/choosing#what-each-can-do). The reason names the
+  capability.
 - `NotPermitted`: you don't have the access it needs, such as acting on a page you may only inspect.
 - `BackendFailure`: the browser refused or broke; its error is the `cause`.
 
 ## Recovering
 
-`Effect.catchReason` matches a module's error and one of its reasons:
+Catch the reason you expect rather than the module's whole error, so every other failure still fails with its
+message and hint. `Effect.catchReason` matches a module's error and one of its reasons. A step that needs a
+capability some browsers lack can fall back when it's missing:
 
 ```ts
-import { Locator, Page } from "@usestrider/browser"
-import { Console, Effect } from "effect"
+import { Page, Reason } from "@usestrider/browser"
+import { Console, Effect, Option } from "effect"
 
-const listSuggestions = (violation: Locator.StrictViolation) =>
-  Console.log("Several banners:", violation.suggestions)
+const noPdf = (unsupported: Reason.Unsupported) =>
+  Console.log(
+    `No PDF: ${unsupported.capability} is unsupported on ${unsupported.backend}`
+  ).pipe(
+    Effect.as(Option.none())
+  )
 
-const dismissBanner = Effect.fn("dismissBanner")(function*(page: Page.Page) {
-  const accept = page.getByRole("button", { name: "Accept cookies" })
-  yield* accept.click().pipe(
-    Effect.catchReason("LocatorError", "StrictViolation", listSuggestions)
+const invoicePdf = Effect.fn("invoicePdf")(function*(page: Page.Page) {
+  return yield* page.pdf().pipe(
+    Effect.map(Option.some),
+    Effect.catchReason("PageError", "Unsupported", noPdf)
   )
 })
 ```
 
-A shared reason is the same class in every module: `Effect.catchReason(tag, "Unsupported", …)` works for any tag.
+A shared reason is the same class in every module, so one handler serves them all: `noPdf` would serve a
+`LocatorError`'s `Unsupported` too.
 
 ## Strict by default
 
-An action or read needs exactly one element. Two or more fail at once with `StrictViolation`, which lists them and
-suggests `.filter({ visible: true })` when only one is visible. Ambiguity doesn't wait: it's a bug in the locator.
+Acting on the first of two matches would act on whichever the page rendered first, so a run could pass having
+clicked the wrong button. An action or read needs exactly one element. Two or more fail at once with
+`StrictViolation`, which lists them and suggests [`.filter({ visible: true })`](/docs/pages/locators#narrowing) when
+only one is visible. Ambiguity doesn't wait: it's a bug in the locator.
 
 When duplicates are brief, such as overlapping toasts, wait for them to settle first:
 
@@ -71,14 +83,42 @@ const dismissToast = Effect.fn("dismissToast")(function*(page: Page.Page) {
 
 ## Failed expectations
 
-`ExpectationFailed` has what was expected, the last value seen and every value seen. When the locator matched
-nothing, `nearest` shows the page where the locator stopped matching, and `suggestions` are locators for elements
-with similar names.
+An expectation that runs out of time may have seen the wrong thing, or found nothing at all; `ExpectationFailed`
+tells the two apart without a rerun. It has `condition` (what was expected), `last` (the last value seen) and
+`history` (every value seen). When the locator matched nothing, `nearest` is an accessibility snapshot of what its
+first steps found, up to the step that matched nothing, and `suggestions` are locators for elements with similar
+names:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Console, Effect, Option } from "effect"
+
+const reportMissing = Effect.fn("reportMissing")(
+  function*(failure: Expect.ExpectationFailed) {
+    const last = Option.map(failure.last, (seen) => seen.value)
+    yield* Console.error(`Expected ${failure.condition}, last saw`, last)
+    yield* Console.error(Option.getOrElse(failure.nearest, () => "nothing near"))
+    yield* Console.error("Did you mean:", failure.suggestions)
+  }
+)
+
+const expectPlaced = Effect.fn("expectPlaced")(function*(page: Page.Page) {
+  yield* page.getByText("Order placed").pipe(
+    Expect.toBeVisible,
+    Effect.tapErrorTag("ExpectationFailed", reportMissing)
+  )
+})
+```
 
 ## Diagnostics
 
-Every failure carries `diagnostics`: the operation's id; for an action, whether its input may have reached the
-page, `dispatch`: `NotSent`, `MayHaveBeenSent` or `Acknowledged`; and, for an [operation with steps](/docs/deadlines#operations-of-your-own), `progress`.
+An action that fails may still have reached the page, so retrying it could submit twice. Every failure carries
+`diagnostics`:
+
+- `dispatch`, for an action: whether its input reached the page, `NotSent`, `MayHaveBeenSent` or `Acknowledged`.
+- `progress`, for an [operation with steps](/docs/deadlines#operations-of-your-own): how far each step got.
+- `operationId`: the id that links the failure to its operation's span and its entry in a
+  [trace](/docs/tools/recordings#traces).
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -89,13 +129,40 @@ const mayHavePaid = Effect.fn("mayHavePaid")(function*(page: Page.Page) {
     Effect.as(true),
     Effect.catchTag(
       "LocatorError",
-      (error) => Effect.succeed(error.diagnostics.dispatch._tag === "MayHaveBeenSent")
+      (error) => Effect.succeed(error.diagnostics.dispatch._tag !== "NotSent")
     )
   )
 })
 ```
 
-- Errors are Schemas, so they encode as data; the `strider` command and the agent toolkit return them that way.
-- Secrets never appear: `Redacted` values, cookies and typed passwords are left out of messages, spans and logs.
-- Under the default preset, `strict`, a URL keeps its origin and path with query values redacted.
-  `Diagnostics.withPreset("local")` shows URLs whole.
+Errors are Schemas, so they encode as data; the [`strider` CLI](/docs/agents/cli) and the
+[agent toolkit](/docs/agents/toolkit) return them that way.
+
+## Secrets and URLs
+
+A failure's message ends up in logs, traces and bug reports, so `Redacted` values, cookies and typed passwords are
+left out of it, and of spans and logs. A diagnostics preset sets how much of a URL they show: the default,
+`strict`, keeps the origin and path and redacts query values, which can hold tokens. To see URLs whole while
+debugging on your own machine, apply `Diagnostics.withPreset("local")` where a debug run starts, not inside a step:
+
+```ts title="debug.ts"
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
+import { Browser, Diagnostics } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Config, Effect, Layer } from "effect"
+
+const openCart = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage()
+  yield* page.goto("https://shop.example.com/cart?session=abc")
+}))
+
+const BrowserLive = Chromium.layerConfig({
+  executablePath: Config.String("CHROMIUM_PATH")
+}).pipe(Layer.provide(NodeServices.layer))
+
+openCart.pipe(
+  Diagnostics.withPreset("local"),
+  Effect.provide(BrowserLive),
+  NodeRuntime.runMain
+)
+```
