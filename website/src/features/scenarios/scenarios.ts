@@ -41,7 +41,7 @@ const property = (entry: string, key: string) => {
 // The program as it runs, named a scenario: in the source its name pairs it with its Playwright twin
 const withImports = (code: string) => {
   const uses = (name: string) => new RegExp(`\\b${name}\\.`).test(code)
-  const effect = ["Effect", "Schema"].filter(uses)
+  const effect = ["Effect", "FileSystem", "Schema"].filter(uses)
   const http = ["HttpIncomingMessage"].filter(uses)
   return [
     `import { ${modules.filter(uses).join(", ")} } from "@usestrider/browser"`,

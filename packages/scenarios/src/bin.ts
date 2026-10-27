@@ -144,7 +144,7 @@ const outcomeOf = async (run: () => Promise<string>) => {
 const results: Array<Measurements["scenarios"][number]> = []
 for (const scenario of chosen) {
   log(`scenario ${scenario.name}`)
-  const runStrider = () => strider(scenario.strider(origin, files))
+  const runStrider = () => strider(scenario.strider(origin))
   const runPlaywright = () => scenario.playwright(browser, origin, files)
   // The first run of each is its outcome, and warms it up
   const outcome = { strider: await outcomeOf(runStrider), playwright: await outcomeOf(runPlaywright) }

@@ -18,7 +18,7 @@ import {
   Route
 } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
-import type * as FileSystem from "effect/FileSystem"
+import * as FileSystem from "effect/FileSystem"
 import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
@@ -38,11 +38,12 @@ export interface Scenario {
   readonly recording?: string
   /** What writing it found, shown under its code. */
   readonly note?: string
-  readonly strider: (origin: string, files: Files) => Effect.Effect<string, unknown, StriderNeeds>
+  /** The Strider program: given the local site's address, and needing nothing of the runner's */
+  readonly strider: (origin: string) => Effect.Effect<string, unknown, StriderNeeds>
   readonly playwright: (browser: Playwright.Browser, origin: string, files: Files) => Promise<string>
 }
 
-/** Where a scenario may write a file, and where the recordings are. */
+/** Where a Playwright twin may write a file, and where the recordings are; a Strider program names its own. */
 export interface Files {
   readonly temporary: (name: string) => string
   readonly recording: (name: string) => string
@@ -266,8 +267,9 @@ const navigationPlaywright = async (browser: Playwright.Browser, origin: string)
 // #endregion
 
 // #region har/strider
-const harStrider = Effect.fn("har")(function*(origin: string, files: Files) {
-  const path = files.temporary("report-strider.har")
+const harStrider = Effect.fn("har")(function*(origin: string) {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* fs.makeTempFileScoped({ suffix: ".har" })
   yield* Effect.scoped(Effect.gen(function*() {
     const page = yield* Browser.newPage()
     const har = yield* Har.record(page, { content: "embed" })
@@ -308,22 +310,23 @@ const harPlaywright = async (browser: Playwright.Browser, origin: string, files:
 }
 // #endregion
 
-// The public demo sites: TodoMVC's demo for testing, and The Internet's login
-const todomvc = "https://demo.playwright.dev/todomvc/"
-const theInternet = "https://the-internet.herokuapp.com"
-
 // #region todomvc/strider
-const todomvcStrider = Effect.fn("todomvc")(function*(_: string, files: Files) {
+// TodoMVC's demo, and a recording of it to replay instead of visiting it
+const todomvc = "https://demo.playwright.dev/todomvc/"
+const todomvcRecording = ".data/scenarios/todomvc.har"
+
+const todomvcStrider = Effect.fn("todomvc")(function*() {
   const page = yield* Browser.newPage()
-  yield* page.route("**/*", yield* Route.fromHar(files.recording("todomvc")))
+  yield* page.route("**/*", yield* Route.fromHar(todomvcRecording))
   yield* page.goto(todomvc)
   const input = page.getByPlaceholder("What needs to be done?")
   for (const todo of ["Buy tea", "Write docs", "Ship it"]) {
     yield* input.fill(todo)
     yield* input.press("Enter")
   }
-  // TodoMVC's checkbox is `opacity: 0` under its styled label, which Strider's actions count as hidden (Q241)
-  yield* page.getByTestId("todo-item").first.getByRole("checkbox").check({ checks: { visible: false } })
+  // The checkbox is `opacity: 0` under a styled label, which actions count as hidden
+  const first = page.getByTestId("todo-item").first
+  yield* first.getByRole("checkbox").check({ checks: { visible: false } })
   yield* page.getByText("2 items left").pipe(Expect.toBeVisible)
   return yield* page.getByTestId("todo-count").readText
 })
@@ -351,9 +354,13 @@ const todomvcPlaywright = async (browser: Playwright.Browser, _: string, files: 
 // #endregion
 
 // #region the-internet/strider
-const theInternetStrider = Effect.fn("the-internet")(function*(_: string, files: Files) {
+// The Internet's login, and a recording of it to replay instead of visiting it
+const theInternet = "https://the-internet.herokuapp.com"
+const theInternetRecording = ".data/scenarios/the-internet.har"
+
+const theInternetStrider = Effect.fn("the-internet")(function*() {
   const page = yield* Browser.newPage()
-  yield* page.route("**/*", yield* Route.fromHar(files.recording("the-internet")))
+  yield* page.route("**/*", yield* Route.fromHar(theInternetRecording))
   yield* page.goto(`${theInternet}/login`)
   yield* page.getByLabel("Username").fill("tomsmith")
   yield* page.getByLabel("Password").fill("SuperSecretPassword!")
