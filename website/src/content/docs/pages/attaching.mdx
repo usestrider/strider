@@ -4,18 +4,25 @@ description: Drive a browser that's already running, and take read or full acces
 order: 5
 ---
 
-A browser you launch starts empty: no logins, no tabs, nothing a person left open. Attaching drives a browser that's
-already running and leaves it running, and its tabs, which you didn't open, can only be watched until you ask for
-more.
+A launch starts a new browser. To drive one that a person or another program already has running, with its
+sessions and tabs as they are, attach to it; it keeps running after.
 
 ## Connecting
 
-`layerConnect` attaches to a running browser, such as Chrome started with `--remote-debugging-port=9222`, and
-leaves it running:
+`layerConnect` takes the browser's debugging address. Chrome opens its debugging port when started with one, and
+a profile of its own ([Chromium](/docs/browsers/chromium#attaching) says why):
+
+```sh
+google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug
+```
+
+`browser.pages` is the browser's open tabs, a [`Watchable`](/docs/pages/expectations#state-that-changes) read as
+`page.url` is. You didn't open them, so they're observed, and `inspect` takes read access
+([Access is typed](#access-is-typed)):
 
 ```ts
 import { NodeSocket } from "@effect/platform-node"
-import { Browser } from "@usestrider/browser"
+import { Browser, Page } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
 import { Effect, Layer } from "effect"
 
@@ -23,51 +30,85 @@ const Attached = Chromium.layerConnect("http://127.0.0.1:9222").pipe(
   Layer.provide(NodeSocket.layerWebSocketConstructor)
 )
 
-const firstHeading = Effect.scoped(Effect.gen(function*() {
+const describeTab = Effect.fn("describeTab")(function*(tab: Page.ObservedPage) {
+  const inspected = yield* tab.inspect
+  return { url: yield* tab.url, title: yield* inspected.title }
+})
+
+const openTabs = Effect.scoped(Effect.gen(function*() {
   const browser = yield* Browser.Browser
-  const [first] = yield* browser.pages
-  if (first === undefined) return "no tabs"
-  const tab = yield* first.inspect
-  return yield* tab.getByRole("heading").first.readText
+  return yield* Effect.forEach(yield* browser.pages, describeTab)
 })).pipe(Effect.provide(Attached))
 ```
 
-- `Firefox.layerConnect`: Firefox's remote agent.
-- `Bidi.layerConnect`: any WebDriver BiDi endpoint.
-- `WebKit.layerAttach`: a WebKitGTK or WPE browser's inspector server. Its pages can be read and navigated, not
-  typed into.
+- [`Firefox.layerConnect`](/docs/browsers/firefox#attaching): Firefox's remote agent.
+- [`Bidi.layerConnect`](/docs/api/browser/bidi/Bidi#layerConnect): any WebDriver BiDi endpoint.
+- [`WebKit.layerAttach`](/docs/browsers/webkit#attaching): a WebKitGTK or WPE browser's inspector server. Its pages
+  can be read and navigated, not typed into.
 
 ## Access is typed
 
-A page has one of three types:
+A tab you didn't open may be in use, by a person or another program, and a stray click or route there changes
+what they see. Take `inspect` when the program only reads, so acting on the tab doesn't compile, and `control`
+when it must act. A page has one of three types:
 
 | Type                | Can                                                                            |
 | ------------------- | ------------------------------------------------------------------------------ |
-| `Page.ObservedPage` | report its state and events                                                    |
-| `Page.ReadonlyPage` | also locate and read, take snapshots and screenshots, and evaluate in isolation |
-| `Page.Page`         | also act, navigate, evaluate among the page's own scripts, and declare routes    |
+| `Page.ObservedPage` | report its state and [events](/docs/events/events)                             |
+| `Page.ReadonlyPage` | also locate and read, take [snapshots](/docs/agents/toolkit#snapshots) and screenshots, and [evaluate](/docs/pages/expectations#evaluating-in-the-page) in isolation |
+| `Page.Page`         | also act, navigate, evaluate among the page's own scripts, and declare [routes](/docs/events/routes) |
 
-A page you opened is a `Page`. One you didn't, such as an attached browser's tab or a launched browser's first tab,
-is observed. `inspect` gives read access and `control` full access, for the scope they're called in:
+A page you opened is a `Page`; one you didn't, such as an attached browser's tab or a launched browser's first
+tab, is observed. Access lasts for the scope `inspect` or `control` is called in.
+[`browser.defaultContext`](/docs/pages/contexts#logging-in-once), a context you didn't make, takes `control` the
+same way.
+
+An observed tab reports its URL, so a program can find the tab it wants before taking access. With `control`, it
+can add a [route](/docs/events/routes), which answers the tab's matching requests itself: `Route.abort()` fails
+them, and `hits` counts them:
 
 ```ts
-import { Browser, Route } from "@usestrider/browser"
-import { Console, Effect } from "effect"
+import { Browser, Page, Route } from "@usestrider/browser"
+import { Console, Effect, Option } from "effect"
+
+const findTab = Effect.fn("findTab")(function*(origin: string) {
+  const browser = yield* Browser.Browser
+  for (const tab of yield* browser.pages) {
+    if ((yield* tab.url).startsWith(origin)) return Option.some<Page.ObservedPage>(tab)
+  }
+  return Option.none<Page.ObservedPage>()
+})
 
 const blockAnalytics = Effect.scoped(Effect.gen(function*() {
-  const [, second] = yield* (yield* Browser.Browser).pages
-  if (second === undefined) return
-  const tab = yield* second.control
+  const found = yield* findTab("https://app.example.com")
+  if (Option.isNone(found)) return
+  const tab = yield* found.value.control
   const blocked = yield* tab.route(
     "**/analytics/**",
     () => Effect.succeed(Route.abort())
   )
   yield* tab.getByRole("button", { name: "Refresh" }).click()
-  yield* Console.log(`blocked ${yield* blocked.hits} analytics calls`)
+  const hits = yield* blocked.hits.waitFor((count) => count > 0)
+  yield* Console.log(`blocked ${hits} analytics calls`)
 }))
 ```
 
-- When the scope closes, the route is removed and the tab stays open. Using `tab` again fails with `TargetGone`,
-  reason `AccessReleased`.
-- An action on an inspected page is a compile error. A helper that only reads should take a `Page.ReadonlyPage`, so
-  it takes either.
+- When the scope closes, the route is removed and the tab stays open. Using `tab` again fails with
+  [`TargetGone`](/docs/api/browser/Target#TargetGone), reason `AccessReleased`.
+- A helper that only reads can take a `Page.ReadonlyPage`, so it works on an inspected tab and on a `Page`
+  alike:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const unreadCount = Effect.fn("unreadCount")(function*(page: Page.ReadonlyPage) {
+  const messages = page.getByRole("list", { name: "Inbox" }).getByRole("listitem")
+  yield* messages.first.pipe(Expect.toBeVisible)
+  return yield* messages.filter({ hasText: "Unread" }).count
+})
+
+const unreadInTab = Effect.fn("unreadInTab")(function*(tab: Page.ObservedPage) {
+  return yield* unreadCount(yield* tab.inspect)
+})
+```
