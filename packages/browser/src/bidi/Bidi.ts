@@ -41,14 +41,14 @@ declare module "../Reason.ts" {
  *
  * const program = Effect.gen(function*() {
  *   const token = yield* Config.Redacted("GRID_TOKEN")
- *   const page = yield* Effect.scoped(Browser.newPage()).pipe(
- *     Effect.provide(
- *       Bidi.layerConnect("wss://grid.example.com/session", {
- *         headers: { authorization: token }
- *       })
- *     )
- *   )
- *   return page.id
+ *   const grid = Bidi.layerConnect("wss://grid.example.com/session", {
+ *     headers: { authorization: token }
+ *   })
+ *   return yield* Effect.scoped(Effect.gen(function*() {
+ *     const page = yield* Browser.newPage()
+ *     yield* page.goto("https://shop.example.com")
+ *     return yield* page.title
+ *   })).pipe(Effect.provide(grid))
  * })
  * ```
  *

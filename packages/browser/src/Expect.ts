@@ -383,6 +383,11 @@ export const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]> 
 /**
  * Expects the one match's accessibility tree to match a pattern.
  *
+ * **Gotchas**
+ *
+ * A pattern's children are the node's direct children, so links in a list sit under `list` and `listitem` nodes:
+ * match the list, or locate it, rather than the navigation around it.
+ *
  * **Example** (Checking the navigation for an Orders link)
  *
  * ```ts import.meta.vitest

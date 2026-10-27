@@ -598,8 +598,8 @@ const overrideCapability = (override: Adapter.Override): string | undefined => {
 
 /**
  * Stock WebKit launched in automation mode: the attached table, with what its Automation
- * session drives: contexts as browser processes, pages, history, trusted input, dialogs whose kind it doesn't say,
- * the window's size as the viewport, and file inputs.
+ * session drives: contexts as browser processes, pages, trusted input, dialogs whose kind it doesn't say, the
+ * window's size as the viewport, and file inputs. History traversal stays unsupported (`navigation.traverse`).
  */
 export const launchedCapabilities = (info: Browser.Info) => {
   const evidence = `WebKit adapter, launched, ${info.product} ${info.revision}`

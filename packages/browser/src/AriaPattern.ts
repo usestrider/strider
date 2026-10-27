@@ -109,7 +109,7 @@ export const text = (value: string | RegExp): AriaPattern =>
   Data.registerPattern({ [TypeId]: TypeId }, { _tag: "Text", value: matcher(value) })
 
 /**
- * These children, in this order, and no others.
+ * These direct children, in this order, and no others.
  *
  * **Example** (Matching a cart with exactly two items)
  *
@@ -134,7 +134,7 @@ export const exactly = (...children: ReadonlyArray<AriaPattern>): Children =>
   Data.registerChildren({ [ChildrenTypeId]: ChildrenTypeId }, { _tag: "Exactly", patterns: children.map(Data.pattern) })
 
 /**
- * These children in this order; others may come between.
+ * These direct children, in this order; others may come between.
  *
  * **Example** (Matching a form's field and button among others)
  *

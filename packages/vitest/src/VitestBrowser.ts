@@ -83,8 +83,12 @@ const testRun: TestRun.TestRun = {
 }
 
 /**
- * Provides the backend you pass, unchanged, plus `TestRun` for the current test. Each `@effect/vitest` `layer`
- * block gets one browser.
+ * Provides the backend you pass, unchanged, plus `TestRun` for the current test.
+ *
+ * **Details**
+ *
+ * The browser starts where the layer is built: given to `@effect/vitest`'s `layer`, once for the block, whose tests
+ * share it; provided to one effect, as below, once for that effect.
  *
  * **Example** (Providing a browser to a test)
  *

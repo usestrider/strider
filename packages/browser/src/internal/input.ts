@@ -78,7 +78,7 @@ export const buttons = (state: State, extra?: Mouse.Button): number => {
   return extra === undefined ? mask : mask | bits[extra]
 }
 
-/** Whether any modifier is held, or asked for: what WebKit's pointer can't carry (`input.pointerModifiers`). */
+/** Whether any modifier is held, or asked for: what a backend without `input.pointerModifiers` can't carry. */
 export const anyModifier = (state: State, extra: ReadonlyArray<Keyboard.Modifier> = []): boolean => {
   const flags = modifiers(state, extra)
   return flags.alt || flags.control || flags.meta || flags.shift

@@ -39,11 +39,12 @@ export const stock: LaunchProfile = new LaunchProfile({
 })
 
 /**
- * The default profile: first-run, sync and update prompts off, and nothing a page can observe.
+ * The default profile: first-run, sync and update prompts off, which pages can't tell.
  *
  * **Details**
  *
- * - Firefox's JSON viewer is off, so a JSON response's document is the JSON as served, as in Chromium and WebKit.
+ * - Firefox's JSON viewer is off, which a page can tell: a JSON response's document is the JSON as served, as in
+ *   Chromium and WebKit, not the viewer's page.
  * - Firefox opens popups as windows, so the page that opened one keeps rendering behind it.
  *
  * @stability unstable

@@ -22,15 +22,42 @@ import type * as Socket from "effect/socket/Socket"
 /**
  * Where a connection goes: a host and port, with TLS when asked.
  *
+ * **Details**
+ *
+ * Strider sets `host` and `port` alone, to reach a local inspector server. The other fields follow Effect's
+ * proposed `SocketConnector`, for a connector that passes them on to its platform; one that maps an endpoint to
+ * `NodeSocket.makeNet({ host, port })` leaves them out.
+ *
  * @stability experimental
  * @category models
  * @since 0.1.0
  */
 export interface Endpoint {
+  /**
+   * The host to connect to.
+   */
   readonly host: string
+  /**
+   * The port to connect to.
+   */
   readonly port: number
+  /**
+   * A path, for a platform whose sockets take one, such as a Unix socket's.
+   *
+   * @default none
+   */
   readonly path?: string | undefined
+  /**
+   * Whether to connect with TLS, and with what settings.
+   *
+   * @default false
+   */
   readonly tls?: boolean | TlsOptions | undefined
+  /**
+   * How long connecting may take.
+   *
+   * @default the platform's
+   */
   readonly connectTimeout?: Duration.Input | undefined
 }
 
