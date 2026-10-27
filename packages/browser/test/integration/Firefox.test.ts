@@ -56,6 +56,20 @@ describe("Firefox over WebDriver BiDi", () => {
           assert.deepStrictEqual(title.result, { type: "string", value: "Strider" })
         }), timeout)
 
+      it.effect("keeps the preferences a profile directory of the caller's sets", () =>
+        Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          const profile = yield* fs.makeTempDirectoryScoped({ prefix: "strider-firefox-own-" })
+          const mine = `user_pref("browser.startup.homepage", "https://example.com");\n`
+          yield* fs.writeFileString(`${profile}/user.js`, mine)
+          const { transport } = yield* FirefoxLauncher.launch({ executablePath: executable, userDataDir: profile })
+          const bidi = yield* BidiConnection.make(transport)
+          yield* Session.new_({ capabilities: {} }).pipe(Protocol.on(bidi.session))
+          const written = yield* fs.readFileString(`${profile}/user.js`)
+          assert.isTrue(written.startsWith(mine), written)
+          assert.include(written, `user_pref("app.update.disabledForTesting", true);`)
+        }).pipe(Effect.scoped), timeout)
+
       it.effect("classifies Firefox's error replies with every row of BiDi's table", () =>
         Effect.gen(function*() {
           const { transport: launched } = yield* FirefoxLauncher.launch({ executablePath: executable })

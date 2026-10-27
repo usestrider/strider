@@ -96,6 +96,20 @@ describe("Firefox launcher", () => {
           assert.strictEqual(FirefoxLauncher.userJs(FirefoxLauncher.profilePrefs.stock), "")
           assert.include(FirefoxLauncher.argsFor({}, "/p"), "--headless")
         }))
+
+      it.effect("keeps the preferences a profile of the caller's already sets, and replaces its own", () =>
+        Effect.sync(() => {
+          const prefs = { "browser.startup.page": 0 }
+          const mine = `user_pref("browser.startup.homepage", "https://example.com");\n`
+          const once = FirefoxLauncher.profileUserJs(mine, prefs)
+          assert.isTrue(once.startsWith(mine))
+          assert.include(once, `user_pref("browser.startup.page", 0);`)
+          // A second launch replaces the block instead of adding another
+          assert.strictEqual(FirefoxLauncher.profileUserJs(once, prefs), once)
+          // A profile with no preferences of Strider's gives back the caller's lines alone
+          assert.strictEqual(FirefoxLauncher.profileUserJs(once, {}), mine)
+          assert.strictEqual(FirefoxLauncher.profileUserJs("", {}), "")
+        }))
     }
   )
 })

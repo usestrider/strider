@@ -32,7 +32,8 @@ const FirefoxLive = Firefox.layerConfig({
   updates or telemetry, the JSON viewer off, and popups opened as windows.
 - `LaunchProfile.stock` sets nothing. `LaunchProfile.concurrent` also turns off background timer throttling.
 - A profile's `args` are Chromium switches; Firefox ignores them.
-- A `userDataDir` of your own is never deleted, but its `user.js` is overwritten.
+- A `userDataDir` of your own is never deleted. Its `user.js` keeps its own preferences; Strider's go in a block
+  after them, replaced at each launch.
 
 ## Pages are windows
 

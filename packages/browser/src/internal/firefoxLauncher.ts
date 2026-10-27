@@ -65,14 +65,37 @@ export const userJs = (prefs: Prefs): string =>
   Object.entries(prefs).map(([name, value]) => `user_pref(${JSON.stringify(name)}, ${JSON.stringify(value)});\n`)
     .join("")
 
+const blockStart = "// Strider's launch profile, written at each launch: edit outside this block"
+const blockEnd = "// End of Strider's launch profile"
+
+/**
+ * A profile's `user.js` with the launch profile's preferences in a block of their own, after the lines it had: a
+ * profile directory you own keeps its preferences, and a later launch replaces the block instead of adding another.
+ */
+export const profileUserJs = (existing: string, prefs: Prefs): string => {
+  const lines = existing.split("\n")
+  const start = lines.indexOf(blockStart)
+  const end = lines.indexOf(blockEnd, start)
+  const kept = (start === -1 || end === -1 ? lines : [...lines.slice(0, start), ...lines.slice(end + 1)])
+    .join("\n")
+    .replace(/\n+$/, "")
+  const block = userJs(prefs)
+  if (block === "") return kept === "" ? "" : `${kept}\n`
+  return `${kept === "" ? "" : `${kept}\n`}${blockStart}\n${block}${blockEnd}\n`
+}
+
 /** Launches Firefox and connects to its WebDriver BiDi endpoint. */
 export const launch = Effect.fnUntraced(function*(options: Options) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Launch.executable(options.executablePath)
   const profile = yield* Launch.profileDirectory(options.userDataDir, "strider-firefox-")
+  // A profile directory of the caller's keeps the preferences its user.js already sets
+  const existing = options.userDataDir === undefined
+    ? ""
+    : yield* fs.readFileString(`${profile}/user.js`).pipe(Effect.orElseSucceed(() => ""))
   yield* fs.writeFileString(
     `${profile}/user.js`,
-    userJs(options.profilePrefs ?? profilePrefs[options.profile ?? "automation"])
+    profileUserJs(existing, options.profilePrefs ?? profilePrefs[options.profile ?? "automation"])
   ).pipe(
     Effect.catch((error) =>
       Launch.fail(
