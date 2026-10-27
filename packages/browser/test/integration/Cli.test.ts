@@ -5,7 +5,9 @@
  * and stops; a second session forks the first's state; a daemon killed outright is listed and pruned; and the
  * mistakes a command can make fail at once, with an exit code of their own.
  */
+import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import { Firefox } from "@usestrider/browser/firefox"
 import * as Effect from "effect/Effect"
 import { execFile, spawn } from "node:child_process"
 import * as fs from "node:fs"
@@ -13,6 +15,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { site } from "./adapter/harness.ts"
 import { chromium, firefox } from "./browsers.ts"
+import { firefoxAttachable } from "./slice/attaching.ts"
 
 const timeout = 120_000
 const bin = new URL("../../src/bin/strider.ts", import.meta.url).pathname
@@ -318,6 +321,27 @@ describe("strider", () => {
       })),
     timeout
   )
+
+  it.live("attaches to Firefox's remote agent by an endpoint with no path", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const served = yield* site
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const tab = `${served.origin}/fixture?html=${encodeURIComponent("<title>remote</title>")}`
+        const { endpoint } = yield* firefoxAttachable(Firefox.layerConnect).start(tab, tab)
+        // Firefox answers at /session, which the endpoint it prints leaves out
+        const started = yield* run("start", "--name", "remote", "--attach", endpoint)
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          assert.include(started.out, `${endpoint}/session`)
+          const tabs = yield* run("-s", "remote", "tabs")
+          assert.strictEqual(tabs.code, 0, tabs.err)
+        } finally {
+          yield* run("-s", "remote", "stop")
+        }
+      }).pipe(Effect.provide(NodeServices.layer))
+    ), timeout)
 
   it.live("fails at once on what a command can't mean, with exit codes of its own", () =>
     Effect.gen(function*() {

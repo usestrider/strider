@@ -784,6 +784,17 @@ const serve = (daemon: Daemon, tree: ReturnType<typeof commands>, touch: () => v
 // ── Starting ──
 
 /** The browser a start names: exactly one. */
+/**
+ * A WebDriver BiDi endpoint as the session connects to it: Firefox's remote agent answers at `/session`, which an
+ * endpoint with no path leaves out, so it's added, as `Firefox.layerConnect` adds it; any other is taken as given.
+ */
+const bidiEndpoint = (endpoint: string): string => {
+  const url = URL.parse(endpoint)
+  return url !== null && /^wss?:$/.test(url.protocol) && (url.pathname === "" || url.pathname === "/")
+    ? new URL("/session", url).href
+    : endpoint
+}
+
 const browserOf = (flags: {
   readonly chromium: Option.Option<string>
   readonly firefox: Option.Option<string>
@@ -802,11 +813,9 @@ const browserOf = (flags: {
     ),
     // An HTTP endpoint, or a WebSocket to /devtools/, is Chromium's; any other WebSocket WebDriver BiDi's
     ...Option.toArray(Option.map(flags.attach, (endpoint) =>
-      ({
-        _tag: "Attach",
-        backend: /^https?:|\/devtools\//.test(endpoint) ? "chromium" : "bidi",
-        endpoint
-      }) as const))
+      /^https?:|\/devtools\//.test(endpoint)
+        ? { _tag: "Attach", backend: "chromium", endpoint } as const
+        : { _tag: "Attach", backend: "bidi", endpoint: bidiEndpoint(endpoint) } as const))
   ]
   return given.length === 1
     ? Effect.succeed(given[0]!)
