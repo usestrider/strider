@@ -32,9 +32,11 @@ const command = /^[a-z][\w-]*(?: [\w.:=@/-]+)+$/
 // A span that quotes a message: four or more words and no code's punctuation
 const quote = (text) => words(text) >= 4 && !/[(){}=]|=>/.test(text)
 
-/** The identifiers in code, without its strings and comments */
-const identifiers = (code) =>
-  code.replace(strings, "\"\"").replace(/(^|[^:])\/\/.*$/gm, "$1").match(/[A-Za-z_$][\w$]*/g) ?? []
+/** The identifiers in code, without its strings and comments, and the tags it names in strings, `"LocatorError"` */
+const identifiers = (code) => [
+  ...code.replace(strings, "\"\"").replace(/(^|[^:])\/\/.*$/gm, "$1").match(/[A-Za-z_$][\w$]*/g) ?? [],
+  ...Array.from(code.matchAll(/["']([A-Z][A-Za-z0-9]*)["']/g), ([, tag]) => tag)
+]
 
 /**
  * The names the public packages' own source uses, which tells a name of the API from an HTML attribute, a DOM name
