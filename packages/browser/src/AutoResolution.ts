@@ -68,7 +68,8 @@ export const Policy = Schema.Union([
  *
  * - `ContextOption`: an option the context was made with, such as `dialogs: "dismiss"`.
  * - `Default`: Strider's fixed rule for the kind, which no option changes: a file chooser nothing decides is
- *   canceled, and a request no route decides continues.
+ *   canceled, and a request no route decides continues, as `Route.continue` does. At an authentication challenge,
+ *   that means the page gets the server's response, never the browser's own prompt.
  *
  * @stability unstable
  * @category models
