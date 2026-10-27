@@ -4,6 +4,9 @@ description: Firefox over WebDriver BiDi. Launching, the one-session rule for at
 order: 3
 ---
 
+A program that passes on Chromium can fail on Firefox, from a capability BiDi lacks or a behaviour Firefox has.
+Knowing which lets you run one program on both, and tell a bug in your program from a limit of the backend.
+
 ## Firefox and WebDriver BiDi
 
 Strider drives Firefox over WebDriver BiDi, the W3C's automation protocol and the only one Firefox has. BiDi covers
@@ -13,25 +16,33 @@ it; the [list below](#what-firefox-cant-do) says which. The tests run Firefox 15
 ## Launching
 
 `Firefox.layer` connects to the browser over a WebSocket, so it needs a `WebSocketConstructor` as well as the usual
-services:
+[services](/docs/installation#platform-services). To see Firefox as a person's install shows it, with their profile and devtools open:
 
 ```ts
 import { NodeServices, NodeSocket } from "@effect/platform-node"
+import { LaunchProfile } from "@usestrider/browser"
 import { Firefox } from "@usestrider/browser/firefox"
-import { Config, Layer } from "effect"
+import { Layer } from "effect"
 
-const FirefoxLive = Firefox.layerConfig({
-  executablePath: Config.String("FIREFOX_PATH")
+const AdasFirefox = Firefox.layer({
+  executablePath: "/usr/bin/firefox",
+  headless: false,
+  userDataDir: "./profiles/ada",
+  profile: LaunchProfile.stock,
+  args: ["--devtools"]
 }).pipe(Layer.provide([NodeServices.layer, NodeSocket.layerWebSocketConstructor]))
 ```
 
 - It runs `--headless` (unless `headless: false`), `--remote-debugging-port=0`, `--no-remote`, `--profile` with a
   temporary profile, then your `args`.
-- No endpoint within 30 seconds fails the layer with `ConnectionFailed`, or `ProcessExited` if Firefox exited.
-- `LaunchProfile.automation`, the default, writes preferences to the profile's `user.js`: no first-run page,
+- No endpoint within 30 seconds fails the layer with [`ConnectionFailed`](/docs/api/browser/Browser#ConnectionFailed), or
+  [`ProcessExited`](/docs/api/browser/Browser#ProcessExited) if Firefox exited.
+- On Firefox, a launch profile is the preferences it writes to the profile's `user.js`; its Chromium switches are
+  ignored. `LaunchProfile.automation`, the default, writes: no first-run page,
   updates or telemetry, the JSON viewer off, and popups opened as windows.
-- `LaunchProfile.stock` sets nothing. `LaunchProfile.concurrent` also turns off background timer throttling.
-- A profile's `args` are Chromium switches; Firefox ignores them.
+- `LaunchProfile.stock` sets nothing, for Firefox as a person's install shows it, with its first-run page, JSON
+  viewer and popups in tabs. [`LaunchProfile.concurrent`](/docs/tools/testing#many-pages-at-once) also turns off
+  background timer throttling, for pages that run side by side.
 - A `userDataDir` of your own is never deleted. Its `user.js` keeps its own preferences; Strider's go in a block
   after them, replaced at each launch.
 
@@ -41,9 +52,13 @@ Firefox renders a background tab about once a second, too seldom for an action t
 opens is its own window, and the default profile opens popups as windows too.
 
 A tab of an attached Firefox, or a popup under `LaunchProfile.stock`, is still a tab: call `yield* page.activate`
-before acting on it. `focus: "emulated"` isn't available on Firefox.
+before acting on it, as [Attaching](#attaching) shows. [`focus: "emulated"`](/docs/tools/testing#many-pages-at-once) isn't available on Firefox.
 
 ## Attaching
+
+Attaching works as in [Attaching to a browser](/docs/pages/attaching), at the remote agent's `ws://` address.
+Firefox takes one client at a time, through a BiDi session, which Strider opens when the layer is built and ends
+when its scope closes.
 
 ```sh
 firefox --remote-debugging-port=9222
@@ -59,24 +74,28 @@ const Attached = Firefox.layerConnect("ws://127.0.0.1:9222").pipe(
   Layer.provide(NodeSocket.layerWebSocketConstructor)
 )
 
-const tabTitles = Effect.scoped(Effect.gen(function*() {
-  const pages = yield* (yield* Browser.Browser).pages
-  return yield* Effect.forEach(
-    pages,
-    (page) => Effect.flatMap(page.inspect, (tab) => tab.title)
-  )
+const archiveFirst = Effect.scoped(Effect.gen(function*() {
+  const browser = yield* Browser.Browser
+  for (const tab of yield* browser.pages) {
+    if ((yield* tab.url).startsWith("https://mail.example.com")) {
+      const mail = yield* tab.control
+      yield* mail.activate
+      yield* mail.getByRole("button", { name: "Archive" }).first.click()
+    }
+  }
 })).pipe(Effect.provide(Attached))
 ```
 
 - `/session` is added to an endpoint with no path.
-- Existing tabs are observed; `inspect` or `control` gives access for a scope. They stay open after the program.
-- **One session at a time.** A session outlives its connection until something ends it. Strider ends its own when
-  the layer's scope closes. While another client holds it, connecting fails with `ConnectionFailed`. A program that
-  dies without ending its session leaves Firefox refusing clients until it restarts; for a `strider` session,
-  `strider prune --yes` stops the browser.
+- Existing tabs are observed; [`inspect` or `control`](/docs/pages/attaching#access-is-typed) gives access for a
+  scope. They stay open after the program.
+- **One session at a time.** While another client holds it, connecting fails with `ConnectionFailed`. A session
+  outlives its connection, so a program that dies without ending it leaves Firefox refusing clients until it
+  restarts; for a browser the `strider` CLI started, [`strider prune --yes`](/docs/agents/cli#managing-sessions)
+  stops it.
 - Strider's preferences don't apply: the JSON viewer stays on, and tabs are tabs.
 - File choosers are left to the browser: the setting that answers them is browser-wide.
-- `Capability.Video` isn't available: Firefox writes the file on its own machine.
+- [`Capability.Video`](#whats-different) isn't available: Firefox writes the file on its own machine.
 
 ## What Firefox can't do
 
@@ -94,36 +113,54 @@ What changes when attached:
 
 ## What's different
 
-**Init scripts run inside a function,** so top-level `var` and function declarations aren't globals. Assign to
+**[Init scripts](/docs/events/routes#init-scripts) run inside a function,** so top-level `var` and function declarations aren't globals. Assign to
 `window` to share something.
 
 **Bodies need a subscription first.** BiDi keeps a body only if collection was set up before the request started,
-by a subscription with `body` or by `Har.record`.
+by a subscription with [`body`](/docs/events/network#bodies-decoded) or by
+[`Har.record`](/docs/tools/recordings#har-files).
 
-**An unhandled rejection is reported as a throw,** so `UncaughtException`'s `kind` is `"unknown"`.
+**An unhandled rejection is reported as a throw,** so [`UncaughtException`](/docs/events/events#history)'s `kind` is `"unknown"`.
 
-**`servedBy` is `"cacheOrServiceWorker"`** for both: Firefox can't tell them apart. A script reused from the memory
+**[`servedBy`](/docs/events/network#who-answered) is `"cacheOrServiceWorker"`** for both: Firefox can't tell them apart. A script reused from the memory
 cache shows up as a request.
 
 **Console text is Firefox's own formatting,** which writes `%f` as printf does: `1.250000`.
 
-**Typing is key by key.** Keyboard layouts send no AltGr or dead keys, and the page sees a US key's `code`.
-`insertText` types each character as a key.
+**Typing is key by key.** [Keyboard layouts](/docs/pages/actions#keys) send no AltGr or dead keys, and the page
+sees a US key's `code`. [`insertText`](/docs/pages/actions#the-keyboard-and-the-mouse) types each character as a
+key.
 
-**HTML drag and drop needs `html: "synthetic"`:** Firefox starts a native drag but never drops it.
+**HTML drag and drop needs [`html: "synthetic"`](/docs/pages/actions#dragging):** Firefox starts a native drag but never drops it.
 
 **Input into a cross-site frame goes to the frame's document,** since Firefox doesn't route page coordinates into
 it. A drag between documents goes to the first one alone.
 
-**Routes do less.** No sending a request to a new URL, no fulfilling at the response phase (changing status and
+**[Routes](/docs/events/routes) do less.** No sending a request to a new URL, no fulfilling at the response phase (changing status and
 headers works), and every abort is `"failed"`. An unanswered authentication challenge is canceled.
 
-**Video, not frames.** `Capability.Video` records a WebM file into the context's downloads directory;
-`Capability.Screencast` isn't available. A trace's `screencast: "native"` uses the video.
+**Video, not frames.** [`Capability.Video`](/docs/api/browser/Capability#Video) records a WebM file into the context's downloads
+directory; [`Capability.Screencast`](/docs/api/browser/Capability#Screencast) isn't available. A trace's
+[`screencast: "native"`](/docs/tools/recordings#traces) uses the video. To record one around a step, take the capability for that scope with `page.capability`:
+
+```ts
+import { Capability, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const recordCheckout = Effect.fn("recordCheckout")(function*(page: Page.Page) {
+  const video = yield* Effect.scoped(Effect.gen(function*() {
+    const recording = yield* page.capability(Capability.Video)
+    yield* page.getByRole("button", { name: "Pay" }).click()
+    return recording
+  }))
+  return yield* video.file // written once the recording's scope closes
+})
+```
 
 ## Other WebDriver BiDi browsers
 
-`Bidi.layerConnect` takes any BiDi endpoint as given, with handshake headers such as a grid's token:
+`Firefox.layerConnect` expects Firefox. For a BiDi browser on a grid, whose address is already a session URL, use
+`Bidi.layerConnect`: it takes the endpoint as given, with handshake headers such as the grid's token:
 
 ```ts
 import { NodeSocket } from "@effect/platform-node"
@@ -142,34 +179,40 @@ Only Firefox is tested:
 
 - The capability list is Firefox's, whatever browser answers.
 - It always starts a new session; an endpoint that hands out an existing session's socket may refuse.
-- A remote browser can't read `FileInput.local` paths: use `FileInput.bytes`, or `FileInput.remote`.
+- A remote browser can't read `FileInput.local` paths: use [`FileInput.bytes`](/docs/pages/actions#files), or
+  [`FileInput.remote`](/docs/api/browser/FileInput#remote).
 - Safari Technology Preview's BiDi is partial, and needs a WebDriver capability Strider doesn't set.
 
 ## The raw protocol
 
-`@usestrider/browser/bidi-protocol` has every BiDi command and event as a typed value; `BidiConnection` runs them:
+Use the raw protocol for a BiDi command Strider has no operation for, such as installing a web extension. It needs
+Firefox's one session, so it runs instead of Strider, not beside it. `@usestrider/browser/bidi-protocol` has every
+BiDi command and event as a typed value; `BidiConnection` runs them, at the session address, such as
+`ws://127.0.0.1:9222/session`:
 
 ```ts
-import { BrowsingContext, Session } from "@usestrider/browser/bidi-protocol"
+import { Session, WebExtension } from "@usestrider/browser/bidi-protocol"
 import { BidiConnection, Protocol, Transport } from "@usestrider/browser/protocol"
 import { Effect } from "effect"
 
-const openTab = Effect.fn("openTab")(function*(endpoint: string, url: string) {
-  const transport = yield* Transport.webSocket(endpoint)
-  const bidi = yield* BidiConnection.make(transport)
-  yield* Session.new_({ capabilities: {} }).pipe(Protocol.on(bidi.session))
-  const { context } = yield* BrowsingContext.create({ type: "tab" }).pipe(
-    Protocol.on(bidi.session)
-  )
-  yield* BrowsingContext.navigate({ context, url, wait: "complete" }).pipe(
-    Protocol.on(bidi.session)
-  )
-})
+const installExtension = Effect.fn("installExtension")(
+  function*(endpoint: string, path: string) {
+    const transport = yield* Transport.webSocket(endpoint)
+    const bidi = yield* BidiConnection.make(transport)
+    const on = Protocol.on(bidi.session)
+    yield* Session.new_({ capabilities: {} }).pipe(on)
+    // End the session even on failure, or Firefox stays locked
+    yield* Effect.addFinalizer(() => Session.end().pipe(on, Effect.ignore))
+    const { extension } = yield* WebExtension.install({
+      extensionData: { type: "path", path }
+    }).pipe(on)
+    return extension
+  }
+)
 ```
 
 - Nothing is tracked or waited for.
-- Firefox's one session means a raw connection can't run beside Strider's.
-- End your session with `Session.end` before closing, or Firefox stays locked.
-- `Browser.TraceProtocolCommands` adds a span for each command Strider sends.
+- To find the BiDi commands a Strider step sends, provide
+  [`Browser.TraceProtocolCommands`](/docs/api/browser/Browser#TraceProtocolCommands) as `true` around it.
 
-A rejected command fails with `BackendFailure`; its `cause` is the `ProtocolError`, with Firefox's code and message.
+A rejected command fails with [`BackendFailure`](/docs/errors#three-kinds-of-failure); its `cause` is the `ProtocolError`, with Firefox's code and message.
