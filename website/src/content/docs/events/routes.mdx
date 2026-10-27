@@ -4,34 +4,43 @@ description: Declarations change what a page sees while their scope lasts. Route
 order: 3
 ---
 
+A page that depends on a live backend, on its own startup scripts or on the real clock does something different
+each run. Declarations fix what it gets: the answer to each request, what runs before its scripts, and the time it
+reads.
+
 ## Declarations
 
-A declaration is a setting held for a scope: a route, an init script, the page clock, an emulated setting, a
-granted permission, a dialog or file chooser handler.
+A declaration is a setting held for a scope: a route, an init script, the page clock, an
+[emulated setting or a granted permission](/docs/pages/contexts#settings-for-a-while), a
+[dialog or file chooser handler](/docs/events/events#dialogs).
 
 - The browser confirms it before the call returns, so it applies from the next line.
 - It's removed when its scope closes, or earlier with its handle's `remove`.
 
 ## Routes
 
-`page.route(pattern, handler)` sends each matching request to the handler before it leaves the browser. The handler
-returns a decision, built from Effect's HTTP types in `effect/http`:
+A page that talks to a real backend shows whatever data and failures the backend has that run.
+`page.route(pattern, handler)` decides each matching request before it leaves the browser, so the page gets the
+answer you chose; to only watch traffic, use [requests and responses](/docs/events/network). The handler returns a
+decision, built from Effect's HTTP types in `effect/http`:
 
 ```ts
 import { Page, Route } from "@usestrider/browser"
-import { Effect } from "effect"
+import { Config, Effect } from "effect"
 import { HttpClientRequest, HttpServerResponse } from "effect/http"
 
-const fakeBackend = Effect.fn("fakeBackend")(function*(page: Page.Page) {
+const asTestAccount = Effect.fn("asTestAccount")(function*(page: Page.Page) {
+  const token = yield* Config.Redacted("API_TOKEN")
+  yield* page.route(
+    "https://app.example.com/api/**",
+    () => Effect.succeed(Route.continueWith(HttpClientRequest.bearerToken(token)))
+  )
+  // Added after the route above, so asked before it
   yield* page.route(
     "https://app.example.com/api/user",
     () => Effect.succeed(Route.fulfill(HttpServerResponse.jsonUnsafe({ name: "Ada" })))
   )
-  yield* page.route(
-    "https://app.example.com/api/**",
-    () => Effect.succeed(Route.continueWith(HttpClientRequest.setHeader("x-test", "1")))
-  )
-  yield* page.route("**/analytics/**", () => Effect.succeed(Route.abort()))
+  yield* page.context.route("**/analytics/**", () => Effect.succeed(Route.abort()))
   yield* page.goto("https://app.example.com")
 })
 ```
@@ -41,42 +50,105 @@ const fakeBackend = Effect.fn("fakeBackend")(function*(page: Page.Page) {
 | `Route.fulfill(response)`   | answered with `response`; it never reaches the server                    |
 | `Route.continueWith(change)` | sent on, changed: a function of Effect's `HttpClientRequest`             |
 | `Route.continue`            | sent on as it is                                                         |
-| `Route.abort(reason?)`      | fails, as a network error would                                          |
+| [`Route.abort(reason?)`](/docs/api/browser/Route#abort) | fails, as a network error would                                          |
 | `Route.fallthrough`         | asks the next route that matches, or lets the request continue           |
 
 - A pattern is a glob, a URL or a `URLPattern`.
+- A handler runs in the request phase, before the request is sent, unless given a `phase`.
 - The page's routes are asked before its context's, the newest first; `fallthrough` passes to the next.
-- A route's handle counts the requests it was asked about in `hits`, a watchable number.
+- A route's handle counts the requests it was asked about in [`hits`](/docs/pages/attaching#access-is-typed), a
+  watchable number.
 - A handler that fails, is interrupted or times out lets the request continue. The failure is logged and reported
-  as an `AutoResolution` event.
+  as an [`AutoResolution`](/docs/events/events#next-stream-and-history) event.
+
+A handler gets the paused request, so it can decide by method, headers or body, and pass the rest on with
+`fallthrough`. The handle's `remove` ends a route before its scope does, to see the page recover:
+
+```ts
+import { Expect, Page, Route } from "@usestrider/browser"
+import { Effect } from "effect"
+import { HttpServerResponse } from "effect/http"
+
+const retryAfterOutage = Effect.fn("retryAfterOutage")(function*(page: Page.Page) {
+  const outage = yield* page.route(
+    "https://shop.example.com/api/orders",
+    ({ request }) =>
+      Effect.succeed(
+        request.method === "POST"
+          ? Route.fulfill(HttpServerResponse.empty({ status: 503 }))
+          : Route.fallthrough
+      )
+  )
+  yield* page.getByRole("button", { name: "Place order" }).click()
+  yield* page.getByText("Try again").pipe(Expect.toBeVisible)
+  yield* outage.remove
+  yield* page.getByRole("button", { name: "Try again" }).click()
+  yield* page.getByText("Order placed").pipe(Expect.toBeVisible)
+})
+```
 
 ## The response phase
 
-With `{ phase: "response" }`, the handler sees the server's status and headers, and can pass the response on
-changed or replace it. The phase types what the handler gets and returns, so a decision that doesn't fit the phase
-doesn't compile:
+Use the response phase to change part of what the real server sent, such as a header or one field of the body, and
+keep the rest; `Route.fulfill` in the request phase replaces the whole response. With `{ phase: "response" }`, the
+handler sees the server's status and headers, and `continueWith` takes the ones to change. To make every reload
+ask the server again:
 
 ```ts
 import { Page, Route } from "@usestrider/browser"
 import { Effect } from "effect"
+import { Headers } from "effect/http"
 
-const markResponses = Effect.fn("markResponses")(function*(page: Page.Page) {
+const freshApi = Effect.fn("freshApi")(function*(page: Page.Page) {
   yield* page.route(
     "https://app.example.com/api/**",
-    (intercepted) => {
-      const headers = { ...intercepted.response.headers, "x-seen": "1" }
-      return Effect.succeed(Route.continueWith({ headers }))
-    },
+    ({ response }) =>
+      Effect.succeed(
+        Route.continueWith({
+          headers: Headers.set(response.headers, "cache-control", "no-store")
+        })
+      ),
     { phase: "response" }
   )
 })
 ```
 
+- The phase types what the handler gets and returns, so a decision that doesn't fit the phase doesn't compile.
 - Changing status and headers: Chromium and Firefox.
 - Reading `intercepted.responseBody` and fulfilling with a patched copy: Chromium only.
 - WebKit does neither.
 
-`{ phase: "auth" }` answers an HTTP authentication challenge, on Chromium and Firefox:
+To switch on a feature flag the real server sends off, decode its body, patch it and fulfill with the copy:
+
+```ts
+import { Expect, Page, Route } from "@usestrider/browser"
+import { Effect, Schema } from "effect"
+import { HttpServerResponse } from "effect/http"
+
+const Flags = Schema.Record(Schema.String, Schema.Boolean)
+const decodeFlags = Schema.decodeUnknownEffect(Schema.fromJsonString(Flags))
+
+const withNewCheckout = Effect.fn("withNewCheckout")(
+  function*(intercepted: Route.Intercepted<"response">) {
+    const text = new TextDecoder().decode(yield* intercepted.responseBody)
+    const flags = yield* decodeFlags(text)
+    return Route.fulfill(HttpServerResponse.jsonUnsafe({ ...flags, newCheckout: true }))
+  }
+)
+
+const enableNewCheckout = Effect.fn("enableNewCheckout")(function*(page: Page.Page) {
+  yield* page.route("https://app.example.com/api/flags", withNewCheckout, {
+    phase: "response"
+  })
+  yield* page.goto("https://app.example.com/checkout")
+  yield* page.getByRole("heading", { name: "New checkout" }).pipe(Expect.toBeVisible)
+})
+```
+
+## HTTP authentication
+
+A site behind HTTP authentication stops at the browser's own sign-in prompt, which no locator can reach.
+`{ phase: "auth" }` answers the challenge instead, on Chromium and Firefox:
 
 ```ts
 import { Page, Route } from "@usestrider/browser"
@@ -95,59 +167,110 @@ const signInToStaging = Effect.fn("signInToStaging")(function*(page: Page.Page) 
 
 ## Replaying a recording
 
-`Route.fromHar` reads a HAR file, from `Har.record` or another tool, and makes a handler that answers each request
-from the entry matching its method, URL and body:
+A recorded backend answers the same way every run, with no server running. `Route.fromHar` reads a HAR file, from
+[`Har.record`](/docs/tools/recordings) or another tool, and makes a handler that answers each request from the
+entry matching its method, URL and body. Reading the file needs Effect's `FileSystem`, so build the backend's layer
+with `Layer.provideMerge(NodeServices.layer)` instead of `Layer.provide`, and the program gets it too:
 
 ```ts
-import { Page, Route } from "@usestrider/browser"
-import { Effect } from "effect"
+import { NodeServices } from "@effect/platform-node"
+import { Browser, Route } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Config, Effect, Layer } from "effect"
 
-const fromRecording = Effect.fn("fromRecording")(function*(page: Page.Page) {
-  const replay = yield* Route.fromHar("./fixtures/api.har")
+const BrowserLive = Chromium.layerConfig({
+  executablePath: Config.String("CHROMIUM_PATH")
+}).pipe(Layer.provideMerge(NodeServices.layer))
+
+const fromRecording = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage()
+  const replay = yield* Route.fromHar("./fixtures/api.har", { notFound: "fallthrough" })
   yield* page.route("https://shop.example.com/api/**", replay)
   yield* page.goto("https://shop.example.com/cart")
-})
+})).pipe(Effect.provide(BrowserLive))
 ```
 
-- A request with no entry is aborted, unless `{ notFound: "fallthrough" }`.
-- Reading the file needs Effect's `FileSystem`. Build the backend's layer with
-  `Layer.provideMerge(NodeServices.layer)` instead of `Layer.provide`, so the program gets it too.
+A request with no entry is aborted, unless `notFound` is `"fallthrough"`, as here, which lets it through to the
+server.
 
 ## Init scripts
 
-`addInitScript` runs a function at the start of each new document, in every frame, before the page's own scripts:
+[`page.evaluate`](/docs/pages/expectations#evaluating-in-the-page) after `goto` runs once the page's own scripts
+have started, too late to set up what they read as they load, such as a global or a stub. `addInitScript` runs a
+function at the start of each new document, in every frame, before the page's own scripts:
 
 ```ts
 import { Page } from "@usestrider/browser"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 
-const installHooks = () => {
-  Object.assign(window, { __clicks: [] as Array<string> })
+const installRecorder = () => {
+  Object.assign(window, { __tracked: [] as Array<string> })
 }
 
-const recordClicks = () => {
-  const clicks = (window as unknown as { __clicks: Array<string> }).__clicks
-  addEventListener("click", (event) => clicks.push((event.target as Element).tagName))
+// The page's own scripts call analytics.track as they load; this records instead of sending
+const stubAnalytics = () => {
+  const tracked = (window as unknown as { __tracked: Array<string> }).__tracked
+  Object.assign(window, {
+    analytics: { track: (event: string) => tracked.push(event) }
+  })
 }
 
-const testHooks = Effect.fn("testHooks")(function*(page: Page.Page) {
-  const hooks = yield* page.addInitScript(installHooks)
-  yield* page.addInitScript(recordClicks, { after: [hooks] })
-  yield* page.goto("https://app.example.com")
+const Tracked = Schema.Array(Schema.String)
+
+const purchaseTracked = Effect.fn("purchaseTracked")(function*(page: Page.Page) {
+  const recorder = yield* page.addInitScript(installRecorder)
+  yield* page.addInitScript(stubAnalytics, { after: [recorder] })
+  yield* page.goto("https://app.example.com/checkout")
+  yield* page.getByRole("button", { name: "Pay" }).click()
+  const tracked = yield* page.evaluateInMainWorld(() =>
+    (window as unknown as { __tracked: Array<string> }).__tracked
+  )
+  const events = yield* Schema.decodeUnknownEffect(Tracked)(tracked)
+  return events.includes("Order completed")
 })
 ```
 
 - The function crosses into the page, so it must be self-contained.
 - The context's scripts run before the page's, each in the order added.
 - With `after`, a script runs only if each script it names ran in that document without throwing.
-- A script that throws is reported as an `UncaughtException`.
-- `world: "isolated"` runs it apart from the page's scripts. `workers: true` also runs it in dedicated workers, on
-  Chromium and WebKit.
+- A script that throws is reported as an [`UncaughtException`](/docs/events/events#history).
 - Added to a loaded page, it runs from the next document.
+
+Added to a context, a script runs in every page of it. `workers: true` also runs it in dedicated workers, on
+Chromium and WebKit, and `world: "isolated"` runs it apart from the page's scripts, which can't see or replace it:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+// The same "random" numbers every run, so charts render the same
+const seedRandom = () => {
+  let seed = 42
+  Math.random = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+}
+
+// No animations or transitions, so each screenshot catches the page at rest
+const stillPage = () => {
+  addEventListener("DOMContentLoaded", () => {
+    const style = document.createElement("style")
+    style.textContent =
+      "*, *::before, *::after { animation: none !important; transition: none !important }"
+    document.head.append(style)
+  })
+}
+
+const steadyDashboard = Effect.fn("steadyDashboard")(function*(page: Page.Page) {
+  yield* page.context.addInitScript(seedRandom, { workers: true })
+  yield* page.addInitScript(stillPage, { world: "isolated" })
+  yield* page.goto("https://app.example.com/dashboard")
+})
+```
 
 ## The page clock
 
-`page.clock` replaces `Date`, `performance.now` and timers with a clock you stop, set and move:
+A page that shows today's date, or ends a session after five minutes, renders differently each day or makes a
+test wait the five minutes. `page.clock` replaces `Date`, `performance.now` and timers with a clock you stop, set
+and move, so five minutes pass in one call:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -168,8 +291,28 @@ const sessionExpires = Effect.fn("sessionExpires")(function*(page: Page.Page) {
 | `offset`     | shifted `by` a duration   | run in real time               |
 | `controlled` | starts at `at`, moves only when told | run only when time moves |
 
+Use `fixed` for a date the page only shows, `offset` to run in the future or the past at real speed, and
+`controlled` to make time pass in one call.
+
 - `adjust` moves a controlled clock forward, firing each timer that comes due, in order.
 - `setTime` jumps, firing due timers at most once, as a laptop waking from sleep.
-- `resume` returns to real time from where the clock stands.
-- One timeline spans the page's documents and frames; navigating doesn't reset it.
-- The page clock doesn't touch Strider's deadlines, and `TestClock` doesn't touch the page.
+- `resume` returns to real time from where the clock stands. The timers it held then run as real ones, for a step
+  that needs them, such as a form that validates after a pause:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const signedOutOvernight = Effect.fn("signedOutOvernight")(function*(page: Page.Page) {
+  yield* page.clock.install({ mode: "controlled", at: "2026-03-02T18:00:00Z" })
+  yield* page.goto("https://app.example.com/inbox")
+  yield* page.clock.setTime("2026-03-03T09:00:00Z")
+  yield* page.getByText("Signed out after inactivity").pipe(Expect.toBeVisible)
+  yield* page.clock.resume
+  yield* page.getByLabel("Email").fill("ada@example")
+  yield* page.getByText("Enter a valid email").pipe(Expect.toBeVisible)
+})
+```
+
+One timeline spans the page's documents and frames; navigating doesn't reset it. The page clock doesn't touch
+Strider's deadlines, and `TestClock` doesn't touch the page.
