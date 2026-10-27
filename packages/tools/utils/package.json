@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Repository tools: barrel codegen",
+  "description": "Repository tools: barrel codegen, and the published packages' check",
   "bin": {
     "strider-utils": "./src/bin.mjs"
   }

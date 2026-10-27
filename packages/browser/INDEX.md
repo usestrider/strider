@@ -1487,7 +1487,8 @@ Failure reasons that more than one module's error can carry.
 
 *configuration*
 
-- `interface BackendMetadata extends Metadata`
+- `interface BackendMetadata`
+  - `readonly [key: string]: Metadata[string] | undefined`
 
 *reasons*
 

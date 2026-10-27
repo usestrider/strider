@@ -126,13 +126,16 @@ export type Metadata = typeof Metadata.Type
  * **Details**
  *
  * A backend declares its key with `declare module`, so CDP error codes are typed where the Chromium backend
- * is imported, and the ergonomic layer never has to know them.
+ * is imported, and the ergonomic layer never has to know them. Its keys are optional, and its index admits
+ * `undefined`, so the declarations type-check with `exactOptionalPropertyTypes` on or off.
  *
  * @stability unstable
  * @category configuration
  * @since 0.1.0
  */
-export interface BackendMetadata extends Metadata {}
+export interface BackendMetadata {
+  readonly [key: string]: Metadata[string] | undefined
+}
 
 /**
  * Reason for a protocol command the browser rejected, or answered in a shape the backend didn't expect.

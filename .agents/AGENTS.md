@@ -33,7 +33,7 @@ itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm` from the repos
     155.0.8059.79, Firefox 158.0 and WebKitGTK 2.54.1's MiniBrowser for stock WebKit), fixed fonts, UTC, `C.UTF-8`, an empty home that is deleted after, no sound card, and no
     display: the MiniBrowser, which needs one, gets an Xvfb of its own (`test/integration/stockWebKit.ts`). Run anywhere else, they fail and
     say so; a browser of another version fails them too. Extra arguments go to Vitest
-    (`pnpm test:integration packages/browser/test/integration/WebKit.test.ts`).
+    (`pnpm test:integration packages/browser/test/integration/StockWebKitLaunched.test.ts`).
     `test/integration/adapter/` is the adapter conformance suite, written once and run against each backend, with
     the engine's tests; `test/integration/slice/` runs the public API through each backend's layer. WebKit's are
     stock WebKit's, the MiniBrowser launched. Where a case depends on what a backend can do, it reads the backend's
@@ -44,7 +44,9 @@ itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm` from the repos
   - `INDEX.md`: every declaration and member, generated.
 - `packages/tools/docs`: the JSDoc checker (vendored from Effect; don't edit it), the example check, `INDEX.md` and
   the API reference dataset.
-- `packages/tools/utils`: barrel codegen.
+- `packages/tools/utils`: barrel codegen; `clean`, which `pnpm build` runs first, so no earlier build's output is
+  published; and `pack-check`, which checks what the published packages would be: each one packed, installed in a
+  project of its own with only its peers, imported under Node and type-checked under `nodenext` (review 25).
 - `packages/tools/codegen`: protocol code generation. `protocols/<backend>/` holds the vendored spec (`source/`),
   corrections (`patches/`), our annotations (`overlay/`), and the generated `model.json` and `coverage.json`. Its
   output is `packages/browser/src/cdp/`, `packages/browser/src/bidi-protocol/`,
@@ -54,6 +56,9 @@ itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm` from the repos
   what the wire does, and the evidence. On a roll, `pnpm codegen:audit` lists the corrections the new spec has
   absorbed. `keyboards/source/` holds Unicode CLDR's keyboard layouts, which `pnpm codegen:keyboards` turns into
   `packages/browser/src/internal/keyboardLayouts.ts` (review 22).
+- `.github/workflows/`: CI. `checks.yml` runs `pnpm all`, `pnpm build` and `pnpm pack-check` on every push and
+  pull request, in the Nix environment's default shell; `integration.yml` runs the integration tests nightly when
+  `main` has changed, and on demand, keeping the log of a failed run.
 - `.repos/`: read-only references cloned by `scripts/worktree-setup.sh`, such as Effect's sources and its
   `.agents/skills`. Never import from them.
 
@@ -61,21 +66,22 @@ itself (`src/internal/notBuilt.ts`), never as a no-op. Use `pnpm` from the repos
 
 Use the narrowest check that covers the change:
 
-| Change                               | Run                                                                                                                                      |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Source, scenarios or configuration   | `pnpm check`, `pnpm lint-fix`                                                                                                            |
-| A new, renamed or removed module     | `pnpm codegen`, then `pnpm check`                                                                                                        |
-| Protocol corrections or annotations  | `pnpm codegen:protocol`, then `pnpm check` and `pnpm test --run packages/browser/test/Drift.test.ts`                                     |
-| Keyboard layouts                     | `pnpm codegen:keyboards`, then `pnpm test --run packages/browser/test/Keys.test.ts`                                                      |
-| Runtime behavior                     | `pnpm test --run <file>`                                                                                                                 |
-| The protocol client or transports    | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts`, then `pnpm test:integration` |
-| A backend adapter or launcher        | `pnpm test:integration`                                                                                                                  |
-| The model, engine, locators or pages | `pnpm test:integration packages/browser/test/integration/adapter packages/browser/test/integration/slice`                                |
-| The `strider` command                | `pnpm test --run packages/browser/test/Browsers.test.ts`, `pnpm test:integration packages/browser/test/integration/Cli.test.ts`          |
-| Access rules or other type behavior  | `pnpm test-types`                                                                                                                        |
-| JSDoc text, categories or links      | `pnpm jsdocs`                                                                                                                            |
-| JSDoc examples                       | `pnpm jsdocs`, then `pnpm examples`                                                                                                      |
-| Before a commit that touches `src/`  | `pnpm all`, and `pnpm test:integration` if it touches what drives a browser                                                              |
+| Change                                | Run                                                                                                                                      |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Source, scenarios or configuration    | `pnpm check`, `pnpm lint-fix`                                                                                                            |
+| A new, renamed or removed module      | `pnpm codegen`, then `pnpm check`                                                                                                        |
+| Protocol corrections or annotations   | `pnpm codegen:protocol`, then `pnpm check` and `pnpm test --run packages/browser/test/Drift.test.ts`                                     |
+| Keyboard layouts                      | `pnpm codegen:keyboards`, then `pnpm test --run packages/browser/test/Keys.test.ts`                                                      |
+| Runtime behavior                      | `pnpm test --run <file>`                                                                                                                 |
+| The protocol client or transports     | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts`, then `pnpm test:integration` |
+| A backend adapter or launcher         | `pnpm test:integration`                                                                                                                  |
+| The model, engine, locators or pages  | `pnpm test:integration packages/browser/test/integration/adapter packages/browser/test/integration/slice`                                |
+| The `strider` command                 | `pnpm test --run packages/browser/test/Browsers.test.ts`, `pnpm test:integration packages/browser/test/integration/Cli.test.ts`          |
+| Access rules or other type behavior   | `pnpm test-types`                                                                                                                        |
+| JSDoc text, categories or links       | `pnpm jsdocs`                                                                                                                            |
+| JSDoc examples                        | `pnpm jsdocs`, then `pnpm examples`                                                                                                      |
+| The packages' exports, files or peers | `pnpm build`, then `pnpm pack-check`                                                                                                     |
+| Before a commit that touches `src/`   | `pnpm all`, and `pnpm test:integration` if it touches what drives a browser                                                              |
 
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
 

@@ -1441,3 +1441,13 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 22's sixth step, the second full run; not in 5 runs of the test alone after it. The read's failure, if it failed, isn't reported: the entry is written without a body.
 - *We:* nothing yet.
 - *Reconsider:* when it recurs, which of two it is: the read, sent over the inspector as the document's load finishes, answered after the next `goto`'s navigation, sent over Automation, has committed and cleared the document's resources; or the read sent to a target a process swap had just replaced. The first would be fixed by a navigation the adapter sends waiting for its page's reads in flight; either needs the read's error, which the adapter could log.
+
+**Q239. A build left an earlier build's output in `dist`, where a publish would have taken it** (Ours). `tsc -b` writes `dist` from the sources and never deletes an output whose source is gone, and `pnpm build` cleaned nothing, so the generated BiDi modules' output from before their rename, `browser.js`, `session.d.ts` and the rest, sat beside `Browser.js` and `Session.d.ts`, and `files` packs `dist/**`.
+- *Seen:* review 25's first step, the package check's first run: the consumer project's type check saw two declaration files differing only in case, and offered `@usestrider/browser/bidi-protocol/session` as a subpath.
+- *We:* `pnpm build` runs `strider-utils clean` first, which removes the published packages' `dist` and their build information, and the package check fails a `dist` file with no source beside it.
+- *Reconsider:* nothing.
+
+**Q240. The backends' `BackendMetadata` keys didn't type-check without `exactOptionalPropertyTypes`** (Ours). Each backend declares its key on `Reason.BackendMetadata` by `declare module`, optional, as `cdp?`; `BackendMetadata` extended `Metadata`, whose index is `MutableJson | null`. With `exactOptionalPropertyTypes`, which the workspace sets, an optional key's type has no `undefined`; without it, which TypeScript's `strict` doesn't set, it has, and the index doesn't admit it, so a project that checks its libraries failed on `Bidi.d.ts`, `Chromium.d.ts` and `WebKit.d.ts`.
+- *Seen:* review 25's first step, the package check's first run.
+- *We:* `BackendMetadata` has an index of its own, `Metadata`'s values or `undefined`, and the package check type-checks the packages without `exactOptionalPropertyTypes` or `skipLibCheck`.
+- *Reconsider:* nothing.

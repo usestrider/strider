@@ -961,6 +961,24 @@ Adapter responsibilities:
   - **Q180 stays open,** as the maintainer decided, and **Q14** waits for Firefox.
 - **Tests.** The conformance suite's TLS test, on every backend. Integration tests: 520, all passing in one full run, a file at a time; it was the third: the first failed the slices' Firefox video tests (Q236), and the second Q233's test and the WebKit HAR test (Q238).
 
+**Built** (2026-10-26, after [review 25](reviews/25-release-readiness.md), its first step): the package checks, and CI's checks (candidates 1 and 2).
+
+- **`strider-utils pack-check`** (`packages/tools/utils/src/pack-check.mjs`, `pnpm pack-check` after `pnpm build`) packs `@usestrider/browser` and `@usestrider/vitest` in a temporary directory and checks each tarball: every subpath its `exports` offers exists, the `./*` pattern's expanded as Node resolves it, so a `null` key such as `./internal/*` leaves its files out; a `.d.ts` beside every `.js`, and a source beside it, since output whose source is gone is an earlier build's; its `bin`; none of the workspace's tests, scenarios, fixtures or data; and no `dependencies`, only peers. It then installs both in a project of their own with only their peers, and the peers' peers, laid out flat as npm lays it out; imports every subpath under Node; type-checks an import of each under `module` and `moduleResolution` `nodenext`, without `skipLibCheck` or `exactOptionalPropertyTypes`; runs `strider --help`; and runs it again with `@effect/platform-node` moved away, which must fail saying to install it.
+- **`pnpm build` starts from nothing:** `strider-utils clean` removes the published packages' `dist` and their build information first, since `tsc -b` never deletes an output whose source is gone, and without the build information it would think the deleted output current.
+- **What the check found on its first run,** both fixed:
+  - **A local build would have published an earlier build's output** (Q239): `dist/bidi-protocol/` held `browser.js`, `session.d.ts` and the rest beside `Browser.js` and `Session.d.ts`, from before the generated modules were renamed, and a project type-checking them saw two files differing only in case.
+  - **The backends' `declare module` keys failed to type-check in a project without `exactOptionalPropertyTypes`** (Q240): `BackendMetadata` extended `Metadata`, whose index admits no `undefined`, which an optional key's type has there. It has an index of its own now, which does.
+- **`.github/workflows/checks.yml`,** on every push and pull request, and on demand: `pnpm install --frozen-lockfile`, `pnpm all`, `pnpm build` and `pnpm pack-check`, each in the Nix environment's default shell (`nix develop`), so Node and pnpm are the flake's. A newer push to a branch cancels its older run.
+- **`.github/workflows/integration.yml`,** nightly at 03:17 UTC and on demand: a first job reads the last completed run of the workflow on `main`, and a scheduled run stops there where it tested the commit `main` is at; otherwise `pnpm test:integration --no-file-parallelism` runs, the browsers coming from the Nix binary cache, and a failed run keeps its log as an artifact for 14 days. Ubuntu 24.04 confines unprivileged user namespaces to programs AppArmor names, which the Nix store's Chromium and Firefox aren't, so the job allows them first (`kernel.apparmor_restrict_unprivileged_userns=0`).
+- **The actions** are GitHub's `checkout` and `upload-artifact`, and Cachix's `install-nix-action`, which installs Nix with flakes on; each is pinned by its commit, its release named beside it.
+- **Where the build differs from the review.**
+  - **`@effect/platform-node` was already an optional peer,** and the `strider` command already said to install it when it's missing, since `@usestrider/vitest` moved out (review 22); the review's "What there is" had it required. The package check now holds both.
+  - **`pnpm all` doesn't run the package check,** which the review put there: it needs `pnpm build`'s output and an install, so it's its own command, which CI runs after the build.
+  - **The type check is TypeScript 7's,** the workspace's own: a consumer on TypeScript 5 isn't checked.
+  - **A failed integration run keeps its log only:** the integration tests attach nothing through `TestRun`, which is for a program's tests, so there are no test artifacts to keep.
+  - **No store cache:** each run downloads the toolchain, and the integration run its browsers, from the Nix binary cache, as the review allowed; a cache would need a third party's action more.
+- **Tests.** `pnpm pack-check` passes after a clean `pnpm build`, and failed before the two fixes, naming each file; `pnpm all` passes. The workflows run once pushed. The integration tests didn't run again: nothing a browser runs changed.
+
 ### Pause-on-start granularity
 
 Before-author-script setup for *new* targets needs them paused at creation. Granularity differs by backend, and the access model depends on it.

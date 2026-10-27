@@ -1,0 +1,37 @@
+# The standard checks, on every push and pull request (review 25, candidate 1): in the Nix environment's default
+# shell, so Node and pnpm are the pinned ones, as on a maintainer's machine.
+name: Checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # 31.11.3
+      - name: Install
+        run: nix develop --command pnpm install --frozen-lockfile
+      # The type check and the generated code's, the linters, the standard tests, the type tests and the API
+      # reference's checks
+      - name: pnpm all
+        run: nix develop --command pnpm all
+      # The published packages, built, packed and installed in a project of their own (candidate 2)
+      - name: Build
+        run: nix develop --command pnpm build
+      - name: Package checks
+        run: nix develop --command pnpm pack-check
