@@ -4,67 +4,137 @@ description: Snapshots with refs for a model to act on, and a toolkit of effect/
 order: 1
 ---
 
-A model can't act on a page it can't read, and a selector it guesses breaks on the next render. A snapshot gives it
-the page as text, with a ref for each element it can act on, and the toolkit gives it tools that act through them.
+A model can't act on a page it can't read, and a selector it guesses can match nothing, or the wrong element. A
+snapshot gives it the page as text, with a ref for each element it saw, and the toolkit gives it tools that act
+through them.
 
 ## Snapshots
 
-A snapshot is a page's accessibility tree as data, with a ref for each node that can be acted on. `text` renders
-it for a model:
+Use a snapshot when a model, not your code, picks the element: it reads `text`
+([as the CLI prints it](/docs/agents/cli#commands)) and answers with a ref. A ref acts
+on exactly the node the model saw, or fails, so in your own code prefer a [locator](/docs/pages/locators), which
+finds its element again after a re-render. A snapshot is a page's accessibility tree as data, with a ref for each
+node that can be acted on:
+
+```ts
+import { Page, Snapshot } from "@usestrider/browser"
+import { Effect, Schema } from "effect"
+import { LanguageModel } from "effect/ai"
+
+const Choice = Schema.Struct({ ref: Snapshot.RefId })
+
+const pickAndClick = Effect.fn("pickAndClick")(
+  function*(page: Page.Page, goal: string) {
+    const snapshot = yield* page.snapshot({ interactiveOnly: true })
+    const { value } = yield* LanguageModel.generateObject({
+      prompt:
+        `${goal}\n\nThe page:\n${snapshot.text}\n\nAnswer with the ref of the element to click.`,
+      schema: Choice
+    })
+    yield* snapshot.ref(value.ref).click()
+  }
+)
+
+// If the page changed while the model chose, ask again with a fresh snapshot
+const clickWhatTheModelPicks = (page: Page.Page, goal: string) =>
+  pickAndClick(page, goal).pipe(
+    Effect.catchReason("LocatorError", "StaleRef", () => pickAndClick(page, goal))
+  )
+```
+
+- A ref is a locator pinned to one node, never resolved again. If the node is removed or its document replaced,
+  acting on it fails with a `LocatorError` whose reason, `StaleRef`, says which.
+- A node keeps its ref while its document lives, even if its name changes.
+
+By default a snapshot also infers what the accessibility tree misses: interactivity from `cursor: pointer`,
+`tabindex`, `contenteditable` or `onclick`, and names from text, `title`, `placeholder`, `alt` or a nearby label.
+Each inference is tagged, `clickable "Save" [inferred: cursorPointer]`, so you can list the controls a screen reader
+can't reach:
 
 ```ts
 import { Page } from "@usestrider/browser"
-import { Console, Effect, Option } from "effect"
+import { Effect } from "effect"
 
-const clickByName = Effect.fn("clickByName")(function*(page: Page.Page, name: string) {
-  const snapshot = yield* page.snapshot({ interactiveOnly: true })
-  yield* Console.log(snapshot.text)
-  for (const [id, node] of snapshot.refs) {
-    if (node.name._tag !== "None" && node.name.value === name) {
-      return yield* snapshot.ref(id).click().pipe(Effect.as(Option.some(id)))
-    }
+// Controls the page made clickable without telling assistive technology
+const unreachableControls = Effect.fn("unreachableControls")(
+  function*(page: Page.Page) {
+    const snapshot = yield* page.snapshot()
+    return Array.from(snapshot.refs.values())
+      .filter((node) => node.role._tag === "Inferred")
+      .map((node) => (node.name._tag === "None" ? node.role.role : node.name.value))
   }
-  return Option.none()
+)
+```
+
+`sources: "aria"` gives the accessibility tree alone, as [`Expect.toMatchAria`](/docs/pages/expectations#structure)
+matches; the default is `"aria+interactivity"`. Its text is a starting point for a pattern:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const mainNavTree = Effect.fn("mainNavTree")(function*(page: Page.Page) {
+  const navigation = page.getByRole("navigation", { name: "Main" })
+  const tree = yield* navigation.snapshot({ sources: "aria" })
+  return tree.text
 })
 ```
 
-- By default a snapshot also infers what the accessibility tree misses: interactivity from `cursor: pointer`,
-  `tabindex`, `contenteditable` or `onclick`, and names from text, `title`, `placeholder`, `alt` or a nearby label.
-  Each inference is tagged: `clickable "Save" [inferred: cursorPointer]`.
-- `snapshot({ sources: "aria" })` is the accessibility tree alone, as `Expect.toMatchAria` matches.
-- A ref is a locator pinned to one node, never resolved again. If the node is removed or its document replaced,
-  acting on it fails with `StaleRef`, saying which.
-- A node keeps its ref while its document lives, even if its name changes.
-- `snapshot.diff(previous)` says what changed between two snapshots of a document.
+A snapshot after each action repeats the whole page; `diff` gives only what changed, such as the status a click
+added:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const whatAddingChanged = Effect.fn("whatAddingChanged")(function*(page: Page.Page) {
+  const before = yield* page.snapshot()
+  yield* page.getByRole("button", { name: "Add to cart" }).click()
+  const after = yield* page.snapshot()
+  const changes = yield* after.diff(before)
+  return changes.text
+})
+```
 
 ## The toolkit
 
-`BrowserToolkit` gives a model `effect/ai` tools over one context. The same tools serve your program, an MCP server
-and the [`strider` CLI](/docs/agents/cli):
+`BrowserToolkit` gives a model `effect/ai` tools over one context. Use it when your program calls the model through
+`effect/ai`; when an MCP client, such as an editor's agent, runs the model, serve the same tools with
+[`strider mcp`](/docs/agents/cli#mcp). Where `pickAndClick` gives a model one action, the toolkit gives it every
+tool below, and each result says what happened since the last call. A model calls tools one turn at a time, so an
+agent runs turns in a `Chat` until one asks for no tool:
 
 ```ts
 import { Browser } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
-import { Config, Effect } from "effect"
-import { LanguageModel } from "effect/ai"
+import { Config, Console, Effect } from "effect"
+import { Chat } from "effect/ai"
 
-const agent = Effect.scoped(Effect.gen(function*() {
+const signIn = Effect.scoped(Effect.gen(function*() {
   const context = yield* Browser.newContext()
   const toolkit = yield* BrowserToolkit.make({
     context,
     secrets: { password: yield* Config.Redacted("APP_PASSWORD") },
     capture: CapturePolicy.strict
   })
-  const response = yield* LanguageModel.generateText({
-    prompt: "On app.example.com, sign in as ada@example.com with %password%.",
-    toolkit
-  })
-  return response.text
+  const chat = yield* Chat.fromPrompt(
+    "On app.example.com, sign in as ada@example.com with %password%."
+  )
+  while (true) {
+    const turn = yield* chat.generateText({ prompt: [], toolkit })
+    for (const call of turn.toolCalls) yield* Console.log(call.name, call.params)
+    if (turn.toolCalls.length === 0) return turn.text
+  }
 }))
 ```
 
-The tools: `pages`, `newPage`, `tabs`, `control`, `release`, `goto`, `back`, `snapshot`, `find`, `screenshot`,
-`click`, `fill`, `press`, `select`, `scroll`, `next`, `await`, `expect`, `history`, `route` and `dialog`.
+`pages`, `newPage`, `tabs`, `control` and `release` manage the model's pages (`release` gives back a page `control`
+took, its routes and handlers ended), and `goto` and `back` navigate. `snapshot`, `find` and `screenshot` read a
+page, and `click`, `fill`, `press`, `select` and `scroll` act as [actions](/docs/pages/actions) do. `next`, `await`
+and `history` are the [event verbs](/docs/events/events#next-stream-and-history), `expect` an
+[expectation](/docs/pages/expectations), `route` a [route](/docs/events/routes) and `dialog` a
+[dialog handler](/docs/events/events#dialogs). A result reads as the CLI prints it
+([example](/docs/agents/cli#commands)).
 
 - **Every tool names its page.** There's no current tab. Pages are named when created (`p1`, `p2`, or the model's
   name) or when first seen, as a popup is.
@@ -77,8 +147,41 @@ The tools: `pages`, `newPage`, `tabs`, `control`, `release`, `goto`, `back`, `sn
 - **Secrets are named.** The model writes `%password%`; the value is substituted as the tool runs, and results show
   `%password%`.
 
-`capture` is required. `CapturePolicy.strict` sends no screenshots, masks editable fields' text in snapshots as
-`•••`, and leaves out console text. `CapturePolicy.local` allows all three.
+Every result goes to the model's provider, and a page can hold secrets, or instructions aimed at the model. `capture`
+is required: `CapturePolicy.strict`, for production and pages you don't trust, sends no screenshots, masks editable
+fields' text in snapshots as `•••`, and leaves out console text; `CapturePolicy.local`, for local development
+against pages you trust, allows all three.
 
-With `browser` also given, `tabs` and `control` reach the browser's other pages, such as an attached browser's
-tabs. Without it, the model stays in its context.
+Without `browser`, the model stays in its context. With it, `tabs` and `control` reach the browser's other pages,
+such as a tab of an [attached](/docs/pages/attaching) browser you're already signed in to:
+
+```ts
+import { NodeSocket } from "@effect/platform-node"
+import { Browser } from "@usestrider/browser"
+import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Effect, Layer } from "effect"
+import { Chat } from "effect/ai"
+
+const MyChrome = Chromium.layerConnect("http://127.0.0.1:9222").pipe(
+  Layer.provide(NodeSocket.layerWebSocketConstructor)
+)
+
+const tidyMyInbox = Effect.scoped(Effect.gen(function*() {
+  const browser = yield* Browser.Browser
+  const context = yield* Browser.newContext()
+  const toolkit = yield* BrowserToolkit.make({
+    context,
+    browser,
+    secrets: {},
+    capture: CapturePolicy.strict
+  })
+  const chat = yield* Chat.fromPrompt(
+    "In my mail tab, archive the newsletters from this week."
+  )
+  while (true) {
+    const turn = yield* chat.generateText({ prompt: [], toolkit })
+    if (turn.toolCalls.length === 0) return turn.text
+  }
+})).pipe(Effect.provide(MyChrome))
+```
