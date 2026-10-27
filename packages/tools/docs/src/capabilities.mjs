@@ -25,9 +25,9 @@ export const capabilities = async (root, out) => {
       id: "chromium",
       label: "Chromium",
       layers: "Chromium.layer, Chromium.layerConnect",
-      // The product Chromium reports, headless or not, as `Browser.getVersion` gives it
-      launched: plain(cdp.capabilities(info("Chrome/155.0.8059.79", "cdp"), "launched")),
-      attached: plain(cdp.capabilities(info("Chrome/155.0.8059.79", "cdp"), "attached"))
+      // The product Chromium reports, headless or not, as `Browser.getVersion` gives it, launched headless as by default
+      launched: plain(cdp.capabilities(info("Chrome/155.0.8059.79", "cdp"), "launched", true)),
+      attached: plain(cdp.capabilities(info("Chrome/155.0.8059.79", "cdp"), "attached", true))
     },
     {
       id: "firefox",

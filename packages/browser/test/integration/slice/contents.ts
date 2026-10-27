@@ -829,6 +829,9 @@ export const contents = (
               if (Exit.isSuccess(printed)) {
                 assert.strictEqual(new TextDecoder().decode(printed.value.subarray(0, 5)), "%PDF-")
               }
+              // A browser that prints says so in its table (QUIRKS.md, Q247)
+              const capabilities = yield* (yield* Browser.Browser).capabilities
+              assert.strictEqual(capabilities.entries.find((each) => each.name === "pdf")?.status, "supported")
               if (name === "Firefox") {
                 assert.deepInclude((reasonOf(headed) as unknown as Page.PageError).reason, {
                   _tag: "Unsupported",

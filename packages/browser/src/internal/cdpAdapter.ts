@@ -586,8 +586,15 @@ const plain = (value: Adapter.RemoteValue): unknown => {
 
 // ── Capabilities ──────────────────────────────────────────────────────────────────────────────────────────
 
-/** The backend's capabilities, for a browser it connected to; the documentation tools read them too. */
-export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptions["ownership"]) => {
+/**
+ * The backend's capabilities, for a browser it connected to; the documentation tools read them too. `headless` is
+ * read from the browser's user agent, `HeadlessChrome`: headless Chromium's product name no longer says so.
+ */
+export const capabilities = (
+  info: Browser.Info,
+  ownership: Adapter.ConnectOptions["ownership"],
+  headless: boolean
+) => {
   const evidence = `CDP adapter static profile, ${info.product}`
   const entry = (
     name: string,
@@ -633,8 +640,8 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("screenshot", "supported"),
       entry(
         "pdf",
-        info.product.includes("Headless") ? "supported" : "unknown",
-        info.product.includes("Headless") ? [] : ["Chrome prints to PDF only when headless"]
+        headless ? "supported" : "unknown",
+        headless ? [] : ["Chrome prints to PDF only when headless"]
       ),
       entry("evaluation.userActivation", "supported"),
       entry("input.insertText", "supported"),
@@ -2459,7 +2466,9 @@ export const connect: (
     // Targets that existed before are attached by now; from here on, new pages were created
     yield* client.root.drainObserved
     attachedAtConnect = false
-    const capabilitySet = yield* SubscriptionRef.make(capabilities(info, options.ownership))
+    const capabilitySet = yield* SubscriptionRef.make(
+      capabilities(info, options.ownership, version.userAgent.includes("HeadlessChrome"))
+    )
 
     // ── Operations ──
 

@@ -107,11 +107,6 @@ What changes when attached:
 
 <BrowserLimits browser="chromium" when="attached" />
 
-<Aside type="note">
-PDF shows as unknown because the headless check doesn't recognize Chromium's current product name. A headless
-launch, the default, prints PDFs.
-</Aside>
-
 ## What's different
 
 **Request events lack `Cookie`.** `NetworkResponse.headers` include `Set-Cookie`, but `NetworkRequest.headers` don't

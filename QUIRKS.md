@@ -725,6 +725,11 @@ An entry with no marker is open.
 - *Reconsider:* recording a partition's top-level origin beside its site, so a backend that keys by origin can restore it at its port.
 - **Resolved** in `8431901`: a storage state records a partitioned origin's top-level origin, and a restore writes it from a page there, so stock WebKit's partition is the one its pages find; a state saved without one is restored at the site's default port.
 
+**Q247. Headless Chromium's product name doesn't say it's headless** (Browser). `Browser.getVersion` reports `product: "Chrome/155.0.8059.79"` headless or headed; only the user agent still says `HeadlessChrome`. The CDP adapter looked for `Headless` in the product to decide whether `pdf` is supported, so every Chromium read `unknown`, though a headless one prints.
+- *Seen:* the documentation site's capability tables, which showed PDF as unknown on Chromium.
+- *We:* read `HeadlessChrome` from the user agent `getVersion` gives: `pdf` is `supported` headless, and `unknown` headed, as Q52 decided.
+- *Reconsider:* whether headed Chrome 155 prints too, which would make `pdf` supported everywhere.
+
 ## Browsers: attaching
 
 **Q136. Headless Chromium takes one URL on its command line** (Browser). A second fails the launch: "Multiple targets are not supported in headless mode". Firefox opens each as a tab.
