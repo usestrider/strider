@@ -229,6 +229,10 @@ describe("Stock WebKit, attached through its remote inspector", () => {
             assert.strictEqual(yield* tab.evaluateInMainWorld(() => document.title), "Refusals")
             const jpeg = reasonOf(yield* Effect.exit(tab.screenshot({ format: { _tag: "Jpeg", quality: 80 } })))
             assert.strictEqual(jpeg?.reason?.capability, "screenshot.format")
+            // Bringing a page forward is refused as an error, not a defect
+            const activated = reasonOf(yield* Effect.exit(tab.activate))
+            assert.strictEqual(activated?._tag, "PageError")
+            assert.strictEqual(activated?.reason?.capability, "emulation.focus")
           }))
         }).pipe(Effect.provide(attach(endpoint)))
       }))

@@ -360,7 +360,7 @@ interface Page extends ReadonlyPage {
   route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError | TargetGone, Scope | R>
   addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, Declaration.DeclarationError | TargetGone, Scope>
   emulate(settings: Emulation.Emulation): Effect<Declaration.Registration, Declaration.DeclarationError | TargetGone, Scope>
-  readonly activate: Effect<void, TargetGone>            // bring to front; rendering-based waits need it
+  readonly activate: Effect<void, PageError | TargetGone> // bring to front; rendering-based waits need it
   close(): Effect<void, TargetGone | Timeout>            // owned teardown: no beforeunload
   close(options: { readonly runBeforeUnload: boolean }): Effect<void, PageError | TargetGone | Timeout>
     // the prompt is decided as any dialog is; a handler's stay fails with CloseCanceled, the page usable;

@@ -359,9 +359,14 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   const onPage = <A, R>(name: string, f: (page: Page.Page) => Effect.Effect<A, unknown, R>) =>
     run(Effect.flatMap(pageNamed(name), f))
   // An action brings its page to the front first: the tools name pages, and a page behind another may not render
-  // (Firefox's background tabs, QUIRKS.md Q71), with no tool to bring it forward
+  // (Firefox's background tabs, QUIRKS.md Q71), with no tool to bring it forward. A backend that can't bring one
+  // forward, as attached stock WebKit can't, acts on it where it is
   const acting = <A, R>(name: string, f: (page: Page.Page) => Effect.Effect<A, unknown, R>) =>
-    onPage(name, (page) => Effect.andThen(page.activate, f(page)))
+    onPage(name, (page) =>
+      Effect.andThen(
+        page.activate.pipe(Effect.catchReason("PageError", "Unsupported", () => Effect.void)),
+        f(page)
+      ))
   const targeted = (page: Page.Page, name: string, target: string) =>
     parseTarget(page, name, target, (each) => Option.fromNullishOr(snapshots.get(each)), (ref) => {
       for (const [each, snapshot] of snapshots) if (snapshot.refs.has(ref as Snapshot.RefId)) return Option.some(each)

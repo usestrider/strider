@@ -1340,7 +1340,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
   - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect.…`
   - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect<InitScript.InitScript, Declaration.DeclarationError | Target.…`
   - `emulate(settings: Emulation.Emulation): Effect.Effect<Declaration.Registration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope>`
-  - `readonly activate: Effect.Effect<void, Target.TargetGone>`
+  - `readonly activate: Effect.Effect<void, PageError | Target.TargetGone>`
   - `close(): Effect.Effect<void, Target.TargetGone | Deadline.Timeout>`
   - `close(options: { readonly runBeforeUnload: boolean }): Effect.Effect<void, PageError | Target.TargetGone | Deadline.Timeout>`
 - `type PageErrorReason = typeof PageErrorReason.Type`

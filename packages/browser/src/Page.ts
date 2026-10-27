@@ -937,6 +937,10 @@ export interface Page extends ReadonlyPage {
    * A page in the background, such as a popup's opener, may render too few frames to act on, and actions on it
    * time out. A context made with `focus: "emulated"` keeps every page rendering instead.
    *
+   * **Gotchas**
+   *
+   * Fails with `Unsupported` on attached WebKit, whose inspector can't bring a page forward (`emulation.focus`).
+   *
    * **Example** (Returning to the opener after a popup)
    *
    * ```ts import.meta.vitest
@@ -952,7 +956,7 @@ export interface Page extends ReadonlyPage {
    * })
    * ```
    */
-  readonly activate: Effect.Effect<void, Target.TargetGone>
+  readonly activate: Effect.Effect<void, PageError | Target.TargetGone>
   /**
    * Closes the page without running `beforeunload`, so no prompt opens.
    *

@@ -471,11 +471,16 @@ export const make = (owner: PageOwner): Page.Page => {
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "Page.emulate" }, settings),
     activate: Effect.gen(function*() {
       const { id } = yield* Operation.record
-      yield* adapter.activatePage(entry.id).pipe(Effect.catch((error) => {
-        const mapped = Operation.fromAdapter(error, id, runtime.backend)
-        // Bringing a page to the front has no failure of its own: anything but its end is a defect
-        return mapped._tag === "Gone" ? Effect.fail(mapped.error) : Effect.die(mapped.reason)
-      }))
+      yield* adapter.activatePage(entry.id).pipe(
+        Effect.catch((error): Effect.Effect<never, Page.PageError | Target.TargetGone> => {
+          const mapped = Operation.fromAdapter(error, id, runtime.backend)
+          if (mapped._tag === "Gone") return Effect.fail(mapped.error)
+          // A backend that can't bring a page forward says so, as attached stock WebKit does; anything else is a defect
+          return mapped.reason._tag === "Unsupported"
+            ? Effect.fail(pageError("Page.activate", mapped.reason, id))
+            : Effect.die(mapped.reason)
+        })
+      )
     }).pipe(Operation.named("Page.activate", { attributes: { "browser.page.id": entry.id } })),
     close: ((options?: { readonly runBeforeUnload: boolean }) => {
       const runBeforeUnload = options?.runBeforeUnload === true
