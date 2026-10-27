@@ -134,3 +134,10 @@ In three steps, each committed and pushed when `pnpm all` and the integration te
 1. The record, the deadline's clock, `bound`, and `act` and `read` moved onto them, with P1's tests and P1 in QUIRKS.md, ours, Resolved (candidates 1 and 4).
 2. Every other operation moved; C2, C3, C4 and `Spans.fn` gone (4).
 3. `Operation` public: the module, its JSDoc, API.md, a call site and the type tests (2 and 3), with the README's Status, CONCEPTS.md §2 and §9, API.md (Testing), and the agent instructions.
+
+## Decision
+
+Adopted, 2026-10-26, with these answers:
+
+1. **A step that times out:** (b), as recommended ("your rec"). What leaves an operation is its own `Timeout`, with the phase, history and hint of the step that ran out, the furthest dispatch of any step, and its steps so far; inside the body, a step's `Timeout` is the step's.
+2. **Operations that are values:** public ("yeah you can expose Operation.named too of course"). `Operation.named(name, options?)` wraps an effect, as `Effect.withSpan` does, and is the primitive; `Operation.fn` is the convenience for helpers that take arguments, documented as its expansion, which principle 22 allows. The library's value members, such as `page.title` and `locator.count`, use `named`.
