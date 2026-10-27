@@ -4,10 +4,16 @@ description: Stock WebKitGTK and WPE on Linux. Launching a MiniBrowser, attachin
 order: 4
 ---
 
+A program written for Chromium can fail on WebKit at launch, without a display or a socket connector, or at an
+operation WebKit refuses, such as `page.evaluate`. Knowing what its layers need, and what to use where it refuses,
+a program written against `Browser` runs on WebKit too.
+
 ## Stock WebKit
 
 Strider drives stock WebKitGTK and WPE, unpatched: WebKit's Automation protocol for pages and input, its inspector
-protocol for the rest. Both are generated from WebKitGTK 2.54.1, and the tests run its MiniBrowser.
+protocol for the rest. WebKitGTK and WPE are WebKit's ports, its builds for Linux desktops and for embedded devices;
+each ships MiniBrowser, a small browser for testing it. Both protocols are generated from WebKitGTK 2.54.1, and the
+tests run its MiniBrowser.
 
 - `WebKit.layer` launches a MiniBrowser and drives it.
 - `WebKit.layerAttach` attaches to a running WebKitGTK or WPE browser, to read, locate, screenshot and navigate. It
@@ -17,14 +23,14 @@ Linux only. Safari on macOS and iOS isn't supported. WPE isn't tested.
 
 ## Launching
 
-`WebKit.layer` takes WebKitGTK's or WPE's MiniBrowser; any other executable fails with `InvalidInput`. It isn't on
-`PATH`: it's under the port's directory, such as `/usr/libexec/webkitgtk-6.0/MiniBrowser`. `npx strider browsers`
-finds it.
+`WebKit.layer` takes WebKitGTK's or WPE's MiniBrowser; any other executable fails with
+[`InvalidInput`](/docs/errors#three-kinds-of-failure). It isn't on `PATH`: it's under the port's directory, such as
+`/usr/libexec/webkitgtk-6.0/MiniBrowser`. [`npx strider browsers`](/docs/installation#a-browser) finds it.
 
 A launch needs:
 
 - **A display.** WebKitGTK has no headless mode: leave `headless` unset, since `headless: true` fails with
-  `InvalidInput`. The window opens on `DISPLAY` or `WAYLAND_DISPLAY`; on a server, use a virtual display such as Xvfb.
+  `InvalidInput`. The window opens on `DISPLAY` or `WAYLAND_DISPLAY`.
 - **A `SocketConnector`,** to reach the browser's inspector over TCP. Make one from Node's sockets:
 
 ```ts
@@ -44,12 +50,21 @@ const WebKitLive = WebKit.layerConfig({
 
 `SocketConnector` is provisional; Effect's own will replace it.
 
+On a server or in CI, run the program under a virtual display:
+
+```sh
+WEBKIT_PATH=/usr/libexec/webkitgtk-6.0/MiniBrowser xvfb-run -a node checkout.ts
+```
+
 Each context is a browser process with its own ephemeral profile, about 0.6 seconds to start. The default context
-is the first tab's. Launch profiles don't apply to WebKit.
+is the first tab's. [Launch profiles](/docs/tools/testing#many-pages-at-once) don't apply to WebKit.
 
 ## Attaching
 
-Start the browser with an inspector server:
+[Attach](/docs/pages/attaching) when the browser is already running, such as a WPE browser on a device, to read,
+screenshot or navigate its pages. To click or type, launch a MiniBrowser with
+`WebKit.layer` instead. Start the browser with an
+inspector server:
 
 ```sh
 WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9333 /usr/libexec/webkitgtk-6.0/MiniBrowser https://example.com
@@ -78,14 +93,16 @@ const menuShows = Effect.scoped(Effect.gen(function*() {
 ```
 
 - The page list is read at connect and every 250 ms, so new pages appear.
-- Every page is observed; `inspect` or `control` gives access for a scope. Pages stay open after the program ends.
-- `browser.info` is `WebKit (stock)`, version `unknown`.
+- Every page is observed; [`inspect` or `control`](/docs/pages/attaching#access-is-typed) gives access for a
+  scope. Pages stay open after the program ends.
+- [`browser.info`](/docs/api/browser/Browser#Browser.info) is `WebKit (stock)`, version `unknown`.
 - `goto` sets `location.href`; a fragment-only change is refused.
 - After a failed load, the error page is `about:blank`, as the failed navigation's document.
 - An `alert` stops the page, unreported, until a person dismisses it.
-- The `strider` command's `--attach` can't reach stock WebKit.
+- A program can't open a new page; the browser's own new pages appear in the list.
+- The `strider` command's [`--attach`](/docs/agents/cli#attaching) can't reach stock WebKit.
 
-There's no input, no dialogs and no new pages. To press a button, run the page's own script:
+To press a button anyway, run the page's own script:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -102,10 +119,10 @@ That runs the button's handlers, without what a real click does first, such as f
 
 ## No isolated worlds
 
-Stock WebKit has no isolated worlds, launched or attached:
+Stock WebKit has no [isolated worlds](/docs/pages/expectations#evaluating-in-the-page), launched or attached:
 
 - `page.evaluate` fails with `Unsupported`. Use `evaluateInMainWorld`, which needs control.
-- Strider's engine and init scripts run in the page's world, where the page's scripts can see them. A page that
+- [Strider's engine](/docs/pages/locators#locators-are-descriptions) and [init scripts](/docs/events/routes#init-scripts) run in the page's world, where the page's scripts can see them. A page that
   replaces the built-ins they use can change what locators find.
 
 ## What WebKit can't do
@@ -125,12 +142,44 @@ What changes when attached:
 ## What's different
 
 **Dialogs are `Dialog.Unknown`,** with their message: WebKit doesn't say which kind is open. `accept` answers as OK,
-a prompt with its default; `dismiss` as Cancel; `respond(text)` answers a prompt.
-
-**`Popup.next` fails with `Unsupported`:** WebKit names no opener. Wait for the new page in the context's `pages`:
+a prompt with its default; `dismiss` as Cancel; `respond(text)` answers a prompt. So a
+[handler](/docs/events/events#dialogs)'s `Confirm` and `Prompt` branches never run here, but keep them, so the same handler
+serves Chromium and Firefox; its `Unknown` branch decides from the message:
 
 ```ts
-import { Page } from "@usestrider/browser"
+import { Dialog, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const deleteAccount = Effect.fn("deleteAccount")(function*(page: Page.Page) {
+  yield* Dialog.handle(page, (dialog) => {
+    switch (dialog._tag) {
+      case "Unknown":
+        if (dialog.message.includes("type DELETE")) {
+          return Effect.succeed(dialog.respond("DELETE"))
+        }
+        return Effect.succeed(
+          dialog.message.includes("delete") ? dialog.accept : dialog.dismiss
+        )
+      case "Confirm":
+        return Effect.succeed(
+          dialog.message.includes("delete") ? dialog.accept : dialog.dismiss
+        )
+      case "Prompt":
+        return Effect.succeed(dialog.respond("DELETE"))
+      case "Alert":
+        return Effect.succeed(dialog.accept)
+      case "BeforeUnload":
+        return Effect.succeed(dialog.leave)
+    }
+  })
+  yield* page.getByRole("button", { name: "Delete account" }).click()
+})
+```
+
+**[`Popup.next`](/docs/events/events#popups) fails with `Unsupported`:** WebKit names no opener. Wait for the new page in the context's `pages`:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
 import { Effect, Equal } from "effect"
 
 const openHelp = Effect.fn("openHelp")(function*(page: Page.Page) {
@@ -139,27 +188,29 @@ const openHelp = Effect.fn("openHelp")(function*(page: Page.Page) {
   const after = yield* page.context.pages.waitFor((pages) =>
     pages.length > before.length
   )
-  return after.find((each) => !before.some((known) => Equal.equals(known, each)))
+  // A context you made holds Pages, so the new one can be acted on
+  const help = after.find((each) => !before.some((known) => Equal.equals(known, each)))
+  if (help === undefined) return
+  yield* help.getByRole("heading", { name: "Help" }).pipe(Expect.toBeVisible)
 })
 ```
 
-**No `back` or `forward`:** WebKit misreports them.
+**No [`back`](/docs/api/browser/Page#Page.back) or [`forward`](/docs/api/browser/Page#Page.forward):** WebKit
+misreports them.
 
 **Little emulation.** The viewport is the window's size. Locale, time zone, user agent, touch and throttling can't
 be emulated.
 
-**Cookies.** A context lists only the cookies its open pages are sent, and a host's cookie is set as its domain's.
+**Cookies.** [`context.cookies`](/docs/pages/contexts#cookies-and-storage) lists only the cookies its open pages are
+sent, and a host's cookie is set as its domain's.
 
-**Requests.** No `Cookie` header, in request events or `headersSent`. Request bodies come as text.
+**Requests.** No `Cookie` header, in request events or
+[`headersSent`](/docs/events/network#the-headers-as-sent). Request bodies come as text.
 
 **Storage is keyed by origin.** A cross-site frame's storage is keyed by its page's origin, port included, so a
-saved storage state restored at another port isn't found.
+[saved storage state](/docs/pages/contexts#logging-in-once) restored at another port isn't found.
 
-**No downloads, file choosers, PDFs or screencasts.** `setInputFiles` works. Screenshots are PNG.
+**No downloads, file choosers, PDFs or screencasts.** [`setInputFiles`](/docs/pages/actions#files) works. Screenshots are PNG.
 
-## The protocols
-
-`@usestrider/browser/webkit-automation-protocol` and `@usestrider/browser/webkit-stock-protocol` are the generated
-protocols, as typed values. No public connection runs them yet.
-
-A rejected command fails with `BackendFailure`; its `cause` is the `ProtocolError`, with WebKit's code and message.
+A rejected command fails with [`BackendFailure`](/docs/errors#three-kinds-of-failure); its `cause` is the
+[`ProtocolError`](/docs/api/browser/protocol/Protocol#ProtocolError), with WebKit's code and message.
