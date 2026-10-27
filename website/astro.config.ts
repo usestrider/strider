@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url"
 process.env["STRIDER_REFERENCE_DATA"] ??= fileURLToPath(new URL("../.data/api-reference/", import.meta.url))
 
 export default defineConfig({
+  site: "https://usestrider.dev",
   trailingSlash: "never",
   devToolbar: { enabled: false },
   markdown: {
