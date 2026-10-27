@@ -281,7 +281,7 @@ export const register = <E, R, P extends Route.Phase>(
         // Each decision has the route's budget from when it starts, not the deadline in force at `route`
         const fiber = yield* FiberSet.run(
           fibers,
-          Effect.provideContext(handler(given).pipe(Operation.deciding(budget)), context)
+          Effect.provideContext(handler(given).pipe(Operation.deciding(owner.operation, budget)), context)
         )
         const exit = yield* Fiber.await(fiber).pipe(BrowserClock.timeoutOn(clock, Duration.toMillis(budget)))
         const described =

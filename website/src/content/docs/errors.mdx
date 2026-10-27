@@ -85,7 +85,7 @@ const pay = Effect.fn("pay")(function*(page: Page.Page) {
 - A nested deadline can only be shorter.
 - `Deadline.withDefaultBudget("1 minute")` changes the default for a program.
 - `Deadline.remaining` reads the time left.
-- Deadlines run on the real clock, even under `TestClock`.
+- A real browser's deadlines run on the real clock, even under `TestClock`; `Browser.layerTest`'s on Effect's.
 
 ## Timeouts
 
@@ -97,6 +97,7 @@ A `Timeout`'s `phase` says how far the operation got:
 | `waitingForCondition`   | found it, but it never became ready: hidden, disabled, covered, moving      |
 | `dispatchedUnconfirmed` | sent the input, but couldn't confirm the result                             |
 | `postcondition`         | acted, and what should follow never did, such as a navigation committing    |
+| `waitingForEvent`       | waited for an event, such as a popup, that never came                       |
 
 Before `dispatchedUnconfirmed`, nothing reached the page and retrying is safe. After it, check the page first:
 
@@ -120,6 +121,34 @@ const submitOnce = Effect.fn("submitOnce")(function*(page: Page.Page) {
 Strider never retries input that may have reached the page. It retries only a gesture it stopped before the page
 saw it, such as a click that would have hit a toast.
 
+## Operations of your own
+
+`Operation.fn` is `Effect.fn` for an operation: the caller of your helper gets one deadline for all of it, and a
+`Timeout` named for it that says how far it got.
+
+```ts
+import { Deadline, Operation, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkout = Operation.fn("checkout")(
+  function*(page: Page.Page, confirmed: Effect.Effect<string>) {
+    yield* page.getByLabel("Card number").fill("4242 4242 4242 4242")
+    yield* page.getByRole("button", { name: "Pay" }).click()
+    return yield* Operation.bound(confirmed)
+  },
+  Deadline.within("20 seconds")
+)
+```
+
+- Each operation inside is a step. If the click runs out of time, the caller gets `checkout`'s `Timeout`, in the
+  click's phase, and `diagnostics.progress` lists `Locator.fill` as `ok`.
+- Inside the body, a step's `Timeout` is still the step's: catching one around the click catches the click's.
+- `Operation.bound` ends a wait of your own at the deadline. Past it, this `Timeout` is in the phase
+  `postcondition`: the click went out, and the confirmation didn't come.
+- `Operation.markSent` notes a side effect of your own, such as a call to your API, and `Operation.observe` notes
+  why the operation isn't done yet. They compile only inside an operation.
+- `Operation.named("cartCount")` makes an effect an operation, as `Effect.withSpan` makes it a span.
+
 ## Failed expectations
 
 `ExpectationFailed` has what was expected, the last value seen and every value seen. When the locator matched
@@ -128,8 +157,8 @@ with similar names.
 
 ## Diagnostics
 
-Every failure carries `diagnostics`: the operation's id and, for an action, whether its input may have reached the
-page, `dispatch`: `NotSent` or `MayHaveBeenSent`.
+Every failure carries `diagnostics`: the operation's id; for an action, whether its input may have reached the
+page, `dispatch`: `NotSent`, `MayHaveBeenSent` or `Acknowledged`; and, for an operation with steps, `progress`.
 
 ```ts
 import { Page } from "@usestrider/browser"

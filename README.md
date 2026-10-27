@@ -86,12 +86,17 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 
 Each user-visible operation has one monotonic deadline covering everything it does: queueing for input, setting up observation, resolving the locator, actionability, dispatch and the postcondition. An explicit `Deadline.within` encloses everything inside it, and nested calls can only shorten it; an operation with no enclosing deadline gets the default budget (30 seconds, `Deadline.withDefaultBudget`). Cleanup gets its own bounded budget. Deadlines run on the clock the browser runs on: a real browser's live clock even inside `TestClock` tests, and Effect's clock for `Browser.layerTest`, whose timeline runs on it, and every option accepts `Duration.Input`.
 
+An operation started inside another is a step of it, and a `Timeout` that leaves an operation is the operation's own,
+in the phase of the step that ran out, with its steps as evidence. A program's own helpers are operations the same
+way, through `Operation.fn` and `Operation.named`: one deadline for the helper, a span named for it, and a `Timeout`
+that says how far it got.
+
 ### Errors
 
 | Family | Tag | Meaning |
 |---|---|---|
 | Lifetime | `TargetGone{target, reason}` | Something the operation needed ended. `reason` is a `CloseReason`: page closed, frame detached, document replaced, connection lost, and so on |
-| Deadline | `Timeout{operation, phase}` | `phase` is `resolving \| waitingForCondition \| dispatchedUnconfirmed \| postcondition` |
+| Deadline | `Timeout{operation, phase}` | `phase` is `resolving \| waitingForCondition \| dispatchedUnconfirmed \| postcondition \| waitingForEvent` |
 | Module | one per module: `LocatorError`, `PageError`, `DownloadError`, `DeclarationError`, `SubscriptionError`, `ResponseError`, `ExpectationFailed`, … | `reason` is a class: the module's own (`StrictViolation`, `NavigationFailed`) or one shared from `Reason` (`InvalidInput`, `NotPermitted{required}`, `Unsupported{capability}`, `BackendFailure`) |
 
 - **Evidence.** Every failure carries the same diagnostic envelope: operation id, dispatch state (`NotSent | MayHaveBeenSent | Acknowledged`), per-step progress, the last observation and cleanup notes. A caller asking "did my click happen?" reads the evidence. Nothing is retried automatically once a mutation may have reached the page.
@@ -136,5 +141,4 @@ Built through all three layers on Chromium (CDP), Firefox (WebDriver BiDi) and s
 - **The packages:** `@usestrider/browser`, with the CLI (`strider`) and the agent toolkit, and `@usestrider/vitest`. Neither is published, and there is no licence yet. `pnpm pack-check` checks what would be published.
 - **Tests:** `pnpm all` runs the checks that need no browser. `pnpm test:integration` runs the adapter conformance suite and the slices in the Nix environment (`flake.nix`), against Chromium 155.0.8059.79, Firefox 158.0 and WebKitGTK 2.54.1. CI runs `pnpm all`, the build and the package check on every push, and the integration tests nightly when `main` has changed, or on demand.
 - **Compared with Playwright:** `pnpm scenarios` runs the same scenarios with both libraries on the same stock Chromium and writes [packages/scenarios/RESULTS.md](packages/scenarios/RESULTS.md).
-- **In progress:** `Operation` as a public module ([reviews/26-operations.md](reviews/26-operations.md), its last step).
 - **Upstream:** drafted reports and proposals for browsers and Effect are in `upstream/`, not yet sent.

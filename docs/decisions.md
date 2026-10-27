@@ -120,6 +120,28 @@ ever shortened. The operation reads the deadline and fails with its own evidence
 interrupted from outside as `Effect.timeout` would. The deadline runs on the clock the browser runs on: the live
 clock for a real browser, even under `TestClock`, and Effect's clock for `Browser.layerTest`.
 
+- **Why the browser's clock.** A real browser is another process, and nobody adjusts the test clock in a browser
+  test, so a deadline on it would never fire: a test whose button was renamed would hang until Vitest stopped it,
+  with none of the evidence the deadline exists to give. `Browser.layerTest`'s timeline runs on Effect's clock, so
+  beside it a live deadline would pass or not by how fast the test ran.
+- **Rejected:** `Effect.timeout` around each operation, which interrupts and loses what the operation knew; and one
+  clock for both, either way round.
+
+**An operation keeps a record, and its `Timeout` comes from it.** An operation notes facts as they happen: what it
+observed, that its input or call may have reached the browser, that the browser confirmed it. Its `Timeout` takes its
+phase from them, by the meanings `Deadline.Timeout` documents, and a wait inside it is bounded in one place, the
+record's. An operation started inside another is a step of it, and adds itself to the enclosing record's `progress`
+when it ends, moving the enclosing dispatch as far as its own went.
+
+- **Why.** With helpers that each operation called by hand, every place an operation could fail chose its phase as
+  a literal, which the compiler couldn't check: an evaluation that may still be running reported `resolving`, as if
+  nothing had happened. Each wait chose its clock, so most waited on the fiber's, which `TestClock` replaces, and
+  `progress` stayed empty on every failure but a launch's.
+- **Rejected:** keeping the helpers with a check on how they map the deadline's failure, since phases would still be
+  chosen by hand; the record as a parameter of the body, which would make the signature differ from `Effect.fn`'s and
+  leave a helper unable to find the operation around it; and new phases for users' operations, since the five say
+  where any operation stops and its steps say the rest.
+
 **Init scripts are ordered, not overridden.** A later script wins only a last-write-wins assignment. It can't undo an
 earlier script's listeners, requests, captured references or clock. So scripts are an explicitly ordered bundle per
 world and document. Removing a script affects future documents only, and nothing that ran is rolled back.
@@ -145,6 +167,23 @@ by phase, `Decision<in P>`. Contravariance gives the same guarantee while keepin
 `Route.fulfill` plain values a handler returns.
 
 **A wait is an `Effect`, not a `Deferred`.** See [conventions.md](conventions.md#a-wait-is-an-effect-not-a-deferred).
+
+**Users' operations are kept as the library's are.** `Operation.fn` and `Operation.named` give a user's helper what a
+click has: one deadline for everything inside, a span named for it, and a `Timeout` that says how far it got. The
+maintainer: "If we add an Operation module, the user should be able to use it too."
+
+- **What leaves an operation is its own `Timeout`.** One a step ran out with keeps the step's phase, history and
+  hint, which are true of the operation too; it takes the operation's name and budget, its steps as `progress`, and
+  the furthest dispatch any step reached. Inside the body, a step's `Timeout` is still the step's. Rejected: the
+  step's `Timeout` unchanged, which says neither that the operation was what timed out nor what it had done.
+- **`named` is the primitive, `fn` the convenience.** Library members that are values, such as `page.title`, need
+  an operation without a function, as `Effect.withSpan` sits beside `Effect.fn`. `fn` is documented as `named`
+  around the body, with its pipeables around that, so a `Deadline.within` among them sets the deadline it reads.
+- **Recording needs the operation.** `markSent`, `observe` and `bound` require `Operation.Current`, which only `fn`
+  and `named` provide, so recording outside an operation doesn't compile, and a helper that records says so in its
+  requirements. The library reads it where it is optional, since its operations also run outside any user's.
+- **Rejected:** keeping the module internal; `Deadline.fn`, since the record is more than a deadline; and a
+  `step(name, effect)` combinator, since a step is an operation and `named` makes one.
 
 ## Agents
 

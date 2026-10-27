@@ -239,11 +239,11 @@ interface ObligationModel {
 
 // ── Access, operations ─────────────────────────────────────
 type Access = "observe" | "inspect" | "control"
-interface OperationRecord {                            // internal; inspected through an Effect
+interface OperationRecord {                            // what Operation.Current holds; written through markSent, observe and bound
   readonly id: OperationId
   readonly state: Ref<{
     dispatch: { _tag: "NotSent" } | { _tag: "MayHaveBeenSent" } | { _tag: "Acknowledged"; result: "ok" | "rejected" }
-    progress: ReadonlyArray<StepEvidence>               // per command: unsent | uncertain | ok | rejected
+    progress: ReadonlyArray<StepEvidence>               // per step, an operation run inside it: unsent | uncertain | ok | rejected
     observation: { _tag: "Pending" } | { _tag: "Observed"; value: unknown } | { _tag: "Unknown"; evidence: Evidence }
     caller: "waiting" | "completed" | "failed" | "interrupted"
     cleanup: { _tag: "NotNeeded" } | { _tag: "Pending" } | { _tag: "Completed" } | { _tag: "Failed"; cause: string }
@@ -482,6 +482,11 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
 ## 9. Operations
 
 - **Interruption and records.** Caller cancellation remains Effect interruption. Each user operation has a record (§2) linked to its span.
+  - Its `Timeout` takes its phase from the record: sent and unconfirmed is `dispatchedUnconfirmed`; sent and confirmed, with what it waits for afterwards missing, `postcondition`; nothing sent and nothing observed but `NoMatch`, `resolving`; nothing sent and something else observed, `waitingForCondition`. An event wait says `waitingForEvent` itself.
+  - An operation started inside another is a step of it. When it ends, it joins the enclosing record's `progress`, and the enclosing dispatch moves as far as its own went; one that sent and succeeded counts as acknowledged, and one repeated in a row is kept once. An event wait awaited inside an operation is a step of it, wherever it subscribed.
+  - A `Timeout` that leaves an operation is its own. One a step ran out with keeps the step's phase, history and hint, and takes the operation's name, budget and record. Inside the operation, the step's is the step's.
+  - Work an operation leaves running is no step of it. A handler's decision is an operation of its own, under the handler's budget from when it starts; a recording's fibers run under no operation's deadline.
+  - A program's own operations are the same, through `Operation.fn` and `Operation.named` (API.md).
   - Dispatch is marked `mayHaveBeenSent` before any boundary where delivery becomes uncertain.
   - Abandoned query ids are tombstoned.
   - Late replies that create resources (pages, contexts, handles, scripts, intercepts) are adopted into their intended owner, or released.

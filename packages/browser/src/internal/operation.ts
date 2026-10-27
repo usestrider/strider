@@ -1,16 +1,19 @@
 /**
  * What every L1 operation shares (CONCEPTS.md §9): an operation id, one deadline captured when it starts, the
  * diagnostic envelope its errors carry, and the mapping of an adapter's failures onto the public reasons. An
- * operation run through `named` keeps a record of what it did, from which its `Timeout` is built.
+ * operation run through `named` keeps a record of what it did, from which its `Timeout` is built, and is provided as
+ * `Operation.Current`, the public module's service, which the library reads where it is optional.
  */
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Deadline from "../Deadline.ts"
 import * as Diagnostics from "../Diagnostics.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
+import * as Operation from "../Operation.ts"
 import * as Reason from "../Reason.ts"
 import * as Target from "../Target.ts"
 import { type AdapterError, now } from "./adapter.ts"
@@ -62,7 +65,7 @@ export const diagnostics = (
   return new Diagnostics.Diagnostics({
     operationId: id,
     dispatch: options.dispatch ?? record?.dispatch ?? { _tag: "NotSent" },
-    progress: options.progress ?? record?.progress ?? [],
+    progress: options.progress ?? (record === undefined ? [] : [...record.progress]),
     lastObserved: options.last ?? Option.fromNullishOr(record?.history.at(-1)),
     cleanup: { _tag: "NotNeeded" }
   })
@@ -131,12 +134,17 @@ export type Phase = Deadline.Timeout["phase"]
 /** The records of the operations running, by id, so an error built by id finds its operation's. */
 const running = new Map<Diagnostics.OperationId, Record>()
 
+/** How far a dispatch got: not sent, then may have been sent, then acknowledged. */
+const reach = (dispatch: Diagnostics.DispatchState): number =>
+  dispatch._tag === "NotSent" ? 0 : dispatch._tag === "MayHaveBeenSent" ? 1 : 2
+
 /**
- * What an operation has done (CONCEPTS.md §2, `OperationRecord`): what it observed, and whether its input or call
- * may have reached the browser. An operation notes facts as they happen, and its `Timeout` takes its phase from
- * them, by the meanings `Deadline.Timeout` documents, instead of each place it can fail choosing one.
+ * What an operation has done (CONCEPTS.md §2, `OperationRecord`): what it observed, whether its input or call may
+ * have reached the browser, and its steps. An operation notes facts as they happen, and its `Timeout` takes its phase
+ * from them, by the meanings `Deadline.Timeout` documents, instead of each place it can fail choosing one.
  */
-export class Record {
+export class Record implements Operation.Operation {
+  readonly "~@usestrider/browser/Operation" = "~@usestrider/browser/Operation" as const
   dispatch: Diagnostics.DispatchState = { _tag: "NotSent" }
   readonly history: Array<Diagnostics.ObservedValue> = []
   readonly progress: Array<Diagnostics.StepEvidence> = []
@@ -177,6 +185,29 @@ export class Record {
   }
 
   /**
+   * Adds `step`, an operation that ran inside this one and has ended, to its steps, and moves its dispatch as far as
+   * the step's went. A step that succeeded after it sent was confirmed by succeeding. Its state is how far it got:
+   * `ok` once it succeeded or the browser confirmed it, otherwise `unsent` or `uncertain` by whether it sent. A step
+   * that repeats the one before it, in name and state, is kept once, as the history keeps observations.
+   */
+  addStep(step: Record, succeeded: boolean): void {
+    const dispatch: Diagnostics.DispatchState = succeeded && step.dispatch._tag === "MayHaveBeenSent"
+      ? { _tag: "Acknowledged", result: "ok" }
+      : step.dispatch
+    if (reach(dispatch) > reach(this.dispatch)) this.dispatch = dispatch
+    const state = succeeded
+      ? "ok"
+      : dispatch._tag === "NotSent"
+      ? "unsent"
+      : dispatch._tag === "MayHaveBeenSent"
+      ? "uncertain"
+      : dispatch.result
+    const previous = this.progress.at(-1)
+    if (previous !== undefined && previous.step === step.name && previous.state === state) return
+    this.progress.push({ step: step.name, state, at: now() })
+  }
+
+  /**
    * Where the operation stopped, from what it recorded: sent and unconfirmed, sent and confirmed with what it waits
    * for afterwards missing, never found (nothing observed, or only `NoMatch`), or found and never ready.
    */
@@ -195,7 +226,7 @@ export class Record {
   diagnostics(): Diagnostics.Diagnostics {
     return diagnostics(this.id, {
       dispatch: this.dispatch,
-      progress: this.progress,
+      progress: [...this.progress],
       last: Option.fromNullishOr(this.history.at(-1))
     })
   }
@@ -218,8 +249,25 @@ export class Record {
   }
 
   /**
+   * The operation's `Timeout` for one a step ran out with: named for this operation, with its budget, its furthest
+   * dispatch and its steps, and the step's phase, history and hint, which say where it stopped.
+   */
+  adopt<T extends Deadline.Timeout>(step: T): T {
+    return new Deadline.Timeout({
+      operation: this.name,
+      phase: step.phase,
+      budget: this.budget.budget,
+      last: step.last,
+      history: step.history,
+      hint: step.hint,
+      diagnostics: this.diagnostics()
+    }) as T
+  }
+
+  /**
    * Waits for `self` no longer than the deadline, on the browser's clock, and fails with the operation's `Timeout`,
-   * its hint taken when it fires.
+   * its hint taken when it fires. The `Timeout` is built once `self` has been interrupted, so a step it was running
+   * is among the steps.
    */
   bound<A, E, R>(
     self: Effect.Effect<A, E, R>,
@@ -227,10 +275,12 @@ export class Record {
     phase?: Phase
   ): Effect.Effect<A, E | Deadline.Timeout, R> {
     return Effect.suspend(() =>
-      Effect.raceFirst(
-        self,
-        Effect.andThen(this.clock.sleep(this.left()), Effect.suspend(() => Effect.fail(this.timeout(hint(), phase))))
-      )
+      Effect.raceFirst(Effect.asSome(self), Effect.as(this.clock.sleep(this.left()), Option.none<A>()))
+    ).pipe(
+      Effect.flatMap(Option.match({
+        onNone: () => Effect.fail(this.timeout(hint(), phase)),
+        onSome: Effect.succeed
+      }))
     )
   }
 }
@@ -238,20 +288,26 @@ export class Record {
 const isNoMatch = (value: unknown): boolean =>
   typeof value === "object" && value !== null && "_tag" in value && value._tag === "NoMatch"
 
-/** The record of the operation running, if any. */
-export const Current: Context.Reference<Option.Option<Record>> = Context.Reference<Option.Option<Record>>(
-  "@usestrider/browser/internal/Operation/Current",
-  { defaultValue: () => Option.none() }
+/** The record of the operation running, if any: `Operation.Current`, which the library reads where it is optional. */
+export const current: Effect.Effect<Option.Option<Record>> = Effect.map(
+  Effect.serviceOption(Operation.Current),
+  Option.filter((each): each is Record => each instanceof Record)
 )
 
 /** The running operation's record. Read outside `named`, it is a bug. */
 export const record: Effect.Effect<Record> = Effect.flatMap(
-  Effect.service(Current),
+  current,
   Option.match({
     onNone: () => Effect.die(new Error("An operation's record was read outside the operation")),
     onSome: Effect.succeed
   })
 )
+
+/** The record `Operation.Current` holds, as the public members read it; one provided by hand is a defect. */
+export const recordOf = (operation: Operation.Operation): Effect.Effect<Record> =>
+  operation instanceof Record
+    ? Effect.succeed(operation)
+    : Effect.die(new Error("Operation.Current holds an operation that Operation.fn or Operation.named didn't start"))
 
 /** A record for an operation starting now: its id, and the deadline in force, on the browser's clock. */
 export const start = (name: string): Effect.Effect<Record> =>
@@ -261,36 +317,60 @@ export const start = (name: string): Effect.Effect<Record> =>
   })
 
 /**
- * Runs `self` as an operation: mints its id, reads its deadline once, gives everything
- * inside that deadline and a record, and opens its span.
+ * Makes `record`'s work, `self`, a step of the operation it runs in, if any: when `self` ends, `record` is added to
+ * that operation's steps. An operation through `named` is one; so is an event wait, awaited where it was subscribed
+ * or later.
  */
-export const named = (name: string, options: Spans.Options = {}) => <A, E, R>(self: Effect.Effect<A, E, R>) =>
-  Effect.gen(function*() {
-    const record = yield* start(name)
-    running.set(record.id, record)
-    return yield* under(Effect.provideService(self, Current, Option.some(record)), record.budget.at).pipe(
-      Effect.ensuring(Effect.sync(() => running.delete(record.id)))
+export const asStep = (record: Record) => <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+  Effect.flatMap(current, (enclosing) =>
+    Option.isNone(enclosing) || enclosing.value === record
+      ? self
+      : Effect.onExit(self, (exit) => Effect.sync(() => enclosing.value.addStep(record, Exit.isSuccess(exit)))))
+
+/**
+ * Runs `self` as an operation: mints its id, reads its deadline once, gives everything inside that deadline and a
+ * record, and opens its span. Inside another operation, it is a step of it. A `Timeout` that leaves it is its own: one
+ * a step ran out with becomes the operation's, with the step's phase, history and hint.
+ */
+export const named =
+  (name: string, options: Spans.Options = {}) =>
+  <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, Operation.Current>> =>
+    Effect.gen(function*() {
+      const record = yield* start(name)
+      running.set(record.id, record)
+      return yield* under(Effect.provideService(self, Operation.Current, record), record.budget.at).pipe(
+        Effect.mapError((error) =>
+          Deadline.isTimeout(error) && error.diagnostics.operationId !== record.id ? record.adopt(error) : error
+        ),
+        Effect.ensuring(Effect.sync(() => running.delete(record.id))),
+        asStep(record)
+      )
+    }).pipe(Spans.operation(name, options))
+
+/**
+ * Runs `self` as a handler's decision: apart from the operation that registered it, as an operation of its own named
+ * `name`, under a deadline of its own, `budget` from when it starts (`Deadline.DefaultBudget` as read at
+ * registration), on the browser's clock.
+ */
+export const deciding =
+  (name: string, budget: Duration.Duration) =>
+  <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, Operation.Current>> =>
+    Effect.flatMap(
+      BrowserClock.after(Duration.toMillis(budget)),
+      (at) =>
+        Effect.flatMap(under(start(name), at), (record) =>
+          under(Effect.provideService(self, Operation.Current, record), at))
     )
-  }).pipe(Spans.operation(name, options))
 
 /**
- * Runs `self` as a handler's decision: apart from the operation that registered it, under a deadline of its own,
- * `budget` from when it starts (`Deadline.DefaultBudget` as read at registration), on the browser's clock.
- */
-export const deciding = (budget: Duration.Duration) => <A, E, R>(self: Effect.Effect<A, E, R>) =>
-  Effect.flatMap(BrowserClock.after(Duration.toMillis(budget)), (at) =>
-    self.pipe(
-      Effect.provideService(Current, Option.none()),
-      Effect.provideService(Deadline.CurrentDeadline, Option.some(at))
-    ))
-
-/**
- * Runs `self` apart from the operation that starts it: work that outlives the operation, such as a handler's fiber
- * or a recording's, reads the deadline in force when it runs, not the operation's, which will have passed.
+ * Runs `self` apart from the operation that starts it: work that outlives the operation, such as a recording's fibers,
+ * reads the deadline in force when it runs, not the operation's, which will have passed, and is no step of it.
  */
 export const detached = <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
   self.pipe(
-    Effect.provideService(Current, Option.none()),
+    Effect.updateContext((context: Context.Context<R>) =>
+      Context.omit(Operation.Current)(context) as Context.Context<R>
+    ),
     Effect.provideService(Deadline.CurrentDeadline, Option.none())
   )
 

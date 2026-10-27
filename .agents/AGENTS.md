@@ -110,7 +110,10 @@ section applies them. Effect's skills in `.repos/effect/.agents/skills` are the 
   phase, and its span, opened through `src/internal/spans.ts` so `SpanNameGenerator`, `TracerDisabledWhen` and the
   diagnostics preset apply to it; name its target with `browser.page.id`, `browser.context.id` or `browser.realm.id`.
   Work it leaves running, such as a handler's or a recording's, starts through `Operation.deciding` or
-  `Operation.detached`, never under the operation's deadline.
+  `Operation.detached`, never under the operation's deadline. An operation run inside another is a step of it, and a
+  `Timeout` that leaves an operation is its own, so never catch a step's `Timeout` to rename it. The public
+  `src/Operation.ts` gives users the same over the internal module; the library reads `Operation.Current` only
+  optionally, through `Operation.record` and `Operation.current`.
 - A deadline, and any wait on the browser, reads the browser's clock (`src/internal/browserClock.ts`), never the
   fiber's `Clock`, which `TestClock` replaces: a real browser's is the live clock, `Browser.layerTest`'s Effect's.
 - Nothing implicit (principle 23): every default is stated with `@default`, and nothing hidden waits or retries.
@@ -137,7 +140,6 @@ Review and fix in a loop: find what's wrong, fix it, check again. Don't write a 
 one. Ask the maintainer in conversation when a change needs their decision. When the work settles a principle or an
 architectural decision, state it in the layer document it belongs to, with its reasons and the alternatives rejected
 in `docs/decisions.md`; what was found wrong along the way stays in the commits and `QUIRKS.md`.
-`reviews/26-operations.md` is left from an earlier practice: delete it once its last step is built.
 Keep the documents at even depth and never cut detail to balance them.
 Playwright and other prior art are evidence of what works, not a template.
 

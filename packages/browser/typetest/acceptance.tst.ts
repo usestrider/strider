@@ -23,6 +23,10 @@ describe("requirements", () => {
   it("history never waits and never subscribes", () => {
     expect<Effect.Services<ReturnType<typeof Acceptance.history>>>().type.toBe<never>()
   })
+
+  it("an operation of your own provides what its body records with", () => {
+    expect<Effect.Services<ReturnType<typeof Acceptance.ownOperation>>>().type.toBe<never>()
+  })
 })
 
 describe("errors", () => {
@@ -33,6 +37,12 @@ describe("errors", () => {
       | Page.PageError
       | Target.TargetGone
       | Deadline.Timeout
+    >()
+  })
+
+  it("an operation of your own fails with its steps' errors, and Timeout", () => {
+    expect<Effect.Error<ReturnType<typeof Acceptance.ownOperation>>>().type.toBe<
+      Locator.LocatorError | Target.TargetGone | Deadline.Timeout
     >()
   })
 })

@@ -57,7 +57,7 @@ export const make = <S, A>(source: Source<S, A>): Watchable.Watchable<A> => {
   const waitFor = Effect.fnUntraced(function*(predicate: Predicate.Predicate<A>) {
     const record = yield* Operation.start(source.operation)
     const hint = () => Option.some("The value never satisfied the predicate; history lists what it was")
-    const outcome = yield* states(source).pipe(
+    return yield* states(source).pipe(
       Stream.mapEffect((state): Effect.Effect<Option.Option<A>, Target.TargetGone | Watchable.Ended> => {
         const value = source.project(state)
         if (Option.isSome(value)) {
@@ -82,10 +82,13 @@ export const make = <S, A>(source: Source<S, A>): Watchable.Watchable<A> => {
       }),
       Stream.filterMap(Filter.fromPredicateOption((found: Option.Option<A>) => found)),
       Stream.runHead,
-      (waiting) => record.bound(waiting, hint, "waitingForCondition")
+      (waiting) => record.bound(waiting, hint, "waitingForCondition"),
+      Effect.flatMap(Option.match({
+        onNone: () => Effect.fail(record.timeout(hint(), "waitingForCondition")),
+        onSome: Effect.succeed
+      })),
+      Operation.asStep(record)
     )
-    if (Option.isSome(outcome)) return outcome.value
-    return yield* Effect.fail(record.timeout(hint(), "waitingForCondition"))
   })
   return Object.assign(Effect.suspend(() => read), {
     "~@usestrider/browser/Watchable": "~@usestrider/browser/Watchable" as const,

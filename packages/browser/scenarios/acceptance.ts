@@ -12,6 +12,7 @@ import {
   Expect,
   NetworkRequest,
   NetworkResponse,
+  Operation,
   Page,
   PageNavigation,
   Popup,
@@ -199,3 +200,11 @@ export const structure = (page: Page.ReadonlyPage) =>
       AriaPattern.including(AriaPattern.node("link", "Orders", AriaPattern.unchecked))
     )
   ))
+
+// 17. An operation of your own: one deadline, and a Timeout named for it that says how far it got
+declare const confirmation: (page: Page.Page) => Effect.Effect<string>
+export const ownOperation = Operation.fn("checkout")(function*(page: Page.Page, card: string) {
+  yield* page.getByLabel("Card number").fill(card)
+  yield* page.getByRole("button", { name: "Pay" }).click()
+  return yield* Operation.bound(confirmation(page)) // past the deadline: Timeout{checkout, postcondition}
+}, Deadline.within("20 seconds"))

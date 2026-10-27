@@ -1219,6 +1219,47 @@ The responses a page or context receives, with their bodies when a subscription 
 - `class BodyUnavailable: Schema.Error { why, hint }`
 - `class MalformedBody: Schema.Error { expected, hint }`
 
+### Operation
+
+Operations of your own, kept as the library keeps its: one deadline for everything inside, and a `Timeout` that says how far the operation got.
+
+*tags*
+
+- `class Current: Context.Service "@usestrider/browser/Operation/Current" {  }`
+
+*models*
+
+- `interface Operation`
+  - `readonly [TypeId]: typeof TypeId`
+  - `readonly name: string`
+  - `readonly id: Diagnostics.OperationId`
+- `interface Options`
+  - `readonly attributes?: Readonly<Record<string, unknown>> | undefined`
+- `interface Fn`
+  - `<Eff extends Effect.Effect<any, any, any>, AEff, Args extends Array<any>>(body: (...args: Args) => Generator<Eff, AEff, never>): (...args: Args) => Run<Eff, AE…`
+  - `<Eff extends Effect.Effect<any, any, any>, AEff, Args extends Array<any>, A>(body: (...args: Args) => Generator<Eff, AEff, never>, a: (_: Run<Eff, AEff>, ...ar…`
+  - `<Eff extends Effect.Effect<any, any, any>, AEff, Args extends Array<any>, A, B>(body: (...args: Args) => Generator<Eff, AEff, never>, a: (_: Run<Eff, AEff>, ..…`
+  - `<Eff extends Effect.Effect<any, any, any>, AEff, Args extends Array<any>, A, B, C>(body: (...args: Args) => Generator<Eff, AEff, never>, a: (_: Run<Eff, AEff>,…`
+  - `<Eff extends Effect.Effect<any, any, any>, AEff, Args extends Array<any>, A, B, C, D>(body: (...args: Args) => Generator<Eff, AEff, never>, a: (_: Run<Eff, AEf…`
+  - `<Eff extends Effect.Effect<any, any, any>, AEff, Args extends Array<any>, A, B, C, D, E>(body: (...args: Args) => Generator<Eff, AEff, never>, a: (_: Run<Eff, …`
+  - `<Eff extends Effect.Effect<any, any, any>, AEff, Args extends Array<any>, A, B, C, D, E, F>(body: (...args: Args) => Generator<Eff, AEff, never>, a: (_: Run<Ef…`
+  - `<Eff extends Effect.Effect<any, any, any>, AEff, Args extends Array<any>, A, B, C, D, E, F, G>(body: (...args: Args) => Generator<Eff, AEff, never>, a: (_: Run…`
+  - `<Eff extends Effect.Effect<any, any, any>, AEff, Args extends Array<any>, A, B, C, D, E, F, G, H>(body: (...args: Args) => Generator<Eff, AEff, never>, a: (_: …`
+  - `<Eff extends Effect.Effect<any, any, any>, AEff, Args extends Array<any>, A, B, C, D, E, F, G, H, I>(body: (...args: Args) => Generator<Eff, AEff, never>, a: (…`
+
+*constructors*
+
+- `const fn: (name: string, options?: Options | undefined) => Fn`
+
+*combinators*
+
+- `const named`
+  - `(name: string, options?: Options | undefined): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, Exclude<R, Current>>`
+  - `<A, E, R>(self: Effect.Effect<A, E, R>, name: string, options?: Options | undefined): Effect.Effect<A, E, Exclude<R, Current>>`
+- `const markSent: Effect.Effect<void, never, Current>`
+- `const observe: (value: unknown) => Effect.Effect<void, never, Current>`
+- `const bound: <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E | Deadline.Timeout, R | Current>`
+
 ### OriginStorage
 
 `localStorage` and `sessionStorage`, for the origin of a page's current document.

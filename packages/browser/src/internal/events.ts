@@ -262,8 +262,9 @@ export const next = <A, B, PE, PR, DE = never>(
       Effect.onInterrupt(() => Deferred.interrupt(deferred)),
       Effect.forkScoped
     )
-    // The read side only: an effect that awaits it, which nothing can complete
-    return Deferred.await(deferred)
+    // The read side only: an effect that awaits it, which nothing can complete. Awaited inside an operation, the
+    // wait is a step of it
+    return Deferred.await(deferred).pipe(Operation.asStep(record))
   })
 
 /**

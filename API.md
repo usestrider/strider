@@ -256,6 +256,18 @@ declare const remaining: Effect<Option<Duration>>       // time left before the 
 declare const CurrentDeadline: Context.Reference<Option<MonotonicInstant>>   // read freely; set only through within
 declare const DefaultBudget: Context.Reference<Duration>   // withDefaultBudget is Effect.provideService on this reference
 
+// Operation: a program's own operations, kept as the library's are
+declare const named: {                                  // the primitive, as Effect.withSpan; dual
+  (name: string, options?: Options | undefined): <A, E, R>(self: Effect<A, E, R>) => Effect<A, E, Exclude<R, Current>>
+}
+declare const fn: (name: string, options?: Options | undefined) => Fn   // Effect.fn's shape: named around the body, the pipeables around that
+declare const markSent: Effect<void, never, Current>    // a side effect of the program's own may have happened
+declare const observe: (value: unknown) => Effect<void, never, Current>   // why it isn't done yet: the Timeout's history
+declare const bound: <A, E, R>(self: Effect<A, E, R>) => Effect<A, E | Deadline.Timeout, R | Current>   // a wait of its own, ended at the deadline
+class Current extends Context.Service<Current, Operation>()("@usestrider/browser/Operation/Current") {}   // provided only by fn and named
+interface Operation { readonly name: string; readonly id: Diagnostics.OperationId }
+interface Options { readonly attributes?: Readonly<Record<string, unknown>> | undefined }   // the span's
+
 // Diagnostics
 declare const withPreset: Dual<"local" | "strict">      // how Redactable values render inside; "strict" unless set
 declare const CurrentPreset: Context.Reference<"local" | "strict">
@@ -307,6 +319,7 @@ interface Emulation {
 }
 ```
 
+- **A program's own operations are kept as the library's are.** `Operation.fn("checkout")` makes each call one operation: it reads the deadline in force once, opens a span named `checkout` (through `Browser.SpanNameGenerator` and `TracerDisabledWhen`, as every library span), and keeps a record. Every library operation inside it, and every operation of the program's, is a step of it: when the step ends, it joins the record's steps, and the record's dispatch moves as far as the step's went, a step that sent and succeeded counting as acknowledged. An event wait awaited inside it is a step too. A `Timeout` that leaves it is its own (Errors as users see them). `markSent`, `observe` and `bound` write the record, and compile only where `Operation.Current` is provided: inside `fn` or `named`, or in a helper that says so in its requirements. A handler's decision runs as an operation of its own, under its budget, never as a step of the operation that registered it. `Browser.Operation` is something else: what `SpanNameGenerator` is given, naming a span's operation.
 - **What a connection controls.** A page it created, or a page in a context it created, is controlled for its life. Any other page is observed: a launched browser's own first tab, an attached browser's tabs, and their popups. `browser.pages` lists every page, as `Page`s or observed pages, and `browser.defaultContext` has `pages`, `workers` and `control`. `inspect` and `control` gain access for the caller's scope; when it closes, what they gave fails with `TargetGone{AccessReleased}`, every member alike (QUIRKS.md, Q143), the declarations made through them are removed, and the page stays open. Controlling a context controls its pages for the same scope; a page's `context`, when its context isn't controlled, refuses with `NotPermitted`. A context the connection didn't create has no dialog policy, so its dialogs wait for a handler or the user.
 - **One concept, two lifetimes.** Creation options are declarations held for the context's whole life, made before its first page; `emulate` and `grant` are the same declarations, scoped. So viewport, locale and timezone live in `Emulation`, not as separate options. `focus: "emulated"` is the focus override, which Firefox lacks.
 - **Overrides restore only what they know.** Removing one restores the previous value when it is known and access permits; precedence is page over context (CONCEPTS.md §7). A field the backend can't apply fails with `Unsupported` naming it.
@@ -1071,7 +1084,7 @@ class TargetGone extends Schema.TaggedError<TargetGone>(TargetGoneTypeId)("Targe
   target: Description, reason: CloseReason, diagnostics: Diagnostics.Diagnostics }) {}
 class Timeout extends Schema.TaggedError<Timeout>(TimeoutTypeId)("Timeout", {
   operation: Schema.String,
-  phase: Schema.Literals(["resolving", "waitingForCondition", "dispatchedUnconfirmed", "postcondition"]),
+  phase: Schema.Literals(["resolving", "waitingForCondition", "dispatchedUnconfirmed", "postcondition", "waitingForEvent"]),
   budget: Schema.Duration,
   last: Schema.Option(Diagnostics.ObservedValue), history: Schema.Array(Diagnostics.ObservedValue),
   hint: Schema.Option(Schema.String), diagnostics: Diagnostics.Diagnostics }) {}
@@ -1085,6 +1098,8 @@ locator.click().pipe(
 ```
 
 `Diagnostics.Diagnostics` is the shared envelope: `operationId`, `dispatch`, `progress`, `lastObserved` and `cleanup`. It is rendered under the active preset (README.md). Because every error is a Schema, the CLI and the agent toolkit encode failures as data, envelope and hint included.
+
+A `Timeout` that leaves an operation is that operation's. One a step ran out with keeps the step's `phase`, `history` and `hint`, which say where it stopped, and takes the operation's `operation`, `budget` and diagnostics: `progress` lists its steps, each `ok`, `unsent`, `uncertain` or `rejected`, and `dispatch` is the furthest any step got. Inside the operation's body, a step's `Timeout` is still the step's, so `Effect.catchTag("Timeout", …)` around a click catches the click's. A wait bounded by `Operation.bound` times out in the phase the record shows: `postcondition` after a step that sent succeeded, `dispatchedUnconfirmed` after `markSent`, `waitingForCondition` after `observe`, otherwise `resolving`.
 
 ## Call sites (acceptance scenarios)
 
@@ -1196,7 +1211,14 @@ yield* page.getByRole("navigation").pipe(Expect.toMatchAria(
   AriaPattern.node("navigation", "Main", AriaPattern.including(
     AriaPattern.node("link", "Orders", AriaPattern.unchecked)))))
 
-// 17+. Input held across steps, frames, cookies, origin storage, emulation, workers, WebSocket frames,
+// 17. An operation of the program's own: one deadline, and a Timeout named for it that says how far it got
+const checkout = Operation.fn("checkout")(function*(page: Page.Page, card: string) {
+  yield* page.getByLabel("Card number").fill(card)
+  yield* page.getByRole("button", { name: "Pay" }).click()
+  return yield* Operation.bound(confirmation(page))   // past the deadline: Timeout{checkout, postcondition}, its steps ok
+}, Deadline.within("20 seconds"))
+
+// 18+. Input held across steps, frames, cookies, origin storage, emulation, workers, WebSocket frames,
 //      reads and handles, tests and the fake browser are in packages/browser/scenarios/areas.ts, type-checked.
 ```
 

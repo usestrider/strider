@@ -195,6 +195,12 @@ export * as NetworkResponse from "./NetworkResponse.ts"
  * @stability unstable
  * @since 0.1.0
  */
+export * as Operation from "./Operation.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
 export * as OriginStorage from "./OriginStorage.ts"
 
 /**

@@ -106,7 +106,10 @@ export const register = <S, P, D, E, R>(
         // Each decision has the handler's budget from when it starts, not the deadline in force at registration
         const fiber = yield* FiberSet.run(
           fibers,
-          Effect.provideContext(options.handler(options.pending(subject)).pipe(Operation.deciding(budget)), context)
+          Effect.provideContext(
+            options.handler(options.pending(subject)).pipe(Operation.deciding(options.name, budget)),
+            context
+          )
         )
         const exit = yield* Fiber.await(fiber).pipe(BrowserClock.timeoutOn(clock, Duration.toMillis(budget)))
         const described = `${options.name}: the handler of ${id} didn't decide the ${options.noun(subject)}`

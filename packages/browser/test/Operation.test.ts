@@ -1,23 +1,24 @@
 /**
- * An operation's record: the `Timeout` takes its phase from what the operation recorded,
- * and a bounded wait ends on the deadline's clock, which `TestClock` doesn't move.
+ * An operation's record: the `Timeout` takes its phase from what the operation recorded, a bounded wait ends on the
+ * deadline's clock, which `TestClock` doesn't move, and an operation inside another is a step of it, whose `Timeout`
+ * leaves as the enclosing operation's.
  */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Deadline, Dialog, Popup } from "@usestrider/browser"
+import { Browser, Deadline, Dialog, Operation, Popup } from "@usestrider/browser"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import { TestClock } from "effect/testing"
-import * as Operation from "../src/internal/operation.ts"
+import * as Internal from "../src/internal/operation.ts"
 
 /** The `Timeout` an operation's record gives after `record` has run on it. */
-const timeoutAfter = (record: (record: Operation.Record) => void) =>
-  Effect.map(Operation.record, (current) => {
+const timeoutAfter = (record: (record: Internal.Record) => void) =>
+  Effect.map(Internal.record, (current) => {
     record(current)
     return current.timeout(Option.none())
-  }).pipe(Operation.named("Test.operation"))
+  }).pipe(Internal.named("Test.operation"))
 
 describe("Operation", () => {
   describe("a record's phase", () => {
@@ -75,8 +76,8 @@ describe("Operation", () => {
   describe("named", () => {
     it.effect("gives everything inside the operation's deadline", () =>
       Effect.gen(function*() {
-        const [record, inside] = yield* Effect.all([Operation.record, Deadline.remaining]).pipe(
-          Operation.named("Test.operation"),
+        const [record, inside] = yield* Effect.all([Internal.record, Deadline.remaining]).pipe(
+          Internal.named("Test.operation"),
           Deadline.withDefaultBudget("2 seconds")
         )
         assert.isTrue(Duration.isLessThanOrEqualTo(record.budget.budget, Duration.seconds(2)))
@@ -85,13 +86,13 @@ describe("Operation", () => {
 
     it.effect("keeps an enclosing deadline", () =>
       Effect.gen(function*() {
-        const record = yield* Operation.record.pipe(Operation.named("Test.operation"), Deadline.within("1 second"))
+        const record = yield* Internal.record.pipe(Internal.named("Test.operation"), Deadline.within("1 second"))
         assert.isTrue(Duration.isLessThanOrEqualTo(record.budget.budget, Duration.seconds(1)))
       }))
 
     it.effect("is the only place a record can be read", () =>
       Effect.gen(function*() {
-        const exit = yield* Effect.exit(Operation.record)
+        const exit = yield* Effect.exit(Internal.record)
         assert.isTrue(Exit.hasDies(exit))
       }))
   })
@@ -102,10 +103,10 @@ describe("Operation", () => {
       Effect.gen(function*() {
         const started = performance.now()
         const timeout = yield* Effect.gen(function*() {
-          const record = yield* Operation.record
+          const record = yield* Internal.record
           record.observe({ _tag: "Covered", by: "div.toast" })
           return yield* record.bound(Effect.never, () => Option.some("covered"))
-        }).pipe(Operation.named("Test.operation"), Deadline.within("200 millis"), Effect.flip)
+        }).pipe(Internal.named("Test.operation"), Deadline.within("200 millis"), Effect.flip)
         const elapsed = performance.now() - started
         assert.isTrue(Deadline.isTimeout(timeout))
         assert.strictEqual(timeout.phase, "waitingForCondition")
@@ -115,12 +116,138 @@ describe("Operation", () => {
 
     it.effect("gives the wait's value when it comes first", () =>
       Effect.gen(function*() {
-        const value = yield* Effect.flatMap(Operation.record, (record) => record.bound(Effect.succeed(1), Option.none))
+        const value = yield* Effect.flatMap(Internal.record, (record) => record.bound(Effect.succeed(1), Option.none))
           .pipe(
-            Operation.named("Test.operation"),
+            Internal.named("Test.operation"),
             Deadline.within("1 second")
           )
         assert.strictEqual(value, 1)
+      }))
+  })
+
+  describe("an operation inside another", () => {
+    /** A step that waits on nothing it can find until the deadline. */
+    const stuck = Effect.gen(function*() {
+      const record = yield* Internal.record
+      record.observe({ _tag: "NoMatch" })
+      return yield* record.bound(Effect.never, () => Option.some("never found"))
+    }).pipe(Operation.named("Test.stuck"))
+
+    /** A step that sends, and succeeds. */
+    const sends = Operation.markSent.pipe(Operation.named("Test.sends"))
+
+    it.effect("leaves with the operation's Timeout, the step's phase, history and hint, and its steps", () =>
+      Effect.gen(function*() {
+        const outer = Operation.fn("Test.outer")(function*() {
+          yield* sends
+          yield* stuck
+        }, Deadline.within("100 millis"))
+        const timeout = yield* Effect.flip(outer())
+        assert.strictEqual(timeout.operation, "Test.outer")
+        assert.strictEqual(timeout.phase, "resolving")
+        assert.deepStrictEqual(timeout.hint, Option.some("never found"))
+        assert.deepStrictEqual(timeout.history.map((each) => each.value), [{ _tag: "NoMatch" }])
+        assert.isTrue(Duration.isLessThanOrEqualTo(timeout.budget, Duration.millis(100)))
+        // The furthest dispatch: the step that sent succeeded, which confirms it
+        assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "Acknowledged", result: "ok" })
+        assert.deepStrictEqual(
+          timeout.diagnostics.progress.map(({ state, step }) => ({ step, state })),
+          [{ step: "Test.sends", state: "ok" }, { step: "Test.stuck", state: "unsent" }]
+        )
+      }))
+
+    it.effect("is still the step's Timeout inside the body", () =>
+      Effect.gen(function*() {
+        const caught = yield* Effect.gen(function*() {
+          return yield* stuck.pipe(Effect.catchTag("Timeout", (timeout) => Effect.succeed(timeout.operation)))
+        }).pipe(Operation.named("Test.outer"), Deadline.within("100 millis"))
+        assert.strictEqual(caught, "Test.stuck")
+      }))
+
+    it.effect("is a step once when it repeats", () =>
+      Effect.gen(function*() {
+        const progress = yield* Effect.gen(function*() {
+          yield* Effect.repeat(Effect.void.pipe(Operation.named("Test.read")), { times: 4 })
+          return (yield* Internal.record).progress
+        }).pipe(Operation.named("Test.outer"))
+        assert.deepStrictEqual(progress.map(({ state, step }) => ({ step, state })), [{
+          step: "Test.read",
+          state: "ok"
+        }])
+      }))
+
+    it.effect("is a step when the operation's own wait interrupts it", () =>
+      Effect.gen(function*() {
+        const timeout = yield* Operation.bound(Effect.never.pipe(Operation.named("Test.never"))).pipe(
+          Operation.named("Test.outer"),
+          Deadline.within("100 millis"),
+          Effect.flip
+        )
+        assert(Deadline.isTimeout(timeout), String(timeout))
+        assert.strictEqual(timeout.operation, "Test.outer")
+        assert.deepStrictEqual(timeout.diagnostics.progress.map(({ step }) => step), ["Test.never"])
+      }))
+  })
+
+  describe("what a body records", () => {
+    it.effect("times out in postcondition after a step that sent and succeeded", () =>
+      Effect.gen(function*() {
+        const timeout = yield* Effect.flip(
+          Operation.fn("Test.pay")(function*() {
+            yield* Operation.markSent.pipe(Operation.named("Test.click"))
+            return yield* Operation.bound(Effect.never)
+          }, Deadline.within("100 millis"))()
+        )
+        assert.strictEqual(timeout.operation, "Test.pay")
+        assert.strictEqual(timeout.phase, "postcondition")
+      }))
+
+    it.effect("times out in dispatchedUnconfirmed after markSent", () =>
+      Effect.gen(function*() {
+        const timeout = yield* Effect.flip(
+          Operation.fn("Test.order")(function*() {
+            yield* Operation.markSent
+            return yield* Operation.bound(Effect.never)
+          }, Deadline.within("100 millis"))()
+        )
+        assert.strictEqual(timeout.phase, "dispatchedUnconfirmed")
+        assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
+      }))
+
+    it.effect("times out in waitingForCondition after observe, with what it observed", () =>
+      Effect.gen(function*() {
+        const timeout = yield* Effect.flip(
+          Operation.fn("Test.shipped")(function*() {
+            yield* Operation.observe("processing")
+            yield* Operation.observe("processing")
+            yield* Operation.observe("packed")
+            return yield* Operation.bound(Effect.never)
+          }, Deadline.within("100 millis"))()
+        )
+        assert.strictEqual(timeout.phase, "waitingForCondition")
+        assert.deepStrictEqual(timeout.history.map((each) => each.value), ["processing", "packed"])
+      }))
+
+    it.effect("passes the call's arguments to the body and the pipeables", () =>
+      Effect.gen(function*() {
+        const add = Operation.fn("Test.add")(
+          function*(a: number, b: number) {
+            return yield* Effect.succeed(a + b)
+          },
+          (effect, a) => Effect.map(effect, (sum) => sum * a)
+        )
+        assert.strictEqual(yield* add(2, 3), 10)
+      }))
+
+    it.effect("dies with an operation provided by hand", () =>
+      Effect.gen(function*() {
+        const forged = {
+          "~@usestrider/browser/Operation": "~@usestrider/browser/Operation" as const,
+          name: "forged",
+          id: "OP0" as Internal.Record["id"]
+        }
+        const exit = yield* Effect.exit(Operation.markSent.pipe(Effect.provideService(Operation.Current, forged)))
+        assert.isTrue(Exit.hasDies(exit))
       }))
   })
 
@@ -128,9 +255,9 @@ describe("Operation", () => {
     it.effect("runs detached with no record and no deadline of the operation's", () =>
       Effect.gen(function*() {
         const [record, deadline] = yield* Effect.all([
-          Effect.service(Operation.Current),
+          Effect.serviceOption(Operation.Current),
           Effect.service(Deadline.CurrentDeadline)
-        ]).pipe(Operation.detached, Operation.named("Test.operation"), Deadline.within("1 second"))
+        ]).pipe(Internal.detached, Internal.named("Test.operation"), Deadline.within("1 second"))
         assert.isTrue(Option.isNone(record))
         assert.isTrue(Option.isNone(deadline))
       }))
@@ -138,8 +265,8 @@ describe("Operation", () => {
     it.effect("decides under a budget of its own, from when it starts", () =>
       Effect.gen(function*() {
         const remaining = yield* Deadline.remaining.pipe(
-          Operation.deciding(Duration.seconds(30)),
-          Operation.named("Test.operation"),
+          Internal.deciding("Test.decision", Duration.seconds(30)),
+          Internal.named("Test.operation"),
           Deadline.within("10 millis")
         )
         assert.isTrue(Option.exists(remaining, (left) => Duration.isGreaterThan(left, Duration.seconds(29))))
@@ -159,6 +286,26 @@ describe("Operation", () => {
         const timeout = yield* Fiber.join(fiber)
         assert(Deadline.isTimeout(timeout), String(timeout))
         assert.strictEqual(timeout.phase, "waitingForEvent")
+      })).pipe(Effect.provide(Browser.layerTest(""))))
+
+    it.effect("makes an event wait awaited inside an operation a step of it", () =>
+      Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const fiber = yield* Effect.forkChild(Effect.flip(
+          Operation.fn("Test.awaitPopup")(function*() {
+            return yield* yield* Popup.next(page)
+          }, Deadline.within("200 millis"))()
+        ))
+        yield* TestClock.adjust("200 millis")
+        const timeout = yield* Fiber.join(fiber)
+        assert(Deadline.isTimeout(timeout), String(timeout))
+        assert.strictEqual(timeout.operation, "Test.awaitPopup")
+        assert.strictEqual(timeout.phase, "waitingForEvent")
+        // Subscribing is one step, and the wait another
+        assert.deepStrictEqual(
+          timeout.diagnostics.progress.map(({ state, step }) => ({ step, state })),
+          [{ step: "Popup.next", state: "ok" }, { step: "Popup.next", state: "unsent" }]
+        )
       })).pipe(Effect.provide(Browser.layerTest(""))))
 
     it.effect("gives a handler its own budget, not the deadline in force when it was registered", () =>
