@@ -4,6 +4,9 @@ description: The packages, a browser, and the layer that launches it.
 order: 1
 ---
 
+A Strider program needs three things it doesn't choose for you: a browser to run, the backend that drives it, and
+the platform services the backend starts it with.
+
 ## The packages
 
 ```sh
@@ -26,6 +29,7 @@ you'd install any program. To find their paths:
 
 ```sh
 npx strider browsers
+npx strider browsers --json
 ```
 
 It lists browsers on your `PATH`, in Chrome's, Edge's and Firefox's install locations, and WebKit's MiniBrowser
@@ -33,8 +37,9 @@ where Linux packages and Nix profiles put it, each with its version. `--json` pr
 
 ## Backends
 
-Each backend is an import, so a program loads only the protocol code it uses. All provide the same `Browser`
-service.
+A backend speaks one browser's protocol and provides the `Browser` service, which `Browser.newPage()` uses. Each is
+an import, so a program loads only the protocol code it uses, and one written against `Browser` runs on any of them
+by changing the layer.
 
 | Import                          | Drives                                                         | Layers                                      |
 | ------------------------------- | -------------------------------------------------------------- | ------------------------------------------- |
@@ -59,7 +64,8 @@ const headed = Chromium.layer({ executablePath: "/usr/bin/chromium", headless: f
 
 ## Paths from configuration
 
-Read each machine's path from its environment with `layerConfig`:
+A path in the code is right on one machine only. `layerConfig` takes each option as a `Config`, so each machine
+reads its own path from its environment:
 
 ```ts
 import { Chromium } from "@usestrider/browser/chromium"
@@ -74,7 +80,8 @@ A missing variable fails the layer with `ConfigError` before anything launches.
 
 ## Platform services
 
-Provide them once, where the program starts:
+A backend's layer starts the browser through Effect's platform services and requires them in its type, so a
+program run without them doesn't compile. Provide them to the backend's layer:
 
 | Backend  | Needs                                                                     |
 | -------- | ------------------------------------------------------------------------- |
@@ -82,6 +89,9 @@ Provide them once, where the program starts:
 | Firefox  | `NodeServices.layer` and `NodeSocket.layerWebSocketConstructor`           |
 | WebKit   | `NodeServices.layer` and a `SocketConnector` ([how](/docs/browsers/webkit#launching)) |
 | Attaching (`layerConnect`, `layerAttach`) | `NodeSocket.layerWebSocketConstructor`   |
+
+On Bun, `BunServices.layer` and `BunSocket.layerWebSocketConstructor`, from `@effect/platform-bun`, take their
+places.
 
 ```ts
 import { NodeServices, NodeSocket } from "@effect/platform-node"
