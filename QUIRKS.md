@@ -943,6 +943,11 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *We:* `strider browsers` never runs a MiniBrowser: its version is read from the path it leads to, where that names one, as a Nix store path does, and is otherwise not reported.
 - *Reconsider:* nothing.
 
+**Q236. Firefox now and then answers neither `browsingContext.startScreencast` nor the navigation sent just after it** (Browser). A trace's native screencast starts Firefox's video in a fiber of its own, so `Trace.record` returns before the reply, and a `goto` at once sends `browsingContext.navigate` while `startScreencast` is pending. Sometimes neither is ever answered.
+- *Seen:* review 26's first step, on Firefox 158: the recordings slice's "records screencast frames" hung in one of two full runs; alone, in 2 of 6 runs with the step, and in 1 of 6 on `main` at `0afd6ec`, without it. Each time the last command sent was `startScreencast` (Q151), and `goto` never returned.
+- *We:* nothing yet; the test hangs until Vitest stops it. `goto`'s deadline doesn't bound the command that starts its navigation (`adapter.navigate`), so it waits past the deadline too; review 26's second step bounds every wait an operation makes.
+- *Reconsider:* what Firefox is doing, from the protocol's messages; and whether `Trace.record` should return once the video has started, so a caller's next command never races it.
+
 ## Ours: workarounds and odd shapes
 
 **Q58. `PromptBlocking` carries the dialog's kind and text, not `Page.Prompt`** (Ours). `Reason` is a leaf module, and importing `Page` into it makes a load cycle.
@@ -1418,3 +1423,8 @@ An entry with no marker is open. Review 21 walked every entry and decided each.
 - *Seen:* review 23's third step: in the second full integration run, and twice in three runs of the test alone just after it; then not in 13 runs alone, nor in 3 at the commit before. Which navigation the third is wasn't caught.
 - *We:* the test's assertion prints the navigations it saw, to say which when it recurs.
 - *Reconsider:* when it recurs: likely Firefox's report of a new tab's first `about:blank`, arriving late.
+
+**Q235. A deadline's waits ran on Effect's clock, which `TestClock` freezes** (Ours). The deadline is a live instant, and the loops that compare against it are live, but the 22 waits it bounded (`Effect.timeoutOption(Operation.millisLeft(at))`) slept on Effect's `Clock`, as did `pressSequentially`'s `delay`. Under `TestClock`, which `it.effect` installs, an event wait, the wait for a page's input permit, a dispatch the browser never answered, or a page that reported no document waited for `TestClock.adjust` instead of timing out. An action whose element never became ready still timed out, since a timer in the page caps each round.
+- *Seen:* review 26, P1: `Popup.next` with a 200 ms deadline on `Browser.layerTest`, under `it.effect`, hadn't failed after a second of real time, and failed once the test clock moved.
+- *We:* a deadline runs on the clock the browser runs on (review 26, candidate 1), read from one reference, live unless set. Since review 26's first step, actions, reads, the runtime's wait for a document and `pressSequentially`'s `delay` use it. The other waits move in its second step, when `Browser.layerTest` also sets Effect's clock, on which its timeline runs.
+- *Reconsider:* nothing, once review 26's second step is built.

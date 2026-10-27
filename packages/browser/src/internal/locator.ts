@@ -551,11 +551,14 @@ export class LocatorImpl implements Locator.Locator {
       options,
       focusChecks,
       { _tag: "Focus" },
-      (_ready, io) =>
+      (_ready, io, record) =>
         Effect.as(
           Effect.forEach(characters, (character, index) =>
             Effect.andThen(
-              index > 0 && Duration.isGreaterThan(delay, Duration.zero) ? Effect.sleep(delay) : Effect.void,
+              // On the deadline's clock, the browser's: Effect's would stop under TestClock (QUIRKS.md, Q235)
+              index > 0 && Duration.isGreaterThan(delay, Duration.zero)
+                ? record.clock.sleep(Duration.toMillis(delay))
+                : Effect.void,
               io.send(
                 Input.type(
                   this.owner.page.inputState,
@@ -589,8 +592,9 @@ export class LocatorImpl implements Locator.Locator {
       options,
       noChecks,
       { _tag: "FileInput" },
-      (_ready, _io, id) =>
+      (_ready, _io, record) =>
         Effect.gen({ self: this }, function*() {
+          const id = record.id
           const given = yield* FileInputImpl.partition(list, "files").pipe(
             Effect.mapError((reason) => this.error("Locator.setInputFiles", reason, id))
           )
@@ -612,13 +616,14 @@ export class LocatorImpl implements Locator.Locator {
             }
             paths.push(path)
           }
-          const budget = yield* Operation.budget
+          const budget = record.budget
           const found = yield* Runtime.element(owner.runtime, owner.page, this.steps, id, budget.at).pipe(
             Effect.mapError((failure) => this.sendFailure("Locator.setInputFiles", failure, id, budget))
           )
           // The input went between the checks and now: check again
           if (found._tag !== "Found") return { retry: { _tag: "NoMatch" } } as const
           if (given._tag === "Made") {
+            record.markSent()
             yield* FileInputImpl.setMade(owner.runtime, found.node, given.files, {
               page: Option.some(owner.page),
               at: budget.at,
@@ -627,15 +632,9 @@ export class LocatorImpl implements Locator.Locator {
               failure._tag === "Gone"
                 ? failure.error
                 : failure._tag === "Deadline"
-                ? Operation.timeout({
-                  operation: "Locator.setInputFiles",
-                  id,
-                  phase: "dispatchedUnconfirmed",
-                  budget: budget.budget,
-                  history: [],
-                  hint: Option.some("The page didn't answer before the deadline; the files may have been set"),
-                  dispatch: { _tag: "MayHaveBeenSent" }
-                })
+                ? record.timeout(
+                  Option.some("The page didn't answer before the deadline; the files may have been set")
+                )
                 : this.error("Locator.setInputFiles", failure.reason, id)
             ))
             return "done" as const
@@ -657,19 +656,19 @@ export class LocatorImpl implements Locator.Locator {
       (state, point, targetPoint) => Input.drag(state, point, targetPoint!, steps, options?.modifiers ?? []),
       {
         target: Effect.suspend(() => to.pointOf(options?.targetPosition)),
-        draggable: (id, io) =>
+        draggable: (record, io) =>
           html === "native"
             // An HTML drag is a capability: Firefox never drops one, and WebKit's protocol can't (review 16, P5)
             ? Effect.as(
               this.requires(
                 "Locator.dragTo",
                 "input.dragAndDrop",
-                id,
+                record.id,
                 `dragTo(target, { html: "synthetic" }) has the page dispatch the drag's events, untrusted`
               ),
               "gesture" as const
             )
-            : Effect.andThen(io.disarm, this.syntheticDrag(to, options, id)),
+            : Effect.andThen(io.disarm, this.syntheticDrag(to, options, record)),
         position: options?.position
       }
     ).pipe(
@@ -685,11 +684,12 @@ export class LocatorImpl implements Locator.Locator {
    * An HTML drag the page dispatches (review 22, candidate 6e): the element and the target resolved now, in one
    * document, and the drag's events sent there from the isolated world, sharing one `DataTransfer` (P3).
    */
-  private syntheticDrag(to: LocatorImpl, options: Locator.DragOptions | undefined, id: Diagnostics.OperationId) {
+  private syntheticDrag(to: LocatorImpl, options: Locator.DragOptions | undefined, record: Operation.Record) {
     const operation = "Locator.dragTo"
     const owner = this.owner
+    const id = record.id
     return Effect.gen({ self: this }, function*() {
-      const budget = yield* Operation.budget
+      const budget = record.budget
       const resolve = (locator: LocatorImpl) =>
         Runtime.element(owner.runtime, owner.page, locator.steps, id, budget.at).pipe(
           Effect.mapError((failure) => this.sendFailure(operation, failure, id, budget)),
@@ -739,6 +739,8 @@ export class LocatorImpl implements Locator.Locator {
           realm,
           2
         )
+        // From here the drag's events may have been sent
+        record.markSent()
         const result = yield* Evaluation.call(owner.runtime, {
           realm,
           functionDeclaration: syntheticDrag.toString(),
@@ -754,15 +756,11 @@ export class LocatorImpl implements Locator.Locator {
         failure._tag === "Gone"
           ? failure.error
           : failure._tag === "Deadline"
-          ? Operation.timeout({
-            operation,
-            id,
-            phase: "dispatchedUnconfirmed",
-            budget: budget.budget,
-            history: [],
-            hint: Option.some("The page didn't answer before the deadline; the drag's events may have been sent"),
-            dispatch: { _tag: "MayHaveBeenSent" }
-          })
+          ? record.timeout(
+            record.dispatch._tag === "MayHaveBeenSent"
+              ? Option.some("The page didn't answer before the deadline; the drag's events may have been sent")
+              : Option.none()
+          )
           : this.error(operation, failure.reason, id)
       ))
       yield* Effect.annotateCurrentSpan("browser.drag.outcome", String(outcome))
@@ -933,16 +931,20 @@ export class LocatorImpl implements Locator.Locator {
   ) {
     return Effect.gen({ self: this }, function*() {
       yield* Access.check(this.owner.grant)
-      const id = Operation.operationId()
-      const budget = yield* Operation.budget
-      const response = yield* Runtime.send(this.owner.runtime, this.owner.page, request, id, budget.at).pipe(
-        Effect.mapError((failure) => this.sendFailure(operation, failure, id, budget, "resolving"))
+      const record = yield* Operation.record
+      const id = record.id
+      const response = yield* Runtime.send(this.owner.runtime, this.owner.page, request, id, record.budget.at).pipe(
+        Effect.mapError((failure) =>
+          failure._tag === "Deadline"
+            ? record.timeout(Option.fromUndefinedOr(failure.hint))
+            : this.sendFailure(operation, failure, id, record.budget)
+        )
       )
       if (response._tag === "InvalidSelector") {
         return yield* Effect.fail(this.invalidSelector(operation, response, id))
       }
       return yield* answer(response, id)
-    }).pipe(Spans.operation(operation, {
+    }).pipe(Operation.named(operation, {
       attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
     }))
   }
@@ -1089,7 +1091,7 @@ export class LocatorImpl implements Locator.Locator {
       readonly target?: Effect.Effect<Option.Option<{ readonly x: number; readonly y: number }>, unknown>
       /** For an HTML drag: send the gesture, or say it was done another way. */
       readonly draggable?: (
-        id: Diagnostics.OperationId,
+        record: Operation.Record,
         io: { readonly disarm: Effect.Effect<Option.Option<string>> }
       ) => Effect.Effect<"gesture" | "done", Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
       readonly position?: Mouse.Point | undefined
@@ -1104,15 +1106,15 @@ export class LocatorImpl implements Locator.Locator {
       options,
       pointerChecks,
       { _tag: "Point", position, guard },
-      (ready, io, id) =>
+      (ready, io, record) =>
         Effect.gen({ self: this }, function*() {
           const state = owner.page.inputState
           // A drag the page dispatches carries its modifiers in its events, which every backend can
-          if (ready.draggable && extra.draggable !== undefined && (yield* extra.draggable(id, io)) === "done") {
+          if (ready.draggable && extra.draggable !== undefined && (yield* extra.draggable(record, io)) === "done") {
             return "done" as const
           }
           if (Input.anyModifier(state, options?.modifiers ?? [])) {
-            yield* this.requires(operation, "input.pointerModifiers", id)
+            yield* this.requires(operation, "input.pointerModifiers", record.id)
           }
           let target: { readonly x: number; readonly y: number } | undefined
           if (extra.target !== undefined) {
@@ -1218,7 +1220,7 @@ export class LocatorImpl implements Locator.Locator {
         /** Removes the guard the round armed: what stopped the gesture, if anything did. */
         readonly disarm: Effect.Effect<Option.Option<string>>
       },
-      id: Diagnostics.OperationId
+      record: Operation.Record
     ) => Effect.Effect<
       "done" | { readonly retry: Engine.NotReady },
       Locator.LocatorError | Target.TargetGone | Deadline.Timeout
@@ -1228,10 +1230,10 @@ export class LocatorImpl implements Locator.Locator {
     const owner = this.owner
     return Effect.gen({ self: this }, function*() {
       yield* Access.check(owner.grant)
-      const id = Operation.operationId()
-      const budget = yield* Operation.budget
+      const record = yield* Operation.record
+      const id = record.id
+      const budget = record.budget
       const checks = checksFor(defaults, options?.checks)
-      const history: Array<Diagnostics.ObservedValue> = []
       const round = (cap: number, apply: boolean) =>
         Runtime.sendRouted(
           owner.runtime,
@@ -1247,41 +1249,27 @@ export class LocatorImpl implements Locator.Locator {
                 : this.sendFailure(operation, failure, id, budget, "waitingForCondition")
             )
           )
-      // Set once input may have reached the page: a timeout after it can't say the action didn't happen
-      let sent = false
-      const timedOut = (noDocument?: string) => {
-        if (sent) {
-          return Operation.timeout({
-            operation,
-            id,
-            phase: "dispatchedUnconfirmed",
-            budget: budget.budget,
-            history,
-            hint: Option.some(
-              "The input was sent and the browser hadn't confirmed it by the deadline; a dialog it opened may still be deciding"
-            ),
-            dispatch: { _tag: "MayHaveBeenSent" }
-          })
+      // The record's phase says where the action stopped; the hint says why, from what it saw
+      const hint = (noDocument?: string): Option.Option<string> => {
+        // Input that may have reached the page: a timeout after it can't say the action didn't happen
+        if (record.dispatch._tag === "MayHaveBeenSent") {
+          return Option.some(
+            "The input was sent and the browser hadn't confirmed it by the deadline; a dialog it opened may still be deciding"
+          )
         }
-        const reasons = history.map((each) => each.value as Engine.NotReady)
+        const reasons = record.history.map((each) => each.value as Engine.NotReady)
         const last = reasons.at(-1)
         // A page that rendered no frame in some rounds and one in others renders too seldom to tell the element
         // is still: what moved is the page's frame rate, which page.activate mends (QUIRKS.md, Q19 and Q71)
         const starved = last?._tag === "NotStable" && reasons.some((reason) => reason._tag === "NoRenderingOpportunity")
-        return Operation.timeout({
-          operation,
-          id,
-          phase: reasons.every((reason) => reason._tag === "NoMatch") ? "resolving" : "waitingForCondition",
-          budget: budget.budget,
-          history,
-          hint: Option.map(
-            Option.fromNullishOr(starved ? { _tag: "NoRenderingOpportunity" } as const : last),
-            (reason) => explain(reason, checks.stable)
-          ).pipe(Option.orElse(() => Option.fromUndefinedOr(noDocument)))
-        })
+        return Option.map(
+          Option.fromNullishOr(starved ? { _tag: "NoRenderingOpportunity" } as const : last),
+          (reason) => explain(reason, checks.stable)
+        ).pipe(Option.orElse(() => Option.fromUndefinedOr(noDocument)))
       }
+      const timedOut = (noDocument?: string) => record.timeout(hint(noDocument))
       const notReady = (reason: Engine.NotReady) => {
-        Operation.appendObservation(history, reason)
+        record.observe(reason)
         return Option.none<Ready>()
       }
       /** A round's answer: ready, with its point in the page's viewport, or not yet. */
@@ -1296,7 +1284,7 @@ export class LocatorImpl implements Locator.Locator {
             case "Final":
               return yield* Effect.fail(this.final(operation, response.final, id))
             case "NotReady":
-              for (const reason of response.history) Operation.appendObservation(history, reason)
+              for (const reason of response.history) record.observe(reason)
               // A round cut short before it checked anything adds nothing to what was seen
               return response.checked ? notReady(response.reason) : Option.none<Ready>()
             case "Ready": {
@@ -1340,7 +1328,7 @@ export class LocatorImpl implements Locator.Locator {
                 id
               ))
             }
-            sent = true
+            record.markSent()
             const frame = ready.routed.hops.at(-1)
             return owner.runtime.model.adapter.dispatchInput(
               owner.page.id,
@@ -1374,7 +1362,7 @@ export class LocatorImpl implements Locator.Locator {
           }
         )
       while (true) {
-        const left = Operation.millisLeft(budget.at)
+        const left = record.left()
         if (left <= 0) return yield* Effect.fail(timedOut())
         const first = yield* round(Math.min(1000, left), false).pipe(
           Effect.flatMap(settle),
@@ -1386,7 +1374,7 @@ export class LocatorImpl implements Locator.Locator {
         // Input to a page is serialized; acquiring the permit takes from the deadline, and the checks run again
         const outcome = yield* owner.page.input.withPermit(Effect.gen({ self: this }, function*() {
           const apply = options?.trial !== true
-          const answer = yield* round(Math.min(1000, Operation.millisLeft(budget.at)), apply).pipe(
+          const answer = yield* round(Math.min(1000, record.left()), apply).pipe(
             Effect.catch((failure) =>
               failure._tag === "Deadline" ? Effect.fail(timedOut(failure.hint)) : Effect.fail(failure)
             )
@@ -1404,21 +1392,18 @@ export class LocatorImpl implements Locator.Locator {
           if (Option.isNone(again)) return "again" as const
           // A trial stops at the last check, holding the permit as the action would
           if (options?.trial === true) return "done" as const
-          const done = yield* perform(again.value.response, { send: send(again.value), disarm }, id)
+          const done = yield* perform(again.value.response, { send: send(again.value), disarm }, record)
           if (done === "done") return "done" as const
           // The guard stopped the gesture before the page saw it: nothing happened, so check again
-          sent = false
-          Operation.appendObservation(history, done.retry)
+          record.markNotSent()
+          record.observe(done.retry)
           return "again" as const
-        })).pipe(
-          Effect.timeoutOption(Operation.millisLeft(budget.at)),
-          Effect.flatMap(Option.match({ onNone: () => Effect.fail(timedOut()), onSome: Effect.succeed }))
-        )
+        })).pipe((permitted) => record.bound(permitted, () => hint()))
         if (outcome === "done") return
       }
     }).pipe(
       Effect.raceFirst(Runtime.pageEnded(owner.page, Operation.operationId())),
-      Spans.operation(operation, {
+      Operation.named(operation, {
         attributes: {
           "browser.locator": this.description,
           "browser.page.id": owner.page.id,

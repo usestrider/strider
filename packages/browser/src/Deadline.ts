@@ -3,7 +3,8 @@
  *
  * An operation inside `within(duration)` shares that deadline with everything else inside, and nesting can
  * only shorten it. An operation with no enclosing deadline gets `DefaultBudget`, counted from when it starts.
- * Deadlines run on the live monotonic clock, even under `TestClock`.
+ * Deadlines run on the clock the browser runs on: for a real browser, the live monotonic clock, even under
+ * `TestClock`.
  *
  * This isn't `Effect.timeout`. An operation reads its remaining budget and fails with its own evidence
  * (`Timeout`, with the phase it reached) instead of being interrupted from outside, so a click that timed
@@ -20,7 +21,7 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Diagnostics from "./Diagnostics.ts"
-import { now } from "./internal/adapter.ts"
+import * as DeadlineClock from "./internal/deadlineClock.ts"
 import type * as MonotonicInstant from "./MonotonicInstant.ts"
 
 /**
@@ -61,9 +62,9 @@ export const within: {
 } = dual(
   2,
   <A, E, R>(self: Effect.Effect<A, E, R>, duration: Duration.Input): Effect.Effect<A, E, R> =>
-    Effect.flatMap(CurrentDeadlineEffect, (enclosing) => {
+    Effect.flatMap(Effect.all([CurrentDeadlineEffect, DeadlineClockEffect]), ([enclosing, clock]) => {
       const own =
-        (now() + Duration.toMillis(Duration.fromInputUnsafe(duration)) * 1e6) as MonotonicInstant.MonotonicInstant
+        (clock.now() + Duration.toMillis(Duration.fromInputUnsafe(duration)) * 1e6) as MonotonicInstant.MonotonicInstant
       const deadline = Option.match(enclosing, { onNone: () => own, onSome: (at) => Math.min(at, own) })
       return Effect.provideService(self, CurrentDeadline, Option.some(deadline as MonotonicInstant.MonotonicInstant))
     })
@@ -101,8 +102,8 @@ export const withDefaultBudget: {
  */
 export const remaining: Effect.Effect<Option.Option<Duration.Duration>> = Effect.suspend(() =>
   Effect.map(
-    CurrentDeadlineEffect,
-    Option.map((at) => Duration.millis(Math.max(0, (at - now()) / 1e6)))
+    Effect.all([CurrentDeadlineEffect, DeadlineClockEffect]),
+    ([enclosing, clock]) => Option.map(enclosing, (at) => Duration.millis(DeadlineClock.millisLeft(clock, at)))
   )
 )
 
@@ -124,6 +125,8 @@ export const CurrentDeadline: Context.Reference<Option.Option<MonotonicInstant.M
   })
 
 const CurrentDeadlineEffect = Effect.service(CurrentDeadline)
+
+const DeadlineClockEffect = Effect.service(DeadlineClock.CurrentClock)
 
 /**
  * Reference to the budget an operation gets when no deadline encloses it; 30 seconds unless set.
