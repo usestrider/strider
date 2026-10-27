@@ -4,6 +4,10 @@ description: A test is a program with a browser layer. Strider adds no fixtures 
 order: 1
 ---
 
+Launching a browser for each test is slow, and tests whose pages share a session leak state into each other.
+Under Vitest, each test is an Effect program on one browser per file, with a fresh context for each page, so the
+steps you wrote for scripts run in tests unchanged.
+
 ## Setting up
 
 Tests run under Vitest with Effect's `@effect/vitest`, and `@usestrider/vitest` connects the two:
@@ -14,15 +18,23 @@ npm install --save-dev vitest @effect/vitest @usestrider/vitest
 
 ## A test is a program
 
-A test opens its page as a script does, with `Browser.newPage()`. The layer launches the backend you give it:
+A test opens its page as a script does, with `Browser.newPage()`. `VitestBrowser.layer` provides the backend you
+give it, unchanged, plus `TestRun`, the running test, which [attaching files](#attaching-files) needs:
 
 ```ts title="checkout.test.ts"
 import { NodeServices } from "@effect/platform-node"
 import { layer } from "@effect/vitest"
-import { Browser, Expect } from "@usestrider/browser"
+import { Browser, Expect, Page } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
 import { VitestBrowser } from "@usestrider/vitest"
 import { Config, Effect, Layer } from "effect"
+
+// A step, as a script would write it
+const addToCart = Effect.fn("addToCart")(function*(page: Page.Page) {
+  yield* page.goto("https://shop.example.com")
+  yield* page.getByRole("button", { name: "Add to cart" }).click()
+  yield* page.getByText("1 item").pipe(Expect.toBeVisible)
+})
 
 const ChromiumLive = Chromium.layerConfig({
   executablePath: Config.String("CHROMIUM_PATH")
@@ -34,15 +46,13 @@ layer(BrowserLive, { excludeTestServices: true })("checkout", (it) => {
   it.effect("adds a product to the cart", () =>
     Effect.gen(function*() {
       const page = yield* Browser.newPage()
-      yield* page.goto("https://shop.example.com")
-      yield* page.getByRole("button", { name: "Add to cart" }).click()
-      yield* page.getByText("1 item").pipe(Expect.toBeVisible)
+      yield* addToCart(page)
     }))
 
   it.effect("empties the cart", () =>
     Effect.gen(function*() {
       const page = yield* Browser.newPage()
-      yield* page.goto("https://shop.example.com/cart")
+      yield* addToCart(page)
       yield* page.getByRole("button", { name: "Empty cart" }).click()
       yield* page.getByText("Your cart is empty").pipe(Expect.toBeVisible)
     }))
@@ -52,96 +62,106 @@ layer(BrowserLive, { excludeTestServices: true })("checkout", (it) => {
 - `layer` builds the layer once per block: the file's tests share one browser. Each `Browser.newPage()` makes a
   fresh context, closed when the test ends.
 - Files run in parallel, each with its own browser.
-- `VitestBrowser.layer` adds `TestRun`, the running test, for attaching files.
 - `excludeTestServices: true` runs tests on the real clock. Without it, an `Effect.sleep` of yours waits on a
   `TestClock` nobody moves. Strider's deadlines use the real clock either way.
-- A failed expectation fails the test with `ExpectationFailed`: what was expected, seen and nearest.
+- A failed expectation fails the test with [`ExpectationFailed`](/docs/errors#failed-expectations): what was
+  expected, seen and nearest.
+- A step that takes a page, such as `addToCart`, runs the same in a test and a script. To sign in once per file,
+  start each test's page from saved storage state ([Logging in once](/docs/pages/contexts#logging-in-once)).
 
-## Steps shared with scripts
+## Many pages at once
 
-A step that takes a page runs the same in a test and a script:
+A browser throttles the timers and rendering of pages in the background and gives focus to one page only, so
+with several pages at once, a background page's actions can time out and `toBeFocused` fails on all but one. Use
+these when a file's tests run concurrently, or a test drives several pages:
 
-```ts
+```ts title="dashboards.test.ts"
 import { NodeServices } from "@effect/platform-node"
 import { layer } from "@effect/vitest"
-import { Browser, Expect, Page } from "@usestrider/browser"
+import { Browser, Expect, LaunchProfile } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
 import { VitestBrowser } from "@usestrider/vitest"
-import { Config, Effect, Layer } from "effect"
+import { Effect, Layer } from "effect"
 
-const signIn = Effect.fn("signIn")(function*(page: Page.Page) {
-  yield* page.goto("https://app.example.com/login")
-  yield* page.getByLabel("Email").fill("ada@example.com")
-  yield* page.getByLabel("Password").fill(yield* Config.Redacted("APP_PASSWORD"))
-  yield* page.getByRole("button", { name: "Sign in" }).click()
-})
+const ChromiumLive = Chromium.layer({
+  executablePath: "/usr/bin/chromium",
+  profile: LaunchProfile.concurrent
+}).pipe(Layer.provide(NodeServices.layer))
+
+const BrowserLive = VitestBrowser.layer(ChromiumLive)
+
+layer(BrowserLive, { concurrent: true, excludeTestServices: true })(
+  "dashboards",
+  (it) => {
+    it.effect("focuses the sales search", () =>
+      Effect.gen(function*() {
+        const page = yield* Browser.newPage({ focus: "emulated" })
+        yield* page.goto("https://app.example.com/sales")
+        yield* page.getByRole("searchbox").pipe(Expect.toBeFocused)
+      }))
+
+    it.effect("focuses the stock search", () =>
+      Effect.gen(function*() {
+        const page = yield* Browser.newPage({ focus: "emulated" })
+        yield* page.goto("https://app.example.com/stock")
+        yield* page.getByRole("searchbox").pipe(Expect.toBeFocused)
+      }))
+  }
+)
+```
+
+- `LaunchProfile.concurrent` turns off throttling of background timers and renderers.
+- `focus: "emulated"` makes every page behave as if focused.
+- `concurrent: true` runs the file's tests at once, on its one browser.
+- Pages can tell both apart from a normal browser, so neither is a default.
+
+## Attaching files
+
+A trace written to disk isn't tied to the test that made it, so finding a failed test's trace means matching file
+names by hand. `TestRun`, which `VitestBrowser.layer` provides, attaches a file to the running test as a Vitest
+artifact, kept with its result: `run.attach` takes the file's kind, `"Trace"`, `"Har"` or `"Screenshot"`, and its
+path, such as a [trace](/docs/tools/recordings#traces)'s:
+
+```ts title="cart.test.ts"
+import { NodeServices } from "@effect/platform-node"
+import { layer } from "@effect/vitest"
+import { Browser, Expect, Trace } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { TestRun } from "@usestrider/browser/test"
+import { VitestBrowser } from "@usestrider/vitest"
+import { Config, Effect, Layer } from "effect"
 
 const ChromiumLive = Chromium.layerConfig({
   executablePath: Config.String("CHROMIUM_PATH")
 }).pipe(Layer.provide(NodeServices.layer))
 
-const BrowserLive = VitestBrowser.layer(ChromiumLive)
-
-layer(BrowserLive, { excludeTestServices: true })("account", (it) => {
-  it.effect("greets a signed-in user", () =>
-    Effect.gen(function*() {
-      const page = yield* Browser.newPage()
-      yield* signIn(page)
-      const welcome = page.getByRole("heading", { name: "Welcome, Ada" })
-      yield* welcome.pipe(Expect.toBeVisible)
-    }))
-})
-```
-
-To sign in once per file, start each test's page from saved storage state
-([Logging in once](/docs/pages/contexts#logging-in-once)).
-
-## Many pages at once
-
-For many pages at once in one browser:
-
-```ts
-import { Browser, LaunchProfile } from "@usestrider/browser"
-import { Chromium } from "@usestrider/browser/chromium"
-import { Effect } from "effect"
-
-const BrowserLive = Chromium.layer({
-  executablePath: "/usr/bin/chromium",
-  profile: LaunchProfile.concurrent
-})
-
-const busyPage = Browser.newPage({ focus: "emulated" })
-```
-
-- `LaunchProfile.concurrent` turns off throttling of background timers and renderers.
-- `focus: "emulated"` makes every page behave as if focused.
-- Pages can tell both apart from a normal browser, so neither is a default.
-- Concurrent tests within a file: `layer(BrowserLive, { concurrent: true })`.
-
-## Attaching files
-
-`TestRun` attaches files to the running test as Vitest artifacts, such as a
-[trace](/docs/tools/recordings#traces):
-
-```ts
-import { Browser, Trace } from "@usestrider/browser"
-import { TestRun } from "@usestrider/browser/test"
-import { Effect } from "effect"
-
-const traced = Effect.scoped(Effect.gen(function*() {
-  const page = yield* Browser.newPage()
-  const trace = yield* Trace.record(page, { screenshots: "perAction" })
-  yield* page.goto("https://shop.example.com")
-  yield* page.getByRole("button", { name: "Add to cart" }).click()
-  const path = yield* trace.exportTrace("traces/add-to-cart.zip")
-  const run = yield* TestRun.TestRun
-  yield* run.attach({ _tag: "Trace", path })
-}))
+layer(VitestBrowser.layer(ChromiumLive), { excludeTestServices: true })(
+  "cart",
+  (it) => {
+    it.effect("adds a product to the cart", () =>
+      Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const trace = yield* Trace.record(page, { screenshots: "perAction" })
+        const run = yield* TestRun.TestRun
+        const attachTrace = trace.exportTrace("traces/add-to-cart.zip").pipe(
+          Effect.flatMap((path) => run.attach({ _tag: "Trace", path })),
+          Effect.ignore
+        )
+        // Attached whether the steps pass or fail
+        yield* Effect.gen(function*() {
+          yield* page.goto("https://shop.example.com")
+          yield* page.getByRole("button", { name: "Add to cart" }).click()
+          yield* page.getByText("1 item").pipe(Expect.toBeVisible)
+        }).pipe(Effect.ensuring(attachTrace))
+      }))
+  }
+)
 ```
 
 ## A fake browser for events
 
-`Browser.layerTest` is a fake browser for code about events: waiting for a response, handling a dialog, giving up
+A real browser decides when a response, a dialog or a crash arrives, so a test can't make one come first, or at
+all. `Browser.layerTest` is a fake browser for code about events: waiting for a response, handling a dialog, giving up
 when a page crashes. Its first page plays a timeline on Effect's clock, so under `TestClock` it moves only when the
 test moves it:
 
@@ -168,13 +188,52 @@ it.effect("sees the cart's response before the page commits", () =>
 | Token          | Means                                              |
 | -------------- | -------------------------------------------------- |
 | `-`            | 10 ms                                              |
-| `resp(name)`   | a response to `https://example.test/name`          |
+| `resp(name)`   | a 200 response to `https://example.test/name`     |
 | `commit`       | a document commits at `https://example.test/`      |
 | `load`         | the document finishes loading                      |
-| `dialog(kind)` | a dialog opens                                     |
+| `dialog(kind)` | a dialog opens: `alert`, `confirm`, `prompt` or `beforeunload` |
 | `popup`        | a popup opens                                      |
 | `crash`, `\|`  | the page crashes, or its script closes it          |
 
 - Its events go through the same code as a real browser's.
-- It has no DOM: locators fail with `Unsupported`.
+- It has no DOM: locators fail with [`Unsupported`](/docs/errors#three-kinds-of-failure).
 - It's experimental.
+
+A dialog on the timeline is decided as any dialog is, and a crash ends what was waiting on the page. Here a step
+of yours accepts the page's "Restore your saved cart?" confirm and reads the cart, or gives up when the page
+crashes:
+
+```ts
+import { assert, it } from "@effect/vitest"
+import {
+  AutoResolution,
+  Browser,
+  Dialog,
+  NetworkResponse,
+  Page
+} from "@usestrider/browser"
+import { Effect, Fiber, Option } from "effect"
+import { TestClock } from "effect/testing"
+
+const restoreCart = Effect.fn("restoreCart")(function*(page: Page.Page) {
+  yield* Dialog.handle(page, Dialog.acceptAll) // the restore confirm
+  const cart = yield* NetworkResponse.next(page, { url: "https://example.test/cart" })
+  return yield* cart.pipe(
+    Effect.map((response) => Option.some(response.status)),
+    Effect.catchTag("TargetGone", () => Effect.succeedNone)
+  )
+})
+
+it.effect("gives up on the cart when the page crashes", () =>
+  Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const status = yield* Effect.forkChild(restoreCart(page))
+    yield* TestClock.adjust("40 millis")
+    assert.isTrue(Option.isNone(yield* Fiber.join(status)))
+    const decidedByDefault = yield* AutoResolution.history(page, { subject: "Dialog" })
+    assert.strictEqual(decidedByDefault.entries.length, 0)
+  }).pipe(Effect.provide(Browser.layerTest("--dialog(confirm)--crash"))))
+```
+
+Provide the fake to each test rather than through `layer`, so each test's first page plays its timeline from the
+start, on the `TestClock` that `it.effect` gives it.
