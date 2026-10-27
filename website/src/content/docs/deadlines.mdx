@@ -9,8 +9,9 @@ you meant. So each operation has one deadline, and a `Timeout` that says how far
 
 ## Setting a deadline
 
-An operation has one deadline for everything it does, from waiting its turn at the page's input to confirming the
-result. Without one around it, it gets the default budget, 30 seconds.
+An operation is one call of Strider's, such as a click, a navigation or an expectation; one that runs inside
+another is a step of it. An operation has one deadline for everything it does, from waiting its turn at the page's
+input to confirming the result. Without one around it, it gets the default budget, 30 seconds.
 
 `Deadline.within` sets one deadline for everything inside, shared rather than per step:
 
@@ -24,12 +25,44 @@ const pay = Effect.fn("pay")(function*(page: Page.Page) {
 }, Deadline.within("5 seconds"))
 ```
 
-- Every command an operation sends waits for its reply until the deadline, a cookie read or a declaration as much
-  as a click.
+- Every command an operation sends waits for its reply until the deadline, a cookie read or adding a
+  [route](/docs/events/routes) as much as a click.
 - A nested deadline can only be shorter.
-- `Deadline.withDefaultBudget("1 minute")` changes the default for a program.
-- `Deadline.remaining` reads the time left.
-- A real browser's deadlines run on the real clock, even under `TestClock`; `Browser.layerTest`'s on Effect's.
+- A real browser's deadlines run on the real clock, even under `TestClock`;
+  [`Browser.layerTest`](/docs/tools/testing)'s on Effect's.
+
+When several steps can each take longer than 30 seconds, `Deadline.withDefaultBudget` raises the default rather
+than sharing one total: each operation inside gets the whole budget from when it starts. A deadline from `within`
+still wins:
+
+```ts
+import { Deadline, Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const nightlyReport = Effect.fn("nightlyReport")(function*(page: Page.Page) {
+  yield* page.goto("https://app.example.com/reports/nightly")
+  yield* page.getByRole("button", { name: "Generate" }).click()
+  yield* page.getByText("Report ready").pipe(Expect.toBeVisible)
+  yield* page.getByRole("button", { name: "Export" }).click()
+  yield* page.getByText("Export ready").pipe(Expect.toBeVisible)
+}, Deadline.withDefaultBudget("2 minutes"))
+```
+
+`Deadline.remaining` reads the time left before the deadline around it, so an optional step can be left out when
+time is short. Outside `Deadline.within` and any operation, it's `None`:
+
+```ts
+import { Deadline, Page } from "@usestrider/browser"
+import { Duration, Effect, Option } from "effect"
+
+const placeOrder = Effect.fn("placeOrder")(function*(page: Page.Page) {
+  yield* page.getByRole("button", { name: "Place order" }).click()
+  const left = yield* Deadline.remaining
+  if (Option.exists(left, Duration.isGreaterThan(Duration.seconds(5)))) {
+    yield* page.getByRole("link", { name: "Download receipt" }).click()
+  }
+}, Deadline.within("20 seconds"))
+```
 
 ## Timeouts
 
@@ -67,12 +100,13 @@ saw it, such as a click that would have hit a toast.
 
 ## Operations of your own
 
-`Operation.fn` is `Effect.fn` for an operation: the caller of your helper gets one deadline for all of it, and a
-`Timeout` named for it that says how far it got.
+With `Effect.fn`, a timeout inside your helper is the step's own, such as the click's, and says nothing of the
+steps before it. `Operation.fn` gives the caller one `Timeout`, named for the helper, whose `diagnostics.progress`
+lists each step:
 
 ```ts
 import { Deadline, Operation, Page } from "@usestrider/browser"
-import { Effect } from "effect"
+import { Console, Effect } from "effect"
 
 const checkout = Operation.fn("checkout")(
   function*(page: Page.Page, confirmed: Effect.Effect<string>) {
@@ -82,13 +116,80 @@ const checkout = Operation.fn("checkout")(
   },
   Deadline.within("20 seconds")
 )
+
+const logSteps = (timeout: Deadline.Timeout) =>
+  Effect.forEach(
+    timeout.diagnostics.progress,
+    (step) => Console.error(`${timeout.operation} › ${step.step}: ${step.state}`)
+  )
+
+const pay = Effect.fn("pay")(
+  function*(page: Page.Page, confirmed: Effect.Effect<string>) {
+    return yield* checkout(page, confirmed).pipe(
+      Effect.tapErrorTag("Timeout", logSteps)
+    )
+  }
+)
 ```
 
 - Each operation inside is a step. If the click runs out of time, the caller gets `checkout`'s `Timeout`, in the
   click's phase, and `diagnostics.progress` lists `Locator.fill` as `ok`.
 - Inside the body, a step's `Timeout` is still the step's: catching one around the click catches the click's.
-- `Operation.bound` ends a wait of your own at the deadline. Past it, this `Timeout` is in the phase
-  `postcondition`: the click went out, and the confirmation didn't come.
-- `Operation.markSent` notes a side effect of your own, such as a call to your API, and `Operation.observe` notes
-  why the operation isn't done yet. They compile only inside an operation.
-- `Operation.named("cartCount")` makes an effect an operation, as `Effect.withSpan` makes it a span.
+- A wait of your own, such as `confirmed`, isn't one of Strider's, so nothing would end it at the deadline;
+  `Operation.bound` does. Past it, this `Timeout` is in the phase `postcondition`: the click went out, and the
+  confirmation didn't come.
+
+A side effect of your own, such as a call to your shop's API, is invisible to Strider. `Operation.markSent` notes
+that one may have happened, so a `Timeout` from then is in the phase `dispatchedUnconfirmed` and the caller knows
+not to repeat it blindly. `Operation.observe` notes why the operation isn't done yet, and the `Timeout`'s `history`
+lists what it noted. Both compile only inside an operation:
+
+```ts
+import { Deadline, Operation } from "@usestrider/browser"
+import { Console, Effect } from "effect"
+
+const placeOrder = Operation.fn("placeOrder")(
+  function*(
+    submit: Effect.Effect<string>,
+    status: (id: string) => Effect.Effect<string>
+  ) {
+    yield* Operation.markSent
+    const orderId = yield* Operation.bound(submit)
+    return yield* Operation.bound(Effect.gen(function*() {
+      while (true) {
+        const current = yield* status(orderId)
+        if (current === "confirmed") return orderId
+        yield* Operation.observe(current)
+        yield* Effect.sleep("1 second")
+      }
+    }))
+  },
+  Deadline.within("1 minute")
+)
+
+const logStatuses = (timeout: Deadline.Timeout) =>
+  Console.error(timeout.operation, timeout.history.map((seen) => seen.value))
+
+const order = (
+  submit: Effect.Effect<string>,
+  status: (id: string) => Effect.Effect<string>
+) => placeOrder(submit, status).pipe(Effect.tapErrorTag("Timeout", logStatuses))
+```
+
+`Operation.named` does for an effect what `Operation.fn` does for a function, to name part of a program without
+making it a function: the caller's `Timeout` is named for it and lists its steps.
+
+```ts
+import { Deadline, Expect, Operation, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkout = Effect.fn("checkout")(function*(page: Page.Page, coupon: string) {
+  const applyCoupon = Effect.gen(function*() {
+    yield* page.getByLabel("Coupon").fill(coupon)
+    yield* page.getByRole("button", { name: "Apply" }).click()
+    yield* page.getByText("Coupon applied").pipe(Expect.toBeVisible)
+  })
+  yield* applyCoupon.pipe(Operation.named("applyCoupon"), Deadline.within("10 seconds"))
+  yield* page.getByRole("button", { name: "Place order" }).click()
+})
+```
