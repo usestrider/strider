@@ -16,7 +16,7 @@ whatever tracer Effect has: `effect/observability` exports OTLP, and Effect's De
 
 ```ts
 import { NodeHttpClient } from "@effect/platform-node"
-import { Browser, Page } from "@usestrider/browser"
+import { Page } from "@usestrider/browser"
 import { Effect, Layer } from "effect"
 import { DevTools } from "effect/devtools"
 import { Otlp, OtlpSerialization } from "effect/observability"
@@ -34,11 +34,10 @@ const addToCart = Effect.fn("addToCart")(function*(page: Page.Page) {
   yield* page.getByRole("button", { name: "Add to cart" }).click()
 })
 
-const traced = Effect.scoped(Effect.gen(function*() {
-  const page = yield* Browser.newPage()
+const traced = Effect.fn("traced")(function*(page: Page.Page) {
   yield* page.goto("https://shop.example.com")
   yield* addToCart(page)
-})).pipe(Effect.provide(Tracing))
+}, Effect.provide(Tracing))
 ```
 
 ## Traces
@@ -48,11 +47,10 @@ const traced = Effect.scoped(Effect.gen(function*() {
 output and errors, and optionally screenshots, network and DOM snapshots.
 
 ```ts
-import { Browser, Trace } from "@usestrider/browser"
+import { Page, Trace } from "@usestrider/browser"
 import { Effect } from "effect"
 
-const recorded = Effect.scoped(Effect.gen(function*() {
-  const page = yield* Browser.newPage()
+const recorded = Effect.fn("recorded")(function*(page: Page.Page) {
   const trace = yield* Trace.record(page, {
     screenshots: "perAction",
     screencast: { polled: "250 millis" },
@@ -63,7 +61,7 @@ const recorded = Effect.scoped(Effect.gen(function*() {
   yield* page.getByRole("button", { name: "Add to cart" }).click()
   yield* page.getByRole("link", { name: "Cart" }).click()
   yield* trace.exportTrace("traces/cart.zip")
-}))
+}, Effect.scoped)
 ```
 
 Each capture is opt-in:
@@ -90,11 +88,10 @@ same requests in later runs. `Har.record` records a page's or context's requests
 hop. `content`, required, says where bodies go:
 
 ```ts
-import { Browser, Har, NetworkResponse } from "@usestrider/browser"
+import { Har, NetworkResponse, Page } from "@usestrider/browser"
 import { Effect } from "effect"
 
-const apiFixture = Effect.scoped(Effect.gen(function*() {
-  const page = yield* Browser.newPage()
+const apiFixture = Effect.fn("apiFixture")(function*(page: Page.Page) {
   const har = yield* Har.record(page, {
     content: "embed",
     url: "**/api/**",
@@ -109,7 +106,7 @@ const apiFixture = Effect.scoped(Effect.gen(function*() {
   yield* added
   yield* Effect.log(`${yield* har.entries} API calls recorded`)
   yield* har.exportHar("fixtures/api.har", { include: ["requestBodies"] })
-}))
+}, Effect.scoped)
 ```
 
 | `content`  | Bodies                                                                 |
