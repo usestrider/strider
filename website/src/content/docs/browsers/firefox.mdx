@@ -1,6 +1,6 @@
 ---
 title: Firefox
-description: Firefox over WebDriver BiDi. Launching, the one-session rule for attaching, other BiDi endpoints, and what Firefox can't do.
+description: Firefox over WebDriver BiDi, launching it, pages as windows, attaching through its one session, what Firefox can't do or does differently, other BiDi browsers, and the raw protocol.
 order: 3
 ---
 
@@ -56,7 +56,7 @@ before acting on it, as [Attaching](#attaching) shows. [`focus: "emulated"`](/do
 
 ## Attaching
 
-Attaching works as in [Attached browsers](/docs/pages/attaching), at the remote agent's `ws://` address.
+Attaching works as in [Attached browsers](/docs/pages/attaching), at the remote agent's `ws://` endpoint.
 Firefox takes one client at a time, through a BiDi session, which Strider opens when the layer is built and ends
 when its scope closes.
 
@@ -141,7 +141,7 @@ key.
 it. A drag between documents goes to the first one alone.
 
 **[Routes](/docs/events/routes) do less.** No sending a request to a new URL, no fulfilling at the response phase (changing status and
-headers works), and every abort is `"failed"`. An unanswered authentication challenge is canceled.
+headers works), and every abort is `"failed"`.
 
 **Video, not frames.** [`Capability.Video`](/docs/api/browser/Capability#Video) records a WebM file into the context's downloads
 directory; [`Capability.Screencast`](/docs/api/browser/Capability#Screencast) isn't available. A trace's
@@ -163,7 +163,7 @@ const recordCheckout = Effect.fn("recordCheckout")(function*(page: Page.Page) {
 
 ## Other WebDriver BiDi browsers
 
-`Firefox.layerConnect` expects Firefox. For a BiDi browser on a grid, whose address is already a session URL, use
+`Firefox.layerConnect` expects Firefox. For a BiDi browser on a grid, whose endpoint is already a session URL, use
 `Bidi.layerConnect`: it takes the endpoint as given, with handshake headers such as the grid's token:
 
 ```ts
@@ -191,7 +191,7 @@ Only Firefox is tested:
 
 Use the raw protocol for a BiDi command Strider has no operation for, such as installing a web extension. It needs
 Firefox's one session, so it runs instead of Strider, not beside it. `@usestrider/browser/bidi-protocol` has every
-BiDi command and event as a typed value; `BidiConnection` runs them, at the session address, such as
+BiDi command and event as a typed value; `BidiConnection` runs them, at the session endpoint, such as
 `ws://127.0.0.1:9222/session`:
 
 ```ts
