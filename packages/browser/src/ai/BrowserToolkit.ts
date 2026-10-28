@@ -144,7 +144,9 @@ export interface MakeOptions {
  * - A target is a ref from the page's latest snapshot (`e12`), or `role=button[name="Save"]`, `text="Add to cart"`,
  *   `label=Email`, `testid=cart` or `css=…`; a bad one fails at once.
  * - Each result is the call's outcome and `sinceLast`: navigations, popups, dialogs and who decided them,
- *   downloads, uncaught exceptions, console errors and failed requests since the previous call.
+ *   downloads, uncaught exceptions, console errors and failed requests since the previous call. The capture
+ *   policy's `consoleText` decides the console errors: `"full"` lists them with their text, `"redacted"` without
+ *   it, and `"omitted"`, as `CapturePolicy.strict` has it, leaves them out.
  * - A `%name%` in a parameter becomes the secret's value as the call runs, and results show the value as `%name%`
  *   again.
  * - Waits, routes and dialog handlers end with the scope.
