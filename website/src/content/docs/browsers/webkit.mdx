@@ -82,14 +82,18 @@ const Device = WebKit.layerAttach("http://127.0.0.1:9333").pipe(
   Layer.provide(NodeSocket.layerWebSocketConstructor)
 )
 
-const menuShows = Effect.scoped(Effect.gen(function*() {
-  const [first] = yield* (yield* Browser.Browser).pages
-  if (first === undefined) return
-  const page = yield* first.control
-  yield* page.goto("http://localhost:8080/menu")
-  yield* page.getByRole("heading", { name: "Menu" }).pipe(Expect.toBeVisible)
-  return yield* page.screenshot()
-})).pipe(Effect.provide(Device))
+const menuShows = Effect.fn("menuShows")(
+  function*() {
+    const [first] = yield* (yield* Browser.Browser).pages
+    if (first === undefined) return
+    const page = yield* first.control
+    yield* page.goto("http://localhost:8080/menu")
+    yield* page.getByRole("heading", { name: "Menu" }).pipe(Expect.toBeVisible)
+    return yield* page.screenshot()
+  },
+  Effect.scoped,
+  Effect.provide(Device)
+)
 ```
 
 - The page list is read at connect and every 250 ms, so new pages appear.
