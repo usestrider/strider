@@ -16,7 +16,7 @@ whatever tracer Effect has: `effect/observability` exports OTLP, and Effect's De
 
 ```ts
 import { NodeHttpClient } from "@effect/platform-node"
-import { Page } from "@usestrider/browser"
+import { Browser, Page } from "@usestrider/browser"
 import { Effect, Layer } from "effect"
 import { DevTools } from "effect/devtools"
 import { Otlp, OtlpSerialization } from "effect/observability"
@@ -34,10 +34,11 @@ const addToCart = Effect.fn("addToCart")(function*(page: Page.Page) {
   yield* page.getByRole("button", { name: "Add to cart" }).click()
 })
 
-const traced = Effect.fn("traced")(function*(page: Page.Page) {
+const traced = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage()
   yield* page.goto("https://shop.example.com")
   yield* addToCart(page)
-}, Effect.provide(Tracing))
+})).pipe(Effect.provide(Tracing))
 ```
 
 ## Traces
