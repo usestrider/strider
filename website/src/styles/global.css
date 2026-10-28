@@ -22,6 +22,8 @@
   --ink: #1a1a1a;
   --labels: #5a5750;
   --hairline: #e2ded3;
+  /* The engraving's plate and the cover it's printed on, the same by day and by night */
+  --plate: #e6e3d9;
   --engine-chromium: #1558c8;
   --engine-firefox: #c43e0a;
   --engine-webkit: #0b7a8a;
@@ -545,10 +547,18 @@ body {
   mix-blend-mode: multiply;
 }
 
-/* On night paper the engraving stays ink on paper, a printed plate: muted ivory, so it doesn't glare, with a plate mark
-   drawn as a 1px rule just inside its edge. The engraving multiplies onto the plate, not the page. */
-.dark .plate {
-  background: #e6e3d9;
+/* The cover is the plate's ivory by day and by night, in the day's inks, so it doesn't change when the paper does. On
+   it the engraving's plate shows only its plate mark, a 1px rule just inside its edge; the engraving multiplies onto
+   the plate, not the page. */
+.cover {
+  --ink: #1a1a1a;
+  --labels: #5a5750;
+  background: var(--plate);
+  color: var(--ink);
+}
+
+.plate {
+  background: var(--plate);
   padding: 1.25rem;
   isolation: isolate;
   outline: 1px solid rgb(26 26 26 / 0.22);

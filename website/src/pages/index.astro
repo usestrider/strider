@@ -1,5 +1,6 @@
 ---
-// The cover, which fills the first screen with the band at its foot: the engraving, and the band with what Strider is;
+// The cover, which fills the first screen with the band at its foot: the engraving, and the band with what Strider is,
+// smaller on a phone so the band's heading clears the browser's toolbar;
 // then the contents, and a first example
 import { Image } from "astro:assets"
 import { getCollection } from "astro:content"
@@ -38,10 +39,11 @@ const program = Effect.scoped(Effect.gen(function*() {
   <div class="flex min-h-svh flex-col">
     <SiteHeader />
 
-    <section class="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-6 pt-12 pb-14 text-center">
+    <section class="cover flex flex-1 flex-col">
+      <div class="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-6 pt-6 pb-8 text-center sm:pt-12 sm:pb-14">
       {
         engraving !== undefined && (
-          <div class="plate mx-auto w-[min(26rem,100%)]">
+          <div class="plate mx-auto w-[min(20rem,100%)] sm:w-[min(26rem,100%)]">
           <Image
             class="engraving w-full"
             src={engraving}
@@ -53,7 +55,7 @@ const program = Effect.scoped(Effect.gen(function*() {
           </div>
         )
       }
-      <p class="label mt-6">Browser automation · TypeScript · Effect</p>
+      <p class="label mt-4 sm:mt-6">Browser automation · TypeScript · Effect</p>
       <p class="engines mt-3 flex justify-center gap-6 font-mono text-[0.75rem]" role="group" aria-label="The site's accent color">
         <span id="engine-pick" class="sr-only">Sets the site's accent to this browser's color</span>
         <button class="flex items-center gap-2" type="button" data-pick="chromium" aria-pressed="false" aria-describedby="engine-pick">
@@ -66,11 +68,12 @@ const program = Effect.scoped(Effect.gen(function*() {
           <span class="swatch size-2 bg-[var(--engine-webkit)]"></span>WebKit
         </button>
       </p>
+      </div>
     </section>
 
     <section class="bg-band text-white">
-      <div class="mx-auto max-w-6xl px-6 pt-16 pb-8 md:px-14">
-        <h1 class="max-w-xl font-display text-[2.8rem] leading-[1.08] font-normal sm:text-[3.8rem]">Browser automation, typed end to end.</h1>
+      <div class="mx-auto max-w-6xl px-6 pt-8 pb-8 sm:pt-16 md:px-14">
+        <h1 class="max-w-xl font-display text-[2.4rem] leading-[1.08] font-normal sm:text-[3.8rem]">Browser automation, typed end to end.</h1>
         <p class="mt-5 max-w-lg text-[1.2rem] leading-relaxed">
           Drive Chromium, Firefox and WebKit from TypeScript, with typed errors that say what happened, lifetimes tied to
           scopes, and events you subscribe to before you act.

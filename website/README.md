@@ -26,7 +26,7 @@ After O'Reilly's engineering books: an inked animal, paper and ink, and one band
 are engine labels. Structure is drawn with 1px rules, never shadows, rounded corners or tints. Type is set for reading
 on a screen: EB Garamond for titles, Source Serif 4 for prose at 18px on a 1.65 leading, IBM Plex Sans for navigation
 and labels, and IBM Plex Mono for code, all self-hosted from Fontsource (`astro.config.ts`). Night paper follows the
-reader's system until they choose with the masthead's toggle; on it the engraving stays ink, printed on an ivory plate.
+reader's system until they choose with the masthead's toggle. On either, the cover is the engraving's ivory plate.
 
 | Where                                 | What                                                                                  |
 | ------------------------------------- | ------------------------------------------------------------------------------------- |
