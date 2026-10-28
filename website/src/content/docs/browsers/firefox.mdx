@@ -74,16 +74,20 @@ const Attached = Firefox.layerConnect("ws://127.0.0.1:9222").pipe(
   Layer.provide(NodeSocket.layerWebSocketConstructor)
 )
 
-const archiveFirst = Effect.scoped(Effect.gen(function*() {
-  const browser = yield* Browser.Browser
-  for (const tab of yield* browser.pages) {
-    if ((yield* tab.url).startsWith("https://mail.example.com")) {
-      const mail = yield* tab.control
-      yield* mail.activate
-      yield* mail.getByRole("button", { name: "Archive" }).first.click()
+const archiveFirst = Effect.fn("archiveFirst")(
+  function*() {
+    const browser = yield* Browser.Browser
+    for (const tab of yield* browser.pages) {
+      if ((yield* tab.url).startsWith("https://mail.example.com")) {
+        const mail = yield* tab.control
+        yield* mail.activate
+        yield* mail.getByRole("button", { name: "Archive" }).first.click()
+      }
     }
-  }
-})).pipe(Effect.provide(Attached))
+  },
+  Effect.scoped,
+  Effect.provide(Attached)
+)
 ```
 
 - `/session` is added to an endpoint with no path.
