@@ -121,10 +121,12 @@ import { Effect } from "effect"
 
 // A screenshot is steadier without animations, but can be taken without
 const steadyScreenshot = Effect.fn("steadyScreenshot")(function*(page: Page.Page) {
-  yield* page.emulate({ media: { reducedMotion: "reduce" } }).pipe(
-    Effect.catchReason("DeclarationError", "Unsupported", () => Effect.void)
-  )
-  return yield* page.screenshot()
+  return yield* Effect.scoped(Effect.gen(function*() {
+    yield* page.emulate({ media: { reducedMotion: "reduce" } }).pipe(
+      Effect.catchReason("DeclarationError", "Unsupported", () => Effect.void)
+    )
+    return yield* page.screenshot()
+  }))
 })
 ```
 
