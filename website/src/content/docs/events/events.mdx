@@ -40,9 +40,9 @@ Dialogs and file choosers also have [`handle`](/docs/events/kinds#dialogs):
 | `history` | reads the matches already logged, and never waits                                             |
 | `handle`  | dialogs and file choosers: registers a function that decides each one until its scope closes  |
 
-A filter is data, applied before events are buffered, so the events it rejects never count toward the 1,000 events a
-stream holds for a slow consumer ([Streams](#streams)). `where`, after the filter, adds a predicate for anything a filter can't say: it gets the event and returns an
-`Effect` of a boolean:
+A filter is data, applied before events are buffered, so the events it rejects never count toward the
+[1,000 events a stream holds](#streams) for a slow consumer. `where`, after the filter, adds a predicate for
+anything a filter can't say: it gets the event and returns an `Effect` of a boolean:
 
 ```ts
 import { Download, Page } from "@usestrider/browser"
