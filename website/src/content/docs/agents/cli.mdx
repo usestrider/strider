@@ -4,9 +4,9 @@ description: A command line that drives a live browser from a shell, a script or
 order: 3
 ---
 
-`strider` is the command-line tool that comes with `@usestrider/browser`; in a project, run it as `npx strider`, and
-these examples write `strider`. A program's browser closes when the program ends; `strider` keeps one open in a
-named session between commands, so a shell, a script or an agent can drive it one step at a time.
+A program's browser closes when the program ends. `strider`, the command-line tool that comes with
+`@usestrider/browser`, keeps one open in a named session between commands, so a shell, a script or an agent can
+drive it one step at a time.
 
 ## Commands
 
@@ -53,7 +53,8 @@ filled label=Email on main · 17 ms
   so agents on one machine can't act on each other's tabs.
 - Commands are the toolkit's tools, and answer the same way: the outcome, then what happened since the last
   command.
-- `strider --help` lists the commands, and `strider <command> --help` each one's arguments.
+- In a project, run it as `npx strider`; these examples write `strider`. `strider --help` lists the commands, and
+  `strider <command> --help` each one's arguments.
 
 ## Waits across commands
 
