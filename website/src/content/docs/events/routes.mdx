@@ -174,7 +174,7 @@ with `Layer.provideMerge(NodeServices.layer)` instead of `Layer.provide`, and th
 
 ```ts
 import { NodeServices } from "@effect/platform-node"
-import { Browser, Route } from "@usestrider/browser"
+import { Browser, Page, Route } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
 import { Config, Effect, Layer } from "effect"
 
@@ -182,12 +182,20 @@ const BrowserLive = Chromium.layerConfig({
   executablePath: Config.String("CHROMIUM_PATH")
 }).pipe(Layer.provideMerge(NodeServices.layer))
 
-const fromRecording = Effect.scoped(Effect.gen(function*() {
-  const page = yield* Browser.newPage()
+const fromRecording = Effect.fn("fromRecording")(function*(page: Page.Page) {
   const replay = yield* Route.fromHar("./fixtures/api.har", { notFound: "fallthrough" })
   yield* page.route("https://shop.example.com/api/**", replay)
   yield* page.goto("https://shop.example.com/cart")
-})).pipe(Effect.provide(BrowserLive))
+}, Effect.scoped)
+
+const replayCart = Effect.fn("replayCart")(
+  function*() {
+    const page = yield* Browser.newPage()
+    yield* fromRecording(page)
+  },
+  Effect.scoped,
+  Effect.provide(BrowserLive)
+)
 ```
 
 A request with no entry is aborted, unless `notFound` is `"fallthrough"`, as here, which lets it through to the
