@@ -35,19 +35,25 @@ declare module "../Reason.ts" {
  * **Details**
  *
  * The browser gets a temporary profile, created before it starts and deleted after it exits, unless
- * `userDataDir` names one you own. It exits when the layer's scope closes.
+ * `userDataDir` names one you own. It exits when the layer's scope closes. The layer starts it with the platform's
+ * `ChildProcessSpawner` and `FileSystem`, which `NodeServices.layer` from `@effect/platform-node` provides.
  *
  * **Example** (Launching headless Chromium)
  *
  * ```ts import.meta.vitest
+ * import { NodeServices } from "@effect/platform-node"
  * import { Browser } from "@usestrider/browser"
  * import { Chromium } from "@usestrider/browser/chromium"
- * import { Effect } from "effect"
+ * import { Effect, Layer } from "effect"
+ *
+ * const ChromiumLive = Chromium.layer({ executablePath: "/usr/bin/chromium" }).pipe(
+ *   Layer.provide(NodeServices.layer)
+ * )
  *
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
  *   yield* page.goto("https://example.com")
- * })).pipe(Effect.provide(Chromium.layer({ executablePath: "/usr/bin/chromium" })))
+ * })).pipe(Effect.provide(ChromiumLive))
  * ```
  *
  * @stability unstable
@@ -75,18 +81,19 @@ export const layer = (
  * **Example** (Reading the executable's path from the environment)
  *
  * ```ts import.meta.vitest
+ * import { NodeServices } from "@effect/platform-node"
  * import { Browser } from "@usestrider/browser"
  * import { Chromium } from "@usestrider/browser/chromium"
- * import { Config, Effect } from "effect"
+ * import { Config, Effect, Layer } from "effect"
+ *
+ * const ChromiumLive = Chromium.layerConfig({
+ *   executablePath: Config.String("CHROMIUM_PATH")
+ * }).pipe(Layer.provide(NodeServices.layer))
  *
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
  *   yield* page.goto("https://example.com")
- * })).pipe(
- *   Effect.provide(
- *     Chromium.layerConfig({ executablePath: Config.String("CHROMIUM_PATH") })
- *   )
- * )
+ * })).pipe(Effect.provide(ChromiumLive))
  * ```
  *
  * @see {@link layer}
@@ -112,19 +119,26 @@ export const layerConfig = (
  * (`http://127.0.0.1:9222`), whose `/json/version` names the WebSocket. The pages that were open are observed:
  * `browser.pages` lists them, and `inspect` and `control` give access to one for a scope. `options.headers` go with
  * the handshake and the lookup. Pages and contexts that were already open stay open after the layer's scope closes.
+ * The connection needs a `WebSocketConstructor`, such as `NodeSocket.layerWebSocketConstructor` from
+ * `@effect/platform-node`.
  *
  * **Example** (Inspecting a tab of a browser started with `--remote-debugging-port=9222`)
  *
  * ```ts import.meta.vitest
+ * import { NodeSocket } from "@effect/platform-node"
  * import { Browser } from "@usestrider/browser"
  * import { Chromium } from "@usestrider/browser/chromium"
- * import { Effect } from "effect"
+ * import { Effect, Layer } from "effect"
+ *
+ * const Attached = Chromium.layerConnect("http://127.0.0.1:9222").pipe(
+ *   Layer.provide(NodeSocket.layerWebSocketConstructor)
+ * )
  *
  * const firstHeading = Effect.scoped(Effect.gen(function*() {
  *   const [first] = yield* (yield* Browser.Browser).pages
  *   const page = yield* first!.inspect
  *   return yield* page.getByRole("heading").readText
- * })).pipe(Effect.provide(Chromium.layerConnect("http://127.0.0.1:9222")))
+ * })).pipe(Effect.provide(Attached))
  * ```
  *
  * @stability unstable

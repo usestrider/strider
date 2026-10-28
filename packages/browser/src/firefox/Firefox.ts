@@ -35,19 +35,26 @@ declare module "../Reason.ts" {
  * **Details**
  *
  * The browser gets a temporary profile, created before it starts and deleted after it exits, unless
- * `userDataDir` names one you own. It exits when the layer's scope closes.
+ * `userDataDir` names one you own. It exits when the layer's scope closes. The layer starts it with the platform's
+ * `ChildProcessSpawner` and `FileSystem`, which `NodeServices.layer` from `@effect/platform-node` provides, and
+ * reaches it with a `WebSocketConstructor`, such as `NodeSocket.layerWebSocketConstructor`.
  *
  * **Example** (Launching headless Firefox)
  *
  * ```ts import.meta.vitest
+ * import { NodeServices, NodeSocket } from "@effect/platform-node"
  * import { Browser } from "@usestrider/browser"
  * import { Firefox } from "@usestrider/browser/firefox"
- * import { Effect } from "effect"
+ * import { Effect, Layer } from "effect"
+ *
+ * const FirefoxLive = Firefox.layer({ executablePath: "/usr/bin/firefox" }).pipe(
+ *   Layer.provide([NodeServices.layer, NodeSocket.layerWebSocketConstructor])
+ * )
  *
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
  *   yield* page.goto("https://example.com")
- * })).pipe(Effect.provide(Firefox.layer({ executablePath: "/usr/bin/firefox" })))
+ * })).pipe(Effect.provide(FirefoxLive))
  * ```
  *
  * @stability unstable
@@ -75,16 +82,19 @@ export const layer = (
  * **Example** (Reading the executable's path from the environment)
  *
  * ```ts import.meta.vitest
+ * import { NodeServices, NodeSocket } from "@effect/platform-node"
  * import { Browser } from "@usestrider/browser"
  * import { Firefox } from "@usestrider/browser/firefox"
- * import { Config, Effect } from "effect"
+ * import { Config, Effect, Layer } from "effect"
+ *
+ * const FirefoxLive = Firefox.layerConfig({
+ *   executablePath: Config.String("FIREFOX_PATH")
+ * }).pipe(Layer.provide([NodeServices.layer, NodeSocket.layerWebSocketConstructor]))
  *
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
  *   yield* page.goto("https://example.com")
- * })).pipe(
- *   Effect.provide(Firefox.layerConfig({ executablePath: Config.String("FIREFOX_PATH") }))
- * )
+ * })).pipe(Effect.provide(FirefoxLive))
  * ```
  *
  * @see {@link layer}
@@ -108,7 +118,8 @@ export const layerConfig = (
  *
  * `endpoint` is Firefox's remote agent, as `--remote-debugging-port` starts it (`ws://127.0.0.1:9222`); `/session`
  * is added when the URL has no path. The connection starts a WebDriver BiDi session and ends it when the layer's
- * scope closes. Pages and contexts that were already open stay open.
+ * scope closes. Pages and contexts that were already open stay open. The connection needs a `WebSocketConstructor`,
+ * such as `NodeSocket.layerWebSocketConstructor` from `@effect/platform-node`.
  *
  * **Gotchas**
  *
@@ -120,15 +131,20 @@ export const layerConfig = (
  * **Example** (Driving a Firefox started with `--remote-debugging-port=9222`)
  *
  * ```ts import.meta.vitest
+ * import { NodeSocket } from "@effect/platform-node"
  * import { Browser } from "@usestrider/browser"
  * import { Firefox } from "@usestrider/browser/firefox"
- * import { Effect } from "effect"
+ * import { Effect, Layer } from "effect"
+ *
+ * const Attached = Firefox.layerConnect("ws://127.0.0.1:9222").pipe(
+ *   Layer.provide(NodeSocket.layerWebSocketConstructor)
+ * )
  *
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
  *   yield* page.goto("https://shop.example.com")
  *   return yield* page.title
- * })).pipe(Effect.provide(Firefox.layerConnect("ws://127.0.0.1:9222")))
+ * })).pipe(Effect.provide(Attached))
  * ```
  *
  * @stability unstable

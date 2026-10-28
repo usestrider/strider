@@ -616,15 +616,20 @@ const BrowserErrorTypeId = "~@usestrider/browser/Browser/BrowserError"
  * **Example** (Logging the output of a browser that exited at launch)
  *
  * ```ts import.meta.vitest
+ * import { NodeServices } from "@effect/platform-node"
  * import { Browser } from "@usestrider/browser"
  * import { Chromium } from "@usestrider/browser/chromium"
- * import { Effect } from "effect"
+ * import { Effect, Layer } from "effect"
+ *
+ * const ChromiumLive = Chromium.layer({ executablePath: "/usr/bin/chromium" }).pipe(
+ *   Layer.provide(NodeServices.layer)
+ * )
  *
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
  *   yield* page.goto("https://shop.example.com")
  * })).pipe(
- *   Effect.provide(Chromium.layer({ executablePath: "/usr/bin/chromium" })),
+ *   Effect.provide(ChromiumLive),
  *   Effect.catchReason(
  *     "BrowserError",
  *     "ProcessExited",

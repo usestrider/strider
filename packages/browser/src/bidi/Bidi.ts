@@ -30,20 +30,22 @@ declare module "../Reason.ts" {
  * **Details**
  *
  * `endpoint` is taken as given, such as a grid's session URL. The connection starts a session and ends it when the
- * layer's scope closes; the pages that were open are observed, as an attached browser's are.
+ * layer's scope closes; the pages that were open are observed, as an attached browser's are. The connection needs a
+ * `WebSocketConstructor`, such as `NodeSocket.layerWebSocketConstructor` from `@effect/platform-node`.
  *
  * **Example** (Connecting to a remote grid)
  *
  * ```ts import.meta.vitest
+ * import { NodeSocket } from "@effect/platform-node"
  * import { Browser } from "@usestrider/browser"
  * import { Bidi } from "@usestrider/browser/bidi"
- * import { Config, Effect } from "effect"
+ * import { Config, Effect, Layer } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const token = yield* Config.Redacted("GRID_TOKEN")
  *   const grid = Bidi.layerConnect("wss://grid.example.com/session", {
  *     headers: { authorization: token }
- *   })
+ *   }).pipe(Layer.provide(NodeSocket.layerWebSocketConstructor))
  *   return yield* Effect.scoped(Effect.gen(function*() {
  *     const page = yield* Browser.newPage()
  *     yield* page.goto("https://shop.example.com")

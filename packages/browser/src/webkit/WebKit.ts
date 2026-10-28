@@ -38,11 +38,13 @@ declare module "../Reason.ts" {
  *
  * **Details**
  *
- * An executable not named `MiniBrowser` fails with `InvalidInput`. The browser's inspector server listens on a free
- * local port, which Strider reaches through the `SocketConnector` in context: provide one with
- * `SocketConnector.layer` (`@usestrider/browser/protocol`). Each context is a browser process of its own, with an
- * ephemeral profile; the default context's process holds the browser's first tab. The window opens on the display
- * that `DISPLAY` or `WAYLAND_DISPLAY` names. The browser exits when the layer's scope closes.
+ * An executable not named `MiniBrowser` fails with `InvalidInput`. The layer starts it with the platform's
+ * `ChildProcessSpawner` and `FileSystem`, which `NodeServices.layer` from `@effect/platform-node` provides. The
+ * browser's inspector server listens on a free local port, which Strider reaches through the `SocketConnector` in
+ * context: provide one with `SocketConnector.layer` (`@usestrider/browser/protocol`). Each context is a browser
+ * process of its own, with an ephemeral profile; the default context's process holds the browser's first tab. The
+ * window opens on the display that `DISPLAY` or `WAYLAND_DISPLAY` names. The browser exits when the layer's scope
+ * closes.
  *
  * **Gotchas**
  *
@@ -65,22 +67,24 @@ declare module "../Reason.ts" {
  * **Example** (Launching WebKitGTK's MiniBrowser)
  *
  * ```ts import.meta.vitest
+ * import { NodeServices, NodeSocket } from "@effect/platform-node"
  * import { Browser } from "@usestrider/browser"
- * import type { SocketConnector } from "@usestrider/browser/protocol"
+ * import { SocketConnector } from "@usestrider/browser/protocol"
  * import { WebKit } from "@usestrider/browser/webkit"
  * import { Effect, Layer } from "effect"
  *
- * // Such as SocketConnector.layer((endpoint) => NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port }))
- * declare const sockets: Layer.Layer<SocketConnector.SocketConnector>
+ * const Sockets = SocketConnector.layer((endpoint) =>
+ *   NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port })
+ * )
+ *
+ * const WebKitLive = WebKit.layer({
+ *   executablePath: "/usr/libexec/webkitgtk-6.0/MiniBrowser"
+ * }).pipe(Layer.provide([NodeServices.layer, Sockets]))
  *
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
  *   yield* page.goto("https://example.com")
- * })).pipe(Effect.provide(
- *   WebKit.layer({ executablePath: "/usr/libexec/webkitgtk-6.0/MiniBrowser" }).pipe(
- *     Layer.provide(sockets)
- *   )
- * ))
+ * })).pipe(Effect.provide(WebKitLive))
  * ```
  *
  * @stability unstable
@@ -109,16 +113,24 @@ export const layer = (
  * **Example** (Reading the executable's path from the environment)
  *
  * ```ts import.meta.vitest
+ * import { NodeServices, NodeSocket } from "@effect/platform-node"
  * import { Browser } from "@usestrider/browser"
+ * import { SocketConnector } from "@usestrider/browser/protocol"
  * import { WebKit } from "@usestrider/browser/webkit"
- * import { Config, Effect } from "effect"
+ * import { Config, Effect, Layer } from "effect"
+ *
+ * const Sockets = SocketConnector.layer((endpoint) =>
+ *   NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port })
+ * )
+ *
+ * const WebKitLive = WebKit.layerConfig({
+ *   executablePath: Config.String("WEBKIT_PATH")
+ * }).pipe(Layer.provide([NodeServices.layer, Sockets]))
  *
  * const program = Effect.scoped(Effect.gen(function*() {
  *   const page = yield* Browser.newPage()
  *   yield* page.goto("https://example.com")
- * })).pipe(
- *   Effect.provide(WebKit.layerConfig({ executablePath: Config.String("WEBKIT_PATH") }))
- * )
+ * })).pipe(Effect.provide(WebKitLive))
  * ```
  *
  * @see {@link layer}
@@ -144,7 +156,8 @@ export const layerConfig = (
  * (`http://127.0.0.1:9333`), whose list names a WebSocket for each page; Strider reads the list again every 250 ms
  * for new pages. `options.headers` go with the HTTP requests and the WebSocket handshakes. The pages are observed in
  * one default context: `browser.pages` lists them, and `inspect` and `control` give access to one for a scope. They
- * stay open after the layer's scope closes.
+ * stay open after the layer's scope closes. The connection needs a `WebSocketConstructor`, such as
+ * `NodeSocket.layerWebSocketConstructor` from `@effect/platform-node`.
  *
  * **Gotchas**
  *
@@ -164,15 +177,20 @@ export const layerConfig = (
  * **Example** (Inspecting a page of a browser started with `WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9333`)
  *
  * ```ts import.meta.vitest
+ * import { NodeSocket } from "@effect/platform-node"
  * import { Browser } from "@usestrider/browser"
  * import { WebKit } from "@usestrider/browser/webkit"
- * import { Effect } from "effect"
+ * import { Effect, Layer } from "effect"
+ *
+ * const Device = WebKit.layerAttach("http://127.0.0.1:9333").pipe(
+ *   Layer.provide(NodeSocket.layerWebSocketConstructor)
+ * )
  *
  * const firstHeading = Effect.scoped(Effect.gen(function*() {
  *   const [first] = yield* (yield* Browser.Browser).pages
  *   const page = yield* first!.inspect
  *   return yield* page.getByRole("heading").readText
- * })).pipe(Effect.provide(WebKit.layerAttach("http://127.0.0.1:9333")))
+ * })).pipe(Effect.provide(Device))
  * ```
  *
  * @stability unstable

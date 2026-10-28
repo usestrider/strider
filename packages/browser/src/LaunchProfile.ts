@@ -67,13 +67,15 @@ export const automation: LaunchProfile = new LaunchProfile({
  * **Example** (Launching Chromium for many pages at once)
  *
  * ```ts import.meta.vitest
+ * import { NodeServices } from "@effect/platform-node"
  * import { LaunchProfile } from "@usestrider/browser"
  * import { Chromium } from "@usestrider/browser/chromium"
+ * import { Layer } from "effect"
  *
  * const browser = Chromium.layer({
  *   executablePath: "/usr/bin/chromium",
  *   profile: LaunchProfile.concurrent
- * })
+ * }).pipe(Layer.provide(NodeServices.layer))
  * ```
  *
  * @stability unstable
