@@ -990,7 +990,7 @@ type SecretClass = "credentials" | "cookies" | "authorizationHeaders" | "typedTe
 - **Levels are opt-in, and their costs are stated.**
   - Actions, logs, errors and console output are always recorded.
   - Screenshots and the screencast cost bandwidth. BiDi has no native screencast, so it is polled at the interval you choose.
-  - DOM snapshots are a capture of our own, in the engine's world, which changes nothing in the page and hooks nothing (below), so inspect is enough.
+  - DOM snapshots are a capture of our own, in the engine's world, which changes nothing in the page and hooks nothing (below). They still need control, as every level does: `record` takes a `Page` or a context, never a page you may only inspect, and snapshots need `network: true`, whose body collection is a declaration.
 - **Exports are explicit and redacted.** Both files cross a persistence boundary (`export*`). Classified fields are stripped under the active diagnostics preset, and raw content (bodies, snapshots, screenshots) is included only when asked for.
 - **Recording failures** are `Trace.TraceError` and `Har.HarError`: `WriteFailed{path}`, `NotPermitted`, `Unsupported` (a level the backend lacks) and `BackendFailure`; a HAR's `url` that doesn't compile is `InvalidInput`. A target whose grant was released is `TargetGone{AccessReleased}`.
 - **HAR recording** records requests as sent. Timings follow the HAR spec, and an entry without a body says why. On BiDi, the body collectors start when the recording scope is acquired (research/har.md).
