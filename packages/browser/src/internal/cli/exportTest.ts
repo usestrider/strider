@@ -3,7 +3,8 @@
  * Every command is one statement against the public API, so the test reads as the session ran: a ref becomes
  * the locator its snapshot names, a `%name%` secret its `Config.Redacted`, a wait the `next` it started, with
  * its `--within` as `Deadline.within`, and `remove r1` the `remove` of the handle the route or dialog handler gave.
- * Reads (`pages`, `snapshot`, `screenshot`, `history`) aren't repeated.
+ * Reads (`pages`, `tabs`, `snapshot`, `find`, `screenshot`, `history`) aren't repeated. What runs only in a session,
+ * a segment and a tab taken with `control` until its `release`, is a marked placeholder, which `placeholders` lists.
  */
 import type * as Snapshot from "../../Snapshot.ts"
 
@@ -19,7 +20,7 @@ export type Step =
     readonly params: Readonly<Record<string, unknown>>
     /** The target as a query on its page (`queryOf`), read from the snapshot the call was checked against. */
     readonly target: string | undefined
-    /** The handle the call printed, a wait's (`w1`) or a registration's (`r1`), or else its outcome's text. */
+    /** The handle the call printed, a wait's (`w1`), a registration's (`r1`) or a page's name, or its outcome's text. */
     readonly result: string | undefined
   }
 
@@ -135,7 +136,7 @@ const imports: Readonly<Record<string, string>> = {
   StorageState: "StorageState"
 }
 
-/** The test file. */
+/** The test file, and what each of its placeholders stands for, which `export test` lists. */
 export const render = (options: {
   readonly name: string
   readonly browser: Browser
@@ -179,7 +180,7 @@ export const render = (options: {
   for (const step of options.steps) {
     if (step._tag === "Segment") {
       // A segment runs only inside a session: its code goes here by hand
-      placeholders.push(step.file)
+      placeholders.push(`strider run ${step.file}, which runs only in a session`)
       body.push(`// TODO strider run ${step.file}: a segment runs only in a session; put its steps here`)
       continue
     }
@@ -201,16 +202,38 @@ export const render = (options: {
       continue
     }
     if (step._tag === "Tool" && step.tool === "control") {
-      // A tab the session took from the browser: the test takes it with control, or opens its own page
+      // A tab the session took from the browser: the test takes it with control, or opens its own page, under the
+      // variable later steps use
       const tab = String((step.params as { tab?: string; url?: string }).tab ?? (step.params as { url?: string }).url)
-      placeholders.push(`control ${tab}`)
-      body.push(`// TODO strider control ${tab}: a tab of the browser's own; take it with page.control in the test`)
+      placeholders.push(`strider control ${tab}, a tab of the browser's own`)
+      body.push(
+        `// TODO strider control ${tab}: a tab of the browser's own; take it with page.control in the test${
+          step.result === undefined ? "" : `, as ${declare(step.result)}`
+        }`
+      )
+      continue
+    }
+    if (step._tag === "Tool" && step.tool === "release") {
+      // Where the session gave the tab back, which ends the scope control took it in
+      const name = String(step.params.page)
+      placeholders.push(`strider release -p ${name}, which gives back a tab the test takes by hand`)
+      body.push(
+        `// TODO strider release -p ${name}: the session gave the tab back here; close the scope it was taken in`
+      )
+      variables.delete(name)
       continue
     }
     const params = step.params as Record<string, string | ReadonlyArray<string> | number | undefined>
     const page = typeof params.page === "string" ? pageVariable(params.page) : "page"
     const target = step.target === undefined ? "" : `${page}.${step.target}`
     switch (step.tool) {
+      case "newPage": {
+        // Through strider mcp, under the name the toolkit gave it
+        const opened = declare(step.result ?? String(params.name ?? "page"))
+        body.push(`const ${opened} = yield* context.newPage`)
+        if (params.url !== undefined) body.push(`yield* ${opened}.goto(${quote(String(params.url))})`)
+        break
+      }
       case "goto":
         body.push(`yield* ${page}.goto(${quote(String(params.url))})`)
         break

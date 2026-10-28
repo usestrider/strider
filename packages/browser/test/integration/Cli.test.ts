@@ -70,6 +70,17 @@ const mcp = (env: Record<string, string>, args: ReadonlyArray<string>, messages:
     for (const message of messages) child.stdin.write(`${JSON.stringify(message)}\n`)
   })
 
+/** What an MCP client sends first: its initialization, as id 1. */
+const handshake = [
+  {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } }
+  },
+  { jsonrpc: "2.0", method: "notifications/initialized" }
+]
+
 const environment = () => ({
   XDG_RUNTIME_DIR: fs.mkdtempSync(path.join(os.tmpdir(), "strider-cli-")),
   // The ledger's own, so a test sees only its sessions' records
@@ -155,6 +166,12 @@ describe("strider", () => {
         const missing = yield* run("-s", "shop", "run", path.join(fixtures, "missing-page.ts"))
         assert.notStrictEqual(missing.code, 0)
         assert.include(missing.err, "PageNotFound")
+        // A page an MCP client opens is the session's, and the test's too
+        const opened = yield* mcp(env, ["-s", "shop", "mcp"], [
+          ...handshake,
+          { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "newPage", arguments: { name: "side", url } } }
+        ], 2)
+        assert.include(JSON.stringify(opened.find((answer) => answer.id === 2)?.result), "side")
         // State for a program, and a test of what ran
         const state = path.join(env.XDG_RUNTIME_DIR, "shop.state")
         assert.strictEqual((yield* run("-s", "shop", "state", "save", state)).code, 0)
@@ -177,6 +194,10 @@ describe("strider", () => {
         assert.include(exported, `yield* r1.remove\n`)
         assert.include(exported, `        yield* Dialog.handle(shop, Dialog.dismissAll)\n`)
         assert.include(exported, `// TODO strider run ${path.join(fixtures, "open-popup.ts")}`)
+        assert.include(
+          exported,
+          `const side = yield* context.newPage\n        yield* side.goto(${JSON.stringify(url)})\n`
+        )
         // The page's own script holds the password it checks, so the statement is what is checked
         assert.notInclude(exported, `.fill("hunter2")`)
         assert.match((yield* run("sessions")).out, /^shop  chromium · pages shop, child, p\d+/)
@@ -313,13 +334,7 @@ describe("strider", () => {
           assert.isAbove(fs.readdirSync(downloads).length, 0)
           // strider mcp serves the session's tools to a client over standard input and output
           const answers = yield* mcp(env, ["-s", "tools", "mcp"], [
-            {
-              jsonrpc: "2.0",
-              id: 1,
-              method: "initialize",
-              params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } }
-            },
-            { jsonrpc: "2.0", method: "notifications/initialized" },
+            ...handshake,
             { jsonrpc: "2.0", id: 2, method: "tools/list" },
             { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "pages", arguments: {} } }
           ], 3)

@@ -1,10 +1,12 @@
 /**
  * The CLI sessions, without a browser: the ledger a program keeps, `strider mcp`'s arguments, and what an exported
- * test keeps of its session: a tab the session took with control, marked; a wait's deadline; a dialog's answer.
+ * test keeps of its session: a statement for every tool but the reads; a tab the session took with control, marked;
+ * a page strider mcp opened; a renamed page; a removed declaration; a wait's deadline; a dialog's answer.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Ledger } from "@usestrider/browser"
+import { BrowserToolkit } from "@usestrider/browser/ai"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
@@ -71,24 +73,6 @@ describe("strider mcp", () => {
 })
 
 describe("strider export test", () => {
-  it("marks a tab the session took with control, which a test takes itself", () => {
-    const { placeholders, text } = ExportTest.render({
-      name: "attached",
-      browser: { _tag: "Attach", backend: "chromium", endpoint: "http://127.0.0.1:9222" },
-      secrets: {},
-      state: undefined,
-      steps: [{
-        _tag: "Tool",
-        tool: "control",
-        params: { tab: "N7", name: "mail" },
-        target: undefined,
-        result: undefined
-      }]
-    })
-    assert.deepStrictEqual(placeholders, ["control N7"])
-    assert.include(text, "// TODO strider control N7")
-  })
-
   const launched = { _tag: "Launch", backend: "chromium", executablePath: "/usr/bin/chromium" } as const
   const tool = (name: string, params: Record<string, unknown>, result?: string): ExportTest.Step => ({
     _tag: "Tool",
@@ -96,6 +80,82 @@ describe("strider export test", () => {
     params,
     target: undefined,
     result
+  })
+
+  it("marks a tab the session took with control, until its release, which a test takes itself", () => {
+    const { placeholders, text } = ExportTest.render({
+      name: "attached",
+      browser: { _tag: "Attach", backend: "chromium", endpoint: "http://127.0.0.1:9222" },
+      secrets: {},
+      state: undefined,
+      steps: [
+        tool("control", { tab: "N7", name: "mail" }, "mail"),
+        tool("goto", { page: "mail", url: "https://mail.example.com/inbox" }),
+        tool("release", { page: "mail" }, "released mail; the tab stays open")
+      ]
+    })
+    assert.deepStrictEqual(placeholders, [
+      "strider control N7, a tab of the browser's own",
+      "strider release -p mail, which gives back a tab the test takes by hand"
+    ])
+    assert.include(
+      text,
+      "// TODO strider control N7: a tab of the browser's own; take it with page.control in the test, as mail\n"
+    )
+    assert.include(text, `yield* mail.goto("https://mail.example.com/inbox")\n`)
+    assert.include(text, "// TODO strider release -p mail: the session gave the tab back here")
+  })
+
+  it("opens a page that newPage opened through strider mcp, under the name it printed", () => {
+    const { text } = ExportTest.render({
+      name: "shop",
+      browser: launched,
+      secrets: {},
+      state: undefined,
+      steps: [
+        tool("newPage", { name: "shop", url: "https://shop.example.com" }, "shop"),
+        tool("newPage", {}, "p2"),
+        tool("goto", { page: "p2", url: "https://shop.example.com/cart" })
+      ]
+    })
+    assert.include(
+      text,
+      [
+        `        const shop = yield* context.newPage`,
+        `        yield* shop.goto("https://shop.example.com")`,
+        `        const p2 = yield* context.newPage`,
+        `        yield* p2.goto("https://shop.example.com/cart")`,
+        ``
+      ].join("\n")
+    )
+  })
+
+  it("writes a statement for every tool the session records, from the CLI or strider mcp, but the reads", () => {
+    const reads = ["find", "history", "pages", "screenshot", "snapshot", "tabs"]
+    const params = {
+      page: "main",
+      target: "css=#field",
+      url: "https://shop.example.com",
+      value: "Ada",
+      key: "Enter",
+      values: ["Blue"],
+      event: "navigation",
+      wait: "w1",
+      state: "visible",
+      pattern: "**/api/**",
+      action: "abort",
+      decision: "accept",
+      tab: "N1"
+    }
+    const exported = (steps: ReadonlyArray<ExportTest.Step>) =>
+      ExportTest.render({ name: "shop", browser: launched, secrets: {}, state: undefined, steps }).text
+    const opened: ExportTest.Step = { _tag: "NewPage", page: "main", url: undefined }
+    for (const name of Object.keys(BrowserToolkit.toolkit.tools)) {
+      const step: ExportTest.Step = { _tag: "Tool", tool: name, params, target: `locator("#field")`, result: "w1" }
+      const text = exported([opened, step])
+      if (reads.includes(name)) assert.strictEqual(text, exported([opened]), `${name} is a read`)
+      else assert.notStrictEqual(text, exported([opened]), `${name} has no statement`)
+    }
   })
 
   it("keeps a wait's deadline, as Deadline.within around its next", () => {

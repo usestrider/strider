@@ -108,10 +108,10 @@ const record = (
   })
 }
 
-/** The handle a tool call printed: a wait's, or a route's or dialog handler's registration. */
+/** The handle a tool call printed: a wait's, a route's or dialog handler's registration, or a page's name. */
 const handleOf = (outcome: unknown): string | undefined => {
-  const made = outcome as { readonly wait?: string; readonly registration?: string }
-  return made.wait ?? made.registration
+  const made = outcome as { readonly wait?: string; readonly registration?: string; readonly page?: string }
+  return made.wait ?? made.registration ?? made.page
 }
 
 class CommandFailed extends Data.TaggedError("CommandFailed")<{
@@ -535,9 +535,7 @@ const commands = (daemon: Daemon) => {
           })
           yield* fs.writeFileString(resolved, text).pipe(Effect.mapError(failedWith))
           yield* Console.log(`wrote ${daemon.steps.length} steps to ${resolved}`)
-          for (const file of placeholders) {
-            yield* Console.log(`  a placeholder for strider run ${file}, which runs only in a session`)
-          }
+          for (const placeholder of placeholders) yield* Console.log(`  a placeholder for ${placeholder}`)
         }))
     ])
   )
