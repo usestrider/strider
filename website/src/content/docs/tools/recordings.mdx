@@ -71,13 +71,12 @@ Each capture is opt-in:
 | ---------------------------- | --------------------------------------------------------------------- |
 | none                         | operations, logs, errors and console output                           |
 | `screenshots: "perAction"`   | a screenshot after each action                                        |
-| `screencast`                 | frames as the page renders: `"native"`, the browser's own where it has them, or `{ polled: "250 millis" }`, screenshots at an interval on any browser |
+| `screencast`                 | frames as the page renders: `"native"`, the browser's own, which fails with `Unsupported` on WebKit and an attached Firefox; or `{ polled: "250 millis" }`, screenshots at an interval on any browser |
 | `network: true`              | the page's requests and responses                                     |
 | `domSnapshots: true`         | each frame's DOM before and after every action, which the viewer renders; needs `network` |
 
-DOM snapshots change nothing in the page, and work on an [inspected](/docs/pages/attaching#access-levels) page.
-They're taken in an [isolated world](/docs/pages/expectations#evaluating-in-the-page), except on WebKit, which has
-none.
+DOM snapshots change nothing in the page. They're taken in an
+[isolated world](/docs/pages/expectations#evaluating-in-the-page), except on WebKit, which has none.
 
 [`TestRun`](/docs/tools/testing#attaching-files) attaches a trace to the test that made it.
 
@@ -135,7 +134,7 @@ A HAR is committed as a fixture or attached to a bug report, so its export leave
 | ------------------------ | ---------------------------------------------------------- |
 | `"credentials"`          | credentials in URLs                                        |
 | `"cookies"`              | cookie values, in `Cookie` and `Set-Cookie`                |
-| `"authorizationHeaders"` | `Authorization` headers                                    |
+| `"authorizationHeaders"` | `Authorization` and `Proxy-Authorization` headers          |
 | `"requestBodies"`        | the bodies requests sent, which can hold a password        |
 
 - A trace follows the [diagnostics preset](/docs/errors#secrets-and-urls). Under `strict`, the default, DOM snapshots write password fields and
