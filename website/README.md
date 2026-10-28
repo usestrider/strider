@@ -102,8 +102,8 @@ the guide disagrees with itself; one is added here once the maintainer agrees.
   a sentence or a fragment of one, and never the page's title again: Locators has "The queries". Parallel pages
   give the same section the same heading; otherwise a heading names one subject across the guide.
 - **Decks.** A page's `description` is one noun phrase for what it covers, in the order of its sections: "A page's
-  requests and responses as events, their bodies decoded with a Schema, and the headers they sent." The opening,
-  not the deck, says why.
+  requests and responses as events, their bodies decoded with a Schema, who answered them, the headers they sent,
+  and resending a request." The opening, not the deck, says why.
 - **Names.** One thing has one name on every page, the reference's: an endpoint, not an address. A session is the
   `strider` CLI's; a context has its own cookies and storage.
 - **Browser differences.** A concept page says what a browser does differently where it teaches the feature, such
