@@ -4,16 +4,17 @@ description: Give a model browser tools, named secrets and an explicit capture p
 order: 2
 ---
 
-A model needs tools to drive a browser and a policy for what page content it may receive. The toolkit binds those
-tools to a context, with named secrets and an explicit capture policy.
+A model drives a browser only through tools, and every result a tool returns goes to the model's provider. The
+toolkit gives it Strider's tools over one context, with secrets it names but never sees, and a policy for what
+results may carry.
 
 ## Running an agent
 
 `BrowserToolkit` gives a model `effect/ai` tools over one context. Use it when your program calls the model through
 `effect/ai`; when an MCP client, such as an editor's agent, runs the model, serve the same tools with
-[`strider mcp`](/docs/agents/cli#mcp). Where [`pickAndClick`](/docs/agents/snapshots#acting-through-refs) gives a model one action, the toolkit gives it every
-tool below, and each result says what happened since the last call. A model calls tools one turn at a time, so an
-agent runs turns in a `Chat` until one asks for no tool:
+[`strider mcp`](/docs/agents/cli#mcp). Where [`pickAndClick`](/docs/agents/snapshots#acting-through-refs) gives a
+model one action, the toolkit gives it every tool below, and each result says what happened since the last call.
+A model calls tools one turn at a time, so an agent runs turns in a `Chat` until one asks for no tool:
 
 ```ts
 import { Browser } from "@usestrider/browser"
