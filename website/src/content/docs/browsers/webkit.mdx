@@ -117,7 +117,7 @@ const refresh = Effect.fn("refresh")(function*(page: Page.Page) {
 
 That runs the button's handlers, without what a real click does first, such as focusing it.
 
-## No isolated worlds
+## Isolated worlds
 
 Stock WebKit has no [isolated worlds](/docs/pages/expectations#evaluating-in-the-page), launched or attached:
 
@@ -125,7 +125,7 @@ Stock WebKit has no [isolated worlds](/docs/pages/expectations#evaluating-in-the
 - [Strider's engine](/docs/pages/locators#locators-and-elements) and [init scripts](/docs/events/routes#init-scripts) run in the page's world, where the page's scripts can see them. A page that
   replaces the built-ins they use can change what locators find.
 
-## What WebKit can't do
+## Limits
 
 From the backend's capability list, for a launched MiniBrowser:
 
@@ -139,7 +139,7 @@ What changes when attached:
 
 <BrowserLimits browser="webkit" when="attached" />
 
-## What's different
+## Differences
 
 **Dialogs are `Dialog.Unknown`,** with their message: WebKit doesn't say which kind is open. `accept` answers as OK,
 a prompt with its default; `dismiss` as Cancel; `respond(text)` answers a prompt. So a
