@@ -83,14 +83,12 @@ import { Expect, Page } from "@usestrider/browser"
 import { Effect } from "effect"
 
 const submitOnce = Effect.fn("submitOnce")(function*(page: Page.Page) {
+  const submitted = page.getByText("Submitted").pipe(Expect.toBeVisible)
   yield* page.getByRole("button", { name: "Submit" }).click().pipe(
-    Effect.catchTag("Timeout", (timeout) =>
-      Effect.gen(function*() {
-        if (timeout.phase !== "dispatchedUnconfirmed") {
-          return yield* Effect.fail(timeout)
-        }
-        yield* page.getByText("Submitted").pipe(Expect.toBeVisible)
-      }))
+    Effect.catchIf(
+      (error) => error._tag === "Timeout" && error.phase === "dispatchedUnconfirmed",
+      () => submitted
+    )
   )
 })
 ```
@@ -155,14 +153,15 @@ const placeOrder = Operation.fn("placeOrder")(
   ) {
     yield* Operation.markSent
     const orderId = yield* Operation.bound(submit)
-    return yield* Operation.bound(Effect.gen(function*() {
+    const confirmation = Effect.gen(function*() {
       while (true) {
         const current = yield* status(orderId)
         if (current === "confirmed") return orderId
         yield* Operation.observe(current)
         yield* Effect.sleep("1 second")
       }
-    }))
+    })
+    return yield* Operation.bound(confirmation)
   },
   Deadline.within("1 minute")
 )
