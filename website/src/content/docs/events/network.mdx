@@ -95,7 +95,7 @@ const exportOrders = Effect.fn("exportOrders")(function*(page: Page.Page) {
 })
 ```
 
-## Watching every request
+## Streams and history
 
 `stream` gives every match from now on. Given a context rather than a page, it watches every page in it, and its
 shared and service workers. This logs each `fetch` in the session until the scope closes:
@@ -112,8 +112,6 @@ const logFetches = Effect.fn("logFetches")(function*(page: Page.Page) {
   )
 })
 ```
-
-## History
 
 `history` reads the requests or responses already logged, without bodies:
 
