@@ -78,6 +78,19 @@ are formatted the same way, inside their comments, so the reference shows them u
 breaks it's given where they fit, so lay a block out to read well, naming a value rather than nesting a call four
 deep.
 
+### Style
+
+What every guide does the same way. The `review-guides` skill holds pages to it, and proposes a convention where
+the guide disagrees with itself; one is added here once the maintainer agrees.
+
+- **Openings.** A page opens, before its first section, with up to two plain sentences: what goes wrong without its
+  concept, and what the reader gets. A section introducing a concept does the same before its first code. No
+  history, scene-setting or praise.
+- **Examples.** Whatever the prose names that a reader would type is shown in a block on the page, or linked to
+  where it's shown. A block is one realistic task, written as a step with `Effect.fn`, that reads data through its
+  types, such as a body decoded with a Schema, never `JSON.stringify`. Messages and hints are quoted from the
+  source, and command output from a real run.
+
 ## The reference
 
 `src/features/reference/` turns the dataset into pages:

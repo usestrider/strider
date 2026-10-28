@@ -147,7 +147,8 @@ fold, latched or navigable, become what they mean, unless they are the API's nam
 A guide teaches one concept a page, and a section a reader would look for in the sidebar is a page of its own.
 Before its first code, a concept gets up to two plain sentences: what goes wrong without it and what it gets the
 reader, with no history or scene-setting. Whatever the prose names that a reader would type is shown in a block on
-the page, or linked to where it's shown. The `review-guides` skill checks all three.
+the page, or linked to where it's shown. Every page follows the conventions in `website/README.md`, "Style", so
+the guide reads as one. The `review-guides` skill checks all four.
 
 ## Design changes
 
