@@ -29,7 +29,9 @@ const program = Effect.scoped(Effect.gen(function*() {
   yield* page.goto("https://shop.example.com")
   yield* page.getByRole("button", { name: "Add to cart" }).click()
   yield* page.getByText("1 item").pipe(Expect.toBeVisible)
-})).pipe(Effect.provide(Chromium.layer({ executablePath: "/usr/bin/chromium" })))`
+})).pipe(Effect.provide(
+  Chromium.layer({ executablePath: "/usr/bin/chromium" })
+))`
 ---
 
 <BaseLayout
