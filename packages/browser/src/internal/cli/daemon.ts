@@ -100,18 +100,32 @@ const targetOf = (daemon: Daemon, params: Record<string, unknown>) => {
 /** The tools that act on a page, and so may open a popup as they run. */
 const actions = new Set(["newPage", "goto", "back", "click", "fill", "press", "select", "scroll"])
 
+/** The page a command names, by id, as the session knows it now, or as its pages list it. */
+const named = (daemon: Daemon, page: unknown): Effect.Effect<ReadonlyArray<string>> =>
+  typeof page !== "string" ? Effect.succeed([]) : Option.match(daemon.session.named(page), {
+    onSome: (found) => Effect.succeed([found.id]),
+    onNone: () =>
+      Effect.map(
+        daemon.session.pages,
+        (pages) => pages.filter((each) => each.name === page).map((each) => each.page.id)
+      )
+  })
+
 /**
- * Runs a tool call or command that may open pages, as the recorder's: an action's popups are its own, and a
- * segment's pages its placeholder's.
+ * Runs a tool call or command that may open pages, as the recorder's: an action acts on the page it names and on a
+ * page it opens, from the moment the toolkit opens it, and the popups of those are its own; a segment's pages are
+ * its placeholder's.
  */
 const recording = <A, E, R>(
   daemon: Daemon,
   kind: Recorder.Running["kind"] | undefined,
-  effect: (running: Recorder.Running | undefined) => Effect.Effect<A, E, R>
+  effect: (running: Recorder.Running | undefined) => Effect.Effect<A, E, R>,
+  page?: unknown
 ) =>
   kind === undefined ? effect(undefined) : Effect.acquireUseRelease(
-    Effect.sync(() => daemon.recorder.begin(kind)),
-    effect,
+    Effect.map(named(daemon, page), (pages) => daemon.recorder.begin(kind, pages)),
+    (running) =>
+      effect(running).pipe(Effect.provideService(ToolkitImpl.Opened, (opened) => void running.pages.add(opened))),
     (running) => Effect.sync(() => daemon.recorder.end(running))
   )
 
@@ -189,7 +203,13 @@ const commands = (daemon: Daemon) => {
     name: keyof Tools.Tools,
     params: Record<string, unknown>,
     present: Present
-  ) => recording(daemon, actions.has(name) ? "action" : undefined, (running) => toolIn(name, params, present, running))
+  ) =>
+    recording(
+      daemon,
+      actions.has(name) ? "action" : undefined,
+      (running) => toolIn(name, params, present, running),
+      params.page
+    )
   const toolIn = Effect.fnUntraced(function*(
     name: keyof Tools.Tools,
     params: Record<string, unknown>,
@@ -812,7 +832,7 @@ const serve = (daemon: Daemon, tree: ReturnType<typeof commands>, touch: () => v
             lines.push({ _tag: "Err", text: `${request.tool} isn't one of the session's tools, or it died` })
             lines.push({ _tag: "Exit", code: 1 })
           }
-        }))
+        }), params.page)
       touch()
       for (const line of lines) yield* writer.write(`${JSON.stringify(line)}\n`).pipe(Effect.ignore)
       return

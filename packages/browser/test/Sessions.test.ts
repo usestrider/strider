@@ -578,12 +578,14 @@ describe("strider export test's recorder", () => {
   it("gives a popup to the command that opened it, as it ran or after it, under its opener's name then", () => {
     const recorder = Recorder.make()
     const opening = recorder.begin("action")
+    // The page it opens, as the toolkit opens it
+    opening.pages.add("A")
     recorder.record({ _tag: "NewPage", page: "shop", url: "https://shop.example.com" }, opening)
     recorder.declared("A")
     // Opened by its first document, as page new ran
     recorder.popup({ id: "B", name: "p1", opener: "A", openerName: "shop" })
     recorder.end(opening)
-    const clicking = recorder.begin("action")
+    const clicking = recorder.begin("action", ["A"])
     recorder.record(click, clicking)
     recorder.end(clicking)
     // Seen once the click was over, its opener renamed since
@@ -602,14 +604,14 @@ describe("strider export test's recorder", () => {
     const recorder = Recorder.make()
     recorder.declared("A")
     recorder.waiting("w1", "A")
-    const clicking = recorder.begin("action")
+    const clicking = recorder.begin("action", ["A"])
     // The wait gives the first popup after it started, and the click opened the next
     recorder.popup({ id: "B", name: "p1", opener: "A", openerName: "shop" })
     recorder.popup({ id: "C", name: "p2", opener: "A", openerName: "shop" })
     recorder.record(click, clicking)
     recorder.end(clicking)
     // A click that failed isn't repeated, so its popup is left to a placeholder, even seen after it
-    const failing = recorder.begin("action")
+    const failing = recorder.begin("action", ["A"])
     recorder.popup({ id: "D", name: "p3", opener: "A", openerName: "shop" })
     recorder.end(failing)
     recorder.popup({ id: "E", name: "p4", opener: "A", openerName: "shop" })
@@ -622,6 +624,39 @@ describe("strider export test's recorder", () => {
       { _tag: "Listed", page: "p5", index: 3 }
     ])
     assert.isTrue(recorder.declares("D"))
+  })
+
+  it("gives a popup to the command acting on its opener, of two at once, and to none when both act on it", () => {
+    const recorder = Recorder.make()
+    recorder.declared("A")
+    recorder.declared("B")
+    const toCart: ExportTest.Step = { ...click, params: { page: "cart", target: "css=#open" } }
+    const onShop = recorder.begin("action", ["A"])
+    const onCart = recorder.begin("action", ["B"])
+    // Shop's popup, as the click on cart, which started later, still runs
+    recorder.popup({ id: "C", name: "p1", opener: "A", openerName: "shop" })
+    recorder.record(toCart, onCart)
+    recorder.end(onCart)
+    recorder.record(click, onShop)
+    recorder.end(onShop)
+    // After both: a popup of the popup is the command's that opened the popup, and cart's is cart's command's
+    recorder.popup({ id: "D", name: "p2", opener: "C", openerName: "p1" })
+    recorder.popup({ id: "E", name: "p3", opener: "B", openerName: "cart" })
+    // Two commands at once on one page, which the session can't tell apart: a placeholder
+    const first = recorder.begin("action", ["A"])
+    const second = recorder.begin("action", ["A"])
+    recorder.popup({ id: "F", name: "p4", opener: "A", openerName: "shop" })
+    recorder.record(click, first)
+    recorder.end(first)
+    recorder.record(click, second)
+    recorder.end(second)
+    assert.deepStrictEqual(recorder.steps, [
+      { ...toCart, popups: [{ page: "p3", opener: "cart" }] },
+      { ...click, popups: [{ page: "p1", opener: "shop" }, { page: "p2", opener: "p1" }] },
+      click,
+      click
+    ])
+    assert.isTrue(recorder.declares("F"))
   })
 
   it("leaves the pages a segment opened to its placeholder, and a popup seen after it", () => {

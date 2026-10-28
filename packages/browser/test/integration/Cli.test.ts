@@ -97,6 +97,7 @@ const app = `<title>shop</title>
 <button id="go">Sign in</button>
 <p id="out">signed out</p>
 <button onclick="window.open('/child')">Open</button>
+<button onclick="setTimeout(() => window.open('/child'), 1500)">Later</button>
 <button onclick="document.getElementById('asked').textContent = String(confirm('Sure?'))">Ask</button>
 <p id="asked">not asked</p>
 <button onclick="fetch('/api/status').then((r) => r.text()).then((t) => { document.getElementById('api').textContent = t })">Status</button>
@@ -416,10 +417,31 @@ describe("strider", () => {
           assert.strictEqual(kept.code, 0, kept.err)
           assert.include((yield* tools("pages")).out, "kept")
           assert.strictEqual((yield* tools("-p", "kept", "goto", url)).code, 0)
+          // A popup a click's timer opens while a later click on another page waits for its button is the first
+          // click's, which acted on its opener
+          const late = `${served.origin}/fixture?html=${
+            encodeURIComponent(
+              `<button id="late" disabled>Late</button><script>setTimeout(() => { document.getElementById("late").disabled = false }, 3000)</script>`
+            )
+          }`
+          assert.strictEqual((yield* tools("page", "new", "--name", "aside", late)).code, 0)
+          const before = names(yield* tools("pages"))
+          assert.strictEqual((yield* tools("-p", "shop", "click", `role=button[name="Later"]`)).code, 0)
+          const waited = yield* tools("-p", "aside", "click", "css=#late")
+          assert.strictEqual(waited.code, 0, waited.err)
+          const later = names(yield* tools("pages")).find((name) => !before.includes(name))
+          assert.isDefined(later, "the click's popup opened as aside's click waited")
+          assert.strictEqual((yield* tools("-p", later!, "expect", "css=p", "visible")).code, 0)
           // The test leaves it to the segment's placeholder to declare
           const test = path.join(env.XDG_RUNTIME_DIR, "tools.test.ts")
           assert.strictEqual((yield* tools("export", "test", test)).code, 0)
           const exported = fs.readFileSync(test, "utf8")
+          assert.match(
+            exported,
+            new RegExp(
+              `const (shopPopups\\w*) = yield\\* Popup\\.next\\(shop\\)\\n\\s+yield\\* shop\\.getByRole\\("button", \\{ name: "Later", exact: true \\}\\)\\.click\\(\\)\\n\\s+const ${later} = yield\\* \\1\\n`
+            )
+          )
           assert.include(exported, `: a segment runs only in a session; put its steps here, declaring kept\n`)
           assert.include(exported, `yield* kept.goto(${JSON.stringify(url)})\n`)
           // Downloads go to the session's own directory

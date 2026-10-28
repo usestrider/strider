@@ -155,6 +155,11 @@ describe("shop", () => {
 })
 ```
 
+A popup the session never waited for is waited for in the test with [`Popup.next`](/docs/events/kinds#popups),
+from just before the command that acted on its opener: the one acting on that page as the popup opened, or else the
+last one that did. One that opened while two commands acted on its opener at once is a `TODO`, since the session
+can't tell which of them opened it.
+
 ## Sessions and state
 
 Starting a session from saved [storage state](/docs/pages/contexts#logging-in-once) skips the login form. `--state`

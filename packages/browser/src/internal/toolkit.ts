@@ -15,6 +15,7 @@
  *   snapshots, and how much console text the digest carries.
  */
 import type * as Toolkit from "effect/ai/Toolkit"
+import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -76,6 +77,14 @@ export type Seen =
     /** The opener's name as the popup opened. */
     readonly openerName: string
   }
+
+/**
+ * Told of each page a call opens, by its id, as soon as it opens and before it navigates, in the fiber of the call
+ * that opened it: the CLI's daemon gives a page's popups to the command that opened it.
+ */
+export const Opened = Context.Reference<(page: string) => void>("@usestrider/browser/internal/toolkit/Opened", {
+  defaultValue: () => () => {}
+})
 
 const failed = (error: string, message: string, reason?: string) =>
   new Tools.ToolFailure({ error, message, ...(reason === undefined ? {} : { reason }) })
@@ -484,6 +493,8 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       // Checked first, so a name that's taken opens nothing
       if (name !== undefined && byName.has(name)) return yield* Effect.fail(taken(name))
       const page = yield* context.newPage.pipe(Scope.provide(scope), Effect.mapError(toFailure))
+      const opened = yield* Opened
+      opened(page.id)
       // Taken while the page opened: closed again, as a failed navigation's page is
       const closeAgain = Effect.andThen(forget(page), Effect.ignore(page.close()))
       if (name !== undefined && byName.has(name)) {
