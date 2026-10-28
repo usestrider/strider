@@ -10,8 +10,9 @@ isn't whole when its event comes. Each of these modules adds what its events nee
 
 ## Navigations
 
-[`Expect.toHaveURL`](/docs/pages/expectations#the-matchers) says where the page is, not what got it there. `PageNavigation.next` gives the navigation the
-action caused, with its response, so an error page or a same-document change can be told apart:
+[`Expect.toHaveURL`](/docs/pages/expectations#the-matchers) says where the page is, not what got it there.
+`PageNavigation.next` gives the navigation the action caused, with its response, so an error page or a
+same-document change can be told apart:
 
 ```ts
 import { Page, PageNavigation } from "@usestrider/browser"
@@ -29,8 +30,9 @@ const openOrders = Effect.fn("openOrders")(function*(page: Page.Page) {
 })
 ```
 
-The navigation is data: `Committed` with its response, `SameDocument` for a fragment or the History API, `Restored`
-from the back/forward cache, and [others](/docs/api/browser/PageNavigation#PageNavigation). `waitUntil: "load"` also waits for the document to load.
+The navigation is data: `Committed` with its response, `SameDocument` for a fragment or the History API, which
+WebKit doesn't report, `Restored` from the back/forward cache, and
+[others](/docs/api/browser/PageNavigation#PageNavigation). `waitUntil: "load"` also waits for the document to load.
 
 ## Popups
 
@@ -50,12 +52,13 @@ const connectAccount = Effect.fn("connectAccount")(function*(page: Page.Page) {
 ```
 
 Here [`Dialog.handle`](#dialogs) accepts every dialog the popup opens. The popup is reported before its first
-document loads, so a handler or route registered on it applies to that
-document.
+document loads, so a handler or route registered on it applies to that document.
 
 On Chromium, a popup's opener stops rendering, and actions on it time out with a hint saying so. Call
 [`page.activate`](/docs/api/browser/Page#Page.activate) on the opener first, or make the context with
-[`focus: "emulated"`](/docs/tools/testing#concurrent-pages). Firefox and WebKit keep rendering it.
+[`focus: "emulated"`](/docs/tools/testing#concurrent-pages). Firefox and WebKit keep rendering it, but WebKit
+names no opener, so `Popup.next` fails there with `Unsupported`:
+[wait for the context's new page](/docs/browsers/webkit#differences) instead.
 
 ## Dialogs
 
@@ -93,8 +96,11 @@ const deleteAccount = Effect.fn("deleteAccount")(function*(page: Page.Page) {
 - A dialog no handler decides goes to the context's
   [`dialogs` policy](/docs/pages/contexts#settings-for-a-contexts-life), `"dismiss"` by default, at once. Each
   such decision is reported as an `AutoResolution` event.
+- On WebKit every dialog is `Unknown`, since WebKit doesn't say which kind is open: a handler meant for WebKit
+  [decides from the message](/docs/browsers/webkit#differences) in its `Unknown` branch.
 
-File choosers work the same way. A chooser no handler answers is canceled, and reported:
+File choosers work the same way, except on WebKit, where `FileChooser.handle` fails with `Unsupported` and the
+browser cancels each chooser itself. A chooser no handler answers is canceled, and reported:
 
 ```ts
 import { FileChooser, FileInput, Page } from "@usestrider/browser"
@@ -152,3 +158,4 @@ const exportedHeader = Effect.fn("exportedHeader")(function*(page: Page.Page) {
 
 - The file is kept in a directory the context owns, and removed with it.
 - `saveAs` copies it out once complete; `stream` gives its bytes; `finished` waits for it to end.
+- WebKit reports no downloads: `Download.next` fails there with `Unsupported`.
