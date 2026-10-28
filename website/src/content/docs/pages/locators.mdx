@@ -173,7 +173,7 @@ element. Cross-site frames work the same, and frames nest: `payment.frame(paymen
 ## Strictness
 
 Actions and reads need exactly one match. Several fail at once with
-[`StrictViolation`](/docs/errors#strict-by-default). None is waited for by an
+[`StrictViolation`](/docs/errors#strictness). None is waited for by an
 action or expectation, and fails a read at once with [`NoMatch`](/docs/api/browser/Locator#NoMatch).
 
 `count` and `all` take any number, and read once without waiting, so expect the list first. `all` gives a locator

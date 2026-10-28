@@ -24,7 +24,7 @@ Each module has one error: `LocatorError` for a click, `PageError` for a navigat
 click page.getByRole("button", { name: "Save" }): 2 matches (2 elements match and 1 of them is visible; add .filter({ visible: true }))
 ```
 
-Some reasons belong to one module, such as [`Locator.StrictViolation`](#strict-by-default): the locator matched
+Some reasons belong to one module, such as [`Locator.StrictViolation`](#strictness): the locator matched
 more than one element. Others are shared, in `Reason`:
 
 - `InvalidInput`: an argument the operation can't use, such as a malformed selector. Fails at once.
@@ -61,7 +61,7 @@ const invoicePdf = Effect.fn("invoicePdf")(function*(page: Page.Page) {
 A shared reason is the same class in every module, so one handler serves them all: `noPdf` would serve a
 `LocatorError`'s `Unsupported` too.
 
-## Strict by default
+## Strictness
 
 Acting on the first of two matches would act on whichever the page rendered first, so a run could pass having
 clicked the wrong button. An action or read needs exactly one element. Two or more fail at once with
