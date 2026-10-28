@@ -8,6 +8,12 @@ A program written against `Browser` runs on Chromium unchanged, but Chromium's p
 tabs have rules of their own, and a step that ignores them times out or misses a login. Knowing them, a program
 works around each, and can send CDP itself for what Strider doesn't wrap.
 
+## Protocol and versions
+
+Strider drives Chromium, Chrome and Edge over the Chrome DevTools Protocol: through a pipe to a browser it launches,
+and a WebSocket to one it attaches to. The protocol code is generated from Chrome 155, and the tests run Chromium
+155.0.8059.79. Nothing checks the version at launch.
+
 ## Launching
 
 Launching works as in [Installation](/docs/installation#backends); this section is what Strider passes Chromium,
@@ -28,8 +34,6 @@ const LikeAUser = Chromium.layer({
 }).pipe(Layer.provide(NodeServices.layer))
 ```
 
-- The protocol code is generated from Chrome 155; the tests run Chromium 155.0.8059.79. Nothing checks the version
-  at launch.
 - Arguments, in order: the launch profile's switches, `--headless` (unless
   [`headless: false`](/docs/installation#backends)), your `args`,
   `--remote-debugging-pipe`, `--user-data-dir` with a temporary profile, `about:blank`. Strider talks over the pipe,
@@ -44,7 +48,7 @@ const LikeAUser = Chromium.layer({
 - With `userDataDir`, the profile's logins are in the default context, not the new one `Browser.newPage()` makes:
   open the page there, as [Logging in once](/docs/pages/contexts#logging-in-once) shows.
 
-## Popups
+## Pages as windows
 
 Chromium renders nothing for a page behind another in its window, so each page Strider opens gets its own window.
 A popup, though, goes in front of its opener, which stops rendering, and actions on the opener time out. Call
@@ -210,7 +214,8 @@ const loadMetrics = Effect.fn("loadMetrics")(function*(port: number, url: string
   for each command Strider sends.
 
 A raw command Chromium rejects fails with a `ProtocolError` whose reason, `Rejected`, has Chromium's `code` and
-`description`; a command Strider sends fails its operation with
+`description`, and a `reason` read from them: `NoSuchTarget`, `NoSuchFrame`, `NoSuchNode`, `InvalidArgument`, or
+`Unrecognized` for any other. A command Strider sends fails its operation with
 [`BackendFailure`](/docs/errors#three-kinds-of-failure), the `ProtocolError` as its `cause`. A raw step can recover
 from a rejection it expects, such as a tab that closed before it attached:
 
@@ -227,10 +232,8 @@ const attachIfOpen = Effect.fn("attachIfOpen")(
       Effect.catchReason(
         "ProtocolError",
         "Rejected",
-        (rejected) =>
-          rejected.reason === "NoSuchTarget"
-            ? Effect.succeedNone
-            : Effect.fail(rejected)
+        (rejected, error) =>
+          rejected.reason === "NoSuchTarget" ? Effect.succeedNone : Effect.fail(error)
       )
     )
   }
