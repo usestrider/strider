@@ -186,7 +186,7 @@ const fromRecording = Effect.fn("fromRecording")(function*(page: Page.Page) {
   const replay = yield* Route.fromHar("./fixtures/api.har", { notFound: "fallthrough" })
   yield* page.route("https://shop.example.com/api/**", replay)
   yield* page.goto("https://shop.example.com/cart")
-}, Effect.scoped)
+})
 
 const replayCart = Effect.fn("replayCart")(
   function*() {
