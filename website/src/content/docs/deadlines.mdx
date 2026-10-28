@@ -170,10 +170,16 @@ const placeOrder = Operation.fn("placeOrder")(
 const logStatuses = (timeout: Deadline.Timeout) =>
   Console.error(timeout.operation, timeout.history.map((seen) => seen.value))
 
-const order = (
-  submit: Effect.Effect<string>,
-  status: (id: string) => Effect.Effect<string>
-) => placeOrder(submit, status).pipe(Effect.tapErrorTag("Timeout", logStatuses))
+const order = Effect.fn("order")(
+  function*(
+    submit: Effect.Effect<string>,
+    status: (id: string) => Effect.Effect<string>
+  ) {
+    return yield* placeOrder(submit, status).pipe(
+      Effect.tapErrorTag("Timeout", logStatuses)
+    )
+  }
+)
 ```
 
 `Operation.named` does for an effect what `Operation.fn` does for a function, to name part of a program without
