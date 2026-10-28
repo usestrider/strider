@@ -19,3 +19,18 @@ describe("Session.page", () => {
       assert.include(result.failure.message, "generated handle")
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 })
+
+describe("Session.page, a name that spells a handle", () => {
+  it.effect("finds a page that was kept under the name its own generated handle spells", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const opened = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      // The page is p1 by the first lookup; keeping it as "p1" is a name given, though it spells the handle.
+      yield* session.pages
+      yield* session.name(opened, "p1")
+      const result = yield* Effect.result(session.page("p1"))
+      if (result._tag === "Failure") return assert.fail(`session.page("p1") failed: ${result.failure.message}`)
+      assert.strictEqual(result.success.id, opened.id)
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
