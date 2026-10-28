@@ -8,10 +8,113 @@
     "editor.selectionBackground": "#3B3934"
   },
   "tokenColors": [
-    { "settings": { "foreground": "#F2EEE6" } },
     {
-      "scope": ["comment", "punctuation.definition.comment"],
-      "settings": { "foreground": "#ACA69A", "fontStyle": "italic" }
+      "settings": {
+        "foreground": "#F2EEE6"
+      }
+    },
+    {
+      "scope": [
+        "comment",
+        "punctuation.definition.comment"
+      ],
+      "settings": {
+        "foreground": "#ACA69A",
+        "fontStyle": "italic"
+      }
+    },
+    {
+      "scope": [
+        "keyword",
+        "storage",
+        "storage.type",
+        "storage.modifier",
+        "keyword.control",
+        "keyword.operator.new",
+        "keyword.operator.expression",
+        "keyword.operator.of",
+        "keyword.operator.in",
+        "variable.language.this",
+        "variable.language.super"
+      ],
+      "settings": {
+        "foreground": "#E47B64"
+      }
+    },
+    {
+      "scope": [
+        "keyword.operator",
+        "punctuation",
+        "meta.brace",
+        "meta.delimiter"
+      ],
+      "settings": {
+        "foreground": "#9B978F"
+      }
+    },
+    {
+      "scope": [
+        "keyword.operator.new",
+        "keyword.operator.expression",
+        "keyword.operator.of",
+        "keyword.operator.in"
+      ],
+      "settings": {
+        "foreground": "#E47B64"
+      }
+    },
+    {
+      "scope": [
+        "string",
+        "string.template",
+        "string.regexp",
+        "punctuation.definition.string"
+      ],
+      "settings": {
+        "foreground": "#61A934"
+      }
+    },
+    {
+      "scope": [
+        "constant.numeric",
+        "constant.language",
+        "constant.character.escape"
+      ],
+      "settings": {
+        "foreground": "#E97B00"
+      }
+    },
+    {
+      "scope": [
+        "entity.name.function",
+        "support.function"
+      ],
+      "settings": {
+        "foreground": "#6699E4"
+      }
+    },
+    {
+      "scope": [
+        "entity.name.type",
+        "entity.name.class",
+        "entity.other.inherited-class",
+        "support.type",
+        "support.class",
+        "support.type.primitive"
+      ],
+      "settings": {
+        "foreground": "#B985CD"
+      }
+    },
+    {
+      "scope": [
+        "meta.object-literal.key",
+        "variable.other.property",
+        "support.variable.property"
+      ],
+      "settings": {
+        "foreground": "#58A2B9"
+      }
     }
   ]
 }

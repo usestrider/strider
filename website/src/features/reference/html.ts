@@ -1,25 +1,34 @@
-// A laid-out signature as HTML: highlighted by Shiki in the theme code blocks use (features/code/paper.json), with
-// every linked span an `<a>`. Shiki merges neighboring tokens of one color, so its tokens are cut at each link's
+// A laid-out signature as HTML: highlighted by Shiki in the themes code blocks use (features/code/paper.json by day,
+// night.json by night, each token carrying both as CSS variables), with every linked span an `<a>`. Shiki merges neighboring tokens of one color, so its tokens are cut at each link's
 // edges here, and a link never depends on where Shiki happened to end a token.
 import type { Highlighter, ThemeRegistration } from "shiki"
 import { createHighlighter } from "shiki"
+import night from "../code/night.json"
 import paper from "../code/paper.json"
 import type { Laid } from "./doc.ts"
 
 let highlighter: Promise<Highlighter> | undefined
 
-const get = () => (highlighter ??= createHighlighter({ themes: [paper as ThemeRegistration], langs: ["ts"] }))
+const get = () => (highlighter ??= createHighlighter({
+  themes: [paper as ThemeRegistration, night as ThemeRegistration],
+  langs: ["ts"]
+}))
 
 const escape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
 const attribute = (text: string) => escape(text).replace(/"/g, "&quot;")
 
 export const signatureHtml = async ({ code, links }: Laid): Promise<string> => {
-  const { tokens } = (await get()).codeToTokens(code, { lang: "ts", theme: "strider-paper" })
+  const { tokens } = (await get()).codeToTokens(code, {
+    lang: "ts",
+    themes: { light: "strider-paper", dark: "strider-night" },
+    defaultColor: false
+  })
   const sorted = [...links].sort((a, b) => a.start - b.start)
   const lines = tokens.map((line) =>
     line.map((token) => {
-      const color = token.color === undefined ? "" : ` style="color:${token.color}"`
+      const inks = Object.entries(token.htmlStyle ?? {}).map(([name, value]) => `${name}:${value}`).join(";")
+      const color = inks === "" ? "" : ` style="${inks}"`
       // The token's text, cut where a link starts or ends inside it
       let html = ""
       let at = token.offset

@@ -24,12 +24,20 @@ const { title, description } = Astro.props
     <Font cssVariable="--font-plex-sans" preload />
     <Font cssVariable="--font-plex" preload />
     <script is:inline>
-      // Before first paint, the band: the color of the browser the page is read in, by its brand. Chrome on iOS is
-      // Chromium blue, though it runs on WebKit. The site is light only for now; dark mode returns with a toggle.
+      // Before first paint, the paper and the band. The paper is night or day as the reader last chose with the
+      // masthead's toggle, or as their system prefers. The band is the color of the browser the page is read in, by
+      // its brand: Chrome on iOS is Chromium blue, though it runs on WebKit.
       const root = document.documentElement
-      root.dataset.theme = "light"
+      const chosen = localStorage.getItem("theme")
+      const theme = chosen === "dark" || chosen === "light"
+        ? chosen
+        : matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light"
+      root.dataset.theme = theme
+      root.classList.toggle("dark", theme === "dark")
       const ua = navigator.userAgent
-      root.dataset.engine = /\bOPR\//.test(ua)
+      const brand = /\bOPR\//.test(ua)
         ? "opera"
         : /\bEdg(A|iOS)?\//.test(ua)
         ? "edge"
@@ -38,6 +46,9 @@ const { title, description } = Astro.props
         : /AppleWebKit\//.test(ua) && !/(Chrome|Chromium|CriOS)\//.test(ua)
         ? "webkit"
         : "chromium"
+      // Unless the reader picked an engine's color on the cover, which is remembered
+      const picked = localStorage.getItem("engine")
+      root.dataset.engine = picked === "chromium" || picked === "firefox" || picked === "webkit" ? picked : brand
     </script>
   </head>
   <body>

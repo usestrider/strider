@@ -1,6 +1,8 @@
 ---
-// The masthead: the mark and the name, then the sections and the version. It's the same bar on every page, the
-// cover included, so moving between pages never moves it.
+// The masthead: the mark and the name, then two groups set apart by space alone: the sections, and the night toggle
+// beside the version, which links to the repository with GitHub's mark. It's the same bar on every page, the cover
+// included, so moving between pages never moves it. On a phone the version shows only the mark, and under 380px the
+// name is hidden, kept for screen readers.
 import { versionLabel } from "../features/site.ts"
 import Mark from "./Mark.astro"
 
@@ -12,14 +14,54 @@ const { area } = Astro.props
 const version = await versionLabel()
 ---
 
-<header class="flex h-14 items-center gap-4 border-b border-ink px-6 sm:gap-7">
-  <a class="flex items-center gap-2.5 text-[1.05rem]" href="/"><Mark size={22} /> Strider</a>
+<header class="flex h-14 items-center gap-2.5 border-b border-ink px-6 sm:gap-11">
+  <a class="flex items-center gap-2.5 text-[1.05rem]" href="/"><Mark size={22} /> <span class="max-[379px]:sr-only">Strider</span></a>
   <span class="flex-1"></span>
-  <nav class="flex items-center gap-4 sm:gap-6">
+  <nav class="flex items-center gap-2.5 sm:gap-6">
     <a class="nav-link" href="/docs" aria-current={area === "guides" ? "page" : undefined}>Guide</a>
     <a class="nav-link" href="/docs/scenarios" aria-current={area === "scenarios" ? "page" : undefined}>Scenarios</a>
     <a class="nav-link" href="/docs/api" aria-current={area === "reference" ? "page" : undefined}>API</a>
-    <a class="nav-link" href="https://github.com/usestrider/strider">GitHub</a>
   </nav>
-  <span class="badge hidden sm:inline">{version}</span>
+  <div class="flex items-center gap-2 sm:gap-4">
+    <button class="icon-link" type="button" aria-label="Dark mode" aria-pressed="false" title="Dark mode" data-theme-toggle>
+      <svg class="theme-moon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20.5 14.1A8.5 8.5 0 1 1 9.9 3.5a6.6 6.6 0 0 0 10.6 10.6z" />
+      </svg>
+      <svg class="theme-sun" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+        <circle cx="12" cy="12" r="4.2" />
+        <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4" />
+      </svg>
+    </button>
+    <a class="badge badge-link" href="https://github.com/usestrider/strider" aria-label={`GitHub, ${version}`}>
+      <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+        <path
+          fill="currentColor"
+          d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+        />
+      </svg>
+      <span class="hidden sm:inline">{version}</span>
+    </a>
+  </div>
 </header>
+
+<script>
+  // Night or day paper: the toggle's choice is remembered for every page; until the reader makes one, the page follows
+  // their system, even as it changes
+  const root = document.documentElement
+  const toggle = document.querySelector<HTMLButtonElement>("[data-theme-toggle]")
+  const apply = (theme: "dark" | "light") => {
+    root.dataset.theme = theme
+    root.classList.toggle("dark", theme === "dark")
+    toggle?.setAttribute("aria-pressed", String(theme === "dark"))
+  }
+  toggle?.addEventListener("click", () => {
+    const theme = root.classList.contains("dark") ? "light" : "dark"
+    localStorage.setItem("theme", theme)
+    apply(theme)
+  })
+  const system = matchMedia("(prefers-color-scheme: dark)")
+  system.addEventListener("change", () => {
+    if (localStorage.getItem("theme") === null) apply(system.matches ? "dark" : "light")
+  })
+  toggle?.setAttribute("aria-pressed", String(root.classList.contains("dark")))
+</script>

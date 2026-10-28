@@ -6,6 +6,7 @@
 import { pluginCollapsibleSections } from "@expressive-code/plugin-collapsible-sections"
 import { pluginLineNumbers } from "@expressive-code/plugin-line-numbers"
 import { defineEcConfig, definePlugin } from "astro-expressive-code"
+import night from "./src/features/code/night.json" with { type: "json" }
 import paper from "./src/features/code/paper.json" with { type: "json" }
 
 const languages = { ts: "TypeScript", tsx: "TSX", js: "JavaScript", jsx: "JSX", json: "JSON", css: "CSS", html: "HTML" }
@@ -43,8 +44,8 @@ export default defineEcConfig({
   plugins: [pluginCollapsibleSections(), pluginLineNumbers(), pluginTitleBar()],
   // A long line wraps, keeping its indentation, rather than scrolling
   defaultProps: { showLineNumbers: false, wrap: true, preserveIndent: true },
-  // Light only for now; src/features/code/night.json returns with dark mode
-  themes: [paper],
+  // Paper by day, night.json on night paper, chosen by the data-theme BaseLayout sets
+  themes: [paper, night],
   useDarkModeMediaQuery: false,
   themeCssSelector: (theme) => `[data-theme='${theme.type}']`,
   styleOverrides: {

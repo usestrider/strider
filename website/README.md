@@ -25,13 +25,13 @@ pnpm website:build    # the static site, in website/dist/
 After O'Reilly's engineering books: an inked animal, paper and ink, and one band color per page; the only other fills
 are engine labels. Structure is drawn with 1px rules, never shadows, rounded corners or tints. Type is set for reading
 on a screen: EB Garamond for titles, Source Serif 4 for prose at 18px on a 1.65 leading, IBM Plex Sans for navigation
-and labels, and IBM Plex Mono for code, all self-hosted from Fontsource (`astro.config.ts`). The site is light only
-for now; the night palette waits in `global.css` for a toggle.
+and labels, and IBM Plex Mono for code, all self-hosted from Fontsource (`astro.config.ts`). Night paper follows the
+reader's system until they choose with the masthead's toggle; on it the engraving stays ink, printed on an ivory plate.
 
 | Where                                 | What                                                                                  |
 | ------------------------------------- | ------------------------------------------------------------------------------------- |
 | `src/styles/global.css`               | the palette as variables, the type, and the components: labels, badges, callouts      |
-| `src/layouts/BaseLayout.astro`        | before first paint, the band: the reader's browser's color                            |
+| `src/layouts/BaseLayout.astro`        | before first paint, the band: the reader's browser's color, or the one picked         |
 | `src/layouts/DocShell.astro`          | the masthead, the band with breadcrumbs, the sidebar, the page and the rail           |
 | `src/components/SideNav.astro`        | a sidebar's groups; `SideFilter.astro` narrows the reference's modules as you type    |
 | `src/components/Rail.astro`           | what's on the page: a module's categories and declarations, the one being read marked |
@@ -42,7 +42,8 @@ for now; the night palette waits in `global.css` for a toggle.
 | `src/components/Aside.astro`          | callouts in guides: `<Aside type="note">`, `"tip"`, `"caution"` or `"warning"`        |
 
 The band is Chromium blue, Firefox orange, WebKit cyan, Edge green or Opera red, by the brand of the browser the page
-is read in. Each is darkened until white type passes 4.5:1 on it and the color passes as text on paper.
+is read in, unless the reader clicks Chromium, Firefox or WebKit on the cover, an unmarked easter egg that is
+remembered. Each is darkened until white type passes 4.5:1 on it and the color passes as text on paper.
 
 A module's page reads as effect.website's does: its summary and import line, then each category's declarations, each
 with its summary, signature, JSDoc sections, examples and `@see` links. A type's Schema or tag folds into a line

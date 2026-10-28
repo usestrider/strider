@@ -41,21 +41,30 @@ const program = Effect.scoped(Effect.gen(function*() {
     <section class="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-6 pt-12 pb-14 text-center">
       {
         engraving !== undefined && (
+          <div class="plate mx-auto w-[min(26rem,100%)]">
           <Image
-            class="engraving mx-auto w-[min(26rem,100%)]"
+            class="engraving w-full"
             src={engraving}
             widths={[468, 936]}
             sizes="(min-width: 520px) 468px, 100vw"
             alt="An engraving of a great blue heron, stepping"
             loading="eager"
           />
+          </div>
         )
       }
       <p class="label mt-6">Browser automation · TypeScript · Effect</p>
-      <p class="mt-3 flex justify-center gap-6 font-mono text-[0.75rem]">
-        <span class="flex items-center gap-2"><span class="size-2 bg-[var(--engine-chromium)]"></span>Chromium</span>
-        <span class="flex items-center gap-2"><span class="size-2 bg-[var(--engine-firefox)]"></span>Firefox</span>
-        <span class="flex items-center gap-2"><span class="size-2 bg-[var(--engine-webkit)]"></span>WebKit</span>
+      <p class="engines mt-3 flex justify-center gap-6 font-mono text-[0.75rem]" role="group" aria-label="The site's accent color">
+        <span id="engine-pick" class="sr-only">Sets the site's accent to this browser's color</span>
+        <button class="flex items-center gap-2" type="button" data-pick="chromium" aria-pressed="false" aria-describedby="engine-pick">
+          <span class="swatch size-2 bg-[var(--engine-chromium)]"></span>Chromium
+        </button>
+        <button class="flex items-center gap-2" type="button" data-pick="firefox" aria-pressed="false" aria-describedby="engine-pick">
+          <span class="swatch size-2 bg-[var(--engine-firefox)]"></span>Firefox
+        </button>
+        <button class="flex items-center gap-2" type="button" data-pick="webkit" aria-pressed="false" aria-describedby="engine-pick">
+          <span class="swatch size-2 bg-[var(--engine-webkit)]"></span>WebKit
+        </button>
       </p>
     </section>
 
@@ -117,3 +126,23 @@ const program = Effect.scoped(Effect.gen(function*() {
     </div>
   </section>
 </BaseLayout>
+
+<script>
+  // The engines on the cover pick the site's color: the band and the links take the picked engine's, on this page and
+  // every one after, in place of the reader's browser's
+  const root = document.documentElement
+  const picks = document.querySelectorAll<HTMLButtonElement>("[data-pick]")
+  const mark = () => {
+    for (const pick of picks) pick.setAttribute("aria-pressed", String(pick.dataset.pick === root.dataset.engine))
+  }
+  for (const pick of picks) {
+    pick.addEventListener("click", () => {
+      const engine = pick.dataset.pick
+      if (engine === undefined) return
+      root.dataset.engine = engine
+      localStorage.setItem("engine", engine)
+      mark()
+    })
+  }
+  mark()
+</script>

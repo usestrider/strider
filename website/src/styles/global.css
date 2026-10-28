@@ -9,7 +9,7 @@
  *
  * The band is the color of the browser the page is read in (BaseLayout sets `data-engine`), and Chromium blue
  * otherwise: each engine's signature hue, darkened until white type passes 4.5:1 on it and the color itself passes
- * on paper. The site is light only for now; the night palette below waits for a toggle to set `.dark`.
+ * on paper. Night paper is `.dark` on the root: the reader's choice with the masthead's toggle, or their system's.
  */
 @import "tailwindcss";
 
@@ -58,6 +58,11 @@
 :root[data-engine="opera"] {
   --band: var(--engine-opera);
   --band-lift: #cf6a75;
+}
+
+/* The cover's engines pick the site's color when clicked, unmarked: an easter egg, so they look as they did */
+.engines button {
+  cursor: pointer;
 }
 
 /* Night paper: ink and paper swap, the band keeps its color as a fill and is lifted as text */
@@ -113,19 +118,44 @@ body {
     color: var(--labels);
   }
 
+  /* A section in the masthead, spaced a little tighter on a phone so the masthead fits */
   .nav-link {
     font-family: var(--mono);
     font-size: 0.75rem;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--ink);
     padding-block: 0.2rem;
     border-bottom: 2px solid transparent;
   }
 
+  @media (width >= 40rem) {
+    .nav-link {
+      letter-spacing: 0.1em;
+    }
+  }
+
   .nav-link[aria-current="page"] {
     color: var(--band-text);
     border-bottom-color: var(--band);
+  }
+
+  /* The masthead's night toggle: in ink, the band's color under the pointer, showing the moon by day and the sun by
+     night */
+  .icon-link {
+    display: inline-flex;
+    padding: 0.2rem;
+    color: var(--ink);
+    cursor: pointer;
+  }
+
+  .icon-link:hover {
+    color: var(--band-text);
+  }
+
+  .dark .theme-moon,
+  :root:not(.dark) .theme-sun {
+    display: none;
   }
 
   /* A version: v0.4.2 */
@@ -134,6 +164,33 @@ body {
     font-size: 0.7rem;
     border: 1px solid var(--ink);
     padding: 0.15rem 0.5rem;
+  }
+
+  /* The masthead's version, a link to the repository with GitHub's mark before it */
+  .badge-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--ink);
+  }
+
+  .badge-link:hover {
+    color: var(--band-text);
+    border-color: var(--band);
+  }
+
+  /* On a phone, only the mark, unboxed and at the toggle's size beside it */
+  @media (width < 40rem) {
+    .badge-link,
+    .badge-link:hover {
+      border-color: transparent;
+      padding: 0.2rem;
+    }
+
+    .badge-link svg {
+      width: 18px;
+      height: 18px;
+    }
   }
 
   /* UNSTABLE, DEPRECATED: ink filled */
@@ -481,17 +538,21 @@ body {
   margin-bottom: 0;
 }
 
-/* The engraving is ink on white: multiplied, its white takes the paper's color; on night paper it's printed
-   inverted, its lines light, as ink and paper swap. Its white is a level or two short of pure, and brightening it
-   2% first leaves no edge where the image ends. */
+/* The engraving is ink on white: multiplied, its white takes the paper's color. Its white is a level or two short of
+   pure, and brightening it 2% first leaves no edge where the image ends. */
 .engraving {
   filter: brightness(1.02);
   mix-blend-mode: multiply;
 }
 
-.dark .engraving {
-  filter: brightness(1.02) invert(1);
-  mix-blend-mode: screen;
+/* On night paper the engraving stays ink on paper, a printed plate: muted ivory, so it doesn't glare, with a plate mark
+   drawn as a 1px rule just inside its edge. The engraving multiplies onto the plate, not the page. */
+.dark .plate {
+  background: #e6e3d9;
+  padding: 1.25rem;
+  isolation: isolate;
+  outline: 1px solid rgb(26 26 26 / 0.22);
+  outline-offset: -0.55rem;
 }
 
 /* ── Code ───────────────────────────────────────────────────────────────────── */
@@ -583,6 +644,15 @@ pre.signature {
   font-family: var(--mono);
   font-size: 0.84rem;
   line-height: 1.6;
+}
+
+/* Each token carries both themes' inks (features/reference/html.ts) */
+pre.signature span {
+  color: var(--shiki-light);
+}
+
+.dark pre.signature span {
+  color: var(--shiki-dark);
 }
 
 pre.signature a {
