@@ -51,11 +51,10 @@ A popup, though, goes in front of its opener, which stops rendering, and actions
 [`activate`](/docs/api/browser/Page#Page.activate) on the opener before going back to it:
 
 ```ts
-import { Browser, Expect, Popup } from "@usestrider/browser"
+import { Expect, Page, Popup } from "@usestrider/browser"
 import { Effect } from "effect"
 
-const signInWithPopup = Effect.scoped(Effect.gen(function*() {
-  const page = yield* Browser.newPage()
+const signInWithPopup = Effect.fn("signInWithPopup")(function*(page: Page.Page) {
   yield* page.goto("https://app.example.com")
   const popups = yield* Popup.next(page)
   yield* page.getByRole("button", { name: "Sign in with Example" }).click()
@@ -63,7 +62,7 @@ const signInWithPopup = Effect.scoped(Effect.gen(function*() {
   yield* popup.getByRole("button", { name: "Allow" }).click()
   yield* page.activate
   yield* page.getByText("Signed in").pipe(Expect.toBeVisible)
-}))
+}, Effect.scoped)
 ```
 
 For a flow that goes back and forth between pages, or runs several at once, make the context with
