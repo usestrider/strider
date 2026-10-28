@@ -37,7 +37,7 @@ A launch runs the executable you name; Strider never finds or installs a browser
 Pages, [locators](/docs/pages/locators), [`click` and `fill`](/docs/pages/actions) and
 [retrying expectations](/docs/pages/expectations) work much as in Playwright. What differs:
 
-- **Lifetimes are scopes.** A page, [route](/docs/events/routes) or [dialog handler](/docs/events/kinds#dialogs)
+- **Lifetimes are scopes.** A page, [route](/docs/events/routes) or [dialog handler](/docs/events/kinds#dialogs-and-file-choosers)
   ends with the `Scope` that acquired it, even on failure or interruption.
 - **Subscribe, then act.** To catch a popup, download or response an action causes,
   [subscribe first](/docs/events/events). A subscription sees events after it starts, never before.

@@ -253,7 +253,7 @@ popup  https://pay.example.com/card
 ```
 
 - A segment runs in its own scope: its [routes](/docs/events/routes),
-  [handlers](/docs/events/kinds#dialogs) and waits end with it.
+  [handlers](/docs/events/kinds#dialogs-and-file-choosers) and waits end with it.
 - Pages it returns are named into the session under their keys, but not kept: a popup of a session page stays open,
   since its opener owns it, and a page the segment opened itself closes with the segment.
 - To keep a page it opened, call [`session.keep`](/docs/api/browser/cli/CurrentSession#CurrentSession.keep). For a

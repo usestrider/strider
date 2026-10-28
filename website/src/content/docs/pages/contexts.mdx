@@ -66,7 +66,7 @@ const berlinPhone = Effect.fn("berlinPhone")(function*() {
 | `emulation`      | viewport, user agent, locale, time zone, position, media features, network, CPU     |
 | `permissions`    | permissions granted to every origin; not on WebKit, nor on Firefox, where [`grant`](#settings-for-a-while) with an `origin` grants to one |
 | [`storageState`](#logging-in-once) | cookies and storage to start from                                |
-| `dialogs`        | what happens to a dialog no [handler](/docs/events/kinds#dialogs) decides: `"dismiss"` (the default), `"accept"`, `"leaveOpen"` |
+| `dialogs`        | what happens to a dialog no [handler](/docs/events/kinds#dialogs-and-file-choosers) decides: `"dismiss"` (the default), `"accept"`, `"leaveOpen"` |
 | [`downloads`](/docs/events/kinds#downloads) | a temporary directory (the default), `"deny"`, or `{ directory }`; on WebKit, which has no downloads, any value fails |
 | [`focus`](/docs/tools/testing#concurrent-pages) | `"emulated"` makes every page behave as if focused, not on Firefox or WebKit; otherwise only one has focus, and `toBeFocused` fails on the rest |
 | [`keyboardLayout`](/docs/pages/actions#keys) | the layout typing uses: `us` (the default), `uk`, `de`, `fr`, `es`, `it`           |

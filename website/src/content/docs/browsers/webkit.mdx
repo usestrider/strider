@@ -147,7 +147,7 @@ What changes when attached:
 
 **Dialogs are `Dialog.Unknown`,** with their message: WebKit doesn't say which kind is open. `accept` answers as OK,
 a prompt with its default; `dismiss` as Cancel; `respond(text)` answers a prompt. So a
-[handler](/docs/events/kinds#dialogs)'s `Confirm` and `Prompt` branches never run here, but keep them, so the same handler
+[handler](/docs/events/kinds#dialogs-and-file-choosers)'s `Confirm` and `Prompt` branches never run here, but keep them, so the same handler
 serves Chromium and Firefox; its `Unknown` branch decides from the message:
 
 ```ts
