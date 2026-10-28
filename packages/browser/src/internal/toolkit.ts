@@ -293,15 +293,21 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       : `console ${message.level} on ${where} (text not sent)`
   const originName = (origin: Target.EventOrigin) => origin._tag === "Page" ? nameOfEntry(origin.page) : "a worker"
 
-  const watchPage = (page: Page.Page, name: string): Effect.Effect<void> =>
+  /** A page's name as it is now, which `page name` may have changed since `named` was given. */
+  const nameNow = (page: Page.Page, named: string) => nameById.get(page.id) ?? named
+
+  // Each line names the page by its name as the line is noted, so a page renamed since it was first seen is
+  // called by its new name
+  const watchPage = (page: Page.Page, first: string): Effect.Effect<void> =>
     Effect.gen(function*() {
       const pageEntry = Handles.page(page).entry
+      const name = () => nameNow(page, first)
       yield* drain(pageEntry.events.navigation, (navigation) => {
         if (
           navigation.frame === pageEntry.id &&
           (navigation.outcome._tag === "Committed" || navigation.outcome._tag === "SameDocument")
         ) {
-          note(`${name} navigated to ${navigation.url}`)
+          note(`${name()} navigated to ${navigation.url}`)
         }
       })
       yield* drainEffect(pageEntry.events.popup, (popup) =>
@@ -315,9 +321,9 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
                   page: opened,
                   name: popupName,
                   opener: page,
-                  openerName: nameById.get(page.id) ?? name
+                  openerName: name()
                 })
-                note(`popup ${popupName} opened from ${name}${
+                note(`popup ${popupName} opened from ${name()}${
                   Option.match(popup.url, {
                     onNone: () => "",
                     onSome: (url) => ` at ${url}`
@@ -326,10 +332,10 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
               }))
         }))
       yield* drain(pageEntry.events.dialog, (prompt) =>
-        note(`dialog ${prompt.kind}${prompt.message === "" ? "" : ` "${prompt.message}"`} on ${name}`))
+        note(`dialog ${prompt.kind}${prompt.message === "" ? "" : ` "${prompt.message}"`} on ${name()}`))
       yield* Effect.forkIn(
         Effect.flatMap(page.closed, (reason) =>
-          Effect.sync(() => note(`${name} closed: ${reason._tag}`))),
+          Effect.sync(() => note(`${name()} closed: ${reason._tag}`))),
         scope
       )
     })
@@ -631,7 +637,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
               case "navigation":
                 return Effect.map(
                   PageNavigation.next(page),
-                  (wait) => Effect.map(wait, (navigation) => `${name} navigated to ${navigation.url}`)
+                  (wait) => Effect.map(wait, (navigation) => `${nameNow(page, name)} navigated to ${navigation.url}`)
                 )
               case "popup":
                 return Effect.map(Popup.next(page), (wait) =>
@@ -646,7 +652,9 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
                   Dialog.next(page),
                   (wait) =>
                     Effect.map(wait, (dialog) =>
-                      `dialog ${dialog._tag}${"message" in dialog ? ` "${dialog.message}"` : ""} on ${name}`)
+                      `dialog ${dialog._tag}${"message" in dialog ? ` "${dialog.message}"` : ""} on ${
+                        nameNow(page, name)
+                      }`)
                 )
               case "download":
                 return Effect.map(
@@ -660,14 +668,12 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
                   ? Effect.fail(failed("InvalidInput", "A response wait needs a URL pattern"))
                   : Effect.map(
                     NetworkResponse.next(page, { url }),
-                    (wait) =>
-                      Effect.map(wait, (response) =>
-                        `${response.status} ${response.url}`)
+                    (wait) => Effect.map(wait, (response) => `${response.status} ${response.url}`)
                   )
               case "console":
                 return Effect.map(
                   ConsoleMessage.next(page),
-                  (wait) => Effect.map(wait, (message) => consoleLine(message, name))
+                  (wait) => Effect.map(wait, (message) => consoleLine(message, nameNow(page, name)))
                 )
             }
           })()
