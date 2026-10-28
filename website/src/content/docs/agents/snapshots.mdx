@@ -1,6 +1,6 @@
 ---
 title: Snapshots
-description: Read a page as an accessibility tree, act through refs, and compare snapshots.
+description: A page's accessibility tree with refs to act through, the controls a snapshot infers, the tree alone, and what changed between two snapshots.
 order: 1
 ---
 
@@ -9,10 +9,10 @@ refs that act on the nodes it saw.
 
 ## Acting through refs
 
-Use a snapshot when a model, not your code, picks the element: it reads `text`
-([as the CLI prints it](/docs/agents/cli#commands)) and answers with a ref. A ref acts
-on exactly the node the model saw, or fails, so in your own code prefer a [locator](/docs/pages/locators), which
-finds its element again after a re-render. A snapshot is a page's accessibility tree as data, with a ref for each
+Use a snapshot when a model, not your code, picks the element: it reads `text`,
+[as the CLI prints it](/docs/agents/cli#commands), and answers with a ref. A ref acts on exactly the node the model
+saw, or fails, so in your own code prefer a [locator](/docs/pages/locators), which finds its element again after a
+re-render. A snapshot is a page's accessibility tree as data, with a ref for each
 node that can be acted on:
 
 ```ts
@@ -70,7 +70,7 @@ const unreachableControls = Effect.fn("unreachableControls")(
 )
 ```
 
-## Accessibility trees
+## The accessibility tree alone
 
 `sources: "aria"` gives the accessibility tree alone, as [`Expect.toMatchAria`](/docs/pages/expectations#accessibility-trees)
 matches it; the default, `"aria+interactivity"`, adds the inferred controls. Use it to start a pattern: one written
