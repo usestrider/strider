@@ -140,6 +140,31 @@ describe("strider export test", () => {
     assert.notInclude(text, "Deadline")
   })
 
+  it("ends a route or dialog handler where the session removed it, with its handle's remove", () => {
+    const { text } = ExportTest.render({
+      name: "shop",
+      browser: launched,
+      secrets: {},
+      state: undefined,
+      steps: [
+        { _tag: "NewPage", page: "main", url: undefined },
+        tool("route", { page: "main", pattern: "**/analytics/**", action: "abort" }, "r1"),
+        tool("dialog", { page: "main", decision: "dismiss" }, "r2"),
+        tool("route", { page: "main", pattern: "**/ads/**", action: "abort" }, "r3"),
+        { _tag: "Remove", registration: "r1" },
+        { _tag: "Remove", registration: "r2" }
+      ]
+    })
+    assert.include(
+      text,
+      `const r1 = yield* main.route("**/analytics/**", () => Effect.succeed(Route.abort()))\n`
+    )
+    assert.include(text, `const r2 = yield* Dialog.handle(main, Dialog.dismissAll)\n`)
+    // One the session kept on ends with the test's scope, so it needs no name
+    assert.include(text, `        yield* main.route("**/ads/**", () => Effect.succeed(Route.abort()))\n`)
+    assert.include(text, `        yield* r1.remove\n        yield* r2.remove\n`)
+  })
+
   it("answers a dialog of unknown kind with the text, as the session did", () => {
     const { text } = ExportTest.render({
       name: "shop",

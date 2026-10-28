@@ -105,8 +105,14 @@ const record = (
     tool: name,
     params,
     target: target === undefined ? undefined : target.replace(/^[A-Za-z_$][\w$]*\./, `${variable(page!)}.`),
-    result: typeof outcome === "string" ? outcome : (outcome as { readonly wait?: string }).wait
+    result: typeof outcome === "string" ? outcome : handleOf(outcome)
   })
+}
+
+/** The handle a tool call printed: a wait's, or a route's or dialog handler's registration. */
+const handleOf = (outcome: unknown): string | undefined => {
+  const made = outcome as { readonly wait?: string; readonly registration?: string }
+  return made.wait ?? made.registration
 }
 
 class CommandFailed extends Data.TaggedError("CommandFailed")<{
@@ -426,6 +432,7 @@ const commands = (daemon: Daemon) => {
     ({ registration }) =>
       Effect.gen(function*() {
         yield* daemon.session.remove(registration).pipe(Effect.mapError((failure) => new CommandFailed(failure)))
+        daemon.steps.push({ _tag: "Remove", registration })
         yield* Console.log(`removed ${registration}`)
       })
   )

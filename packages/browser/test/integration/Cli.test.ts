@@ -163,6 +163,10 @@ describe("strider", () => {
         assert.include(exported, `shop.getByRole("button", { name: "Sign in", exact: true }).click()`)
         assert.include(exported, `.fill(yield* Config.Redacted("SECRET_PW"))`)
         assert.include(exported, `const w1 = yield* Popup.next(shop).pipe(Deadline.within("20 seconds"))`)
+        // The route the session removed ends where it did, through its handle; the dialog handler it kept doesn't
+        assert.include(exported, `const r1 = yield* shop.route("**/api/status", () => Effect.succeed(Route.fulfill(`)
+        assert.include(exported, `yield* r1.remove\n`)
+        assert.include(exported, `        yield* Dialog.handle(shop, Dialog.dismissAll)\n`)
         assert.include(exported, `// TODO strider run ${path.join(fixtures, "open-popup.ts")}`)
         // The page's own script holds the password it checks, so the statement is what is checked
         assert.notInclude(exported, `.fill("hunter2")`)

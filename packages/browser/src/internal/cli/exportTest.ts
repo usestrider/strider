@@ -1,8 +1,8 @@
 /**
  * `strider export test` (CLI.md): a session's successful commands as one Vitest test.
  * Every command is one statement against the public API, so the test reads as the session ran: a ref becomes
- * the locator its snapshot names, a `%name%` secret its `Config.Redacted`, and a wait the `next` it started, with
- * its `--within` as `Deadline.within`.
+ * the locator its snapshot names, a `%name%` secret its `Config.Redacted`, a wait the `next` it started, with
+ * its `--within` as `Deadline.within`, and `remove r1` the `remove` of the handle the route or dialog handler gave.
  * Reads (`pages`, `snapshot`, `screenshot`, `history`) aren't repeated.
  */
 import type * as Snapshot from "../../Snapshot.ts"
@@ -10,12 +10,14 @@ import type * as Snapshot from "../../Snapshot.ts"
 /** A command the session ran, as the test repeats it. */
 export type Step =
   | { readonly _tag: "NewPage"; readonly page: string; readonly url: string | undefined }
+  | { readonly _tag: "Remove"; readonly registration: string }
   | { readonly _tag: "Segment"; readonly file: string }
   | {
     readonly _tag: "Tool"
     readonly tool: string
     readonly params: Readonly<Record<string, unknown>>
     readonly target: string | undefined
+    /** The handle the call printed, a wait's (`w1`) or a registration's (`r1`), or else its outcome's text. */
     readonly result: string | undefined
   }
 
@@ -122,6 +124,10 @@ export const render = (options: {
       } })`
     ]
   if (options.state !== undefined) used.add("StorageState")
+  // A route or dialog handler the session removed keeps its handle, whose remove ends it where the session did
+  const removed = new Set(options.steps.flatMap((step) => step._tag === "Remove" ? [step.registration] : []))
+  const handle = (step: Step) =>
+    step._tag === "Tool" && step.result !== undefined && removed.has(step.result) ? `const ${step.result} = ` : ""
   const pages = new Set<string>()
   const value = (text: string) => {
     const secret = /^%([A-Za-z_][\w-]*)%$/.exec(text)?.[1]
@@ -141,6 +147,10 @@ export const render = (options: {
       pages.add(step.page)
       body.push(`const ${page} = yield* context.newPage`)
       if (step.url !== undefined) body.push(`yield* ${page}.goto(${quote(step.url)})`)
+      continue
+    }
+    if (step._tag === "Remove") {
+      body.push(`yield* ${step.registration}.remove`)
       continue
     }
     if (step._tag === "Tool" && step.tool === "control") {
@@ -240,18 +250,20 @@ export const render = (options: {
           : `Route.fulfill(HttpServerResponse.text(${quote(String(params.body ?? ""))}, { status: ${
             params.status ?? 200
           }${params.contentType === undefined ? "" : `, contentType: ${quote(String(params.contentType))}`} }))`
-        body.push(`yield* ${page}.route(${quote(String(params.pattern))}, () => Effect.succeed(${decision}))`)
+        body.push(
+          `${handle(step)}yield* ${page}.route(${quote(String(params.pattern))}, () => Effect.succeed(${decision}))`
+        )
         break
       }
       case "dialog":
         used.add("Dialog")
         body.push(
-          params.decision === "accept" && params.text !== undefined
+          handle(step) + (params.decision === "accept" && params.text !== undefined
             // As in the session, a dialog of unknown kind, as every dialog on WebKit is, gets the text too
             ? `yield* Dialog.handle(${page}, (dialog) => Effect.succeed(dialog._tag === "Prompt" || dialog._tag === "Unknown" ? dialog.respond(${
               quote(String(params.text))
             }) : dialog._tag === "BeforeUnload" ? dialog.leave : dialog.accept))`
-            : `yield* Dialog.handle(${page}, Dialog.${params.decision === "accept" ? "acceptAll" : "dismissAll"})`
+            : `yield* Dialog.handle(${page}, Dialog.${params.decision === "accept" ? "acceptAll" : "dismissAll"})`)
         )
         break
     }
