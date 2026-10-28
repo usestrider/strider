@@ -7,7 +7,7 @@ order: 3
 A program that passes on Chromium can fail on Firefox, from a capability BiDi lacks or a behaviour Firefox has.
 Knowing which lets you run one program on both, and tell a bug in your program from a limit of the backend.
 
-## Firefox and WebDriver BiDi
+## Protocol and versions
 
 Strider drives Firefox over WebDriver BiDi, the W3C's automation protocol and the only one Firefox has. BiDi covers
 less than CDP, so most of what Firefox can't do in Strider is missing from BiDi or from Firefox's implementation of
@@ -93,7 +93,7 @@ const archiveFirst = Effect.fn("archiveFirst")(
 - `/session` is added to an endpoint with no path.
 - Existing tabs are observed; [`inspect` or `control`](/docs/pages/attaching#access-levels) gives access for a
   scope. They stay open after the program.
-- **One session at a time.** While another client holds it, connecting fails with `ConnectionFailed`. A session
+- One session at a time: while another client holds it, connecting fails with `ConnectionFailed`. A session
   outlives its connection, so a program that dies without ending it leaves Firefox refusing clients until it
   restarts; for a browser the `strider` CLI started, [`strider prune --yes`](/docs/agents/cli#managing-sessions)
   stops it.
