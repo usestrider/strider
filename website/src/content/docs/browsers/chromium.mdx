@@ -1,6 +1,6 @@
 ---
 title: Chromium
-description: Chromium, Chrome and Edge over the Chrome DevTools Protocol. Launching, popups, attaching, and what Chromium does differently.
+description: Chromium, Chrome and Edge over the Chrome DevTools Protocol, launching them, popups and the windows pages open in, attaching, what Chromium can't do or does differently, and the raw protocol.
 order: 2
 ---
 
@@ -37,7 +37,7 @@ const LikeAUser = Chromium.layer({
 - Arguments, in order: the launch profile's switches, `--headless` (unless
   [`headless: false`](/docs/installation#backends)), your `args`,
   `--remote-debugging-pipe`, `--user-data-dir` with a temporary profile, `about:blank`. Strider talks over the pipe,
-  with no message size limit and no debugging port ([the raw protocol](#the-raw-protocol)).
+  with no message size limit and no debugging port, which [the raw protocol](#the-raw-protocol) needs.
 - Don't put a URL in `args`: headless Chromium opens one page only.
 - `LaunchProfile.automation`, the default, turns off first-run pages, sync, updates and background networking.
   Pages can't tell. [`LaunchProfile.concurrent`](/docs/tools/testing#concurrent-pages) also stops throttling
@@ -66,7 +66,7 @@ const signInWithPopup = Effect.fn("signInWithPopup")(function*(page: Page.Page) 
   yield* popup.getByRole("button", { name: "Allow" }).click()
   yield* page.activate
   yield* page.getByText("Signed in").pipe(Expect.toBeVisible)
-}, Effect.scoped)
+})
 ```
 
 For a flow that goes back and forth between pages, or runs several at once, make the context with
