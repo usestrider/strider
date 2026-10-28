@@ -1,0 +1,62 @@
+---
+title: Page clock
+description: A clock for the time a page reads, its three modes, and moving it forward, jumping it and letting it run in real time again.
+order: 6
+---
+
+A page that shows today's date, or ends a session after five minutes, renders differently each day or makes a
+test wait the five minutes. The page clock replaces the time the page reads with one you stop, set and move, so
+five minutes pass in one call.
+
+## Installing a clock
+
+`page.clock.install` replaces `Date` and `performance.now`, and in controlled mode the timers, in every current
+and later document of the page. It's a [declaration](/docs/events/routes#declarations), held until its scope
+closes:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const sessionExpires = Effect.fn("sessionExpires")(function*(page: Page.Page) {
+  yield* page.clock.install({ mode: "controlled", at: "2026-01-01T09:00:00Z" })
+  yield* page.goto("https://app.example.com/session")
+  yield* page.getByRole("button", { name: "Start" }).click()
+  yield* page.clock.adjust("5 minutes")
+  yield* page.getByText("Session expired").pipe(Expect.toBeVisible)
+})
+```
+
+| Mode         | Wall time                 | Timers and animation frames    |
+| ------------ | ------------------------- | ------------------------------ |
+| `fixed`      | frozen at `at`            | run in real time               |
+| `offset`     | shifted `by` a duration   | run in real time               |
+| `controlled` | starts at `at`, moves only when told | run only when time moves |
+
+Use `fixed` for a date the page only shows, `offset` to run in the future or the past at real speed, and
+`controlled` to make time pass in one call.
+
+## Moving time
+
+- `adjust` moves a controlled clock forward, firing each timer that comes due, in order.
+- `setTime` jumps, firing due timers at most once, as a laptop waking from sleep.
+- `resume` returns to real time from where the clock stands. The timers it held then run as real ones, for a step
+  that needs them, such as a form that validates after a pause:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const signedOutOvernight = Effect.fn("signedOutOvernight")(function*(page: Page.Page) {
+  yield* page.clock.install({ mode: "controlled", at: "2026-03-02T18:00:00Z" })
+  yield* page.goto("https://mail.example.com/inbox")
+  yield* page.clock.setTime("2026-03-03T09:00:00Z")
+  yield* page.getByText("Signed out after inactivity").pipe(Expect.toBeVisible)
+  yield* page.clock.resume
+  yield* page.getByLabel("Email").fill("ada@example")
+  yield* page.getByText("Enter a valid email").pipe(Expect.toBeVisible)
+})
+```
+
+One timeline spans the page's documents and frames; navigating doesn't reset it. The page clock doesn't touch
+Strider's deadlines, and `TestClock` doesn't touch the page.

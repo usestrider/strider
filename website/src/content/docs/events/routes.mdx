@@ -1,28 +1,27 @@
 ---
-title: Routes, init scripts and the clock
-description: Declarations change what a page sees while their scope lasts. Routes decide requests, init scripts run before the page's own, and the page clock moves when you say.
+title: Routes
+description: Declarations and their scope, route handlers and the decisions they return, the response phase, HTTP authentication, and replaying a recording.
 order: 4
 ---
 
-A page that depends on a live backend, on its own startup scripts or on the real clock does something different
-each run. Declarations fix what it gets: the answer to each request, what runs before its scripts, and the time it
-reads.
+A page that talks to a real backend shows whatever data and failures the backend has that run. A route decides
+each matching request before it leaves the browser, so the page gets the answer you chose.
 
 ## Declarations
 
-A declaration is a setting held for a scope: a route, an init script, the page clock, an
+A declaration is a setting held for a scope: a route, an [init script](/docs/events/init-scripts), the
+[page clock](/docs/events/page-clock), an
 [emulated setting or a granted permission](/docs/pages/contexts#settings-for-a-while), a
 [dialog or file chooser handler](/docs/events/kinds#dialogs).
 
 - The browser confirms it before the call returns, so it applies from the next line.
 - It's removed when its scope closes, or earlier with its handle's `remove`.
 
-## Routes
+## Handlers and decisions
 
-A page that talks to a real backend shows whatever data and failures the backend has that run.
-`page.route(pattern, handler)` decides each matching request before it leaves the browser, so the page gets the
-answer you chose; to only watch traffic, use [requests and responses](/docs/events/network). The handler returns a
-decision, built from Effect's HTTP types in `effect/http`:
+`page.route(pattern, handler)` adds a route; to only watch traffic, use
+[requests and responses](/docs/events/network) instead. Its handler returns a decision for each matching request,
+built from Effect's HTTP types in `effect/http`:
 
 ```ts
 import { Page, Route } from "@usestrider/browser"
@@ -204,127 +203,3 @@ const replayCart = Effect.fn("replayCart")(
 
 A request with no entry is aborted, unless `notFound` is `"fallthrough"`, as here, which lets it through to the
 server.
-
-## Init scripts
-
-[`page.evaluate`](/docs/pages/expectations#evaluating-in-the-page) after `goto` runs once the page's own scripts
-have started, too late to set up what they read as they load, such as a global or a stub. `addInitScript` runs a
-function at the start of each new document, in every frame, before the page's own scripts:
-
-```ts
-import { Page } from "@usestrider/browser"
-import { Effect, Schema } from "effect"
-
-const installRecorder = () => {
-  Object.assign(window, { __tracked: [] as Array<string> })
-}
-
-// The page's own scripts call analytics.track as they load; this records instead of sending
-const stubAnalytics = () => {
-  const tracked = (window as unknown as { __tracked: Array<string> }).__tracked
-  Object.assign(window, {
-    analytics: { track: (event: string) => tracked.push(event) }
-  })
-}
-
-const Tracked = Schema.Array(Schema.String)
-
-const purchaseTracked = Effect.fn("purchaseTracked")(function*(page: Page.Page) {
-  const recorder = yield* page.addInitScript(installRecorder)
-  yield* page.addInitScript(stubAnalytics, { after: [recorder] })
-  yield* page.goto("https://shop.example.com/checkout")
-  yield* page.getByRole("button", { name: "Pay" }).click()
-  const tracked = yield* page.evaluateInMainWorld(() =>
-    (window as unknown as { __tracked: Array<string> }).__tracked
-  )
-  const events = yield* Schema.decodeUnknownEffect(Tracked)(tracked)
-  return events.includes("Order completed")
-})
-```
-
-- The function crosses into the page, so it must be self-contained.
-- The context's scripts run before the page's, each in the order added.
-- With `after`, a script runs only if each script it names ran in that document without throwing.
-- A script that throws is reported as an [`UncaughtException`](/docs/events/events#history).
-- Added to a loaded page, it runs from the next document.
-
-Added to a context, a script runs in every page of it. `workers: true` also runs it in dedicated workers, on
-Chromium and WebKit, and `world: "isolated"` runs it apart from the page's scripts, which can't see or replace it:
-
-```ts
-import { Page } from "@usestrider/browser"
-import { Effect } from "effect"
-
-// The same "random" numbers every run, so charts render the same
-const seedRandom = () => {
-  let seed = 42
-  Math.random = () => (seed = (seed * 16807) % 2147483647) / 2147483647
-}
-
-// No animations or transitions, so each screenshot catches the page at rest
-const stillPage = () => {
-  addEventListener("DOMContentLoaded", () => {
-    const style = document.createElement("style")
-    style.textContent =
-      "*, *::before, *::after { animation: none !important; transition: none !important }"
-    document.head.append(style)
-  })
-}
-
-const steadyDashboard = Effect.fn("steadyDashboard")(function*(page: Page.Page) {
-  yield* page.context.addInitScript(seedRandom, { workers: true })
-  yield* page.addInitScript(stillPage, { world: "isolated" })
-  yield* page.goto("https://app.example.com/dashboard")
-})
-```
-
-## The page clock
-
-A page that shows today's date, or ends a session after five minutes, renders differently each day or makes a
-test wait the five minutes. `page.clock` replaces `Date`, `performance.now` and timers with a clock you stop, set
-and move, so five minutes pass in one call:
-
-```ts
-import { Expect, Page } from "@usestrider/browser"
-import { Effect } from "effect"
-
-const sessionExpires = Effect.fn("sessionExpires")(function*(page: Page.Page) {
-  yield* page.clock.install({ mode: "controlled", at: "2026-01-01T09:00:00Z" })
-  yield* page.goto("https://app.example.com/session")
-  yield* page.getByRole("button", { name: "Start" }).click()
-  yield* page.clock.adjust("5 minutes")
-  yield* page.getByText("Session expired").pipe(Expect.toBeVisible)
-})
-```
-
-| Mode         | Wall time                 | Timers and animation frames    |
-| ------------ | ------------------------- | ------------------------------ |
-| `fixed`      | frozen at `at`            | run in real time               |
-| `offset`     | shifted `by` a duration   | run in real time               |
-| `controlled` | starts at `at`, moves only when told | run only when time moves |
-
-Use `fixed` for a date the page only shows, `offset` to run in the future or the past at real speed, and
-`controlled` to make time pass in one call.
-
-- `adjust` moves a controlled clock forward, firing each timer that comes due, in order.
-- `setTime` jumps, firing due timers at most once, as a laptop waking from sleep.
-- `resume` returns to real time from where the clock stands. The timers it held then run as real ones, for a step
-  that needs them, such as a form that validates after a pause:
-
-```ts
-import { Expect, Page } from "@usestrider/browser"
-import { Effect } from "effect"
-
-const signedOutOvernight = Effect.fn("signedOutOvernight")(function*(page: Page.Page) {
-  yield* page.clock.install({ mode: "controlled", at: "2026-03-02T18:00:00Z" })
-  yield* page.goto("https://mail.example.com/inbox")
-  yield* page.clock.setTime("2026-03-03T09:00:00Z")
-  yield* page.getByText("Signed out after inactivity").pipe(Expect.toBeVisible)
-  yield* page.clock.resume
-  yield* page.getByLabel("Email").fill("ada@example")
-  yield* page.getByText("Enter a valid email").pipe(Expect.toBeVisible)
-})
-```
-
-One timeline spans the page's documents and frames; navigating doesn't reset it. The page clock doesn't touch
-Strider's deadlines, and `TestClock` doesn't touch the page.

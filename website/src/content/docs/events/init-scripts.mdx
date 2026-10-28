@@ -1,0 +1,83 @@
+---
+title: Init scripts
+description: Scripts that run before a page's own, the order they run in and what they depend on, and scripts for a whole context, its workers or an isolated world.
+order: 5
+---
+
+[`page.evaluate`](/docs/pages/expectations#evaluating-in-the-page) after `goto` runs once the page's own scripts
+have started, too late to set up what they read as they load, such as a global or a stub. An init script runs
+first, so the page's scripts load into what it set up.
+
+## Adding a script
+
+`addInitScript` runs a function at the start of each new document, in every frame, before the page's own scripts.
+It's a [declaration](/docs/events/routes#declarations), held until its scope closes:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect, Schema } from "effect"
+
+const installRecorder = () => {
+  Object.assign(window, { __tracked: [] as Array<string> })
+}
+
+// The page's own scripts call analytics.track as they load; this records instead of sending
+const stubAnalytics = () => {
+  const tracked = (window as unknown as { __tracked: Array<string> }).__tracked
+  Object.assign(window, {
+    analytics: { track: (event: string) => tracked.push(event) }
+  })
+}
+
+const Tracked = Schema.Array(Schema.String)
+
+const purchaseTracked = Effect.fn("purchaseTracked")(function*(page: Page.Page) {
+  const recorder = yield* page.addInitScript(installRecorder)
+  yield* page.addInitScript(stubAnalytics, { after: [recorder] })
+  yield* page.goto("https://shop.example.com/checkout")
+  yield* page.getByRole("button", { name: "Pay" }).click()
+  const tracked = yield* page.evaluateInMainWorld(() =>
+    (window as unknown as { __tracked: Array<string> }).__tracked
+  )
+  const events = yield* Schema.decodeUnknownEffect(Tracked)(tracked)
+  return events.includes("Order completed")
+})
+```
+
+- The function crosses into the page, so it must be self-contained.
+- The context's scripts run before the page's, each in the order added.
+- With `after`, a script runs only if each script it names ran in that document without throwing.
+- A script that throws is reported as an [`UncaughtException`](/docs/events/events#history).
+- Added to a loaded page, it runs from the next document.
+
+## Contexts, workers and isolated worlds
+
+Added to a context, a script runs in every page of it. `workers: true` also runs it in dedicated workers, on
+Chromium and WebKit, and `world: "isolated"` runs it apart from the page's scripts, which can't see or replace it:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+// The same "random" numbers every run, so charts render the same
+const seedRandom = () => {
+  let seed = 42
+  Math.random = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+}
+
+// No animations or transitions, so each screenshot catches the page at rest
+const stillPage = () => {
+  addEventListener("DOMContentLoaded", () => {
+    const style = document.createElement("style")
+    style.textContent =
+      "*, *::before, *::after { animation: none !important; transition: none !important }"
+    document.head.append(style)
+  })
+}
+
+const steadyDashboard = Effect.fn("steadyDashboard")(function*(page: Page.Page) {
+  yield* page.context.addInitScript(seedRandom, { workers: true })
+  yield* page.addInitScript(stillPage, { world: "isolated" })
+  yield* page.goto("https://app.example.com/dashboard")
+})
+```

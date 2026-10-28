@@ -126,7 +126,7 @@ That runs the button's handlers, without what a real click does first, such as f
 Stock WebKit has no [isolated worlds](/docs/pages/expectations#evaluating-in-the-page), launched or attached:
 
 - `page.evaluate` fails with `Unsupported`. Use `evaluateInMainWorld`, which needs control.
-- [Strider's engine](/docs/pages/locators#locators-and-elements) and [init scripts](/docs/events/routes#init-scripts) run in the page's world, where the page's scripts can see them. A page that
+- [Strider's engine](/docs/pages/locators#locators-and-elements) and [init scripts](/docs/events/init-scripts) run in the page's world, where the page's scripts can see them. A page that
   replaces the built-ins they use can change what locators find.
 
 ## Limits

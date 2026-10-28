@@ -119,7 +119,7 @@ const apiFixture = Effect.fn("apiFixture")(function*(page: Page.Page) {
 `include` keeps a class of secret the export would otherwise redact ([below](#redaction));
 `Route.fromHar` matches on request bodies, so a fixture for it includes them.
 
-- Timings are Strider's own measurements, not the [page clock](/docs/events/routes#the-page-clock)'s, so they
+- Timings are Strider's own measurements, not the [page clock](/docs/events/page-clock)'s, so they
   compare across browsers.
 - `entries`, a watchable number, counts what the recording has. Wait for the response a fixture is for, as above,
   rather than for a count, which any call the page load made satisfies.
