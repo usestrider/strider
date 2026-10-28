@@ -149,11 +149,11 @@ page's users have, and Shift, AltGr and dead keys type as they would:
 import { Browser } from "@usestrider/browser"
 import { Effect } from "effect"
 
-const germanAddress = Effect.scoped(Effect.gen(function*() {
+const germanAddress = Effect.fn("germanAddress")(function*() {
   const page = yield* Browser.newPage({ keyboardLayout: "de" })
   yield* page.goto("https://shop.example.de/checkout")
   yield* page.getByLabel("Straße").pressSequentially("Hauptstraße 5")
-}))
+}, Effect.scoped)
 ```
 
 Layouts: `us`, `uk`, `de`, `fr`, `es`, `it`. Firefox sends only the keys' values; WebKit has no layouts.
