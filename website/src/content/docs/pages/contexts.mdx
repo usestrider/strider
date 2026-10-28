@@ -17,7 +17,7 @@ signed-in user, make the context and open pages in it:
 import { Browser, Expect } from "@usestrider/browser"
 import { Effect } from "effect"
 
-const twoTabs = Effect.scoped(Effect.gen(function*() {
+const twoTabs = Effect.fn("twoTabs")(function*() {
   const context = yield* Browser.newContext()
   const inbox = yield* context.newPage
   const settings = yield* context.newPage
@@ -27,7 +27,7 @@ const twoTabs = Effect.scoped(Effect.gen(function*() {
   yield* settings.getByRole("button", { name: "Save" }).click()
   yield* inbox.reload()
   yield* inbox.getByText("Ada").pipe(Expect.toBeVisible)
-}))
+}, Effect.scoped)
 ```
 
 A context and its pages close with the scope that made them, popups included.
@@ -42,7 +42,7 @@ loads:
 import { Browser, Expect } from "@usestrider/browser"
 import { Effect } from "effect"
 
-const berlinPhone = Effect.scoped(Effect.gen(function*() {
+const berlinPhone = Effect.fn("berlinPhone")(function*() {
   const page = yield* Browser.newPage({
     emulation: {
       viewport: { width: 390, height: 844, deviceScaleFactor: 3, mobile: true },
@@ -58,7 +58,7 @@ const berlinPhone = Effect.scoped(Effect.gen(function*() {
   })
   yield* page.goto("https://maps.example.com")
   yield* page.getByRole("button", { name: "Route berechnen" }).pipe(Expect.toBeVisible)
-}))
+}, Effect.scoped)
 ```
 
 | Option           | Sets                                                                               |
@@ -114,7 +114,7 @@ Storage state is a context's cookies, and the `localStorage` and IndexedDB of ea
 import { Browser, Expect, StorageState } from "@usestrider/browser"
 import { Config, Effect, FileSystem, Schema } from "effect"
 
-const saveLogin = Effect.scoped(Effect.gen(function*() {
+const saveLogin = Effect.fn("saveLogin")(function*() {
   const page = yield* Browser.newPage()
   yield* page.goto("https://app.example.com/login")
   yield* page.getByLabel("Email").fill("ada@example.com")
@@ -125,9 +125,9 @@ const saveLogin = Effect.scoped(Effect.gen(function*() {
   const json = yield* Schema.encodeEffect(StorageState.Json)(state)
   const fs = yield* FileSystem.FileSystem
   yield* fs.writeFileString("auth/app.json", json, { mode: 0o600 })
-}))
+}, Effect.scoped)
 
-const signedIn = Effect.gen(function*() {
+const signedIn = Effect.fn("signedIn")(function*() {
   const fs = yield* FileSystem.FileSystem
   const json = yield* fs.readFileString("auth/app.json")
   const storageState = yield* Schema.decodeEffect(StorageState.Json)(json)
@@ -155,13 +155,17 @@ const AdasProfile = Chromium.layer({
   userDataDir: "./profiles/ada"
 })
 
-const profileInbox = Effect.scoped(Effect.gen(function*() {
-  const browser = yield* Browser.Browser
-  const context = yield* browser.defaultContext.control
-  const page = yield* context.newPage
-  yield* page.goto("https://mail.example.com")
-  yield* page.getByRole("heading", { name: "Inbox" }).pipe(Expect.toBeVisible)
-})).pipe(Effect.provide(AdasProfile))
+const profileInbox = Effect.fn("profileInbox")(
+  function*() {
+    const browser = yield* Browser.Browser
+    const context = yield* browser.defaultContext.control
+    const page = yield* context.newPage
+    yield* page.goto("https://mail.example.com")
+    yield* page.getByRole("heading", { name: "Inbox" }).pipe(Expect.toBeVisible)
+  },
+  Effect.scoped,
+  Effect.provide(AdasProfile)
+)
 ```
 
 ## Cookies and storage
