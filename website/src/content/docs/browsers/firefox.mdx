@@ -11,7 +11,7 @@ Knowing which lets you run one program on both, and tell a bug in your program f
 
 Strider drives Firefox over WebDriver BiDi, the W3C's automation protocol and the only one Firefox has. BiDi covers
 less than CDP, so most of what Firefox can't do in Strider is missing from BiDi or from Firefox's implementation of
-it; the [list below](#what-firefox-cant-do) says which. The tests run Firefox 158.0.
+it; the [list below](#limits) says which. The tests run Firefox 158.0.
 
 ## Launching
 
@@ -46,7 +46,7 @@ const AdasFirefox = Firefox.layer({
 - A `userDataDir` of your own is never deleted. Its `user.js` keeps its own preferences; Strider's go in a block
   after them, replaced at each launch.
 
-## Pages are windows
+## Pages as windows
 
 Firefox renders a background tab about once a second, too seldom for an action to wait on. So each page Strider
 opens is its own window, and the default profile opens popups as windows too.
@@ -95,9 +95,9 @@ const archiveFirst = Effect.scoped(Effect.gen(function*() {
   stops it.
 - Strider's preferences don't apply: the JSON viewer stays on, and tabs are tabs.
 - File choosers are left to the browser: the setting that answers them is browser-wide.
-- [`Capability.Video`](#whats-different) isn't available: Firefox writes the file on its own machine.
+- [`Capability.Video`](#differences) isn't available: Firefox writes the file on its own machine.
 
-## What Firefox can't do
+## Limits
 
 From the backend's capability list:
 
@@ -111,7 +111,7 @@ What changes when attached:
 
 <BrowserLimits browser="firefox" when="attached" />
 
-## What's different
+## Differences
 
 **[Init scripts](/docs/events/routes#init-scripts) run inside a function,** so top-level `var` and function declarations aren't globals. Assign to
 `window` to share something.
