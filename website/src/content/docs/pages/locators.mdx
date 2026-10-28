@@ -24,8 +24,10 @@ const signIn = Effect.fn("signIn")(function*(page: Page.Page) {
 })
 ```
 
-Queries, the `getBy…` methods and `locator`, run in Strider's own engine in each document, so they mean the same
-on every browser.
+Queries, the `getBy…` methods and `locator`, run in Strider's own engine in each document, apart from the page's
+scripts, so they mean the same on every browser. On WebKit, which has no
+[isolated worlds](/docs/browsers/webkit#isolated-worlds), the engine runs beside the page's scripts, and a page
+that replaces the built-ins it uses can change what queries find.
 
 ## The queries
 
