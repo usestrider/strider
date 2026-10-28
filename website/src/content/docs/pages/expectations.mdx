@@ -31,7 +31,7 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 
 | Matcher                                        | Passes when                                                      |
 | ---------------------------------------------- | ---------------------------------------------------------------- |
-| `toBeVisible`, `toBeHidden`                    | exactly one element matches and is visible; or none is, or it's hidden |
+| `toBeVisible`, `toBeHidden`                    | exactly one element matches and is visible; or no match is visible, however many match |
 | `toBeEnabled`, `toBeDisabled`                  | the element is enabled, or disabled                              |
 | `toBeChecked`, `toBeFocused`, `toBeEditable`   | it's checked; it has focus, through open shadow roots; it's editable |
 | `toHaveText(expected)`                         | its text is `expected`, or for a list, each match's in order      |
@@ -78,9 +78,9 @@ const cartSurvivesReload = Effect.fn("cartSurvivesReload")(function*(page: Page.
 })
 ```
 
-A locator's expectation re-checks in the page on each DOM change, input or focus event and animation frame, in
-rounds of up to a second, until the deadline. Nothing is missed between checks; there's no polling interval or
-backoff.
+A locator's expectation re-checks in the page on each DOM change, `input`, `change` or focus event and animation
+frame, in rounds of up to a second, until the deadline. Nothing is missed between checks; there's no polling
+interval or backoff.
 
 The first failed expectation stops the rest. To see every failure, collect them with Effect:
 
@@ -218,7 +218,8 @@ const signIn = Effect.fn("signIn")(function*(page: Page.Page) {
 When no read gives what you need, such as the viewport's size or a global the app sets, run a function in the page.
 `page.evaluate` runs a function in an isolated world, which sees the DOM but not the page's globals.
 `evaluateInMainWorld` runs it among the page's scripts, and needs
-[control](/docs/pages/attaching#access-levels), which a `Page` you opened has:
+[control](/docs/pages/attaching#access-levels), which a `Page` you opened has. On WebKit, which has no isolated
+worlds, `page.evaluate` fails with `Unsupported`, so use `evaluateInMainWorld` there:
 
 ```ts
 import { Page } from "@usestrider/browser"
