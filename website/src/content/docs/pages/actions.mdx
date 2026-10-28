@@ -7,7 +7,7 @@ order: 2
 Input sent to an element that's hidden, moving or covered misses it or lands on something else, and a sleep before
 each step only makes that less likely. An action waits until its element can take the input, then sends it once.
 
-## Actions
+## The actions
 
 An action is a locator method, with settings as an optional last argument:
 
@@ -31,7 +31,7 @@ const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: st
 | Action                        | Does                                                                      |
 | ----------------------------- | ------------------------------------------------------------------------- |
 | `click()`, [`dblclick()`](/docs/api/browser/Locator#Locator.dblclick) | moves the pointer to the element, presses and releases                     |
-| [`tap()`](/docs/api/browser/Locator#Locator.tap) | a touch start and end                                                      |
+| [`tap()`](/docs/api/browser/Locator#Locator.tap) | a touch start and end; on WebKit, which has no touch, fails with `Unsupported` |
 | [`hover()`](/docs/api/browser/Locator#Locator.hover) | moves the pointer over the element                                         |
 | `check()`, [`uncheck()`](/docs/api/browser/Locator#Locator.uncheck) | clicks a checkbox or radio unless it's already in that state, then confirms the change |
 | `fill(value)`                 | focuses a field, selects its contents and inserts the value; `""` empties it |
@@ -158,7 +158,9 @@ const germanAddress = Effect.fn("germanAddress")(function*() {
 }, Effect.scoped)
 ```
 
-Layouts: `us`, `uk`, `de`, `fr`, `es`, `it`. Firefox sends only the keys' values; WebKit has no layouts.
+Layouts: `us`, `uk`, `de`, `fr`, `es`, `it`. On Firefox a layout still types, each key with the `code` it has on a
+US keyboard and with no AltGr or dead keys. WebKit types characters and named keys, and fails with `Unsupported`,
+before anything is sent, at a key the layout reaches with AltGr or a dead key.
 
 ## Files
 
@@ -183,14 +185,15 @@ const importReport = Effect.fn("importReport")(function*(page: Page.Page, csv: s
 })
 ```
 
-An upload through a file chooser, not an input, is answered with `FileChooser.handle`
-([Events](/docs/events/kinds#dialogs)).
+An upload through a file chooser, not an input, is answered with
+[`FileChooser.handle`](/docs/events/kinds#dialogs).
 
 ## Dragging
 
-`dragTo` drags with the pointer. A native HTML drag (`draggable="true"`) finishes only on Chromium;
-`html: "synthetic"` has the page dispatch the drag's events instead, on every browser. They're untrusted: their
-`isTrusted` is `false`, so a page that checks it can tell them from a user's:
+`dragTo` drags with the pointer. A native HTML drag (`draggable="true"`) works only on Chromium, and fails
+elsewhere with `Unsupported` before anything is sent; `html: "synthetic"` has the page dispatch the drag's events
+instead, on every browser. They're untrusted: their `isTrusted` is `false`, so a page that checks it can tell them
+from a user's:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -251,14 +254,3 @@ const zoomMap = Effect.fn("zoomMap")(function*(page: Page.Page) {
 A click while Shift is held is a Shift-click; moves while a button is held are a drag. Input to one page goes one
 gesture at a time, so two fibers acting on one page never interleave their presses: the second
 [waits its turn](/docs/deadlines#setting-a-deadline), within its deadline.
-
-## Browser differences
-
-- Native HTML drag and drop: Chromium only.
-- `tap` and touch: not on WebKit.
-- Keyboard layouts: partial on Firefox, none on WebKit.
-
-A native drag or a tap the browser can't do fails with `Unsupported`, naming the capability, before anything is
-sent. On Firefox a layout still types, each key with the `code` it has on a US keyboard and with no AltGr or dead
-keys. WebKit types characters and named keys, and fails with `Unsupported` at a key the layout reaches with AltGr
-or a dead key.
