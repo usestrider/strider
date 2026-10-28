@@ -65,11 +65,13 @@ Before sending anything, an action waits, checking at each animation frame, unti
   never sees the click, and the action checks again.
 - A timeout names the last failed check: `Another element covers the element's action point: div.toast "Saved"`.
 
+## Turning checks off
+
 An element that never passes a check, such as a button that pulses forever, times out. Turn single checks off with
-`checks`, by key: `visible`, `stable`, `enabled`, `editable`, `notInert`,
-`inViewport` and `receivesPointer`. There's no blanket `force`: turning off one check rather than all keeps the
-rest guarding the action. `trial: true` runs the checks and sends nothing, to learn whether an action would go
-through without causing it:
+`checks`, by key: `visible`, `stable`, `enabled`, `editable`, `notInert`, `inViewport` and `receivesPointer`.
+There's no blanket `force`: turning off one check rather than all keeps the rest guarding the action. `trial: true`
+does the reverse, running the checks and sending nothing, to learn whether an action would go through without
+causing it:
 
 ```ts
 import { Deadline, Page } from "@usestrider/browser"
@@ -256,4 +258,7 @@ gesture at a time, so two fibers acting on one page never interleave their press
 - `tap` and touch: not on WebKit.
 - Keyboard layouts: partial on Firefox, none on WebKit.
 
-Each fails with `Unsupported`, naming the capability, before anything is sent.
+A native drag or a tap the browser can't do fails with `Unsupported`, naming the capability, before anything is
+sent. On Firefox a layout still types, each key with the `code` it has on a US keyboard and with no AltGr or dead
+keys. WebKit types characters and named keys, and fails with `Unsupported` at a key the layout reaches with AltGr
+or a dead key.
