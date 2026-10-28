@@ -208,6 +208,8 @@ describe("strider", () => {
         const refused = yield* run("-s", "shop", "page", "new", "--name", "refused", unsafe)
         assert.strictEqual(refused.code, 11, refused.err)
         assert.notInclude(refused.err, "hunter2")
+        // It names the URL it was going to, with the secret's name back in
+        assert.include(refused.err, "Navigation to http://127.0.0.1:9/?pw=%password% failed")
         // Its page is closed again, so the session holds no page the exported test leaves out
         const held = names(yield* run("-s", "shop", "pages"))
         assert.notInclude(held, "refused")

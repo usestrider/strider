@@ -2,6 +2,8 @@ import { assert, describe, it } from "@effect/vitest"
 import * as CookieJar from "@usestrider/browser/CookieJar"
 import * as Diagnostics from "@usestrider/browser/Diagnostics"
 import * as Locator from "@usestrider/browser/Locator"
+import * as Page from "@usestrider/browser/Page"
+import * as PageNavigation from "@usestrider/browser/PageNavigation"
 import * as StorageState from "@usestrider/browser/StorageState"
 import * as Url from "@usestrider/browser/Url"
 import * as Effect from "effect/Effect"
@@ -33,6 +35,40 @@ describe("module errors", () => {
     assert.strictEqual(
       ambiguous.message,
       "click getByText(\"Save\"): 2 matches (try getByRole('button', { name: 'Save' }))"
+    )
+  })
+
+  it("names where a navigation was going, when its reason knows", () => {
+    const url = Option.some("http://127.0.0.1:9/" as Url.Url)
+    const failed = new PageNavigation.NavigationFailed({
+      url,
+      netError: "net::ERR_CONNECTION_REFUSED",
+      hint: "The browser couldn't load the page"
+    })
+    assert.strictEqual(
+      new Page.PageError({ operation: "Page.goto", reason: failed, diagnostics }).message,
+      "Page.goto: Navigation to http://127.0.0.1:9/ failed: net::ERR_CONNECTION_REFUSED (The browser couldn't load the page)"
+    )
+    // A reload's or a traversal's knows none
+    assert.strictEqual(
+      new PageNavigation.NavigationFailed({ ...failed, url: Option.none() }).message,
+      "Navigation failed: net::ERR_CONNECTION_REFUSED (The browser couldn't load the page)"
+    )
+    assert.strictEqual(
+      new PageNavigation.NavigationCanceled({ url, why: "beforeunload", hint: "kept" }).message,
+      "Navigation to http://127.0.0.1:9/ canceled by beforeunload (kept)"
+    )
+    assert.strictEqual(
+      new PageNavigation.NavigationSuperseded({ url, by: "another", hint: "replaced" }).message,
+      "Navigation to http://127.0.0.1:9/ superseded by another (replaced)"
+    )
+    assert.strictEqual(
+      new PageNavigation.BecameDownload({ url, hint: "stayed" }).message,
+      "The navigation to http://127.0.0.1:9/ became a download (stayed)"
+    )
+    assert.strictEqual(
+      new PageNavigation.NoContent({ url, hint: "stayed" }).message,
+      "The server answered the navigation to http://127.0.0.1:9/ without content, 204 or 205 (stayed)"
     )
   })
 

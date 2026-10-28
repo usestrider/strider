@@ -338,6 +338,10 @@ export const history = (
     ({ accepts, channel, kind }) => Events.history(kind, channel, accepts)
   )
 
+/** ` to <url>`, where a reason knows where its navigation was going; nothing where it doesn't. */
+const going = (url: Option.Option<Url.Url>): string =>
+  Option.match(url, { onNone: () => "", onSome: (to) => ` to ${to}` })
+
 /**
  * Reason for a navigation that failed at the network level, such as a DNS failure.
  *
@@ -354,7 +358,7 @@ export class NavigationFailed
   })
 {
   override get message(): string {
-    return `Navigation failed: ${this.netError} (${this.hint})`
+    return `Navigation${going(this.url)} failed: ${this.netError} (${this.hint})`
   }
 }
 
@@ -379,7 +383,7 @@ export class NavigationCanceled extends Schema.Error<NavigationCanceled>(
   hint: Schema.String
 }) {
   override get message(): string {
-    return `Navigation canceled by ${this.why} (${this.hint})`
+    return `Navigation${going(this.url)} canceled by ${this.why} (${this.hint})`
   }
 }
 
@@ -399,7 +403,7 @@ export class NavigationSuperseded extends Schema.Error<NavigationSuperseded>(
   hint: Schema.String
 }) {
   override get message(): string {
-    return `Navigation superseded by ${this.by} (${this.hint})`
+    return `Navigation${going(this.url)} superseded by ${this.by} (${this.hint})`
   }
 }
 
@@ -416,7 +420,7 @@ export class BecameDownload extends Schema.Error<BecameDownload>("@usestrider/br
   hint: Schema.String
 }) {
   override get message(): string {
-    return `The navigation became a download (${this.hint})`
+    return `The navigation${going(this.url)} became a download (${this.hint})`
   }
 }
 
@@ -433,6 +437,6 @@ export class NoContent extends Schema.Error<NoContent>("@usestrider/browser/Page
   hint: Schema.String
 }) {
   override get message(): string {
-    return `The server answered without content, 204 or 205 (${this.hint})`
+    return `The server answered the navigation${going(this.url)} without content, 204 or 205 (${this.hint})`
   }
 }
