@@ -82,6 +82,21 @@ A locator's expectation re-checks in the page on each DOM change, input or focus
 rounds of up to a second, until the deadline. Nothing is missed between checks; there's no polling interval or
 backoff.
 
+The first failed expectation stops the rest. To see every failure, collect them with Effect:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const summary = Effect.fn("summary")(function*(page: Page.Page) {
+  return yield* Effect.all([
+    page.getByTestId("subtotal").pipe(Expect.toHaveText("$40.00")),
+    page.getByTestId("shipping").pipe(Expect.toHaveText("$5.00")),
+    page.getByTestId("total").pipe(Expect.toHaveText("$45.00"))
+  ], { mode: "result" })
+})
+```
+
 ## Expecting anything
 
 When no matcher fits, such as a count of at least ten, expect any effect to meet a condition. `Expect.that` takes
@@ -170,23 +185,6 @@ const savedSettings = Effect.fn("savedSettings")(function*(page: Page.Page) {
 })
 ```
 
-## Collecting failures
-
-The first failed expectation stops the rest. To see every failure, collect them with Effect:
-
-```ts
-import { Expect, Page } from "@usestrider/browser"
-import { Effect } from "effect"
-
-const summary = Effect.fn("summary")(function*(page: Page.Page) {
-  return yield* Effect.all([
-    page.getByTestId("subtotal").pipe(Expect.toHaveText("$40.00")),
-    page.getByTestId("shipping").pipe(Expect.toHaveText("$5.00")),
-    page.getByTestId("total").pipe(Expect.toHaveText("$45.00"))
-  ], { mode: "result" })
-})
-```
-
 ## Watchables
 
 A URL read once misses the redirect after it. A page's status, URL and frames, a download's progress and a
@@ -202,17 +200,16 @@ const signIn = Effect.fn("signIn")(function*(page: Page.Page) {
     Effect.forkScoped
   )
   yield* page.getByRole("button", { name: "Sign in" }).click()
-  yield* page.status.waitFor((status) =>
-    status._tag === "Open" && status.document.readiness === "complete"
-  )
-  return yield* page.url
+  return yield* page.url.waitFor((url) => new URL(url).pathname === "/dashboard")
 })
 ```
 
 - `changes` gives the current value, then the latest each time the consumer takes one, so a slow consumer sees the
   newest value, not every one.
-- Use `waitFor` to go on once a state comes, such as the load; use `Expect.that` when the state not coming is a
-  failure, so the error says what was expected and what was seen. `waitFor` checks the current value first.
+- Use `waitFor` to go on once a state comes, such as the dashboard's URL; use `Expect.that` when the state not
+  coming is a failure, so the error says what was expected and what was seen.
+- `waitFor` checks the current value first, so wait for what the click changes: a wait for the load would pass at
+  once, on the sign-in page, which has already loaded.
 - It fails with `Watchable.Ended` when the value settles on one that doesn't match, such as a completed download's
   status, and with `TargetGone` when what it watches ends, such as a closed page.
 
