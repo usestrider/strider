@@ -147,22 +147,26 @@ debugging on your own machine, apply `Diagnostics.withPreset("local")` where a d
 
 ```ts title="debug.ts"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import { Browser, Diagnostics } from "@usestrider/browser"
+import { Browser, Diagnostics, Page } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
 import { Config, Effect, Layer } from "effect"
 
-const openCart = Effect.scoped(Effect.gen(function*() {
-  const page = yield* Browser.newPage()
+const openCart = Effect.fn("openCart")(function*(page: Page.Page) {
   yield* page.goto("https://shop.example.com/cart?session=abc")
-}))
+})
 
 const BrowserLive = Chromium.layerConfig({
   executablePath: Config.String("CHROMIUM_PATH")
 }).pipe(Layer.provide(NodeServices.layer))
 
-openCart.pipe(
-  Diagnostics.withPreset("local"),
-  Effect.provide(BrowserLive),
-  NodeRuntime.runMain
+const debugCart = Effect.fn("debugCart")(
+  function*() {
+    const page = yield* Browser.newPage()
+    yield* openCart(page)
+  },
+  Effect.scoped,
+  Effect.provide(BrowserLive)
 )
+
+debugCart().pipe(Diagnostics.withPreset("local"), NodeRuntime.runMain)
 ```
