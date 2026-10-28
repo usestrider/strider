@@ -584,6 +584,11 @@ An entry with no marker is open.
 - *We:* `network.headersSent` is `partial` on stock WebKit, saying so.
 - *Reconsider:* nothing on our side: the protocol has no other report of the headers sent.
 
+**Q252. A challenge no route answers ends differently on each browser** (Browser). Strider intercepts a challenge only for an `auth` route, so with none the browser answers it. Headless Chromium fails the navigation with `net::ERR_INVALID_AUTH_CREDENTIALS`, without the server's `401` page; Firefox opens its own prompt, which nothing answers (Q95); and stock WebKit's MiniBrowser never commits the navigation, with no dialog reported.
+- *Seen:* a `goto` of the harness's `/auth` with no route, on each backend: Chromium's failed at once, Firefox's timed out `dispatchedUnconfirmed` and WebKit's `postcondition`. A request-phase route on another URL changed nothing on Chromium or Firefox.
+- *We:* nothing: Routes, "HTTP authentication", says what each browser does, and an `auth` route that continues gives Chromium and Firefox the server's `401` page.
+- *Reconsider:* intercepting every challenge on Chromium and Firefox and canceling those no route answers, so the page gets the server's response, and a timeout never stands for a prompt.
+
 ## Browsers: emulation, permissions and declarations
 
 **Q47. WebKit's init scripts run in the main world only** (Browser). `Page.setBootstrapScript` has no world.
