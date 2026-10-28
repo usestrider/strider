@@ -16,8 +16,9 @@
  *
  * **Gotchas**
  *
- * On Firefox each script runs inside a function, so its top-level `var` and function declarations aren't
- * globals, as they are on Chromium and WebKit: assign to `window` to share something.
+ * On Firefox a `{ source }` or `{ path }` script runs inside a function, so its top-level `var` and function
+ * declarations aren't globals there, as they are on Chromium and WebKit: assign to `window` to share something. A
+ * function script's declarations are its own on every backend, since it runs as a call.
  *
  * @stability unstable
  * @since 0.1.0
