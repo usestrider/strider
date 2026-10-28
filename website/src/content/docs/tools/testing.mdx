@@ -189,7 +189,7 @@ it.effect("sees the cart's response before the page commits", () =>
 | `resp(name)`   | a 200 response to `https://example.test/name`     |
 | `commit`       | a document commits at `https://example.test/`      |
 | `load`         | the document finishes loading                      |
-| `dialog(kind)` | a dialog opens: `alert`, `confirm`, `prompt` or `beforeunload` |
+| `dialog(kind)` | a dialog opens, with no message: `alert`, `confirm`, `prompt` or `beforeunload` |
 | `popup`        | a popup opens                                      |
 | `crash`, `\|`  | the page crashes, or its script closes it          |
 
@@ -198,8 +198,8 @@ it.effect("sees the cart's response before the page commits", () =>
 - It's experimental.
 
 A dialog on the timeline is decided as any dialog is, and a crash ends what was waiting on the page. Here a step
-of yours accepts the page's "Restore your saved cart?" confirm and reads the cart, or gives up when the page
-crashes:
+of yours accepts the confirm, which on the real site asks "Restore your saved cart?", and reads the cart, or gives
+up when the page crashes:
 
 ```ts
 import { assert, it } from "@effect/vitest"
