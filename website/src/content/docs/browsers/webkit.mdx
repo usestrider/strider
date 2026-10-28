@@ -8,7 +8,7 @@ A program written for Chromium can fail on WebKit at launch, without a display o
 operation WebKit refuses, such as `page.evaluate`. Knowing what its layers need, and what to use where it refuses,
 a program written against `Browser` runs on WebKit too.
 
-## Stock WebKit
+## Protocol and versions
 
 Strider drives stock WebKitGTK and WPE, unpatched: WebKit's Automation protocol for pages and input, its inspector
 protocol for the rest. WebKitGTK and WPE are WebKit's ports, its builds for Linux desktops and for embedded devices;
@@ -57,7 +57,7 @@ WEBKIT_PATH=/usr/libexec/webkitgtk-6.0/MiniBrowser xvfb-run -a node checkout.ts
 ```
 
 Each context is a browser process with its own ephemeral profile, about 0.6 seconds to start. The default context
-is the first tab's. [Launch profiles](/docs/tools/testing#concurrent-pages) don't apply to WebKit.
+is the first tab's. [Launch profiles](/docs/browsers/chromium#launching) don't apply to WebKit.
 
 ## Attaching
 
@@ -67,7 +67,7 @@ screenshot or navigate its pages. To click or type, launch a MiniBrowser with
 inspector server:
 
 ```sh
-WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9333 /usr/libexec/webkitgtk-6.0/MiniBrowser https://example.com
+WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9333 /usr/libexec/webkitgtk-6.0/MiniBrowser http://localhost:8080
 ```
 
 Attach to it with `WebKit.layerAttach`, which needs a `WebSocketConstructor`:
@@ -104,7 +104,7 @@ const menuShows = Effect.fn("menuShows")(
 - After a failed load, the error page is `about:blank`, as the failed navigation's document.
 - An `alert` stops the page, unreported, until a person dismisses it.
 - A program can't open a new page; the browser's own new pages appear in the list.
-- The `strider` command's [`--attach`](/docs/agents/cli#attaching) can't reach stock WebKit.
+- The `strider` CLI's [`--attach`](/docs/agents/cli#attaching) can't reach stock WebKit.
 
 To press a button anyway, run the page's own script:
 
@@ -215,6 +215,13 @@ sent, and a host's cookie is set as its domain's.
 [saved storage state](/docs/pages/contexts#logging-in-once) restored at another port isn't found.
 
 **No downloads, file choosers, PDFs or screencasts.** [`setInputFiles`](/docs/pages/actions#files) works. Screenshots are PNG.
+
+## The raw protocol
+
+There's no raw connection to WebKit: `@usestrider/browser/protocol` has `CdpConnection` for CDP and
+`BidiConnection` for WebDriver BiDi, and none for WebKit's inspector or Automation protocol, so a WebKit command
+Strider has no operation for can't be sent. To find the commands a Strider step sends, provide
+[`Browser.TraceProtocolCommands`](/docs/api/browser/Browser#TraceProtocolCommands) as `true` around it.
 
 A rejected command fails with [`BackendFailure`](/docs/errors#three-kinds-of-failure); its `cause` is the
 [`ProtocolError`](/docs/api/browser/protocol/Protocol#ProtocolError), with WebKit's code and message.
