@@ -147,7 +147,7 @@ What changes when attached:
 
 **Dialogs are `Dialog.Unknown`,** with their message: WebKit doesn't say which kind is open. `accept` answers as OK,
 a prompt with its default; `dismiss` as Cancel; `respond(text)` answers a prompt. So a
-[handler](/docs/events/events#dialogs)'s `Confirm` and `Prompt` branches never run here, but keep them, so the same handler
+[handler](/docs/events/kinds#dialogs)'s `Confirm` and `Prompt` branches never run here, but keep them, so the same handler
 serves Chromium and Firefox; its `Unknown` branch decides from the message:
 
 ```ts
@@ -180,7 +180,7 @@ const deleteAccount = Effect.fn("deleteAccount")(function*(page: Page.Page) {
 })
 ```
 
-**[`Popup.next`](/docs/events/events#popups) fails with `Unsupported`:** WebKit names no opener. Wait for the new page in the context's `pages`:
+**[`Popup.next`](/docs/events/kinds#popups) fails with `Unsupported`:** WebKit names no opener. Wait for the new page in the context's `pages`:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"

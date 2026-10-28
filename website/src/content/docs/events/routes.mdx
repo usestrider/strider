@@ -1,7 +1,7 @@
 ---
 title: Routes, init scripts and the clock
 description: Declarations change what a page sees while their scope lasts. Routes decide requests, init scripts run before the page's own, and the page clock moves when you say.
-order: 3
+order: 4
 ---
 
 A page that depends on a live backend, on its own startup scripts or on the real clock does something different
@@ -12,7 +12,7 @@ reads.
 
 A declaration is a setting held for a scope: a route, an init script, the page clock, an
 [emulated setting or a granted permission](/docs/pages/contexts#settings-for-a-while), a
-[dialog or file chooser handler](/docs/events/events#dialogs).
+[dialog or file chooser handler](/docs/events/kinds#dialogs).
 
 - The browser confirms it before the call returns, so it applies from the next line.
 - It's removed when its scope closes, or earlier with its handle's `remove`.

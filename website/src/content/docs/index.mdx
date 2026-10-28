@@ -37,7 +37,7 @@ A launch runs the executable you name; Strider never finds or installs a browser
 Pages, [locators](/docs/pages/locators), [`click` and `fill`](/docs/pages/actions) and
 [retrying expectations](/docs/pages/expectations) work much as in Playwright. What differs:
 
-- **Lifetimes are scopes.** A page, [route](/docs/events/routes) or [dialog handler](/docs/events/events#dialogs)
+- **Lifetimes are scopes.** A page, [route](/docs/events/routes) or [dialog handler](/docs/events/kinds#dialogs)
   ends with the `Scope` that acquired it, even on failure or interruption.
 - **Subscribe, then act.** To catch a popup, download or response an action causes,
   [subscribe first](/docs/events/events). A subscription sees events after it starts, never before.
@@ -60,7 +60,9 @@ Read the first four in order. The fifth is for agents and the command line, and 
 2. **Pages and locators:** [finding elements](/docs/pages/locators), [acting on them](/docs/pages/actions),
    [expectations](/docs/pages/expectations), [contexts](/docs/pages/contexts), which keep sessions apart, and
    [attaching to a browser](/docs/pages/attaching).
-3. **Events and the network:** [events](/docs/events/events), [requests and responses](/docs/events/network), and
+3. **Events and the network:** [events](/docs/events/events),
+   [navigations, popups, dialogs and downloads](/docs/events/kinds),
+   [requests and responses](/docs/events/network), and
    [routes, init scripts and the page clock](/docs/events/routes).
 4. **Testing and recordings:** [tests with Vitest](/docs/tools/testing) and
    [traces and HAR files](/docs/tools/recordings).

@@ -1,0 +1,154 @@
+---
+title: Navigations, popups, dialogs and downloads
+description: The navigation an action causes, popups, handlers for dialogs and file choosers, and downloads and their files.
+order: 2
+---
+
+A navigation can end on an error page, a dialog blocks its page until something decides it, and a download's file
+isn't whole when its event comes. Each of these modules adds what its events need to the
+[`next`, `stream` and `history`](/docs/events/events#next-stream-and-history) every event module has.
+
+## Navigations
+
+[`Expect.toHaveURL`](/docs/pages/expectations#expectations) says where the page is, not what got it there. `PageNavigation.next` gives the navigation the
+action caused, with its response, so an error page or a same-document change can be told apart:
+
+```ts
+import { Page, PageNavigation } from "@usestrider/browser"
+import { Effect, Option } from "effect"
+
+const openOrders = Effect.fn("openOrders")(function*(page: Page.Page) {
+  const orders = yield* PageNavigation.next(page, {
+    url: "**/orders",
+    waitUntil: "load"
+  })
+  yield* page.getByRole("link", { name: "Orders" }).click()
+  const navigation = yield* orders
+  if (navigation._tag !== "Committed") return Option.none()
+  return Option.map(navigation.response, (response) => response.status)
+})
+```
+
+The navigation is data: `Committed` with its response, `SameDocument` for a fragment or the History API, `Restored`
+from the back/forward cache, and [others](/docs/api/browser/PageNavigation#PageNavigation). `waitUntil: "load"` also waits for the document to load.
+
+## Popups
+
+`Popup.next` gives a page the page opened, as a `Page` that closes with its opener's scope:
+
+```ts
+import { Dialog, Page, Popup } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const connectAccount = Effect.fn("connectAccount")(function*(page: Page.Page) {
+  const popups = yield* Popup.next(page)
+  yield* page.getByText("Connect account").click()
+  const popup = yield* popups
+  yield* Dialog.handle(popup, Dialog.acceptAll)
+  yield* popup.getByRole("button", { name: "Allow" }).click()
+})
+```
+
+Here [`Dialog.handle`](#dialogs) accepts every dialog the popup opens. The popup is reported before its first
+document loads, so a handler or route registered on it applies to that
+document.
+
+On Chromium, a popup's opener stops rendering, and actions on it time out with a hint saying so. Call
+[`page.activate`](/docs/api/browser/Page#Page.activate) on the opener first, or make the context with
+[`focus: "emulated"`](/docs/tools/testing#concurrent-pages). Firefox and WebKit keep rendering it.
+
+## Dialogs
+
+A dialog blocks its page until it's decided, and the action that opened it doesn't return until then, so a wait
+collected after the action would come too late. Register a handler before it opens; the handler lasts until its
+scope closes:
+
+```ts
+import { Dialog, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const deleteAccount = Effect.fn("deleteAccount")(function*(page: Page.Page) {
+  yield* Dialog.handle(page, (dialog) => {
+    switch (dialog._tag) {
+      case "Confirm": {
+        const yes = dialog.message.includes("delete")
+        return Effect.succeed(yes ? dialog.accept : dialog.dismiss)
+      }
+      case "Prompt":
+        return Effect.succeed(dialog.respond("DELETE"))
+      case "Alert":
+        return Effect.succeed(dialog.accept)
+      case "BeforeUnload":
+        return Effect.succeed(dialog.leave)
+      case "Unknown":
+        return Effect.succeed(dialog.accept)
+    }
+  })
+  yield* page.getByRole("button", { name: "Delete account" }).click()
+})
+```
+
+- Each kind offers only its own decisions: an alert can only be accepted, a prompt can be answered.
+- `Dialog.acceptAll` and [`Dialog.dismissAll`](/docs/api/browser/Dialog#dismissAll) are ready-made handlers.
+- A dialog no handler decides goes to the context's
+  [`dialogs` policy](/docs/pages/contexts#settings-for-the-whole-session), `"dismiss"` by default, at once. Each
+  such decision is reported as an `AutoResolution` event.
+
+File choosers work the same way. A chooser no handler answers is canceled, and reported:
+
+```ts
+import { FileChooser, FileInput, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const uploadPhoto = Effect.fn("uploadPhoto")(function*(page: Page.Page) {
+  yield* FileChooser.handle(page, FileChooser.choose(FileInput.local("./photo.jpg")))
+  yield* page.getByRole("button", { name: "Upload photo" }).click()
+})
+```
+
+The decisions a default made are events too, so a flow can report the dialogs nothing handled:
+
+```ts
+import { AutoResolution, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const undecidedDialogs = Effect.fn("undecidedDialogs")(function*(page: Page.Page) {
+  const decided = yield* AutoResolution.history(page, { subject: "Dialog" })
+  for (const { subject, decision } of decided.entries) {
+    if (subject._tag === "Dialog") {
+      yield* Effect.logWarning(`${subject.kind} "${subject.message}" was ${decision}`)
+    }
+  }
+})
+```
+
+## Downloads
+
+A download's event comes when it starts, before its file is complete. The handle, with its file, status and
+suggested name, follows it to the end, so you save or read the file once it's whole:
+
+```ts
+import { Download, Page } from "@usestrider/browser"
+import { Console, Effect, Stream } from "effect"
+
+const exportReport = Effect.fn("exportReport")(function*(page: Page.Page) {
+  const pdf = yield* Download.next(page)
+  yield* page.getByText("Export PDF").click()
+  const report = yield* pdf
+  yield* report.status.changes.pipe(
+    Stream.runForEach((status) => Console.log(status._tag)),
+    Effect.forkScoped
+  )
+  yield* report.saveAs(`./reports/${report.suggestedFilename}`)
+})
+
+const exportedHeader = Effect.fn("exportedHeader")(function*(page: Page.Page) {
+  const csv = yield* Download.next(page)
+  yield* page.getByRole("button", { name: "Export CSV" }).click()
+  const text = yield* (yield* csv).stream.pipe(Stream.decodeText(), Stream.mkString)
+  return text.split("\n")[0]
+})
+```
+
+- The file is kept in a directory the context owns, and removed with it.
+- `saveAs` copies it out once complete; `stream` gives its bytes; `finished` waits for it to end.
