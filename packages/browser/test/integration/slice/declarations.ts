@@ -8,6 +8,7 @@ import {
   AutoResolution,
   Browser,
   Condition,
+  Deadline,
   Declaration,
   Expect,
   Page,
@@ -235,6 +236,33 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("gives the page the server's response to a challenge with no auth route, where the backend can", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const challenges = yield* status("network.challenges")
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            if (challenges === "unsupported") {
+              // The browser waits on its own answer, and the navigation never commits
+              const waited = yield* Effect.flip(page.goto(`${origin}/auth`).pipe(Deadline.within("2 seconds")))
+              assert(Deadline.isTimeout(waited), String(waited))
+              return
+            }
+            // No route, no prompt: the 401 the server sent, as its page
+            const navigation = yield* page.goto(`${origin}/auth`)
+            assert(navigation._tag === "Committed" && Option.isSome(navigation.response), navigation._tag)
+            assert.strictEqual(navigation.response.value.status, 401)
+            yield* page.getByText("who are you?").pipe(Expect.toBeVisible)
+            // A fetch's challenge too, where the backend pauses every challenge, not a document's alone
+            if (challenges === "supported") {
+              assert.deepStrictEqual(
+                yield* run(page, origin, `return fetch('/auth').then(async (r) => [r.status, await r.text()])`),
+                [401, `<title>auth</title><p>who are you?</p>`]
+              )
+            }
+          }))
+        }), timeout)
+
       it.effect("fails a navigation a route aborts, with a reason on CDP", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -264,7 +292,8 @@ export const declarations = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             const error = yield* Effect.flip(
-              page.route("https://example.com/:id(", () => Effect.succeed(Route.continue))
+              page.route("https://example.com/:id(", () =>
+                Effect.succeed(Route.continue))
             )
             assert(Route.isRouteError(error) && error.reason._tag === "InvalidInput", String(error))
           }))

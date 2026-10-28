@@ -129,6 +129,10 @@ include `Cookie`. Use [`NetworkRequest.headersSent`](/docs/events/network#sent-h
 **A navigated-away page's body is dropped,** unless a [HAR recording](/docs/tools/recordings#har-files) or a
 subscription with [`body`](/docs/events/network#decoding-bodies) collects it.
 
+**Only a document's challenge is answered without a route.** A navigation to a page behind HTTP authentication gets
+the server's `401` page, as on Firefox, but a `fetch`, an image or a script behind it waits on Chromium's own prompt
+until it times out. An [`auth` route](/docs/events/routes#http-authentication) on its URL answers it.
+
 **[Routes](/docs/events/routes) see CORS preflights,** the `OPTIONS` requests, on Chromium only. A route that fakes a
 cross-origin API must let them through, and answer with the headers CORS needs:
 

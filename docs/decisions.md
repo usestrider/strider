@@ -174,6 +174,20 @@ things.
 stops rendering, which actionability's frame-based checks depend on. The library's isolated world keeps the real
 timers and frames on every backend.
 
+**A challenge no route answers gets the server's response, in a context the library creates.** Headless, a
+browser's own answer to an authentication challenge is a prompt nobody sees: Firefox and stock WebKit wait on it, and
+Chromium fails a navigation with `net::ERR_INVALID_AUTH_CREDENTIALS` and leaves a `fetch` waiting. A timeout that
+stands for a prompt tells a test nothing it can act on, while the server's `401` page is what a visitor without
+credentials sees. So every context the library creates pauses the challenges its backend can, and one no route
+answers is canceled.
+
+- **Why only documents on Chromium.** Chromium asks about a challenge only for a request it paused as it started, so
+  asking about a subresource's would pause every request, a round trip each: about 0.17 ms over a local pipe, and a
+  network's over a remote endpoint. A navigation pays one.
+- **Rejected:** leaving the browser's answer, which turns a missing route into a timeout; pausing every request on
+  Chromium, for the cost above; and canceling challenges in contexts the library didn't create, where a person's
+  browser shows its prompt.
+
 ## The public API (L2)
 
 **A decision that doesn't apply is a type error.** A dialog handler gets `Dialog.Pending`, whose shapes carry only

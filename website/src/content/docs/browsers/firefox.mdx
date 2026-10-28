@@ -142,8 +142,7 @@ it. A drag between documents goes to the first one alone.
 
 **[Routes](/docs/events/routes) do less.** No sending a request to a new URL, no fulfilling at the response phase
 (changing status and headers works), and no abort reason but `"failed"`: a decision Firefox can't apply fails with
-`Unsupported`, and the request continues as it was. A challenge no `auth` route answers opens Firefox's own prompt,
-which nothing answers, so its navigation times out.
+`Unsupported`, and the request continues as it was.
 
 **Video, not frames.** [`Capability.Video`](/docs/api/browser/Capability#Video) records a WebM file into the context's downloads
 directory; [`Capability.Screencast`](/docs/api/browser/Capability#Screencast) isn't available. A trace's

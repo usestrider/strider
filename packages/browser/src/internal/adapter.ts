@@ -531,6 +531,11 @@ export type Declaration =
     readonly behavior: { readonly _tag: "Allow"; readonly directory: string } | { readonly _tag: "Deny" }
   }
   | { readonly _tag: "FileChooser" }
+  /**
+   * Pauses the authentication challenges in scope that the backend can pause (`network.challenges`), as an `auth`
+   * intercept pauses one, so the model answers a challenge no route answers, and the browser's prompt never opens.
+   */
+  | { readonly _tag: "Challenges" }
   | {
     readonly _tag: "BodyCollection"
     /** Which bodies are kept: requests' (Q164), responses', or both. */

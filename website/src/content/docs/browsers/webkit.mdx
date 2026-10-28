@@ -212,7 +212,8 @@ sent, and a host's cookie is set as its domain's.
 [`headersSent`](/docs/events/network#sent-headers). Request bodies come as text.
 
 **No HTTP authentication.** There's no [`auth` route](/docs/events/routes#http-authentication), and a navigation to
-a page that asks for credentials never commits, so it times out.
+a page that asks for credentials never commits, so it times out, where Chromium and Firefox give the page the
+server's `401` page.
 
 **Storage is keyed by origin.** A cross-site frame's storage is keyed by its page's origin, port included, so a
 [saved storage state](/docs/pages/contexts#logging-in-once) restored at another port isn't found.

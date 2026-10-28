@@ -588,6 +588,17 @@ An entry with no marker is open.
 - *Seen:* a `goto` of the harness's `/auth` with no route, on each backend: Chromium's failed at once, Firefox's timed out `dispatchedUnconfirmed` and WebKit's `postcondition`. A request-phase route on another URL changed nothing on Chromium or Firefox.
 - *We:* nothing: Routes, "HTTP authentication", says what each browser does, and an `auth` route that continues gives Chromium and Firefox the server's `401` page.
 - *Reconsider:* intercepting every challenge on Chromium and Firefox and canceling those no route answers, so the page gets the server's response, and a timeout never stands for a prompt.
+- **Resolved**, in the commit that marks it: every context the library creates declares `Challenges` where the backend can pause a challenge (`network.challenges`), so one no route answers is canceled, and the page gets the server's response, its `401` page included, with `goto` committed at that status. Chromium pauses every document for it, so a navigation's or a frame's challenge is answered and a `fetch`'s or a subresource's still waits (Q254); Firefox pauses every challenge, which pauses nothing else; stock WebKit can pause none (Q255). A context the library didn't create, such as an attached browser's own, keeps the browser's answer.
+
+**Q254. Chromium asks about a subresource's challenge only when every request is paused** (Browser). Chromium raises `Fetch.authRequired` only for a request intercepted as it starts (Q96), so a `fetch`, an image or a script that gets a challenge nothing intercepted waits on Chromium's prompt, which headless never shows: the `fetch` never settles. A navigation's fails `net::ERR_INVALID_AUTH_CREDENTIALS` instead (Q252).
+- *Seen:* a `fetch` of the harness's `/auth`, with no route, still pending at its 6-second abort. With an `auth` route on `**`, which pauses every request at the request stage, 200 `fetch`es one after another took about 200 ms in the page rather than 165, a round trip of about 0.17 ms each over the local pipe; 300 images loaded at once took the same time either way.
+- *We:* `Challenges` pauses every document at the request stage (`resourceType: "Document"`), which costs a navigation one round trip, and leaves other requests alone, so a subresource's challenge waits as before; `network.challenges` is `partial` on Chromium, saying so. An `auth` route on the subresource's URL answers it.
+- *Reconsider:* pausing every request in a context the library creates, if a round trip per request proves negligible where it matters; over a remote endpoint each would cost a network round trip.
+
+**Q255. Stock WebKit's MiniBrowser waits on a challenge that nothing it speaks can answer** (Browser). WebKitGTK asks its view to authenticate; under automation the MiniBrowser opens no dialog it reports and answers nothing, and neither the inspector protocol nor Automation has a command that answers or cancels a challenge, so the navigation never commits.
+- *Seen:* a `goto` of the harness's `/auth` timed out `postcondition`, and a `fetch` of it was still pending at its 6-second abort.
+- *We:* `network.challenges` is `unsupported` there, so a context declares nothing, and an `auth` route fails with `Unsupported` (`interception.auth`); a page behind HTTP authentication times out.
+- *Reconsider:* credentials given in advance, the one way WebKit's API answers a challenge, if the MiniBrowser's automation comes to expose it.
 
 ## Browsers: emulation, permissions and declarations
 

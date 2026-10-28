@@ -150,9 +150,10 @@ const enableNewCheckout = Effect.fn("enableNewCheckout")(function*(page: Page.Pa
 
 ## HTTP authentication
 
-A site behind HTTP authentication asks the browser for credentials, where no locator can reach: Chromium fails the
-navigation with `net::ERR_INVALID_AUTH_CREDENTIALS`, and Firefox and WebKit wait for an answer nothing gives until
-the navigation times out. `{ phase: "auth" }` answers the challenge instead, on Chromium and Firefox:
+A site behind HTTP authentication asks the browser for credentials, where no locator can reach. With no route to
+answer, the page gets the server's own response, such as its `401` page, on Chromium and Firefox, and `goto` returns
+it; on WebKit the navigation waits for an answer nothing gives, until it times out. `{ phase: "auth" }` answers the
+challenge with credentials instead, on Chromium and Firefox:
 
 ```ts
 import { Page, Route } from "@usestrider/browser"
@@ -169,9 +170,15 @@ const signInToStaging = Effect.fn("signInToStaging")(function*(page: Page.Page) 
 })
 ```
 
-A challenge the route lets continue, with `Route.continue` or a handler that fails, gets the server's own response,
-such as its `401` page; the browser's prompt never opens. On WebKit an `auth` route fails with `Unsupported`, since
-WebKit answers challenges only from credentials set in advance.
+A challenge the route lets continue, with `Route.continue` or a handler that fails, gets the server's own response
+too; the browser's prompt never opens. On WebKit an `auth` route fails with `Unsupported`, since WebKit answers
+challenges only from credentials set in advance.
+
+- On Chromium, a challenge to a `fetch`, an image or a script with no route still waits on Chromium's own prompt,
+  until it times out: only a document's is answered without one, since pausing every request would slow them all.
+  An `auth` route on its URL answers it.
+- A page in a context Strider didn't create, such as a tab of a browser it [attached](/docs/pages/attaching) to,
+  keeps the browser's own answer.
 
 ## Replaying a recording
 

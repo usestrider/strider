@@ -620,6 +620,9 @@ export const capabilities = (
       entry("interception.request", "supported"),
       entry("interception.response", "supported"),
       entry("interception.auth", "supported"),
+      entry("network.challenges", "partial", [
+        "a document's challenge only: a fetch's or a subresource's still waits on Chromium's prompt, since asking about it would pause every request"
+      ]),
       entry("bodies", "supported"),
       entry("console", "supported"),
       entry("prompts", "supported"),
@@ -2320,16 +2323,22 @@ export const connect: (
 
     const applyIntercepts = Effect.fnUntraced(function*(target: TargetEntry, page: PageEntry) {
       const intercepts = registry.intercepts(placement(page))
-      const key = JSON.stringify(intercepts)
+      const challenges = registry.challenges(placement(page))
+      const key = JSON.stringify({ intercepts, challenges })
       if (key === target.intercepts) return
       const on = Protocol.on(target.session)
       // A challenge is asked about only for a request intercepted as it starts: an auth pattern pauses there too,
-      // and the request goes on at once unless a request-phase intercept wants it
+      // and the request goes on at once unless a request-phase intercept wants it. Where challenges are paused,
+      // every document is, a pause a page's load hardly notices; pausing every request would cost each of them a
+      // round trip (QUIRKS.md, Q254)
       const patterns = [
         ...[...new Set([...intercepts.request, ...intercepts.auth])].map((urlPattern) => ({
           urlPattern,
           requestStage: "Request" as const
         })),
+        ...(challenges
+          ? [{ urlPattern: "*", resourceType: "Document" as const, requestStage: "Request" as const }]
+          : []),
         ...intercepts.response.map((urlPattern) => ({ urlPattern, requestStage: "Response" as const }))
       ]
       // Enabled from the target's start and never disabled, with a pattern no request matches while nothing
@@ -2337,7 +2346,9 @@ export const connect: (
       // past the route, about once in forty under load, apparently while the interceptor was installed again;
       // with the pattern kept, never in 160 (QUIRKS.md, Q46 and Q103). A request paused still has its decision to come.
       const effective = patterns.length > 0 ? patterns : [{ urlPattern: nothing, requestStage: "Request" as const }]
-      yield* Fetch.enable({ patterns: effective, handleAuthRequests: intercepts.auth.length > 0 }).pipe(on)
+      yield* Fetch.enable({ patterns: effective, handleAuthRequests: intercepts.auth.length > 0 || challenges }).pipe(
+        on
+      )
       target.intercepts = key
     })
 
@@ -2390,6 +2401,7 @@ export const connect: (
           case "InitScript":
             return applyScripts(target, page)
           case "Intercept":
+          case "Challenges":
             return applyIntercepts(target, page)
           case "Override":
             return applyOverride(target.session, declaration.override._tag, registry.overrides(placement(page)))

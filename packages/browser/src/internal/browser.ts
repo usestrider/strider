@@ -597,6 +597,11 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: created }
       // Where file choosers aren't reported, as on stock WebKit, the browser cancels them itself
       if (reports("fileChooser")) yield* adapter.declare(scope, { _tag: "FileChooser" }).pipe(Effect.catch(failed))
+      // A challenge no route answers gets the server's response, never the browser's prompt, which nothing answers
+      // headless, wherever the backend can pause one (QUIRKS.md, Q95 and Q252)
+      if (reports("network.challenges")) {
+        yield* adapter.declare(scope, { _tag: "Challenges" }).pipe(Effect.catch(failed))
+      }
       if (asked === "deny") {
         yield* adapter.declare(scope, { _tag: "Downloads", behavior: { _tag: "Deny" } }).pipe(Effect.catch(failed))
         yield* Effect.annotateCurrentSpan("browser.context.downloads", "deny")

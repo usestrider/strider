@@ -83,6 +83,8 @@ export interface Registry {
     context: UserContext.Id
   ) => Extract<Adapter.Declaration, { _tag: "Downloads" }>["behavior"] | undefined
   readonly fileChooser: (placement: Placement) => boolean
+  /** Whether a placement's authentication challenges are paused, whatever its intercepts. */
+  readonly challenges: (placement: Placement) => boolean
   /**
    * The largest body of a kind, a request's or a response's, that a collection in force keeps, or `undefined`
    * where none keeps that kind (QUIRKS.md, Q160 and Q164).
@@ -179,7 +181,8 @@ export const make = (): Registry => {
       }
       return winner?.declaration._tag === "Downloads" ? winner.declaration.behavior : undefined
     },
-    fileChooser: (placement) => inScope(placement).some((entry) => entry.declaration._tag === "FileChooser")
+    fileChooser: (placement) => inScope(placement).some((entry) => entry.declaration._tag === "FileChooser"),
+    challenges: (placement) => inScope(placement).some((entry) => entry.declaration._tag === "Challenges")
   }
 }
 

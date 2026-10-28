@@ -475,6 +475,9 @@ export const attachedCapabilities = (info: Browser.Info) => {
       entry("interception.request", "partial", ["a page a service worker controls sends its requests past it"]),
       entry("interception.response", "partial", ["a page a service worker controls sends its requests past it"]),
       entry("interception.auth", "unsupported", ["WebKit answers challenges from credentials set in advance"]),
+      entry("network.challenges", "unsupported", [
+        "a challenge waits on the MiniBrowser, and neither the inspector nor Automation can answer it"
+      ]),
       entry("interception.responseBody", "unsupported", ["WebKit can't read a response paused there"]),
       entry("interception.responseFulfill", "supported"),
       entry("interception.responseHeaders", "unsupported", [
@@ -2103,9 +2106,10 @@ export const connect: (
             concurrency: "unbounded",
             discard: true
           })
-        // Refused as they're declared: stock WebKit reports no file chooser and no download
+        // Refused as they're declared: stock WebKit reports no file chooser and no download, and pauses no challenge
         case "FileChooser":
         case "Downloads":
+        case "Challenges":
         // WebKit keeps response bodies on its own, so there is nothing to collect
         case "BodyCollection":
           return Effect.void
@@ -2589,6 +2593,14 @@ export const connect: (
       if (declaration._tag === "Intercept" && declaration.phases.includes("auth")) {
         return yield* Effect.fail(
           unsupported("interception.auth", "WebKit answers challenges from credentials set in advance")
+        )
+      }
+      if (declaration._tag === "Challenges") {
+        return yield* Effect.fail(
+          unsupported(
+            "network.challenges",
+            "a challenge waits on the MiniBrowser, and neither the inspector nor Automation can answer it"
+          )
         )
       }
       const id = ids.registration()

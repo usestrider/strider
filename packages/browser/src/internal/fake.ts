@@ -113,6 +113,7 @@ const capabilities = () => {
       entry("interception.request", "unsupported", ["the timeline's requests are never paused"]),
       entry("interception.response", "unsupported", ["the timeline's requests are never paused"]),
       entry("interception.auth", "unsupported", ["the timeline's requests are never paused"]),
+      entry("network.challenges", "unsupported", ["the timeline's requests are never paused"]),
       entry("bodies", "supported", ["every body is empty"]),
       entry("console", "unsupported", ["the timeline has no console messages"]),
       entry("fileChooser", "unsupported", [noDom]),

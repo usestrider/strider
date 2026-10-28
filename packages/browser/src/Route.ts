@@ -531,8 +531,11 @@ export const fromHar: (
  *
  * **Gotchas**
  *
- * An `auth` route fails with `Unsupported` on WebKit, which answers challenges only from credentials set in advance
- * (`interception.auth`).
+ * - An `auth` route fails with `Unsupported` on WebKit, which answers challenges only from credentials set in
+ *   advance (`interception.auth`).
+ * - Without an `auth` route, a challenge in a context Strider created gets the server's response, such as its `401`
+ *   page, on Chromium and Firefox. On Chromium only a document's does: a `fetch`'s or an image's waits on the
+ *   browser's prompt until it times out (`network.challenges`).
  *
  * **Example** (Signing in to a page behind HTTP authentication)
  *

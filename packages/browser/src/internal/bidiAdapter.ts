@@ -418,6 +418,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("interception.request", "supported"),
       entry("interception.response", "supported"),
       entry("interception.auth", "supported"),
+      entry("network.challenges", "supported"),
       entry("bodies", "supported", ["only with a body collection declared before the request"]),
       entry("console", "partial", [
         "a dedicated worker's messages are attributed to its page, and shared and service workers' aren't reported"
@@ -2428,7 +2429,8 @@ export const connect: (
               return applyScripts().pipe(Effect.ignore)
             case "Override":
               return applyKind(declaration.override._tag, scope).pipe(Effect.ignore)
-            case "Intercept": {
+            case "Intercept":
+            case "Challenges": {
               const intercept = intercepts.get(id)
               intercepts.delete(id)
               const collector = requestCollectors.get(id)
@@ -2475,6 +2477,12 @@ export const connect: (
             requestCollectors.set(id, collector)
           }
           yield* protocol(addIntercept(id, scope, declaration))
+          break
+        case "Challenges":
+          // An intercept at the challenge alone, for every URL, which pauses nothing else. WebDriver BiDi can't
+          // scope one to a user context, so a context's is the session's, and a challenge in another context
+          // goes on as the browser answers it
+          yield* protocol(addIntercept(id, scope, { _tag: "Intercept", patterns: [], phases: ["auth"] }))
           break
         case "BodyCollection": {
           const { collector } = yield* protocol(
