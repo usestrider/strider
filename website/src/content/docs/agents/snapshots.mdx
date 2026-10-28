@@ -52,8 +52,8 @@ const clickWhatTheModelPicks = Effect.fn("clickWhatTheModelPicks")(
 
 By default a snapshot also infers what the accessibility tree misses: interactivity from `cursor: pointer`,
 `tabindex`, `contenteditable` or `onclick`, and names from text, `title`, `placeholder`, `alt` or a nearby label.
-Each inference is tagged, `clickable "Save" [inferred: cursorPointer]`, so you can list the controls a screen reader
-can't reach:
+Each inference is tagged, as in `- clickable "Save" [ref=e7] [inferred: cursorPointer]`, so you can list the
+controls a screen reader can't reach:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -91,7 +91,7 @@ const mainNavTree = Effect.fn("mainNavTree")(function*(page: Page.Page) {
 
 A snapshot after each action repeats the whole page; `diff` gives only what changed, such as the status a click
 added. Use it to tell a model what its last action did. Two snapshots of different documents, such as either side of
-a navigation, fail with [`DocumentsDiffer`](/docs/api/browser/Snapshot#DocumentsDiffer):
+a navigation, fail with a `SnapshotError` whose reason is [`DocumentsDiffer`](/docs/api/browser/Snapshot#DocumentsDiffer):
 
 ```ts
 import { Page } from "@usestrider/browser"
