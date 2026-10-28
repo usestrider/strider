@@ -1,5 +1,5 @@
 ---
-title: Attaching to a browser
+title: Attached browsers
 description: Drive a browser that's already running, and take read or full access to the tabs you didn't open.
 order: 5
 ---
@@ -18,7 +18,7 @@ google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug
 
 `browser.pages` is the browser's open tabs, a [`Watchable`](/docs/pages/expectations#watchables) read as
 `page.url` is. You didn't open them, so they're observed, and `inspect` takes read access
-([Access is typed](#access-is-typed)):
+([Access levels](#access-levels)):
 
 ```ts
 import { NodeSocket } from "@effect/platform-node"
@@ -46,7 +46,7 @@ const openTabs = Effect.scoped(Effect.gen(function*() {
 - [`WebKit.layerAttach`](/docs/browsers/webkit#attaching): a WebKitGTK or WPE browser's inspector server. Its pages
   can be read and navigated, not typed into.
 
-## Access is typed
+## Access levels
 
 A tab you didn't open may be in use, by a person or another program, and a stray click or route there changes
 what they see. Take `inspect` when the program only reads, so acting on the tab doesn't compile, and `control`

@@ -143,7 +143,7 @@ const signedIn = Effect.gen(function*() {
 
 A browser's default context is the session it starts with, the one its profile's cookies and storage are in. A
 profile's logins are there, not in the context `Browser.newPage()` makes, so open the page in it, taking
-[`control`](/docs/pages/attaching#access-is-typed) of it first:
+[`control`](/docs/pages/attaching#access-levels) of it first:
 
 ```ts
 import { Browser, Expect } from "@usestrider/browser"

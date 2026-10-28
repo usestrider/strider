@@ -216,7 +216,7 @@ const signIn = Effect.fn("signIn")(function*(page: Page.Page) {
 When no read gives what you need, such as the viewport's size or a global the app sets, run a function in the page.
 `page.evaluate` runs a function in an isolated world, which sees the DOM but not the page's globals.
 `evaluateInMainWorld` runs it among the page's scripts, and needs
-[control](/docs/pages/attaching#access-is-typed), which a `Page` you opened has:
+[control](/docs/pages/attaching#access-levels), which a `Page` you opened has:
 
 ```ts
 import { Page } from "@usestrider/browser"

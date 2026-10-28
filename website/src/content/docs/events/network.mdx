@@ -66,7 +66,7 @@ const addToCart = Effect.fn("addToCart")(function*(page: Page.Page) {
   - `BodyUnavailable`: there's no body to read. Its `why` says which: a redirect, over the limit, released by the
     browser, a failed transfer, or a stream that never ends, such as server-sent events.
   - `MalformedBody`: the body isn't what it was read as.
-- Reading a body needs [read access](/docs/pages/attaching#access-is-typed) to the page.
+- Reading a body needs [read access](/docs/pages/attaching#access-levels) to the page.
 
 Bodies are collected up to 10 MiB; `NetworkResponse.withBodyLimit` raises it for the subscriptions inside it. A step
 that can do without the body catches its reason:

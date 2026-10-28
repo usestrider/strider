@@ -56,7 +56,7 @@ before acting on it, as [Attaching](#attaching) shows. [`focus: "emulated"`](/do
 
 ## Attaching
 
-Attaching works as in [Attaching to a browser](/docs/pages/attaching), at the remote agent's `ws://` address.
+Attaching works as in [Attached browsers](/docs/pages/attaching), at the remote agent's `ws://` address.
 Firefox takes one client at a time, through a BiDi session, which Strider opens when the layer is built and ends
 when its scope closes.
 
@@ -87,7 +87,7 @@ const archiveFirst = Effect.scoped(Effect.gen(function*() {
 ```
 
 - `/session` is added to an endpoint with no path.
-- Existing tabs are observed; [`inspect` or `control`](/docs/pages/attaching#access-is-typed) gives access for a
+- Existing tabs are observed; [`inspect` or `control`](/docs/pages/attaching#access-levels) gives access for a
   scope. They stay open after the program.
 - **One session at a time.** While another client holds it, connecting fails with `ConnectionFailed`. A session
   outlives its connection, so a program that dies without ending it leaves Firefox refusing clients until it

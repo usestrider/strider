@@ -72,7 +72,7 @@ can tell, so it isn't the default.
 
 ## Attaching
 
-Attaching works as [Attaching to a browser](/docs/pages/attaching) shows; on Chromium, start the browser with a
+Attaching works as [Attached browsers](/docs/pages/attaching) shows; on Chromium, start the browser with a
 debugging port and a profile of its own, since recent Chrome won't open a debugging port on the everyday profile:
 
 ```sh
@@ -95,7 +95,7 @@ const SharedChrome = Layer.unwrap(Effect.gen(function*() {
 ```
 
 - An HTTP endpoint is read for its WebSocket at `/json/version`. `headers` go with both requests.
-- Existing tabs are observed; [`inspect` or `control`](/docs/pages/attaching#access-is-typed) gives access for a
+- Existing tabs are observed; [`inspect` or `control`](/docs/pages/attaching#access-levels) gives access for a
   scope. The browser and its tabs stay as
   they were after the program; contexts Strider created close with the connection.
 - Several clients can attach at once.

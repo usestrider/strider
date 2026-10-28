@@ -41,7 +41,7 @@ Pages, [locators](/docs/pages/locators), [`click` and `fill`](/docs/pages/action
   can also fail with `TargetGone` or `Timeout`, both in its type.
 - **[One deadline](/docs/deadlines) per operation,** covering everything it does.
   `Deadline.within("5 seconds")` sets one for a block.
-- **[Access is typed.](/docs/pages/attaching#access-is-typed)** A page you opened is a `Page`. A tab of a browser you
+- **[Access is typed.](/docs/pages/attaching#access-levels)** A page you opened is a `Page`. A tab of a browser you
   attached to can only be watched until you ask for access, and acting on it before then doesn't compile.
 - **Nothing is implicit.** No hidden sleeps, grace periods or retries of input that may have reached the page.
 

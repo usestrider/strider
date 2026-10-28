@@ -93,7 +93,7 @@ const menuShows = Effect.scoped(Effect.gen(function*() {
 ```
 
 - The page list is read at connect and every 250 ms, so new pages appear.
-- Every page is observed; [`inspect` or `control`](/docs/pages/attaching#access-is-typed) gives access for a
+- Every page is observed; [`inspect` or `control`](/docs/pages/attaching#access-levels) gives access for a
   scope. Pages stay open after the program ends.
 - [`browser.info`](/docs/api/browser/Browser#Browser.info) is `WebKit (stock)`, version `unknown`.
 - `goto` sets `location.href`; a fragment-only change is refused.

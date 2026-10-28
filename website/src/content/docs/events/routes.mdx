@@ -56,7 +56,7 @@ const asTestAccount = Effect.fn("asTestAccount")(function*(page: Page.Page) {
 - A pattern is a glob, a URL or a `URLPattern`.
 - A handler runs in the request phase, before the request is sent, unless given a `phase`.
 - The page's routes are asked before its context's, the newest first; `fallthrough` passes to the next.
-- A route's handle counts the requests it was asked about in [`hits`](/docs/pages/attaching#access-is-typed), a
+- A route's handle counts the requests it was asked about in [`hits`](/docs/pages/attaching#access-levels), a
   watchable number.
 - A handler that fails, is interrupted or times out lets the request continue. The failure is logged and reported
   as an [`AutoResolution`](/docs/events/events#next-stream-and-history) event.
