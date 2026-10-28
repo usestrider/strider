@@ -159,14 +159,14 @@ const BrowserLive = Chromium.layerConfig({
   executablePath: Config.String("CHROMIUM_PATH")
 }).pipe(Layer.provide(NodeServices.layer))
 
-const debugCart = Effect.fn("debugCart")(
-  function*() {
-    const page = yield* Browser.newPage()
-    yield* openCart(page)
-  },
-  Effect.scoped,
-  Effect.provide(BrowserLive)
-)
+const program = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage()
+  yield* openCart(page)
+}))
 
-debugCart().pipe(Diagnostics.withPreset("local"), NodeRuntime.runMain)
+program.pipe(
+  Diagnostics.withPreset("local"),
+  Effect.provide(BrowserLive),
+  NodeRuntime.runMain
+)
 ```
