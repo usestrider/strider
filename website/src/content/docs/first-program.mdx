@@ -1,6 +1,6 @@
 ---
 title: First program
-description: Launch a browser, open a page, act and check the result, then make the steps reusable functions.
+description: A whole program, the page it opens, its locators, actions, expectations and reads, the layer that launches the browser, and steps as functions that run concurrently.
 order: 2
 ---
 
@@ -114,7 +114,7 @@ A step that takes the page works the same in a script, a [test](/docs/tools/test
 [`strider` segment](/docs/agents/cli#segments). One that only reads can take a `Page.ReadonlyPage`, and then also works on
 [pages you may only inspect](/docs/pages/attaching#access-levels).
 
-## Concurrent pages
+## Running steps concurrently
 
 Run steps concurrently with Effect. Each `newPage` gets its own context, so the pages share no cookies; pages that
 should share them, such as two tabs of one login, open in [one context](/docs/pages/contexts). `Effect.scoped`, as
