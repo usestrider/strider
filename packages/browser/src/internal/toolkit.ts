@@ -211,6 +211,8 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   // ── Pages, named ──
   const byName = new Map<string, Page.Page>()
   const nameById = new Map<Target.NavigableId, string>()
+  // The names given to pages, as against the handles `p1`, `p2`… generated for them
+  const kept = new Set<string>()
   let counter = 0
   const snapshots = new Map<string, Snapshot.Snapshot<Locator.Locator>>()
   const digest: Array<string> = []
@@ -222,6 +224,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       let name = given
       while (name === undefined || byName.has(name)) name = `p${++counter}`
       byName.set(name, page)
+      if (name === given) kept.add(name)
       nameById.set(page.id, name)
       return Effect.as(watchPage(page, name), name)
     })
@@ -243,6 +246,18 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
         )
         : Effect.succeed(page)
     })
+
+  /** `session.page`: finds a page by a name it was given, never by a generated handle. */
+  const keptNamed = (name: string): Effect.Effect<Page.Page, Tools.ToolFailure> =>
+    Effect.flatMap(pageNamed(name), (page) =>
+      kept.has(name) ? Effect.succeed(page) : Effect.fail(
+        failed(
+          "PageNotFound",
+          `${name} is a generated handle, not a name; give the page a name with keep, then find it by that name. The named pages are ${
+            [...kept].join(", ") || "none"
+          }`
+        )
+      ))
 
   // ── The digest ──
   const note = (line: string) => void digest.push(line)
@@ -459,6 +474,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
         controlled.delete(name)
         const page = byName.get(name)
         byName.delete(name)
+        kept.delete(name)
         snapshots.delete(name)
         if (page !== undefined) nameById.delete(page.id)
         yield* Scope.close(grant, Exit.void)
@@ -794,7 +810,9 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
             return Effect.fail(failed("InvalidInput", `${JSON.stringify(to)}: a name starts with a letter`))
           }
           byName.delete(from)
+          kept.delete(from)
           byName.set(to, page)
+          kept.add(to)
           nameById.set(page.id, to)
           const snapshot = snapshots.get(from)
           if (snapshot !== undefined) {
@@ -803,7 +821,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
           }
           return Effect.void
         })),
-    page: pageNamed,
+    page: keptNamed,
     pages: Effect.map(Effect.orDie(refresh), (pages) => pages.map((page) => ({ name: nameById.get(page.id)!, page }))),
     latest: (name) => Option.fromNullishOr(snapshots.get(name)),
     remove: (id) =>
