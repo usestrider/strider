@@ -11,7 +11,7 @@ Knowing which lets you run one program on both, and tell a bug in your program f
 
 Strider drives Firefox over WebDriver BiDi, the W3C's automation protocol and the only one Firefox has. BiDi covers
 less than CDP, so most of what Firefox can't do in Strider is missing from BiDi or from Firefox's implementation of
-it; the [list below](#limits) says which. The tests run Firefox 158.0.
+it; the [Limits](#limits) say which. The tests run Firefox 158.0.
 
 ## Launching
 
@@ -117,8 +117,8 @@ What changes when attached:
 
 ## Differences
 
-**[Init scripts](/docs/events/init-scripts) run inside a function,** so top-level `var` and function declarations aren't globals. Assign to
-`window` to share something.
+**[Init scripts](/docs/events/init-scripts) given as `{ source }` or `{ path }` run inside a function,** so their
+top-level `var` and function declarations aren't globals. Assign to `window` to share something.
 
 **Bodies need a subscription first.** BiDi keeps a body only if collection was set up before the request started,
 by a subscription with [`body`](/docs/events/network#decoding-bodies) or by
@@ -140,8 +140,10 @@ key.
 **Input into a cross-site frame goes to the frame's document,** since Firefox doesn't route page coordinates into
 it. A drag between documents goes to the first one alone.
 
-**[Routes](/docs/events/routes) do less.** No sending a request to a new URL, no fulfilling at the response phase (changing status and
-headers works), and every abort is `"failed"`.
+**[Routes](/docs/events/routes) do less.** No sending a request to a new URL, no fulfilling at the response phase
+(changing status and headers works), and no abort reason but `"failed"`: a decision Firefox can't apply fails with
+`Unsupported`, and the request continues as it was. A challenge no `auth` route answers opens Firefox's own prompt,
+which nothing answers, so its navigation times out.
 
 **Video, not frames.** [`Capability.Video`](/docs/api/browser/Capability#Video) records a WebM file into the context's downloads
 directory; [`Capability.Screencast`](/docs/api/browser/Capability#Screencast) isn't available. A trace's
@@ -211,7 +213,8 @@ const installExtension = Effect.fn("installExtension")(
       extensionData: { type: "path", path }
     }).pipe(on)
     return extension
-  }
+  },
+  Effect.scoped
 )
 ```
 
@@ -219,4 +222,8 @@ const installExtension = Effect.fn("installExtension")(
 - To find the BiDi commands a Strider step sends, provide
   [`Browser.TraceProtocolCommands`](/docs/api/browser/Browser#TraceProtocolCommands) as `true` around it.
 
-A rejected command fails with [`BackendFailure`](/docs/errors#three-kinds-of-failure); its `cause` is the `ProtocolError`, with Firefox's code and message.
+A raw command Firefox rejects fails with a
+[`ProtocolError`](/docs/api/browser/protocol/Protocol#ProtocolError) whose reason, `Rejected`, has Firefox's
+`code`, such as `"no such frame"`, and `description`, and a `reason` read from them: `NoSuchTarget`,
+`NoSuchFrame`, `NoSuchNode`, `InvalidArgument`, or `Unrecognized` for any other. A command Strider sends fails its
+operation with [`BackendFailure`](/docs/errors#three-kinds-of-failure), the `ProtocolError` as its `cause`.
