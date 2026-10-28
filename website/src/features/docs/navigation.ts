@@ -26,7 +26,8 @@ export const groups: ReadonlyArray<Group> = [
   {
     label: "Events and the network",
     directory: "events",
-    description: "Subscribing before you act, watching requests and responses, and routes, scripts and time."
+    description:
+      "Subscribing before you act, watching requests and responses, and routes, init scripts and the page clock."
   },
   {
     label: "Testing and recordings",

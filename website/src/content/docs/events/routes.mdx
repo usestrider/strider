@@ -1,5 +1,5 @@
 ---
-title: Routes, scripts and time
+title: Routes, init scripts and the clock
 description: Declarations change what a page sees while their scope lasts. Routes decide requests, init scripts run before the page's own, and the page clock moves when you say.
 order: 3
 ---
@@ -137,10 +137,10 @@ const withNewCheckout = Effect.fn("withNewCheckout")(
 )
 
 const enableNewCheckout = Effect.fn("enableNewCheckout")(function*(page: Page.Page) {
-  yield* page.route("https://app.example.com/api/flags", withNewCheckout, {
+  yield* page.route("https://shop.example.com/api/flags", withNewCheckout, {
     phase: "response"
   })
-  yield* page.goto("https://app.example.com/checkout")
+  yield* page.goto("https://shop.example.com/checkout")
   yield* page.getByRole("heading", { name: "New checkout" }).pipe(Expect.toBeVisible)
 })
 ```
@@ -220,7 +220,7 @@ const Tracked = Schema.Array(Schema.String)
 const purchaseTracked = Effect.fn("purchaseTracked")(function*(page: Page.Page) {
   const recorder = yield* page.addInitScript(installRecorder)
   yield* page.addInitScript(stubAnalytics, { after: [recorder] })
-  yield* page.goto("https://app.example.com/checkout")
+  yield* page.goto("https://shop.example.com/checkout")
   yield* page.getByRole("button", { name: "Pay" }).click()
   const tracked = yield* page.evaluateInMainWorld(() =>
     (window as unknown as { __tracked: Array<string> }).__tracked
@@ -305,7 +305,7 @@ import { Effect } from "effect"
 
 const signedOutOvernight = Effect.fn("signedOutOvernight")(function*(page: Page.Page) {
   yield* page.clock.install({ mode: "controlled", at: "2026-03-02T18:00:00Z" })
-  yield* page.goto("https://app.example.com/inbox")
+  yield* page.goto("https://mail.example.com/inbox")
   yield* page.clock.setTime("2026-03-03T09:00:00Z")
   yield* page.getByText("Signed out after inactivity").pipe(Expect.toBeVisible)
   yield* page.clock.resume
