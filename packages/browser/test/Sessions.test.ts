@@ -304,6 +304,41 @@ describe("strider export test", () => {
     assert.include(text, `yield* admin.goto(\`https://${token}@admin.example.com\`)\n`)
   })
 
+  it("leaves out a check of a text with a secret in it, which a failure would print, and says so", () => {
+    const expect = (text: string): ExportTest.Step => ({
+      _tag: "Tool",
+      tool: "expect",
+      params: { page: "main", target: "css=#out", state: "visible", text },
+      target: `locator("#out")`,
+      result: undefined
+    })
+    const { text } = ExportTest.render({
+      name: "shop",
+      browser: launched,
+      secrets: { password: "APP_PASSWORD", user: "APP_USER" },
+      state: undefined,
+      steps: [
+        { _tag: "NewPage", page: "main", url: undefined },
+        expect("%password%"),
+        expect("Welcome, %user%"),
+        expect("Saved")
+      ]
+    })
+    assert.include(
+      text,
+      [
+        `        yield* main.locator("#out").pipe(Expect.toBeVisible)`,
+        `        // Left out: the session's check that this contains "%password%", which has a secret in it, since a failed check prints the text it expected`,
+        `        yield* main.locator("#out").pipe(Expect.toBeVisible)`,
+        `        // Left out: the session's check that this contains "Welcome, %user%", which has a secret in it, since a failed check prints the text it expected`,
+        `        yield* main.locator("#out").pipe(Expect.toBeVisible)`,
+        `        yield* main.locator("#out").pipe(Expect.toContainText("Saved"))`,
+        ``
+      ].join("\n")
+    )
+    assert.notInclude(text, "Config")
+  })
+
   it("answers a dialog of unknown kind with the text, as the session did", () => {
     const { text } = ExportTest.render({
       name: "shop",

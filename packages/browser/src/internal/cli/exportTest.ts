@@ -2,10 +2,11 @@
  * `strider export test` (CLI.md): a session's successful commands as one Vitest test.
  * Every command is one statement against the public API, so the test reads as the session ran: a ref becomes
  * the locator its snapshot names, a `%name%` secret, wherever the session put one in, its `Config.Redacted`, a
- * wait the `next` it started, with
- * its `--within` as `Deadline.within`, and `remove r1` the `remove` of the handle the route or dialog handler gave.
+ * wait the `next` it started, with its `--within` as `Deadline.within`, `remove r1` the `remove` of the handle the
+ * route or dialog handler gave, and `page name` a variable of the new name.
  * Reads (`pages`, `tabs`, `snapshot`, `find`, `screenshot`, `history`) aren't repeated. What runs only in a session,
  * a segment and a tab taken with `control` until its `release`, is a marked placeholder, which `placeholders` lists.
+ * A check of a text with a secret in it is left out, with a comment, since a failed check prints the text (Q248).
  */
 import type * as Snapshot from "../../Snapshot.ts"
 
@@ -298,7 +299,14 @@ export const render = (options: {
         }[String(params.state)] ?? "toBeVisible"
         body.push(`yield* ${target}.pipe(Expect.${matcher})`)
         if (params.text !== undefined) {
-          body.push(`yield* ${target}.pipe(Expect.toContainText(${quote(String(params.text))}))`)
+          // A text with a secret in it isn't checked: a failed check prints the text it expected
+          body.push(
+            hasSecret(String(params.text))
+              ? `// Left out: the session's check that this contains ${
+                quote(String(params.text))
+              }, which has a secret in it, since a failed check prints the text it expected`
+              : `yield* ${target}.pipe(Expect.toContainText(${quote(String(params.text))}))`
+          )
         }
         break
       }

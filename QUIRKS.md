@@ -1367,3 +1367,8 @@ An entry with no marker is open.
 - *We:* `Browsers.among` searches given candidates, and `find` is it over every place; the test passes only `PATH`'s and WebKit's, and WebKit's are never run.
 - *Reconsider:* nothing.
 - **Resolved** in `1bafdf0`.
+
+**Q248. An exported test leaves out a check of a secret's text** (Ours). `strider expect … --text %password%` checks the page's text against the secret's value, which the toolkit puts in as the call runs and takes back out of the result. A test that repeated the check would hold the value in a matcher, and a failed `Expect.toContainText` prints the text it expected, so the secret would reach the test's output.
+- *Seen:* making the export put a secret in wherever the session did.
+- *We:* `export test` writes the expectation's state check, and in place of its text check a comment saying it was left out and why, at the maintainer's decision.
+- *Reconsider:* a text matcher that takes a `Redacted` and leaves it out of its failure, with which the export would keep the check.

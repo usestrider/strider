@@ -176,6 +176,9 @@ describe("strider", () => {
         const html = (before: string, after: string) =>
           `${served.origin}/fixture?html=${encodeURIComponent(before)}%password%${encodeURIComponent(after)}`
         assert.strictEqual((yield* shop("goto", html(`<p id="pw">`, "</p>"))).code, 0)
+        const checked = yield* shop("expect", "css=#pw", "visible", "--text", "%password%")
+        assert.strictEqual(checked.code, 0, checked.err)
+        assert.notInclude(checked.out, "hunter2")
         // State for a program, and a test of what ran
         const state = path.join(env.XDG_RUNTIME_DIR, "shop.state")
         assert.strictEqual((yield* run("-s", "shop", "state", "save", state)).code, 0)
@@ -208,6 +211,12 @@ describe("strider", () => {
           exported,
           `yield* shop.goto(\`${html(`<p id="pw">`, "</p>").replace("%password%", () => password)}\`)\n`
         )
+        // The check of the secret's text is left out, since a failure would print it
+        assert.include(
+          exported,
+          `yield* shop.locator("#pw").pipe(Expect.toBeVisible)\n        // Left out: the session's check that this contains "%password%"`
+        )
+        assert.notInclude(exported, `Expect.toContainText("%password%")`)
         // The page's own script holds the password it checks, so the statement is what is checked
         assert.notInclude(exported, `.fill("hunter2")`)
         assert.match((yield* run("sessions")).out, /^shop  chromium · pages shop, child, p\d+/)
