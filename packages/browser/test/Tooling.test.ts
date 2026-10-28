@@ -329,6 +329,35 @@ describe("BrowserToolkit", () => {
       assert.strictEqual(yield* shop.url, "https://example.test/caf%C3%A9?token=abc&typo=%tokn%")
     })).pipe(Effect.provide(Browser.layerTest(""))))
 
+  it.effect("tells of each page it comes to know that no tool opened: one listed in the context, and each popup", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const first = yield* Browser.newPage()
+      const seen: Array<ToolkitImpl.Seen> = []
+      const session = yield* ToolkitImpl.makeSession({
+        context: first.context,
+        secrets: {},
+        capture: CapturePolicy.local,
+        seen: (each) => void seen.push(each)
+      })
+      // What it told, once it has told `count`: a popup is told as its opener's events are drained
+      const told = Effect.fnUntraced(function*(count: number) {
+        for (let turn = 0; turn < 100 && seen.length < count; turn++) yield* Effect.yieldNow
+        return seen.map((each) =>
+          each._tag === "Listed" ? [each._tag, each.name, each.index] : [each._tag, each.name, each.openerName]
+        )
+      })
+      // The page opened before the toolkit is found among the context's pages, at its place there
+      assert.deepStrictEqual(yield* told(1), [["Listed", "p1", 0]])
+      assert.strictEqual(seen[0]!.page, first)
+      // The timeline's popups, the second after its opener is renamed
+      yield* TestClock.adjust("10 millis")
+      assert.deepStrictEqual((yield* told(2))[1], ["Popup", "p2", "p1"])
+      assert.strictEqual(Option.getOrThrow(session.named("p2")), seen[1]!.page)
+      yield* session.rename("p1", "shop")
+      yield* TestClock.adjust("10 millis")
+      assert.deepStrictEqual((yield* told(3))[2], ["Popup", "p3", "shop"])
+    })).pipe(Effect.provide(Browser.layerTest("-popup-popup"))))
+
   it("masks an editable field's text under the strict capture policy", () => {
     assert.deepStrictEqual(
       CapturePolicy.strict,

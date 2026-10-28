@@ -7,16 +7,38 @@
  * Reads (`pages`, `tabs`, `snapshot`, `find`, `screenshot`, `history`) aren't repeated. What runs only in a session,
  * a segment and a tab taken with `control` until its `release`, is a marked placeholder, which `placeholders` lists.
  * A check of a text with a secret in it is left out, with a comment, since a failed check prints the text (Q248).
+ *
+ * A page the session came to know without a command that opened it is declared where a later statement names it,
+ * as a reader would declare it: a popup with `Popup.next` from just before the command that opened it, or with the
+ * wait the session had started on its opener; a page first found among the context's pages by its place there; and
+ * a segment's in its placeholder. One the export can't declare so is a marked placeholder too (Q251).
  */
 import type * as Snapshot from "../../Snapshot.ts"
 import * as Secrets from "../secrets.ts"
 
-/** A command the session ran, as the test repeats it. */
+/** A popup a command opened, by its name and its opener's as the command ran. */
+export interface Opened {
+  readonly page: string
+  readonly opener: string
+}
+
+/** A command the session ran, as the test repeats it, or how it came to know a page no command opened. */
 export type Step =
-  | { readonly _tag: "NewPage"; readonly page: string; readonly url: string | undefined }
+  | {
+    readonly _tag: "NewPage"
+    readonly page: string
+    readonly url: string | undefined
+    /** The popups it opened, such as one its page's first document opened. */
+    readonly popups?: ReadonlyArray<Opened> | undefined
+  }
   | { readonly _tag: "Remove"; readonly registration: string }
   | { readonly _tag: "Rename"; readonly from: string; readonly to: string }
-  | { readonly _tag: "Segment"; readonly file: string }
+  | {
+    readonly _tag: "Segment"
+    readonly file: string
+    /** The pages it gave the session, by the names they had after it: opened, returned, kept or popups. */
+    readonly pages?: ReadonlyArray<string> | undefined
+  }
   | {
     readonly _tag: "Tool"
     readonly tool: string
@@ -25,7 +47,40 @@ export type Step =
     readonly target: string | undefined
     /** The handle the call printed, a wait's (`w1`), a registration's (`r1`) or a page's name, or its outcome's text. */
     readonly result: string | undefined
+    /** The popups it opened. */
+    readonly popups?: ReadonlyArray<Opened> | undefined
   }
+  /** A popup that opened while a popup wait the session had started on its opener was pending: the wait gives it. */
+  | { readonly _tag: "Popup"; readonly page: string; readonly wait: string }
+  /** A page the session first found among its context's pages, at `index`, with no event saying what opened it. */
+  | { readonly _tag: "Listed"; readonly page: string; readonly index: number }
+
+/** The tools that only read, which the test doesn't repeat. */
+const reads = new Set(["pages", "tabs", "snapshot", "find", "screenshot", "history"])
+
+/**
+ * The pages the test's statements name, and so must declare: a step's page, a renamed page, and the opener of a popup
+ * that is one of them, which the test waits on.
+ */
+const namedPages = (steps: ReadonlyArray<Step>): ReadonlySet<string> => {
+  const named = new Set(steps.flatMap((step) =>
+    step._tag === "Rename"
+      ? [step.from]
+      : step._tag === "Tool" && !reads.has(step.tool) && step.tool !== "release" && typeof step.params.page === "string"
+      ? [step.params.page]
+      : []
+  ))
+  const opened = steps.flatMap((step) => step._tag === "Tool" || step._tag === "NewPage" ? step.popups ?? [] : [])
+  for (let size = -1; size !== named.size;) {
+    size = named.size
+    for (const popup of opened) if (named.has(popup.page)) named.add(popup.opener)
+  }
+  return named
+}
+
+/** Names as a sentence lists them: `a`, `a and b`, `a, b and c`. */
+const listed = (names: ReadonlyArray<string>) =>
+  names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`
 
 /** Where the session's browser came from, as the test's layer names it. */
 export type Browser =
@@ -183,15 +238,81 @@ export const render = (options: {
     step._tag === "Tool" && step.result !== undefined && removed.has(step.result) ? `const ${step.result} = ` : ""
   // Each page's variable, by the name the session gives it now: a page renamed is the variable of its new name
   const taken = new Set([...reserved, ...Object.keys(imports)])
+  const fresh = (base: string) => {
+    let name = base
+    for (let n = 2; taken.has(name); n++) name = `${base}_${n}`
+    taken.add(name)
+    return name
+  }
   const variables = new Map<string, string>()
   const declare = (page: string) => {
-    let name = variable(page)
-    for (let n = 2; taken.has(name); n++) name = `${variable(page)}_${n}`
-    taken.add(name)
+    const name = fresh(variable(page))
     variables.set(page, name)
     return name
   }
-  const pageVariable = (page: string) => variables.get(page) ?? variable(page)
+  // A page no command opened is declared only where a statement names it
+  const named = namedPages(options.steps)
+  /** The popups a wait the session started gives, declared from it when a statement first names them. */
+  const pending = new Map<string, string>()
+  /** A page's variable, declared first if it's a page the session only saw, or a placeholder if no step opened it. */
+  const use = (page: string): string => {
+    const known = variables.get(page)
+    if (known !== undefined) return known
+    const wait = pending.get(page)
+    pending.delete(page)
+    const declared = declare(page)
+    if (wait !== undefined) {
+      body.push(`const ${declared} = yield* ${wait}`)
+      return declared
+    }
+    placeholders.push(`page ${page}, which no command the test repeats opened`)
+    body.push(
+      `// TODO page ${page}: the session had it, but no command the test repeats opened it; declare it here, as ${declared}`
+    )
+    return declared
+  }
+  /**
+   * A command's popups that a statement names: each opener's first is waited for with `Popup.next` from just before
+   * the command, or, for the page the command opens, from just after it's declared. `Popup.next` gives an opener's
+   * first popup alone, so a second popup of one opener, or a popup of a popup, that the same command opened is a
+   * placeholder.
+   */
+  const popupsOf = (popups: ReadonlyArray<Opened> | undefined, self: string | undefined) => {
+    const shown = (popups ?? []).filter((popup) => named.has(popup.page))
+    const ours = new Set(shown.map((popup) => popup.page))
+    const firsts = new Set<string>()
+    const waits = shown.map((popup) => {
+      const first = !firsts.has(popup.opener) && !ours.has(popup.opener)
+      firsts.add(popup.opener)
+      return { ...popup, first, wait: undefined as string | undefined }
+    })
+    const subscribe = (own: boolean) => {
+      for (const each of waits) {
+        if (!each.first || (each.opener === self) !== own) continue
+        used.add("Popup")
+        const opener = use(each.opener)
+        each.wait = fresh(`${opener}Popups`)
+        body.push(`const ${each.wait} = yield* Popup.next(${opener})`)
+      }
+    }
+    return {
+      before: () => subscribe(false),
+      declared: () => subscribe(true),
+      after: () => {
+        for (const each of waits) {
+          if (each.wait !== undefined) {
+            body.push(`const ${declare(each.page)} = yield* ${each.wait}`)
+            continue
+          }
+          const declared = declare(each.page)
+          placeholders.push(`page ${each.page}, a popup that Popup.next can't single out`)
+          body.push(
+            `// TODO page ${each.page}: one of several popups the command above opened, which Popup.next can't single out; declare it here, as ${declared}`
+          )
+        }
+      }
+    }
+  }
   // A secret's `%name%` anywhere in a fill's value or a URL is its value, which the session put in as the call ran;
   // any other `%…%`, such as a URL's `%C3%`, is text, as the session sent it (Q250)
   const split = (text: string) => Secrets.split(text, Object.keys(options.secrets))
@@ -217,15 +338,36 @@ export const render = (options: {
   }
   for (const step of options.steps) {
     if (step._tag === "Segment") {
-      // A segment runs only inside a session: its code goes here by hand
-      placeholders.push(`strider run ${step.file}, which runs only in a session`)
-      body.push(`// TODO strider run ${step.file}: a segment runs only in a session; put its steps here`)
+      // A segment runs only inside a session: its code goes here by hand, declaring the pages later steps name
+      const pages = (step.pages ?? []).filter((page) => named.has(page) && !variables.has(page)).map(declare)
+      const declaring = pages.length === 0 ? "" : `, declaring ${listed(pages)}`
+      placeholders.push(`strider run ${step.file}, which runs only in a session${declaring}`)
+      body.push(`// TODO strider run ${step.file}: a segment runs only in a session; put its steps here${declaring}`)
+      continue
+    }
+    if (step._tag === "Popup") {
+      if (!variables.has(step.page)) pending.set(step.page, step.wait)
+      continue
+    }
+    if (step._tag === "Listed") {
+      // As a reader waits for a page no event announces: by its place among the context's pages
+      if (named.has(step.page) && !variables.has(step.page)) {
+        body.push(
+          `const ${declare(step.page)} = (yield* context.pages.waitFor((pages) => pages.length >= ${
+            step.index + 1
+          }))[${step.index}]!`
+        )
+      }
       continue
     }
     if (step._tag === "NewPage") {
+      const popups = popupsOf(step.popups, step.page)
+      popups.before()
       const page = declare(step.page)
       body.push(`const ${page} = yield* context.newPage`)
+      popups.declared()
       if (step.url !== undefined) body.push(`yield* ${page}.goto(${revealed(step.url)})`)
+      popups.after()
       continue
     }
     if (step._tag === "Remove") {
@@ -234,12 +376,13 @@ export const render = (options: {
     }
     if (step._tag === "Rename") {
       // `page name`: later steps name the page by its new name, which is a variable of its own from here
-      const from = pageVariable(step.from)
+      const from = use(step.from)
       variables.delete(step.from)
       body.push(`const ${declare(step.to)} = ${from}`)
       continue
     }
-    if (step._tag === "Tool" && step.tool === "control") {
+    if (reads.has(step.tool)) continue
+    if (step.tool === "control") {
       // A tab the session took from the browser: the test takes it with control, or opens its own page, under the
       // variable later steps use
       const tab = String((step.params as { tab?: string; url?: string }).tab ?? (step.params as { url?: string }).url)
@@ -251,7 +394,7 @@ export const render = (options: {
       )
       continue
     }
-    if (step._tag === "Tool" && step.tool === "release") {
+    if (step.tool === "release") {
       // Where the session gave the tab back, which ends the scope control took it in
       const name = String(step.params.page)
       placeholders.push(`strider release -p ${name}, which gives back a tab the test takes by hand`)
@@ -262,13 +405,17 @@ export const render = (options: {
       continue
     }
     const params = step.params as Record<string, string | ReadonlyArray<string> | number | undefined>
-    const page = typeof params.page === "string" ? pageVariable(params.page) : "page"
+    const page = typeof params.page === "string" ? use(params.page) : "page"
     const target = step.target === undefined ? "" : `${page}.${step.target}`
+    // Through strider mcp, newPage opens a page under the name the toolkit gave it
+    const opens = step.tool === "newPage" ? step.result ?? String(params.name ?? "page") : undefined
+    const popups = popupsOf(step.popups, opens)
+    popups.before()
     switch (step.tool) {
       case "newPage": {
-        // Through strider mcp, under the name the toolkit gave it
-        const opened = declare(step.result ?? String(params.name ?? "page"))
+        const opened = declare(opens!)
         body.push(`const ${opened} = yield* context.newPage`)
+        popups.declared()
         if (params.url !== undefined) body.push(`yield* ${opened}.goto(${revealed(String(params.url))})`)
         break
       }
@@ -348,11 +495,13 @@ export const render = (options: {
         break
       }
       case "await": {
+        // A popup a statement named before the session collected it is declared already
         const popup = step.result !== undefined ? /^popup (\S+),/.exec(step.result)?.[1] : undefined
+        if (popup !== undefined) pending.delete(popup)
         body.push(
-          popup === undefined
+          popup === undefined || variables.has(popup)
             ? `yield* ${String(params.wait)}`
-            : `const ${declare(popup.replace(/,$/, ""))} = yield* ${String(params.wait)}`
+            : `const ${declare(popup)} = yield* ${String(params.wait)}`
         )
         break
       }
@@ -382,6 +531,7 @@ export const render = (options: {
         )
         break
     }
+    popups.after()
   }
   const layer = options.browser._tag === "Launch"
     ? {

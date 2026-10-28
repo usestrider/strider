@@ -52,6 +52,7 @@ import * as ToolkitImpl from "../toolkit.ts"
 import type * as Tools from "../tools.ts"
 import * as ExportTest from "./exportTest.ts"
 import * as Node from "./node.ts"
+import * as Recorder from "./recorder.ts"
 import * as Session from "./session.ts"
 
 // ── The session ──
@@ -75,7 +76,8 @@ interface Daemon {
   readonly context: UserContext.UserContext
   readonly session: ToolkitImpl.Session
   readonly scope: Scope.Scope
-  readonly steps: Array<ExportTest.Step>
+  /** The steps `export test` writes, and how the session came to know the pages no command opened. */
+  readonly recorder: Recorder.Recorder
   readonly stop: (keep: boolean) => void
   readonly lastActivity: () => number
   readonly idleTimeout: string
@@ -95,21 +97,49 @@ const targetOf = (daemon: Daemon, params: Record<string, unknown>) => {
     : undefined
 }
 
-/** Records a successful tool call for `export test`. */
+/** The tools that act on a page, and so may open a popup as they run. */
+const actions = new Set(["newPage", "goto", "back", "click", "fill", "press", "select", "scroll"])
+
+/**
+ * Runs a tool call or command that may open pages, as the recorder's: an action's popups are its own, and a
+ * segment's pages its placeholder's.
+ */
+const recording = <A, E, R>(
+  daemon: Daemon,
+  kind: Recorder.Running["kind"] | undefined,
+  effect: (running: Recorder.Running | undefined) => Effect.Effect<A, E, R>
+) =>
+  kind === undefined ? effect(undefined) : Effect.acquireUseRelease(
+    Effect.sync(() => daemon.recorder.begin(kind)),
+    effect,
+    (running) => Effect.sync(() => daemon.recorder.end(running))
+  )
+
+/** Records a successful tool call for `export test`, with the pages it declares and the popup waits it starts. */
 const record = (
   daemon: Daemon,
   name: string,
   params: Record<string, unknown>,
   outcome: unknown,
-  target: string | undefined
+  target: string | undefined,
+  running: Recorder.Running | undefined
 ) => {
-  daemon.steps.push({
-    _tag: "Tool",
-    tool: name,
-    params,
-    target,
-    result: typeof outcome === "string" ? outcome : handleOf(outcome)
-  })
+  const result = typeof outcome === "string" ? outcome : handleOf(outcome)
+  daemon.recorder.record({ _tag: "Tool", tool: name, params, target, result }, running)
+  const id = (page: unknown) =>
+    typeof page === "string" ? Option.getOrUndefined(daemon.session.named(page))?.id : undefined
+  // A page newPage opened or control took, and a popup await collected, is declared by its step
+  const declared = name === "newPage" || name === "control"
+    ? id(result)
+    : name === "await" && result !== undefined
+    ? id(/^popup (\S+),/.exec(result)?.[1])
+    : undefined
+  if (declared !== undefined) daemon.recorder.declared(declared)
+  // A popup wait gives the next popup its page opens
+  const opener = id(params.page)
+  if (name === "next" && params.event === "popup" && result !== undefined && opener !== undefined) {
+    daemon.recorder.waiting(result, opener)
+  }
 }
 
 /** The handle a tool call printed: a wait's, a route's or dialog handler's registration, or a page's name. */
@@ -155,10 +185,16 @@ const commands = (daemon: Daemon) => {
     params: Record<string, unknown>,
     present: Present = plain
   ) => toolWith(name, params, present)
-  const toolWith = Effect.fnUntraced(function*(
+  const toolWith = (
     name: keyof Tools.Tools,
     params: Record<string, unknown>,
     present: Present
+  ) => recording(daemon, actions.has(name) ? "action" : undefined, (running) => toolIn(name, params, present, running))
+  const toolIn = Effect.fnUntraced(function*(
+    name: keyof Tools.Tools,
+    params: Record<string, unknown>,
+    present: Present,
+    running: Recorder.Running | undefined
   ) {
     const config = yield* root
     const started = performance.now()
@@ -178,7 +214,7 @@ const commands = (daemon: Daemon) => {
     }
     const value = last.result as { readonly outcome: unknown; readonly sinceLast: ReadonlyArray<string> }
     const shown = yield* present(value.outcome)
-    record(daemon, name, params, value.outcome, target)
+    record(daemon, name, params, value.outcome, target, running)
     if (config.json) {
       yield* Console.log(JSON.stringify({
         page,
@@ -435,7 +471,7 @@ const commands = (daemon: Daemon) => {
     ({ registration }) =>
       Effect.gen(function*() {
         yield* daemon.session.remove(registration).pipe(Effect.mapError((failure) => new CommandFailed(failure)))
-        daemon.steps.push({ _tag: "Remove", registration })
+        daemon.recorder.record({ _tag: "Remove", registration })
         yield* Console.log(`removed ${registration}`)
       })
   )
@@ -447,28 +483,33 @@ const commands = (daemon: Daemon) => {
         "new",
         { name: Flag.String("name").pipe(Flag.optional), url: Argument.String("url").pipe(Argument.optional) },
         ({ name, url }) =>
-          Effect.gen(function*() {
-            const opened = yield* daemon.context.newPage.pipe(Scope.provide(daemon.scope), Effect.mapError(failedWith))
-            const named = yield* daemon.session.name(opened, Option.getOrUndefined(name)).pipe(
-              Effect.mapError((failure) => new CommandFailed(failure))
-            )
-            // A secret's %name% in the URL is its value, as goto puts it in, and a failure names it again
-            if (Option.isSome(url)) {
-              yield* opened.goto(daemon.session.reveal(url.value)).pipe(
-                Effect.mapError((error) =>
-                  new CommandFailed(daemon.session.conceal({ ...ToolkitImpl.toFailure(error) }))
-                )
+          recording(daemon, "action", (running) =>
+            Effect.gen(function*() {
+              const opened = yield* daemon.context.newPage.pipe(
+                Scope.provide(daemon.scope),
+                Effect.mapError(failedWith)
               )
-            }
-            daemon.steps.push({ _tag: "NewPage", page: named, url: Option.getOrUndefined(url) })
-            yield* Console.log(`${named}${Option.isSome(url) ? ` at ${url.value}` : ""}`)
-          })
+              const named = yield* daemon.session.name(opened, Option.getOrUndefined(name)).pipe(
+                Effect.mapError((failure) => new CommandFailed(failure))
+              )
+              // A secret's %name% in the URL is its value, as goto puts it in, and a failure names it again
+              if (Option.isSome(url)) {
+                yield* opened.goto(daemon.session.reveal(url.value)).pipe(
+                  Effect.mapError((error) =>
+                    new CommandFailed(daemon.session.conceal({ ...ToolkitImpl.toFailure(error) }))
+                  )
+                )
+              }
+              daemon.recorder.record({ _tag: "NewPage", page: named, url: Option.getOrUndefined(url) }, running)
+              daemon.recorder.declared(opened.id)
+              yield* Console.log(`${named}${Option.isSome(url) ? ` at ${url.value}` : ""}`)
+            }))
       ),
       Command.make("name", { name: Argument.String("name") }, ({ name }) =>
         Effect.gen(function*() {
           const from = yield* pageFlag
           yield* daemon.session.rename(from, name).pipe(Effect.mapError((failure) => new CommandFailed(failure)))
-          daemon.steps.push({ _tag: "Rename", from, to: name })
+          daemon.recorder.record({ _tag: "Rename", from, to: name })
           yield* Console.log(`${from} is now ${name}`)
         }))
     ])
@@ -513,7 +554,29 @@ const commands = (daemon: Daemon) => {
     "run",
     { file: Argument.String("file") },
     ({ file }) =>
-      Effect.tap(segment(daemon, file), () => Effect.sync(() => void daemon.steps.push({ _tag: "Segment", file })))
+      Effect.gen(function*() {
+        // Every page named first, so what's new after the segment is its own
+        const before = new Map((yield* daemon.session.pages).map((each) => [each.page.id, each.name]))
+        return yield* recording(daemon, "segment", (running) =>
+          Effect.gen(function*() {
+            const ran = yield* Effect.exit(segment(daemon, file))
+            const after = yield* daemon.session.pages
+            // The pages it gave the session, which its placeholder declares, by the names they have now
+            const pages = after.filter((each) => !before.has(each.page.id) && !daemon.recorder.declares(each.page.id))
+            if (Exit.isSuccess(ran)) {
+              daemon.recorder.record({ _tag: "Segment", file, pages: pages.map((each) => each.name) }, running)
+              for (const each of pages) daemon.recorder.declared(each.page.id)
+            }
+            // A page it renamed, as keeping one under a new name does, is renamed in the test too
+            for (const each of after) {
+              const from = before.get(each.page.id)
+              if (from !== undefined && from !== each.name) {
+                daemon.recorder.record({ _tag: "Rename", from, to: each.name })
+              }
+            }
+            return yield* ran
+          }))
+      })
   )
   const state = Command.make("state").pipe(
     Command.withSubcommands([
@@ -544,10 +607,12 @@ const commands = (daemon: Daemon) => {
             state: daemon.state,
             fork: daemon.fork,
             userDataDir: daemon.userDataDir,
-            steps: daemon.steps
+            steps: daemon.recorder.steps
           })
           yield* fs.writeFileString(resolved, text).pipe(Effect.mapError(failedWith))
-          yield* Console.log(`wrote ${daemon.steps.length} steps to ${resolved}`)
+          // The commands it repeats, not what the session saw of its pages
+          const commands = daemon.recorder.steps.filter((step) => step._tag !== "Popup" && step._tag !== "Listed")
+          yield* Console.log(`wrote ${commands.length} steps to ${resolved}`)
           for (const placeholder of placeholders) yield* Console.log(`  a placeholder for ${placeholder}`)
         }))
     ])
@@ -739,20 +804,24 @@ const serve = (daemon: Daemon, tree: ReturnType<typeof commands>, touch: () => v
       touch()
       const params = (request.params ?? {}) as Record<string, unknown>
       const target = targetOf(daemon, params)
-      const exit = yield* Effect.exit(callTool(daemon, request.tool as keyof Tools.Tools, params))
-      touch()
       const lines: Array<Session.Response> = []
-      if (Exit.isSuccess(exit) && Option.isSome(exit.value)) {
-        const result = exit.value.value
-        if (!result.isFailure) {
-          record(daemon, request.tool, params, (result.result as { readonly outcome: unknown }).outcome, target)
-        }
-        lines.push({ _tag: "ToolResult", failure: result.isFailure, value: result.encodedResult })
-        lines.push({ _tag: "Exit", code: 0 })
-      } else {
-        lines.push({ _tag: "Err", text: `${request.tool} isn't one of the session's tools, or it died` })
-        lines.push({ _tag: "Exit", code: 1 })
-      }
+      yield* recording(daemon, actions.has(request.tool) ? "action" : undefined, (running) =>
+        Effect.gen(function*() {
+          const exit = yield* Effect.exit(callTool(daemon, request.tool as keyof Tools.Tools, params))
+          if (Exit.isSuccess(exit) && Option.isSome(exit.value)) {
+            const result = exit.value.value
+            if (!result.isFailure) {
+              const outcome = (result.result as { readonly outcome: unknown }).outcome
+              record(daemon, request.tool, params, outcome, target, running)
+            }
+            lines.push({ _tag: "ToolResult", failure: result.isFailure, value: result.encodedResult })
+            lines.push({ _tag: "Exit", code: 0 })
+          } else {
+            lines.push({ _tag: "Err", text: `${request.tool} isn't one of the session's tools, or it died` })
+            lines.push({ _tag: "Exit", code: 1 })
+          }
+        }))
+      touch()
       for (const line of lines) yield* writer.write(`${JSON.stringify(line)}\n`).pipe(Effect.ignore)
       return
     }
@@ -1027,12 +1096,18 @@ const start = Command.make(
       }).pipe(
         Effect.mapError(failedWith)
       )
+      const recorder = Recorder.make()
       const session = yield* ToolkitImpl.makeSession({
         context,
         secrets,
         capture: CapturePolicy.local,
         // The session can take the browser's own tabs with control
-        browser: instance
+        browser: instance,
+        // A page no command opened, for the exported test to declare
+        seen: (seen) =>
+          seen._tag === "Listed"
+            ? recorder.listed({ id: seen.page.id, name: seen.name, index: seen.index })
+            : recorder.popup({ id: seen.page.id, name: seen.name, opener: seen.opener.id, openerName: seen.openerName })
       })
       const stopped = yield* Deferred.make<boolean>()
       let last = performance.now()
@@ -1048,7 +1123,7 @@ const start = Command.make(
         context,
         session,
         scope,
-        steps: [],
+        recorder,
         shots: 0,
         // After the command that asked has had its answer
         stop: (keepIt) => void setTimeout(() => Deferred.doneUnsafe(stopped, Exit.succeed(keepIt)), 50),

@@ -81,6 +81,10 @@ const handshake = [
   { jsonrpc: "2.0", method: "notifications/initialized" }
 ]
 
+/** The page names `strider pages` lists, one a line before its URL. */
+const names = (listing: { readonly out: string }) =>
+  listing.out.split("\n").filter((line) => line.includes("  ")).map((line) => line.split("  ")[0]!)
+
 const environment = () => ({
   XDG_RUNTIME_DIR: fs.mkdtempSync(path.join(os.tmpdir(), "strider-cli-")),
   // The ledger's own, so a test sees only its sessions' records
@@ -145,6 +149,17 @@ describe("strider", () => {
         const popup = /popup (p\d+)/.exec(awaited.out)![1]!
         assert.strictEqual((yield* run("-s", "shop", "-p", popup, "page", "name", "child")).code, 0)
         assert.strictEqual((yield* run("-s", "shop", "-p", "child", "expect", "css=p", "visible")).code, 0)
+        // A popup the session never waited for, found among the pages it lists, and renamed
+        const before = names(yield* run("-s", "shop", "pages"))
+        assert.strictEqual((yield* shop("click", `role=button[name="Open"]`)).code, 0)
+        let unwaited: string | undefined
+        for (let attempt = 0; attempt < 50 && unwaited === undefined; attempt++) {
+          unwaited = names(yield* run("-s", "shop", "pages")).find((name) => !before.includes(name))
+          if (unwaited === undefined) yield* Effect.sleep("100 millis")
+        }
+        assert.isDefined(unwaited, "the popup is listed")
+        assert.strictEqual((yield* run("-s", "shop", "-p", unwaited!, "page", "name", "help")).code, 0)
+        assert.strictEqual((yield* run("-s", "shop", "-p", "help", "expect", "css=p", "visible")).code, 0)
         // A route and a dialog decision, each a registration
         const routed = yield* shop("route", "**/api/status", "fulfill", "--body", "all good")
         assert.match(routed.out, /^r1: fulfill/)
@@ -163,6 +178,8 @@ describe("strider", () => {
         // A segment: run in the session, its returned page named into it
         const segment = yield* run("-s", "shop", "run", path.join(fixtures, "open-popup.ts"))
         assert.match(segment.out, /^ran .*open-popup\.ts; popup is p\d+/, segment.err)
+        const returned = /popup is (p\d+)/.exec(segment.out)![1]!
+        assert.strictEqual((yield* run("-s", "shop", "-p", returned, "expect", "css=p", "visible")).code, 0)
         const missing = yield* run("-s", "shop", "run", path.join(fixtures, "missing-page.ts"))
         assert.notStrictEqual(missing.code, 0)
         assert.include(missing.err, "PageNotFound")
@@ -214,11 +231,30 @@ describe("strider", () => {
         assert.include(exported, `const ${popup} = yield* w1\n`)
         assert.include(exported, `const child = ${popup}\n`)
         assert.include(exported, `yield* child.locator("p").pipe(Expect.toBeVisible)\n`)
+        // The popup it never waited for is waited for from just before the click that opened it
+        assert.include(
+          exported,
+          [
+            `        const shopPopups = yield* Popup.next(shop)`,
+            `        yield* shop.getByRole("button", { name: "Open", exact: true }).click()`,
+            `        const ${unwaited} = yield* shopPopups`,
+            `        const help = ${unwaited}`,
+            `        yield* help.locator("p").pipe(Expect.toBeVisible)`,
+            ``
+          ].join("\n")
+        )
         // The route the session removed ends where it did, through its handle; the dialog handler it kept doesn't
         assert.include(exported, `const r1 = yield* shop.route("**/api/status", () => Effect.succeed(Route.fulfill(`)
         assert.include(exported, `yield* r1.remove\n`)
         assert.include(exported, `        yield* Dialog.handle(shop, Dialog.dismissAll)\n`)
-        assert.include(exported, `// TODO strider run ${path.join(fixtures, "open-popup.ts")}`)
+        // The page the segment returned is its placeholder's to declare
+        assert.include(
+          exported,
+          `// TODO strider run ${
+            path.join(fixtures, "open-popup.ts")
+          }: a segment runs only in a session; put its steps here, declaring ${returned}\n`
+        )
+        assert.include(exported, `yield* ${returned}.locator("p").pipe(Expect.toBeVisible)\n`)
         assert.include(
           exported,
           `const side = yield* context.newPage\n        yield* side.goto(${JSON.stringify(url)})\n`
@@ -245,7 +281,7 @@ describe("strider", () => {
         assert.include(exported, `yield* shop.goto(${JSON.stringify(cafe)})\n`)
         // The page's own script holds the password it checks, so the statement is what is checked
         assert.notInclude(exported, `.fill("hunter2")`)
-        assert.match((yield* run("sessions")).out, /^shop  chromium · pages shop, child, p\d+/)
+        assert.match((yield* run("sessions")).out, /^shop  chromium · pages shop, child, help, p\d+/)
       } finally {
         yield* run("-s", "shop", "stop")
       }
@@ -371,6 +407,12 @@ describe("strider", () => {
           assert.strictEqual(kept.code, 0, kept.err)
           assert.include((yield* tools("pages")).out, "kept")
           assert.strictEqual((yield* tools("-p", "kept", "goto", url)).code, 0)
+          // The test leaves it to the segment's placeholder to declare
+          const test = path.join(env.XDG_RUNTIME_DIR, "tools.test.ts")
+          assert.strictEqual((yield* tools("export", "test", test)).code, 0)
+          const exported = fs.readFileSync(test, "utf8")
+          assert.include(exported, `: a segment runs only in a session; put its steps here, declaring kept\n`)
+          assert.include(exported, `yield* kept.goto(${JSON.stringify(url)})\n`)
           // Downloads go to the session's own directory
           const downloads = path.join(env.XDG_RUNTIME_DIR, "strider", "tools", "downloads")
           yield* tools(

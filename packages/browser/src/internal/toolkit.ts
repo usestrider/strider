@@ -58,7 +58,24 @@ export interface Options {
   readonly capture: CapturePolicy.CapturePolicy
   /** The browser, for `tabs` and `control`; without it, they fail with `NotPermitted`. */
   readonly browser?: Browser.Browser | undefined
+  /** Told of each page the toolkit comes to know that no tool opened, as the CLI's exported test declares it. */
+  readonly seen?: ((seen: Seen) => void) | undefined
 }
+
+/**
+ * A page the toolkit came to know that no tool opened: one it found among the context's pages and named, at its
+ * place there, or a popup a page it watches opened, told each time one opens, named before or not.
+ */
+export type Seen =
+  | { readonly _tag: "Listed"; readonly page: Page.Page; readonly name: string; readonly index: number }
+  | {
+    readonly _tag: "Popup"
+    readonly page: Page.Page
+    readonly name: string
+    readonly opener: Page.Page
+    /** The opener's name as the popup opened. */
+    readonly openerName: string
+  }
 
 const failed = (error: string, message: string, reason?: string) =>
   new Tools.ToolFailure({ error, message, ...(reason === undefined ? {} : { reason }) })
@@ -159,6 +176,8 @@ export interface Session {
   readonly page: (name: string) => Effect.Effect<Page.Page, Tools.ToolFailure>
   /** The context's pages, each named. */
   readonly pages: Effect.Effect<ReadonlyArray<{ readonly name: string; readonly page: Page.Page }>>
+  /** The page with a name, as the toolkit knows it now, without listing the context's pages again. */
+  readonly named: (name: string) => Option.Option<Page.Page>
   /** A page's latest snapshot, which its refs are checked against. */
   readonly latest: (name: string) => Option.Option<Snapshot.Snapshot<Locator.Locator>>
   /** Ends a route or dialog handler that `route` or `dialog` declared, by its registration (`r1`). */
@@ -226,7 +245,11 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   /** The context's pages, each named, the new ones `p1`, `p2`… */
   const refresh = Effect.gen(function*() {
     const pages = yield* context.pages
-    for (const page of pages) yield* nameOf(page)
+    for (const [index, page] of pages.entries()) {
+      if (nameById.has(page.id)) continue
+      const name = yield* nameOf(page)
+      options.seen?.({ _tag: "Listed", page, name, index })
+    }
     return pages
   })
 
@@ -286,22 +309,27 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
           onNone: () => Effect.void,
           onSome: (opened) =>
             Effect.flatMap(nameOf(opened), (popupName) =>
-              Effect.sync(() =>
+              Effect.sync(() => {
+                options.seen?.({
+                  _tag: "Popup",
+                  page: opened,
+                  name: popupName,
+                  opener: page,
+                  openerName: nameById.get(page.id) ?? name
+                })
                 note(`popup ${popupName} opened from ${name}${
                   Option.match(popup.url, {
                     onNone: () => "",
                     onSome: (url) => ` at ${url}`
                   })
                 }`)
-              ))
+              }))
         }))
       yield* drain(pageEntry.events.dialog, (prompt) =>
         note(`dialog ${prompt.kind}${prompt.message === "" ? "" : ` "${prompt.message}"`} on ${name}`))
       yield* Effect.forkIn(
         Effect.flatMap(page.closed, (reason) =>
-          Effect.sync(() =>
-            note(`${name} closed: ${reason._tag}`)
-          )),
+          Effect.sync(() => note(`${name} closed: ${reason._tag}`))),
         scope
       )
     })
@@ -817,6 +845,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
         })),
     page: keptNamed,
     pages: Effect.map(Effect.orDie(refresh), (pages) => pages.map((page) => ({ name: nameById.get(page.id)!, page }))),
+    named: (name) => Option.fromNullishOr(byName.get(name)),
     latest: (name) => Option.fromNullishOr(snapshots.get(name)),
     remove: (id) =>
       Effect.suspend(() => {

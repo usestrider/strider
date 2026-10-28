@@ -3,7 +3,7 @@
  * test keeps of its session: a statement for every tool but the reads; a tab the session took with control, marked;
  * a page strider mcp opened; a renamed page; a removed declaration; secrets wherever the session put them in, but
  * not in a check's text, and a `%…%` that names none as text; a fork or profile, said; a wait's deadline; a dialog's
- * answer.
+ * answer; and a page no command opened, declared where a step names it, from what the session recorded of it.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
@@ -17,6 +17,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import * as ExportTest from "../src/internal/cli/exportTest.ts"
 import * as Mcp from "../src/internal/cli/mcp.ts"
+import * as Recorder from "../src/internal/cli/recorder.ts"
 
 describe("Ledger", () => {
   it.effect("records what a program owns while it owns it, and forgets it as the program ends", () =>
@@ -440,5 +441,198 @@ describe("strider export test", () => {
       text,
       `dialog._tag === "Prompt" || dialog._tag === "Unknown" ? dialog.respond("Ada") : dialog._tag === "BeforeUnload" ? dialog.leave : dialog.accept`
     )
+  })
+
+  const open = (page: string, popups?: ReadonlyArray<ExportTest.Opened>): ExportTest.Step => ({
+    _tag: "Tool",
+    tool: "click",
+    params: { page, target: `role=button[name="Open"]` },
+    target: `getByRole("button", { name: "Open", exact: true })`,
+    result: undefined,
+    ...(popups === undefined ? {} : { popups })
+  })
+
+  it("waits for a popup the session never waited for from just before the command that opened it", () => {
+    const { placeholders, text } = ExportTest.render({
+      name: "shop",
+      browser: launched,
+      secrets: {},
+      state: undefined,
+      steps: [
+        // Its first document opened one
+        {
+          _tag: "NewPage",
+          page: "shop",
+          url: "https://shop.example.com",
+          popups: [{ page: "p1", opener: "shop" }]
+        },
+        // A click opened three, the last of which no step names
+        open("shop", [{ page: "p2", opener: "shop" }, { page: "p3", opener: "shop" }, { page: "p4", opener: "shop" }]),
+        { _tag: "Rename", from: "p2", to: "help" },
+        tool("goto", { page: "help", url: "https://shop.example.com/help/faq" }),
+        tool("goto", { page: "p1", url: "https://shop.example.com/offers" }),
+        tool("goto", { page: "p3", url: "https://shop.example.com/chat" })
+      ]
+    })
+    assert.include(
+      text,
+      [
+        `        const shop = yield* context.newPage`,
+        `        const shopPopups = yield* Popup.next(shop)`,
+        `        yield* shop.goto("https://shop.example.com")`,
+        `        const p1 = yield* shopPopups`,
+        `        const shopPopups_2 = yield* Popup.next(shop)`,
+        `        yield* shop.getByRole("button", { name: "Open", exact: true }).click()`,
+        `        const p2 = yield* shopPopups_2`,
+        // Popup.next gives an opener's first popup alone
+        `        // TODO page p3: one of several popups the command above opened, which Popup.next can't single out; declare it here, as p3`,
+        `        const help = p2`,
+        `        yield* help.goto("https://shop.example.com/help/faq")`,
+        `        yield* p1.goto("https://shop.example.com/offers")`,
+        `        yield* p3.goto("https://shop.example.com/chat")`,
+        ``
+      ].join("\n")
+    )
+    assert.include(text, `import { Browser, Popup } from "@usestrider/browser"`)
+    assert.notInclude(text, "p4")
+    assert.deepStrictEqual(placeholders, ["page p3, a popup that Popup.next can't single out"])
+  })
+
+  it("declares a popup from the wait the session started where a step first names it, and a listed page by its place", () => {
+    const { text } = ExportTest.render({
+      name: "shop",
+      browser: launched,
+      secrets: {},
+      state: undefined,
+      steps: [
+        { _tag: "NewPage", page: "main", url: undefined },
+        tool("next", { page: "main", event: "popup" }, "w1"),
+        open("main"),
+        { _tag: "Popup", page: "p1", wait: "w1" },
+        tool("goto", { page: "p1", url: "https://shop.example.com/help" }),
+        // Collected after a step named it, so declared already
+        tool("await", { wait: "w1" }, "popup p1, at https://shop.example.com/help so far"),
+        // Found among the context's pages with no event that said what opened it, as on stock WebKit
+        { _tag: "Listed", page: "p2", index: 2 },
+        tool("goto", { page: "p2", url: "https://shop.example.com/chat" }),
+        { _tag: "Listed", page: "p3", index: 3 }
+      ]
+    })
+    assert.include(
+      text,
+      [
+        `        yield* main.getByRole("button", { name: "Open", exact: true }).click()`,
+        `        const p1 = yield* w1`,
+        `        yield* p1.goto("https://shop.example.com/help")`,
+        `        yield* w1`,
+        `        const p2 = (yield* context.pages.waitFor((pages) => pages.length >= 3))[2]!`,
+        `        yield* p2.goto("https://shop.example.com/chat")`,
+        ``
+      ].join("\n")
+    )
+    assert.notInclude(text, "p3")
+  })
+
+  it("declares a segment's pages in its placeholder, and marks a page no command it repeats opened", () => {
+    const { placeholders, text } = ExportTest.render({
+      name: "shop",
+      browser: launched,
+      secrets: {},
+      state: undefined,
+      steps: [
+        { _tag: "NewPage", page: "main", url: undefined },
+        { _tag: "Segment", file: "pay.ts", pages: ["receipt", "p2"] },
+        tool("goto", { page: "receipt", url: "https://shop.example.com/receipt" }),
+        // Such as one a command opened before it failed
+        tool("goto", { page: "lost", url: "https://shop.example.com/lost" }),
+        tool("goto", { page: "lost", url: "https://shop.example.com/found" })
+      ]
+    })
+    assert.include(
+      text,
+      [
+        `        // TODO strider run pay.ts: a segment runs only in a session; put its steps here, declaring receipt`,
+        `        yield* receipt.goto("https://shop.example.com/receipt")`,
+        `        // TODO page lost: the session had it, but no command the test repeats opened it; declare it here, as lost`,
+        `        yield* lost.goto("https://shop.example.com/lost")`,
+        `        yield* lost.goto("https://shop.example.com/found")`,
+        ``
+      ].join("\n")
+    )
+    assert.deepStrictEqual(placeholders, [
+      "strider run pay.ts, which runs only in a session, declaring receipt",
+      "page lost, which no command the test repeats opened"
+    ])
+  })
+})
+
+describe("strider export test's recorder", () => {
+  const click: ExportTest.Step = {
+    _tag: "Tool",
+    tool: "click",
+    params: { page: "shop", target: "css=#open" },
+    target: `locator("#open")`,
+    result: undefined
+  }
+
+  it("gives a popup to the command that opened it, as it ran or after it, under its opener's name then", () => {
+    const recorder = Recorder.make()
+    const opening = recorder.begin("action")
+    recorder.record({ _tag: "NewPage", page: "shop", url: "https://shop.example.com" }, opening)
+    recorder.declared("A")
+    // Opened by its first document, as page new ran
+    recorder.popup({ id: "B", name: "p1", opener: "A", openerName: "shop" })
+    recorder.end(opening)
+    const clicking = recorder.begin("action")
+    recorder.record(click, clicking)
+    recorder.end(clicking)
+    // Seen once the click was over, its opener renamed since
+    recorder.record({ _tag: "Rename", from: "shop", to: "store" })
+    recorder.popup({ id: "C", name: "p2", opener: "A", openerName: "store" })
+    // Known already: told again, it's nothing new
+    recorder.popup({ id: "B", name: "p1", opener: "A", openerName: "store" })
+    assert.deepStrictEqual(recorder.steps, [
+      { _tag: "NewPage", page: "shop", url: "https://shop.example.com", popups: [{ page: "p1", opener: "shop" }] },
+      { ...click, popups: [{ page: "p2", opener: "shop" }] },
+      { _tag: "Rename", from: "shop", to: "store" }
+    ])
+  })
+
+  it("gives a popup to the wait pending on its opener, and none to a command that failed", () => {
+    const recorder = Recorder.make()
+    recorder.declared("A")
+    recorder.waiting("w1", "A")
+    const clicking = recorder.begin("action")
+    // The wait gives the first popup after it started, and the click opened the next
+    recorder.popup({ id: "B", name: "p1", opener: "A", openerName: "shop" })
+    recorder.popup({ id: "C", name: "p2", opener: "A", openerName: "shop" })
+    recorder.record(click, clicking)
+    recorder.end(clicking)
+    // A click that failed isn't repeated, so its popup is left to a placeholder, even seen after it
+    const failing = recorder.begin("action")
+    recorder.popup({ id: "D", name: "p3", opener: "A", openerName: "shop" })
+    recorder.end(failing)
+    recorder.popup({ id: "E", name: "p4", opener: "A", openerName: "shop" })
+    // A page found among the context's pages, and one known already
+    recorder.listed({ id: "F", name: "p5", index: 3 })
+    recorder.listed({ id: "B", name: "p1", index: 1 })
+    assert.deepStrictEqual(recorder.steps, [
+      { _tag: "Popup", page: "p1", wait: "w1" },
+      { ...click, popups: [{ page: "p2", opener: "shop" }] },
+      { _tag: "Listed", page: "p5", index: 3 }
+    ])
+    assert.isTrue(recorder.declares("D"))
+  })
+
+  it("leaves the pages a segment opened to its placeholder, and a popup seen after it", () => {
+    const recorder = Recorder.make()
+    const running = recorder.begin("segment")
+    recorder.listed({ id: "B", name: "p1", index: 1 })
+    recorder.popup({ id: "C", name: "p2", opener: "A", openerName: "shop" })
+    // The daemon finds what's new after it
+    recorder.record({ _tag: "Segment", file: "pay.ts", pages: ["p1", "p2"] }, running)
+    recorder.end(running)
+    recorder.popup({ id: "D", name: "p3", opener: "A", openerName: "shop" })
+    assert.deepStrictEqual(recorder.steps, [{ _tag: "Segment", file: "pay.ts", pages: ["p1", "p2", "p3"] }])
   })
 })
