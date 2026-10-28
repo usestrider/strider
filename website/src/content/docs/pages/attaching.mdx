@@ -35,10 +35,14 @@ const describeTab = Effect.fn("describeTab")(function*(tab: Page.ObservedPage) {
   return { url: yield* tab.url, title: yield* inspected.title }
 })
 
-const openTabs = Effect.scoped(Effect.gen(function*() {
-  const browser = yield* Browser.Browser
-  return yield* Effect.forEach(yield* browser.pages, describeTab)
-})).pipe(Effect.provide(Attached))
+const openTabs = Effect.fn("openTabs")(
+  function*() {
+    const browser = yield* Browser.Browser
+    return yield* Effect.forEach(yield* browser.pages, describeTab)
+  },
+  Effect.scoped,
+  Effect.provide(Attached)
+)
 ```
 
 - [`Firefox.layerConnect`](/docs/browsers/firefox#attaching): Firefox's remote agent.
@@ -79,7 +83,7 @@ const findTab = Effect.fn("findTab")(function*(origin: string) {
   return Option.none<Page.ObservedPage>()
 })
 
-const blockAnalytics = Effect.scoped(Effect.gen(function*() {
+const blockAnalytics = Effect.fn("blockAnalytics")(function*() {
   const found = yield* findTab("https://app.example.com")
   if (Option.isNone(found)) return
   const tab = yield* found.value.control
@@ -90,7 +94,7 @@ const blockAnalytics = Effect.scoped(Effect.gen(function*() {
   yield* tab.getByRole("button", { name: "Refresh" }).click()
   const hits = yield* blocked.hits.waitFor((count) => count > 0)
   yield* Console.log(`blocked ${hits} analytics calls`)
-}))
+}, Effect.scoped)
 ```
 
 - When the scope closes, the route is removed and the tab stays open. Using `tab` again fails with
