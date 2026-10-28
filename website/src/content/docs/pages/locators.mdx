@@ -45,8 +45,14 @@ classes. An accessible name is what a screen reader announces for an element: a 
 its `aria-label`. They're computed by [HTML-AAM](https://www.w3.org/TR/html-aam-1.0/) and
 [accname 1.2](https://www.w3.org/TR/accname-1.2/).
 
-A string matches as a case-insensitive substring; `exact: true` matches the whole text, case-sensitively; a `RegExp`
-is tested as given. A role's hidden elements match only with `includeHidden: true`:
+A malformed CSS selector fails with [`InvalidInput`](/docs/errors#three-kinds-of-failure) when used, without
+waiting.
+
+## Matching text
+
+A string matches as a case-insensitive substring, so `name: "Save"` also finds "Save draft". `exact: true` matches
+the whole text, case-sensitively, and a `RegExp` is tested as given. A role's hidden elements match only with
+`includeHidden: true`:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -71,9 +77,6 @@ const saveCart = Effect.fn("saveCart")(function*(page: Page.Page) {
 
 Text is text content with whitespace collapsed, through open shadow roots, not `innerText`. `getByText` finds the
 smallest element that has it: `"1 item"` finds the `<p>` in `<p>1 <b>item</b></p>`.
-
-A malformed CSS selector fails with [`InvalidInput`](/docs/errors#three-kinds-of-failure) when used, without
-waiting.
 
 ## Narrowing
 
@@ -162,6 +165,15 @@ const cartCount = Effect.fn("cartCount")(function*(page: Page.Page) {
   return yield* badge.readText
 })
 ```
+
+With no badge on the page, `cartCount` fails with:
+
+```
+Locator.readText cart badge: Nothing matched (A read never waits; Expect waits for what it expects)
+```
+
+A label names that locator only: one built from it, such as `badge.first` or `badge.filter({ visible: true })`, is
+named by its queries again, so call `describe` last.
 
 ## Frames
 
