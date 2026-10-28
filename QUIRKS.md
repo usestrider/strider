@@ -1372,3 +1372,8 @@ An entry with no marker is open.
 - *Seen:* making the export put a secret in wherever the session did.
 - *We:* `export test` writes the expectation's state check, and in place of its text check a comment saying it was left out and why, at the maintainer's decision.
 - *Reconsider:* a text matcher that takes a `Redacted` and leaves it out of its failure, with which the export would keep the check.
+
+**Q249. An exported test of a forked or profiled session starts empty** (Ours). A session started with `--fork` took its state from the other session's memory, and one started with `--user-data-dir` runs on a profile its browser keeps locked, so the test `export test` writes can start from neither, as it starts from a `--state` file.
+- *Seen:* checking what an exported test repeats of its session.
+- *We:* the test's context is made as a fresh session's, with a comment at the top of the test saying which the session started from and that the test starts empty, at the maintainer's decision.
+- *Reconsider:* writing a fork's state to a file at export, with `state save`'s mode, for the test to read as it reads `--state`'s.

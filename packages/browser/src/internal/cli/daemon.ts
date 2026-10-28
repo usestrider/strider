@@ -68,6 +68,10 @@ interface Daemon {
   readonly secretVariables: Readonly<Record<string, string>>
   /** The state file the session started from, which the exported test reads too. */
   readonly state: string | undefined
+  /** The session whose state this one started from, which the exported test can't read. */
+  readonly fork: string | undefined
+  /** The profile directory the session's browser runs on, when it isn't the session's own. */
+  readonly userDataDir: string | undefined
   readonly context: UserContext.UserContext
   readonly session: ToolkitImpl.Session
   readonly scope: Scope.Scope
@@ -531,6 +535,8 @@ const commands = (daemon: Daemon) => {
             browser: daemon.browser,
             secrets: daemon.secretVariables,
             state: daemon.state,
+            fork: daemon.fork,
+            userDataDir: daemon.userDataDir,
             steps: daemon.steps
           })
           yield* fs.writeFileString(resolved, text).pipe(Effect.mapError(failedWith))
@@ -1029,6 +1035,9 @@ const start = Command.make(
         browser,
         secretVariables: flags.secret,
         state: Option.getOrUndefined(Option.map(stateFile, (file) => file)),
+        // --state wins over --fork, as the context above was made
+        fork: Option.isSome(stateFile) ? undefined : Option.getOrUndefined(forkOf),
+        userDataDir: Option.getOrUndefined(flags.userDataDir),
         context,
         session,
         scope,

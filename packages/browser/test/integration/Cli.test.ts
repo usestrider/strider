@@ -265,6 +265,13 @@ describe("strider", () => {
               "flavor=oat"
             )
             assert.strictEqual(shown.code, 0, shown.err)
+            // A fork's state is in no file, so its test starts empty, and says so
+            const test = path.join(env.XDG_RUNTIME_DIR, "second.test.ts")
+            assert.strictEqual((yield* run("-s", "second", "export", "test", test)).code, 0)
+            assert.include(
+              fs.readFileSync(test, "utf8"),
+              `// The session started from session first's state (start --fork), which no file holds: this test's context starts empty\n        const context = yield* Browser.newContext({ focus: "emulated" })\n`
+            )
           } finally {
             yield* run("-s", "second", "stop")
           }

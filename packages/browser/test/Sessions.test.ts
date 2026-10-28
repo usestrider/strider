@@ -1,7 +1,8 @@
 /**
  * The CLI sessions, without a browser: the ledger a program keeps, `strider mcp`'s arguments, and what an exported
  * test keeps of its session: a statement for every tool but the reads; a tab the session took with control, marked;
- * a page strider mcp opened; a renamed page; a removed declaration; a wait's deadline; a dialog's answer.
+ * a page strider mcp opened; a renamed page; a removed declaration; secrets wherever the session put them in, but
+ * not in a check's text; a fork or profile, said; a wait's deadline; a dialog's answer.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
@@ -337,6 +338,30 @@ describe("strider export test", () => {
       ].join("\n")
     )
     assert.notInclude(text, "Config")
+  })
+
+  it("says when the session started from a fork or a profile, which the test starts without", () => {
+    const exported = (origin: { readonly fork?: string; readonly userDataDir?: string }) =>
+      ExportTest.render({
+        name: "twin",
+        browser: launched,
+        secrets: {},
+        state: undefined,
+        ...origin,
+        steps: [{ _tag: "NewPage", page: "main", url: "https://shop.example.com" }]
+      }).text
+    const context = `        const context = yield* Browser.newContext({ focus: "emulated" })\n`
+    assert.include(
+      exported({ fork: "login" }),
+      `      Effect.scoped(Effect.gen(function*() {\n        // The session started from session login's state (start --fork), which no file holds: this test's context starts empty\n${context}`
+    )
+    assert.include(
+      exported({ userDataDir: "/home/ada/profiles/shop" }),
+      `        // The session's browser ran on the profile at /home/ada/profiles/shop (start --user-data-dir), which that browser keeps locked: this test's starts with an empty one\n${context}`
+    )
+    const both = exported({ fork: "login", userDataDir: "/home/ada/profiles/shop" })
+    assert.match(both, /\(start --fork\).*\n.*\(start --user-data-dir\).*\n.*Browser\.newContext/)
+    assert.notInclude(exported({}), "// The session")
   })
 
   it("answers a dialog of unknown kind with the text, as the session did", () => {

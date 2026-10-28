@@ -153,14 +153,28 @@ export const render = (options: {
   readonly browser: Browser
   readonly secrets: Readonly<Record<string, string>>
   readonly state: string | undefined
+  /** The session `start --fork` copied the state of, which no file holds. */
+  readonly fork?: string | undefined
+  /** The profile `start --user-data-dir` gave the session's browser, which that browser keeps locked. */
+  readonly userDataDir?: string | undefined
   readonly steps: ReadonlyArray<Step>
 }): { readonly text: string; readonly placeholders: ReadonlyArray<string> } => {
   const used = new Set<string>(["Browser"])
   const placeholders: Array<string> = []
   const focus = focusFor(options.browser) === "emulated" ? `focus: "emulated"` : undefined
+  // What the test can't start from, it says, and starts without
+  const started = [
+    ...(options.fork === undefined ? [] : [
+      `// The session started from session ${options.fork}'s state (start --fork), which no file holds: this test's context starts empty`
+    ]),
+    ...(options.userDataDir === undefined ? [] : [
+      `// The session's browser ran on the profile at ${options.userDataDir} (start --user-data-dir), which that browser keeps locked: this test's starts with an empty one`
+    ])
+  ]
   const body: Array<string> = options.state === undefined
-    ? [`const context = yield* Browser.newContext(${focus === undefined ? "" : `{ ${focus} }`})`]
+    ? [...started, `const context = yield* Browser.newContext(${focus === undefined ? "" : `{ ${focus} }`})`]
     : [
+      ...started,
       `const saved = yield* (yield* FileSystem.FileSystem).readFileString(${quote(options.state)})`,
       `const context = yield* Browser.newContext({ storageState: yield* Schema.decodeEffect(StorageState.Json)(saved)${
         focus === undefined ? "" : `, ${focus}`
