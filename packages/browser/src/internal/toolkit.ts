@@ -793,6 +793,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
         const known = nameById.get(page.id)
         // A page named already, such as one listed as p3 before a segment kept it, takes the name it's given
         if (known !== undefined) {
+          if (given === known) kept.add(known)
           return given === undefined || given === known
             ? Effect.succeed(known)
             : Effect.as(session.rename(known, given), given)

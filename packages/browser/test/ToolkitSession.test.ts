@@ -34,3 +34,17 @@ describe("Session.page, a name that spells a handle", () => {
       assert.strictEqual(result.success.id, opened.id)
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 })
+
+describe("Session.page, an ordinary name", () => {
+  it.effect("finds a page kept under a name", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const opened = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      // Listed as p1 first, then kept as "checkout": the name finds it, and the handle no longer does.
+      yield* session.pages
+      yield* session.name(opened, "checkout")
+      const found = yield* session.page("checkout")
+      assert.strictEqual(found.id, opened.id)
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
