@@ -52,9 +52,9 @@ after an expectation. A 404 still commits: `goto` returns the navigation, with i
 `page.getByRole("button", { name: "Add to cart" })` is a locator: how to find an element, not the element. It
 finds the element again each time it's used, so it survives a re-render.
 
-`click()` waits until exactly one element matches and it's visible, enabled, still and uncovered, scrolling it into
-view, then clicks once. If something covers it as the click is sent, the page never sees the click and the action
-checks again. [Actions](/docs/pages/actions) lists each action's checks, and
+`click()` waits until an element matches and it's visible, enabled, still and uncovered, scrolling it into view,
+then clicks once. If something covers it as the click is sent, the page never sees the click and the action checks
+again. Two or more matches fail at once, with [`StrictViolation`](/docs/errors#strictness). [Actions](/docs/pages/actions) lists each action's checks, and
 [finding elements](/docs/pages/locators) the other locators, `filter`, and locators inside locators.
 
 ## Expectations
