@@ -56,7 +56,8 @@ and `history` are the [event verbs](/docs/events/events#next-stream-and-history)
   `text="Add to cart"`, `label=Email`, `testid=cart`, `css=…`. A ref from another page's snapshot is refused.
 - **No tool waits after it acts.** `next` subscribes and `await` collects; `expect` waits for a condition.
 - **Each result has the outcome and what happened since the last call:** navigations, popups, dialogs and who
-  decided them, downloads, uncaught exceptions, console errors, failed requests.
+  decided them, downloads, uncaught exceptions, failed requests, and console errors where the
+  [capture policy](#capture-policy) allows them.
 - **Failures go back to the model** as data, hint included.
 - **Secrets are named.** The model writes `%password%`; the value is substituted as the tool runs, and results show
   `%password%`.
@@ -65,8 +66,24 @@ and `history` are the [event verbs](/docs/events/events#next-stream-and-history)
 
 Every result goes to the model's provider, and a page can hold secrets, or instructions aimed at the model. `capture`
 is required: `CapturePolicy.strict`, for production and pages you don't trust, sends no screenshots, masks editable
-fields' text in snapshots as `•••`, and leaves out console text; `CapturePolicy.local`, for local development
-against pages you trust, allows all three.
+fields' text in snapshots as `•••`, and leaves console errors out of results; `CapturePolicy.local`, for local
+development against pages you trust, allows all three. Read the choice from configuration, so only a machine that
+says so gets `local`:
+
+```ts
+import { UserContext } from "@usestrider/browser"
+import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
+import { Config, Effect } from "effect"
+
+const Capture = Config.Literals(["strict", "local"], "AGENT_CAPTURE").pipe(
+  Config.withDefault("strict"),
+  Config.map((name) => name === "local" ? CapturePolicy.local : CapturePolicy.strict)
+)
+
+const agentTools = Effect.fn("agentTools")(function*(context: UserContext.UserContext) {
+  return yield* BrowserToolkit.make({ context, secrets: {}, capture: yield* Capture })
+})
+```
 
 ## Browser access
 
@@ -107,3 +124,7 @@ const tidyMyInbox = Effect.fn("tidyMyInbox")(
   Effect.provide(MyChrome)
 )
 ```
+
+When the model calls `release`, or the step's scope closes, a tab it took with `control` stays open, and its routes
+and handlers end. Without `browser`, `tabs` and `control` fail with `NotPermitted`, and the model reads
+`This toolkit was made for its context alone; BrowserToolkit.make with the browser lists and controls its tabs`.
