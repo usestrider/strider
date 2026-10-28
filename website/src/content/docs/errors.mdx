@@ -1,6 +1,6 @@
 ---
 title: Errors
-description: What a failure tells you, and recovering from the ones you expect.
+description: The three kinds of failure, recovering from the reason you expect, strictness, failed expectations, diagnostics, and the secrets and URLs a message leaves out.
 order: 3
 ---
 
@@ -34,7 +34,8 @@ more than one element. Others are shared, in `Reason`:
 - `Unsupported`: this backend [can't do it](/docs/browsers/choosing#capabilities). The reason names the
   capability.
 - `NotPermitted`: you don't have the access it needs, such as acting on a page you may only inspect.
-- `BackendFailure`: the browser refused or broke; its error is the `cause`.
+- `BackendFailure`: the browser rejected a command, or answered in a shape Strider didn't expect. When the
+  browser reported an error, it's the `cause`.
 
 ## Recovering
 
@@ -87,10 +88,11 @@ const dismissToast = Effect.fn("dismissToast")(function*(page: Page.Page) {
 ## Failed expectations
 
 An expectation that runs out of time may have seen the wrong thing, or found nothing at all; `ExpectationFailed`
-tells the two apart without a rerun. It has `condition` (what was expected), `last` (the last value seen) and
-`history` (every value seen). When the locator matched nothing, `nearest` is an accessibility snapshot of what its
-first steps found, up to the step that matched nothing, and `suggestions` are locators for elements with similar
-names:
+tells the two apart without a rerun. Its message is the locator and its `condition`:
+`Expected page.getByRole("main").getByRole("heading", { name: "Order placed" }) to be visible`. `last` is the last
+value seen, and `history` every value seen. When the locator matched nothing, `nearest` is an accessibility
+snapshot of what its first steps found, up to the step that matched nothing. When the locator ends with a
+`getByRole` and a name, `suggestions` are locators for elements with that role and a similar name:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -99,14 +101,15 @@ import { Console, Effect, Option } from "effect"
 const reportMissing = Effect.fn("reportMissing")(
   function*(failure: Expect.ExpectationFailed) {
     const last = Option.map(failure.last, (seen) => seen.value)
-    yield* Console.error(`Expected ${failure.condition}, last saw`, last)
+    yield* Console.error(`${failure.message}; last saw`, last)
     yield* Console.error(Option.getOrElse(failure.nearest, () => "nothing near"))
     yield* Console.error("Did you mean:", failure.suggestions)
   }
 )
 
 const expectPlaced = Effect.fn("expectPlaced")(function*(page: Page.Page) {
-  yield* page.getByText("Order placed").pipe(
+  const placed = page.getByRole("main").getByRole("heading", { name: "Order placed" })
+  yield* placed.pipe(
     Expect.toBeVisible,
     Effect.tapErrorTag("ExpectationFailed", reportMissing)
   )
