@@ -22,7 +22,7 @@ import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
 import { Config, Console, Effect } from "effect"
 import { Chat } from "effect/ai"
 
-const signIn = Effect.scoped(Effect.gen(function*() {
+const signIn = Effect.fn("signIn")(function*() {
   const context = yield* Browser.newContext()
   const toolkit = yield* BrowserToolkit.make({
     context,
@@ -37,7 +37,7 @@ const signIn = Effect.scoped(Effect.gen(function*() {
     for (const call of turn.toolCalls) yield* Console.log(call.name, call.params)
     if (turn.toolCalls.length === 0) return turn.text
   }
-}))
+}, Effect.scoped)
 ```
 
 ## Tools
@@ -85,21 +85,25 @@ const MyChrome = Chromium.layerConnect("http://127.0.0.1:9222").pipe(
   Layer.provide(NodeSocket.layerWebSocketConstructor)
 )
 
-const tidyMyInbox = Effect.scoped(Effect.gen(function*() {
-  const browser = yield* Browser.Browser
-  const context = yield* Browser.newContext()
-  const toolkit = yield* BrowserToolkit.make({
-    context,
-    browser,
-    secrets: {},
-    capture: CapturePolicy.strict
-  })
-  const chat = yield* Chat.fromPrompt(
-    "In my mail tab, archive the newsletters from this week."
-  )
-  while (true) {
-    const turn = yield* chat.generateText({ prompt: [], toolkit })
-    if (turn.toolCalls.length === 0) return turn.text
-  }
-})).pipe(Effect.provide(MyChrome))
+const tidyMyInbox = Effect.fn("tidyMyInbox")(
+  function*() {
+    const browser = yield* Browser.Browser
+    const context = yield* Browser.newContext()
+    const toolkit = yield* BrowserToolkit.make({
+      context,
+      browser,
+      secrets: {},
+      capture: CapturePolicy.strict
+    })
+    const chat = yield* Chat.fromPrompt(
+      "In my mail tab, archive the newsletters from this week."
+    )
+    while (true) {
+      const turn = yield* chat.generateText({ prompt: [], toolkit })
+      if (turn.toolCalls.length === 0) return turn.text
+    }
+  },
+  Effect.scoped,
+  Effect.provide(MyChrome)
+)
 ```
