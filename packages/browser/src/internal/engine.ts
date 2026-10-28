@@ -43,6 +43,8 @@ export type Step =
   | { readonly _tag: "TestId"; readonly id: string }
   | { readonly _tag: "Css"; readonly selector: string }
   | { readonly _tag: "Nth"; readonly index: number }
+  | { readonly _tag: "First" }
+  | { readonly _tag: "Last" }
   | {
     readonly _tag: "Filter"
     readonly hasText: TextMatcher | null
@@ -1077,8 +1079,10 @@ export function engine(render: (root: SnapNode) => string) {
     let current: ReadonlyArray<Document | Element> = from
     for (const step of steps) {
       switch (step._tag) {
+        case "First":
+        case "Last":
         case "Nth": {
-          const index = step.index < 0 ? current.length + step.index : step.index
+          const index = step._tag === "First" ? 0 : step._tag === "Last" ? current.length - 1 : step.index
           current = index >= 0 && index < current.length ? [current[index]!] : []
           break
         }

@@ -55,7 +55,11 @@ const describePlain = (steps: ReadonlyArray<Engine.Step>): string =>
       case "Css":
         return `locator(${JSON.stringify(step.selector)})`
       case "Nth":
-        return step.index === 0 ? "first" : step.index === -1 ? "last" : `nth(${step.index})`
+        return `nth(${step.index})`
+      case "First":
+        return "first"
+      case "Last":
+        return "last"
       case "Filter": {
         const parts = [
           ...(step.hasText === null ? [] : [`hasText: ${quote(step.hasText)}`]),

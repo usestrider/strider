@@ -442,6 +442,12 @@ Notes:
 
 ## Locators, actions and actionability
 
+`nth(index)` selects a match counting from 0. Negative indexes and indexes at or past the number of matches
+select nothing; strict reads fail with `NoMatch` and actions wait for a match until their deadline. `first`
+and `last` select the first and last match separately, and select nothing when the list is empty. Errors and
+traces preserve the selection as written: `nth(0)`, `nth(-1)`, `first` or `last`.
+
+
 ```ts
 interface ReadonlyLocator extends Queries<ReadonlyLocator>, Pipeable, Equal.Equal, Inspectable {
   // queries are relative to this locator

@@ -214,6 +214,17 @@ maintainer: "If we add an Operation module, the user should be able to use it to
 - **Rejected:** keeping the module internal; `Deadline.fn`, since the record is more than a deadline; and a
   `step(name, effect)` combinator, since a step is an operation and `named` makes one.
 
+**Locator positions follow Effect's collection indexes.** `nth(index)` counts from zero, and negative indexes
+are out of range, as in Effect's Array and Chunk. `last` is a separate selection so a caller can still select the
+end of a list. Both it and `first` match nothing on an empty list. Rejected: counting negative indexes from the
+end, which makes the same index mean something different from Effect's collections, and rejecting `last`
+along with negative indexing, which removes a useful selection.
+
+**Locator diagnostics preserve the selection the caller wrote.** The step model keeps `First`, `Last` and
+`Nth` separately, so errors and traces say `nth(0)`, `nth(-1)`, `first` or `last` without guessing from an
+index. Rejected: canonicalizing `nth(0)` to `first` and `nth(-1)` to `last`, which hides the call a user
+needs to find and, for a negative index, would name a different selection.
+
 ## Agents
 
 **Page-provided tools (WebMCP) are designed, and built once a browser ships the API.** A page registers tools with

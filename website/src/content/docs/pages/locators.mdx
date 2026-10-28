@@ -122,7 +122,9 @@ const cancelOrder = Effect.fn("cancelOrder")(
 ```
 
 `or` matches either locator, for a control whose label changes with its state; `and` keeps the elements both
-match. `first`, `last` and `nth(index)` pick by position, for a list whose order means something:
+match. `first`, `last` and `nth(index)` pick by position, for a list whose order means something.
+`nth(index)` counts from 0; negative indexes and indexes past the end match nothing. `first` and `last` also
+match nothing on an empty list. Errors and traces keep the selection you wrote:
 
 ```ts
 import { Page } from "@usestrider/browser"

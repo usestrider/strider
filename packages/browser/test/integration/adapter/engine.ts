@@ -193,7 +193,7 @@ export const engine = (backend: Backend) =>
             ]
             assert.strictEqual(count(yield* send({ op: "count", steps: pear })), 1)
             assert.strictEqual(
-              count(yield* send({ op: "count", steps: [role("button", text("Buy")), { _tag: "Nth", index: -1 }] })),
+              count(yield* send({ op: "count", steps: [role("button", text("Buy")), { _tag: "Last" }] })),
               1
             )
             const invalid = yield* send({ op: "count", steps: [{ _tag: "Css", selector: "button[" }] })
