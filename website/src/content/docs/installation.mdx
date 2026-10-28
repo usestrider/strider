@@ -87,7 +87,7 @@ program run without them doesn't compile. Provide them to the backend's layer:
 | -------- | ------------------------------------------------------------------------- |
 | Chromium | `NodeServices.layer`                                                      |
 | Firefox  | `NodeServices.layer` and `NodeSocket.layerWebSocketConstructor`           |
-| WebKit   | `NodeServices.layer` and a `SocketConnector` ([how](/docs/browsers/webkit#launching)) |
+| WebKit   | `NodeServices.layer` and a [`SocketConnector`](/docs/browsers/webkit#launching)       |
 | Attaching (`layerConnect`, `layerAttach`) | `NodeSocket.layerWebSocketConstructor`   |
 
 On Bun, `BunServices.layer` and `BunSocket.layerWebSocketConstructor`, from `@effect/platform-bun`, take their
