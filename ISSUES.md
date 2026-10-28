@@ -103,7 +103,7 @@ generated handle like `p2` is a token.
 
 **I21. `nth` takes a negative index.** It counts from the end (`last` is `nth(-1)`), which nothing documents, and
 errors name `nth(0)` and `nth(-1)` as `first` and `last`. Decide whether negative indexes are public.
-- **Fixed** in the implementation commit following `a35ad65`: negative indexes match nothing; first and last remain separate selections, and diagnostics preserve the selection as written.
+- **Fixed** in `5779465`: negative indexes match nothing; first and last remain separate selections, and diagnostics preserve the selection as written.
 
 ## Declared, never produced
 
