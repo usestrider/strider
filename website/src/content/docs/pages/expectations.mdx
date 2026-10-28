@@ -7,7 +7,7 @@ order: 3
 A check that reads the page once can run before the page catches up, and pass or fail by timing. An expectation
 waits until the page is right, so a read after it gets the value you meant.
 
-## Expect, then read
+## Expectations before reads
 
 - **An expectation** (`Expect.to*`) retries on each change to the page until it passes or the deadline does.
 - **A read** (`readText`, `count`, `isChecked`, [`page.title`](/docs/first-program#reads)) says what's true now. It never waits or retries.
@@ -73,8 +73,6 @@ const direct = Expect.toHaveText(badge, "3")
 const visible = badge.pipe(Expect.toBeVisible)
 ```
 
-## How expectations wait
-
 A locator's expectation re-checks in the page on each DOM change, input or focus event and animation frame, in
 rounds of up to a second, until the deadline. Nothing is missed between checks; there's no polling interval or
 backoff.
@@ -102,10 +100,10 @@ const resultsLoaded = Effect.fn("resultsLoaded")(function*(page: Page.Page) {
 })
 ```
 
-A [`Watchable`](#state-that-changes) such as `page.url` re-checks on each change; any other effect re-runs every
+A [`Watchable`](#watchables) such as `page.url` re-checks on each change; any other effect re-runs every
 100 ms, or as `Expect.withCheckInterval` sets.
 
-## Structure
+## Accessibility trees
 
 Expecting each element alone can't check their order, or that nothing else is there. `toMatchAria` matches a
 region's accessibility tree, its roles, names and order, against a pattern in one expectation. Each node says how
@@ -167,7 +165,7 @@ const savedSettings = Effect.fn("savedSettings")(function*(page: Page.Page) {
 })
 ```
 
-## Several checks, every failure
+## Collecting failures
 
 The first failed expectation stops the rest. To see every failure, collect them with Effect:
 
@@ -184,7 +182,7 @@ const summary = Effect.fn("summary")(function*(page: Page.Page) {
 })
 ```
 
-## State that changes
+## Watchables
 
 A URL read once misses the redirect after it. A page's status, URL and frames, a download's progress and a
 browser's pages are `Watchable`s, which read the value now, stream its `changes`, or wait for one with `waitFor`:
@@ -209,8 +207,7 @@ const signIn = Effect.fn("signIn")(function*(page: Page.Page) {
 - `changes` gives the current value, then the latest each time the consumer takes one, so a slow consumer sees the
   newest value, not every one.
 - Use `waitFor` to go on once a state comes, such as the load; use `Expect.that` when the state not coming is a
-  failure, so the error says what was expected and what was seen.
-- `waitFor` checks the current value first.
+  failure, so the error says what was expected and what was seen. `waitFor` checks the current value first.
 - It fails with `Watchable.Ended` when the value settles on one that doesn't match, such as a completed download's
   status, and with `TargetGone` when what it watches ends, such as a closed page.
 

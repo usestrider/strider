@@ -16,7 +16,7 @@ a profile of its own ([Chromium](/docs/browsers/chromium#attaching) says why):
 google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug
 ```
 
-`browser.pages` is the browser's open tabs, a [`Watchable`](/docs/pages/expectations#state-that-changes) read as
+`browser.pages` is the browser's open tabs, a [`Watchable`](/docs/pages/expectations#watchables) read as
 `page.url` is. You didn't open them, so they're observed, and `inspect` takes read access
 ([Access is typed](#access-is-typed)):
 
