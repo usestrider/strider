@@ -91,6 +91,17 @@ the guide disagrees with itself; one is added here once the maintainer agrees.
   types, such as a body decoded with a Schema, never `JSON.stringify`. Messages and hints are quoted from the
   source, and command output from a real run.
 
+- **Titles and headings.** A page's title names its subject as a noun phrase (Locators, Actions, Tests with Vitest).
+  A section heading is a noun phrase for a subject or an -ing form for a procedure (Launching, Recovering), never
+  a sentence or a fragment of one. Parallel pages give the same section the same heading.
+- **Sections.** A section holds one thing a reader looks for. One of a sentence or two joins its neighbour; one
+  many times the page's median splits at its own subject.
+- **Hosts.** `shop.example.com` for commerce, `app.example.com` for accounts and dashboards, `mail.example.com` for
+  mail; another host only for what's its own, such as a payment provider, a map, staging or a cross-origin API;
+  `example.test` for the fake browser's timeline.
+- **Devices.** Paragraphs explain, lists hold parallel rules, tables compare; bold-led paragraphs only in a
+  browser page's differences. No callout boxes, no one-item lists.
+
 ## The reference
 
 `src/features/reference/` turns the dataset into pages:
