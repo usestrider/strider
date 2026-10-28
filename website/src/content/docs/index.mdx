@@ -12,16 +12,21 @@ Strider is pre-release; the API can still change before 1.0. What a browser
 [can't do](/docs/browsers/choosing#capabilities) fails with `Unsupported`, naming the capability.
 
 ```ts
+import { NodeServices } from "@effect/platform-node"
 import { Browser, Expect } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
+
+const BrowserLive = Chromium.layer({ executablePath: "/usr/bin/chromium" }).pipe(
+  Layer.provide(NodeServices.layer)
+)
 
 const program = Effect.scoped(Effect.gen(function*() {
   const page = yield* Browser.newPage()
   yield* page.goto("https://shop.example.com")
   yield* page.getByRole("button", { name: "Add to cart" }).click()
   yield* page.getByText("1 item").pipe(Expect.toBeVisible)
-})).pipe(Effect.provide(Chromium.layer({ executablePath: "/usr/bin/chromium" })))
+})).pipe(Effect.provide(BrowserLive))
 ```
 
 A launch runs the executable you name; Strider never finds or installs a browser.
@@ -36,9 +41,10 @@ Pages, [locators](/docs/pages/locators), [`click` and `fill`](/docs/pages/action
   ends with the `Scope` that acquired it, even on failure or interruption.
 - **Subscribe, then act.** To catch a popup, download or response an action causes,
   [subscribe first](/docs/events/events). A subscription sees events after it starts, never before.
-- **[Errors](/docs/errors) say what happened.** Each module has one error, whose `reason` says why and whose `hint`
-  says what to do, such as `Another element covers the element's action point: div.toast "Saved"`. Any operation
-  can also fail with `TargetGone` or `Timeout`, both in its type.
+- **[Errors](/docs/errors) say what happened.** Each module has one error, whose `reason` says why, with a `hint`
+  of what to do, such as `2 elements match and 1 of them is visible; add .filter({ visible: true })`. A failed
+  expectation has the values it saw instead. Any operation can also fail with `TargetGone` or `Timeout`, both in
+  its type.
 - **[One deadline](/docs/deadlines) per operation,** covering everything it does.
   `Deadline.within("5 seconds")` sets one for a block.
 - **[Access is typed.](/docs/pages/attaching#access-levels)** A page you opened is a `Page`. A tab of a browser you
@@ -60,7 +66,7 @@ Read the first four in order. The fifth is for agents and the command line, and 
    [traces and HAR files](/docs/tools/recordings).
 5. **Agents and the command line:** [snapshots](/docs/agents/snapshots), [the agent toolkit](/docs/agents/toolkit),
    and [the `strider` CLI](/docs/agents/cli).
-6. **Browsers:** [choosing one](/docs/browsers/choosing), then what's particular to [Chromium](/docs/browsers/chromium),
+6. **Browsers:** [browser support](/docs/browsers/choosing), then what's particular to [Chromium](/docs/browsers/chromium),
    [Firefox](/docs/browsers/firefox) and [WebKit](/docs/browsers/webkit).
 
 The [API reference](/docs/api) is generated from Strider's source. Every example in the guide is type-checked.
