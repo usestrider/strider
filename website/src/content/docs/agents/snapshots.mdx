@@ -73,7 +73,8 @@ const unreachableControls = Effect.fn("unreachableControls")(
 ## Accessibility trees
 
 `sources: "aria"` gives the accessibility tree alone, as [`Expect.toMatchAria`](/docs/pages/expectations#accessibility-trees)
-matches; the default is `"aria+interactivity"`. Its text is a starting point for a pattern:
+matches it; the default, `"aria+interactivity"`, adds the inferred controls. Use it to start a pattern: one written
+from the default's text expects nodes the tree doesn't have:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -89,7 +90,8 @@ const mainNavTree = Effect.fn("mainNavTree")(function*(page: Page.Page) {
 ## Comparing snapshots
 
 A snapshot after each action repeats the whole page; `diff` gives only what changed, such as the status a click
-added:
+added. Use it to tell a model what its last action did. Two snapshots of different documents, such as either side of
+a navigation, fail with [`DocumentsDiffer`](/docs/api/browser/Snapshot#DocumentsDiffer):
 
 ```ts
 import { Page } from "@usestrider/browser"
