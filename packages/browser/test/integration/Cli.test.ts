@@ -172,6 +172,10 @@ describe("strider", () => {
           { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "newPage", arguments: { name: "side", url } } }
         ], 2)
         assert.include(JSON.stringify(opened.find((answer) => answer.id === 2)?.result), "side")
+        // A secret in a URL, put in as the command runs
+        const html = (before: string, after: string) =>
+          `${served.origin}/fixture?html=${encodeURIComponent(before)}%password%${encodeURIComponent(after)}`
+        assert.strictEqual((yield* shop("goto", html(`<p id="pw">`, "</p>"))).code, 0)
         // State for a program, and a test of what ran
         const state = path.join(env.XDG_RUNTIME_DIR, "shop.state")
         assert.strictEqual((yield* run("-s", "shop", "state", "save", state)).code, 0)
@@ -197,6 +201,12 @@ describe("strider", () => {
         assert.include(
           exported,
           `const side = yield* context.newPage\n        yield* side.goto(${JSON.stringify(url)})\n`
+        )
+        // The URL's secret is built in from its config, where the session put it
+        const password = `\${Redacted.value(yield* Config.Redacted("SECRET_PW"))}`
+        assert.include(
+          exported,
+          `yield* shop.goto(\`${html(`<p id="pw">`, "</p>").replace("%password%", () => password)}\`)\n`
         )
         // The page's own script holds the password it checks, so the statement is what is checked
         assert.notInclude(exported, `.fill("hunter2")`)

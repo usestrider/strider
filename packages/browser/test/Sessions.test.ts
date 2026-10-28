@@ -264,6 +264,46 @@ describe("strider export test", () => {
     assert.include(text, `yield* shop.goto("https://shop.example.com/cart")\n`)
   })
 
+  it("builds a secret into a fill's value or a URL wherever the session put it in", () => {
+    const fill = (target: string, value: string): ExportTest.Step => ({
+      _tag: "Tool",
+      tool: "fill",
+      params: { page: "main", target: "label=…", value },
+      target,
+      result: undefined
+    })
+    const { text } = ExportTest.render({
+      name: "shop",
+      browser: launched,
+      secrets: { password: "APP_PASSWORD", token: "API_TOKEN" },
+      state: undefined,
+      steps: [
+        { _tag: "NewPage", page: "main", url: undefined },
+        fill(`getByLabel("Password")`, "%password%"),
+        fill(`getByLabel("Login")`, "ada:%password%"),
+        // Template-literal syntax in the text is text
+        fill(`getByLabel("Note")`, "%token%`${x}`\\"),
+        fill(`getByLabel("Name")`, "100% Ada"),
+        tool("goto", { page: "main", url: "https://shop.example.com/login?token=%token%&next=/cart" }),
+        tool("goto", { page: "main", url: "%token%" }),
+        tool("newPage", { name: "admin", url: "https://%token%@admin.example.com" }, "admin")
+      ]
+    })
+    assert.include(text, `import { Config, Effect, Layer, Redacted } from "effect"`)
+    const token = `\${Redacted.value(yield* Config.Redacted("API_TOKEN"))}`
+    assert.include(text, `yield* main.getByLabel("Password").fill(yield* Config.Redacted("APP_PASSWORD"))\n`)
+    // Filled redacted, as the session filled a value with a secret in it
+    assert.include(
+      text,
+      `yield* main.getByLabel("Login").fill(Redacted.make(\`ada:\${Redacted.value(yield* Config.Redacted("APP_PASSWORD"))}\`))\n`
+    )
+    assert.include(text, `yield* main.getByLabel("Note").fill(Redacted.make(\`${token}\\\`\\\${x}\\\`\\\\\`))\n`)
+    assert.include(text, `yield* main.getByLabel("Name").fill("100% Ada")\n`)
+    assert.include(text, `yield* main.goto(\`https://shop.example.com/login?token=${token}&next=/cart\`)\n`)
+    assert.include(text, `yield* main.goto(Redacted.value(yield* Config.Redacted("API_TOKEN")))\n`)
+    assert.include(text, `yield* admin.goto(\`https://${token}@admin.example.com\`)\n`)
+  })
+
   it("answers a dialog of unknown kind with the text, as the session did", () => {
     const { text } = ExportTest.render({
       name: "shop",

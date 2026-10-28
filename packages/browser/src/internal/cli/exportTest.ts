@@ -1,7 +1,8 @@
 /**
  * `strider export test` (CLI.md): a session's successful commands as one Vitest test.
  * Every command is one statement against the public API, so the test reads as the session ran: a ref becomes
- * the locator its snapshot names, a `%name%` secret its `Config.Redacted`, a wait the `next` it started, with
+ * the locator its snapshot names, a `%name%` secret, wherever the session put one in, its `Config.Redacted`, a
+ * wait the `next` it started, with
  * its `--within` as `Deadline.within`, and `remove r1` the `remove` of the handle the route or dialog handler gave.
  * Reads (`pages`, `tabs`, `snapshot`, `find`, `screenshot`, `history`) aren't repeated. What runs only in a session,
  * a segment and a tab taken with `control` until its `release`, is a marked placeholder, which `placeholders` lists.
@@ -30,6 +31,15 @@ export type Browser =
   | { readonly _tag: "Attach"; readonly backend: "chromium" | "bidi"; readonly endpoint: string }
 
 const quote = (text: string) => JSON.stringify(text)
+
+/** Text as it stands inside a template literal. */
+const literal = (text: string) =>
+  JSON.stringify(text).slice(1, -1).replace(/\\"/g, `"`).replace(/`|\$\{/g, (match) => `\\${match}`)
+
+/** A secret's placeholder, `%name%`, which the toolkit replaces wherever it stands in a value it reveals. */
+const secretPattern = /%([A-Za-z_][\w-]*)%/
+
+const hasSecret = (text: string) => secretPattern.test(text)
 
 /**
  * A session's context's focus: emulated where the backend has focus emulation, which WebDriver BiDi and stock
@@ -171,11 +181,25 @@ export const render = (options: {
     return name
   }
   const pageVariable = (page: string) => variables.get(page) ?? variable(page)
-  const value = (text: string) => {
-    const secret = /^%([A-Za-z_][\w-]*)%$/.exec(text)?.[1]
-    if (secret === undefined) return quote(text)
+  // A `%name%` anywhere in a fill's value or a URL is the secret's value, which the session put in as the call ran
+  const secret = (name: string) => {
     used.add("Config")
-    return `yield* Config.Redacted(${quote(options.secrets[secret] ?? secret.toUpperCase())})`
+    return `yield* Config.Redacted(${quote(options.secrets[name] ?? name.toUpperCase())})`
+  }
+  /** A string with the secrets' values put in where the session put them, built from each secret's config. */
+  const revealed = (text: string) => {
+    const parts = text.split(secretPattern)
+    if (parts.length === 1) return quote(text)
+    used.add("Redacted")
+    const value = (name: string) => `Redacted.value(${secret(name)})`
+    if (parts.length === 3 && parts[0] === "" && parts[2] === "") return value(parts[1]!)
+    return `\`${parts.map((part, index) => index % 2 === 1 ? `\${${value(part)}}` : literal(part)).join("")}\``
+  }
+  /** A fill's value: one with a secret in it stays redacted, as the session filled it. */
+  const filled = (text: string) => {
+    const whole = new RegExp(`^${secretPattern.source}$`).exec(text)?.[1]
+    if (whole !== undefined) return secret(whole)
+    return hasSecret(text) ? `Redacted.make(${revealed(text)})` : quote(text)
   }
   for (const step of options.steps) {
     if (step._tag === "Segment") {
@@ -231,11 +255,11 @@ export const render = (options: {
         // Through strider mcp, under the name the toolkit gave it
         const opened = declare(step.result ?? String(params.name ?? "page"))
         body.push(`const ${opened} = yield* context.newPage`)
-        if (params.url !== undefined) body.push(`yield* ${opened}.goto(${quote(String(params.url))})`)
+        if (params.url !== undefined) body.push(`yield* ${opened}.goto(${revealed(String(params.url))})`)
         break
       }
       case "goto":
-        body.push(`yield* ${page}.goto(${quote(String(params.url))})`)
+        body.push(`yield* ${page}.goto(${revealed(String(params.url))})`)
         break
       case "back":
         body.push(`yield* ${page}.back()`)
@@ -244,7 +268,7 @@ export const render = (options: {
         body.push(`yield* ${target}.click()`)
         break
       case "fill":
-        body.push(`yield* ${target}.fill(${value(String(params.value))})`)
+        body.push(`yield* ${target}.fill(${filled(String(params.value))})`)
         break
       case "press":
         body.push(
@@ -350,7 +374,9 @@ export const render = (options: {
   const browserLayer = options.browser._tag === "Launch"
     ? `${layer.name}.layer({ executablePath: ${quote(options.browser.executablePath)} })`
     : `${layer.name}.layerConnect(${quote(options.browser.endpoint)})`
-  const library = [...used].filter((each) => each !== "Config").map((each) => imports[each] ?? each).sort()
+  const library = [...used].filter((each) => each !== "Config" && each !== "Redacted").map((each) =>
+    imports[each] ?? each
+  ).sort()
   const needsResponse = options.steps.some((step) =>
     step._tag === "Tool" && step.tool === "route" && step.params.action === "fulfill"
   )
@@ -366,6 +392,7 @@ export const render = (options: {
         "Effect",
         ...(options.state === undefined ? [] : ["FileSystem"]),
         "Layer",
+        ...(used.has("Redacted") ? ["Redacted"] : []),
         ...(options.state === undefined ? [] : ["Schema"])
       ].join(", ")
     } } from "effect"`,
