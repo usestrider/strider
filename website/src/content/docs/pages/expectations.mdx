@@ -1,6 +1,6 @@
 ---
 title: Expectations and reads
-description: Expectations wait for the page to be right, reads say what it is now, state that changes can be watched, and code can run in the page.
+description: Expectations before reads, the matchers, conditions of your own, accessibility trees, the reads, watchable state, and functions run in the page.
 order: 3
 ---
 
@@ -25,7 +25,7 @@ const cartTotal = Effect.fn("cartTotal")(function*(page: Page.Page) {
 })
 ```
 
-## Expectations
+## The matchers
 
 Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take the page:
 
@@ -162,8 +162,8 @@ const productPage = Effect.fn("productPage")(function*(page: Page.Page) {
 | `count`, `all`                        | how many elements match, and a locator for each                  |
 | `page.title`, `page.readHtml`         | the document's title, and its HTML                               |
 
-Reads need [exactly one match](/docs/errors#strictness); one that hasn't rendered yet
-fails with `NoMatch`, so expect it first. `count` and `all` take any number, so count what may not be there:
+Reads need [exactly one match](/docs/errors#strictness); one that hasn't rendered yet fails with `NoMatch`, so
+expect it first. `count` and `all` take any number, so count what may not be there:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
