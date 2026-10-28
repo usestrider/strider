@@ -100,12 +100,14 @@ the guide disagrees with itself; one is added here once the maintainer agrees.
 - **Titles and headings.** A page's title names its subject as a noun phrase (Locators, Actions, Tests with Vitest).
   A section heading is a noun phrase for a subject or an -ing form for a procedure (Launching, Recovering), never
   a sentence or a fragment of one, and never the page's title again: Locators has "The queries". Parallel pages
-  give the same section the same heading; otherwise a heading names one subject across the guide.
+  give the same section the same heading, and a heading on two pages means the same thing on both. A heading may
+  join two words for one subject, as Handlers and decisions does.
 - **Decks.** A page's `description` is one noun phrase for what it covers, in the order of its sections: "A page's
   requests and responses as events, their bodies decoded with a Schema, who answered them, the headers they sent,
   and resending a request." The opening, not the deck, says why.
 - **Names.** One thing has one name on every page, the reference's: an endpoint, not an address. A session is the
-  `strider` CLI's; a context has its own cookies and storage.
+  `strider` CLI's, or a protocol's own, CDP's or BiDi's, as the reference names it; a context has its own cookies
+  and storage.
 - **Browser differences.** A concept page says what a browser does differently where it teaches the feature, such
   as "not on WebKit" in an action's row, not in a closing section. Only a browser's own page collects them.
 - **Links.** A link's text names what it links to: "Call [`page.activate`](…)", never "([reference](…))",
@@ -116,7 +118,8 @@ the guide disagrees with itself; one is added here once the maintainer agrees.
   mail; another host only for what's its own, such as a payment provider, a map, staging or a cross-origin API;
   `example.test` for the fake browser's timeline.
 - **Devices.** Paragraphs explain, lists hold parallel rules, tables compare; bold-led paragraphs only in a
-  browser page's differences. No callout boxes, no one-item lists.
+  browser page's differences. A list's items may lead in bold when all of them do, as Introduction's do. No
+  callout boxes, no one-item lists.
 
 ## The reference
 
