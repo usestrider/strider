@@ -17,12 +17,15 @@ you expect.
 | `Timeout`              | the [deadline](/docs/deadlines) passed                         | `phase`: [how far it got](/docs/deadlines#timeouts) |
 
 Each module has one error: `LocatorError` for a click, `PageError` for a navigation,
-[`DownloadError`](/docs/api/browser/Download#DownloadError),
-`ExpectationFailed`. Every reason has a `hint`, and the message includes it:
+[`DownloadError`](/docs/api/browser/Download#DownloadError) for a download. Every reason has a `hint`, and the
+message includes it:
 
 ```
-click page.getByRole("button", { name: "Save" }): 2 matches (2 elements match and 1 of them is visible; add .filter({ visible: true }))
+Locator.click page.getByRole("button", { name: "Save" }): 2 matches (2 elements match and 1 of them is visible; add .filter({ visible: true }))
 ```
+
+An expectation's error, [`ExpectationFailed`](#failed-expectations), has no reason: it carries the values the
+expectation saw.
 
 Some reasons belong to one module, such as [`Locator.StrictViolation`](#strictness): the locator matched
 more than one element. Others are shared, in `Reason`:
