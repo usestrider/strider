@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
 <title>Strider stepping heron</title>
+<!-- Light only: a browser answers a favicon's prefers-color-scheme from its own theme, not the page's, so an adaptive
+     favicon can turn dark on a light page. The adaptive original is
+     design/strider/heron/responsive/adaptive/heron-16.svg. -->
 <style>
 :root { --paper: #ffffff; --ink: #202322; }
-@media (prefers-color-scheme: dark) {
-  :root { --paper: #25282b; --ink: #f5f4ee; }
-}
 </style>
 <rect width="24" height="24" rx="6" fill="var(--paper)"/>
 <!-- the medium heron's outline, filled: body, neck, head, beak and crest -->
