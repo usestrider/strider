@@ -121,7 +121,7 @@ strider -s shop export test checkout.test.ts
 // Exported from the strider session shop. Each statement is one command the session ran.
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, layer } from "@effect/vitest"
-import { Browser, Download, Expect } from "@usestrider/browser"
+import { Browser, Deadline, Download, Expect } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
 import { Effect, Layer } from "effect"
 
@@ -141,7 +141,7 @@ describe("shop", () => {
         yield* main.goto("https://shop.example.com/cart")
         yield* main.getByLabel("Email").fill("ada@example.com")
         yield* main.goto("https://shop.example.com/orders")
-        const w1 = yield* Download.next(main)
+        const w1 = yield* Download.next(main).pipe(Deadline.within("2 minutes"))
         yield* main.getByRole("button", { name: "Export CSV", exact: true }).click()
         yield* w1
       })))

@@ -162,7 +162,7 @@ describe("strider", () => {
         assert.include(exported, `const shop = yield* context.newPage`)
         assert.include(exported, `shop.getByRole("button", { name: "Sign in", exact: true }).click()`)
         assert.include(exported, `.fill(yield* Config.Redacted("SECRET_PW"))`)
-        assert.include(exported, `const w1 = yield* Popup.next(shop)`)
+        assert.include(exported, `const w1 = yield* Popup.next(shop).pipe(Deadline.within("20 seconds"))`)
         assert.include(exported, `// TODO strider run ${path.join(fixtures, "open-popup.ts")}`)
         // The page's own script holds the password it checks, so the statement is what is checked
         assert.notInclude(exported, `.fill("hunter2")`)

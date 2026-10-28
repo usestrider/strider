@@ -1,6 +1,6 @@
 /**
- * The CLI sessions, without a browser: the ledger a program keeps, `strider mcp`'s arguments, and how an
- * exported test marks a tab the session took with control.
+ * The CLI sessions, without a browser: the ledger a program keeps, `strider mcp`'s arguments, and what an exported
+ * test keeps of its session: a tab the session took with control, marked; a wait's deadline; a dialog's answer.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
@@ -87,5 +87,73 @@ describe("strider export test", () => {
     })
     assert.deepStrictEqual(placeholders, ["control N7"])
     assert.include(text, "// TODO strider control N7")
+  })
+
+  const launched = { _tag: "Launch", backend: "chromium", executablePath: "/usr/bin/chromium" } as const
+  const tool = (name: string, params: Record<string, unknown>, result?: string): ExportTest.Step => ({
+    _tag: "Tool",
+    tool: name,
+    params,
+    target: undefined,
+    result
+  })
+
+  it("keeps a wait's deadline, as Deadline.within around its next", () => {
+    const { text } = ExportTest.render({
+      name: "shop",
+      browser: launched,
+      secrets: {},
+      state: undefined,
+      steps: [
+        { _tag: "NewPage", page: "main", url: "https://shop.example.com/orders" },
+        tool("next", { page: "main", event: "download", within: "2 minutes" }, "w1"),
+        tool("next", { page: "main", event: "response", url: "**/api/orders", within: "30  seconds" }, "w2"),
+        tool("next", { page: "main", event: "navigation" }, "w3")
+      ]
+    })
+    assert.include(
+      text,
+      `import { Browser, Deadline, Download, NetworkResponse, PageNavigation } from "@usestrider/browser"`
+    )
+    assert.include(text, `const w1 = yield* Download.next(main).pipe(Deadline.within("2 minutes"))`)
+    // Written as Duration.Input's type takes it, with one space before the unit
+    assert.include(
+      text,
+      `const w2 = yield* NetworkResponse.next(main, { url: "**/api/orders" }).pipe(Deadline.within("30 seconds"))`
+    )
+    // A wait without one takes the default budget, as it did in the session
+    assert.include(text, `const w3 = yield* PageNavigation.next(main)\n`)
+  })
+
+  it("imports Deadline only for a wait that had a deadline", () => {
+    const { text } = ExportTest.render({
+      name: "shop",
+      browser: launched,
+      secrets: {},
+      state: undefined,
+      steps: [
+        { _tag: "NewPage", page: "main", url: undefined },
+        tool("next", { page: "main", event: "popup" }, "w1")
+      ]
+    })
+    assert.include(text, `import { Browser, Popup } from "@usestrider/browser"`)
+    assert.notInclude(text, "Deadline")
+  })
+
+  it("answers a dialog of unknown kind with the text, as the session did", () => {
+    const { text } = ExportTest.render({
+      name: "shop",
+      browser: launched,
+      secrets: {},
+      state: undefined,
+      steps: [
+        { _tag: "NewPage", page: "main", url: undefined },
+        tool("dialog", { page: "main", decision: "accept", text: "Ada" })
+      ]
+    })
+    assert.include(
+      text,
+      `dialog._tag === "Prompt" || dialog._tag === "Unknown" ? dialog.respond("Ada") : dialog._tag === "BeforeUnload" ? dialog.leave : dialog.accept`
+    )
   })
 })

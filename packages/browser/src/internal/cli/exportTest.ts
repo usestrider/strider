@@ -1,7 +1,8 @@
 /**
  * `strider export test` (CLI.md): a session's successful commands as one Vitest test.
  * Every command is one statement against the public API, so the test reads as the session ran: a ref becomes
- * the locator its snapshot names, a `%name%` secret its `Config.Redacted`, and a wait the `next` it started.
+ * the locator its snapshot names, a `%name%` secret its `Config.Redacted`, and a wait the `next` it started, with
+ * its `--within` as `Deadline.within`.
  * Reads (`pages`, `snapshot`, `screenshot`, `history`) aren't repeated.
  */
 import type * as Snapshot from "../../Snapshot.ts"
@@ -89,6 +90,7 @@ const variable = (name: string) => {
 const imports: Readonly<Record<string, string>> = {
   Browser: "Browser",
   Config: "Config",
+  Deadline: "Deadline",
   Dialog: "Dialog",
   Download: "Download",
   Expect: "Expect",
@@ -207,10 +209,16 @@ export const render = (options: {
           console: "ConsoleMessage"
         }[String(params.event)] ?? "PageNavigation"
         used.add(module)
+        // --within is the deadline the wait took at next, as Deadline.within around next gives it. A duration
+        // parses with any whitespace before its unit, and Duration.Input's type takes one space
+        if (params.within !== undefined) used.add("Deadline")
+        const within = params.within === undefined
+          ? ""
+          : `.pipe(Deadline.within(${quote(String(params.within).replace(/\s+/, " "))}))`
         body.push(
           `const ${wait} = yield* ${module}.next(${page}${
             module === "NetworkResponse" ? `, { url: ${quote(String(params.url))} }` : ""
-          })`
+          })${within}`
         )
         break
       }
@@ -239,7 +247,8 @@ export const render = (options: {
         used.add("Dialog")
         body.push(
           params.decision === "accept" && params.text !== undefined
-            ? `yield* Dialog.handle(${page}, (dialog) => Effect.succeed(dialog._tag === "Prompt" ? dialog.respond(${
+            // As in the session, a dialog of unknown kind, as every dialog on WebKit is, gets the text too
+            ? `yield* Dialog.handle(${page}, (dialog) => Effect.succeed(dialog._tag === "Prompt" || dialog._tag === "Unknown" ? dialog.respond(${
               quote(String(params.text))
             }) : dialog._tag === "BeforeUnload" ? dialog.leave : dialog.accept))`
             : `yield* Dialog.handle(${page}, Dialog.${params.decision === "accept" ? "acceptAll" : "dismissAll"})`
