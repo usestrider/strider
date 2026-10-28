@@ -91,7 +91,7 @@ const deleteAccount = Effect.fn("deleteAccount")(function*(page: Page.Page) {
 - Each kind offers only its own decisions: an alert can only be accepted, a prompt can be answered.
 - `Dialog.acceptAll` and [`Dialog.dismissAll`](/docs/api/browser/Dialog#dismissAll) are ready-made handlers.
 - A dialog no handler decides goes to the context's
-  [`dialogs` policy](/docs/pages/contexts#settings-for-the-whole-session), `"dismiss"` by default, at once. Each
+  [`dialogs` policy](/docs/pages/contexts#settings-for-a-contexts-life), `"dismiss"` by default, at once. Each
   such decision is reported as an `AutoResolution` event.
 
 File choosers work the same way. A chooser no handler answers is canceled, and reported:

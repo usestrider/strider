@@ -137,7 +137,7 @@ const pageErrors = Effect.fn("pageErrors")(function*(page: Page.Page) {
 ```
 
 - The log keeps the latest 100 events of each kind per page, or the context's
-  [`eventLog`](/docs/pages/contexts#settings-for-the-whole-session). `dropped` counts the
+  [`eventLog`](/docs/pages/contexts#settings-for-a-contexts-life). `dropped` counts the
   rest.
 - To catch what an action causes, use `next`. There's no "last event" to read.
 

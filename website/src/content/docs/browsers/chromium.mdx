@@ -44,7 +44,7 @@ const LikeAUser = Chromium.layer({
   background pages, which pages can tell. `LaunchProfile.stock` adds nothing, to run Chromium as a person does,
   first-run pages, sync and updates included.
 - Headless Chromium's user agent says `HeadlessChrome`. Set the context's
-  [`emulation: { userAgent }`](/docs/pages/contexts#settings-for-the-whole-session) to change it.
+  [`emulation: { userAgent }`](/docs/pages/contexts#settings-for-a-contexts-life) to change it.
 - With `userDataDir`, the profile's logins are in the default context, not the new one `Browser.newPage()` makes:
   open the page there, as [Logging in once](/docs/pages/contexts#logging-in-once) shows.
 
@@ -102,7 +102,7 @@ const SharedChrome = Layer.unwrap(Effect.gen(function*() {
   scope. The browser and its tabs stay as
   they were after the program; contexts Strider created close with the connection.
 - Several clients can attach at once.
-- The browser's own tabs keep Chromium's behaviour: no [dialog policy](/docs/pages/contexts#settings-for-the-whole-session),
+- The browser's own tabs keep Chromium's behaviour: no [dialog policy](/docs/pages/contexts#settings-for-a-contexts-life),
   downloads canceled, no focus emulation.
 - Popups aren't paused when they open, so a route or handler registered on a popup may miss its first document.
 - A dialog an earlier client left open goes unreported, and `inspect` on that page fails with a hint saying so.

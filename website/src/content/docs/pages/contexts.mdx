@@ -1,17 +1,17 @@
 ---
 title: Contexts
-description: Contexts keep sessions apart and hold their settings, and storage state lets you log in once.
+description: Pages in one context, settings for a context's life and for a while, logging in once with storage state, and cookies and storage.
 order: 4
 ---
 
-Pages that share cookies and storage leak state from one task or test into the next. A context is a session of its
-own, so pages in different contexts share nothing, and its settings hold for every page in it.
+Pages that share cookies and storage leak state from one task or test into the next. A context has its own, so
+pages in different contexts share nothing, and its settings hold for every page in it.
 
-## Contexts
+## Pages in one context
 
-A context is an isolated session: its own cookies, storage, cache and permissions, like a fresh profile.
-`Browser.newPage()` makes a context with one page in it. For pages that share a session, such as two tabs of one
-signed-in user, make the context and open pages in it:
+A context is like a fresh profile: its own cookies, storage, cache and permissions. `Browser.newPage()` makes a
+context with one page in it. For pages that share them, such as two tabs of one signed-in user, make the context
+and open pages in it:
 
 ```ts
 import { Browser, Expect } from "@usestrider/browser"
@@ -32,7 +32,7 @@ const twoTabs = Effect.fn("twoTabs")(function*() {
 
 A context and its pages close with the scope that made them, popups included.
 
-## Settings for the whole session
+## Settings for a context's life
 
 A page reads its viewport, locale and time zone as it loads, so settings applied after it opens can miss what it
 rendered first. Options to `newContext` or `newPage` hold for the context's life, and apply before its first page
@@ -65,7 +65,7 @@ const berlinPhone = Effect.fn("berlinPhone")(function*() {
 | ---------------- | ---------------------------------------------------------------------------------- |
 | `emulation`      | viewport, user agent, locale, time zone, position, media features, network, CPU     |
 | `permissions`    | permissions granted to every origin                                                |
-| `storageState`   | cookies and storage to start from (below)                                          |
+| [`storageState`](#logging-in-once) | cookies and storage to start from                                |
 | `dialogs`        | what happens to a dialog no [handler](/docs/events/kinds#dialogs) decides: `"dismiss"` (the default), `"accept"`, `"leaveOpen"` |
 | [`downloads`](/docs/events/kinds#downloads) | a temporary directory (the default), `"deny"`, or `{ directory }`                  |
 | [`focus`](/docs/tools/testing#concurrent-pages) | `"emulated"` makes every page behave as if focused; otherwise only one has focus, and `toBeFocused` fails on the rest |
@@ -77,10 +77,10 @@ applied. [`browser.capabilities`](/docs/browsers/choosing#capabilities) lists wh
 
 ## Settings for a while
 
-Some states come and go within a session, such as the network dropping or a permission granted after a prompt.
-Set as an option, they'd hold for every step; set for a scope, only the steps that test them see them. `emulate`
-and `grant` apply settings until their scope closes, then restore what was there. `emulate` works on a context, for
-every page in it, popups included, or on a page, for that page alone; `grant` works only on a context:
+Some states come and go while a context is open, such as the network dropping or a permission granted after a
+prompt. Set as an option, they'd hold for every step; set for a scope, only the steps that test them see them.
+`emulate` and `grant` apply settings until their scope closes, then restore what was there. `emulate` works on a
+context, for every page in it, popups included, or on a page, for that page alone; `grant` works only on a context:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -141,7 +141,7 @@ const signedIn = Effect.fn("signedIn")(function*() {
   directory: `userDataDir` keeps the profile in a directory of yours instead of a temporary one, so a login made
   there once, by hand in a headed run, is there at the next launch.
 
-A browser's default context is the session it starts with, the one its profile's cookies and storage are in. A
+A browser's default context is the one it starts with, which holds its profile's cookies and storage. A
 profile's logins are there, not in the context `Browser.newPage()` makes, so open the page in it, taking
 [`control`](/docs/pages/attaching#access-levels) of it first:
 
