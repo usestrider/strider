@@ -1,106 +1,17 @@
 ---
-title: Snapshots and the toolkit
-description: Snapshots with refs for a model to act on, and a toolkit of effect/ai tools over a context.
-order: 1
+title: Agent toolkit
+description: Give a model browser tools, named secrets and an explicit capture policy.
+order: 2
 ---
 
-A model can't act on a page it can't read, and a selector it guesses can match nothing, or the wrong element. A
-snapshot gives it the page as text, with a ref for each element it saw, and the toolkit gives it tools that act
-through them.
+A model needs tools to drive a browser and a policy for what page content it may receive. The toolkit binds those
+tools to a context, with named secrets and an explicit capture policy.
 
-## Snapshots
-
-Use a snapshot when a model, not your code, picks the element: it reads `text`
-([as the CLI prints it](/docs/agents/cli#commands)) and answers with a ref. A ref acts
-on exactly the node the model saw, or fails, so in your own code prefer a [locator](/docs/pages/locators), which
-finds its element again after a re-render. A snapshot is a page's accessibility tree as data, with a ref for each
-node that can be acted on:
-
-```ts
-import { Page, Snapshot } from "@usestrider/browser"
-import { Effect, Schema } from "effect"
-import { LanguageModel } from "effect/ai"
-
-const Choice = Schema.Struct({ ref: Snapshot.RefId })
-
-const pickAndClick = Effect.fn("pickAndClick")(
-  function*(page: Page.Page, goal: string) {
-    const snapshot = yield* page.snapshot({ interactiveOnly: true })
-    const { value } = yield* LanguageModel.generateObject({
-      prompt:
-        `${goal}\n\nThe page:\n${snapshot.text}\n\nAnswer with the ref of the element to click.`,
-      schema: Choice
-    })
-    yield* snapshot.ref(value.ref).click()
-  }
-)
-
-// If the page changed while the model chose, ask again with a fresh snapshot
-const clickWhatTheModelPicks = (page: Page.Page, goal: string) =>
-  pickAndClick(page, goal).pipe(
-    Effect.catchReason("LocatorError", "StaleRef", () => pickAndClick(page, goal))
-  )
-```
-
-- A ref is a locator pinned to one node, never resolved again. If the node is removed or its document replaced,
-  acting on it fails with a `LocatorError` whose reason, `StaleRef`, says which.
-- A node keeps its ref while its document lives, even if its name changes.
-
-By default a snapshot also infers what the accessibility tree misses: interactivity from `cursor: pointer`,
-`tabindex`, `contenteditable` or `onclick`, and names from text, `title`, `placeholder`, `alt` or a nearby label.
-Each inference is tagged, `clickable "Save" [inferred: cursorPointer]`, so you can list the controls a screen reader
-can't reach:
-
-```ts
-import { Page } from "@usestrider/browser"
-import { Effect } from "effect"
-
-// Controls the page made clickable without telling assistive technology
-const unreachableControls = Effect.fn("unreachableControls")(
-  function*(page: Page.Page) {
-    const snapshot = yield* page.snapshot()
-    return Array.from(snapshot.refs.values())
-      .filter((node) => node.role._tag === "Inferred")
-      .map((node) => (node.name._tag === "None" ? node.role.role : node.name.value))
-  }
-)
-```
-
-`sources: "aria"` gives the accessibility tree alone, as [`Expect.toMatchAria`](/docs/pages/expectations#structure)
-matches; the default is `"aria+interactivity"`. Its text is a starting point for a pattern:
-
-```ts
-import { Page } from "@usestrider/browser"
-import { Effect } from "effect"
-
-const mainNavTree = Effect.fn("mainNavTree")(function*(page: Page.Page) {
-  const navigation = page.getByRole("navigation", { name: "Main" })
-  const tree = yield* navigation.snapshot({ sources: "aria" })
-  return tree.text
-})
-```
-
-A snapshot after each action repeats the whole page; `diff` gives only what changed, such as the status a click
-added:
-
-```ts
-import { Page } from "@usestrider/browser"
-import { Effect } from "effect"
-
-const whatAddingChanged = Effect.fn("whatAddingChanged")(function*(page: Page.Page) {
-  const before = yield* page.snapshot()
-  yield* page.getByRole("button", { name: "Add to cart" }).click()
-  const after = yield* page.snapshot()
-  const changes = yield* after.diff(before)
-  return changes.text
-})
-```
-
-## The toolkit
+## Running an agent
 
 `BrowserToolkit` gives a model `effect/ai` tools over one context. Use it when your program calls the model through
 `effect/ai`; when an MCP client, such as an editor's agent, runs the model, serve the same tools with
-[`strider mcp`](/docs/agents/cli#mcp). Where `pickAndClick` gives a model one action, the toolkit gives it every
+[`strider mcp`](/docs/agents/cli#mcp). Where [`pickAndClick`](/docs/agents/snapshots#acting-through-refs) gives a model one action, the toolkit gives it every
 tool below, and each result says what happened since the last call. A model calls tools one turn at a time, so an
 agent runs turns in a `Chat` until one asks for no tool:
 
@@ -128,6 +39,8 @@ const signIn = Effect.scoped(Effect.gen(function*() {
 }))
 ```
 
+## Tools
+
 `pages`, `newPage`, `tabs`, `control` and `release` manage the model's pages (`release` gives back a page `control`
 took, its routes and handlers ended), and `goto` and `back` navigate. `snapshot`, `find` and `screenshot` read a
 page, and `click`, `fill`, `press`, `select` and `scroll` act as [actions](/docs/pages/actions) do. `next`, `await`
@@ -147,10 +60,14 @@ and `history` are the [event verbs](/docs/events/events#next-stream-and-history)
 - **Secrets are named.** The model writes `%password%`; the value is substituted as the tool runs, and results show
   `%password%`.
 
+## Capture policy
+
 Every result goes to the model's provider, and a page can hold secrets, or instructions aimed at the model. `capture`
 is required: `CapturePolicy.strict`, for production and pages you don't trust, sends no screenshots, masks editable
 fields' text in snapshots as `•••`, and leaves out console text; `CapturePolicy.local`, for local development
 against pages you trust, allows all three.
+
+## Browser access
 
 Without `browser`, the model stays in its context. With it, `tabs` and `control` reach the browser's other pages,
 such as a tab of an [attached](/docs/pages/attaching) browser you're already signed in to:

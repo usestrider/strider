@@ -37,7 +37,7 @@ export const groups: ReadonlyArray<Group> = [
     label: "Agents and the command line",
     directory: "agents",
     description:
-      "Snapshots and a toolkit of tools for a model, and the strider CLI, which drives a live browser from a shell."
+      "Snapshots for reading a page, an agent toolkit for acting on it, and the strider CLI for driving a browser from a shell."
   },
   {
     label: "Browsers",

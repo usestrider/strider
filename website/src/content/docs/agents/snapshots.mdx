@@ -1,0 +1,102 @@
+---
+title: Snapshots
+description: Read a page as an accessibility tree, act through refs, and compare snapshots.
+order: 1
+---
+
+A selector a model guesses can match nothing, or the wrong element. A snapshot gives it the page as text, with
+refs that act on the nodes it saw.
+
+## Acting through refs
+
+Use a snapshot when a model, not your code, picks the element: it reads `text`
+([as the CLI prints it](/docs/agents/cli#commands)) and answers with a ref. A ref acts
+on exactly the node the model saw, or fails, so in your own code prefer a [locator](/docs/pages/locators), which
+finds its element again after a re-render. A snapshot is a page's accessibility tree as data, with a ref for each
+node that can be acted on:
+
+```ts
+import { Page, Snapshot } from "@usestrider/browser"
+import { Effect, Schema } from "effect"
+import { LanguageModel } from "effect/ai"
+
+const Choice = Schema.Struct({ ref: Snapshot.RefId })
+
+const pickAndClick = Effect.fn("pickAndClick")(
+  function*(page: Page.Page, goal: string) {
+    const snapshot = yield* page.snapshot({ interactiveOnly: true })
+    const { value } = yield* LanguageModel.generateObject({
+      prompt:
+        `${goal}\n\nThe page:\n${snapshot.text}\n\nAnswer with the ref of the element to click.`,
+      schema: Choice
+    })
+    yield* snapshot.ref(value.ref).click()
+  }
+)
+
+// If the page changed while the model chose, ask again with a fresh snapshot
+const clickWhatTheModelPicks = (page: Page.Page, goal: string) =>
+  pickAndClick(page, goal).pipe(
+    Effect.catchReason("LocatorError", "StaleRef", () => pickAndClick(page, goal))
+  )
+```
+
+- A ref is a locator pinned to one node, never resolved again. If the node is removed or its document replaced,
+  acting on it fails with a `LocatorError` whose reason, `StaleRef`, says which.
+- A node keeps its ref while its document lives, even if its name changes.
+
+## Inferred controls
+
+By default a snapshot also infers what the accessibility tree misses: interactivity from `cursor: pointer`,
+`tabindex`, `contenteditable` or `onclick`, and names from text, `title`, `placeholder`, `alt` or a nearby label.
+Each inference is tagged, `clickable "Save" [inferred: cursorPointer]`, so you can list the controls a screen reader
+can't reach:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+// Controls the page made clickable without telling assistive technology
+const unreachableControls = Effect.fn("unreachableControls")(
+  function*(page: Page.Page) {
+    const snapshot = yield* page.snapshot()
+    return Array.from(snapshot.refs.values())
+      .filter((node) => node.role._tag === "Inferred")
+      .map((node) => (node.name._tag === "None" ? node.role.role : node.name.value))
+  }
+)
+```
+
+## Accessibility trees
+
+`sources: "aria"` gives the accessibility tree alone, as [`Expect.toMatchAria`](/docs/pages/expectations#structure)
+matches; the default is `"aria+interactivity"`. Its text is a starting point for a pattern:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const mainNavTree = Effect.fn("mainNavTree")(function*(page: Page.Page) {
+  const navigation = page.getByRole("navigation", { name: "Main" })
+  const tree = yield* navigation.snapshot({ sources: "aria" })
+  return tree.text
+})
+```
+
+## Comparing snapshots
+
+A snapshot after each action repeats the whole page; `diff` gives only what changed, such as the status a click
+added:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const whatAddingChanged = Effect.fn("whatAddingChanged")(function*(page: Page.Page) {
+  const before = yield* page.snapshot()
+  yield* page.getByRole("button", { name: "Add to cart" }).click()
+  const after = yield* page.snapshot()
+  const changes = yield* after.diff(before)
+  return changes.text
+})
+```

@@ -61,7 +61,7 @@ The chapters are the groups in `src/features/docs/navigation.ts`, each a directo
 | 2. Pages and locators     | `pages/`  | finding elements, actions, expectations and reads, contexts, attaching to a browser |
 | 3. Events and the network | `events/` | events, requests and responses, routes, scripts and time      |
 | 4. Testing and recordings | `tools/`  | Vitest, traces and HAR files |
-| 5. Agents and the command line | `agents/` | snapshots and the toolkit, the `strider` CLI |
+| 5. Agents and the command line | `agents/` | snapshots, the agent toolkit, the `strider` CLI |
 | 6. Browsers               | `browsers/` | choosing a browser, Chromium, Firefox, WebKit                |
 
 The browser pages render each backend's capabilities with `<Capabilities />` (every backend, side by side) and

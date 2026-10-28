@@ -1,7 +1,7 @@
 ---
 title: The strider CLI
 description: A command line that drives a live browser from a shell, a script or an agent, with named sessions, TypeScript segments run in them, and an MCP server.
-order: 2
+order: 3
 ---
 
 `strider` is the command-line tool that comes with `@usestrider/browser`; in a project, run it as `npx strider`, and
@@ -11,7 +11,7 @@ named session between commands, so a shell, a script or an agent can drive it on
 ## Commands
 
 A session holds one browser between commands. A target is a ref from the page's latest snapshot, such as `e3`, or
-a locator, such as `label=Email`, as the [toolkit's](/docs/agents/toolkit#the-toolkit) are:
+a locator, such as `label=Email`, as the [toolkit's](/docs/agents/toolkit#tools) are:
 
 ```sh
 strider start --name shop --chromium /usr/bin/chromium

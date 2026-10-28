@@ -55,7 +55,7 @@ when it must act. A page has one of three types:
 | Type                | Can                                                                            |
 | ------------------- | ------------------------------------------------------------------------------ |
 | `Page.ObservedPage` | report its state and [events](/docs/events/events)                             |
-| `Page.ReadonlyPage` | also locate and read, take [snapshots](/docs/agents/toolkit#snapshots) and screenshots, and [evaluate](/docs/pages/expectations#evaluating-in-the-page) in isolation |
+| `Page.ReadonlyPage` | also locate and read, take [snapshots](/docs/agents/snapshots) and screenshots, and [evaluate](/docs/pages/expectations#evaluating-in-the-page) in isolation |
 | `Page.Page`         | also act, navigate, evaluate among the page's own scripts, and declare [routes](/docs/events/routes) |
 
 A page you opened is a `Page`; one you didn't, such as an attached browser's tab or a launched browser's first
