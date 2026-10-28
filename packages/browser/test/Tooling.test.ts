@@ -21,6 +21,8 @@ import {
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
+import * as Option from "effect/Option"
+import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
 import * as Tracer from "effect/Tracer"
@@ -303,6 +305,29 @@ describe("BrowserToolkit", () => {
     ])
     for (const tool of Object.values(BrowserToolkit.toolkit.tools)) assert.strictEqual(tool.failureMode, "return")
   })
+
+  it.effect("puts in a secret for its own name alone, and sends any other text between % signs as written", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const first = yield* Browser.newPage()
+      const tools = yield* BrowserToolkit.make({
+        context: first.context,
+        secrets: { token: Redacted.make("abc") },
+        capture: CapturePolicy.local
+      })
+      const call = (name: BrowserToolkit.ToolName, params: Record<string, unknown>) =>
+        Effect.flatMap(tools.handle(name, params as never), Stream.runLast).pipe(
+          Effect.map((last) => Option.getOrThrow(last).result as any)
+        )
+      // A URL's percent-escapes are its own, not secrets
+      const opened = yield* call("newPage", { name: "shop", url: "https://example.test/caf%C3%A9" })
+      assert.deepStrictEqual(opened.outcome, { page: "shop", url: "https://example.test/caf%C3%A9" })
+      // A mistyped name is sent as written too; the result shows the secret's value as its name again
+      const url = "https://example.test/caf%C3%A9?token=%token%&typo=%tokn%"
+      const went = yield* call("goto", { page: "shop", url })
+      assert.deepStrictEqual(went.outcome, { url })
+      const shop = (yield* first.context.pages).find((page) => page.id !== first.id)!
+      assert.strictEqual(yield* shop.url, "https://example.test/caf%C3%A9?token=abc&typo=%tokn%")
+    })).pipe(Effect.provide(Browser.layerTest(""))))
 
   it("masks an editable field's text under the strict capture policy", () => {
     assert.deepStrictEqual(

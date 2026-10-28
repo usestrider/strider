@@ -128,7 +128,7 @@ export const click = tool(
 
 export const fill = tool(
   "fill",
-  "Fills a field with text; %name% is a secret, substituted as the call is made." + front,
+  "Fills a field with text; a secret's %name% is its value, substituted as the call is made." + front,
   { page: PageName, target: Target, value: Schema.String },
   Schema.String
 )

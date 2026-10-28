@@ -143,8 +143,9 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               assert.include(stale.value.message, `the ref is from shop's snapshot`)
               const nowhere = yield* call(tools, "goto", { page: "nowhere", url })
               assert.strictEqual(nowhere.value.error, "PageNotFound")
-              const missing = yield* call(tools, "fill", { page: "shop", target: "label=Email", value: "%token%" })
-              assert.include(missing.value.message, "No secret named token")
+              // A %…% that names no secret, such as a mistyped name, is filled as written
+              const typo = yield* call(tools, "fill", { page: "shop", target: "label=Email", value: "%token%" })
+              assert.isFalse(typo.failed, JSON.stringify(typo.value))
             }))
           }),
         timeout

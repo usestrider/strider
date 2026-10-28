@@ -1377,3 +1377,8 @@ An entry with no marker is open.
 - *Seen:* checking what an exported test repeats of its session.
 - *We:* the test's context is made as a fresh session's, with a comment at the top of the test saying which the session started from and that the test starts empty, at the maintainer's decision.
 - *Reconsider:* writing a fork's state to a file at export, with `state save`'s mode, for the test to read as it reads `--state`'s.
+
+**Q250. A `%name%` that names no secret is sent as written** (Ours). The agent toolkit, and so every `strider` command and `strider mcp` tool, read any `%name%` in a value or URL as a secret's placeholder and refused one that named no secret, so a URL's percent-escapes failed: `strider goto "https://shop.example.com/caf%C3%A9"` read `%C3%` as a secret and failed with "No secret named C3".
+- *Seen:* driving a page at a percent-escaped URL through the CLI.
+- *We:* a `%name%` is a secret only when the toolkit has one by that name, in every tool, and so every command, and in the exported test; any other is passed through unchanged, at the maintainer's decision. The cost is that a mistyped name, `%pasword%`, passes through too, as literal text, with no error: a field it fills gets the text `%pasword%`.
+- *Reconsider:* a placeholder syntax that a URL or a field's text can't hold, or a note in the result when a value holds a `%name%` close to a secret's.

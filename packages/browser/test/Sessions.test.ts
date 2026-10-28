@@ -2,7 +2,8 @@
  * The CLI sessions, without a browser: the ledger a program keeps, `strider mcp`'s arguments, and what an exported
  * test keeps of its session: a statement for every tool but the reads; a tab the session took with control, marked;
  * a page strider mcp opened; a renamed page; a removed declaration; secrets wherever the session put them in, but
- * not in a check's text; a fork or profile, said; a wait's deadline; a dialog's answer.
+ * not in a check's text, and a `%…%` that names none as text; a fork or profile, said; a wait's deadline; a dialog's
+ * answer.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
@@ -303,6 +304,42 @@ describe("strider export test", () => {
     assert.include(text, `yield* main.goto(\`https://shop.example.com/login?token=${token}&next=/cart\`)\n`)
     assert.include(text, `yield* main.goto(Redacted.value(yield* Config.Redacted("API_TOKEN")))\n`)
     assert.include(text, `yield* admin.goto(\`https://${token}@admin.example.com\`)\n`)
+  })
+
+  it("keeps a %…% that names no secret as the text the session sent, such as a URL's percent-escapes", () => {
+    const { text } = ExportTest.render({
+      name: "shop",
+      browser: launched,
+      secrets: { token: "API_TOKEN" },
+      state: undefined,
+      steps: [
+        { _tag: "NewPage", page: "main", url: undefined },
+        tool("goto", { page: "main", url: "https://shop.example.com/caf%C3%A9" }),
+        tool("goto", { page: "main", url: "https://shop.example.com/caf%C3%A9?token=%token%" }),
+        // A mistyped name is text too, as the session filled it
+        {
+          _tag: "Tool",
+          tool: "fill",
+          params: { page: "main", target: "label=Token", value: "%tokn%" },
+          target: `getByLabel("Token")`,
+          result: undefined
+        },
+        {
+          _tag: "Tool",
+          tool: "expect",
+          params: { page: "main", target: "css=#sale", state: "visible", text: "50%off%" },
+          target: `locator("#sale")`,
+          result: undefined
+        }
+      ]
+    })
+    assert.include(text, `yield* main.goto("https://shop.example.com/caf%C3%A9")\n`)
+    assert.include(
+      text,
+      `yield* main.goto(\`https://shop.example.com/caf%C3%A9?token=\${Redacted.value(yield* Config.Redacted("API_TOKEN"))}\`)\n`
+    )
+    assert.include(text, `yield* main.getByLabel("Token").fill("%tokn%")\n`)
+    assert.include(text, `yield* main.locator("#sale").pipe(Expect.toContainText("50%off%"))\n`)
   })
 
   it("leaves out a check of a text with a secret in it, which a failure would print, and says so", () => {

@@ -8,8 +8,9 @@
  * - **The digest.** The context's and each page's event channels are recorded from the start, and each result
  *   takes what they recorded since the previous call: navigations, popups, dialogs and who decided them,
  *   downloads, uncaught exceptions, console errors and failed requests. No tool waits after it acts.
- * - **Secrets.** A `%name%` in a parameter is the secret's value at dispatch, and every result and digest line
- *   has the values put back as `%name%`.
+ * - **Secrets.** A `%name%` in a parameter, for a name among the secrets, is the secret's value at dispatch, and
+ *   every result and digest line has the values put back as `%name%`. Other text between `%` signs, such as a
+ *   URL's `%C3%`, is sent as written.
  * - **Capture.** The policy decides whether screenshots are sent, whether an editable field's text is masked in
  *   snapshots, and how much console text the digest carries.
  */
@@ -46,6 +47,7 @@ import type * as UserContext from "../UserContext.ts"
 import * as Events from "./events.ts"
 import * as Handles from "./handles.ts"
 import type * as Model from "./model.ts"
+import * as Secrets from "./secrets.ts"
 import * as Tools from "./tools.ts"
 import * as UrlPattern from "./urlPattern.ts"
 
@@ -178,23 +180,10 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   const secrets = Object.entries(options.secrets).map(([name, value]) => ({ name, value: Redacted.value(value) }))
 
   // ── Secrets ──
-  const reveal = (text: string): Effect.Effect<string, Tools.ToolFailure> =>
-    Effect.suspend(() => {
-      let missing: string | undefined
-      const out = text.replace(/%([A-Za-z_][\w-]*)%/g, (whole, name: string) => {
-        const secret = secrets.find((each) => each.name === name)
-        if (secret === undefined) {
-          missing = name
-          return whole
-        }
-        return secret.value
-      })
-      return missing === undefined
-        ? Effect.succeed(out)
-        : Effect.fail(failed("InvalidInput", `No secret named ${missing}; the secrets are ${names(secrets)}`))
-    })
-  const names = (list: ReadonlyArray<{ readonly name: string }>) =>
-    list.length === 0 ? "none" : list.map((each) => `%${each.name}%`).join(", ")
+  // Only a secret's own name is a placeholder: any other `%…%`, such as a URL's `%C3%`, is sent as written (Q250)
+  const values = new Map(secrets.map((secret) => [secret.name, secret.value]))
+  const reveal = (text: string): string =>
+    Secrets.split(text, values.keys()).map((part, index) => index % 2 === 1 ? values.get(part)! : part).join("")
   const conceal = <A>(value: A): A => {
     if (typeof value === "string") {
       let out: string = value
@@ -493,13 +482,13 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
         }
         const page = yield* context.newPage.pipe(Scope.provide(scope))
         const named = yield* nameOf(page, name)
-        if (url !== undefined) yield* page.goto(yield* reveal(url))
+        if (url !== undefined) yield* page.goto(reveal(url))
         return { page: named, url: String(yield* page.url) }
       })),
     goto: ({ page: name, url }) =>
       onPage(name, (page) =>
         Effect.gen(function*() {
-          const navigation = yield* page.goto(yield* reveal(url))
+          const navigation = yield* page.goto(reveal(url))
           return navigation._tag === "Committed" && Option.isSome(navigation.response)
             ? { url: navigation.url, status: navigation.response.value.status }
             : { url: navigation.url }
@@ -571,7 +560,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       acting(name, (page) =>
         Effect.gen(function*() {
           const locator = yield* targeted(page, name, target)
-          const revealed = yield* reveal(value)
+          const revealed = reveal(value)
           yield* revealed === value ? locator.fill(value) : locator.fill(Redacted.make(revealed))
           return `filled ${target}`
         })),
@@ -686,7 +675,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
               yield* Expect.toBeChecked(locator)
               break
           }
-          if (text !== undefined) yield* Expect.toContainText(locator, yield* reveal(text))
+          if (text !== undefined) yield* Expect.toContainText(locator, reveal(text))
           return `${target} is ${state}${text === undefined ? "" : ` and contains ${JSON.stringify(text)}`}`
         })),
     history: ({ page: name, kind, level, failed }) =>

@@ -179,6 +179,12 @@ describe("strider", () => {
         const checked = yield* shop("expect", "css=#pw", "visible", "--text", "%password%")
         assert.strictEqual(checked.code, 0, checked.err)
         assert.notInclude(checked.out, "hunter2")
+        // A URL's percent-escapes name no secret, so the URL is sent as written
+        const cafe = `${served.origin}/fixture?html=${encodeURIComponent(`<p id="word">café</p>`)}`
+        assert.include(cafe, "caf%C3%A9")
+        const visited = yield* shop("goto", cafe)
+        assert.strictEqual(visited.code, 0, visited.err)
+        assert.strictEqual((yield* shop("expect", "css=#word", "visible", "--text", "café")).code, 0)
         // State for a program, and a test of what ran
         const state = path.join(env.XDG_RUNTIME_DIR, "shop.state")
         assert.strictEqual((yield* run("-s", "shop", "state", "save", state)).code, 0)
@@ -217,6 +223,8 @@ describe("strider", () => {
           `yield* shop.locator("#pw").pipe(Expect.toBeVisible)\n        // Left out: the session's check that this contains "%password%"`
         )
         assert.notInclude(exported, `Expect.toContainText("%password%")`)
+        // A percent-escaped URL is the text the session sent
+        assert.include(exported, `yield* shop.goto(${JSON.stringify(cafe)})\n`)
         // The page's own script holds the password it checks, so the statement is what is checked
         assert.notInclude(exported, `.fill("hunter2")`)
         assert.match((yield* run("sessions")).out, /^shop  chromium · pages shop, child, p\d+/)

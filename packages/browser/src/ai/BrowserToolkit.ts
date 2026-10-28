@@ -119,7 +119,8 @@ export interface MakeOptions {
    */
   readonly context: UserContext.UserContext
   /**
-   * Secrets the model may use by name: it sees `%name%`, and Strider puts in the value as the tool call runs.
+   * Secrets the model may use by name: it sees `%name%`, and Strider puts in the value as the tool call runs. Only
+   * these names are secrets: any other `%name%` in a parameter is sent as written.
    */
   readonly secrets: Readonly<Record<SecretName | string, Redacted.Redacted<string>>>
   /**
@@ -148,8 +149,13 @@ export interface MakeOptions {
  *   policy's `consoleText` decides the console errors: `"full"` lists them with their text, `"redacted"` without
  *   it, and `"omitted"`, as `CapturePolicy.strict` has it, leaves them out.
  * - A `%name%` in a parameter becomes the secret's value as the call runs, and results show the value as `%name%`
- *   again.
+ *   again. Other text between `%` signs, such as `%C3%` in a URL, is sent as written.
  * - Waits, routes and dialog handlers end with the scope.
+ *
+ * **Gotchas**
+ *
+ * A mistyped secret name isn't an error: `%pasword%` names no secret, so it is sent as written, and a field it fills
+ * gets the text `%pasword%`.
  *
  * **Example** (Building a toolkit for a context)
  *

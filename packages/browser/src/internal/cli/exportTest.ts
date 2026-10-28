@@ -1,7 +1,7 @@
 /**
  * `strider export test` (CLI.md): a session's successful commands as one Vitest test.
  * Every command is one statement against the public API, so the test reads as the session ran: a ref becomes
- * the locator its snapshot names, a `%name%` secret, wherever the session put one in, its `Config.Redacted`, a
+ * the locator its snapshot names, a secret's `%name%`, wherever the session put one in, its `Config.Redacted`, a
  * wait the `next` it started, with its `--within` as `Deadline.within`, `remove r1` the `remove` of the handle the
  * route or dialog handler gave, and `page name` a variable of the new name.
  * Reads (`pages`, `tabs`, `snapshot`, `find`, `screenshot`, `history`) aren't repeated. What runs only in a session,
@@ -9,6 +9,7 @@
  * A check of a text with a secret in it is left out, with a comment, since a failed check prints the text (Q248).
  */
 import type * as Snapshot from "../../Snapshot.ts"
+import * as Secrets from "../secrets.ts"
 
 /** A command the session ran, as the test repeats it. */
 export type Step =
@@ -36,11 +37,6 @@ const quote = (text: string) => JSON.stringify(text)
 /** Text as it stands inside a template literal. */
 const literal = (text: string) =>
   JSON.stringify(text).slice(1, -1).replace(/\\"/g, `"`).replace(/`|\$\{/g, (match) => `\\${match}`)
-
-/** A secret's placeholder, `%name%`, which the toolkit replaces wherever it stands in a value it reveals. */
-const secretPattern = /%([A-Za-z_][\w-]*)%/
-
-const hasSecret = (text: string) => secretPattern.test(text)
 
 /**
  * A session's context's focus: emulated where the backend has focus emulation, which WebDriver BiDi and stock
@@ -196,14 +192,17 @@ export const render = (options: {
     return name
   }
   const pageVariable = (page: string) => variables.get(page) ?? variable(page)
-  // A `%name%` anywhere in a fill's value or a URL is the secret's value, which the session put in as the call ran
+  // A secret's `%name%` anywhere in a fill's value or a URL is its value, which the session put in as the call ran;
+  // any other `%…%`, such as a URL's `%C3%`, is text, as the session sent it (Q250)
+  const split = (text: string) => Secrets.split(text, Object.keys(options.secrets))
+  const hasSecret = (text: string) => split(text).length > 1
   const secret = (name: string) => {
     used.add("Config")
-    return `yield* Config.Redacted(${quote(options.secrets[name] ?? name.toUpperCase())})`
+    return `yield* Config.Redacted(${quote(options.secrets[name]!)})`
   }
   /** A string with the secrets' values put in where the session put them, built from each secret's config. */
   const revealed = (text: string) => {
-    const parts = text.split(secretPattern)
+    const parts = split(text)
     if (parts.length === 1) return quote(text)
     used.add("Redacted")
     const value = (name: string) => `Redacted.value(${secret(name)})`
@@ -212,9 +211,9 @@ export const render = (options: {
   }
   /** A fill's value: one with a secret in it stays redacted, as the session filled it. */
   const filled = (text: string) => {
-    const whole = new RegExp(`^${secretPattern.source}$`).exec(text)?.[1]
-    if (whole !== undefined) return secret(whole)
-    return hasSecret(text) ? `Redacted.make(${revealed(text)})` : quote(text)
+    const parts = split(text)
+    if (parts.length === 3 && parts[0] === "" && parts[2] === "") return secret(parts[1]!)
+    return parts.length > 1 ? `Redacted.make(${revealed(text)})` : quote(text)
   }
   for (const step of options.steps) {
     if (step._tag === "Segment") {
