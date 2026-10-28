@@ -104,7 +104,7 @@ const SharedChrome = Layer.unwrap(Effect.gen(function*() {
 - Popups aren't paused when they open, so a route or handler registered on a popup may miss its first document.
 - A dialog an earlier client left open goes unreported, and `inspect` on that page fails with a hint saying so.
 
-## What Chromium can't do
+## Limits
 
 Chromium supports nearly every capability Strider has. From the backend's capability list:
 
@@ -118,7 +118,7 @@ What changes when attached:
 
 <BrowserLimits browser="chromium" when="attached" />
 
-## What's different
+## Differences
 
 **Request events lack `Cookie`.** `NetworkResponse.headers` include `Set-Cookie`, but `NetworkRequest.headers` don't
 include `Cookie`. Use [`NetworkRequest.headersSent`](/docs/events/network#sent-headers).
