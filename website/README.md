@@ -91,11 +91,25 @@ the guide disagrees with itself; one is added here once the maintainer agrees.
   where it's shown. A block is one realistic task, written as a step with `Effect.fn`, that reads data through its
   types, such as a body decoded with a Schema, never `JSON.stringify`. Messages and hints are quoted from the
   source, and command output from a real run. A step takes what it works on; a block about getting a browser,
-  context or connection gets it inside its step. Layers, schemas, test callbacks, segment exports and the
-  program that runs the steps aren't steps; a tracer is provided there, outside every span it should record.
+  context or connection gets it inside its step. A step uses `Effect.scoped` only for what must end with it, such
+  as a page or context it opens, a recording or a temporary setting; one that subscribes or registers on a page it
+  was given leaves the scope to its caller. Layers, schemas, test callbacks, segment exports, handlers passed to a
+  combinator, functions run in the page, conditions and patterns, locator helpers and the program that runs the
+  steps aren't steps. A handler becomes `Effect.fn` only when it needs a generator. A tracer is provided to the
+  program, outside every span it should record.
 - **Titles and headings.** A page's title names its subject as a noun phrase (Locators, Actions, Tests with Vitest).
   A section heading is a noun phrase for a subject or an -ing form for a procedure (Launching, Recovering), never
-  a sentence or a fragment of one. Parallel pages give the same section the same heading.
+  a sentence or a fragment of one, and never the page's title again: Locators has "The queries". Parallel pages
+  give the same section the same heading; otherwise a heading names one subject across the guide.
+- **Decks.** A page's `description` is one noun phrase for what it covers, in the order of its sections: "A page's
+  requests and responses as events, their bodies decoded with a Schema, and the headers they sent." The opening,
+  not the deck, says why.
+- **Names.** One thing has one name on every page, the reference's: an endpoint, not an address. A session is the
+  `strider` CLI's; a context has its own cookies and storage.
+- **Browser differences.** A concept page says what a browser does differently where it teaches the feature, such
+  as "not on WebKit" in an action's row, not in a closing section. Only a browser's own page collects them.
+- **Links.** A link's text names what it links to: "Call [`page.activate`](…)", never "([reference](…))",
+  "(example)", "(how)" or "(below)".
 - **Sections.** A section holds one thing a reader looks for. One of a sentence or two joins its neighbour; one
   many times the page's median splits at its own subject.
 - **Hosts.** `shop.example.com` for commerce, `app.example.com` for accounts and dashboards, `mail.example.com` for
