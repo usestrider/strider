@@ -58,7 +58,7 @@ The chapters are the groups in `src/features/docs/navigation.ts`, each a directo
 | Chapter                   | Directory | Pages                                                         |
 | ------------------------- | --------- | ------------------------------------------------------------- |
 | 1. Getting started        | (top)     | introduction, installation, first program, errors, deadlines |
-| 2. Pages and locators     | `pages/`  | finding elements, actions, expectations and reads, contexts, attaching to a browser |
+| 2. Pages and locators     | `pages/`  | locators, actions, expectations and reads, contexts, attaching to a browser |
 | 3. Events and the network | `events/` | events, requests and responses, routes, scripts and time      |
 | 4. Testing and recordings | `tools/`  | Vitest, traces and HAR files |
 | 5. Agents and the command line | `agents/` | snapshots, the agent toolkit, the `strider` CLI |
