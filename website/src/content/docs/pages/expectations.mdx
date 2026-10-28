@@ -65,12 +65,18 @@ A matcher without arguments is the function itself; one with arguments is dual:
 ```ts
 import { Expect, Page } from "@usestrider/browser"
 
-declare const page: Page.Page
+import { Effect } from "effect"
 
-const badge = page.getByTestId("cart-count")
-const piped = badge.pipe(Expect.toHaveText("3"))
-const direct = Expect.toHaveText(badge, "3")
-const visible = badge.pipe(Expect.toBeVisible)
+const cartSurvivesReload = Effect.fn("cartSurvivesReload")(function*(page: Page.Page) {
+  const badge = page.getByTestId("cart-count")
+  const piped = badge.pipe(Expect.toHaveText("3"))
+  const direct = Expect.toHaveText(badge, "3")
+  const visible = badge.pipe(Expect.toBeVisible)
+  yield* visible
+  yield* piped
+  yield* page.reload()
+  yield* direct
+})
 ```
 
 A locator's expectation re-checks in the page on each DOM change, input or focus event and animation frame, in
