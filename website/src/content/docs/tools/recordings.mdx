@@ -1,6 +1,6 @@
 ---
 title: Traces and HAR files
-description: Every operation is already a span. A trace adds what the page looked like, for Playwright's trace viewer; a HAR records the traffic.
+description: Spans for every operation, traces of what the page looked like for Playwright's trace viewer, HAR files of its traffic, and what their exports redact.
 order: 2
 ---
 
@@ -79,12 +79,12 @@ DOM snapshots change nothing in the page, and work on an [inspected](/docs/pages
 They're taken in an [isolated world](/docs/pages/expectations#evaluating-in-the-page), except on WebKit, which has
 none.
 
-`TestRun` attaches a trace to the test that made it ([example](/docs/tools/testing#attaching-files)).
+[`TestRun`](/docs/tools/testing#attaching-files) attaches a trace to the test that made it.
 
 ## HAR files
 
 A trace's `network` shows the traffic only in the trace viewer. A HAR is the traffic alone, in the format HAR tools
-and [`Route.fromHar`](/docs/events/routes#replaying-a-recording) read, so a session recorded once can answer the
+and [`Route.fromHar`](/docs/events/routes#replaying-a-recording) read, so a run recorded once can answer the
 same requests in later runs. `Har.record` records a page's or context's requests as HAR 1.2, one entry per redirect
 hop. `content`, required, says where bodies go:
 
@@ -116,8 +116,8 @@ const apiFixture = Effect.fn("apiFixture")(function*(page: Page.Page) {
 | `"attach"` | the export is one zip of `har.har` and the bodies it names, which `Route.fromHar` reads |
 | `"omit"`   | left out                                                               |
 
-`include` keeps a class of secret the export would otherwise redact ([below](#redaction));
-`Route.fromHar` matches on request bodies, so a fixture for it includes them.
+`include` keeps a [class of secret](#redaction) the export would otherwise redact; `Route.fromHar` matches on
+request bodies, so a fixture for it includes them.
 
 - Timings are Strider's own measurements, not the [page clock](/docs/events/page-clock)'s, so they
   compare across browsers.
