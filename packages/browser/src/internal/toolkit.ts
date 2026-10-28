@@ -170,6 +170,14 @@ export interface Session {
   readonly toolkit: Toolkit.WithHandler<Tools.Tools>
   /** Names a page: `given`, which must be free, or the next `p1`, `p2`…; a named page keeps its name. */
   readonly name: (page: Page.Page, given?: string) => Effect.Effect<string, Tools.ToolFailure>
+  /**
+   * Opens a page in the context, named `name`, which must be free, or the next `p1`, `p2`…, and navigates it to
+   * `url` when one is given, with its secrets put in. The name is checked before the page opens; a page whose
+   * navigation fails is closed and its name freed, so a failed open leaves nothing behind.
+   */
+  readonly open: (
+    options: { readonly name?: string | undefined; readonly url?: string | undefined }
+  ) => Effect.Effect<{ readonly page: Page.Page; readonly name: string }, Tools.ToolFailure>
   /** Renames a page. */
   readonly rename: (from: string, to: string) => Effect.Effect<void, Tools.ToolFailure>
   /** The page with a name; fails, naming the others, when there is none. */
@@ -228,6 +236,8 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   let counter = 0
   const snapshots = new Map<string, Snapshot.Snapshot<Locator.Locator>>()
   const digest: Array<string> = []
+  // Each named page's digest lines are recorded in a scope of its own, which forgetting the page closes
+  const watching = new Map<Target.NavigableId, Scope.Closeable>()
 
   const nameOf = (page: Page.Page, given?: string): Effect.Effect<string> =>
     Effect.suspend(() => {
@@ -238,7 +248,24 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       byName.set(name, page)
       if (name === given) kept.add(name)
       nameById.set(page.id, name)
-      return Effect.as(watchPage(page, name), name)
+      return Effect.flatMap(Scope.fork(scope), (watcher) => {
+        watching.set(page.id, watcher)
+        return Effect.as(watchPage(page, name, watcher), name)
+      })
+    })
+  /** Forgets a page the session no longer holds: its name, its snapshot and its digest lines. */
+  const forget = (page: Page.Page): Effect.Effect<void> =>
+    Effect.suspend(() => {
+      const name = nameById.get(page.id)
+      if (name !== undefined) {
+        byName.delete(name)
+        kept.delete(name)
+        snapshots.delete(name)
+      }
+      nameById.delete(page.id)
+      const watcher = watching.get(page.id)
+      watching.delete(page.id)
+      return watcher === undefined ? Effect.void : Scope.close(watcher, Exit.void)
     })
   const nameOfEntry = (id: Target.NavigableId): string => nameById.get(id) ?? id
 
@@ -278,15 +305,15 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   // ── The digest ──
   const note = (line: string) => void digest.push(line)
   const drainEffect = Effect.fnUntraced(
-    function*<A>(channel: Events.Channel<A>, each: (value: A) => Effect.Effect<void>) {
-      const queue = yield* Events.recorded(channel, () => true).pipe(Scope.provide(scope))
+    function*<A>(channel: Events.Channel<A>, each: (value: A) => Effect.Effect<void>, within: Scope.Scope = scope) {
+      const queue = yield* Events.recorded(channel, () => true).pipe(Scope.provide(within))
       yield* Effect.gen(function*() {
         while (true) yield* each((yield* Queue.take(queue)).value)
-      }).pipe(Effect.ignore, Effect.forkIn(scope))
+      }).pipe(Effect.ignore, Effect.forkIn(within))
     }
   )
-  const drain = <A>(channel: Events.Channel<A>, each: (value: A) => void) =>
-    drainEffect(channel, (value) => Effect.sync(() => each(value)))
+  const drain = <A>(channel: Events.Channel<A>, each: (value: A) => void, within: Scope.Scope = scope) =>
+    drainEffect(channel, (value) => Effect.sync(() => each(value)), within)
   const consoleLine = (message: ConsoleMessage.ConsoleMessage, where: string) =>
     capture.consoleText === "full"
       ? `console ${message.level} on ${where}: ${message.text}`
@@ -298,7 +325,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
 
   // Each line names the page by its name as the line is noted, so a page renamed since it was first seen is
   // called by its new name
-  const watchPage = (page: Page.Page, first: string): Effect.Effect<void> =>
+  const watchPage = (page: Page.Page, first: string, within: Scope.Scope): Effect.Effect<void> =>
     Effect.gen(function*() {
       const pageEntry = Handles.page(page).entry
       const name = () => nameNow(page, first)
@@ -309,7 +336,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
         ) {
           note(`${name()} navigated to ${navigation.url}`)
         }
-      })
+      }, within)
       yield* drainEffect(pageEntry.events.popup, (popup) =>
         Option.match(runtime.page(popup.page), {
           onNone: () => Effect.void,
@@ -330,13 +357,15 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
                   })
                 }`)
               }))
-        }))
-      yield* drain(pageEntry.events.dialog, (prompt) =>
-        note(`dialog ${prompt.kind}${prompt.message === "" ? "" : ` "${prompt.message}"`} on ${name()}`))
+        }), within)
+      yield* drain(
+        pageEntry.events.dialog,
+        (prompt) => note(`dialog ${prompt.kind}${prompt.message === "" ? "" : ` "${prompt.message}"`} on ${name()}`),
+        within
+      )
       yield* Effect.forkIn(
-        Effect.flatMap(page.closed, (reason) =>
-          Effect.sync(() => note(`${name()} closed: ${reason._tag}`))),
-        scope
+        Effect.flatMap(page.closed, (reason) => Effect.sync(() => note(`${name()} closed: ${reason._tag}`))),
+        within
       )
     })
 
@@ -449,6 +478,29 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       : Effect.map(options.browser.pages, (pages) => pages.filter((page) => !nameById.has(page.id)))
   )
 
+  const taken = (name: string) => failed("InvalidInput", `A page is already named ${name}`)
+  const open: Session["open"] = Effect.fnUntraced(
+    function*({ name, url }) {
+      // Checked first, so a name that's taken opens nothing
+      if (name !== undefined && byName.has(name)) return yield* Effect.fail(taken(name))
+      const page = yield* context.newPage.pipe(Scope.provide(scope), Effect.mapError(toFailure))
+      // Taken while the page opened: closed again, as a failed navigation's page is
+      const closeAgain = Effect.andThen(forget(page), Effect.ignore(page.close()))
+      if (name !== undefined && byName.has(name)) {
+        yield* closeAgain
+        return yield* Effect.fail(taken(name))
+      }
+      const named = yield* nameOf(page, name)
+      // A page whose navigation fails isn't the session's: the command failed, and the exported test leaves it
+      // out, so the page goes with it
+      if (url !== undefined) {
+        yield* page.goto(reveal(url)).pipe(Effect.mapError(toFailure), Effect.onError(() => closeAgain))
+      }
+      return { page, name: named }
+    },
+    Effect.mapError((failure) => new Tools.ToolFailure(conceal({ ...failure })))
+  )
+
   const handlers = Tools.toolkit.of({
     tabs: () =>
       run(
@@ -499,11 +551,9 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
           )
         }
         controlled.delete(name)
+        // The tab is no longer the session's: its name is free, and the digest says no more of it
         const page = byName.get(name)
-        byName.delete(name)
-        kept.delete(name)
-        snapshots.delete(name)
-        if (page !== undefined) nameById.delete(page.id)
+        if (page !== undefined) yield* forget(page)
         yield* Scope.close(grant, Exit.void)
         return `released ${name}; the tab stays open`
       })),
@@ -515,13 +565,8 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       })),
     newPage: ({ name, url }) =>
       run(Effect.gen(function*() {
-        if (name !== undefined && byName.has(name)) {
-          return yield* Effect.fail(failed("InvalidInput", `A page is already named ${name}`))
-        }
-        const page = yield* context.newPage.pipe(Scope.provide(scope))
-        const named = yield* nameOf(page, name)
-        if (url !== undefined) yield* page.goto(reveal(url))
-        return { page: named, url: String(yield* page.url) }
+        const opened = yield* open({ name, url })
+        return { page: opened.name, url: String(yield* opened.page.url) }
       })),
     goto: ({ page: name, url }) =>
       onPage(name, (page) =>
@@ -830,6 +875,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
         }
         return nameOf(page, given)
       }),
+    open,
     rename: (from, to) =>
       Effect.flatMap(pageNamed(from), (page) =>
         Effect.suspend(() => {

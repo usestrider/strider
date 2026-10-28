@@ -208,6 +208,13 @@ describe("strider", () => {
         const refused = yield* run("-s", "shop", "page", "new", "--name", "refused", unsafe)
         assert.strictEqual(refused.code, 11, refused.err)
         assert.notInclude(refused.err, "hunter2")
+        // Its page is closed again, so the session holds no page the exported test leaves out
+        const held = names(yield* run("-s", "shop", "pages"))
+        assert.notInclude(held, "refused")
+        // A name that's taken fails before a page opens
+        const twice = yield* run("-s", "shop", "page", "new", "--name", "shop", url)
+        assert.strictEqual(twice.code, 15, twice.err)
+        assert.deepStrictEqual(names(yield* run("-s", "shop", "pages")), held)
         // A URL's percent-escapes name no secret, so the URL is sent as written
         const cafe = `${served.origin}/fixture?html=${encodeURIComponent(`<p id="word">café</p>`)}`
         assert.include(cafe, "caf%C3%A9")

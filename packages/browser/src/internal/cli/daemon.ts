@@ -485,21 +485,13 @@ const commands = (daemon: Daemon) => {
         ({ name, url }) =>
           recording(daemon, "action", (running) =>
             Effect.gen(function*() {
-              const opened = yield* daemon.context.newPage.pipe(
-                Scope.provide(daemon.scope),
-                Effect.mapError(failedWith)
-              )
-              const named = yield* daemon.session.name(opened, Option.getOrUndefined(name)).pipe(
-                Effect.mapError((failure) => new CommandFailed(failure))
-              )
-              // A secret's %name% in the URL is its value, as goto puts it in, and a failure names it again
-              if (Option.isSome(url)) {
-                yield* opened.goto(daemon.session.reveal(url.value)).pipe(
-                  Effect.mapError((error) =>
-                    new CommandFailed(daemon.session.conceal({ ...ToolkitImpl.toFailure(error) }))
-                  )
-                )
-              }
+              // The name is checked before the page opens, and a page whose navigation fails is closed, so a
+              // page new that failed leaves no page, as the exported test, which leaves it out, has none. A
+              // secret's %name% in the URL is its value, as goto puts it in, and a failure names it again
+              const { name: named, page: opened } = yield* daemon.session.open({
+                name: Option.getOrUndefined(name),
+                url: Option.getOrUndefined(url)
+              }).pipe(Effect.mapError((failure) => new CommandFailed(failure)))
               daemon.recorder.record({ _tag: "NewPage", page: named, url: Option.getOrUndefined(url) }, running)
               daemon.recorder.declared(opened.id)
               yield* Console.log(`${named}${Option.isSome(url) ? ` at ${url.value}` : ""}`)

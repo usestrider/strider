@@ -88,3 +88,32 @@ describe("Session's digest", () => {
       assert.isFalse(lines.some((line) => /\b(p1|shop)\b/.test(line)), lines.join("\n"))
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-popup-dialog(alert)-|"))))
 })
+
+describe("Session.open", () => {
+  it.effect("checks the name before it opens a page, so a name that's taken opens none", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      yield* session.open({ name: "shop" })
+      const before = (yield* context.pages).length
+      const result = yield* Effect.result(session.open({ name: "shop" }))
+      if (result._tag === "Success") return assert.fail(`open gave a second page named shop: ${result.success.name}`)
+      assert.strictEqual(result.failure.error, "InvalidInput")
+      assert.strictEqual((yield* context.pages).length, before)
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+  it.effect("closes a page whose navigation fails and frees its name, which the digest leaves out", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      const result = yield* Effect.result(session.open({ name: "refused", url: "not a URL" }))
+      if (result._tag === "Success") return assert.fail("open navigated to a URL that doesn't parse")
+      assert.strictEqual(result.failure.error, "PageError")
+      assert.deepStrictEqual(yield* context.pages, [])
+      assert.isTrue(Option.isNone(session.named("refused")))
+      assert.deepStrictEqual(yield* sinceLast(session), [])
+      // The name is free again
+      const opened = yield* session.open({ name: "refused", url: "https://example.test/" })
+      assert.strictEqual(opened.name, "refused")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})

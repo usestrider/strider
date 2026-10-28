@@ -53,6 +53,8 @@ filled label=Email on main · 17 ms
   names its page with `-p`; there's no default, so agents on one machine can't act on each other's tabs.
 - Commands are the toolkit's tools, and answer the same way: the outcome, then what happened since the last
   command.
+- A `page new` that fails, on a name that's taken or a URL that doesn't load, leaves no page behind, so the name is
+  free to try again.
 - In a project, run it as `npx strider`; these examples write `strider`. `strider --help` lists the commands, and
   `strider <command> --help` each one's arguments.
 

@@ -61,7 +61,7 @@ export const pages = tool(
 
 export const newPage = tool(
   "newPage",
-  "Opens a page in the context, named as given or p1, p2…, and navigates it when a URL is given.",
+  "Opens a page in the context, named as given or p1, p2…, and navigates it when a URL is given. A page whose navigation fails is closed again, so the name stays free.",
   { name: Schema.optional(Schema.String), url: Schema.optional(Schema.String) },
   Schema.Struct({ page: Schema.String, url: Schema.String })
 )
