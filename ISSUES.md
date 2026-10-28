@@ -99,7 +99,7 @@ whatever the operation's deadline, and late replies are released, not adopted (`
 
 **I20. `session.page("p2")` accepts a generated name.** CLI.md:46 says a segment finds pages by name only, and a
 generated handle like `p2` is a token.
-- **Fixed** in `2bfcbd9`: `session.page` finds only names given to pages; a generated handle fails `PageNotFound`, saying it isn't a name. The tools' own lookup still accepts `p1`, `p2`….
+- **Fixed** in `2bfcbd9` and `2f8d1fd`: `session.page` finds only names given to pages; a generated handle fails `PageNotFound`, saying it isn't a name. The tools' own lookup still accepts `p1`, `p2`….
 
 **I21. `nth` takes a negative index.** It counts from the end (`last` is `nth(-1)`), which nothing documents, and
 errors name `nth(0)` and `nth(-1)` as `first` and `last`. Decide whether negative indexes are public.
