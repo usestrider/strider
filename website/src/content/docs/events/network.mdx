@@ -7,7 +7,7 @@ order: 2
 What a page shows can lag behind its calls to the server, or look the same when one failed. Waiting on the
 response an action causes checks what the server said, and decoding its body gives what it returned as typed data.
 
-## Requests and responses are events
+## Request and response events
 
 `NetworkRequest` and `NetworkResponse` are event modules, with `next`, `stream` and `history`.
 
@@ -33,7 +33,7 @@ const deleteOrder = Effect.fn("deleteOrder")(function*(page: Page.Page) {
 })
 ```
 
-## Bodies, decoded
+## Decoding bodies
 
 A status says the call went through, not what came back. A body decoded with a Schema gives the data the server
 returned, typed, and fails if it isn't that shape. A body is collected only when a subscription asks with `body`: a
@@ -77,7 +77,7 @@ import { Effect, Option } from "effect"
 
 const exportOrders = Effect.fn("exportOrders")(function*(page: Page.Page) {
   const exported = yield* NetworkResponse.next(page, {
-    url: "https://app.example.com/api/orders/export",
+    url: "https://shop.example.com/api/orders/export",
     body: (message) => message.arrayBuffer
   }).pipe(NetworkResponse.withBodyLimit("50 MiB"))
   yield* page.getByRole("button", { name: "Export orders" }).click()
@@ -95,7 +95,7 @@ const exportOrders = Effect.fn("exportOrders")(function*(page: Page.Page) {
 })
 ```
 
-## Watching all of it
+## Watching every request
 
 `stream` gives every match from now on. Given a context rather than a page, it watches every page in it, and its
 shared and service workers. This logs each `fetch` in the session until the scope closes:
@@ -113,7 +113,7 @@ const logFetches = Effect.fn("logFetches")(function*(page: Page.Page) {
 })
 ```
 
-## What already happened
+## History
 
 `history` reads the requests or responses already logged, without bodies:
 
@@ -130,7 +130,7 @@ const failedCalls = Effect.fn("failedCalls")(function*(page: Page.Page) {
 })
 ```
 
-## Who answered
+## Response sources
 
 A response from a cache or a service worker never reached the server, so a check of caching or offline support
 needs to know where it came from. `servedBy` is `"network"`, `"cache"`, `"serviceWorker"`, `"route"` when a
@@ -151,7 +151,7 @@ const shellWorksOffline = Effect.fn("shellWorksOffline")(function*(page: Page.Pa
 })
 ```
 
-## The headers as sent
+## Sent headers
 
 A request event's headers are what the browser reported on sending. Chromium and WebKit leave out some the network
 stack adds, such as `Cookie`. `NetworkRequest.headersSent` waits for the headers as sent (WebKit's still lack
@@ -177,7 +177,7 @@ const sentCookies = Effect.fn("sentCookies")(function*(page: Page.Page) {
 
 Credential headers, such as cookies and authorization, are redacted in logs, errors and spans.
 
-## Sending it yourself
+## Resending requests
 
 Rebuilt by hand, a call to the page's API misses what the page put in it, such as an auth header.
 `NetworkRequest.toHttpClientRequest` turns a captured request into an Effect `HttpClientRequest`, to send again or

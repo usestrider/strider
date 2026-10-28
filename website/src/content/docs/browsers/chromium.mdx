@@ -121,10 +121,10 @@ What changes when attached:
 ## What's different
 
 **Request events lack `Cookie`.** `NetworkResponse.headers` include `Set-Cookie`, but `NetworkRequest.headers` don't
-include `Cookie`. Use [`NetworkRequest.headersSent`](/docs/events/network#the-headers-as-sent).
+include `Cookie`. Use [`NetworkRequest.headersSent`](/docs/events/network#sent-headers).
 
 **A navigated-away page's body is dropped,** unless a [HAR recording](/docs/tools/recordings#har-files) or a
-subscription with [`body`](/docs/events/network#bodies-decoded) collects it.
+subscription with [`body`](/docs/events/network#decoding-bodies) collects it.
 
 **[Routes](/docs/events/routes) see CORS preflights,** the `OPTIONS` requests, on Chromium only. A route that fakes a
 cross-origin API must let them through, and answer with the headers CORS needs:

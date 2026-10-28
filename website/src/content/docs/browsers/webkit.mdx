@@ -205,7 +205,7 @@ be emulated.
 sent, and a host's cookie is set as its domain's.
 
 **Requests.** No `Cookie` header, in request events or
-[`headersSent`](/docs/events/network#the-headers-as-sent). Request bodies come as text.
+[`headersSent`](/docs/events/network#sent-headers). Request bodies come as text.
 
 **Storage is keyed by origin.** A cross-site frame's storage is keyed by its page's origin, port included, so a
 [saved storage state](/docs/pages/contexts#logging-in-once) restored at another port isn't found.

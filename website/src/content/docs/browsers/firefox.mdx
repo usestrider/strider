@@ -117,12 +117,12 @@ What changes when attached:
 `window` to share something.
 
 **Bodies need a subscription first.** BiDi keeps a body only if collection was set up before the request started,
-by a subscription with [`body`](/docs/events/network#bodies-decoded) or by
+by a subscription with [`body`](/docs/events/network#decoding-bodies) or by
 [`Har.record`](/docs/tools/recordings#har-files).
 
 **An unhandled rejection is reported as a throw,** so [`UncaughtException`](/docs/events/events#history)'s `kind` is `"unknown"`.
 
-**[`servedBy`](/docs/events/network#who-answered) is `"cacheOrServiceWorker"`** for both: Firefox can't tell them apart. A script reused from the memory
+**[`servedBy`](/docs/events/network#response-sources) is `"cacheOrServiceWorker"`** for both: Firefox can't tell them apart. A script reused from the memory
 cache shows up as a request.
 
 **Console text is Firefox's own formatting,** which writes `%f` as printf does: `1.250000`.
