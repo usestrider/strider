@@ -28,7 +28,7 @@ Some reasons belong to one module, such as [`Locator.StrictViolation`](#strictne
 more than one element. Others are shared, in `Reason`:
 
 - `InvalidInput`: an argument the operation can't use, such as a malformed selector. Fails at once.
-- `Unsupported`: this backend [can't do it](/docs/browsers/choosing#what-each-can-do). The reason names the
+- `Unsupported`: this backend [can't do it](/docs/browsers/choosing#capabilities). The reason names the
   capability.
 - `NotPermitted`: you don't have the access it needs, such as acting on a page you may only inspect.
 - `BackendFailure`: the browser refused or broke; its error is the `cause`.

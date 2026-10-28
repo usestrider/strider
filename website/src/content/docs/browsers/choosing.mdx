@@ -1,5 +1,5 @@
 ---
-title: Choosing a browser
+title: Browser support
 description: Three engines, what each can do, and how to run one program on all of them.
 order: 1
 ---
@@ -27,7 +27,7 @@ The rest of the guide works on all three, except where a browser lacks a capabil
   [`Popup.next`](/docs/events/events#popups), since WebKit names no opener; no downloads or file choosers; and no
   [`back`](/docs/api/browser/Page#Page.back) or [`forward`](/docs/api/browser/Page#Page.forward).
 
-## What each can do
+## Capabilities
 
 Generated from each backend's capability list, the one `browser.capabilities` returns. Hover a cell for the reason
 it's missing or partial. Columns are launched browsers; a second line says when attaching differs. A dash means the
@@ -36,7 +36,7 @@ lists WebDriver input.
 
 <Capabilities />
 
-## One program, every browser
+## Running on every browser
 
 A program needs a `Browser`, which a layer provides, so the same program or tests run on every backend by changing
 the layer. Each backend requires its own [platform services](/docs/installation#platform-services), WebKit's
@@ -88,7 +88,7 @@ for (const [name, backend] of Object.entries(backends)) {
 Each `layer` block launches its own browser. Blocks in one file run in turn; put each backend in its own file to
 run them in parallel.
 
-## Checking what a browser can do
+## Checking capabilities
 
 A step a backend can't do fails with `Unsupported`, so a program meant for every backend has to know where to do
 without it. Check the capability first when the answer changes what the program does; recover from `Unsupported`
