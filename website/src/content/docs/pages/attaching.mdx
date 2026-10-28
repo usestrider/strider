@@ -1,24 +1,23 @@
 ---
 title: Attached browsers
-description: Drive a browser that's already running, and take read or full access to the tabs you didn't open.
+description: Connecting to a browser that's already running, and the access levels of the tabs you didn't open.
 order: 5
 ---
 
 A launch starts a new browser. To drive one that a person or another program already has running, with its
-sessions and tabs as they are, attach to it; it keeps running after.
+logins and tabs as they are, attach to it; it keeps running after.
 
 ## Connecting
 
-`layerConnect` takes the browser's debugging address. Chrome opens its debugging port when started with one, and
-a profile of its own ([Chromium](/docs/browsers/chromium#attaching) says why):
+`layerConnect` takes the browser's endpoint. Chrome opens its debugging port when started with one, and a
+profile of its own ([Chromium](/docs/browsers/chromium#attaching) says why):
 
 ```sh
 google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug
 ```
 
 `browser.pages` is the browser's open tabs, a [`Watchable`](/docs/pages/expectations#watchables) read as
-`page.url` is. You didn't open them, so they're observed, and `inspect` takes read access
-([Access levels](#access-levels)):
+`page.url` is. You didn't open them, so they're observed, and [`inspect`](#access-levels) takes read access:
 
 ```ts
 import { NodeSocket } from "@effect/platform-node"
