@@ -83,7 +83,6 @@ searches inside the previous one's matches:
 
 ```ts
 import { Page } from "@usestrider/browser"
-
 import { Effect } from "effect"
 
 const openOrders = Effect.fn("openOrders")(function*(page: Page.Page) {
@@ -156,7 +155,6 @@ A failure names a locator by its queries, and `header .cart > span` doesn't say 
 
 ```ts
 import { Page } from "@usestrider/browser"
-
 import { Effect } from "effect"
 
 const cartCount = Effect.fn("cartCount")(function*(page: Page.Page) {
