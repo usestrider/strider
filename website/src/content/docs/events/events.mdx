@@ -41,7 +41,7 @@ Dialogs and file choosers also have [`handle`](/docs/events/kinds#dialogs):
 | `handle`  | dialogs and file choosers: registers a function that decides each one until its scope closes  |
 
 A filter is data, applied before events are buffered, so the events it rejects never count toward the
-[1,000 events a stream holds](#streams) for a slow consumer. `where`, after the filter, adds a predicate for
+[events a stream buffers](#streams) for a slow consumer. `where`, after the filter, adds a predicate for
 anything a filter can't say: it gets the event and returns an `Effect` of a boolean:
 
 ```ts
@@ -81,7 +81,8 @@ Each module has the verbs above, and filters on fields of its own:
 
 ## Several outcomes
 
-Subscribe to each before the action, then collect them together:
+One action can cause several events, such as a navigation and the response that placed the order. Subscribe to
+each before the action, then collect them together:
 
 ```ts
 import { NetworkResponse, Page, PageNavigation } from "@usestrider/browser"
@@ -115,9 +116,13 @@ const logErrors = Effect.fn("logErrors")(function*(page: Page.Page) {
 })
 ```
 
-- A stream ends when its page closes, and fails with [`TargetGone`](/docs/api/browser/Target#TargetGone) if the page crashes.
+- A stream ends when its page or context closes, and fails with
+  [`TargetGone`](/docs/api/browser/Target#TargetGone) when it ends any other way, such as a crash or a lost
+  connection.
 - A consumer more than 1,000 events behind fails the stream with
   [`EventOverflow`](/docs/api/browser/Subscription#EventOverflow). Nothing is dropped silently.
+  [`Subscription.withCapacity`](/docs/api/browser/Subscription#withCapacity) sets another bound for the streams
+  that subscribe inside it.
 
 ## History
 
