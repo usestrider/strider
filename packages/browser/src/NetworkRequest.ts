@@ -353,7 +353,11 @@ export const history = (
  *
  * **Gotchas**
  *
- * Redacted header values stay redacted in the result: a replay that needs them must set them again.
+ * - The result has the request's method, URL and headers, and no body: a replay of a `POST` sets one.
+ * - Header values are whole, so a replay sends the credentials the page put in, such as an `Authorization`
+ *   header. Effect's `Headers` still redact them wherever the result is logged or inspected.
+ * - On Chromium and WebKit, the headers leave out what the network adds, `Cookie` among them. On Firefox they
+ *   include the `Cookie` the browser sent, so the replay sends it too.
  *
  * **Example** (Replaying a search request)
  *
