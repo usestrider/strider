@@ -62,6 +62,8 @@ const downloadInvoice = Effect.fn("downloadInvoice")(function*(page: Page.Page) 
 
 ## Event modules
 
+Each module has the verbs above, and filters on fields of its own:
+
 | Module              | Reports                                                     | Filter                             |
 | ------------------- | ----------------------------------------------------------- | ---------------------------------- |
 | `PageNavigation`    | navigations of the page, and optionally its frames           | `url`, `frames`, and `waitUntil` for `next` |
