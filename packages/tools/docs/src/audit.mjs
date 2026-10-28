@@ -2,6 +2,8 @@
 // concept, sections with few words before their first code, and names the prose mentions that no block on the page
 // shows, with where else the guides show them. These are candidates for a reviewer to judge, not errors, so the
 // audit never fails. It also lists links to a guide or a heading that doesn't exist, which a split leaves behind.
+// With --consistency, it compares the pages instead: the forms of their titles and headings, how many examples
+// each has for its prose, the sites its examples visit, and the devices its prose uses.
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { codeBlocks, typescriptLanguages } from "./guides.mjs"
@@ -74,6 +76,34 @@ const namesIn = (span) => {
 
 const lastPart = (name) => name.slice(name.lastIndexOf(".") + 1)
 
+// A heading that reads as a sentence or a fragment of one, rather than a name: a verb, a comma, or a question word
+const phrase = new RegExp(
+  ",|\\b(?:is|are|has|have|can|can't|do|does|don't|doesn't|isn't|aren't|needs|takes|goes|runs|works|says|" +
+    "leaves|first|then)\\b|^(?:What|Who|When|Why|How)\\b",
+  "i"
+)
+
+/** The form of a title or heading: a name, a gerund ("Finding elements"), a phrase, or, for titles, an article's */
+const formOf = (text, { title = false } = {}) => {
+  const bare = text.replace(/`/g, "")
+  if (title && /^(?:A|An|The) /.test(bare)) return "article"
+  const rest = bare.replace(/^(?:A|An|The) /, "")
+  if (/^\p{Lu}\p{Ll}+ing\b/u.test(rest)) return "gerund"
+  if (phrase.test(rest)) return "phrase"
+  if (title && / and /.test(rest)) return "joined"
+  return "name"
+}
+
+// The sites examples visit: the example domains, and example.test
+const site = /https?:\/\/((?:[a-z0-9-]+\.)*(?:example\.[a-z]+|example\.test))/g
+
+const median = (values) => {
+  if (values.length === 0) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  const middle = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
+}
+
 /** A heading's anchor, as the site's rehypeHeadingIds makes it with github-slugger */
 const slug = (text) =>
   text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, "").replace(/ /g, "-")
@@ -96,7 +126,8 @@ const parse = (text) => {
 
 /** A guide: its sections and their leads, the names its prose mentions, what its code uses and what it links to */
 const read = (file, id, known) => {
-  const { data, lines, offset } = parse(fs.readFileSync(file, "utf8"))
+  const text = fs.readFileSync(file, "utf8")
+  const { data, lines, offset } = parse(text)
   const blocks = codeBlocks(lines.join("\n"))
   const typescript = blocks.filter((block) => typescriptLanguages.has(block.lang))
   const page = {
@@ -114,7 +145,12 @@ const read = (file, id, known) => {
     commands: blocks.filter((block) => !typescriptLanguages.has(block.lang)).map((block) => block.code),
     links: new Set(),
     hrefs: [],
-    anchors: new Set()
+    anchors: new Set(),
+    allBlocks: blocks.length,
+    sites: Array.from(text.matchAll(site), ([, host]) => host),
+    declares: typescript.reduce((n, block) => n + (block.code.match(/^declare const /gm)?.length ?? 0), 0),
+    asides: 0,
+    boldLeads: 0
   }
   let fenced = false
   let current = page.lead
@@ -126,6 +162,8 @@ const read = (file, id, known) => {
       continue
     }
     if (fenced || /^\s*import .* from /.test(raw)) continue
+    if (/^\s*<Aside\b/.test(raw)) page.asides++
+    if (/^\*\*[^*]+\*\*/.test(raw)) page.boldLeads++
     const head = heading.exec(raw)
     if (head !== null) {
       const base = slug(head[2])
@@ -237,9 +275,87 @@ export const auditGuides = async (root, dir) => {
         short: code && lead < shortLead
       })),
       unshown,
-      broken
+      broken,
+      style: {
+        titleForm: formOf(page.title, { title: true }),
+        headingForms: page.sections.map((section) => formOf(section.title)),
+        blocks: page.allBlocks,
+        blocksPer100Words: page.words === 0 ? 0 : Math.round((page.allBlocks / page.words) * 1000) / 10,
+        sites: [...new Set(page.sites)],
+        declares: page.declares,
+        asides: page.asides,
+        boldLeads: page.boldLeads,
+        sectionWords: {
+          median: median(page.sections.map((section) => section.words)),
+          max: Math.max(0, ...page.sections.map((section) => section.words))
+        }
+      }
     }
   })
+}
+
+const count = (items) => {
+  const counts = new Map()
+  for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1)
+  return [...counts].sort((a, b) => b[1] - a[1])
+}
+
+/** The guides compared: where they differ in form, in how many examples they give, and in what their prose uses */
+const consistencyReport = (audits) => {
+  const out = ["Consistency across the guide", ""]
+  const titles = Map.groupBy(audits, (page) => page.style.titleForm)
+  out.push("Page titles, by form:")
+  for (const [form, pages] of [...titles].sort((a, b) => b[1].length - a[1].length)) {
+    out.push(`  ${form.padEnd(8)} ${pages.length}  ${pages.map((page) => page.title).join(" · ")}`)
+  }
+  const headings = count(audits.flatMap((page) => page.style.headingForms))
+  out.push("", `Section headings, by form: ${headings.map(([form, n]) => `${form} ${n}`).join(", ")}`)
+  for (const page of audits) {
+    const forms = count(page.style.headingForms)
+    if (forms.length < 2) continue
+    const named = page.sections.map((section, i) => `${section.title} (${page.style.headingForms[i]})`)
+    out.push(`  § ${page.section} ${page.title}: ${forms.map(([form, n]) => `${n} ${form}`).join(", ")}`)
+    out.push(`      ${named.join(" · ")}`)
+  }
+  const densities = audits.map((page) => page.style.blocksPer100Words)
+  const middle = median(densities)
+  out.push("", `Code blocks per 100 words of prose: median ${middle}`)
+  for (const page of audits) {
+    const density = page.style.blocksPer100Words
+    const flag = density < middle / 2
+      ? "  fewer than half the median"
+      : density > middle * 2
+      ? "  over twice the median"
+      : ""
+    out.push(
+      `  § ${page.section.padEnd(4)} ${page.title.padEnd(30)} ${
+        String(density).padStart(4)
+      }  (${page.style.blocks} blocks)${flag}`
+    )
+  }
+  const sites = count(audits.flatMap((page) => page.style.sites))
+  out.push(
+    "",
+    `Sites in examples, by how many pages visit them: ${sites.map(([host, n]) => `${host} ${n}`).join(", ")}`
+  )
+  const devices = [
+    ["Blocks written as `declare const` values rather than steps", (page) => page.style.declares],
+    ["Callouts (<Aside>)", (page) => page.style.asides],
+    ["Paragraphs led by a bold label", (page) => page.style.boldLeads]
+  ]
+  for (const [label, of] of devices) {
+    const using = audits.filter((page) => of(page) > 0)
+    out.push("", `${label}: ${using.length === 0 ? "none" : using.map((page) => `${page.id} ${of(page)}`).join(", ")}`)
+  }
+  out.push("", "Words per section, median and longest, by page:")
+  for (const page of audits) {
+    out.push(
+      `  § ${page.section.padEnd(4)} ${page.title.padEnd(30)} ${String(page.style.sectionWords.median).padStart(5)} ${
+        String(page.style.sectionWords.max).padStart(5)
+      }`
+    )
+  }
+  return out.join("\n") + "\n"
 }
 
 const pagesList = (ids) => ids.length > 3 ? `${ids.slice(0, 3).join(", ")} and ${ids.length - 3} more` : ids.join(", ")
@@ -297,9 +413,13 @@ const report = (audits) => {
   return out.join("\n") + "\n"
 }
 
-/** Writes the audit of the pages named (ids such as `events/events`), or of every page, as text or JSON */
-export const audit = async (root, dir, { json = false, pages = [] } = {}) => {
+/**
+ * Writes the audit of the pages named (ids such as `events/events`), or of every page, as text or JSON; with
+ * `consistency`, the comparison of the pages instead
+ */
+export const audit = async (root, dir, { json = false, consistency = false, pages = [] } = {}) => {
   const audits = (await auditGuides(root, dir)).filter((page) => pages.length === 0 || pages.includes(page.id))
-  process.stdout.write(json ? JSON.stringify(audits, null, 2) + "\n" : report(audits))
+  const text = consistency ? consistencyReport(audits) : report(audits)
+  process.stdout.write(json ? JSON.stringify(audits, null, 2) + "\n" : text)
   return 0
 }

@@ -10,7 +10,7 @@
 //                   backend's capabilities to .data/api-reference/capabilities.json
 //   audit           list, for each guide, what its review checks: size, sections with little before their code,
 //                   and names the prose mentions that no block on the page shows; --json for the data, and page
-//                   ids (events/events) to audit only those
+//                   ids (events/events) to audit only those; --consistency compares the pages instead
 import { spawnSync } from "node:child_process"
 import * as path from "node:path"
 
@@ -54,12 +54,13 @@ switch (command) {
   case "audit":
     process.exitCode = await (await import("./audit.mjs")).audit(root, guides, {
       json: args.includes("--json"),
+      consistency: args.includes("--consistency"),
       pages: args.filter((arg) => !arg.startsWith("--"))
     })
     break
   default:
     process.stderr.write(
-      "usage: strider-docs jsdocs | examples | format [--check] | index | api-reference | audit [--json] [page…]\n"
+      "usage: strider-docs jsdocs | examples | format [--check] | index | api-reference | audit [--json] [--consistency] [page…]\n"
     )
     process.exitCode = 1
 }

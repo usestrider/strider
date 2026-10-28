@@ -18,7 +18,10 @@ concept; pages with no paragraph before their first section, and sections with u
 code; and each name the prose puts in inline code that no block on the page uses, with whether another guide shows it
 and whether this page links there. A name counts when the public packages' own source uses it as an identifier,
 which leaves out HTML attributes, DOM names and plain values. It also lists links to a guide or a heading that
-doesn't exist, with headings' anchors made as the site makes them; links into the reference aren't checked.
+doesn't exist, with headings' anchors made as the site makes them; links into the reference aren't checked. With
+`--consistency`, it compares the pages instead: the form of each title and heading (a name, a gerund such as
+"Finding elements", a phrase, a title's article), code blocks per 100 words of prose against the median, the sites
+examples visit, `declare const` blocks, callouts and bold-label paragraphs, and each page's section lengths.
 
 Once the modules are implemented, `@effect/doctest` runs the examples instead of only type-checking them: the fences
 are already marked `ts import.meta.vitest`.
