@@ -57,7 +57,7 @@ The chapters are the groups in `src/features/docs/navigation.ts`, each a directo
 
 | Chapter                   | Directory | Pages                                                         |
 | ------------------------- | --------- | ------------------------------------------------------------- |
-| 1. Getting started        | (top)     | introduction, installation, a first program, errors, deadlines |
+| 1. Getting started        | (top)     | introduction, installation, first program, errors, deadlines |
 | 2. Pages and locators     | `pages/`  | finding elements, actions, expectations and reads, contexts, attaching to a browser |
 | 3. Events and the network | `events/` | events, requests and responses, routes, scripts and time      |
 | 4. Testing and recordings | `tools/`  | Vitest, traces and HAR files |
