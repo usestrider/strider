@@ -162,7 +162,7 @@ const productPage = Effect.fn("productPage")(function*(page: Page.Page) {
 | `count`, `all`                        | how many elements match, and a locator for each                  |
 | `page.title`, `page.readHtml`         | the document's title, and its HTML                               |
 
-Reads need exactly one match, as in [Strictness](/docs/pages/locators#strictness); one that hasn't rendered yet
+Reads need [exactly one match](/docs/errors#strictness); one that hasn't rendered yet
 fails with `NoMatch`, so expect it first. `count` and `all` take any number, so count what may not be there:
 
 ```ts

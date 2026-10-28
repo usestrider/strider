@@ -1,6 +1,6 @@
 ---
 title: Locators
-description: Locators describe how to find an element, by role, text or label, and find it again each time they're used.
+description: Locators and the elements they find, the queries, matching text, narrowing to the matches you mean, labels for errors and traces, frames, and counting matches.
 order: 1
 ---
 
@@ -195,14 +195,12 @@ const payByCard = Effect.fn("payByCard")(function*(page: Page.Page) {
 It finds the iframe again on every attempt, so a frame that reloads or arrives late is waited for like any
 element. Cross-site frames work the same, and frames nest: `payment.frame(payment.locator("iframe"))`.
 
-## Strictness
+## Counting matches
 
-Actions and reads need exactly one match. Several fail at once with
-[`StrictViolation`](/docs/errors#strictness). None is waited for by an
-action or expectation, and fails a read at once with [`NoMatch`](/docs/api/browser/Locator#NoMatch).
-
-`count` and `all` take any number, and read once without waiting, so expect the list first. `all` gives a locator
-per current match:
+An action or read needs exactly one match: several fail it at once with
+[`StrictViolation`](/docs/errors#strictness), and none is waited for by an action or expectation, and fails a
+read at once with [`NoMatch`](/docs/api/browser/Locator#NoMatch). For a list of any length, `count` and `all` take
+any number, and read once without waiting, so expect the list first. `all` gives a locator per current match:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
