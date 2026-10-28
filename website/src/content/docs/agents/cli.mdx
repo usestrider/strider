@@ -58,7 +58,7 @@ filled label=Email on main · 17 ms
 ## Waits across commands
 
 A download the click starts can arrive before the click's command returns, so subscribe in a command before it, as
-a [program does](/docs/events/events#subscribe-act-collect). `next` prints a wait's name; `await` collects it in a
+a [program does](/docs/events/events#subscribing-before-acting). `next` prints a wait's name; `await` collects it in a
 later command. Durations are written as Effect's are, such as `"2 minutes"`:
 
 ```sh

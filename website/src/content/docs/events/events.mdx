@@ -7,7 +7,7 @@ order: 1
 An action's effects, such as a popup or a download, can arrive before the action returns, so a program that looks
 for them afterwards can miss them. A subscription made before the action sees everything the action causes.
 
-## Subscribe, act, collect
+## Subscribing before acting
 
 `Download.next` subscribes when it's called and gives a wait, an `Effect` of the first matching download, so call
 it before the action:
@@ -24,8 +24,8 @@ const exportCsv = Effect.fn("exportCsv")(function*(page: Page.Page) {
 })
 ```
 
-- Subscribing after the click is a race. If the download came first, the wait times out with a hint: "a download
-  came 12 ms before Download.next subscribed; call Download.next before the action that causes it".
+Subscribing after the click is a race. If the download came first, the wait times out with a hint: "a download
+came 12 ms before Download.next subscribed; call Download.next before the action that causes it".
 
 ## Next, stream and history
 
@@ -39,21 +39,6 @@ Dialogs and file choosers also have [`handle`](#dialogs):
 | `stream`  | subscribes now; gives a `Stream` of every match from then on                                  |
 | `history` | reads the matches already logged, and never waits                                             |
 | `handle`  | dialogs and file choosers: registers a function that decides each one until its scope closes  |
-
-| Module              | Reports                                                     | Filter                             |
-| ------------------- | ----------------------------------------------------------- | ---------------------------------- |
-| `PageNavigation`    | navigations of the page, and optionally its frames           | `url`, `frames`, and `waitUntil` for `next` |
-| `Popup`             | pages this page opened                                       | `url`                              |
-| `Dialog`            | alerts, confirms, prompts and `beforeunload`                 | `kind`                             |
-| `FileChooser`       | file pickers the page opened                                 | `multiple`                         |
-| `Download`          | downloads                                                    | `url`                              |
-| [`NetworkRequest`](/docs/events/network) | requests, one per redirect hop                               | `url`, `method`, `resourceType`    |
-| [`NetworkResponse`](/docs/events/network) | responses, with their bodies when asked                      | `url`, `method`, `status`, `body`  |
-| `ConsoleMessage`    | console output                                               | `level`, `text`                    |
-| `UncaughtException` | errors nothing caught, and rejections nothing handled        | `message`                          |
-| [`BrowserWorker`](/docs/api/browser/BrowserWorker) | workers the page or context started                          | `url`, `kind`                      |
-| [`NetworkConnection`](/docs/api/browser/NetworkConnection) | WebSockets and event sources, with their frames               | `url`, `kind`                      |
-| [`AutoResolution`](/docs/api/browser/AutoResolution) | dialogs, choosers and requests decided by a default          | `subject`                          |
 
 A filter is data, applied before events are buffered, so the events it rejects never count toward the 1,000 events a
 stream holds for a slow consumer ([Streams](#streams)). `where`, after the filter, adds a predicate for anything a filter can't say: it gets the event and returns an
@@ -74,6 +59,23 @@ const downloadInvoice = Effect.fn("downloadInvoice")(function*(page: Page.Page) 
   yield* file.saveAs(`./invoices/${file.suggestedFilename}`)
 })
 ```
+
+## Event modules
+
+| Module              | Reports                                                     | Filter                             |
+| ------------------- | ----------------------------------------------------------- | ---------------------------------- |
+| `PageNavigation`    | navigations of the page, and optionally its frames           | `url`, `frames`, and `waitUntil` for `next` |
+| `Popup`             | pages this page opened                                       | `url`                              |
+| `Dialog`            | alerts, confirms, prompts and `beforeunload`                 | `kind`                             |
+| `FileChooser`       | file pickers the page opened                                 | `multiple`                         |
+| `Download`          | downloads                                                    | `url`                              |
+| [`NetworkRequest`](/docs/events/network) | requests, one per redirect hop                               | `url`, `method`, `resourceType`    |
+| [`NetworkResponse`](/docs/events/network) | responses, with their bodies when asked                      | `url`, `method`, `status`, `body`  |
+| `ConsoleMessage`    | console output                                               | `level`, `text`                    |
+| `UncaughtException` | errors nothing caught, and rejections nothing handled        | `message`                          |
+| [`BrowserWorker`](/docs/api/browser/BrowserWorker) | workers the page or context started                          | `url`, `kind`                      |
+| [`NetworkConnection`](/docs/api/browser/NetworkConnection) | WebSockets and event sources, with their frames               | `url`, `kind`                      |
+| [`AutoResolution`](/docs/api/browser/AutoResolution) | dialogs, choosers and requests decided by a default          | `subject`                          |
 
 ## Navigations
 
@@ -120,11 +122,9 @@ Here [`Dialog.handle`](#dialogs) accepts every dialog the popup opens. The popup
 document loads, so a handler or route registered on it applies to that
 document.
 
-<Aside type="caution">
 On Chromium, a popup's opener stops rendering, and actions on it time out with a hint saying so. Call
 `yield* page.activate` ([reference](/docs/api/browser/Page#Page.activate)) first, or make the context with
 [`focus: "emulated"`](/docs/tools/testing#many-pages-at-once). Firefox and WebKit keep rendering it.
-</Aside>
 
 ## Dialogs
 

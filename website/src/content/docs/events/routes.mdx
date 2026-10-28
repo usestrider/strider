@@ -59,7 +59,7 @@ const asTestAccount = Effect.fn("asTestAccount")(function*(page: Page.Page) {
 - A route's handle counts the requests it was asked about in [`hits`](/docs/pages/attaching#access-levels), a
   watchable number.
 - A handler that fails, is interrupted or times out lets the request continue. The failure is logged and reported
-  as an [`AutoResolution`](/docs/events/events#next-stream-and-history) event.
+  as an [`AutoResolution`](/docs/events/events#event-modules) event.
 
 A handler gets the paused request, so it can decide by method, headers or body, and pass the rest on with
 `fallthrough`. The handle's `remove` ends a route before its scope does, to see the page recover:
