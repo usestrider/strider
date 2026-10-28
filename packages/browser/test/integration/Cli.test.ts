@@ -128,7 +128,12 @@ describe("strider", () => {
         // A wait started by one command and collected by another
         assert.match((yield* shop("next", "popup", "--within", "20 seconds")).out, /^w1: waiting for the next popup/)
         assert.strictEqual((yield* shop("click", `role=button[name="Open"]`)).code, 0)
-        assert.match((yield* run("-s", "shop", "await", "w1")).out, /popup p\d+/)
+        const awaited = yield* run("-s", "shop", "await", "w1")
+        assert.match(awaited.out, /popup p\d+/)
+        // A popup named after it opened, whose steps then name it so
+        const popup = /popup (p\d+)/.exec(awaited.out)![1]!
+        assert.strictEqual((yield* run("-s", "shop", "-p", popup, "page", "name", "child")).code, 0)
+        assert.strictEqual((yield* run("-s", "shop", "-p", "child", "expect", "css=p", "visible")).code, 0)
         // A route and a dialog decision, each a registration
         const routed = yield* shop("route", "**/api/status", "fulfill", "--body", "all good")
         assert.match(routed.out, /^r1: fulfill/)
@@ -163,6 +168,10 @@ describe("strider", () => {
         assert.include(exported, `shop.getByRole("button", { name: "Sign in", exact: true }).click()`)
         assert.include(exported, `.fill(yield* Config.Redacted("SECRET_PW"))`)
         assert.include(exported, `const w1 = yield* Popup.next(shop).pipe(Deadline.within("20 seconds"))`)
+        // The popup the session named is a variable of that name from then on
+        assert.include(exported, `const ${popup} = yield* w1\n`)
+        assert.include(exported, `const child = ${popup}\n`)
+        assert.include(exported, `yield* child.locator("p").pipe(Expect.toBeVisible)\n`)
         // The route the session removed ends where it did, through its handle; the dialog handler it kept doesn't
         assert.include(exported, `const r1 = yield* shop.route("**/api/status", () => Effect.succeed(Route.fulfill(`)
         assert.include(exported, `yield* r1.remove\n`)
@@ -170,7 +179,7 @@ describe("strider", () => {
         assert.include(exported, `// TODO strider run ${path.join(fixtures, "open-popup.ts")}`)
         // The page's own script holds the password it checks, so the statement is what is checked
         assert.notInclude(exported, `.fill("hunter2")`)
-        assert.match((yield* run("sessions")).out, /^shop  chromium · pages shop, p\d+, p\d+/)
+        assert.match((yield* run("sessions")).out, /^shop  chromium · pages shop, child, p\d+/)
       } finally {
         yield* run("-s", "shop", "stop")
       }

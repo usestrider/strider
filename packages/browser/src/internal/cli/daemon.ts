@@ -83,11 +83,11 @@ interface Daemon {
 const callTool = (daemon: Daemon, tool: keyof Tools.Tools, params: Record<string, unknown>) =>
   Effect.flatMap(daemon.session.toolkit.handle(tool, params as never), Stream.runLast)
 
-/** A tool call's target as a locator expression, for the exported test: a ref is the locator its snapshot names. */
+/** A tool call's target as a query on its page, for the exported test: a ref is the locator its snapshot names. */
 const targetOf = (daemon: Daemon, params: Record<string, unknown>) => {
   const page = typeof params.page === "string" ? params.page : undefined
   return typeof params.target === "string" && page !== undefined
-    ? ExportTest.locatorOf(page, params.target, Option.getOrUndefined(daemon.session.latest(page)))
+    ? ExportTest.queryOf(params.target, Option.getOrUndefined(daemon.session.latest(page)))
     : undefined
 }
 
@@ -99,12 +99,11 @@ const record = (
   outcome: unknown,
   target: string | undefined
 ) => {
-  const page = typeof params.page === "string" ? params.page : undefined
   daemon.steps.push({
     _tag: "Tool",
     tool: name,
     params,
-    target: target === undefined ? undefined : target.replace(/^[A-Za-z_$][\w$]*\./, `${variable(page!)}.`),
+    target,
     result: typeof outcome === "string" ? outcome : handleOf(outcome)
   })
 }
@@ -458,6 +457,7 @@ const commands = (daemon: Daemon) => {
         Effect.gen(function*() {
           const from = yield* pageFlag
           yield* daemon.session.rename(from, name).pipe(Effect.mapError((failure) => new CommandFailed(failure)))
+          daemon.steps.push({ _tag: "Rename", from, to: name })
           yield* Console.log(`${from} is now ${name}`)
         }))
     ])
@@ -597,11 +597,6 @@ const commands = (daemon: Daemon) => {
       stop
     ])
   )
-}
-
-const variable = (name: string) => {
-  const camel = name.replace(/-([a-z0-9])/g, (_, letter: string) => letter.toUpperCase())
-  return /^[A-Za-z_$][\w$]*$/.test(camel) ? camel : `page_${camel.replace(/\W/g, "_")}`
 }
 
 const failedWith = (error: unknown) => new CommandFailed(ToolkitImpl.toFailure(error))

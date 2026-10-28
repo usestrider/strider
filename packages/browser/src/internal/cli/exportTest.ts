@@ -11,11 +11,13 @@ import type * as Snapshot from "../../Snapshot.ts"
 export type Step =
   | { readonly _tag: "NewPage"; readonly page: string; readonly url: string | undefined }
   | { readonly _tag: "Remove"; readonly registration: string }
+  | { readonly _tag: "Rename"; readonly from: string; readonly to: string }
   | { readonly _tag: "Segment"; readonly file: string }
   | {
     readonly _tag: "Tool"
     readonly tool: string
     readonly params: Readonly<Record<string, unknown>>
+    /** The target as a query on its page (`queryOf`), read from the snapshot the call was checked against. */
     readonly target: string | undefined
     /** The handle the call printed, a wait's (`w1`) or a registration's (`r1`), or else its outcome's text. */
     readonly result: string | undefined
@@ -39,24 +41,26 @@ export const focusFor = (browser: Browser): "emulated" | "system" =>
 /** Whether a session launches WebKit, which reaches its browser over TCP. */
 const launchesWebKit = (browser: Browser) => browser._tag === "Launch" && browser.backend === "webkit"
 
-/** A locator expression for a target, on the page variable `page`; a ref as its snapshot named it. */
-export const locatorOf = (
-  page: string,
+/**
+ * A target as a query on its page, such as `getByRole("button")`; a ref as its snapshot named it. The test puts the
+ * page's variable before it, which a page renamed later changes.
+ */
+export const queryOf = (
   target: string,
   snapshot: Snapshot.Snapshot | undefined
 ): string => {
   if (/^e\d+$/.test(target)) {
     const node = snapshot?.refs.get(target as Snapshot.RefId)
-    if (node === undefined) return `${page}.locator("*") /* ${target}: no snapshot named it */`
+    if (node === undefined) return `locator("*") /* ${target}: no snapshot named it */`
     const name = node.name._tag === "None" ? undefined : node.name.value
     if (node.role._tag === "Aria") {
       return name === undefined
-        ? `${page}.getByRole(${quote(node.role.role)})`
-        : `${page}.getByRole(${quote(node.role.role)}, { name: ${quote(name)}, exact: true })`
+        ? `getByRole(${quote(node.role.role)})`
+        : `getByRole(${quote(node.role.role)}, { name: ${quote(name)}, exact: true })`
     }
     return name === undefined
-      ? `${page}.locator("*") /* ${target}: a ${node.role.role} element with no name */`
-      : `${page}.getByText(${quote(name)}, { exact: true })`
+      ? `locator("*") /* ${target}: a ${node.role.role} element with no name */`
+      : `getByText(${quote(name)}, { exact: true })`
   }
   const [kind, ...rest] = target.split("=")
   const value = rest.join("=")
@@ -65,29 +69,56 @@ export const locatorOf = (
     case "role": {
       const match = /^([a-z]+)(?:\[name="(.*)"\])?$/.exec(value)
       return match?.[2] === undefined
-        ? `${page}.getByRole(${quote(match?.[1] ?? value)})`
-        : `${page}.getByRole(${quote(match[1]!)}, { name: ${quote(match[2])}, exact: true })`
+        ? `getByRole(${quote(match?.[1] ?? value)})`
+        : `getByRole(${quote(match[1]!)}, { name: ${quote(match[2])}, exact: true })`
     }
     case "text":
       return exact === undefined
-        ? `${page}.getByText(${quote(value)})`
-        : `${page}.getByText(${quote(exact)}, { exact: true })`
+        ? `getByText(${quote(value)})`
+        : `getByText(${quote(exact)}, { exact: true })`
     case "label":
       return exact === undefined
-        ? `${page}.getByLabel(${quote(value)})`
-        : `${page}.getByLabel(${quote(exact)}, { exact: true })`
+        ? `getByLabel(${quote(value)})`
+        : `getByLabel(${quote(exact)}, { exact: true })`
     case "testid":
-      return `${page}.getByTestId(${quote(exact ?? value)})`
+      return `getByTestId(${quote(exact ?? value)})`
     default:
-      return `${page}.locator(${quote(value)})`
+      return `locator(${quote(value)})`
   }
 }
+
+/** A locator expression for a target, on the page variable `page`. */
+export const locatorOf = (page: string, target: string, snapshot: Snapshot.Snapshot | undefined): string =>
+  `${page}.${queryOf(target, snapshot)}`
 
 /** A JavaScript name for a page's name. */
 const variable = (name: string) => {
   const camel = name.replace(/-([a-z0-9])/g, (_, letter: string) => letter.toUpperCase())
   return /^[A-Za-z_$][\w$]*$/.test(camel) ? camel : `page_${camel.replace(/\W/g, "_")}`
 }
+
+/** The names the test file declares besides its pages, which a page's variable mustn't take. */
+const reserved = [
+  "browser",
+  "context",
+  "describe",
+  "it",
+  "layer",
+  "saved",
+  "Bidi",
+  "Chromium",
+  "Effect",
+  "FileSystem",
+  "Firefox",
+  "HttpServerResponse",
+  "Layer",
+  "NodeServices",
+  "NodeSocket",
+  "Redacted",
+  "Schema",
+  "SocketConnector",
+  "WebKit"
+]
 
 const imports: Readonly<Record<string, string>> = {
   Browser: "Browser",
@@ -128,7 +159,17 @@ export const render = (options: {
   const removed = new Set(options.steps.flatMap((step) => step._tag === "Remove" ? [step.registration] : []))
   const handle = (step: Step) =>
     step._tag === "Tool" && step.result !== undefined && removed.has(step.result) ? `const ${step.result} = ` : ""
-  const pages = new Set<string>()
+  // Each page's variable, by the name the session gives it now: a page renamed is the variable of its new name
+  const taken = new Set([...reserved, ...Object.keys(imports)])
+  const variables = new Map<string, string>()
+  const declare = (page: string) => {
+    let name = variable(page)
+    for (let n = 2; taken.has(name); n++) name = `${variable(page)}_${n}`
+    taken.add(name)
+    variables.set(page, name)
+    return name
+  }
+  const pageVariable = (page: string) => variables.get(page) ?? variable(page)
   const value = (text: string) => {
     const secret = /^%([A-Za-z_][\w-]*)%$/.exec(text)?.[1]
     if (secret === undefined) return quote(text)
@@ -143,14 +184,20 @@ export const render = (options: {
       continue
     }
     if (step._tag === "NewPage") {
-      const page = variable(step.page)
-      pages.add(step.page)
+      const page = declare(step.page)
       body.push(`const ${page} = yield* context.newPage`)
       if (step.url !== undefined) body.push(`yield* ${page}.goto(${quote(step.url)})`)
       continue
     }
     if (step._tag === "Remove") {
       body.push(`yield* ${step.registration}.remove`)
+      continue
+    }
+    if (step._tag === "Rename") {
+      // `page name`: later steps name the page by its new name, which is a variable of its own from here
+      const from = pageVariable(step.from)
+      variables.delete(step.from)
+      body.push(`const ${declare(step.to)} = ${from}`)
       continue
     }
     if (step._tag === "Tool" && step.tool === "control") {
@@ -161,8 +208,8 @@ export const render = (options: {
       continue
     }
     const params = step.params as Record<string, string | ReadonlyArray<string> | number | undefined>
-    const page = typeof params.page === "string" ? variable(params.page) : "page"
-    const target = step.target ?? ""
+    const page = typeof params.page === "string" ? pageVariable(params.page) : "page"
+    const target = step.target === undefined ? "" : `${page}.${step.target}`
     switch (step.tool) {
       case "goto":
         body.push(`yield* ${page}.goto(${quote(String(params.url))})`)
@@ -237,7 +284,7 @@ export const render = (options: {
         body.push(
           popup === undefined
             ? `yield* ${String(params.wait)}`
-            : `const ${variable(popup.replace(/,$/, ""))} = yield* ${String(params.wait)}`
+            : `const ${declare(popup.replace(/,$/, ""))} = yield* ${String(params.wait)}`
         )
         break
       }

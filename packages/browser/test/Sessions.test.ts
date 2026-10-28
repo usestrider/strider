@@ -165,6 +165,45 @@ describe("strider export test", () => {
     assert.include(text, `        yield* r1.remove\n        yield* r2.remove\n`)
   })
 
+  it("gives a page the session renamed a variable of its new name, which later steps use", () => {
+    const { text } = ExportTest.render({
+      name: "shop",
+      browser: launched,
+      secrets: {},
+      state: undefined,
+      steps: [
+        { _tag: "NewPage", page: "main", url: undefined },
+        tool("next", { page: "main", event: "popup" }, "w1"),
+        {
+          _tag: "Tool",
+          tool: "click",
+          params: { page: "main", target: `role=button[name="Open"]` },
+          target: `getByRole("button", { name: "Open", exact: true })`,
+          result: undefined
+        },
+        tool("await", { wait: "w1" }, "popup p2, at about:blank so far"),
+        { _tag: "Rename", from: "p2", to: "consent-form" },
+        {
+          _tag: "Tool",
+          tool: "click",
+          params: { page: "consent-form", target: "e3" },
+          target: `getByRole("button", { name: "Accept", exact: true })`,
+          result: undefined
+        },
+        // A name a page gave up is a new page's, with a variable of its own
+        { _tag: "Rename", from: "main", to: "shop" },
+        { _tag: "NewPage", page: "main", url: undefined },
+        tool("goto", { page: "main", url: "https://shop.example.com/help" }),
+        tool("goto", { page: "shop", url: "https://shop.example.com/cart" })
+      ]
+    })
+    assert.include(text, `const p2 = yield* w1\n        const consentForm = p2\n`)
+    assert.include(text, `yield* consentForm.getByRole("button", { name: "Accept", exact: true }).click()`)
+    assert.include(text, `const shop = main\n        const main_2 = yield* context.newPage\n`)
+    assert.include(text, `yield* main_2.goto("https://shop.example.com/help")\n`)
+    assert.include(text, `yield* shop.goto("https://shop.example.com/cart")\n`)
+  })
+
   it("answers a dialog of unknown kind with the text, as the session did", () => {
     const { text } = ExportTest.render({
       name: "shop",
