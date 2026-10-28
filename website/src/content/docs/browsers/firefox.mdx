@@ -41,7 +41,7 @@ const AdasFirefox = Firefox.layer({
   ignored. `LaunchProfile.automation`, the default, writes: no first-run page,
   updates or telemetry, the JSON viewer off, and popups opened as windows.
 - `LaunchProfile.stock` sets nothing, for Firefox as a person's install shows it, with its first-run page, JSON
-  viewer and popups in tabs. [`LaunchProfile.concurrent`](/docs/tools/testing#many-pages-at-once) also turns off
+  viewer and popups in tabs. [`LaunchProfile.concurrent`](/docs/tools/testing#concurrent-pages) also turns off
   background timer throttling, for pages that run side by side.
 - A `userDataDir` of your own is never deleted. Its `user.js` keeps its own preferences; Strider's go in a block
   after them, replaced at each launch.
@@ -52,7 +52,7 @@ Firefox renders a background tab about once a second, too seldom for an action t
 opens is its own window, and the default profile opens popups as windows too.
 
 A tab of an attached Firefox, or a popup under `LaunchProfile.stock`, is still a tab: call `yield* page.activate`
-before acting on it, as [Attaching](#attaching) shows. [`focus: "emulated"`](/docs/tools/testing#many-pages-at-once) isn't available on Firefox.
+before acting on it, as [Attaching](#attaching) shows. [`focus: "emulated"`](/docs/tools/testing#concurrent-pages) isn't available on Firefox.
 
 ## Attaching
 

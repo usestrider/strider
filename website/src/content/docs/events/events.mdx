@@ -124,7 +124,7 @@ document.
 
 On Chromium, a popup's opener stops rendering, and actions on it time out with a hint saying so. Call
 `yield* page.activate` ([reference](/docs/api/browser/Page#Page.activate)) first, or make the context with
-[`focus: "emulated"`](/docs/tools/testing#many-pages-at-once). Firefox and WebKit keep rendering it.
+[`focus: "emulated"`](/docs/tools/testing#concurrent-pages). Firefox and WebKit keep rendering it.
 
 ## Dialogs
 

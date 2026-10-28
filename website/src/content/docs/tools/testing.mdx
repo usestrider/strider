@@ -1,5 +1,5 @@
 ---
-title: Testing with Vitest
+title: Tests with Vitest
 description: A test is a program with a browser layer. Strider adds no fixtures of its own, only a way to attach files to the test, and a fake browser for testing events.
 order: 1
 ---
@@ -16,7 +16,7 @@ Tests run under Vitest with Effect's `@effect/vitest`, and `@usestrider/vitest` 
 npm install --save-dev vitest @effect/vitest @usestrider/vitest
 ```
 
-## A test is a program
+## Writing a test
 
 A test opens its page as a script does, with `Browser.newPage()`. `VitestBrowser.layer` provides the backend you
 give it, unchanged, plus `TestRun`, the running test, which [attaching files](#attaching-files) needs:
@@ -69,7 +69,7 @@ layer(BrowserLive, { excludeTestServices: true })("checkout", (it) => {
 - A step that takes a page, such as `addToCart`, runs the same in a test and a script. To sign in once per file,
   start each test's page from saved storage state ([Logging in once](/docs/pages/contexts#logging-in-once)).
 
-## Many pages at once
+## Concurrent pages
 
 A browser throttles the timers and rendering of pages in the background and gives focus to one page only, so
 with several pages at once, a background page's actions can time out and `toBeFocused` fails on all but one. Use

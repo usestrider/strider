@@ -36,7 +36,7 @@ const LikeAUser = Chromium.layer({
   with no message size limit and no debugging port ([the raw protocol](#the-raw-protocol)).
 - Don't put a URL in `args`: headless Chromium opens one page only.
 - `LaunchProfile.automation`, the default, turns off first-run pages, sync, updates and background networking.
-  Pages can't tell. [`LaunchProfile.concurrent`](/docs/tools/testing#many-pages-at-once) also stops throttling
+  Pages can't tell. [`LaunchProfile.concurrent`](/docs/tools/testing#concurrent-pages) also stops throttling
   background pages, which pages can tell. `LaunchProfile.stock` adds nothing, to run Chromium as a person does,
   first-run pages, sync and updates included.
 - Headless Chromium's user agent says `HeadlessChrome`. Set the context's
@@ -67,7 +67,7 @@ const signInWithPopup = Effect.scoped(Effect.gen(function*() {
 ```
 
 For a flow that goes back and forth between pages, or runs several at once, make the context with
-[`focus: "emulated"`](/docs/tools/testing#many-pages-at-once) instead: every page then behaves as if focused. Pages
+[`focus: "emulated"`](/docs/tools/testing#concurrent-pages) instead: every page then behaves as if focused. Pages
 can tell, so it isn't the default.
 
 ## Attaching
