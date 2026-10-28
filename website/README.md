@@ -90,8 +90,8 @@ the guide disagrees with itself; one is added here once the maintainer agrees.
   where it's shown. A block is one realistic task, written as a step with `Effect.fn`, that reads data through its
   types, such as a body decoded with a Schema, never `JSON.stringify`. Messages and hints are quoted from the
   source, and command output from a real run. A step takes what it works on; a block about getting a browser,
-  context or connection gets it inside its step. Layers, schemas, test callbacks, segment exports and the first
-  program aren't steps.
+  context or connection gets it inside its step. Layers, schemas, test callbacks, segment exports and the
+  program that runs the steps aren't steps; a tracer is provided there, outside every span it should record.
 - **Titles and headings.** A page's title names its subject as a noun phrase (Locators, Actions, Tests with Vitest).
   A section heading is a noun phrase for a subject or an -ing form for a procedure (Launching, Recovering), never
   a sentence or a fragment of one. Parallel pages give the same section the same heading.
