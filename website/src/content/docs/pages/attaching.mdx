@@ -69,7 +69,7 @@ same way.
 
 An observed tab reports its URL, so a program can find the tab it wants before taking access. With `control`, it
 can add a [route](/docs/events/routes), which answers the tab's matching requests itself: `Route.abort()` fails
-them, and `hits` counts them:
+them, and `hits` counts them, so a step can wait until one was blocked:
 
 ```ts
 import { Browser, Page, Route } from "@usestrider/browser"
@@ -92,8 +92,8 @@ const blockAnalytics = Effect.fn("blockAnalytics")(function*() {
     () => Effect.succeed(Route.abort())
   )
   yield* tab.getByRole("button", { name: "Refresh" }).click()
-  const hits = yield* blocked.hits.waitFor((count) => count > 0)
-  yield* Console.log(`blocked ${hits} analytics calls`)
+  yield* blocked.hits.waitFor((count) => count > 0)
+  yield* Console.log("Blocked the refresh's analytics call")
 }, Effect.scoped)
 ```
 
