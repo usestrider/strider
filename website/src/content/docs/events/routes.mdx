@@ -165,6 +165,10 @@ const signInToStaging = Effect.fn("signInToStaging")(function*(page: Page.Page) 
 })
 ```
 
+A challenge the route lets continue, with `Route.continue` or a handler that fails, gets the server's own response,
+such as its `401` page; the browser's prompt never opens. On WebKit an `auth` route fails with `Unsupported`, since
+WebKit answers challenges only from credentials set in advance.
+
 ## Replaying a recording
 
 A recorded backend answers the same way every run, with no server running. `Route.fromHar` reads a HAR file, from
