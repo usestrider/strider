@@ -7,7 +7,7 @@ order: 2
 An error and its spans say which call failed, not what the page showed or what it sent and received. A trace keeps
 what the page looked like at each step, and a HAR its traffic, in files you open after the run.
 
-## Spans first
+## Spans
 
 Spans time each call and place it inside the step that made it, so a slow or failed run shows which call it was,
 with no logging of your own. Every operation opens a span named for it, such as `Locator.click` or `Page.goto`, with
@@ -80,6 +80,9 @@ DOM snapshots change nothing in the page, and work on an [inspected](/docs/pages
 They're taken in an [isolated world](/docs/pages/expectations#evaluating-in-the-page), except on WebKit, which has
 none.
 
+`TestRun` attaches a trace to the test that made it
+([example](/docs/tools/testing#attaching-files)).
+
 ## HAR files
 
 A trace's `network` shows the traffic only in the trace viewer. A HAR is the traffic alone, in the format HAR tools
@@ -116,7 +119,7 @@ const apiFixture = Effect.scoped(Effect.gen(function*() {
 | `"attach"` | the export is one zip of `har.har` and the bodies it names, which `Route.fromHar` reads |
 | `"omit"`   | left out                                                               |
 
-`include` keeps a class of secret the export would otherwise redact ([below](#what-exports-leave-out));
+`include` keeps a class of secret the export would otherwise redact ([below](#redaction));
 `Route.fromHar` matches on request bodies, so a fixture for it includes them.
 
 - Timings are Strider's own measurements, not the [page clock](/docs/events/routes#the-page-clock)'s, so they
@@ -126,7 +129,7 @@ const apiFixture = Effect.scoped(Effect.gen(function*() {
 - `exportHar` writes what's recorded so far. With `inFlightAtStop: "wait"`, it first waits for the requests in
   flight; otherwise they're marked incomplete. The recording stops when its scope closes.
 
-## What exports leave out
+## Redaction
 
 A HAR is committed as a fixture or attached to a bug report, so its export leaves out each class of secret unless
 `include` names it:
@@ -141,8 +144,3 @@ A HAR is committed as a fixture or attached to a bug report, so its export leave
 - A trace follows the [diagnostics preset](/docs/errors#secrets-and-urls). Under `strict`, the default, DOM snapshots write password fields and
   fields filled with a `Redacted` value as `REDACTED`.
 - Screenshots, bodies and DOM snapshots hold whatever the page showed. Treat them as a screen recording.
-
-## In tests
-
-`TestRun` attaches a trace to the test that made it
-([example](/docs/tools/testing#attaching-files)).
