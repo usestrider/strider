@@ -1,6 +1,6 @@
 ---
 title: Requests and responses
-description: Watch a page's traffic as events, decode a response's body with a Schema, and read what was already sent.
+description: A page's requests and responses as events, their bodies decoded with a Schema, and the headers they sent.
 order: 3
 ---
 
@@ -98,7 +98,7 @@ const exportOrders = Effect.fn("exportOrders")(function*(page: Page.Page) {
 ## Streams and history
 
 `stream` gives every match from now on. Given a context rather than a page, it watches every page in it, and its
-shared and service workers. This logs each `fetch` in the session until the scope closes:
+shared and service workers. This logs each `fetch` in the context until the scope closes:
 
 ```ts
 import { NetworkRequest, Page } from "@usestrider/browser"
