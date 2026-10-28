@@ -1,6 +1,6 @@
 ---
 title: Agent toolkit
-description: Give a model browser tools, named secrets and an explicit capture policy.
+description: Browser tools for a model through effect/ai, what each tool does and returns, the capture policy for its results, and access to the browser's other tabs.
 order: 2
 ---
 
@@ -47,8 +47,8 @@ took, its routes and handlers ended), and `goto` and `back` navigate. `snapshot`
 page, and `click`, `fill`, `press`, `select` and `scroll` act as [actions](/docs/pages/actions) do. `next`, `await`
 and `history` are the [event verbs](/docs/events/events#next-stream-and-history), `expect` an
 [expectation](/docs/pages/expectations), `route` a [route](/docs/events/routes) and `dialog` a
-[dialog handler](/docs/events/kinds#dialogs). A result reads as the CLI prints it
-([example](/docs/agents/cli#commands)).
+[dialog handler](/docs/events/kinds#dialogs). A result reads
+[as the CLI prints it](/docs/agents/cli#commands).
 
 - **Every tool names its page.** There's no current tab. Pages are named when created (`p1`, `p2`, or the model's
   name) or when first seen, as a popup is.
