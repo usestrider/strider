@@ -56,8 +56,8 @@ and `history` are the [event verbs](/docs/events/events#next-stream-and-history)
   `text="Add to cart"`, `label=Email`, `testid=cart`, `css=…`. A ref from another page's snapshot is refused.
 - **No tool waits after it acts.** `next` subscribes and `await` collects; `expect` waits for a condition.
 - **Each result has the outcome and what happened since the last call:** navigations, popups, dialogs and who
-  decided them, downloads, uncaught exceptions, failed requests, and console errors where the
-  [capture policy](#capture-policy) allows them.
+  decided them, file choosers the policy canceled, closed pages, downloads, uncaught exceptions, failed requests,
+  and console errors where the [capture policy](#capture-policy) allows them.
 - **Failures go back to the model** as data, hint included.
 - **Secrets are named.** The model writes `%password%`; the value is substituted as the tool runs, and results show
   `%password%`. Only the names in `secrets` are substituted: any other text between `%` signs, such as `%C3%` in a
@@ -67,9 +67,10 @@ and `history` are the [event verbs](/docs/events/events#next-stream-and-history)
 
 Every result goes to the model's provider, and a page can hold secrets, or instructions aimed at the model. `capture`
 is required: `CapturePolicy.strict`, for production and pages you don't trust, sends no screenshots, masks editable
-fields' text in snapshots as `•••`, and leaves console errors out of results; `CapturePolicy.local`, for local
-development against pages you trust, allows all three. Read the choice from configuration, so only a machine that
-says so gets `local`:
+fields' text in snapshots as `•••`, and leaves console errors out of what a result says happened, while
+`history` lists them with "(text not sent)" for their text; `CapturePolicy.local`, for local development against
+pages you trust, allows all three. Read the choice from configuration, so only a machine that says so gets
+`local`:
 
 ```ts
 import { UserContext } from "@usestrider/browser"
