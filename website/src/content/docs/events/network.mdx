@@ -97,8 +97,8 @@ const exportOrders = Effect.fn("exportOrders")(function*(page: Page.Page) {
 
 ## Streams and history
 
-`stream` gives every match from now on. Given a context rather than a page, it watches every page in it, and its
-shared and service workers. This logs each `fetch` in the context until the scope closes:
+`stream` gives every match from now on. Given a context rather than a page, it watches every page in it, and on
+Chromium its shared and service workers too. This logs each `fetch` in the context until the scope closes:
 
 ```ts
 import { NetworkRequest, Page } from "@usestrider/browser"
@@ -132,7 +132,8 @@ const failedCalls = Effect.fn("failedCalls")(function*(page: Page.Page) {
 
 A response from a cache or a service worker never reached the server, so a check of caching or offline support
 needs to know where it came from. `servedBy` is `"network"`, `"cache"`, `"serviceWorker"`, `"route"` when a
-[route](/docs/events/routes) fulfilled it, or `"cacheOrServiceWorker"` on Firefox, which can't tell them apart:
+[route](/docs/events/routes) fulfilled it, `"cacheOrServiceWorker"` on Firefox, which can't tell them apart, or
+`"unknown"`, which WebKit can report when it doesn't know:
 
 ```ts
 import { NetworkResponse, Page } from "@usestrider/browser"
@@ -179,7 +180,9 @@ Credential headers, such as cookies and authorization, are redacted in logs, err
 
 Rebuilt by hand, a call to the page's API misses what the page put in it, such as an auth header.
 `NetworkRequest.toHttpClientRequest` turns a captured request into an Effect `HttpClientRequest`, to send again or
-changed. Sent from outside the browser, it goes without the browser's cookies, cache, proxy and service workers:
+changed: its method, URL and headers, with their values, still redacted in logs. It has no body, so a replay of a
+`POST` sets one. Sent from outside the browser, it goes without the browser's cache, proxy and service workers, and
+without its cookies, except on Firefox, whose request events carry the `Cookie` the browser sent:
 
 ```ts
 import { NetworkRequest, Page } from "@usestrider/browser"
