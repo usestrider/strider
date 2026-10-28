@@ -10,16 +10,14 @@ first, so the page's scripts load into what it set up.
 
 ## Adding a script
 
-`addInitScript` runs a function at the start of each new document, in every frame, before the page's own scripts.
-It's a [declaration](/docs/events/routes#declarations), held until its scope closes:
+`addInitScript` runs a script at the start of each new document, in every frame, before the page's own scripts: a
+function, JavaScript source as `{ source }`, or a file on this machine as
+[`{ path }`](/docs/api/browser/InitScript#Source), read when the script is added. It's a
+[declaration](/docs/events/routes#declarations), held until its scope closes:
 
 ```ts
 import { Page } from "@usestrider/browser"
 import { Effect, Schema } from "effect"
-
-const installRecorder = () => {
-  Object.assign(window, { __tracked: [] as Array<string> })
-}
 
 // The page's own scripts call analytics.track as they load; this records instead of sending
 const stubAnalytics = () => {
@@ -32,7 +30,7 @@ const stubAnalytics = () => {
 const Tracked = Schema.Array(Schema.String)
 
 const purchaseTracked = Effect.fn("purchaseTracked")(function*(page: Page.Page) {
-  const recorder = yield* page.addInitScript(installRecorder)
+  const recorder = yield* page.addInitScript({ source: "window.__tracked = []" })
   yield* page.addInitScript(stubAnalytics, { after: [recorder] })
   yield* page.goto("https://shop.example.com/checkout")
   yield* page.getByRole("button", { name: "Pay" }).click()
@@ -44,9 +42,9 @@ const purchaseTracked = Effect.fn("purchaseTracked")(function*(page: Page.Page) 
 })
 ```
 
-- The function crosses into the page, so it must be self-contained.
-- On Firefox a script runs inside a function, so its top-level `var` and function declarations aren't globals:
-  assign to `window`, as these do.
+- A function crosses into the page, so it must be self-contained.
+- On Firefox a `{ source }` or `{ path }` script runs inside a function, so its top-level `var` and function
+  declarations aren't globals: assign to `window`, as the recorder does.
 - The context's scripts run before the page's, each in the order added.
 - With `after`, a script runs only if each script it names ran in that document without throwing.
 - A script that throws is reported as an [`UncaughtException`](/docs/events/events#history).
