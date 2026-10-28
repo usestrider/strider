@@ -225,7 +225,7 @@ export const render = (options: {
     if (step._tag === "NewPage") {
       const page = declare(step.page)
       body.push(`const ${page} = yield* context.newPage`)
-      if (step.url !== undefined) body.push(`yield* ${page}.goto(${quote(step.url)})`)
+      if (step.url !== undefined) body.push(`yield* ${page}.goto(${revealed(step.url)})`)
       continue
     }
     if (step._tag === "Remove") {

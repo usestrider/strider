@@ -163,6 +163,10 @@ export interface Session {
   readonly latest: (name: string) => Option.Option<Snapshot.Snapshot<Locator.Locator>>
   /** Ends a route or dialog handler that `route` or `dialog` declared, by its registration (`r1`). */
   readonly remove: (registration: string) => Effect.Effect<void, Tools.ToolFailure>
+  /** Text with each secret's `%name%` replaced by its value, as the tools put secrets in. */
+  readonly reveal: (text: string) => string
+  /** A value with each secret's value replaced by its `%name%` again, as every result has it. */
+  readonly conceal: <A>(value: A) => A
 }
 
 /** Binds the tools to a context for the scope. */
@@ -827,7 +831,9 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
         }
         registrations.delete(id)
         return registration.remove
-      })
+      }),
+    reveal,
+    conceal
   }
   return session
 })

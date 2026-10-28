@@ -306,6 +306,30 @@ describe("strider export test", () => {
     assert.include(text, `yield* admin.goto(\`https://${token}@admin.example.com\`)\n`)
   })
 
+  it("builds a secret into the URL page new opened a page at, as into goto's", () => {
+    const { text } = ExportTest.render({
+      name: "shop",
+      browser: launched,
+      secrets: { token: "API_TOKEN" },
+      state: undefined,
+      steps: [
+        { _tag: "NewPage", page: "account", url: "https://shop.example.com/account?token=%token%" },
+        { _tag: "NewPage", page: "help", url: "https://shop.example.com/help" }
+      ]
+    })
+    assert.include(
+      text,
+      [
+        `        const account = yield* context.newPage`,
+        `        yield* account.goto(\`https://shop.example.com/account?token=\${Redacted.value(yield* Config.Redacted("API_TOKEN"))}\`)`,
+        `        const help = yield* context.newPage`,
+        `        yield* help.goto("https://shop.example.com/help")`,
+        ``
+      ].join("\n")
+    )
+    assert.include(text, `import { Config, Effect, Layer, Redacted } from "effect"`)
+  })
+
   it("keeps a %…% that names no secret as the text the session sent, such as a URL's percent-escapes", () => {
     const { text } = ExportTest.render({
       name: "shop",

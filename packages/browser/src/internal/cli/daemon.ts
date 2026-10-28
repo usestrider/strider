@@ -452,7 +452,14 @@ const commands = (daemon: Daemon) => {
             const named = yield* daemon.session.name(opened, Option.getOrUndefined(name)).pipe(
               Effect.mapError((failure) => new CommandFailed(failure))
             )
-            if (Option.isSome(url)) yield* opened.goto(url.value).pipe(Effect.mapError(failedWith))
+            // A secret's %name% in the URL is its value, as goto puts it in, and a failure names it again
+            if (Option.isSome(url)) {
+              yield* opened.goto(daemon.session.reveal(url.value)).pipe(
+                Effect.mapError((error) =>
+                  new CommandFailed(daemon.session.conceal({ ...ToolkitImpl.toFailure(error) }))
+                )
+              )
+            }
             daemon.steps.push({ _tag: "NewPage", page: named, url: Option.getOrUndefined(url) })
             yield* Console.log(`${named}${Option.isSome(url) ? ` at ${url.value}` : ""}`)
           })

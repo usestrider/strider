@@ -179,6 +179,18 @@ describe("strider", () => {
         const checked = yield* shop("expect", "css=#pw", "visible", "--text", "%password%")
         assert.strictEqual(checked.code, 0, checked.err)
         assert.notInclude(checked.out, "hunter2")
+        // page new puts a secret into its URL as goto does, and prints the URL with its name
+        const vault = yield* run("-s", "shop", "page", "new", "--name", "vault", html(`<p id="pw">`, "</p>"))
+        assert.strictEqual(vault.code, 0, vault.err)
+        assert.include(vault.out, "%password%")
+        assert.notInclude(vault.out, "hunter2")
+        const unlocked = yield* run("-s", "shop", "-p", "vault", "expect", "css=#pw", "visible", "--text", "%password%")
+        assert.strictEqual(unlocked.code, 0, unlocked.err)
+        // A navigation that fails doesn't print the secret either
+        const unsafe = "http://127.0.0.1:9/?pw=%password%"
+        const refused = yield* run("-s", "shop", "page", "new", "--name", "refused", unsafe)
+        assert.strictEqual(refused.code, 11, refused.err)
+        assert.notInclude(refused.err, "hunter2")
         // A URL's percent-escapes name no secret, so the URL is sent as written
         const cafe = `${served.origin}/fixture?html=${encodeURIComponent(`<p id="word">café</p>`)}`
         assert.include(cafe, "caf%C3%A9")
@@ -216,6 +228,12 @@ describe("strider", () => {
         assert.include(
           exported,
           `yield* shop.goto(\`${html(`<p id="pw">`, "</p>").replace("%password%", () => password)}\`)\n`
+        )
+        assert.include(
+          exported,
+          `const vault = yield* context.newPage\n        yield* vault.goto(\`${
+            html(`<p id="pw">`, "</p>").replace("%password%", () => password)
+          }\`)\n`
         )
         // The check of the secret's text is left out, since a failure would print it
         assert.include(
