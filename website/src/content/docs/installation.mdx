@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: The packages, a browser, and the layer that launches it.
+description: The packages, a browser, the backends and their layers, paths from configuration, and the platform services a layer needs.
 order: 1
 ---
 
@@ -33,7 +33,8 @@ npx strider browsers --json
 ```
 
 It lists browsers on your `PATH`, in Chrome's, Edge's and Firefox's install locations, and WebKit's MiniBrowser
-where Linux packages and Nix profiles put it, each with its version. `--json` prints the same as data.
+where Linux packages and Nix profiles put it, each with the version it reports, where it reports one. `--json`
+prints the same as data.
 
 ## Backends
 
