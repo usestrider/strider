@@ -35,10 +35,13 @@ const pickAndClick = Effect.fn("pickAndClick")(
 )
 
 // If the page changed while the model chose, ask again with a fresh snapshot
-const clickWhatTheModelPicks = (page: Page.Page, goal: string) =>
-  pickAndClick(page, goal).pipe(
-    Effect.catchReason("LocatorError", "StaleRef", () => pickAndClick(page, goal))
-  )
+const clickWhatTheModelPicks = Effect.fn("clickWhatTheModelPicks")(
+  function*(page: Page.Page, goal: string) {
+    return yield* pickAndClick(page, goal).pipe(
+      Effect.catchReason("LocatorError", "StaleRef", () => pickAndClick(page, goal))
+    )
+  }
+)
 ```
 
 - A ref is a locator pinned to one node, never resolved again. If the node is removed or its document replaced,
