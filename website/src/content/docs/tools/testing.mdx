@@ -8,15 +8,13 @@ Launching a browser for each test is slow, and tests whose pages share a session
 Under Vitest, each test is an Effect program on one browser per file, with a fresh context for each page, so the
 steps you wrote for scripts run in tests unchanged.
 
-## Setting up
+## Writing a test
 
 Tests run under Vitest with Effect's `@effect/vitest`, and `@usestrider/vitest` connects the two:
 
 ```sh
 npm install --save-dev vitest @effect/vitest @usestrider/vitest
 ```
-
-## Writing a test
 
 A test opens its page as a script does, with `Browser.newPage()`. `VitestBrowser.layer` provides the backend you
 give it, unchanged, plus `TestRun`, the running test, which [attaching files](#attaching-files) needs:
