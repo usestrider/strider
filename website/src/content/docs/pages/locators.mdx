@@ -49,15 +49,24 @@ A string matches as a case-insensitive substring; `exact: true` matches the whol
 is tested as given. A role's hidden elements match only with `includeHidden: true`:
 
 ```ts
-import { Page } from "@usestrider/browser"
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
 
-declare const page: Page.Page
-
-page.getByRole("button", { name: "Save" }) // "Save" and "Save draft"
-page.getByRole("button", { name: "Save", exact: true }) // only "Save"
-page.getByText(/^\d+ items?$/) // "1 item", "12 items"
-page.getByLabel("Email", { exact: true }) // not "Email confirmation"
-page.getByRole("dialog", { name: "Cookie settings", includeHidden: true }) // even while hidden
+const saveCart = Effect.fn("saveCart")(function*(page: Page.Page) {
+  const saves = page.getByRole("button", { name: "Save" }) // "Save" and "Save draft"
+  yield* saves.pipe(Expect.toHaveCount(2))
+  const email = page.getByLabel("Email", { exact: true }) // not "Email confirmation"
+  yield* email.fill("ada@example.com")
+  const save = page.getByRole("button", { name: "Save", exact: true }) // only "Save"
+  yield* save.click()
+  const items = page.getByText(/^\d+ items?$/) // "1 item", "12 items"
+  yield* items.pipe(Expect.toBeVisible)
+  const cookies = page.getByRole("dialog", {
+    name: "Cookie settings",
+    includeHidden: true // even while hidden
+  })
+  yield* cookies.pipe(Expect.toBeHidden)
+})
 ```
 
 Text is text content with whitespace collapsed, through open shadow roots, not `innerText`. `getByText` finds the
@@ -75,10 +84,13 @@ searches inside the previous one's matches:
 ```ts
 import { Page } from "@usestrider/browser"
 
-declare const page: Page.Page
+import { Effect } from "effect"
 
-const nav = page.getByRole("navigation", { name: "Main" })
-const orders = nav.getByRole("link", { name: "Orders" })
+const openOrders = Effect.fn("openOrders")(function*(page: Page.Page) {
+  const nav = page.getByRole("navigation", { name: "Main" })
+  const orders = nav.getByRole("link", { name: "Orders" })
+  yield* orders.click()
+})
 ```
 
 `filter` keeps matches by `hasText`, `hasNotText`, `visible`, or what they contain, `has` and `hasNot`.
@@ -145,9 +157,12 @@ A failure names a locator by its queries, and `header .cart > span` doesn't say 
 ```ts
 import { Page } from "@usestrider/browser"
 
-declare const page: Page.Page
+import { Effect } from "effect"
 
-const badge = page.locator("header .cart > span").describe("cart badge")
+const cartCount = Effect.fn("cartCount")(function*(page: Page.Page) {
+  const badge = page.locator("header .cart > span").describe("cart badge")
+  return yield* badge.readText
+})
 ```
 
 ## Frames
