@@ -45,6 +45,8 @@ const purchaseTracked = Effect.fn("purchaseTracked")(function*(page: Page.Page) 
 ```
 
 - The function crosses into the page, so it must be self-contained.
+- On Firefox a script runs inside a function, so its top-level `var` and function declarations aren't globals:
+  assign to `window`, as these do.
 - The context's scripts run before the page's, each in the order added.
 - With `after`, a script runs only if each script it names ran in that document without throwing.
 - A script that throws is reported as an [`UncaughtException`](/docs/events/events#history).
@@ -53,7 +55,8 @@ const purchaseTracked = Effect.fn("purchaseTracked")(function*(page: Page.Page) 
 ## Contexts, workers and isolated worlds
 
 Added to a context, a script runs in every page of it. `workers: true` also runs it in dedicated workers, on
-Chromium and WebKit, and `world: "isolated"` runs it apart from the page's scripts, which can't see or replace it:
+Chromium and WebKit, and `world: "isolated"`, on Chromium and Firefox, runs it apart from the page's scripts, which
+can't see or replace it:
 
 ```ts
 import { Page } from "@usestrider/browser"
