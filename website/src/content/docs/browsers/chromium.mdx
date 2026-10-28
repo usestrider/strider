@@ -202,7 +202,7 @@ const loadMetrics = Effect.fn("loadMetrics")(function*(port: number, url: string
     Protocol.withCommandTimeout("5 seconds")
   )
   return metrics.map((metric) => `${metric.name}: ${metric.value}`)
-})
+}, Effect.scoped)
 ```
 
 - `cdp.browser` sends commands to the browser, such as `Target`'s; `cdp.session(sessionId)` to a page attached with
