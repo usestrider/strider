@@ -1,6 +1,6 @@
 ---
 title: Actions
-description: Clicking, typing, choosing and uploading; the checks each action makes first; and the keyboard and mouse.
+description: The actions, the checks each makes first and turning them off, typing, keys and keyboard layouts, files, dragging, and the keyboard and the mouse.
 order: 2
 ---
 
@@ -63,7 +63,8 @@ Before sending anything, an action waits, checking at each animation frame, unti
   "Not inert": not under an `inert` attribute, nor outside an open modal dialog.
 - After the checks pass, it checks once more and sends. If something covers a click's target in between, the page
   never sees the click, and the action checks again.
-- A timeout names the last failed check: `Another element covers the element's action point: div.toast "Saved"`.
+- A timeout's hint names the last failed check:
+  `Another element covers the element's action point: div.toast "Saved"`.
 
 ## Turning checks off
 
@@ -159,8 +160,9 @@ const germanAddress = Effect.fn("germanAddress")(function*() {
 ```
 
 Layouts: `us`, `uk`, `de`, `fr`, `es`, `it`. On Firefox a layout still types, each key with the `code` it has on a
-US keyboard and with no AltGr or dead keys. WebKit types characters and named keys, and fails with `Unsupported`,
-before anything is sent, at a key the layout reaches with AltGr or a dead key.
+US keyboard and with no AltGr or dead keys. WebKit types characters and named keys, and fails with `Unsupported` at
+a character the layout reaches with AltGr or a dead key, before that key is sent; `pressSequentially` has already
+typed the characters before it.
 
 ## Files
 
@@ -209,7 +211,8 @@ const moveToDone = Effect.fn("moveToDone")(function*(page: Page.Page, title: str
 ## The keyboard and the mouse
 
 `page.keyboard` types into whatever has focus, for a shortcut the page itself handles. Its `insertText` adds text
-at the caret with no key events, as an input method would, where `fill` replaces the field's contents.
+at the caret with no key events, as an input method would, where `fill` replaces the field's contents; on Firefox,
+which has no command for it, each character is typed as a key.
 `page.mouse` acts at coordinates, for canvases and maps. Neither checks anything. Holding a key or button is
 scoped, so a failed step never leaves it held:
 
