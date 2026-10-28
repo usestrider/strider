@@ -1,6 +1,6 @@
 ---
 title: Strider CLI
-description: A command line that drives a live browser from a shell, a script or an agent, with named sessions, TypeScript segments run in them, and an MCP server.
+description: Commands on a live browser, waits across commands, failures and their exit codes, exporting a session as a test, sessions, their state and managing them, attaching, TypeScript segments, and an MCP server.
 order: 3
 ---
 
@@ -49,8 +49,8 @@ since last: GET https://shop.example.com/api/offers answered 503
 filled label=Email on main · 17 ms
 ```
 
-- Every command names its session with `-s`, and a command on a page names its page with `-p`; there's no default,
-  so agents on one machine can't act on each other's tabs.
+- Every command names its session with `-s`, or `STRIDER_SESSION` in its environment, and a command on a page
+  names its page with `-p`; there's no default, so agents on one machine can't act on each other's tabs.
 - Commands are the toolkit's tools, and answer the same way: the outcome, then what happened since the last
   command.
 - In a project, run it as `npx strider`; these examples write `strider`. `strider --help` lists the commands, and
@@ -59,8 +59,8 @@ filled label=Email on main · 17 ms
 ## Waits across commands
 
 A download the click starts can arrive before the click's command returns, so subscribe in a command before it, as
-a [program does](/docs/events/events#subscribing-before-acting). `next` prints a wait's name; `await` collects it in a
-later command. Durations are written as Effect's are, such as `"2 minutes"`:
+a program [subscribes before acting](/docs/events/events#subscribing-before-acting). `next` prints a wait's name;
+`await` collects it in a later command. Durations are written as Effect's are, such as `"2 minutes"`:
 
 ```sh
 strider -s shop -p main goto https://shop.example.com/orders
@@ -104,6 +104,8 @@ ExpectationFailed: Expected page.getByRole("status") to be visible
 | 16   | `PageNotFound`: no page by that name                          |
 | 17   | [`NotPermitted`](/docs/errors#three-kinds-of-failure): access the session lacks |
 | 20   | no session by that name                                       |
+| 1    | any other error                                               |
+| 130  | the command was interrupted, such as with Ctrl-C; the session goes on |
 
 The code is the error's, not its reason's: a locator's `InvalidInput` exits with `LocatorError`'s 10.
 
@@ -111,8 +113,9 @@ The code is the error's, not its reason's: a locator's `InvalidInput` exits with
 
 A session's refs mean nothing outside it, so rewriting a session as a test by hand means finding each element again.
 `export test` writes each command the session ran, expectations included, as a step of a
-[Vitest test](/docs/tools/testing), with refs turned into the locators they stood for. For the session in
-[Commands](#commands) and [Waits across commands](#waits-across-commands):
+[Vitest test](/docs/tools/testing), with refs turned into the locators they stood for. It leaves out reads, such as
+`snapshot` and `find`, and commands that failed; `run`, `control` and `release` become `TODO` comments, which the
+command lists. For the session in [Commands](#commands) and [Waits across commands](#waits-across-commands):
 
 ```sh
 strider -s shop export test checkout.test.ts
@@ -170,7 +173,7 @@ strider start --name twin --chromium /usr/bin/chromium --fork login
 ```
 
 ```
-saved the session's state to ./auth/shop.state, readable by you alone
+saved the session's state to /home/ada/shop/auth/shop.state, readable by you alone
 ```
 
 ## Managing sessions
@@ -182,7 +185,7 @@ A session's browser runs until the session stops, so list what's running and sto
 | [`strider browsers`](/docs/installation#a-browser) | lists the browsers on the machine, by path                               |
 | `strider start --name s --chromium <path>`     | starts a session; also `--firefox`, `--webkit` or `--attach <endpoint>`      |
 | `strider sessions`                             | lists sessions, with their pages and idle time: `shop  chromium · pages main · idle 0 s of 1h` |
-| `strider -s s stop`                            | ends the session and deletes its directory                                   |
+| `strider -s s stop`                            | ends the session and deletes its directory; `--keep` keeps the directory     |
 | `strider prune`                                | lists browsers and profile directories left by programs that were killed; `--yes` removes them |
 
 A session's profile, downloads and artifacts are in `$XDG_RUNTIME_DIR/strider/<name>/`, deleted when it stops. A
@@ -206,7 +209,9 @@ N1  https://mail.example.com/inbox · 2 ms
 mail at https://mail.example.com/inbox, controlled until strider release -p mail · 2 ms
 ```
 
-Stopping an attached session leaves the browser and its tabs running.
+Stopping an attached session leaves the browser and its tabs running. `--attach` takes a Chromium's debugging
+endpoint or a WebDriver BiDi endpoint, such as Firefox's; it can't reach stock WebKit, which a program reaches with
+[`WebKit.layerAttach`](/docs/browsers/webkit#attaching).
 
 ## Segments
 
@@ -242,20 +247,23 @@ as the `strider` running the session:
 ```sh
 npx tsc --noEmit && strider -s shop run pay.ts
 strider -s shop pages
-strider -s shop -p popup snapshot
+strider -s shop -p p1 page name card
+strider -s shop -p card snapshot
 ```
 
 ```
-ran /home/ada/shop/pay.ts
+ran /home/ada/shop/pay.ts; popup is p1
 main  https://shop.example.com/cart
-popup  https://pay.example.com/card
+p1  https://pay.example.com/card
 (0 ms)
+p1 is now card
 ```
 
 - A segment runs in its own scope: its [routes](/docs/events/routes),
   [handlers](/docs/events/kinds#dialogs-and-file-choosers) and waits end with it.
-- Pages it returns are named into the session under their keys, but not kept: a popup of a session page stays open,
-  since its opener owns it, and a page the segment opened itself closes with the segment.
+- Pages it returns are named into the session as a page opened without a name is, `p1` and on: `ran` says which
+  name each key got, and `page name` renames one. They aren't kept: a popup of a session page stays open, since its
+  opener owns it, and a page the segment opened itself closes with the segment.
 - To keep a page it opened, call [`session.keep`](/docs/api/browser/cli/CurrentSession#CurrentSession.keep). For a
   page you know you want, `page new --name orders <url>` is simpler; a segment keeps one it opens partway through:
 
