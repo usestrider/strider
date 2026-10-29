@@ -107,4 +107,18 @@ describe("strider help", () => {
       assert.match(row!, /^\s+--\S+\s+\S+\s{2,}\S/, `Missing description for --${flag}:\n${text}`)
     }
   })
+
+  it("describes each command in the root listing, as the toolkit's tools are described", () => {
+    const text = help("-s", "help-check")
+    for (const command of ["start", "pages", "snapshot", "find", "click", "fill", "select", "page", "stop"]) {
+      assert.match(text, new RegExp(`^ +${command} +\\S`, "m"), `Missing description for ${command}`)
+    }
+  })
+
+  it("lists mcp and shows its own help, not the root's", () => {
+    assert.match(help(), /^\s+mcp\b/m)
+    const text = help("mcp")
+    assert.include(text, "strider mcp")
+    assert.include(text, "--start")
+  })
 })
