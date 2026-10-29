@@ -62,7 +62,7 @@ $XDG_RUNTIME_DIR/strider/       # per user; the OS temp directory where there is
 `strider --help` lists the local and session commands without starting a browser or connecting to a session.
 Use `strider select --help` for a command's arguments and flags, or `strider page --help` to discover a group's
 subcommands and `strider page new --help` for their arguments. The same help is available with a session selector,
-such as `strider -s checkout select --help`. `strider start --help` describes every launch and lifetime flag.
+such as `strider -s checkout select --help`. `strider start --help` describes every launch and lifetime flag. Command listings describe each command, using the toolkit’s descriptions for its tools. `strider mcp --help` describes session selection, `--start`, `--keep` and the forwarded launch options without starting an MCP server or session.
 
 ## A session
 

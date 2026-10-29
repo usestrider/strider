@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
+import * as Tools from "../src/internal/tools.ts"
 
 const bin = new URL("../src/bin/strider.ts", import.meta.url).pathname
 
@@ -110,7 +111,41 @@ describe("strider help", () => {
 
   it("describes each command in the root listing, as the toolkit's tools are described", () => {
     const text = help("-s", "help-check")
-    for (const command of ["start", "pages", "snapshot", "find", "click", "fill", "select", "page", "stop"]) {
+    for (
+      const command of [
+        "start",
+        "browsers",
+        "sessions",
+        "prune",
+        "mcp",
+        "pages",
+        "snapshot",
+        "find",
+        "screenshot",
+        "goto",
+        "back",
+        "click",
+        "fill",
+        "press",
+        "select",
+        "scroll",
+        "next",
+        "await",
+        "expect",
+        "history",
+        "route",
+        "dialog",
+        "remove",
+        "page",
+        "tabs",
+        "control",
+        "release",
+        "run",
+        "state",
+        "export",
+        "stop"
+      ]
+    ) {
       assert.match(text, new RegExp(`^ +${command} +\\S`, "m"), `Missing description for ${command}`)
     }
   })
@@ -119,6 +154,58 @@ describe("strider help", () => {
     assert.match(help(), /^\s+mcp\b/m)
     const text = help("mcp")
     assert.include(text, "strider mcp")
-    assert.include(text, "--start")
+    for (
+      const flag of [
+        "start",
+        "keep",
+        "session",
+        "name",
+        "chromium",
+        "firefox",
+        "webkit",
+        "attach",
+        "user-data-dir",
+        "state",
+        "fork",
+        "idle",
+        "owner-pid",
+        "secret"
+      ]
+    ) {
+      const row = text.split("\n").find((line) => new RegExp(`^\\s+--${flag}(?:, -s)? `).test(line))
+      assert.isDefined(row, `Missing --${flag}:\n${text}`)
+      assert.match(
+        row!,
+        flag === "start" || flag === "keep" ? /^\s+--\S+\s{2,}\S/ : /^\s+--\S+(?: -s)?\s+\S+\s{2,}\S/,
+        `Missing description for --${flag}`
+      )
+    }
+    assert.include(text, "-s")
+    assert.include(text, "STRIDER_SESSION")
+    assert.include(text, "mcp-<pid>")
+    assert.include(text, "--keep")
+    assert.include(help("-s", "help-check", "mcp"), "strider mcp")
+    assert.include(help("mcp", "--start", "--chromium", "/no/browser", "--keep"), "strider mcp")
+  })
+  it("describes nested commands and reuses toolkit descriptions", () => {
+    for (
+      const [group, commands] of [["page", ["new", "name"]], ["dialog", ["handle"]], ["state", ["save"]], ["export", [
+        "test"
+      ]]] as const
+    ) {
+      const text = help(group)
+      for (const command of commands) {
+        assert.match(text, new RegExp(`^ +${command} +\\S`, "m"), `Missing description for ${group} ${command}`)
+      }
+    }
+    const root = help().replace(/\s+/g, " ")
+    for (const tool of Object.values(Tools.toolkit.tools)) {
+      const text = tool.name === "newPage"
+        ? help("page", "new")
+        : tool.name === "dialog"
+        ? help("dialog", "handle")
+        : root
+      assert.include(text.replace(/\s+/g, " "), tool.description!.slice(0, 65), tool.name)
+    }
   })
 })

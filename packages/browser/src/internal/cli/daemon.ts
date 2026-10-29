@@ -49,7 +49,7 @@ import type * as UserContext from "../../UserContext.ts"
 import * as WebKit from "../../webkit/WebKit.ts"
 import * as Handles from "../handles.ts"
 import * as ToolkitImpl from "../toolkit.ts"
-import type * as Tools from "../tools.ts"
+import * as Tools from "../tools.ts"
 import * as ExportTest from "./exportTest.ts"
 import * as Node from "./node.ts"
 import * as Recorder from "./recorder.ts"
@@ -485,7 +485,7 @@ export const commands = (getDaemon: () => Daemon) => {
                   text: `${outcome.registration}: dialogs ${decision}ed; strider remove ${outcome.registration} ends it`
                 }))
           )
-      )
+      ).pipe(Command.withDescription(Tools.dialog.description!))
     ])
   )
   const remove = Command.make(
@@ -519,14 +519,14 @@ export const commands = (getDaemon: () => Daemon) => {
               getDaemon().recorder.declared(opened.id)
               yield* Console.log(`${named}${Option.isSome(url) ? ` at ${url.value}` : ""}`)
             }))
-      ),
+      ).pipe(Command.withDescription(Tools.newPage.description!)),
       Command.make("name", { name: Argument.String("name") }, ({ name }) =>
         Effect.gen(function*() {
           const from = yield* pageFlag
           yield* getDaemon().session.rename(from, name).pipe(Effect.mapError((failure) => new CommandFailed(failure)))
           getDaemon().recorder.record({ _tag: "Rename", from, to: name })
           yield* Console.log(`${from} is now ${name}`)
-        }))
+        })).pipe(Command.withDescription("Give an existing page a new name"))
     ])
   )
   // The browser's own tabs: an attached browser's, or a launched one's first
@@ -604,7 +604,7 @@ export const commands = (getDaemon: () => Daemon) => {
           const resolved = yield* resolvePath(path)
           yield* fs.writeFileString(resolved, text, { mode: 0o600 }).pipe(Effect.mapError(failedWith))
           yield* Console.log(`saved the session's state to ${resolved}, readable by you alone`)
-        })),
+        })).pipe(Command.withDescription("Save storage state to a file")),
       Command.make("export", {}, () => Effect.flatMap(exportState(getDaemon()), Console.log)).pipe(
         Command.withDescription("The state as JSON, for a session that forks this one"),
         Command.unlisted
@@ -631,7 +631,7 @@ export const commands = (getDaemon: () => Daemon) => {
           const commands = getDaemon().recorder.steps.filter((step) => step._tag !== "Popup" && step._tag !== "Listed")
           yield* Console.log(`wrote ${commands.length} steps to ${resolved}`)
           for (const placeholder of placeholders) yield* Console.log(`  a placeholder for ${placeholder}`)
-        }))
+        })).pipe(Command.withDescription("Write the recorded session as a TypeScript test"))
     ])
   )
   const info = Command.make("info", {}, () =>
@@ -665,33 +665,33 @@ export const commands = (getDaemon: () => Daemon) => {
 
   return root.pipe(
     Command.withSubcommands([
-      pages,
-      snapshot,
-      find,
-      screenshot,
-      goto,
-      back,
-      click,
-      fill,
-      press,
-      select,
-      scroll,
-      next,
-      awaitCommand,
-      expect,
-      history,
-      route,
-      dialog,
-      remove,
-      page,
-      tabs,
-      control,
-      release,
-      run,
-      state,
-      exportCommand,
+      pages.pipe(Command.withDescription(Tools.pages.description!)),
+      snapshot.pipe(Command.withDescription(Tools.snapshot.description!)),
+      find.pipe(Command.withDescription(Tools.find.description!)),
+      screenshot.pipe(Command.withDescription(Tools.screenshot.description!)),
+      goto.pipe(Command.withDescription(Tools.goto.description!)),
+      back.pipe(Command.withDescription(Tools.back.description!)),
+      click.pipe(Command.withDescription(Tools.click.description!)),
+      fill.pipe(Command.withDescription(Tools.fill.description!)),
+      press.pipe(Command.withDescription(Tools.press.description!)),
+      select.pipe(Command.withDescription(Tools.select.description!)),
+      scroll.pipe(Command.withDescription(Tools.scroll.description!)),
+      next.pipe(Command.withDescription(Tools.next.description!)),
+      awaitCommand.pipe(Command.withDescription(Tools.await.description!)),
+      expect.pipe(Command.withDescription(Tools.expect.description!)),
+      history.pipe(Command.withDescription(Tools.history.description!)),
+      route.pipe(Command.withDescription(Tools.route.description!)),
+      dialog.pipe(Command.withDescription("Register how the page handles dialogs.")),
+      remove.pipe(Command.withDescription("Remove a route or dialog handler by its registration.")),
+      page.pipe(Command.withDescription("Open or name pages in the session.")),
+      tabs.pipe(Command.withDescription(Tools.tabs.description!)),
+      control.pipe(Command.withDescription(Tools.control.description!)),
+      release.pipe(Command.withDescription(Tools.release.description!)),
+      run.pipe(Command.withDescription("Run a TypeScript segment in the session.")),
+      state.pipe(Command.withDescription("Save the session’s storage state.")),
+      exportCommand.pipe(Command.withDescription("Export the recorded session as a test.")),
       info,
-      stop
+      stop.pipe(Command.withDescription("Stop the session; optionally keep its directory."))
     ])
   )
 }
@@ -1006,51 +1006,54 @@ const decodeState = (text: string, from: string) =>
     )
   )
 
+/** Launch and lifetime flags shared with MCP help. */
+export const startFlags = {
+  name: Flag.String("name").pipe(Flag.withDescription("The session's name: lowercase letters, digits and dashes")),
+  chromium: Flag.String("chromium").pipe(
+    Flag.withDescription("Launch Chromium from this executable path; choose exactly one browser or --attach"),
+    Flag.optional
+  ),
+  firefox: Flag.String("firefox").pipe(
+    Flag.withDescription("Launch Firefox from this executable path; choose exactly one browser or --attach"),
+    Flag.optional
+  ),
+  webkit: Flag.String("webkit").pipe(
+    Flag.withDescription(
+      "Launch stock WebKit from this MiniBrowser executable path; choose exactly one browser or --attach"
+    ),
+    Flag.optional
+  ),
+  attach: Flag.String("attach").pipe(
+    Flag.withDescription("Attach to the browser at this endpoint instead of launching one"),
+    Flag.optional
+  ),
+  userDataDir: Flag.String("user-data-dir").pipe(
+    Flag.withDescription("Use this profile directory; it is kept when the session stops"),
+    Flag.optional
+  ),
+  state: Flag.String("state").pipe(
+    Flag.withDescription("Load initial storage state from this file; cannot be combined with --fork"),
+    Flag.optional
+  ),
+  fork: Flag.String("fork").pipe(
+    Flag.withDescription("Copy initial storage state from this running session; cannot be combined with --state"),
+    Flag.optional
+  ),
+  idle: Flag.String("idle").pipe(
+    Flag.withDescription("Stop after this duration without commands (default: 1 hour)"),
+    Flag.withDefault("1 hour")
+  ),
+  ownerPid: Flag.Int("owner-pid").pipe(Flag.withDescription("Stop when this process exits"), Flag.optional),
+  secret: Flag.KeyValuePair("secret").pipe(
+    Flag.withDescription("Bind a secret name to an environment variable, as name=VARIABLE; repeat for more secrets"),
+    Flag.withDefault({})
+  )
+}
+
 /** `strider start`, run in the daemon: the session, from its start to its end. */
 export const start = Command.make(
   "start",
-  {
-    name: Flag.String("name").pipe(Flag.withDescription("The session's name: lowercase letters, digits and dashes")),
-    chromium: Flag.String("chromium").pipe(
-      Flag.withDescription("Launch Chromium from this executable path; choose exactly one browser or --attach"),
-      Flag.optional
-    ),
-    firefox: Flag.String("firefox").pipe(
-      Flag.withDescription("Launch Firefox from this executable path; choose exactly one browser or --attach"),
-      Flag.optional
-    ),
-    webkit: Flag.String("webkit").pipe(
-      Flag.withDescription(
-        "Launch stock WebKit from this MiniBrowser executable path; choose exactly one browser or --attach"
-      ),
-      Flag.optional
-    ),
-    attach: Flag.String("attach").pipe(
-      Flag.withDescription("Attach to the browser at this endpoint instead of launching one"),
-      Flag.optional
-    ),
-    userDataDir: Flag.String("user-data-dir").pipe(
-      Flag.withDescription("Use this profile directory; it is kept when the session stops"),
-      Flag.optional
-    ),
-    state: Flag.String("state").pipe(
-      Flag.withDescription("Load initial storage state from this file; cannot be combined with --fork"),
-      Flag.optional
-    ),
-    fork: Flag.String("fork").pipe(
-      Flag.withDescription("Copy initial storage state from this running session; cannot be combined with --state"),
-      Flag.optional
-    ),
-    idle: Flag.String("idle").pipe(
-      Flag.withDescription("Stop after this duration without commands (default: 1 hour)"),
-      Flag.withDefault("1 hour")
-    ),
-    ownerPid: Flag.Int("owner-pid").pipe(Flag.withDescription("Stop when this process exits"), Flag.optional),
-    secret: Flag.KeyValuePair("secret").pipe(
-      Flag.withDescription("Bind a secret name to an environment variable, as name=VARIABLE; repeat for more secrets"),
-      Flag.withDefault({})
-    )
-  },
+  startFlags,
   (flags) =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
@@ -1212,7 +1215,7 @@ export const start = Command.make(
       )
       keep = yield* Deferred.await(stopped)
     }).pipe(Effect.scoped)
-)
+).pipe(Command.withDescription("Start a named browser session"))
 
 let announced = false
 

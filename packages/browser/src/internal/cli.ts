@@ -296,6 +296,23 @@ const forHelp = (command: Command.Command.Any): Command.Command<any, any> =>
     Command.withSubcommands(command.subcommands.flatMap((group) => group.commands.map(forHelp)))
   )
 
+/** MCP uses its own startup parser; this view shares the daemon's forwarded flag definitions. */
+const mcpHelp = Command.make("mcp", {
+  ...Daemon.startFlags,
+  name: Flag.String("name").pipe(
+    Flag.withDescription("Name the started session; defaults to -s or mcp-<pid>"),
+    Flag.optional
+  ),
+  start: Flag.Boolean("start").pipe(
+    Flag.withDescription("Start a session with the launch options below; otherwise serve -s or STRIDER_SESSION"),
+    Flag.withDefault(false)
+  ),
+  keep: Flag.Boolean("keep").pipe(
+    Flag.withDescription("With --start, keep the session running after this MCP process exits"),
+    Flag.withDefault(false)
+  )
+}).pipe(Command.withDescription("Serve a session's tools over MCP on standard input and output"))
+
 /** The complete command tree, for local help. Session handlers never run here. */
 const sessionCommands = Daemon.commands(() => {
   throw new Error("Help must not access a session")
@@ -304,6 +321,7 @@ const help = Command.make("strider").pipe(
   Command.withSharedFlags(Daemon.selectors),
   Command.withSubcommands([
     forHelp(Daemon.start),
+    mcpHelp,
     forHelp(browsers),
     forHelp(sessions),
     forHelp(prune),
