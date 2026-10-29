@@ -60,6 +60,15 @@ describe("Session.scan", () => {
       command: "stop"
     })
   })
+
+  it("removes only session options before the literal boundary", () => {
+    for (const flags of [["-s", "checkout"], ["--session", "checkout"], ["--session=checkout"]]) {
+      const data = ["--page=stop", "fill", "css=input", "--", "--session=other", "-s", "literal"]
+      const argv = [...data.slice(0, 2), ...flags, ...data.slice(2)]
+      assert.deepStrictEqual(Session.scan(argv), { session: "checkout", command: "fill" })
+      assert.deepStrictEqual(Session.withoutSession(argv), data)
+    }
+  })
 })
 
 describe("Ledger", () => {
