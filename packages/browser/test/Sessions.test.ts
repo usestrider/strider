@@ -18,6 +18,17 @@ import * as path from "node:path"
 import * as ExportTest from "../src/internal/cli/exportTest.ts"
 import * as Mcp from "../src/internal/cli/mcp.ts"
 import * as Recorder from "../src/internal/cli/recorder.ts"
+import * as Session from "../src/internal/cli/session.ts"
+
+describe("Session.scan", () => {
+  it("reads the session before stop", () => {
+    assert.deepStrictEqual(Session.scan(["-s", "checkout", "stop"]), { session: "checkout", command: "stop" })
+  })
+
+  it("reads the session after stop", () => {
+    assert.deepStrictEqual(Session.scan(["stop", "-s", "checkout"]), { session: "checkout", command: "stop" })
+  })
+})
 
 describe("Ledger", () => {
   it.effect("records what a program owns while it owns it, and forgets it as the program ends", () =>
