@@ -120,6 +120,13 @@ describe("strider", () => {
         const started = yield* run("start", "--name", "checkout", "--chromium", chromium.executable)
         assert.strictEqual(started.code, 0, started.err)
         try {
+          // A different environment default must never override an explicit routing flag.
+          for (const flags of [["-s", "checkout"], ["--session", "checkout"], ["--session=checkout"]]) {
+            for (const args of [[...flags, "pages"], ["pages", ...flags]]) {
+              const listed = yield* strider({ ...env, STRIDER_SESSION: "wrong-session" }, ...args)
+              assert.strictEqual(listed.code, 0, listed.err)
+            }
+          }
           const stopped = yield* run(
             ...(position === "before" ? ["-s", "checkout", "stop"] : ["stop", "-s", "checkout"])
           )

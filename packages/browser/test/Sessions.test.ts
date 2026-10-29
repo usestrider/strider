@@ -28,6 +28,38 @@ describe("Session.scan", () => {
   it("reads the session after stop", () => {
     assert.deepStrictEqual(Session.scan(["stop", "-s", "checkout"]), { session: "checkout", command: "stop" })
   })
+  it("reads long session flags on either side of the command", () => {
+    for (const flags of [["--session", "checkout"], ["--session=checkout"], ["-s=checkout"]]) {
+      for (const argv of [[...flags, "stop"], ["stop", ...flags]]) {
+        assert.deepStrictEqual(Session.scan(argv), { session: "checkout", command: "stop" })
+      }
+    }
+  })
+
+  it("preserves inline command data and stops at the literal boundary", () => {
+    for (
+      const data of [
+        ["fill", "css=input", "text containing --session=other"],
+        ["expect", "css=p", "visible", "--text=--session=other"],
+        ["fill", "css=input", "--", "-s", "other"],
+        ["run", "file.ts", "--", "--session=other"]
+      ]
+    ) {
+      const argv = ["-s", "checkout", ...data]
+      assert.deepStrictEqual(Session.scan(argv), { session: "checkout", command: data[0] })
+      assert.deepStrictEqual(Session.withoutSession(argv), data)
+    }
+    assert.deepStrictEqual(Session.scan(["--", "-s", "other"]), { session: undefined, command: undefined })
+    assert.deepStrictEqual(Session.scan(["stop", "--", "--session=other"]), { session: undefined, command: "stop" })
+    assert.deepStrictEqual(Session.scan(["-p", "stop", "pages", "--session=checkout"]), {
+      session: "checkout",
+      command: "pages"
+    })
+    assert.deepStrictEqual(Session.scan(["stop", "-p", "--", "-s", "other"]), {
+      session: undefined,
+      command: "stop"
+    })
+  })
 })
 
 describe("Ledger", () => {
@@ -65,6 +97,23 @@ describe("Ledger", () => {
 })
 
 describe("strider mcp", () => {
+  it("uses explicit session flags before environment defaults and respects literal data", () => {
+    for (const flag of [["-s", "shop"], ["--session", "shop"], ["--session=shop"]]) {
+      for (const argv of [[...flag, "mcp"], ["mcp", ...flag]]) {
+        assert.deepStrictEqual(Mcp.parse(argv, 7, { STRIDER_SESSION: "env" }), { _tag: "Serve", session: "shop" })
+      }
+      assert.deepStrictEqual(Mcp.parse(["mcp", ...flag, "--start"], 7, {}), {
+        _tag: "Start",
+        session: "shop",
+        start: ["start", "--name", "shop", "--owner-pid", "7"]
+      })
+    }
+    assert.deepStrictEqual(Mcp.parse(["mcp", "--", "--session=other"], 7, { STRIDER_SESSION: "env" }), {
+      _tag: "Serve",
+      session: "env"
+    })
+  })
+
   it("serves a session it is named, or one it starts, which ends with it unless kept", () => {
     assert.deepStrictEqual(Mcp.parse(["mcp", "-s", "shop"], 7, {}), { _tag: "Serve", session: "shop" })
     assert.deepStrictEqual(Mcp.parse(["-s", "shop", "mcp"], 7, {}), { _tag: "Serve", session: "shop" })

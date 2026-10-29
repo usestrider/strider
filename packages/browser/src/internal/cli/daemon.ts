@@ -170,7 +170,7 @@ class CommandFailed extends Data.TaggedError("CommandFailed")<{
 
 const elapsedSince = (started: number) => `${Math.round(performance.now() - started)} ms`
 
-/** The session's flags, which come before the command. */
+/** The session's flags, accepted before and after the command. */
 const root = Command.make("strider").pipe(Command.withSharedFlags({
   session: Flag.String("session").pipe(Flag.withAlias("s"), Flag.withDescription("The session"), Flag.optional),
   page: Flag.String("page").pipe(Flag.withAlias("p"), Flag.withDescription("The page, by name"), Flag.optional),

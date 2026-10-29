@@ -61,29 +61,51 @@ export type Started =
   | { readonly _tag: "Ready"; readonly text: string }
   | { readonly _tag: "Failed"; readonly text: string; readonly code: number }
 
-/** The flags of `strider` itself that take a value, which come before the command. */
+/** The shared flags that take a separate value. */
 const valued = new Set(["-s", "--session", "-p", "--page"])
+
+/** Reads routing flags without treating inline values or operands after `--` as options. */
+const routing = (argv: ReadonlyArray<string>) => {
+  let session: string | undefined
+  let command: string | undefined
+  const rest: Array<string> = []
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index]!
+    if (arg === "--") {
+      rest.push(...argv.slice(index))
+      break
+    }
+    const isSession = arg === "-s" || arg === "--session"
+    if (isSession || valued.has(arg)) {
+      const value = argv[index + 1]
+      // Effect's parser only takes a following value token, never another option or the delimiter.
+      if (value !== undefined && !value.startsWith("-")) {
+        if (isSession) session = value
+        else rest.push(arg, value)
+        index++
+      } else if (!isSession) rest.push(arg)
+      continue
+    }
+    if (arg.startsWith("--session=") || arg.startsWith("-s=")) {
+      session = arg.slice(arg.indexOf("=") + 1)
+      continue
+    }
+    if (!arg.startsWith("-") && command === undefined) command = arg
+    rest.push(arg)
+  }
+  return { session, command, rest }
+}
 
 /** The session and the command an argument list names, read without parsing the rest. */
 export const scan = (
   argv: ReadonlyArray<string>
 ): { readonly session: string | undefined; readonly command: string | undefined } => {
-  let session: string | undefined
-  let command: string | undefined
-  for (let index = 0; index < argv.length; index++) {
-    const arg = argv[index]!
-    if (arg === "-s" || arg === "--session") session = argv[index + 1]
-    else if (arg.startsWith("--session=")) session = arg.slice("--session=".length)
-    if (valued.has(arg)) {
-      index++
-      continue
-    }
-    if (arg.startsWith("-")) continue
-    command = arg
-    break
-  }
+  const { session, command } = routing(argv)
   return { session, command }
 }
+
+/** Removes routing flags, preserving command data and the `--` boundary. */
+export const withoutSession = (argv: ReadonlyArray<string>): ReadonlyArray<string> => routing(argv).rest
 
 /** Exit codes: per module error, so a script can branch on what failed. */
 export const exitCodes: Readonly<Record<string, number>> = {
