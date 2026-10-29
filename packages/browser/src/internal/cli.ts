@@ -15,6 +15,7 @@ import * as Schema from "effect/Schema"
 import * as Ledger from "../Ledger.ts"
 import * as Browsers from "./browsers.ts"
 import * as Client from "./cli/client.ts"
+import * as Daemon from "./cli/daemon.ts"
 import * as Node from "./cli/node.ts"
 import * as Session from "./cli/session.ts"
 
@@ -288,11 +289,54 @@ export const prune = Command.make(
   )
 )
 
-/** `strider`: the commands that need no session. A session's commands go to its daemon. */
-export const strider = Command.make("strider").pipe(
+/** Reuses a command's parser and help metadata, with no executable session handlers. */
+const forHelp = (command: Command.Command.Any): Command.Command<any, any> =>
+  (command as Command.Command<any, any, any, any, any>).pipe(
+    Command.withHandler(() => Effect.void),
+    Command.withSubcommands(command.subcommands.flatMap((group) => group.commands.map(forHelp)))
+  )
+
+/** MCP uses its own startup parser; this view shares the daemon's forwarded flag definitions. */
+const mcpHelp = Command.make("mcp", {
+  ...Daemon.startFlags,
+  name: Flag.String("name").pipe(
+    Flag.withDescription("Name the started session; defaults to -s or mcp-<pid>"),
+    Flag.optional
+  ),
+  start: Flag.Boolean("start").pipe(
+    Flag.withDescription("Start a session with the launch options below; otherwise serve -s or STRIDER_SESSION"),
+    Flag.withDefault(false)
+  ),
+  keep: Flag.Boolean("keep").pipe(
+    Flag.withDescription("With --start, keep the session running after this MCP process exits"),
+    Flag.withDefault(false)
+  )
+}).pipe(Command.withDescription("Serve a session's tools over MCP on standard input and output"))
+
+/** The complete command tree, for local help. Session handlers never run here. */
+const sessionCommands = Daemon.commands(() => {
+  throw new Error("Help must not access a session")
+})
+const help = Command.make("strider").pipe(
+  Command.withSharedFlags(Daemon.selectors),
+  Command.withSubcommands([
+    forHelp(Daemon.start),
+    mcpHelp,
+    forHelp(browsers),
+    forHelp(sessions),
+    forHelp(prune),
+    ...sessionCommands.subcommands
+      .flatMap((group) =>
+        group.commands.map((command) => forHelp(command).pipe(Command.withSharedFlags(Daemon.output)))
+      )
+  ]),
   Command.withDescription(
     "Strider: Effect-native browser automation. strider start --name <name> --chromium <path> starts a session; strider -s <name> -p <page> <command> drives it."
-  ),
+  )
+)
+
+/** The commands that execute locally without a session. */
+export const strider = Command.make("strider").pipe(
   Command.withSubcommands([browsers, sessions, prune])
 )
 
@@ -302,5 +346,8 @@ export const run = Effect.fnUntraced(function*(argv: ReadonlyArray<string>) {
   const path = yield* Path.Path
   const manifest = yield* path.fromFileUrl(new URL("../../package.json", import.meta.url))
   const { version } = JSON.parse(yield* fs.readFileString(manifest)) as { readonly version: string }
-  return yield* Command.runWith(strider, { version })(argv)
+  return yield* Command.runWith(
+    Session.helpRequested(argv) || Session.scan(argv).command === undefined ? help : strider,
+    { version }
+  )(argv)
 })

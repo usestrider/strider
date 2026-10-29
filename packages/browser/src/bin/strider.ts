@@ -35,7 +35,7 @@ const runLocal = async () => {
     import("effect/Layer"),
     import("../internal/cli.ts")
   ])
-  if (command === "__daemon") {
+  if (!help && command === "__daemon") {
     const { daemon } = await import("../internal/cli/daemon.ts")
     // The daemon's process ends with its session
     const { SocketConnector } = await import("../protocol/index.ts")
@@ -51,7 +51,7 @@ const runLocal = async () => {
     )
     return
   }
-  if (command === "mcp") {
+  if (!help && command === "mcp") {
     // An MCP server over standard input and output, for a client that launches it
     const [{ run }, NodeStdio] = await Promise.all([
       import("../internal/cli/mcp.ts"),
@@ -63,7 +63,12 @@ const runLocal = async () => {
   Cli.run(argv).pipe(Effect.provide(NodeServices.layer), NodeRuntime.runMain)
 }
 
-if (command === "start") {
+// Only flags before the argument terminator request local help.
+const help = Session.helpRequested(argv)
+
+if (help) {
+  await runLocal()
+} else if (command === "start") {
   process.exitCode = await Client.start(argv, bin)
 } else if (command === undefined || Client.local.has(command)) {
   await runLocal()
