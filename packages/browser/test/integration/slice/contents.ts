@@ -523,13 +523,22 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.goto(fixtureUrl(origin, `<button autofocus>Stay</button><label>Entry<input required></label><label>Disabled<input required disabled></label><label>Readonly<input required readonly></label><output>0</output><script>document.addEventListener("invalid", () => { document.querySelector("output").textContent = String(Number(document.querySelector("output").textContent) + 1) }, true)</script>`))
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<button autofocus>Stay</button><label>Entry<input required></label><label>Disabled<input required disabled></label><label>Readonly<input required readonly></label><output>0</output><script>document.addEventListener("invalid", () => { document.querySelector("output").textContent = String(Number(document.querySelector("output").textContent) + 1) }, true)</script>`
+              )
+            )
             yield* page.getByRole("button", { name: "Stay" }).focus()
-            yield* page.evaluateInMainWorld(() => document.querySelector("input")!.setCustomValidity('First "message"'))
+            yield* page.evaluateInMainWorld(() =>
+              document.querySelector("input")!.setCustomValidity("First \"message\"")
+            )
             const before = yield* page.snapshot()
             assert.include(before.text, "[invalid]")
-            assert.include(before.text, JSON.stringify('First "message"'))
-            yield* page.evaluateInMainWorld(() => document.querySelector("input")!.setCustomValidity("Second message"))
+            assert.include(before.text, JSON.stringify("First \"message\""))
+            yield* page.evaluateInMainWorld(() =>
+              document.querySelector("input")!.setCustomValidity("Second message")
+            )
             const after = yield* page.snapshot()
             const diff = yield* after.diff(before)
             assert.strictEqual(diff.changed.length, 1)
@@ -667,7 +676,9 @@ export const contents = (
               node.name._tag === "Accessible" && node.name.value === "Later"
             ))
             assert.isTrue(
-              diff.changed.some((node) => node.role.role === "checkbox" && !node.states.has("checked"))
+              diff.changed.some((node) =>
+                node.role.role === "checkbox" && !node.states.has("checked")
+              )
             )
             assert.strictEqual(diff.removed.length, 1)
             assert.match(diff.text, /\+ button "Later" \[ref=e\d+\]/)
@@ -697,7 +708,9 @@ export const contents = (
               snapshot.text,
               /- iframe "Payment" \[ref=e\d+\]:\n {4}- heading "Inner" \[ref=f1e\d+\]\n {4}- button "Add" \[ref=f1e\d+\]/
             )
-            const add = [...snapshot.refs].find(([ref, node]) => ref.startsWith("f1") && node.role.role === "button")!
+            const add = [...snapshot.refs].find(([ref, node]) =>
+              ref.startsWith("f1") && node.role.role === "button"
+            )!
             yield* snapshot.ref(add[0]).click()
             yield* page.frame(page.locator("#cross")).locator("#count").pipe(Expect.toHaveText("1"))
           }))
@@ -943,7 +956,12 @@ export const contents = (
               }
               // A browser that prints says so in its table (QUIRKS.md, Q247)
               const capabilities = yield* (yield* Browser.Browser).capabilities
-              assert.strictEqual(capabilities.entries.find((each) => each.name === "pdf")?.status, "supported")
+              assert.strictEqual(
+                capabilities.entries.find((each) =>
+                  each.name === "pdf"
+                )?.status,
+                "supported"
+              )
               if (name === "Firefox") {
                 assert.deepInclude((reasonOf(headed) as unknown as Page.PageError).reason, {
                   _tag: "Unsupported",

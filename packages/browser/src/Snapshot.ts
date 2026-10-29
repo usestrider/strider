@@ -96,6 +96,10 @@ export type InteractivityEvidence = typeof InteractivityEvidence.Type
  * Where a role or name came from is always visible: `Aria` and `Accessible` come from the accessibility
  * tree. An `Inferred` role carries its `evidence`, and an `Inferred` name says what it came `from`.
  *
+ * Native controls that participate in constraint validation carry `invalid` and their browser-provided
+ * `validationMessage` when invalid. Other nodes carry `None`. Inspection reads current state without
+ * triggering validation events or changing focus. Invalidity does not prove a submission was attempted.
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
@@ -117,7 +121,8 @@ export interface Node {
       readonly from: "text" | "title" | "placeholder" | "alt" | "nearbyLabel"
     }
     | { readonly _tag: "None" }
-  readonly states: ReadonlySet<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed">
+  readonly states: ReadonlySet<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed" | "invalid">
+  readonly validationMessage: Option.Option<string>
   readonly children: ReadonlyArray<Node>
 }
 
@@ -133,6 +138,7 @@ export interface NodeEncoded {
   readonly role: Node["role"]
   readonly name: Node["name"]
   readonly states: Node["states"]
+  readonly validationMessage: Option.Option<string>
   readonly children: ReadonlyArray<NodeEncoded>
 }
 
@@ -161,7 +167,10 @@ export const Node: Schema.Codec<Node, NodeEncoded> = Schema.Struct({
     }),
     Schema.TaggedStruct("None", {})
   ]),
-  states: Schema.ReadonlySet(Schema.Literals(["checked", "expanded", "selected", "disabled", "focused", "pressed"])),
+  states: Schema.ReadonlySet(
+    Schema.Literals(["checked", "expanded", "selected", "disabled", "focused", "pressed", "invalid"])
+  ),
+  validationMessage: Schema.Option(Schema.String),
   children: Schema.Array(Schema.suspend((): Schema.Codec<Node, NodeEncoded> => Node))
 })
 

@@ -1635,13 +1635,15 @@ Accessibility snapshots of a page, for agents and for checking a page's structur
   - `readonly ref: Option.Option<RefId>`
   - `readonly role: | { readonly _tag: "Aria"; readonly role: AriaRole.AriaRole } | { readonly _tag: "Inferred" readonly role: "clickable" | "editable" | "focusable…`
   - `readonly name: | { readonly _tag: "Accessible"; readonly value: string } | { readonly _tag: "Inferred" readonly value: string readonly from: "text" | "title" |…`
-  - `readonly states: ReadonlySet<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed">`
+  - `readonly states: ReadonlySet<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed" | "invalid">`
+  - `readonly validationMessage: Option.Option<string>`
   - `readonly children: ReadonlyArray<Node>`
 - `interface NodeEncoded`
   - `readonly ref: Option.Option<string>`
   - `readonly role: Node["role"]`
   - `readonly name: Node["name"]`
   - `readonly states: Node["states"]`
+  - `readonly validationMessage: Option.Option<string>`
   - `readonly children: ReadonlyArray<NodeEncoded>`
 - `class Data: Schema.Class { document, generation, root, text }`
 - `class Diff: Schema.Class { added, removed, changed, text }`

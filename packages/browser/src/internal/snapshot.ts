@@ -184,8 +184,9 @@ const toNode = (node: Engine.SnapNode): Snapshot.Node => ({
     }
     : node.name,
   states: new Set(
-    node.states as ReadonlyArray<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed">
+    node.states as ReadonlyArray<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed" | "invalid">
   ),
+  validationMessage: Option.fromNullishOr(node.validationMessage),
   children: node.children.map(toNode)
 })
 
@@ -207,13 +208,15 @@ const lineOf = (node: Snapshot.Node): string =>
     role: node.role,
     name: node.name,
     states: [...node.states],
+    validationMessage: Option.getOrNull(node.validationMessage),
     children: [],
     frame: false
   }).replace(/^- /, "")
 
 /** What a diff compares of a node: its role, name and states. */
 const sameNode = (a: Snapshot.Node, b: Snapshot.Node) =>
-  JSON.stringify([a.role, a.name, [...a.states].sort()]) === JSON.stringify([b.role, b.name, [...b.states].sort()])
+  JSON.stringify([a.role, a.name, [...a.states].sort(), a.validationMessage]) ===
+    JSON.stringify([b.role, b.name, [...b.states].sort(), b.validationMessage])
 
 export class SnapshotImpl extends Snapshot.Data implements Snapshot.Snapshot<LocatorImpl.LocatorImpl> {
   readonly [TypeId] = TypeId as typeof TypeId

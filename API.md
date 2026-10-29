@@ -164,9 +164,14 @@ interface Node {
     | { readonly _tag: "Accessible"; readonly value: string }
     | { readonly _tag: "Inferred"; readonly value: string; readonly from: "text" | "title" | "placeholder" | "alt" | "nearbyLabel" }
     | { readonly _tag: "None" }
-  readonly states: ReadonlySet<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed">
+  readonly states: ReadonlySet<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed" | "invalid">
+  readonly validationMessage: Option<string>
   readonly children: ReadonlyArray<Node>
 }
+// Native constraint invalidity is read only when willValidate is true. Invalid controls carry invalid
+// and validationMessage (rendered as [validationMessage="…"]); other nodes carry None. Reading never
+// triggers validation or changes focus. Current invalidity does not prove a submission attempt.
+// Diffs include message-only changes as well as invalidity clearing.
 // InteractivityEvidence: "clickListener" | "cursorPointer" | "tabindex" | "contentEditable" | "onclickAttribute"
 // Diff: added, removed (refs), changed, text
 ```
