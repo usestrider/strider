@@ -478,6 +478,46 @@ export const contents = (
 
       // ── Snapshots ──
 
+      it.effect("reports invalid state and native validation message after a required select blocks submission", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<form onsubmit="event.preventDefault(); document.querySelector('output').textContent = 'submitted'">
+<label>How did you hear about this job? * <select required id="source"><option value="">Choose one</option><option value="friend">Friend</option></select></label>
+<button type="submit">Apply</button><output>not submitted</output></form>`
+              )
+            )
+            yield* page.getByRole("button", { name: "Apply" }).click()
+            const native = yield* page.evaluateInMainWorld(() => {
+              const select = document.querySelector("select")!
+              return {
+                submitted: document.querySelector("output")!.textContent,
+                focused: document.activeElement === select,
+                valid: select.validity.valid,
+                message: select.validationMessage
+              }
+            })
+            assert.strictEqual(native.submitted, "not submitted")
+            assert.isTrue(native.focused)
+            assert.isFalse(native.valid)
+            assert.isNotEmpty(native.message)
+            const snapshot = yield* page.snapshot()
+            assert.include(snapshot.text, "[focused]")
+            assert.deepStrictEqual(
+              {
+                invalid: snapshot.text.includes("[invalid]"),
+                message: snapshot.text.includes(native.message)
+              },
+              { invalid: true, message: true },
+              JSON.stringify({ native, snapshot: snapshot.text })
+            )
+          }))
+        }), timeout)
+
       it.effect("takes the accessibility tree, with interactivity inferred and tagged", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
