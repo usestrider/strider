@@ -1408,3 +1408,9 @@ An entry with no marker is open.
 - *Seen:* checking what an exported test repeats of a session that two commands drove at once.
 - *We:* a command acts on the page it names with `-p`, on the page it opens, from the moment the toolkit opens it (`page new`, or `newPage` through `strider mcp`), and on the popups given to it; a segment acts on every page. A popup goes to the command acting on its opener as it opened, or, when none is, to the last that acted on it. When two commands act on its opener at once, the session can't know which opened it, and the test has a placeholder for it.
 - *Reconsider:* the popup's opening event's initiator, where a backend reports the script or the input that opened it, which would single out the command even on one page.
+
+**Q254. A session flag after the command never reached the daemon** (Ours). `strider stop -s checkout`, as documented, reported no session and left the browser running, although `strider -s checkout stop` worked. The client's routing scan stopped at the command; the daemon's shared flags already accepted either order.
+- *Seen:* ROOK-84's CLI integration regressions on Chromium 155.0.8059.79, with `STRIDER_SESSION` empty.
+- *We:* scan session flags before and after the command, preserving inline command values and stopping at `--`. Explicit flags override the environment default, and MCP uses the same scan.
+- **Resolved:** both stop forms pass, including assertions that the session disappears from the listing and its directory is removed.
+- *Reconsider:* keeping the client's lightweight routing scan aligned with the daemon's shared flags when those flags change.
