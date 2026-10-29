@@ -183,7 +183,7 @@ describe("strider", () => {
         "password=SECRET_PW"
       )
       assert.strictEqual(started.code, 0, started.err)
-      assert.match(started.out, /^session shop · .* at .* · focus emulated · idle timeout 1h/)
+      assert.match(started.out, /^session shop · .* at .* · focus emulated · idle timeout 1 hour/)
       try {
         assert.strictEqual((yield* run("-s", "shop", "page", "new", "--name", "shop", url)).code, 0)
         const snapshot = yield* shop("snapshot")
