@@ -114,6 +114,39 @@ export const contents = (
 ) =>
   describe(`${name} contents`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      it.effect("selects only nonnegative nth positions and keeps first and last distinct in diagnostics", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(fixtureUrl(origin, "<ul><li>One</li><li>Two</li><li>Three</li></ul>"))
+          const items = page.getByRole("listitem")
+          assert.strictEqual(yield* items.nth(0).readText, "One")
+          assert.strictEqual(yield* items.nth(1).readText, "Two")
+          assert.strictEqual(yield* items.nth(2).readText, "Three")
+          assert.strictEqual(yield* items.first.readText, "One")
+          assert.strictEqual(yield* items.last.readText, "Three")
+          for (const index of [-1, -2, -4, 3, 4]) {
+            assert.strictEqual(yield* items.nth(index).count, 0, `nth(${index}) is out of range`)
+            const error = reasonOf(yield* Effect.exit(items.nth(index).readText)) as Locator.LocatorError
+            assert.strictEqual(error.reason._tag, "NoMatch")
+            assert.strictEqual(error.locator, `page.getByRole("listitem").nth(${index})`)
+          }
+          const empty = page.getByRole("button")
+          for (
+            const [locator, suffix] of [
+              [empty.nth(0), "nth(0)"],
+              [empty.nth(-1), "nth(-1)"],
+              [empty.first, "first"],
+              [empty.last, "last"]
+            ] as const
+          ) {
+            assert.strictEqual(yield* locator.count, 0)
+            const error = reasonOf(yield* Effect.exit(locator.readText)) as Locator.LocatorError
+            assert.strictEqual(error.reason._tag, "NoMatch")
+            assert.strictEqual(error.locator, `page.getByRole("button").${suffix}`)
+          }
+        }), timeout)
+
       // ── Evaluation and handles ──
 
       it.effect("evaluates by value in the isolated world, and in the main world when asked", () =>
@@ -128,7 +161,9 @@ export const contents = (
               ))
             ) {
               assert.strictEqual(
-                yield* page.evaluateInMainWorld(() => (window as unknown as { secret: number }).secret),
+                yield* page.evaluateInMainWorld(() =>
+                  (window as unknown as { secret: number }).secret
+                ),
                 42
               )
               return
@@ -152,7 +187,8 @@ export const contents = (
             assert.deepStrictEqual(value.nested, { list: [1, "two", null] })
             assert.strictEqual(
               yield* page.evaluate(
-                (a: number, b: number) => a + b,
+                (a: number, b: number) =>
+                  a + b,
                 1,
                 2
               ),
@@ -858,7 +894,9 @@ export const contents = (
             if (!(yield* fullySupports("cookies"))) {
               // Where a context's list is the cookies its pages are sent (QUIRKS.md, Q225), one shows once a page is
               const listed = Effect.map(jar.list, (cookies) =>
-                cookies.map((cookie) => cookie.name).sort())
+                cookies.map((cookie) =>
+                  cookie.name
+                ).sort())
               yield* jar.set({
                 name: "token",
                 value: Redacted.make("secret"),

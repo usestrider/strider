@@ -286,10 +286,10 @@ export class LocatorImpl implements Locator.Locator {
     return this.with([...this.steps, { _tag: "Nth", index }])
   }
   get first() {
-    return this.nth(0)
+    return this.with([...this.steps, { _tag: "First" }])
   }
   get last() {
-    return this.nth(-1)
+    return this.with([...this.steps, { _tag: "Last" }])
   }
   describe(label: string) {
     return new LocatorImpl(this.owner, this.steps, Option.some(label))

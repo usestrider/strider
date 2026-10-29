@@ -365,7 +365,8 @@ export interface ReadonlyLocator
    */
   or(other: ReadonlyLocator): ReadonlyLocator
   /**
-   * The match at `index`, counting from 0. Errors name it by its position, as `nth(index)`.
+   * The match at `index`, counting from 0. Negative indexes and indexes past the end match nothing.
+   * Errors and traces keep `nth(index)`, including `nth(0)` and `nth(-1)`.
    *
    * **Example** (Reading the third result)
    *
@@ -380,7 +381,7 @@ export interface ReadonlyLocator
    */
   nth(index: number): ReadonlyLocator
   /**
-   * The first match; `nth(0)`.
+   * The first match. An empty list matches nothing. Errors and traces name it as `first`.
    *
    * **Example** (Opening the first search result)
    *
@@ -395,7 +396,7 @@ export interface ReadonlyLocator
    */
   readonly first: ReadonlyLocator
   /**
-   * The last match.
+   * The last match. An empty list matches nothing. Errors and traces name it as `last`.
    *
    * **Example** (Reading the newest message)
    *
