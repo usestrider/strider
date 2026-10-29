@@ -57,6 +57,13 @@ $XDG_RUNTIME_DIR/strider/       # per user; the OS temp directory where there is
     artifacts/
 ```
 
+## Help
+
+`strider --help` lists the local and session commands without starting a browser or connecting to a session.
+Use `strider select --help` for a command's arguments and flags, or `strider page --help` to discover a group's
+subcommands and `strider page new --help` for their arguments. The same help is available with a session selector,
+such as `strider -s checkout select --help`. `strider start --help` describes every launch and lifetime flag.
+
 ## A session
 
 ```sh

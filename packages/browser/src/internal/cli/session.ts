@@ -85,6 +85,15 @@ export const scan = (
   return { session, command }
 }
 
+/** Whether a help flag appears before the argument terminator. */
+export const helpRequested = (argv: ReadonlyArray<string>): boolean => {
+  for (const arg of argv) {
+    if (arg === "--") return false
+    if (arg === "--help" || arg === "-h") return true
+  }
+  return false
+}
+
 /** Exit codes: per module error, so a script can branch on what failed. */
 export const exitCodes: Readonly<Record<string, number>> = {
   CliError: 2,

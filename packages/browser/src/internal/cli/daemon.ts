@@ -171,14 +171,17 @@ class CommandFailed extends Data.TaggedError("CommandFailed")<{
 const elapsedSince = (started: number) => `${Math.round(performance.now() - started)} ms`
 
 /** The session's flags, which come before the command. */
-const root = Command.make("strider").pipe(Command.withSharedFlags({
+export const selectors = {
   session: Flag.String("session").pipe(Flag.withAlias("s"), Flag.withDescription("The session"), Flag.optional),
-  page: Flag.String("page").pipe(Flag.withAlias("p"), Flag.withDescription("The page, by name"), Flag.optional),
+  page: Flag.String("page").pipe(Flag.withAlias("p"), Flag.withDescription("The page, by name"), Flag.optional)
+}
+export const output = {
   json: Flag.Boolean("json").pipe(Flag.withDescription("Print the result as JSON"), Flag.withDefault(false))
-}))
+}
+const root = Command.make("strider").pipe(Command.withSharedFlags({ ...selectors, ...output }))
 
 /** The commands of a session, bound to it. */
-const commands = (daemon: Daemon) => {
+export const commands = (getDaemon: () => Daemon) => {
   const pageFlag = Effect.flatMap(root, (config) =>
     Option.match(config.page, {
       onNone: () =>
@@ -205,7 +208,7 @@ const commands = (daemon: Daemon) => {
     present: Present
   ) =>
     recording(
-      daemon,
+      getDaemon(),
       actions.has(name) ? "action" : undefined,
       (running) => toolIn(name, params, present, running),
       params.page
@@ -220,8 +223,8 @@ const commands = (daemon: Daemon) => {
     const started = performance.now()
     const page = typeof params.page === "string" ? params.page : undefined
     // Read before the call: a ref is the locator its snapshot named, which the call may replace
-    const target = targetOf(daemon, params)
-    const result = yield* Effect.orDie(callTool(daemon, name, params))
+    const target = targetOf(getDaemon(), params)
+    const result = yield* Effect.orDie(callTool(getDaemon(), name, params))
     const last = Option.getOrThrow(result)
     if (last.isFailure) {
       const failure = last.result as Tools.ToolFailure
@@ -234,7 +237,7 @@ const commands = (daemon: Daemon) => {
     }
     const value = last.result as { readonly outcome: unknown; readonly sinceLast: ReadonlyArray<string> }
     const shown = yield* present(value.outcome)
-    record(daemon, name, params, value.outcome, target, running)
+    record(getDaemon(), name, params, value.outcome, target, running)
     if (config.json) {
       yield* Console.log(JSON.stringify({
         page,
@@ -317,7 +320,7 @@ const commands = (daemon: Daemon) => {
           tool("screenshot", { page }, (outcome: { data: string }) =>
             Effect.gen(function*() {
               const fs = yield* FileSystem.FileSystem
-              const file = `${daemon.paths.artifacts}/${page}-${++daemon.shots}.png`
+              const file = `${getDaemon().paths.artifacts}/${page}-${++getDaemon().shots}.png`
               const bytes = Encoding.decode(outcome.data)
               if (bytes._tag === "Success") yield* Effect.orDie(fs.writeFile(file, bytes.success))
               return { text: `screenshot of ${page}`, files: [file] }
@@ -490,8 +493,8 @@ const commands = (daemon: Daemon) => {
     { registration: Argument.String("registration") },
     ({ registration }) =>
       Effect.gen(function*() {
-        yield* daemon.session.remove(registration).pipe(Effect.mapError((failure) => new CommandFailed(failure)))
-        daemon.recorder.record({ _tag: "Remove", registration })
+        yield* getDaemon().session.remove(registration).pipe(Effect.mapError((failure) => new CommandFailed(failure)))
+        getDaemon().recorder.record({ _tag: "Remove", registration })
         yield* Console.log(`removed ${registration}`)
       })
   )
@@ -503,25 +506,25 @@ const commands = (daemon: Daemon) => {
         "new",
         { name: Flag.String("name").pipe(Flag.optional), url: Argument.String("url").pipe(Argument.optional) },
         ({ name, url }) =>
-          recording(daemon, "action", (running) =>
+          recording(getDaemon(), "action", (running) =>
             Effect.gen(function*() {
               // The name is checked before the page opens, and a page whose navigation fails is closed, so a
               // page new that failed leaves no page, as the exported test, which leaves it out, has none. A
               // secret's %name% in the URL is its value, as goto puts it in, and a failure names it again
-              const { name: named, page: opened } = yield* daemon.session.open({
+              const { name: named, page: opened } = yield* getDaemon().session.open({
                 name: Option.getOrUndefined(name),
                 url: Option.getOrUndefined(url)
               }).pipe(Effect.mapError((failure) => new CommandFailed(failure)))
-              daemon.recorder.record({ _tag: "NewPage", page: named, url: Option.getOrUndefined(url) }, running)
-              daemon.recorder.declared(opened.id)
+              getDaemon().recorder.record({ _tag: "NewPage", page: named, url: Option.getOrUndefined(url) }, running)
+              getDaemon().recorder.declared(opened.id)
               yield* Console.log(`${named}${Option.isSome(url) ? ` at ${url.value}` : ""}`)
             }))
       ),
       Command.make("name", { name: Argument.String("name") }, ({ name }) =>
         Effect.gen(function*() {
           const from = yield* pageFlag
-          yield* daemon.session.rename(from, name).pipe(Effect.mapError((failure) => new CommandFailed(failure)))
-          daemon.recorder.record({ _tag: "Rename", from, to: name })
+          yield* getDaemon().session.rename(from, name).pipe(Effect.mapError((failure) => new CommandFailed(failure)))
+          getDaemon().recorder.record({ _tag: "Rename", from, to: name })
           yield* Console.log(`${from} is now ${name}`)
         }))
     ])
@@ -568,22 +571,24 @@ const commands = (daemon: Daemon) => {
     ({ file }) =>
       Effect.gen(function*() {
         // Every page named first, so what's new after the segment is its own
-        const before = new Map((yield* daemon.session.pages).map((each) => [each.page.id, each.name]))
-        return yield* recording(daemon, "segment", (running) =>
+        const before = new Map((yield* getDaemon().session.pages).map((each) => [each.page.id, each.name]))
+        return yield* recording(getDaemon(), "segment", (running) =>
           Effect.gen(function*() {
-            const ran = yield* Effect.exit(segment(daemon, file))
-            const after = yield* daemon.session.pages
+            const ran = yield* Effect.exit(segment(getDaemon(), file))
+            const after = yield* getDaemon().session.pages
             // The pages it gave the session, which its placeholder declares, by the names they have now
-            const pages = after.filter((each) => !before.has(each.page.id) && !daemon.recorder.declares(each.page.id))
+            const pages = after.filter((each) =>
+              !before.has(each.page.id) && !getDaemon().recorder.declares(each.page.id)
+            )
             if (Exit.isSuccess(ran)) {
-              daemon.recorder.record({ _tag: "Segment", file, pages: pages.map((each) => each.name) }, running)
-              for (const each of pages) daemon.recorder.declared(each.page.id)
+              getDaemon().recorder.record({ _tag: "Segment", file, pages: pages.map((each) => each.name) }, running)
+              for (const each of pages) getDaemon().recorder.declared(each.page.id)
             }
             // A page it renamed, as keeping one under a new name does, is renamed in the test too
             for (const each of after) {
               const from = before.get(each.page.id)
               if (from !== undefined && from !== each.name) {
-                daemon.recorder.record({ _tag: "Rename", from, to: each.name })
+                getDaemon().recorder.record({ _tag: "Rename", from, to: each.name })
               }
             }
             return yield* ran
@@ -595,12 +600,12 @@ const commands = (daemon: Daemon) => {
       Command.make("save", { path: Argument.String("path") }, ({ path }) =>
         Effect.gen(function*() {
           const fs = yield* FileSystem.FileSystem
-          const text = yield* exportState(daemon)
+          const text = yield* exportState(getDaemon())
           const resolved = yield* resolvePath(path)
           yield* fs.writeFileString(resolved, text, { mode: 0o600 }).pipe(Effect.mapError(failedWith))
           yield* Console.log(`saved the session's state to ${resolved}, readable by you alone`)
         })),
-      Command.make("export", {}, () => Effect.flatMap(exportState(daemon), Console.log)).pipe(
+      Command.make("export", {}, () => Effect.flatMap(exportState(getDaemon()), Console.log)).pipe(
         Command.withDescription("The state as JSON, for a session that forks this one"),
         Command.unlisted
       )
@@ -613,17 +618,17 @@ const commands = (daemon: Daemon) => {
           const fs = yield* FileSystem.FileSystem
           const resolved = yield* resolvePath(path)
           const { placeholders, text } = ExportTest.render({
-            name: daemon.name,
-            browser: daemon.browser,
-            secrets: daemon.secretVariables,
-            state: daemon.state,
-            fork: daemon.fork,
-            userDataDir: daemon.userDataDir,
-            steps: daemon.recorder.steps
+            name: getDaemon().name,
+            browser: getDaemon().browser,
+            secrets: getDaemon().secretVariables,
+            state: getDaemon().state,
+            fork: getDaemon().fork,
+            userDataDir: getDaemon().userDataDir,
+            steps: getDaemon().recorder.steps
           })
           yield* fs.writeFileString(resolved, text).pipe(Effect.mapError(failedWith))
           // The commands it repeats, not what the session saw of its pages
-          const commands = daemon.recorder.steps.filter((step) => step._tag !== "Popup" && step._tag !== "Listed")
+          const commands = getDaemon().recorder.steps.filter((step) => step._tag !== "Popup" && step._tag !== "Listed")
           yield* Console.log(`wrote ${commands.length} steps to ${resolved}`)
           for (const placeholder of placeholders) yield* Console.log(`  a placeholder for ${placeholder}`)
         }))
@@ -631,15 +636,17 @@ const commands = (daemon: Daemon) => {
   )
   const info = Command.make("info", {}, () =>
     Effect.gen(function*() {
-      const pages = yield* daemon.session.pages
+      const pages = yield* getDaemon().session.pages
       yield* Console.log(JSON.stringify({
-        name: daemon.name,
-        browser: daemon.browser._tag === "Launch" ? daemon.browser.backend : `attached ${daemon.browser.backend}`,
+        name: getDaemon().name,
+        browser: getDaemon().browser._tag === "Launch"
+          ? getDaemon().browser.backend
+          : `attached ${getDaemon().browser.backend}`,
         pages: pages.map((each) => each.name),
-        idle: Math.round((performance.now() - daemon.lastActivity()) / 1000),
-        idleTimeout: daemon.idleTimeout,
-        owner: daemon.owner ?? null,
-        dir: daemon.paths.dir
+        idle: Math.round((performance.now() - getDaemon().lastActivity()) / 1000),
+        idleTimeout: getDaemon().idleTimeout,
+        owner: getDaemon().owner ?? null,
+        dir: getDaemon().paths.dir
       }))
     })).pipe(Command.withDescription("The session, as JSON, for strider sessions"), Command.unlisted)
   const stop = Command.make(
@@ -647,9 +654,11 @@ const commands = (daemon: Daemon) => {
     { keep: Flag.Boolean("keep").pipe(Flag.withDefault(false)) },
     ({ keep }) =>
       Effect.gen(function*() {
-        daemon.stop(keep)
+        getDaemon().stop(keep)
         yield* Console.log(
-          keep ? `stopping ${daemon.name}; its directory stays at ${daemon.paths.dir}` : `stopping ${daemon.name}`
+          keep
+            ? `stopping ${getDaemon().name}; its directory stays at ${getDaemon().paths.dir}`
+            : `stopping ${getDaemon().name}`
         )
       })
   )
@@ -998,20 +1007,49 @@ const decodeState = (text: string, from: string) =>
   )
 
 /** `strider start`, run in the daemon: the session, from its start to its end. */
-const start = Command.make(
+export const start = Command.make(
   "start",
   {
     name: Flag.String("name").pipe(Flag.withDescription("The session's name: lowercase letters, digits and dashes")),
-    chromium: Flag.String("chromium").pipe(Flag.optional),
-    firefox: Flag.String("firefox").pipe(Flag.optional),
-    webkit: Flag.String("webkit").pipe(Flag.optional),
-    attach: Flag.String("attach").pipe(Flag.optional),
-    userDataDir: Flag.String("user-data-dir").pipe(Flag.optional),
-    state: Flag.String("state").pipe(Flag.optional),
-    fork: Flag.String("fork").pipe(Flag.optional),
-    idle: Flag.String("idle").pipe(Flag.withDefault("1 hour")),
-    ownerPid: Flag.Int("owner-pid").pipe(Flag.optional),
-    secret: Flag.KeyValuePair("secret").pipe(Flag.withDefault({}))
+    chromium: Flag.String("chromium").pipe(
+      Flag.withDescription("Launch Chromium from this executable path; choose exactly one browser or --attach"),
+      Flag.optional
+    ),
+    firefox: Flag.String("firefox").pipe(
+      Flag.withDescription("Launch Firefox from this executable path; choose exactly one browser or --attach"),
+      Flag.optional
+    ),
+    webkit: Flag.String("webkit").pipe(
+      Flag.withDescription(
+        "Launch stock WebKit from this MiniBrowser executable path; choose exactly one browser or --attach"
+      ),
+      Flag.optional
+    ),
+    attach: Flag.String("attach").pipe(
+      Flag.withDescription("Attach to the browser at this endpoint instead of launching one"),
+      Flag.optional
+    ),
+    userDataDir: Flag.String("user-data-dir").pipe(
+      Flag.withDescription("Use this profile directory; it is kept when the session stops"),
+      Flag.optional
+    ),
+    state: Flag.String("state").pipe(
+      Flag.withDescription("Load initial storage state from this file; cannot be combined with --fork"),
+      Flag.optional
+    ),
+    fork: Flag.String("fork").pipe(
+      Flag.withDescription("Copy initial storage state from this running session; cannot be combined with --state"),
+      Flag.optional
+    ),
+    idle: Flag.String("idle").pipe(
+      Flag.withDescription("Stop after this duration without commands (default: 1 hour)"),
+      Flag.withDefault("1 hour")
+    ),
+    ownerPid: Flag.Int("owner-pid").pipe(Flag.withDescription("Stop when this process exits"), Flag.optional),
+    secret: Flag.KeyValuePair("secret").pipe(
+      Flag.withDescription("Bind a secret name to an environment variable, as name=VARIABLE; repeat for more secrets"),
+      Flag.withDefault({})
+    )
   },
   (flags) =>
     Effect.gen(function*() {
@@ -1148,7 +1186,7 @@ const start = Command.make(
         Effect.mapError(failedWith)
       )
       const touch = () => void (last = performance.now())
-      const tree = commands(daemon)
+      const tree = commands(() => daemon)
       yield* server.run(serve(daemon, tree, touch)).pipe(Effect.ignore, Effect.forkScoped)
       yield* Effect.gen(function*() {
         while (true) {

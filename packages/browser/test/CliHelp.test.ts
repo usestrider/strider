@@ -7,10 +7,10 @@ import * as path from "node:path"
 
 const bin = new URL("../src/bin/strider.ts", import.meta.url).pathname
 
-const help = (...args: ReadonlyArray<string>) => {
+const invoke = (...args: ReadonlyArray<string>) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "strider-help-"))
   try {
-    const result = spawnSync(process.execPath, [bin, ...args, "--help"], {
+    const result = spawnSync(process.execPath, [bin, ...args], {
       encoding: "utf8",
       timeout: 10_000,
       env: {
@@ -22,14 +22,46 @@ const help = (...args: ReadonlyArray<string>) => {
     })
     assert.isUndefined(result.error)
     assert.isNull(result.signal)
-    // Start help currently uses stderr and exits 1; these regressions concern its contents.
-    return result.stdout + result.stderr
+    return { code: result.status, text: result.stdout + result.stderr }
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
   }
 }
 
+const help = (...args: ReadonlyArray<string>) => {
+  const result = invoke(...args, "--help")
+  assert.strictEqual(result.code, 0, result.text)
+  return result.text
+}
+
 describe("strider help", () => {
+  it("shows root and short command help without a session selector", () => {
+    assert.match(help(), /^\s+select\b/m)
+    const result = invoke("select", "-h")
+    assert.strictEqual(result.code, 0, result.text)
+    assert.include(result.text, "role=")
+  })
+
+  it("keeps ordinary commands and help after the argument terminator on the forwarding path", () => {
+    for (const args of [["select", "target", "label"], ["fill", "target", "--", "--help"]]) {
+      const result = invoke("-s", "help-check", ...args)
+      assert.strictEqual(result.code, 20, result.text)
+      assert.include(result.text, "No session named help-check is running")
+    }
+  })
+
+  it("keeps local argument errors after the argument terminator", () => {
+    const result = invoke("sessions", "--", "--help")
+    assert.notStrictEqual(result.code, 0)
+    assert.include(result.text, "Unexpected positional argument: \"--help\"")
+  })
+
+  it("preserves local command flags in the help tree", () => {
+    assert.include(help("browsers"), "--json")
+    assert.include(help("sessions"), "--json")
+    assert.include(help("select"), "--json")
+    assert.include(help("page", "new"), "--json")
+  })
   it("discovers session and page commands with a session selector before starting a browser", () => {
     const text = help("-s", "help-check")
     for (const command of ["page", "find", "snapshot", "select", "click", "history", "stop"]) {
