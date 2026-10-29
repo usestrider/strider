@@ -150,6 +150,39 @@ describe("strider", () => {
       }), timeout)
   }
 
+  it.live("prints an idle duration given with a newline on one line that can be reused", () =>
+    Effect.gen(function*() {
+      const env = environment()
+      const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+      // The duration parser accepts any whitespace between the number and the unit
+      const started = yield* run(
+        "start",
+        "--name",
+        "newline",
+        "--chromium",
+        chromium.executable,
+        "--idle",
+        "15\nminutes"
+      )
+      assert.strictEqual(started.code, 0, started.err)
+      try {
+        const listed = yield* run("sessions")
+        assert.strictEqual(listed.code, 0, listed.err)
+        const fromStart = /idle timeout (.+)$/m.exec(started.out)?.[1]
+        const fromSessions = /idle .+ of (.+)$/m.exec(listed.out)?.[1]
+        const results = []
+        for (const [name, idle] of [["from-start", fromStart], ["from-sessions", fromSessions]]) {
+          const reused = yield* run("start", "--name", name!, "--chromium", chromium.executable, "--idle", idle ?? "")
+          results.push({ source: name, idle, code: reused.code, err: reused.err })
+        }
+        assert.deepStrictEqual(results.map(({ code }) => code), [0, 0], JSON.stringify(results))
+      } finally {
+        for (const name of ["newline", "from-start", "from-sessions"]) {
+          yield* run("-s", name, "stop")
+        }
+      }
+    }), timeout)
+
   it.live("rejects an invalid idle duration with an example", () =>
     Effect.gen(function*() {
       const result = yield* strider(
