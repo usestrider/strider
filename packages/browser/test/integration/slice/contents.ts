@@ -518,6 +518,42 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("reads constraint invalidity without events or focus changes and diffs messages and clearing", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(fixtureUrl(origin, `<button autofocus>Stay</button><label>Entry<input required></label><label>Disabled<input required disabled></label><label>Readonly<input required readonly></label><output>0</output><script>document.addEventListener("invalid", () => { document.querySelector("output").textContent = String(Number(document.querySelector("output").textContent) + 1) }, true)</script>`))
+            yield* page.getByRole("button", { name: "Stay" }).focus()
+            yield* page.evaluateInMainWorld(() => document.querySelector("input")!.setCustomValidity('First "message"'))
+            const before = yield* page.snapshot()
+            assert.include(before.text, "[invalid]")
+            assert.include(before.text, JSON.stringify('First "message"'))
+            yield* page.evaluateInMainWorld(() => document.querySelector("input")!.setCustomValidity("Second message"))
+            const after = yield* page.snapshot()
+            const diff = yield* after.diff(before)
+            assert.strictEqual(diff.changed.length, 1)
+            assert.include(diff.text, "Second message")
+            assert.isFalse(diff.text.includes("First"))
+            yield* page.evaluateInMainWorld(() => {
+              const input = document.querySelector("input")!
+              input.setCustomValidity("")
+              input.value = "valid"
+            })
+            const cleared = yield* page.snapshot()
+            assert.isFalse(cleared.text.includes("[invalid]"))
+            assert.isFalse(cleared.text.includes("message"))
+            const clearing = yield* cleared.diff(after)
+            assert.strictEqual(clearing.changed.length, 1)
+            assert.isFalse(clearing.text.includes("[invalid]"))
+            const observed = yield* page.evaluateInMainWorld(() => ({
+              events: document.querySelector("output")!.textContent,
+              focus: document.activeElement!.textContent
+            }))
+            assert.deepStrictEqual(observed, { events: "0", focus: "Stay" })
+          }))
+        }), timeout)
+
       it.effect("takes the accessibility tree, with interactivity inferred and tagged", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
