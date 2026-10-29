@@ -11,6 +11,7 @@ const bin = new URL("../src/bin/strider.ts", import.meta.url).pathname
 const invoke = (...args: ReadonlyArray<string>) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "strider-help-"))
   try {
+    const started = performance.now()
     const result = spawnSync(process.execPath, [bin, ...args], {
       encoding: "utf8",
       timeout: 10_000,
@@ -21,6 +22,9 @@ const invoke = (...args: ReadonlyArray<string>) => {
         NO_COLOR: "1"
       }
     })
+    if (process.env.STRIDER_HELP_TIMINGS === "1") {
+      process.stderr.write(`strider ${args.join(" ")}: ${(performance.now() - started).toFixed(3)} ms\n`)
+    }
     assert.isUndefined(result.error)
     assert.isNull(result.signal)
     return { code: result.status, text: result.stdout + result.stderr }
