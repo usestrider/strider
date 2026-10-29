@@ -130,7 +130,7 @@ A page the segment opens itself belongs to the segment's scope, and closes with 
 - **`strider browsers` finds a path.** It lists the browsers on the machine, by backend, with their versions and where each path leads, and `--json` prints the same as data. It is one of the commands that need no session and no daemon, with `sessions` and `prune`.
 - **One context per session.** `--state` and `--fork` apply to it. Two logins at once, such as two users of a chat, are two sessions.
 - **One daemon and one browser per session.** Contexts share launch flags, the downloads directory and OS focus (API.md, Testing), so separate browsers keep concurrent agents apart, and a crash ends one session.
-- **Lifetime.** A session ends at `strider stop`, after its idle timeout, or when `--owner-pid` exits. Whichever applies is printed at start. `strider sessions` lists name, backend, pages, idle time and owner. Both commands print the validated `--idle` value (default `1 hour`), which can be reused as `--idle "15 minutes"`, for example.
+- **Lifetime.** A session ends at `strider stop`, after its idle timeout, or when `--owner-pid` exits. Whichever applies is printed at start. `strider sessions` lists name, backend, pages, idle time and owner. Both commands print the validated `--idle` value with whitespace normalized to spaces (default `1 hour`), which can be reused as `--idle "15 minutes"`, for example.
 
 **Storage**
 - **The session directory is temporary by default.** It sits at a predictable path, so an agent can find a session's artifacts without being told. It is acquired before the browser starts and deleted after the browser exits, like the library's own temporary profile (API.md, Modules and backends). `strider stop --keep` leaves it and prints its path.

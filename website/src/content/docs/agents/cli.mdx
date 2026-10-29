@@ -196,7 +196,7 @@ A session's browser runs until the session stops, so list what's running and sto
 | `strider prune`                                | lists browsers and profile directories left by programs that were killed; `--yes` removes them |
 
 A session's profile, downloads and artifacts are in `$XDG_RUNTIME_DIR/strider/<name>/`, deleted when it stops. A
-session idle for an hour stops itself; `start --idle "30 minutes"` changes that. Both `start` and `sessions` print the validated idle timeout, so you can copy it into `--idle` with quotes.
+session idle for an hour stops itself; `start --idle "30 minutes"` changes that. Both `start` and `sessions` print the validated idle timeout with whitespace normalized to spaces, so you can copy it into `--idle` with quotes.
 
 
 ## Attaching

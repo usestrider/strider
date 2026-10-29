@@ -1140,7 +1140,7 @@ const start = Command.make(
         // After the command that asked has had its answer
         stop: (keepIt) => void setTimeout(() => Deferred.doneUnsafe(stopped, Exit.succeed(keepIt)), 50),
         lastActivity: () => last,
-        idleTimeout: flags.idle,
+        idleTimeout: flags.idle.replace(/\s+/g, " "),
         owner: Option.getOrUndefined(flags.ownerPid)
       }
       const nodeServer = yield* Effect.promise(() => import("@effect/platform-node/NodeSocketServer"))
