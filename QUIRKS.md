@@ -1408,3 +1408,8 @@ An entry with no marker is open.
 - *Seen:* checking what an exported test repeats of a session that two commands drove at once.
 - *We:* a command acts on the page it names with `-p`, on the page it opens, from the moment the toolkit opens it (`page new`, or `newPage` through `strider mcp`), and on the popups given to it; a segment acts on every page. A popup goes to the command acting on its opener as it opened, or, when none is, to the last that acted on it. When two commands act on its opener at once, the session can't know which opened it, and the test has a placeholder for it.
 - *Reconsider:* the popup's opening event's initiator, where a backend reports the script or the input that opened it, which would single out the command even on one page.
+
+**Q254. Stock WebKit's failing expectation sometimes has no observations in a full run** (Browser, or ours: not traced). The slice test `fails an expectation that never holds, with what it saw` expected one history value, `{ matches: 2, visible: 2 }`, but got an empty history from `ExpectationFailed` at `slice/slice.ts:173`.
+- *Seen:* once in three full integration runs while checking the CLI startup fix for ROOK-88, on pinned WebKitGTK 2.54.1; the other two runs passed this test. No protocol recording was enabled.
+- *We:* leave the assertion unchanged; the CLI startup fix does not change expectations or the WebKit adapter.
+- *Reconsider:* trace the expectation's deadline and the page query's protocol messages to establish why no observation reached its history, without a retry or a delay.
