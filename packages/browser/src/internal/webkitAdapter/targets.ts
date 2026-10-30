@@ -363,7 +363,7 @@ const workerGate = (state: State, worker: WorkerEntry) =>
     }).pipe(Effect.ignore)
     // A new worker waits for `Worker.initialized`, so this runs before its own script
     const bundle = state.registry.workerBundle(placement(worker.target.page))
-    if (bundle !== undefined) yield* Runtime.evaluate({ expression: bundle }).pipe(on, Effect.ignore)
+    if (Option.isSome(bundle)) yield* Runtime.evaluate({ expression: bundle.value }).pipe(on, Effect.ignore)
     return { through: 0, apply: Effect.void } satisfies ProtocolClient.Synced
   }).pipe(
     Effect.ensuring(

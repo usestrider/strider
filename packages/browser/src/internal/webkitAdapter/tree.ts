@@ -290,9 +290,5 @@ export const withoutFragment = (url: string): string => {
 }
 
 export const originOf = (url: string): string => {
-  try {
-    return new URL(url).origin
-  } catch {
-    return "null"
-  }
+  return URL.parse(url)?.origin ?? "null"
 }

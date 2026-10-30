@@ -6,11 +6,11 @@
 import * as Option from "effect/Option"
 import * as ConsoleMessage from "../../ConsoleMessage.ts"
 import * as UncaughtException from "../../UncaughtException.ts"
-import type * as Url from "../../Url.ts"
 import * as Console from "../../webkit-stock-protocol/Console.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as ConsoleFormat from "../consoleFormat.ts"
+import * as Urls from "../urls.ts"
 import { contextKey, type Event, type RealmEntry, type State, type TargetEntry, type WorkerEntry } from "./state.ts"
 
 // ── Messages ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -55,9 +55,10 @@ const consoleMessage = (
       text: message.parameters !== undefined && message.parameters.length > 0
         ? ConsoleFormat.format(message.parameters.map(Kit.argumentOf))
         : message.text,
-      location: message.url === undefined || message.url === "" || message.url === "undefined"
-        ? Option.none()
-        : Option.some({ url: message.url as Url.Url, line: message.line ?? 0, column: message.column ?? 0 }),
+      location: Option.map(
+        Urls.reportedOption(message.url ?? ""),
+        (url) => ({ url, line: message.line ?? 0, column: message.column ?? 0 })
+      ),
       origin: realm.document !== undefined
         ? { _tag: "Page", page: target.page.id }
         : { _tag: "Worker", realm: realm.id },

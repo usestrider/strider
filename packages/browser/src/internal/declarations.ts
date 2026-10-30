@@ -75,12 +75,7 @@ export interface Registry {
    * The init-script bundle for a dedicated worker: the main world's scripts declared for workers, in the same
    * order, or `None` where there are none.
    */
-  readonly workerBundleOption: (placement: Placement) => Option.Option<string>
-  /**
-   * Temporary: `workerBundleOption`, as `undefined` for `None`, for the WebKit adapter, which is being rewritten.
-   * When it takes the `Option`, this goes and `workerBundleOption` becomes `workerBundle`.
-   */
-  readonly workerBundle: (placement: Placement) => string | undefined
+  readonly workerBundle: (placement: Placement) => Option.Option<string>
   /** The init-script bundle for each world, by world key. */
   readonly bundles: (
     placement: Placement
@@ -102,12 +97,7 @@ export interface Registry {
    * The largest body of a kind, a request's or a response's, that a collection in force keeps, or `None`
    * where none keeps that kind (QUIRKS.md, Q160 and Q164).
    */
-  readonly bodyLimitOption: (placement: Placement, body: "request" | "response") => Option.Option<number>
-  /**
-   * Temporary: `bodyLimitOption`, as `undefined` for `None`, for the WebKit adapter, which is being rewritten. When
-   * it takes the `Option`, this goes and `bodyLimitOption` becomes `bodyLimit`.
-   */
-  readonly bodyLimit: (placement: Placement, body: "request" | "response") => number | undefined
+  readonly bodyLimit: (placement: Placement, body: "request" | "response") => Option.Option<number>
 }
 
 export const make = (): Registry => {
@@ -138,7 +128,7 @@ export const make = (): Registry => {
       return entry
     },
     all: () => [...registered.values()],
-    bodyLimitOption: (placement, body) => {
+    bodyLimit: (placement, body) => {
       let limit = Option.none<number>()
       for (const entry of inScope(placement)) {
         if (entry.declaration._tag === "BodyCollection" && entry.declaration.bodies.includes(body)) {
@@ -147,7 +137,6 @@ export const make = (): Registry => {
       }
       return limit
     },
-    bodyLimit: (placement, body) => Option.getOrUndefined(registry.bodyLimitOption(placement, body)),
     overrides: (placement) => {
       const effective = new Map<Adapter.Override["_tag"], Adapter.Override>()
       // Least specific and oldest first, so the winner is written last
@@ -158,13 +147,12 @@ export const make = (): Registry => {
       }
       return effective
     },
-    workerBundleOption: (placement) => {
+    workerBundle: (placement) => {
       const sources = scriptsOf(placement)
         .filter((entry) => entry.declaration.workers && entry.declaration.world._tag === "Main")
         .map((entry) => wrap(entry.id, entry.declaration.source, entry.declaration.after))
       return sources.length === 0 ? Option.none() : Option.some(block(sources))
     },
-    workerBundle: (placement) => Option.getOrUndefined(registry.workerBundleOption(placement)),
     bundles: (placement) => {
       const scripts = scriptsOf(placement)
       const bundles = new Map<string, { world: Adapter.World; sources: Array<string> }>()

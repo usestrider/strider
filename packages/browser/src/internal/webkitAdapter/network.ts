@@ -10,11 +10,11 @@ import { Frame as NetworkConnectionFrame } from "../../NetworkConnection.ts"
 import * as NetworkRequest from "../../NetworkRequest.ts"
 import * as NetworkResponse from "../../NetworkResponse.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
-import type * as Url from "../../Url.ts"
 import * as Network from "../../webkit-stock-protocol/Network.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
+import * as Urls from "../urls.ts"
 import {
   endedThing,
   type Event,
@@ -68,7 +68,7 @@ const emitResponse = (state: State, request: RequestEntry, response: Network.Res
     _tag: "ResponseReceived",
     response: new NetworkResponse.NetworkResponse({
       hop: request.hop,
-      url: response.url as Url.Url,
+      url: Urls.reported(response.url),
       status: Math.min(599, Math.max(100, response.status || 200)) as NetworkResponse.StatusCode,
       statusText: response.statusText,
       httpVersion: Option.none(),
@@ -183,7 +183,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         request: new NetworkRequest.NetworkRequest({
           hop: request.hop,
           method: Kit.methodOf(params.request.method),
-          url: params.request.url as Url.Url,
+          url: Urls.reported(params.request.url),
           headers: Kit.headersOf(params.request.headers),
           resourceType: resourceTypes[params.type ?? "Other"] ?? "other",
           initiator: request.frame !== undefined
@@ -215,7 +215,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       })
       if (
         request.resourceType === "document" && request.frame !== undefined &&
-        state.registry.bodyLimit(placement(request.frame.page), "response") !== undefined
+        Option.isSome(state.registry.bodyLimit(placement(request.frame.page), "response"))
       ) {
         const kept = Deferred.makeUnsafe<Uint8Array, Adapter.AdapterError>()
         request.kept = kept
@@ -255,7 +255,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         request: new NetworkRequest.NetworkRequest({
           hop: request.hop,
           method: "GET",
-          url: resource.url as Url.Url,
+          url: Urls.reported(resource.url),
           headers: Kit.headersOf(resource.response?.requestHeaders),
           resourceType: resourceTypes[resource.type] ?? "other",
           initiator: frame !== undefined
@@ -275,7 +275,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         _tag: "ResponseReceived",
         response: new NetworkResponse.NetworkResponse({
           hop: request.hop,
-          url: resource.url as Url.Url,
+          url: Urls.reported(resource.url),
           status: Math.min(599, Math.max(100, resource.response?.status || 200)) as NetworkResponse.StatusCode,
           statusText: resource.response?.statusText ?? "",
           httpVersion: Option.none(),

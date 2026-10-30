@@ -7,11 +7,11 @@ import * as Option from "effect/Option"
 import * as NetworkRequest from "../../NetworkRequest.ts"
 import * as NetworkResponse from "../../NetworkResponse.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
-import type * as Url from "../../Url.ts"
 import * as Automation from "../../webkit-automation-protocol/Automation.ts"
 import * as Network from "../../webkit-stock-protocol/Network.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Urls from "../urls.ts"
 import { automationOf, pageHandleOf, processOfContext } from "./automation.ts"
 import { bodyOf, servedBy } from "./network.ts"
 import {
@@ -35,7 +35,7 @@ const pausedRequest = (
   new NetworkRequest.NetworkRequest({
     hop,
     method: Kit.methodOf(request.method),
-    url: request.url as Url.Url,
+    url: Urls.reported(request.url),
     headers: Kit.headersOf(request.headers),
     resourceType: entry?.resourceType ?? "other",
     initiator: entry?.frame !== undefined
@@ -143,7 +143,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           response: Option.some(
             new NetworkResponse.NetworkResponse({
               hop,
-              url: params.response.url as Url.Url,
+              url: Urls.reported(params.response.url),
               status: Math.min(599, Math.max(100, params.response.status || 200)) as NetworkResponse.StatusCode,
               statusText: params.response.statusText,
               httpVersion: Option.none(),
