@@ -52,6 +52,8 @@ export const removeNavigable = (
       for (const realm of Array.from(navigable.document.realms)) removeRealm(state, realm, reason)
       state.documents.delete(navigable.document.id)
     }
+    // Realms created for a next document that never committed: still in the tables, though never reported
+    for (const realm of Array.from(navigable.pendingRealms)) removeRealm(state, realm, reason)
     if (navigable.parent !== undefined) return
     state.endedPages.set(navigable.id, reason)
     for (const [id, obligation] of state.obligations) {

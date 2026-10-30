@@ -116,6 +116,29 @@ describe("BidiAdapter state", () => {
       assert.strictEqual(ended.reason._tag, "Gone")
     }))
 
+  it.effect("drops the pending realms of a page that is removed, reporting none of them", () =>
+    Effect.gen(function*() {
+      const { page, state } = yield* withPage()
+      const pending: State.RealmEntry = {
+        id: state.ids.realm(),
+        bidi: "R2" as Script.Realm,
+        navigable: page,
+        world: { _tag: "Main" },
+        origin: "null",
+        ended: false,
+        pending: true,
+        held: []
+      }
+      state.realms.set(pending.bidi, pending)
+      state.realmsById.set(pending.id, pending)
+      page.pendingRealms.push(pending)
+      Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
+      assert.isTrue(pending.ended)
+      assert.isFalse(state.realms.has(pending.bidi))
+      assert.isFalse(state.realmsById.has(pending.id))
+      assert.strictEqual(page.pendingRealms.length, 0)
+    }))
+
   it.effect("fails a handle it doesn't hold as Gone, and sends nothing", () =>
     Effect.gen(function*() {
       const { realm, sent, state } = yield* withPage()
