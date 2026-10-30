@@ -198,6 +198,8 @@ export interface DownloadEntry {
 
 export interface HandleEntry {
   readonly target: TargetEntry
+  /** The realm it was made in, which takes it when it ends. */
+  readonly realm: RealmEntry
   readonly objectId: string
   /** The object group it was made in (Q132). */
   readonly group: string | undefined
