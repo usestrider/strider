@@ -112,6 +112,45 @@ const app = `<title>shop</title>
 </script>`
 
 describe("strider", () => {
+  for (const [backend, executable] of [["chromium", chromium.executable], ["firefox", firefox.executable]] as const) {
+    it.live(`${backend} preserves startup and repeated page viewports`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "sized", ...args)
+        const started = yield* run("start", "--name", "sized", `--${backend}`, executable, "--viewport", "1440x1000")
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          assert.include(started.out, "viewport 1440x1000")
+          const served = yield* site
+          const html = `<p id="size"></p><script>function size() { document.querySelector('#size').textContent = innerWidth + 'x' + innerHeight }; onresize = size; size()</script>`
+          const url = `${served.origin}/fixture?html=${encodeURIComponent(html)}`
+          for (const name of ["first", "second"]) {
+            assert.strictEqual((yield* run("page", "new", "--name", name, url)).code, 0)
+            assert.strictEqual((yield* run("-p", name, "expect", "css=#size", "visible", "--text", "1440x1000")).code, 0)
+          }
+          for (const size of ["800x600", "1200x900", "640x480"]) {
+            const resized = yield* run("-p", "first", "page", "viewport", size)
+            assert.strictEqual(resized.code, 0, resized.err)
+            assert.strictEqual((yield* run("-p", "first", "expect", "css=#size", "visible", "--text", size)).code, 0)
+          }
+          for (const size of ["0x600", "-1x600", "1.5x600", "800X600", "9007199254740992x600"]) {
+            assert.notStrictEqual((yield* run("-p", "first", "page", "viewport", size)).code, 0)
+          }
+          assert.strictEqual((yield* run("-p", "first", "expect", "css=#size", "visible", "--text", "640x480")).code, 0)
+          assert.strictEqual((yield* run("-p", "second", "expect", "css=#size", "visible", "--text", "1440x1000")).code, 0)
+          const file = path.join(env.XDG_RUNTIME_DIR, "sized.test.ts")
+          assert.strictEqual((yield* run("export", "test", file)).code, 0)
+          const exported = fs.readFileSync(file, "utf8")
+          assert.include(exported, "emulation: { viewport: { width: 1440, height: 1000 } }")
+          assert.include(exported, "width: 640, height: 480")
+          assert.notInclude(exported, "9007199254740992")
+        } finally {
+          assert.strictEqual((yield* run("stop")).code, 0)
+        }
+        assert.notInclude((yield* strider(env, "sessions")).out, "sized")
+      })), timeout)
+  }
+
   it.live("starts a session, drives its pages by name, and ends it", () =>
     Effect.scoped(Effect.gen(function*() {
       const served = yield* site
