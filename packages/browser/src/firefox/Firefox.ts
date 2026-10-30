@@ -32,6 +32,24 @@ import type * as Url from "../Url.ts"
  * `ChildProcessSpawner` and `FileSystem`, which `NodeServices.layer` from `@effect/platform-node` provides, and
  * reaches it with a `WebSocketConstructor`, such as `NodeSocket.layerWebSocketConstructor`.
  *
+ * The browser starts with core dumps off, so a process that crashes exits at once and the page is reported as
+ * crashed without waiting for the host to write a core. `coreDumps: true` leaves the limit as the host sets it.
+ *
+ * **Example** (Keeping core dumps to debug a crash)
+ *
+ * ```ts import.meta.vitest
+ * import { NodeServices, NodeSocket } from "@effect/platform-node"
+ * import { Firefox } from "@usestrider/browser/firefox"
+ * import { Layer } from "effect"
+ *
+ * const FirefoxLive = Firefox.layer({
+ *   executablePath: "/usr/bin/firefox",
+ *   coreDumps: true
+ * }).pipe(
+ *   Layer.provide([NodeServices.layer, NodeSocket.layerWebSocketConstructor])
+ * )
+ * ```
+ *
  * **Example** (Launching headless Firefox)
  *
  * ```ts import.meta.vitest

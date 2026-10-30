@@ -54,6 +54,8 @@ export interface Settings {
   readonly headless?: boolean | undefined
   readonly args?: ReadonlyArray<string> | undefined
   readonly userDataDir?: string | undefined
+  /** @default false */
+  readonly coreDumps?: boolean | undefined
   /** Wraps each process's Automation transport, as the drift test's recorder does (`test/integration/record.ts`). */
   readonly wrapAutomation?: ((transport: Transport.Transport) => Transport.Transport) | undefined
 }
@@ -137,6 +139,7 @@ const spawnProcess = Effect.fnUntraced(function*(settings: Settings, index: numb
     const port = yield* Random.nextIntBetween(portRange[0], portRange[1])
     const own = yield* Scope.fork(scope)
     const launched = yield* Launch.spawn(path, args, directory, {
+      coreDumps: settings.coreDumps,
       env: {
         WEBKIT_INSPECTOR_SERVER: `127.0.0.1:${port}`,
         XDG_DATA_HOME: `${directory}/data`,

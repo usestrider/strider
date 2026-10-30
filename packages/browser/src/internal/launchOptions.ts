@@ -14,7 +14,8 @@ export const settings = (options: Browser.LaunchOptions) => ({
   profile: options.profile?.name,
   profileArgs: options.profile?.args,
   profilePrefs: options.profile?.prefs,
-  userDataDir: options.userDataDir
+  userDataDir: options.userDataDir,
+  coreDumps: options.coreDumps
 })
 
 /** A backend's `layerConfig`: its `layer`, with the options read from configuration. */

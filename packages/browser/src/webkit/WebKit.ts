@@ -40,6 +40,9 @@ import type * as Url from "../Url.ts"
  * window opens on the display that `DISPLAY` or `WAYLAND_DISPLAY` names. The browser exits when the layer's scope
  * closes.
  *
+ * The browser starts with core dumps off, so a process that crashes exits at once and the page is reported as
+ * crashed without waiting for the host to write a core. `coreDumps: true` leaves the limit as the host sets it.
+ *
  * **Gotchas**
  *
  * - WebKitGTK has no headless mode: `headless: true` fails with `InvalidInput`. Give it a display, such as Xvfb's.
@@ -57,6 +60,24 @@ import type * as Url from "../Url.ts"
  * - Linux only: WebKitGTK and WPE are the stock WebKit ports with an automation mode.
  * - A MiniBrowser from Nix needs `glib-networking`'s modules on `GIO_EXTRA_MODULES` for HTTPS, which otherwise
  *   fails with "TLS support is not available"; other distributions install them where GIO looks.
+ *
+ * **Example** (Keeping core dumps to debug a crash)
+ *
+ * ```ts import.meta.vitest
+ * import { NodeServices, NodeSocket } from "@effect/platform-node"
+ * import { SocketConnector } from "@usestrider/browser/protocol"
+ * import { WebKit } from "@usestrider/browser/webkit"
+ * import { Layer } from "effect"
+ *
+ * const Sockets = SocketConnector.layer((endpoint) =>
+ *   NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port })
+ * )
+ *
+ * const WebKitLive = WebKit.layer({
+ *   executablePath: "/usr/libexec/webkitgtk-6.0/MiniBrowser",
+ *   coreDumps: true
+ * }).pipe(Layer.provide([NodeServices.layer, Sockets]))
+ * ```
  *
  * **Example** (Launching WebKitGTK's MiniBrowser)
  *

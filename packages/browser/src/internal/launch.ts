@@ -139,8 +139,27 @@ const tailBytes = 8 * 1024
 const keptLimit = 64 * 1024
 
 /**
+ * The command that starts a browser, and its arguments. Core dumps are off unless asked for: a browser that
+ * crashes would otherwise not exit until the host has written its core, which takes tens of seconds, so Strider
+ * wouldn't report the crash until then. A child process can't set its own resource limits from Node, so the
+ * browser starts through `sh`, which lowers the limit and becomes the browser (`exec`): the process started is the
+ * browser, with the same pid, file descriptors and signals. The executable and its arguments are the shell's
+ * positional parameters, never part of its script. Windows has no limit to lower and no `sh`, so the browser
+ * starts as it is.
+ */
+export const command = (
+  executable: string,
+  args: ReadonlyArray<string>,
+  coreDumps: boolean,
+  platform: string = process.platform
+): readonly [string, ReadonlyArray<string>] =>
+  coreDumps || platform === "win32"
+    ? [executable, args]
+    : ["/bin/sh", ["-c", "ulimit -c 0; exec \"$@\"", "sh", executable, ...args]]
+
+/**
  * Starts the browser in the scope. Closing the scope terminates it, killing it after `forceKillAfter` if it
- * hasn't exited.
+ * hasn't exited. Core dumps are off unless `coreDumps` is true (see `command`).
  */
 export const spawn = Effect.fnUntraced(function*(
   executable: string,
@@ -149,13 +168,15 @@ export const spawn = Effect.fnUntraced(function*(
   options: {
     readonly additionalFds?: ChildProcess.CommandOptions["additionalFds"]
     readonly env?: Readonly<Record<string, string>> | undefined
+    readonly coreDumps?: boolean | undefined
   }
 ) {
   // In the ledger while it runs, known by the profile its command line names
   const ledger = yield* Ledger.CurrentLedger
   let launched: Ledger.Item | undefined
   yield* Effect.addFinalizer(() => launched === undefined ? Effect.void : ledger.remove(launched))
-  const handle = yield* ChildProcess.make(executable, args, {
+  const [file, fileArgs] = command(executable, args, options.coreDumps ?? false)
+  const handle = yield* ChildProcess.make(file, fileArgs, {
     additionalFds: options.additionalFds ?? {},
     stdin: "ignore",
     stdout: "ignore",

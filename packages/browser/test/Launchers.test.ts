@@ -4,11 +4,13 @@
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
-import { assert, describe, layer } from "@effect/vitest"
+import { assert, describe, it, layer } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Schedule from "effect/Schedule"
+import { readFile } from "node:fs/promises"
 import * as ChromiumLauncher from "../src/internal/chromiumLauncher.ts"
 import * as FirefoxLauncher from "../src/internal/firefoxLauncher.ts"
 import * as Launch from "../src/internal/launch.ts"
@@ -170,5 +172,62 @@ describe("WebKit launcher", () => {
         ).pipe(Effect.flip)
         assert.deepInclude(headless.reason, { _tag: "InvalidInput", input: "headless" })
       }))
+  })
+})
+
+describe("Core dumps", () => {
+  it("starts a browser through sh, with the executable and its arguments as parameters, unless dumps are on", () => {
+    assert.deepStrictEqual(Launch.command("/opt/b rowser", ["--a", "$(x)"], true), ["/opt/b rowser", ["--a", "$(x)"]])
+    assert.deepStrictEqual(Launch.command("/opt/browser", ["--a", "; rm -rf /"], false, "linux"), [
+      "/bin/sh",
+      ["-c", "ulimit -c 0; exec \"$@\"", "sh", "/opt/browser", "--a", "; rm -rf /"]
+    ])
+    // Windows has no limit to lower and no sh
+    assert.deepStrictEqual(Launch.command("C:\\chrome.exe", ["--a"], false, "win32"), ["C:\\chrome.exe", ["--a"]])
+  })
+
+  layer(NodeServices.layer, { excludeTestServices: true })((it) => {
+    const limitOf = (pid: string, name: string) =>
+      Effect.promise(() => readFile(`/proc/${pid}/limits`, "utf8")).pipe(
+        Effect.map((text) =>
+          text.split("\n").find((line) => line.startsWith(name))?.slice(name.length).trim().replace(/\s+/g, " ")
+        )
+      )
+
+    // The process that is exec'd last is a node that waits, in place of a browser
+    const waiting = Effect.fnUntraced(function*(coreDumps: boolean | undefined) {
+      const launched = yield* Launch.spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], "/tmp", {
+        coreDumps
+      })
+      const pid = String(launched.handle.pid)
+      // Until the shell has exec'd, the process is the shell: its command line says so
+      yield* Effect.promise(() => readFile(`/proc/${pid}/cmdline`, "utf8")).pipe(
+        Effect.filterOrFail((line) => !line.startsWith("/bin/sh")),
+        Effect.retry({ schedule: Schedule.spaced("10 millis"), times: 500 })
+      )
+      return { launched, pid }
+    })
+
+    it.effect.skipIf(process.platform !== "linux")(
+      "has no core dump limit by default, in the process that was started",
+      () =>
+        Effect.gen(function*() {
+          for (const coreDumps of [undefined, false]) {
+            const { launched, pid } = yield* waiting(coreDumps)
+            assert.strictEqual(pid, String(launched.handle.pid))
+            assert.strictEqual(yield* limitOf(pid, "Max core file size"), "0 0 bytes")
+            assert.isTrue(yield* launched.handle.isRunning)
+          }
+        })
+    )
+
+    it.effect.skipIf(process.platform !== "linux")(
+      "leaves the limit as it was with coreDumps",
+      () =>
+        Effect.gen(function*() {
+          const { pid } = yield* waiting(true)
+          assert.strictEqual(yield* limitOf(pid, "Max core file size"), yield* limitOf("self", "Max core file size"))
+        })
+    )
   })
 })

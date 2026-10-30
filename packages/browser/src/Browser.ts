@@ -337,6 +337,15 @@ export interface LaunchOptions {
    * @default a temporary profile, deleted after the browser exits
    */
   readonly userDataDir?: FilePath.Local | string | undefined
+  /**
+   * Let the browser write a core dump when it crashes. A crashed page is reported once its process has exited, and
+   * on a host that writes core dumps, a process doesn't exit until its core is written, which can take half a
+   * minute or more. So the browser starts with the limit on core dumps at 0, through `sh`, which then becomes the
+   * browser. It does nothing on Windows, which has no such limit. Set it to `true` to debug a crash with its core.
+   *
+   * @default false
+   */
+  readonly coreDumps?: boolean | undefined
 }
 
 /**
