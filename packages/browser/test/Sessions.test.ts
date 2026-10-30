@@ -8,6 +8,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Ledger } from "@usestrider/browser"
+import * as McpSchema from "effect/ai/McpSchema"
+import * as Tool from "effect/ai/Tool"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
@@ -106,6 +109,43 @@ describe("Ledger", () => {
 })
 
 describe("strider mcp", () => {
+  it("tells a client which tools only read and which act on a page as a person would", () => {
+    const hints = (name: Tools.ToolName) => {
+      const annotations = Tools.toolkit.tools[name].annotations
+      return [Context.get(annotations, Tool.Readonly), Context.get(annotations, Tool.Destructive)]
+    }
+    for (const name of ["pages", "tabs", "snapshot", "find", "screenshot", "history", "expect"] as const) {
+      assert.deepStrictEqual(hints(name), [true, false], name)
+    }
+    for (const name of ["newPage", "next", "await", "route", "dialog", "control", "release", "scroll"] as const) {
+      assert.deepStrictEqual(hints(name), [false, false], name)
+    }
+    for (const name of ["goto", "back", "click", "fill", "press", "select"] as const) {
+      assert.deepStrictEqual(hints(name), [false, true], name)
+    }
+  })
+
+  it("gives a client a screenshot as an image, with the digest as text", () => {
+    const structuredContent = { outcome: { mediaType: "image/png", data: "iVBORw0K" }, sinceLast: ["navigated"] }
+    const answered = new McpSchema.CallToolResult({
+      structuredContent,
+      content: [{ type: "text", text: JSON.stringify(structuredContent) }]
+    })
+    const shown = Mcp.asImage(answered)
+    assert.instanceOf(shown, McpSchema.CallToolResult)
+    const [image, text] = (shown as McpSchema.CallToolResult).content
+    assert.deepStrictEqual(image, {
+      type: "image",
+      mimeType: "image/png",
+      data: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a])
+    })
+    assert.deepStrictEqual(text, { type: "text", text: JSON.stringify({ sinceLast: ["navigated"] }) })
+    assert.deepStrictEqual((shown as McpSchema.CallToolResult).structuredContent, structuredContent)
+    // A failure is as it was
+    const failed = new McpSchema.CallToolResult({ isError: true, content: [{ type: "text", text: "{}" }] })
+    assert.strictEqual(Mcp.asImage(failed), failed)
+  })
+
   const parse = (argv: ReadonlyArray<string>, env: Readonly<Record<string, string>>) =>
     Mcp.parse(argv, 7, env).pipe(Effect.provide(NodeServices.layer))
 

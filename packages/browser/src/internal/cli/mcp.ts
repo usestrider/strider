@@ -11,12 +11,14 @@
  * Standard output is the client's, so what `start` reports goes to standard error.
  */
 import * as McpProtocol from "effect/ai/McpProtocol"
+import * as McpSchema from "effect/ai/McpSchema"
 import * as McpServer from "effect/ai/McpServer"
 import type * as Toolkit from "effect/ai/Toolkit"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
+import * as Base64 from "effect/encoding/Base64"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
@@ -144,6 +146,34 @@ const forward =
       return yield* Schema.decodeUnknownEffect(schemas.successSchema)(value).pipe(Effect.orDie)
     })
 
+/**
+ * A screenshot's result as a client shows a model an image: its PNG as `ImageContent`, and the rest of its result as
+ * text, rather than the whole result as JSON text, base64 and all. Its structured result stays as the tool's Schema
+ * encodes it. Any other result, a failure's included, is as it was.
+ */
+export const asImage = (result: McpSchema.CallToolResult | McpSchema.InputRequired) => {
+  if (!(result instanceof McpSchema.CallToolResult) || result.isError === true) return result
+  const shot = Schema.decodeUnknownOption(Tools.schemas.screenshot.successSchema)(result.structuredContent)
+  if (Option.isNone(shot)) return result
+  const bytes = Base64.decode(shot.value.outcome.data)
+  if (bytes._tag === "Failure") return result
+  const image: McpSchema.ImageContent = { type: "image", data: bytes.success, mimeType: shot.value.outcome.mediaType }
+  const rest: McpSchema.TextContent = { type: "text", text: JSON.stringify({ sinceLast: shot.value.sinceLast }) }
+  return new McpSchema.CallToolResult({ ...result, content: [image, rest] })
+}
+
+/** The MCP server, with each screenshot it answers given to the client as an image. */
+const screenshotsAsImages = (server: McpServer.McpServer["Service"]): McpServer.McpServer["Service"] =>
+  McpServer.McpServer.of({
+    ...server,
+    addTool: (options) =>
+      server.addTool(
+        options.tool.name === Tools.screenshot.name
+          ? { ...options, handle: (payload) => Effect.map(options.handle(payload), asImage) }
+          : options
+      )
+  })
+
 /** Serves a session's tools over standard input and output, starting it first if asked, until the client goes. */
 const serve = Effect.fnUntraced(
   function*(plan: Plan, bin: string, stdio: Layer.Layer<Stdio.Stdio>) {
@@ -180,7 +210,9 @@ const serve = Effect.fnUntraced(
       route: to("route"),
       dialog: to("dialog")
     }
-    const server = McpServer.toolkit(Tools.toolkit).pipe(
+    const server = Layer.effectDiscard(
+      McpServer.registerToolkit(Tools.toolkit).pipe(Effect.updateService(McpServer.McpServer, screenshotsAsImages))
+    ).pipe(
       Layer.provide(Tools.toolkit.toLayer(handlers)),
       Layer.provide(McpServer.layerStdio({
         name: "strider",
