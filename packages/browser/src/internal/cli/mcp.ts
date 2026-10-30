@@ -13,6 +13,7 @@
 import * as McpProtocol from "effect/ai/McpProtocol"
 import * as McpSchema from "effect/ai/McpSchema"
 import * as McpServer from "effect/ai/McpServer"
+import * as Tool from "effect/ai/Tool"
 import type * as Toolkit from "effect/ai/Toolkit"
 import * as Cause from "effect/Cause"
 import * as Command from "effect/cli/Command"
@@ -158,8 +159,9 @@ const forward =
 
 /**
  * A screenshot's result as a client shows a model an image: its PNG as `ImageContent`, and the rest of its result as
- * text, rather than the whole result as JSON text, base64 and all. Its structured result stays as the tool's Schema
- * encodes it. Any other result, a failure's included, is as it was.
+ * text, rather than the whole result as JSON text, base64 and all. Its structured result is the tool's without the
+ * bytes (`Tools.screenshotWithoutBytes`), so the image crosses once. Any other result, a failure's included, is as
+ * it was.
  */
 export const asImage = (result: McpSchema.CallToolResult | McpSchema.InputRequired) => {
   if (!(result instanceof McpSchema.CallToolResult) || result.isError === true) return result
@@ -169,17 +171,25 @@ export const asImage = (result: McpSchema.CallToolResult | McpSchema.InputRequir
   if (bytes._tag === "Failure") return result
   const image: McpSchema.ImageContent = { type: "image", data: bytes.success, mimeType: shot.value.outcome.mediaType }
   const rest: McpSchema.TextContent = { type: "text", text: JSON.stringify({ sinceLast: shot.value.sinceLast }) }
-  return new McpSchema.CallToolResult({ ...result, content: [image, rest] })
+  const structuredContent = { outcome: { mediaType: shot.value.outcome.mediaType }, sinceLast: shot.value.sinceLast }
+  return new McpSchema.CallToolResult({ ...result, structuredContent, content: [image, rest] })
 }
 
-/** The MCP server, with each screenshot it answers given to the client as an image. */
+/** The MCP server, with each screenshot it answers given to the client as an image, and its output schema to match. */
 const screenshotsAsImages = (server: McpServer.McpServer["Service"]): McpServer.McpServer["Service"] =>
   McpServer.McpServer.of({
     ...server,
     addTool: (options) =>
       server.addTool(
         options.tool.name === Tools.screenshot.name
-          ? { ...options, handle: (payload) => Effect.map(options.handle(payload), asImage) }
+          ? {
+            ...options,
+            tool: new McpSchema.Tool({
+              ...options.tool,
+              outputSchema: Tool.getJsonSchemaFromSchema(Tools.screenshotWithoutBytes)
+            }),
+            handle: (payload) => Effect.map(options.handle(payload), asImage)
+          }
           : options
       )
   })

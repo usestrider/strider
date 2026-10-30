@@ -584,10 +584,19 @@ describe("strider", () => {
           const answers = yield* mcp(env, ["-s", "tools", "mcp"], [
             ...handshake,
             { jsonrpc: "2.0", id: 2, method: "tools/list" },
-            { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "pages", arguments: {} } }
-          ], 3)
+            { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "pages", arguments: {} } },
+            { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "screenshot", arguments: { page: "shop" } } }
+          ], 4)
           const listedTools = answers.find((answer) => answer.id === 2)?.result?.tools?.map((tool: any) => tool.name)
           assert.includeMembers(listedTools ?? [], ["click", "find", "control"])
+          // A screenshot crosses once, as an image: its structured result leaves the bytes out, as its schema does
+          const shotSchema = answers.find((answer) => answer.id === 2)?.result?.tools?.find((tool: any) =>
+            tool.name === "screenshot"
+          )?.outputSchema
+          assert.notProperty(shotSchema?.properties?.outcome?.properties ?? {}, "data")
+          const shot = answers.find((answer) => answer.id === 4)?.result
+          assert.strictEqual(shot?.content?.[0]?.type, "image")
+          assert.deepStrictEqual(shot?.structuredContent?.outcome, { mediaType: "image/png" })
           const pages = JSON.stringify(answers.find((answer) => answer.id === 3)?.result)
           assert.include(pages, "shop")
           assert.include(pages, "kept")

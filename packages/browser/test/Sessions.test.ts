@@ -140,7 +140,11 @@ describe("strider mcp", () => {
       data: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a])
     })
     assert.deepStrictEqual(text, { type: "text", text: JSON.stringify({ sinceLast: ["navigated"] }) })
-    assert.deepStrictEqual((shown as McpSchema.CallToolResult).structuredContent, structuredContent)
+    // The bytes cross once, as the image
+    assert.deepStrictEqual((shown as McpSchema.CallToolResult).structuredContent, {
+      outcome: { mediaType: "image/png" },
+      sinceLast: ["navigated"]
+    })
     // A failure is as it was
     const failed = new McpSchema.CallToolResult({ isError: true, content: [{ type: "text", text: "{}" }] })
     assert.strictEqual(Mcp.asImage(failed), failed)

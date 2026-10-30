@@ -136,6 +136,12 @@ export const snapshot = tool(
   "reads"
 )
 
+/**
+ * A screenshot's result as `strider mcp` carries it in structured content: the PNG goes to the client as image
+ * content, so its bytes aren't sent a second time here.
+ */
+export const screenshotWithoutBytes = result(Schema.Struct({ mediaType: Schema.Literal("image/png") }))
+
 export const screenshot = tool(
   "screenshot",
   "A PNG of the page's viewport, base64-encoded, where the capture policy allows screenshots." + front,
