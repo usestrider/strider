@@ -1175,7 +1175,7 @@ export const InspectorIssue = /*#__PURE__*/ Schema.suspend(() =>
     details: InspectorIssueDetails,
     issueId: Schema.optional(IssueId)
   }).annotate({ identifier: "Audits.InspectorIssue" })
-) as any as Schema.Codec<InspectorIssue>
+) as any as Schema.Codec<InspectorIssue, unknown>
 
 /**
  * A unique identifier for the type of issue. Each type may use one of the
@@ -1311,7 +1311,7 @@ export const InspectorIssueDetails = /*#__PURE__*/ Schema.suspend(() =>
     lazyLoadImageIssueDetails: Schema.optional(LazyLoadImageIssueDetails),
     webInstallIssueDetails: Schema.optional(WebInstallIssueDetails)
   }).annotate({ identifier: "Audits.InspectorIssueDetails" })
-) as any as Schema.Codec<InspectorIssueDetails>
+) as any as Schema.Codec<InspectorIssueDetails, unknown>
 
 /**
  * A unique id for a DevTools inspector issue. Allows other entities (e.g.
@@ -1905,7 +1905,7 @@ export const SelectivePermissionsInterventionIssueDetails = /*#__PURE__*/ Schema
     adAncestry: Network.AdAncestry,
     stackTrace: Schema.optional(Runtime.StackTrace)
   }).annotate({ identifier: "Audits.SelectivePermissionsInterventionIssueDetails" })
-) as any as Schema.Codec<SelectivePermissionsInterventionIssueDetails>
+) as any as Schema.Codec<SelectivePermissionsInterventionIssueDetails, unknown>
 
 /**
  * Details for a issue arising from an SAB being instantiated in, or
@@ -2423,7 +2423,7 @@ export const IssueAddedParams = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     issue: InspectorIssue
   }).annotate({ identifier: "Audits.IssueAddedParams" })
-) as any as Schema.Codec<IssueAddedParams>
+) as any as Schema.Codec<IssueAddedParams, unknown>
 
 /**
  * Runs the form issues check for the target page. Found issues are reported

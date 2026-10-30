@@ -55,7 +55,7 @@ export const Animation = /*#__PURE__*/ Schema.suspend(() =>
     cssTransitionProperty: Schema.optional(Schema.String),
     stackTrace: Schema.optional(Console.StackTrace)
   }).annotate({ identifier: "Animation.Animation" })
-) as any as Schema.Codec<Animation>
+) as any as Schema.Codec<Animation, unknown>
 
 /**
  * Unique Web Animation identifier.
@@ -297,7 +297,7 @@ export const AnimationCreatedParams = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     animation: Animation
   }).annotate({ identifier: "Animation.AnimationCreatedParams" })
-) as any as Schema.Codec<AnimationCreatedParams>
+) as any as Schema.Codec<AnimationCreatedParams, unknown>
 
 /**
  * Dispatched whenever a `WebAnimation` is destroyed.
@@ -526,7 +526,7 @@ export const ResolveAnimationResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     object: Runtime.RemoteObject
   }).annotate({ identifier: "Animation.ResolveAnimationResult" })
-) as any as Schema.Codec<ResolveAnimationResult>
+) as any as Schema.Codec<ResolveAnimationResult, unknown>
 
 /**
  * Dispatched whenever the target of any effect of any animation is changed in any way.

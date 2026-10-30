@@ -115,7 +115,7 @@ export const CollectionEntry = /*#__PURE__*/ Schema.suspend(() =>
     key: Schema.optional(RemoteObject),
     value: RemoteObject
   }).annotate({ identifier: "Runtime.CollectionEntry" })
-) as any as Schema.Codec<CollectionEntry>
+) as any as Schema.Codec<CollectionEntry, unknown>
 
 /**
  * `EntryPreview`.
@@ -295,7 +295,7 @@ export const InternalPropertyDescriptor = /*#__PURE__*/ Schema.suspend(() =>
     name: Schema.String,
     value: Schema.optional(RemoteObject)
   }).annotate({ identifier: "Runtime.InternalPropertyDescriptor" })
-) as any as Schema.Codec<InternalPropertyDescriptor>
+) as any as Schema.Codec<InternalPropertyDescriptor, unknown>
 
 /**
  * Object containing abbreviated remote object value.
@@ -499,7 +499,7 @@ export const PropertyDescriptor = /*#__PURE__*/ Schema.suspend(() =>
     isPrivate: Schema.optional(Schema.Boolean),
     nativeGetter: Schema.optional(Schema.Boolean)
   }).annotate({ identifier: "Runtime.PropertyDescriptor" })
-) as any as Schema.Codec<PropertyDescriptor>
+) as any as Schema.Codec<PropertyDescriptor, unknown>
 
 /**
  * `PropertyPreview`.
@@ -684,7 +684,7 @@ export const RemoteObject = /*#__PURE__*/ Schema.suspend(() =>
     classPrototype: Schema.optional(RemoteObject),
     preview: Schema.optional(ObjectPreview)
   }).annotate({ identifier: "Runtime.RemoteObject" })
-) as any as Schema.Codec<RemoteObject>
+) as any as Schema.Codec<RemoteObject, unknown>
 
 /**
  * Object subtype hint. Specified for <code>object</code> <code>function</code> (for class) type values only.
@@ -811,7 +811,7 @@ export const StructureDescription = /*#__PURE__*/ Schema.suspend(() =>
     prototypeStructure: Schema.optional(StructureDescription),
     isImprecise: Schema.optional(Schema.Boolean)
   }).annotate({ identifier: "Runtime.StructureDescription" })
-) as any as Schema.Codec<StructureDescription>
+) as any as Schema.Codec<StructureDescription, unknown>
 
 /**
  * Syntax error type: "none" for no error, "irrecoverable" for unrecoverable errors, "unterminated-literal" for when there is an unterminated literal, "recoverable" for when the expression is unfinished but valid so far.
@@ -881,7 +881,7 @@ export const TypeDescription = /*#__PURE__*/ Schema.suspend(() =>
     structures: Schema.optional(Schema.Array(StructureDescription)),
     isTruncated: Schema.optional(Schema.Boolean)
   }).annotate({ identifier: "Runtime.TypeDescription" })
-) as any as Schema.Codec<TypeDescription>
+) as any as Schema.Codec<TypeDescription, unknown>
 
 /**
  * Describes the location of an expression we want type information for.
@@ -1069,7 +1069,7 @@ export const AwaitPromiseResult = /*#__PURE__*/ Schema.suspend(() =>
     wasThrown: Schema.optional(Schema.Boolean),
     savedResultIndex: Schema.optional(Schema.Int)
   }).annotate({ identifier: "Runtime.AwaitPromiseResult" })
-) as any as Schema.Codec<AwaitPromiseResult>
+) as any as Schema.Codec<AwaitPromiseResult, unknown>
 
 /**
  * Calls function with given declaration on the given object. Object group of the result is inherited from the target object.
@@ -1163,7 +1163,7 @@ export const CallFunctionOnResult = /*#__PURE__*/ Schema.suspend(() =>
     result: RemoteObject,
     wasThrown: Schema.optional(Schema.Boolean)
   }).annotate({ identifier: "Runtime.CallFunctionOnResult" })
-) as any as Schema.Codec<CallFunctionOnResult>
+) as any as Schema.Codec<CallFunctionOnResult, unknown>
 
 /**
  * Evaluates expression on global object.
@@ -1267,7 +1267,7 @@ export const EvaluateResult = /*#__PURE__*/ Schema.suspend(() =>
     wasThrown: Schema.optional(Schema.Boolean),
     savedResultIndex: Schema.optional(Schema.Int)
   }).annotate({ identifier: "Runtime.EvaluateResult" })
-) as any as Schema.Codec<EvaluateResult>
+) as any as Schema.Codec<EvaluateResult, unknown>
 
 /**
  * Issued when new execution context is created.
@@ -1414,7 +1414,7 @@ export const GetCollectionEntriesResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     entries: Schema.Array(CollectionEntry)
   }).annotate({ identifier: "Runtime.GetCollectionEntriesResult" })
-) as any as Schema.Codec<GetCollectionEntriesResult>
+) as any as Schema.Codec<GetCollectionEntriesResult, unknown>
 
 /**
  * Returns displayable properties of a given object. Object group of the result is inherited from the target object. Displayable properties are own properties, internal properties, and native getters in the prototype chain (assumed to be bindings and treated like own properties for the frontend).
@@ -1488,7 +1488,7 @@ export const GetDisplayablePropertiesResult = /*#__PURE__*/ Schema.suspend(() =>
     properties: Schema.Array(PropertyDescriptor),
     internalProperties: Schema.optional(Schema.Array(InternalPropertyDescriptor))
   }).annotate({ identifier: "Runtime.GetDisplayablePropertiesResult" })
-) as any as Schema.Codec<GetDisplayablePropertiesResult>
+) as any as Schema.Codec<GetDisplayablePropertiesResult, unknown>
 
 /**
  * Returns a preview for the given object.
@@ -1618,7 +1618,7 @@ export const GetPropertiesResult = /*#__PURE__*/ Schema.suspend(() =>
     properties: Schema.Array(PropertyDescriptor),
     internalProperties: Schema.optional(Schema.Array(InternalPropertyDescriptor))
   }).annotate({ identifier: "Runtime.GetPropertiesResult" })
-) as any as Schema.Codec<GetPropertiesResult>
+) as any as Schema.Codec<GetPropertiesResult, unknown>
 
 /**
  * Returns detailed information on the given function.
@@ -1669,7 +1669,7 @@ export const GetRuntimeTypesForVariablesAtOffsetsResult = /*#__PURE__*/ Schema.s
   Schema.Struct({
     types: Schema.Array(TypeDescription)
   }).annotate({ identifier: "Runtime.GetRuntimeTypesForVariablesAtOffsetsResult" })
-) as any as Schema.Codec<GetRuntimeTypesForVariablesAtOffsetsResult>
+) as any as Schema.Codec<GetRuntimeTypesForVariablesAtOffsetsResult, unknown>
 
 /**
  * Parses JavaScript source code for errors.

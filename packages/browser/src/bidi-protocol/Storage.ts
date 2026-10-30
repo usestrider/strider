@@ -178,7 +178,7 @@ export const GetCookiesResult = /*#__PURE__*/ Schema.suspend(() =>
     cookies: Schema.Array(Network.Cookie),
     partitionKey: PartitionKey
   }).annotate({ identifier: "storage.GetCookiesResult" })
-) as any as Schema.Codec<GetCookiesResult>
+) as any as Schema.Codec<GetCookiesResult, unknown>
 
 /**
  * `PartialCookie`.
@@ -216,7 +216,7 @@ export const PartialCookie = /*#__PURE__*/ Schema.suspend(() =>
     sameSite: Schema.optional(Network.SameSite),
     expiry: Schema.optional(Schema.Int)
   }).annotate({ identifier: "storage.PartialCookie" })
-) as any as Schema.Codec<PartialCookie>
+) as any as Schema.Codec<PartialCookie, unknown>
 
 /**
  * `PartitionDescriptor`.
@@ -288,7 +288,7 @@ export const SetCookieParameters = /*#__PURE__*/ Schema.suspend(() =>
     cookie: PartialCookie,
     partition: Schema.optional(PartitionDescriptor)
   }).annotate({ identifier: "storage.SetCookieParameters" })
-) as any as Schema.Codec<SetCookieParameters>
+) as any as Schema.Codec<SetCookieParameters, unknown>
 
 /**
  * `SetCookieResult`.

@@ -243,7 +243,7 @@ export const ConsoleMessage = /*#__PURE__*/ Schema.suspend(() =>
     networkRequestId: Schema.optional(Network.RequestId),
     timestamp: Schema.optional(Schema.Number)
   }).annotate({ identifier: "Console.ConsoleMessage" })
-) as any as Schema.Codec<ConsoleMessage>
+) as any as Schema.Codec<ConsoleMessage, unknown>
 
 /**
  * Message severity.
@@ -339,7 +339,7 @@ export const StackTrace = /*#__PURE__*/ Schema.suspend(() =>
     truncated: Schema.optional(Schema.Boolean),
     parentStackTrace: Schema.optional(StackTrace)
   }).annotate({ identifier: "Console.StackTrace" })
-) as any as Schema.Codec<StackTrace>
+) as any as Schema.Codec<StackTrace, unknown>
 
 /**
  * List of the different message sources that are non-default logging channels.
@@ -427,7 +427,7 @@ export const MessageAddedParams = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     message: ConsoleMessage
   }).annotate({ identifier: "Console.MessageAddedParams" })
-) as any as Schema.Codec<MessageAddedParams>
+) as any as Schema.Codec<MessageAddedParams, unknown>
 
 /**
  * Issued when subsequent message(s) are equal to the previous one(s).

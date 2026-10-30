@@ -167,7 +167,7 @@ export const GetPreviewResult = /*#__PURE__*/ Schema.suspend(() =>
     functionDetails: Schema.optional(Debugger.FunctionDetails),
     preview: Schema.optional(Runtime.ObjectPreview)
   }).annotate({ identifier: "Heap.GetPreviewResult" })
-) as any as Schema.Codec<GetPreviewResult>
+) as any as Schema.Codec<GetPreviewResult, unknown>
 
 /**
  * Returns the strongly referenced Runtime.RemoteObject for a Heap.HeapObjectId.
@@ -226,7 +226,7 @@ export const GetRemoteObjectResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     result: Runtime.RemoteObject
   }).annotate({ identifier: "Heap.GetRemoteObjectResult" })
-) as any as Schema.Codec<GetRemoteObjectResult>
+) as any as Schema.Codec<GetRemoteObjectResult, unknown>
 
 /**
  * Take a heap snapshot.

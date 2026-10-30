@@ -916,7 +916,7 @@ export const Node = /*#__PURE__*/ Schema.suspend(() =>
     contentSecurityPolicyHash: Schema.optional(Schema.String),
     layoutFlags: Schema.optional(Schema.Array(Schema.String))
   }).annotate({ identifier: "DOM.Node" })
-) as any as Schema.Codec<Node>
+) as any as Schema.Codec<Node, unknown>
 
 /**
  * Unique DOM node identifier.
@@ -1428,7 +1428,7 @@ export const ChildNodeInsertedParams = /*#__PURE__*/ Schema.suspend(() =>
     previousNodeId: NodeId,
     node: Node
   }).annotate({ identifier: "DOM.ChildNodeInsertedParams" })
-) as any as Schema.Codec<ChildNodeInsertedParams>
+) as any as Schema.Codec<ChildNodeInsertedParams, unknown>
 
 /**
  * Mirrors <code>DOMNodeRemoved</code> event.
@@ -1849,7 +1849,7 @@ export const GetDocumentResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     root: Node
   }).annotate({ identifier: "DOM.GetDocumentResult" })
-) as any as Schema.Codec<GetDocumentResult>
+) as any as Schema.Codec<GetDocumentResult, unknown>
 
 /**
  * Returns event listeners relevant to the node.
@@ -2714,7 +2714,7 @@ export const PseudoElementAddedParams = /*#__PURE__*/ Schema.suspend(() =>
     parentId: NodeId,
     pseudoElement: Node
   }).annotate({ identifier: "DOM.PseudoElementAddedParams" })
-) as any as Schema.Codec<PseudoElementAddedParams>
+) as any as Schema.Codec<PseudoElementAddedParams, unknown>
 
 /**
  * Called when a pseudo element is removed from an element.
@@ -3245,7 +3245,7 @@ export const ResolveNodeResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     object: Runtime.RemoteObject
   }).annotate({ identifier: "DOM.ResolveNodeResult" })
-) as any as Schema.Codec<ResolveNodeResult>
+) as any as Schema.Codec<ResolveNodeResult, unknown>
 
 /**
  * Controls whether any DOM commands work for nodes inside a UserAgent shadow tree.
@@ -3404,7 +3404,7 @@ export const SetChildNodesParams = /*#__PURE__*/ Schema.suspend(() =>
     parentId: NodeId,
     nodes: Schema.Array(Node)
   }).annotate({ identifier: "DOM.SetChildNodesParams" })
-) as any as Schema.Codec<SetChildNodesParams>
+) as any as Schema.Codec<SetChildNodesParams, unknown>
 
 /**
  * Enable/disable the given event listener. A disabled event listener will not fire.
@@ -3691,7 +3691,7 @@ export const ShadowRootPushedParams = /*#__PURE__*/ Schema.suspend(() =>
     hostId: NodeId,
     root: Node
   }).annotate({ identifier: "DOM.ShadowRootPushedParams" })
-) as any as Schema.Codec<ShadowRootPushedParams>
+) as any as Schema.Codec<ShadowRootPushedParams, unknown>
 
 /**
  * Shows a flex overlay for a node that begins a 'flex' layout context. The command has no effect if <code>nodeId</code> is invalid or the associated node does not begin a 'flex' layout context. A node can only have one flex overlay at a time; subsequent calls with the same <code>nodeId</code> will override earlier calls.

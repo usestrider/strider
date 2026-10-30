@@ -209,7 +209,7 @@ export const DetachedElementInfo = /*#__PURE__*/ Schema.suspend(() =>
     treeNode: Node,
     retainedNodeIds: Schema.Array(NodeId)
   }).annotate({ identifier: "DOM.DetachedElementInfo" })
-) as any as Schema.Codec<DetachedElementInfo>
+) as any as Schema.Codec<DetachedElementInfo, unknown>
 
 /**
  * ContainerSelector logical axes
@@ -409,7 +409,7 @@ export const Node = /*#__PURE__*/ Schema.suspend(() =>
     adoptedStyleSheets: Schema.optional(Schema.Array(StyleSheetId)),
     adProvenance: Schema.optional(Network.AdProvenance)
   }).annotate({ identifier: "DOM.Node" })
-) as any as Schema.Codec<Node>
+) as any as Schema.Codec<Node, unknown>
 
 /**
  * Unique DOM node identifier.
@@ -982,7 +982,7 @@ export const ChildNodeInsertedParams = /*#__PURE__*/ Schema.suspend(() =>
     previousNodeId: NodeId,
     node: Node
   }).annotate({ identifier: "DOM.ChildNodeInsertedParams" })
-) as any as Schema.Codec<ChildNodeInsertedParams>
+) as any as Schema.Codec<ChildNodeInsertedParams, unknown>
 
 /**
  * Mirrors `DOMNodeRemoved` event.
@@ -1213,7 +1213,7 @@ export const DescribeNodeResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     node: Node
   }).annotate({ identifier: "DOM.DescribeNodeResult" })
-) as any as Schema.Codec<DescribeNodeResult>
+) as any as Schema.Codec<DescribeNodeResult, unknown>
 
 /**
  * Discards search results from the session with the given id. `getSearchResults` should no longer
@@ -1805,7 +1805,7 @@ export const GetDetachedDomNodesResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     detachedNodes: Schema.Array(DetachedElementInfo)
   }).annotate({ identifier: "DOM.GetDetachedDomNodesResult" })
-) as any as Schema.Codec<GetDetachedDomNodesResult>
+) as any as Schema.Codec<GetDetachedDomNodesResult, unknown>
 
 /**
  * Returns the root DOM node (and optionally the subtree) to the caller.
@@ -1868,7 +1868,7 @@ export const GetDocumentResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     root: Node
   }).annotate({ identifier: "DOM.GetDocumentResult" })
-) as any as Schema.Codec<GetDocumentResult>
+) as any as Schema.Codec<GetDocumentResult, unknown>
 
 /**
  * Returns the NodeId of the matched element according to certain relations.
@@ -2249,7 +2249,7 @@ export const GetNodeStackTracesResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     creation: Schema.optional(Runtime.StackTrace)
   }).annotate({ identifier: "DOM.GetNodeStackTracesResult" })
-) as any as Schema.Codec<GetNodeStackTracesResult>
+) as any as Schema.Codec<GetNodeStackTracesResult, unknown>
 
 /**
  * Finds nodes with a given computed style in a subtree.
@@ -2778,7 +2778,7 @@ export const PseudoElementAddedParams = /*#__PURE__*/ Schema.suspend(() =>
     parentId: NodeId,
     pseudoElement: Node
   }).annotate({ identifier: "DOM.PseudoElementAddedParams" })
-) as any as Schema.Codec<PseudoElementAddedParams>
+) as any as Schema.Codec<PseudoElementAddedParams, unknown>
 
 /**
  * Called when a pseudo element is removed from an element.
@@ -3450,7 +3450,7 @@ export const SetChildNodesParams = /*#__PURE__*/ Schema.suspend(() =>
     parentId: NodeId,
     nodes: Schema.Array(Node)
   }).annotate({ identifier: "DOM.SetChildNodesParams" })
-) as any as Schema.Codec<SetChildNodesParams>
+) as any as Schema.Codec<SetChildNodesParams, unknown>
 
 /**
  * Sets files for the given file input element.
@@ -3734,7 +3734,7 @@ export const ShadowRootPushedParams = /*#__PURE__*/ Schema.suspend(() =>
     hostId: NodeId,
     root: Node
   }).annotate({ identifier: "DOM.ShadowRootPushedParams" })
-) as any as Schema.Codec<ShadowRootPushedParams>
+) as any as Schema.Codec<ShadowRootPushedParams, unknown>
 
 /**
  * Collects class names for the node with given id and all of it's child nodes.
