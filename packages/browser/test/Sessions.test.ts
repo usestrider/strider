@@ -106,42 +106,66 @@ describe("Ledger", () => {
 })
 
 describe("strider mcp", () => {
-  it("uses explicit session flags before environment defaults and respects literal data", () => {
-    for (const flag of [["-s", "shop"], ["--session", "shop"], ["--session=shop"]]) {
-      for (const argv of [[...flag, "mcp"], ["mcp", ...flag]]) {
-        assert.deepStrictEqual(Mcp.parse(argv, 7, { STRIDER_SESSION: "env" }), { _tag: "Serve", session: "shop" })
-      }
-      assert.deepStrictEqual(Mcp.parse(["mcp", ...flag, "--start"], 7, {}), {
-        _tag: "Start",
-        session: "shop",
-        start: ["start", "--name", "shop", "--owner-pid", "7"]
-      })
-    }
-    assert.deepStrictEqual(Mcp.parse(["mcp", "--", "--session=other"], 7, { STRIDER_SESSION: "env" }), {
-      _tag: "Serve",
-      session: "env"
-    })
-  })
+  const parse = (argv: ReadonlyArray<string>, env: Readonly<Record<string, string>>) =>
+    Mcp.parse(argv, 7, env).pipe(Effect.provide(NodeServices.layer))
 
-  it("serves a session it is named, or one it starts, which ends with it unless kept", () => {
-    assert.deepStrictEqual(Mcp.parse(["mcp", "-s", "shop"], 7, {}), { _tag: "Serve", session: "shop" })
-    assert.deepStrictEqual(Mcp.parse(["-s", "shop", "mcp"], 7, {}), { _tag: "Serve", session: "shop" })
-    assert.deepStrictEqual(Mcp.parse(["mcp"], 7, { STRIDER_SESSION: "env" }), { _tag: "Serve", session: "env" })
-    assert.strictEqual(Mcp.parse(["mcp"], 7, {})._tag, "Invalid")
-    assert.deepStrictEqual(Mcp.parse(["mcp", "--start", "--chromium", "/bin/chromium"], 7, {}), {
-      _tag: "Start",
-      session: "mcp-7",
-      start: ["start", "--name", "mcp-7", "--chromium", "/bin/chromium", "--owner-pid", "7"]
-    })
-    assert.deepStrictEqual(
-      Mcp.parse(["mcp", "--start", "--keep", "--name", "kept", "--firefox", "/bin/firefox"], 7, {}),
-      {
-        _tag: "Start",
-        session: "kept",
-        start: ["start", "--name", "kept", "--firefox", "/bin/firefox"]
+  it.effect("uses explicit session flags before environment defaults, and takes nothing after --", () =>
+    Effect.gen(function*() {
+      for (const flag of [["-s", "shop"], ["--session", "shop"], ["--session=shop"]]) {
+        for (const argv of [[...flag, "mcp"], ["mcp", ...flag]]) {
+          assert.deepStrictEqual(yield* parse(argv, { STRIDER_SESSION: "env" }), { _tag: "Serve", session: "shop" })
+        }
+        assert.deepStrictEqual(yield* parse(["mcp", ...flag, "--start"], {}), {
+          _tag: "Start",
+          session: "shop",
+          start: ["start", "--name", "shop", "--owner-pid", "7"]
+        })
       }
-    )
-  })
+      // What follows -- is an operand, which mcp takes none of, never a session flag
+      const literal = yield* Effect.exit(parse(["mcp", "--", "--session=other"], { STRIDER_SESSION: "env" }))
+      assert.isTrue(literal._tag === "Failure")
+    }))
+
+  it.effect("serves a session it is named, or one it starts, which ends with it unless kept", () =>
+    Effect.gen(function*() {
+      assert.deepStrictEqual(yield* parse(["mcp", "-s", "shop"], {}), { _tag: "Serve", session: "shop" })
+      assert.deepStrictEqual(yield* parse(["-s", "shop", "mcp"], {}), { _tag: "Serve", session: "shop" })
+      assert.deepStrictEqual(yield* parse(["mcp"], { STRIDER_SESSION: "env" }), { _tag: "Serve", session: "env" })
+      assert.strictEqual((yield* parse(["mcp"], {}))?._tag, "Invalid")
+      assert.deepStrictEqual(yield* parse(["mcp", "--start", "--chromium", "/bin/chromium"], {}), {
+        _tag: "Start",
+        session: "mcp-7",
+        start: ["start", "--name", "mcp-7", "--chromium", "/bin/chromium", "--owner-pid", "7"]
+      })
+      assert.deepStrictEqual(
+        yield* parse(["mcp", "--start", "--keep", "--name", "kept", "--firefox", "/bin/firefox"], {}),
+        {
+          _tag: "Start",
+          session: "kept",
+          start: ["start", "--name", "kept", "--firefox", "/bin/firefox"]
+        }
+      )
+      assert.deepStrictEqual(
+        yield* parse(["mcp", "--start", "--chromium", "/bin/chromium", "--idle", "5 minutes", "--secret", "pw=PW"], {}),
+        {
+          _tag: "Start",
+          session: "mcp-7",
+          start: [
+            "start",
+            "--name",
+            "mcp-7",
+            "--chromium",
+            "/bin/chromium",
+            "--idle",
+            "5 minutes",
+            "--secret",
+            "pw=PW",
+            "--owner-pid",
+            "7"
+          ]
+        }
+      )
+    }))
 })
 
 describe("strider export test", () => {

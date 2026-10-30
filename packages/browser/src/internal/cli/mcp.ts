@@ -6,67 +6,122 @@
  *
  * - `strider mcp -s shop` serves session `shop`, started with `strider start`.
  * - `strider mcp --start --chromium <path>` starts a session for the client, named `--name` or `mcp-<pid>`,
- *   which ends when this process does, unless `--keep`. Every other flag goes to `start`.
+ *   which ends when this process does, unless `--keep`. `start`'s other flags go to `start`.
  *
  * Standard output is the client's, so what `start` reports goes to standard error.
  */
 import * as McpProtocol from "effect/ai/McpProtocol"
 import * as McpServer from "effect/ai/McpServer"
+import * as Command from "effect/cli/Command"
+import * as Flag from "effect/cli/Flag"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import type * as Stdio from "effect/Stdio"
 import * as Tools from "../tools.ts"
 import * as Client from "./client.ts"
+import * as Daemon from "./daemon.ts"
 import * as Node from "./node.ts"
 import * as Session from "./session.ts"
 
-/** What `strider mcp`'s arguments ask for: the session to serve, and whether to start it. */
-export const parse = (
+/** What `strider mcp` was asked for: the session to serve, and the `start` arguments that start it, if it does. */
+export type Plan =
+  | { readonly _tag: "Serve"; readonly session: string }
+  | { readonly _tag: "Start"; readonly session: string; readonly start: ReadonlyArray<string> }
+  | { readonly _tag: "Invalid"; readonly message: string }
+
+/** `start`'s flags, with the name and idle timeout optional, and `mcp`'s own. */
+const flags = {
+  ...Daemon.startFlags,
+  name: Flag.String("name").pipe(
+    Flag.withDescription("Name the started session; defaults to -s or mcp-<pid>"),
+    Flag.optional
+  ),
+  idle: Flag.String("idle").pipe(
+    Flag.withDescription("Stop the started session after this duration without commands (default: 1 hour)"),
+    Flag.optional
+  ),
+  start: Flag.Boolean("start").pipe(
+    Flag.withDescription("Start a session with the launch options below; otherwise serve -s or STRIDER_SESSION"),
+    Flag.withDefault(false)
+  ),
+  keep: Flag.Boolean("keep").pipe(
+    Flag.withDescription("With --start, keep the session running after this MCP process exits"),
+    Flag.withDefault(false)
+  )
+}
+
+type Flags = Command.Command.Config.Infer<typeof flags>
+
+/** `strider start`'s arguments for the flags given, which end the session with `pid` unless it's kept. */
+const startArgs = (name: string, given: Flags, pid: number): ReadonlyArray<string> => {
+  const option = (flag: string, value: Option.Option<string | number>) =>
+    Option.match(value, { onNone: () => [], onSome: (value) => [`--${flag}`, String(value)] })
+  return [
+    "start",
+    "--name",
+    name,
+    ...option("chromium", given.chromium),
+    ...option("firefox", given.firefox),
+    ...option("webkit", given.webkit),
+    ...option("attach", given.attach),
+    ...option("user-data-dir", given.userDataDir),
+    ...option("state", given.state),
+    ...option("fork", given.fork),
+    ...option("idle", given.idle),
+    ...Object.entries(given.secret).flatMap(([secret, variable]) => ["--secret", `${secret}=${variable}`]),
+    // The session ends with this process unless it is kept
+    ...option("owner-pid", Option.orElse(given.ownerPid, () => given.keep ? Option.none() : Option.some(pid)))
+  ]
+}
+
+/** The session `-s` or `STRIDER_SESSION` names, which `strider mcp` serves, or starts with `--start`. */
+const plan = (
+  given: Flags,
+  selected: Option.Option<string>,
+  pid: number,
+  env: Readonly<Record<string, string | undefined>>
+): Plan => {
+  if (given.start) {
+    const name = Option.getOrElse(Option.orElse(given.name, () => selected), () => `mcp-${pid}`)
+    return { _tag: "Start", session: name, start: startArgs(name, given, pid) }
+  }
+  const name = Option.getOrElse(selected, () => env.STRIDER_SESSION ?? "")
+  return name === ""
+    ? { _tag: "Invalid", message: "strider mcp serves a session: name it with -s, or start one with --start" }
+    : { _tag: "Serve", session: name }
+}
+
+const root = Command.make("strider").pipe(Command.withSharedFlags(Daemon.selectors))
+
+/** `strider mcp`, whose plan `serve` carries out. */
+export const command = <E, R>(
+  serve: (plan: Plan) => Effect.Effect<void, E, R>,
+  pid: number = Node.process.pid,
+  env: Readonly<Record<string, string | undefined>> = Node.process.env
+) =>
+  Command.make(
+    "mcp",
+    flags,
+    (given) => Effect.flatMap(root, ({ session }) => serve(plan(given, session, pid, env)))
+  ).pipe(Command.withDescription("Serve a session's tools over MCP on standard input and output"))
+
+/** What `strider mcp`'s arguments ask for, as its command parses them. */
+export const parse = Effect.fnUntraced(function*(
   argv: ReadonlyArray<string>,
   pid: number,
   env: Readonly<Record<string, string | undefined>>
-):
-  | { readonly _tag: "Serve"; readonly session: string }
-  | { readonly _tag: "Start"; readonly session: string; readonly start: ReadonlyArray<string> }
-  | { readonly _tag: "Invalid"; readonly message: string } =>
-{
-  const rest = [...Session.withoutSession(argv)]
-  const at = rest.indexOf("mcp")
-  if (at >= 0) rest.splice(at, 1)
-  const session = Session.scan(argv).session
-  const option = (flag: string): number => {
-    const index = rest.indexOf(flag)
-    const boundary = rest.indexOf("--")
-    return boundary >= 0 && index >= boundary ? -1 : index
-  }
-  const take = (flag: string): string | undefined => {
-    const index = option(flag)
-    if (index < 0) return undefined
-    const value = rest[index + 1]
-    rest.splice(index, 2)
-    return value
-  }
-  const start = option("--start")
-  if (start < 0) {
-    const name = session ?? env.STRIDER_SESSION
-    return name === undefined || name === ""
-      ? { _tag: "Invalid", message: "strider mcp serves a session: name it with -s, or start one with --start" }
-      : { _tag: "Serve", session: name }
-  }
-  rest.splice(start, 1)
-  const keep = option("--keep")
-  if (keep >= 0) rest.splice(keep, 1)
-  const name = take("--name") ?? session ?? `mcp-${pid}`
-  return {
-    _tag: "Start",
-    session: name,
-    // The session ends with this process unless it is kept
-    start: ["start", "--name", name, ...rest, ...(keep >= 0 ? [] : ["--owner-pid", String(pid)])]
-  }
-}
+) {
+  let planned: Plan | undefined
+  yield* Command.runWith(
+    root.pipe(Command.withSubcommands([command((plan) => Effect.sync(() => void (planned = plan)), pid, env)])),
+    { version: "" }
+  )(argv)
+  return planned
+})
 
 /** A tool call, forwarded to the session's daemon, and its result decoded by the tool's own Schemas. */
 const forward = (client: Client.Client, session: string, name: keyof Tools.Tools) => (params: unknown) =>
@@ -87,32 +142,30 @@ const forward = (client: Client.Client, session: string, name: keyof Tools.Tools
     return yield* Schema.decodeUnknownEffect(tool.successSchema)(value).pipe(Effect.orDie)
   })
 
-/** Serves the session's tools over standard input and output, until the client goes. */
-export const run = Effect.fnUntraced(
-  function*(argv: ReadonlyArray<string>, bin: string, stdio: Layer.Layer<Stdio.Stdio>) {
-    const process = Node.process
-    const rootDir = yield* Client.sessionRoot
-    const asked = parse(argv, process.pid, process.env)
-    if (asked._tag === "Invalid") {
-      yield* Console.error(asked.message)
+/** Serves a session's tools over standard input and output, starting it first if asked, until the client goes. */
+const serve = Effect.fnUntraced(
+  function*(plan: Plan, bin: string, stdio: Layer.Layer<Stdio.Stdio>) {
+    if (plan._tag === "Invalid") {
+      yield* Console.error(plan.message)
       return yield* new Client.Exit({ code: Session.exitCodes.CliError! })
     }
     // Standard output is the client's: what start reports goes to standard error
-    if (asked._tag === "Start") yield* Client.start(asked.start, bin, Console.error)
-    const client = yield* Client.session(rootDir, asked.session)
+    if (plan._tag === "Start") yield* Client.start(plan.start, bin, Console.error)
+    const rootDir = yield* Client.sessionRoot
+    const client = yield* Client.session(rootDir, plan.session)
     const handlers = Object.fromEntries(
       (Object.keys(Tools.toolkit.tools) as Array<keyof Tools.Tools>).map((name) => [
         name,
-        forward(client, asked.session, name)
+        forward(client, plan.session, name)
       ])
     )
     const server = McpServer.toolkit(Tools.toolkit).pipe(
       Layer.provide(Tools.toolkit.toLayer(handlers as never)),
       Layer.provide(McpServer.layerStdio({
         name: "strider",
-        version: "0.1.0",
+        version: yield* Session.version,
         instructions:
-          `Browser tools for the strider session ${asked.session}. Every page tool names its page; snapshot gives refs to target, and find searches it.`,
+          `Browser tools for the strider session ${plan.session}. Every page tool names its page; snapshot gives refs to target, and find searches it.`,
         protocols: [McpProtocol.v2025_11_25, McpProtocol.v2025_06_18, McpProtocol.v2025_03_26, McpProtocol.v2024_11_05]
       })),
       Layer.provide(stdio)
@@ -121,4 +174,14 @@ export const run = Effect.fnUntraced(
     return yield* Layer.launch(server).pipe(Effect.provideService(Logger.LogToStderr, true))
   },
   Effect.scoped
+)
+
+/** Runs `strider mcp` with its arguments: `bin` starts a session's daemon, and `stdio` is the client's. */
+export const run = Effect.fnUntraced(
+  function*(argv: ReadonlyArray<string>, bin: string, stdio: Layer.Layer<Stdio.Stdio>) {
+    return yield* Command.runWith(
+      root.pipe(Command.withSubcommands([command((plan) => serve(plan, bin, stdio))])),
+      { version: yield* Session.version }
+    )(argv)
+  }
 )
