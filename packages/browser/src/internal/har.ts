@@ -237,15 +237,11 @@ const redacted = "REDACTED"
 /** A URL with its credentials redacted, unless they are included. */
 const urlOf = (url: string, writing: Writing): string => {
   if (writing.include.has("credentials")) return url
-  try {
-    const parsed = new URL(url)
-    if (parsed.username === "" && parsed.password === "") return url
-    parsed.username = redacted
-    parsed.password = ""
-    return parsed.href
-  } catch {
-    return url
-  }
+  const parsed = URL.parse(url)
+  if (parsed === null || (parsed.username === "" && parsed.password === "")) return url
+  parsed.username = redacted
+  parsed.password = ""
+  return parsed.href
 }
 
 const isAuthorization = (name: string) => name === "authorization" || name === "proxy-authorization"
@@ -335,13 +331,9 @@ const responseCookies = (
   })
 
 const queryOf = (url: string) => {
-  try {
-    const query: Array<typeof HarLog.NameValue.Type> = []
-    new URL(url).searchParams.forEach((value, name) => query.push({ name, value }))
-    return query
-  } catch {
-    return []
-  }
+  const query: Array<typeof HarLog.NameValue.Type> = []
+  URL.parse(url)?.searchParams.forEach((value, name) => query.push({ name, value }))
+  return query
 }
 
 const textual = (mimeType: string) =>

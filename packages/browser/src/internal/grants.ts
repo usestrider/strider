@@ -19,11 +19,8 @@ import type * as Runtime from "./runtime.ts"
 
 const origin = (input: string | undefined): Option.Option<string> | undefined => {
   if (input === undefined) return Option.none()
-  try {
-    return Option.some(new URL(input).origin)
-  } catch {
-    return undefined
-  }
+  const parsed = URL.parse(input)
+  return parsed === null ? undefined : Option.some(parsed.origin)
 }
 
 export const grant = (

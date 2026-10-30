@@ -482,13 +482,7 @@ export const bodyBytes = (
   base64Encoded ? decodeBase64(body, method) : Effect.succeed(new TextEncoder().encode(body))
 
 /** A URL as the browser writes it, so `http://a` and `http://a/` compare equal; anything else as it is. */
-export const normalize = (url: string): string => {
-  try {
-    return new URL(url).href
-  } catch {
-    return url
-  }
-}
+export const normalize = (url: string): string => URL.parse(url)?.href ?? url
 
 /** Headers from a protocol's record of them, each value as a string. */
 export const headersOf = (headers: unknown): Headers.Headers => {

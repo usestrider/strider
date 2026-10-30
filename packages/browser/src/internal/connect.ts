@@ -12,7 +12,9 @@
 import * as Effect from "effect/Effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as HttpUrl from "effect/http/Url"
 import * as Redacted from "effect/Redacted"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Socket from "effect/socket/Socket"
@@ -31,12 +33,9 @@ const refused = (hint: string) => Launch.fail(new Browser.ConnectionFailed({ sta
 /** The endpoint, parsed, with its scheme one of `schemes`. */
 const parse = (endpoint: string, schemes: ReadonlyArray<string>, expected: string) =>
   Effect.suspend(() => {
-    let url: URL
-    try {
-      url = new URL(endpoint)
-    } catch {
-      return invalid(expected, `${JSON.stringify(endpoint)} doesn't parse`)
-    }
+    const parsed = HttpUrl.fromString(endpoint)
+    if (Result.isFailure(parsed)) return invalid(expected, `${JSON.stringify(endpoint)} doesn't parse`)
+    const url = parsed.success
     return schemes.includes(url.protocol)
       ? Effect.succeed(url)
       : invalid(expected, `${url.protocol} isn't one of ${schemes.join(", ")}`)

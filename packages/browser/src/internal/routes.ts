@@ -73,12 +73,8 @@ const fixedPrefix = (pattern: string): string => {
     const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(fixed)
     return scheme === null ? "" : scheme[0].toLowerCase()
   }
-  try {
-    const origin = new URL(`${parts[1]}://${parts[2]}/`)
-    return `${origin.protocol}//${origin.host}${parts[3]}`
-  } catch {
-    return `${parts[1]!.toLowerCase()}://`
-  }
+  const origin = URL.parse(`${parts[1]}://${parts[2]}/`)
+  return origin === null ? `${parts[1]!.toLowerCase()}://` : `${origin.protocol}//${origin.host}${parts[3]}`
 }
 
 /** A header's value as the browser sends it: a redacted one unwrapped, since it is going back where it came from. */

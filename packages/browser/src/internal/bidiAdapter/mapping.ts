@@ -130,26 +130,14 @@ export const errorPage = (url: string) => url.startsWith("about:neterror") || ur
  */
 export const intended = (url: string) => {
   if (!errorPage(url)) return url
-  try {
-    return new URL(url).searchParams.get("u") ?? url
-  } catch {
-    return url
-  }
+  return URL.parse(url)?.searchParams.get("u") ?? url
 }
 
 export const originOf = (url: string) => {
-  try {
-    return new URL(url).origin
-  } catch {
-    return "null"
-  }
+  return URL.parse(url)?.origin ?? "null"
 }
 
 /** An error page's error, its `e` parameter. */
 export const errorText = (url: string) => {
-  try {
-    return new URL(url).searchParams.get("e") ?? "error page"
-  } catch {
-    return "error page"
-  }
+  return URL.parse(url)?.searchParams.get("e") ?? "error page"
 }

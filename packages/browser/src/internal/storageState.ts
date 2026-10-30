@@ -385,13 +385,11 @@ const sourcesOf = Effect.fnUntraced(function*(runtime: Runtime.Runtime, context:
     if (page.context !== context) continue
     const { frames, status: state } = yield* page.state.get
     if (state._tag !== "Open") continue
-    let top: URL
-    try {
-      top = new URL(state.url)
-    } catch {
-      continue
-    }
-    const topSite = siteOf(top)
+    const top = URL.parse(state.url)
+    if (top === null) continue
+    // A page that isn't on a site, such as about:blank, has no site to key a frame's partition by
+    const topSite = Schema.decodeUnknownOption(Url.Site)(siteOf(top))
+    if (Option.isNone(topSite)) continue
     const documents = [
       state.document.id,
       ...frames.flatMap((frame) => Option.toArray(frame.document))
@@ -399,16 +397,11 @@ const sourcesOf = Effect.fnUntraced(function*(runtime: Runtime.Runtime, context:
     for (const document of documents) {
       const entry = runtime.model.document(document)
       if (Option.isNone(entry)) continue
-      let url: URL
-      try {
-        url = new URL((yield* entry.value.state.get).url)
-      } catch {
-        continue
-      }
-      if (url.protocol !== "http:" && url.protocol !== "https:") continue
-      const partition: CookieJar.PartitionKey = siteOf(url) === topSite
+      const url = URL.parse((yield* entry.value.state.get).url)
+      if (url === null || (url.protocol !== "http:" && url.protocol !== "https:")) continue
+      const partition: CookieJar.PartitionKey = siteOf(url) === topSite.value
         ? { _tag: "Unpartitioned" }
-        : { _tag: "Partitioned", topLevelSite: Url.Site.make(topSite), crossSiteAncestor: Option.some(true) }
+        : { _tag: "Partitioned", topLevelSite: topSite.value, crossSiteAncestor: Option.some(true) }
       const key = `${url.origin} ${partition._tag === "Partitioned" ? partition.topLevelSite : ""}`
       if (!sources.has(key)) sources.set(key, { document, origin: url.origin, partition, topLevelOrigin: top.origin })
     }
