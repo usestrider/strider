@@ -18,30 +18,18 @@ import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import { dual } from "effect/Function"
-import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import * as Stream from "effect/Stream"
 import type * as AriaPattern from "./AriaPattern.ts"
 import type * as Condition from "./Condition.ts"
-import * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
-import * as Access from "./internal/access.ts"
-import { now } from "./internal/adapter.ts"
 import * as AriaPatterns from "./internal/ariaPattern.ts"
-import * as BrowserClock from "./internal/browserClock.ts"
 import * as ConditionImpl from "./internal/condition.ts"
-import type * as Engine from "./internal/engine.ts"
-import * as Handles from "./internal/handles.ts"
-import { LocatorImpl } from "./internal/locator.ts"
-import type * as Model from "./internal/model.ts"
-import * as Operation from "./internal/operation.ts"
-import * as Runtime from "./internal/runtime.ts"
-import { describeSteps } from "./internal/steps.ts"
-import type * as Locator from "./Locator.ts"
+import * as ExpectImpl from "./internal/expect.ts"
+import * as Locator from "./Locator.ts"
 import type * as Page from "./Page.ts"
 import type * as Target from "./Target.ts"
-import type * as Watchable from "./Watchable.ts"
+import * as Watchable from "./Watchable.ts"
 
 /**
  * A matcher that takes no arguments: the function is the expectation, as in `locator.pipe(Expect.toBeVisible)`.
@@ -83,7 +71,7 @@ export interface DualMatcher<S, Args extends ReadonlyArray<unknown>> {
  * @since 0.1.0
  */
 export const toBeVisible: Matcher<Locator.ReadonlyLocator> = (locator) =>
-  expectLocator(locator, { _tag: "Visible" }, "toBeVisible", "to be visible")
+  ExpectImpl.expectLocator(locator, { _tag: "Visible" }, "toBeVisible", "to be visible")
 
 /**
  * Expects no match to be visible: passes when every match is hidden, or when nothing matches.
@@ -104,7 +92,7 @@ export const toBeVisible: Matcher<Locator.ReadonlyLocator> = (locator) =>
  * @since 0.1.0
  */
 export const toBeHidden: Matcher<Locator.ReadonlyLocator> = (locator) =>
-  expectLocator(locator, { _tag: "Hidden" }, "toBeHidden", "to be hidden")
+  ExpectImpl.expectLocator(locator, { _tag: "Hidden" }, "toBeHidden", "to be hidden")
 
 /**
  * Expects the one match to be enabled.
@@ -126,7 +114,7 @@ export const toBeHidden: Matcher<Locator.ReadonlyLocator> = (locator) =>
  * @since 0.1.0
  */
 export const toBeEnabled: Matcher<Locator.ReadonlyLocator> = (locator) =>
-  expectLocator(locator, { _tag: "Enabled" }, "toBeEnabled", "to be enabled")
+  ExpectImpl.expectLocator(locator, { _tag: "Enabled" }, "toBeEnabled", "to be enabled")
 
 /**
  * Expects the one match to be disabled.
@@ -147,7 +135,7 @@ export const toBeEnabled: Matcher<Locator.ReadonlyLocator> = (locator) =>
  * @since 0.1.0
  */
 export const toBeDisabled: Matcher<Locator.ReadonlyLocator> = (locator) =>
-  expectLocator(locator, { _tag: "Disabled" }, "toBeDisabled", "to be disabled")
+  ExpectImpl.expectLocator(locator, { _tag: "Disabled" }, "toBeDisabled", "to be disabled")
 
 /**
  * Expects the one match to be checked.
@@ -172,7 +160,7 @@ export const toBeDisabled: Matcher<Locator.ReadonlyLocator> = (locator) =>
  * @since 0.1.0
  */
 export const toBeChecked: Matcher<Locator.ReadonlyLocator> = (locator) =>
-  expectLocator(locator, { _tag: "Checked" }, "toBeChecked", "to be checked")
+  ExpectImpl.expectLocator(locator, { _tag: "Checked" }, "toBeChecked", "to be checked")
 
 /**
  * Expects the one match to have focus.
@@ -194,7 +182,7 @@ export const toBeChecked: Matcher<Locator.ReadonlyLocator> = (locator) =>
  * @since 0.1.0
  */
 export const toBeFocused: Matcher<Locator.ReadonlyLocator> = (locator) =>
-  expectLocator(locator, { _tag: "Focused" }, "toBeFocused", "to have focus")
+  ExpectImpl.expectLocator(locator, { _tag: "Focused" }, "toBeFocused", "to have focus")
 
 /**
  * Expects the one match to accept input.
@@ -216,7 +204,7 @@ export const toBeFocused: Matcher<Locator.ReadonlyLocator> = (locator) =>
  * @since 0.1.0
  */
 export const toBeEditable: Matcher<Locator.ReadonlyLocator> = (locator) =>
-  expectLocator(locator, { _tag: "Editable" }, "toBeEditable", "to be editable")
+  ExpectImpl.expectLocator(locator, { _tag: "Editable" }, "toBeEditable", "to be editable")
 
 /**
  * Expects the one match's text to match `expected`, or, given a list, as many matches as the list has entries,
@@ -249,11 +237,11 @@ export const toHaveText: DualMatcher<
 > = dual(2, (locator: Locator.ReadonlyLocator, expected: string | RegExp | ReadonlyArray<string | RegExp>) => {
   const list = Array.isArray(expected)
   const all = (list ? expected : [expected]) as ReadonlyArray<string | RegExp>
-  return expectLocator(
+  return ExpectImpl.expectLocator(
     locator,
-    { _tag: "Text", expected: all.map((each) => matcher(each, true)), list },
+    { _tag: "Text", expected: all.map((each) => ExpectImpl.matcher(each, true)), list },
     "toHaveText",
-    `to have the text ${list ? `[${all.map(show).join(", ")}]` : show(all[0]!)}`
+    `to have the text ${list ? `[${all.map(ExpectImpl.show).join(", ")}]` : ExpectImpl.show(all[0]!)}`
   )
 })
 
@@ -279,11 +267,11 @@ export const toHaveText: DualMatcher<
 export const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]> = dual(
   2,
   (locator: Locator.ReadonlyLocator, expected: string | RegExp) =>
-    expectLocator(
+    ExpectImpl.expectLocator(
       locator,
-      { _tag: "ContainsText", expected: matcher(expected, false) },
+      { _tag: "ContainsText", expected: ExpectImpl.matcher(expected, false) },
       "toContainText",
-      `to contain the text ${show(expected)}`
+      `to contain the text ${ExpectImpl.show(expected)}`
     )
 )
 
@@ -309,11 +297,11 @@ export const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: stri
 export const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]> = dual(
   2,
   (locator: Locator.ReadonlyLocator, expected: string | RegExp) =>
-    expectLocator(
+    ExpectImpl.expectLocator(
       locator,
-      { _tag: "Value", expected: matcher(expected, true) },
+      { _tag: "Value", expected: ExpectImpl.matcher(expected, true) },
       "toHaveValue",
-      `to have the value ${show(expected)}`
+      `to have the value ${ExpectImpl.show(expected)}`
     )
 )
 
@@ -341,13 +329,13 @@ export const toHaveAttribute: DualMatcher<
   Locator.ReadonlyLocator,
   [name: string, expected?: string | RegExp | undefined]
 > = dual(
-  (args) => args[0] instanceof LocatorImpl,
+  (args) => Locator.isLocator(args[0]),
   (locator: Locator.ReadonlyLocator, name: string, expected?: string | RegExp) =>
-    expectLocator(
+    ExpectImpl.expectLocator(
       locator,
-      { _tag: "Attribute", name, expected: expected === undefined ? null : matcher(expected, true) },
+      { _tag: "Attribute", name, expected: expected === undefined ? null : ExpectImpl.matcher(expected, true) },
       "toHaveAttribute",
-      `to have the attribute ${name}${expected === undefined ? "" : ` ${show(expected)}`}`
+      `to have the attribute ${name}${expected === undefined ? "" : ` ${ExpectImpl.show(expected)}`}`
     )
 )
 
@@ -372,7 +360,7 @@ export const toHaveAttribute: DualMatcher<
 export const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]> = dual(
   2,
   (locator: Locator.ReadonlyLocator, count: number) =>
-    expectLocator(
+    ExpectImpl.expectLocator(
       locator,
       { _tag: "Count", count },
       "toHaveCount",
@@ -413,7 +401,7 @@ export const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPat
   2,
   (locator: Locator.ReadonlyLocator, pattern: AriaPattern.AriaPattern) => {
     const data = AriaPatterns.pattern(pattern)
-    return expectLocator(
+    return ExpectImpl.expectLocator(
       locator,
       { _tag: "Aria", pattern: data },
       "toMatchAria",
@@ -443,15 +431,7 @@ export const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPat
  */
 export const toHaveURL: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]> = dual(
   2,
-  (page: Page.ReadonlyPage, expected: string | RegExp) =>
-    watching(
-      page.url,
-      (url: string) =>
-        typeof expected === "string" ? url === expected : new RegExp(expected.source, expected.flags).test(url),
-      "toHaveURL",
-      `page ${page.id}`,
-      `to have the URL ${show(expected)}`
-    )
+  (page: Page.ReadonlyPage, expected: string | RegExp) => ExpectImpl.url(page, expected)
 )
 
 /**
@@ -474,15 +454,7 @@ export const toHaveURL: DualMatcher<Page.ReadonlyPage, [expected: string | RegEx
  */
 export const toHaveTitle: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]> = dual(
   2,
-  (page: Page.ReadonlyPage, expected: string | RegExp) => {
-    const { entry, grant, runtime } = Handles.page(page)
-    return expectIn(
-      { runtime, page: entry, grant, steps: [], description: `page ${page.id}` },
-      { _tag: "Title", expected: matcher(expected, true) },
-      "toHaveTitle",
-      `to have the title ${show(expected)}`
-    )
-  }
+  (page: Page.ReadonlyPage, expected: string | RegExp) => ExpectImpl.title(page, expected)
 )
 
 /**
@@ -513,15 +485,15 @@ export const that = <A, E, R>(
   subject: Effect.Effect<A, E, R>,
   condition: Condition.Condition<A>
 ): Effect.Effect<void, E | ExpectationFailed | Target.TargetGone, R> =>
-  Predicate.hasProperty(subject, "~@usestrider/browser/Watchable")
-    ? watching(
-      subject as unknown as Watchable.Watchable<A>,
+  Watchable.isWatchable(subject)
+    ? ExpectImpl.watching(
+      subject as Watchable.Watchable<A>,
       (value: A) => ConditionImpl.holds(condition, value),
       "that",
       "the subject",
       ConditionImpl.describe(condition)
     )
-    : polling(subject, condition)
+    : ExpectImpl.polling(subject, condition)
 
 /**
  * Reference to how often `Expect.that` runs a subject that isn't a `Watchable` again; 100 ms unless set.
@@ -636,270 +608,3 @@ export class ExpectationFailed extends Schema.TaggedError<ExpectationFailed>(Exp
  */
 export const isExpectationFailed = (u: unknown): u is ExpectationFailed =>
   Predicate.hasProperty(u, ExpectationFailedTypeId)
-
-// ── Implementation ──
-
-const show = (expected: string | RegExp) => typeof expected === "string" ? JSON.stringify(expected) : String(expected)
-
-/** A string compared whole (`exact`) or contained, or a `RegExp` tested as given. */
-const matcher = (expected: string | RegExp, exact: boolean): Engine.TextMatcher =>
-  typeof expected === "string"
-    ? { _tag: "String", value: expected, exact }
-    : { _tag: "RegExp", source: expected.source, flags: expected.flags }
-
-/** What a failed expectation says, from what it saw. */
-const failure = (
-  id: Diagnostics.OperationId,
-  subject: string,
-  condition: string,
-  started: number,
-  history: ReadonlyArray<Diagnostics.ObservedValue>,
-  checks: number,
-  triggers: ReadonlySet<"initial" | "change" | "interval">,
-  explained: Explained = { nearest: Option.none(), suggestions: [] }
-) =>
-  new ExpectationFailed({
-    subject,
-    condition,
-    last: Option.fromNullishOr(history.at(-1)),
-    history: [...history],
-    elapsed: Duration.millis((now() - started) / 1e6),
-    checks: { count: checks, triggeredBy: Array.from(triggers) },
-    nearest: explained.nearest,
-    suggestions: explained.suggestions,
-    diagnostics: Operation.diagnostics(id, { last: Option.fromNullishOr(history.at(-1)) })
-  })
-
-/** What a failed expectation says when nothing matched its locator. */
-interface Explained {
-  readonly nearest: Option.Option<string>
-  readonly suggestions: ReadonlyArray<string>
-}
-
-/** How long explaining a failure may take, past the expectation's deadline. */
-const explainBudget = 1000
-
-/**
- * Why a locator matched nothing: the accessibility text of what the longest matching prefix of its steps found,
- * and locators for elements near it with the role it asked for and a close name. Nothing when it matches now.
- */
-const explain = (subject: InPage, id: Diagnostics.OperationId): Effect.Effect<Explained> => {
-  const none: Explained = { nearest: Option.none(), suggestions: [] }
-  if (subject.steps.length === 0) return Effect.succeed(none)
-  // After the expectation's deadline, under a budget of its own
-  return Effect.flatMap(
-    Operation.record,
-    (record) =>
-      Runtime.send(subject.runtime, subject.page, { op: "explain", steps: subject.steps }, id, record.budget.at)
-  ).pipe(
-    Operation.apart("Expect.explain", Duration.millis(explainBudget)),
-    Effect.map((response): Explained => {
-      if (response._tag !== "Explained" || response.matched) return none
-      const boundary = subject.steps.findLastIndex((step) => step._tag === "Frame")
-      const frames = subject.steps.slice(0, boundary + 1)
-      const last = subject.steps.slice(boundary + 1)
-      return {
-        nearest: Option.fromNullishOr(response.nearest),
-        suggestions: response.suggestions.map((suggestion) =>
-          `page.${
-            describeSteps([...frames, ...last.slice(0, response.prefix), {
-              _tag: "Role",
-              role: suggestion.role,
-              name: { _tag: "String", value: suggestion.name, exact: true },
-              includeHidden: false
-            }])
-          }`
-        )
-      }
-    }),
-    Effect.orElseSucceed(() => none)
-  )
-}
-
-interface InPage {
-  readonly runtime: Runtime.Runtime
-  readonly page: Model.PageEntry
-  /** The grant the subject's handle was made under. */
-  readonly grant: Option.Option<Access.Grant>
-  readonly steps: ReadonlyArray<Engine.Step>
-  readonly description: string
-}
-
-const expectLocator = (
-  subject: Locator.ReadonlyLocator,
-  expectation: Engine.Expectation,
-  matcherName: string,
-  condition: string
-) =>
-  Effect.suspend(() => {
-    if (!(subject instanceof LocatorImpl)) return Effect.die(new Error("Expect: not a locator of this library"))
-    return expectIn(
-      {
-        runtime: subject.owner.runtime,
-        page: subject.owner.page,
-        grant: subject.owner.grant,
-        steps: subject.steps,
-        description: subject.description
-      },
-      expectation,
-      matcherName,
-      condition
-    )
-  })
-
-/**
- * An expectation that waits in the page: rounds of up to a second, each checking once
- * and then again on each change the page makes, until it holds or the deadline ends.
- */
-const expectIn = (subject: InPage, expectation: Engine.Expectation, matcherName: string, condition: string) =>
-  Effect.gen(function*() {
-    yield* Access.check(subject.grant)
-    const record = yield* Operation.record
-    const id = record.id
-    const budget = record.budget
-    const started = now()
-    const history: Array<Diagnostics.ObservedValue> = []
-    const triggers = new Set<"initial" | "change" | "interval">(["initial"])
-    let checks = 0
-    const failed = () =>
-      Effect.flatMap(
-        // A count or absence is about matching nothing, and a title has no locator: nothing to explain
-        expectation._tag === "Count" || expectation._tag === "Hidden" || expectation._tag === "Title"
-          ? Effect.succeed<Explained>({ nearest: Option.none(), suggestions: [] })
-          : explain(subject, id),
-        (explained) =>
-          Effect.fail(failure(id, subject.description, condition, started, history, checks, triggers, explained))
-      )
-    while (true) {
-      const left = record.left()
-      if (left <= 0 && checks > 0) return yield* failed()
-      checks++
-      const response = yield* Runtime.send(
-        subject.runtime,
-        subject.page,
-        { op: "expect", steps: subject.steps, expectation, cap: Runtime.roundCap(left) },
-        id,
-        budget.at
-      ).pipe(
-        Effect.map((response): Engine.Response | { readonly error: string; readonly final: boolean } => response),
-        Effect.catch((
-          failure
-        ): Effect.Effect<{ readonly error: string; readonly final: boolean } | null, Target.TargetGone> =>
-          failure._tag === "Gone"
-            ? Effect.fail(failure.error)
-            : failure._tag === "Deadline"
-            ? Effect.succeed(null)
-            // A dialog nothing will decide holds the page until someone else decides it
-            : Effect.succeed({ error: failure.reason.message, final: failure.reason._tag === "PromptBlocking" })
-        )
-      )
-      if (response === null) return yield* failed()
-      if ("error" in response) {
-        Operation.appendObservation(history, { error: response.error })
-        if (response.final) return yield* failed()
-        continue
-      }
-      switch (response._tag) {
-        case "Expected":
-          Operation.appendObservation(history, response.observed)
-          if (response.changed) triggers.add("change")
-          if (response.passed) return
-          break
-        case "InvalidSelector":
-          // A selector that doesn't parse never will
-          Operation.appendObservation(history, {
-            error: `invalid selector ${JSON.stringify(response.selector)}: ${response.message}`
-          })
-          return yield* failed()
-        case "Strict":
-          // An iframe on the way matches more than one element: waiting may narrow it
-          Operation.appendObservation(history, { error: `an iframe on the way matches ${response.count} elements` })
-          break
-        case "StaleRef":
-          // A ref never rebinds, so waiting can't mend it
-          Operation.appendObservation(history, { error: `stale ref (${response.why})` })
-          return yield* failed()
-        case "Final":
-          // An iframe on the way that isn't one never will be
-          Operation.appendObservation(history, { error: `${response.final.element} on the way isn't an iframe` })
-          return yield* failed()
-        default:
-          Operation.appendObservation(history, { error: `unexpected answer ${response._tag}` })
-      }
-    }
-  }).pipe(Operation.named(`Expect.${matcherName}`, {
-    attributes: { "browser.page.id": subject.page.id, "browser.subject": subject.description }
-  }))
-
-/** An expectation on a `Watchable`: its value now, then each change, until it holds or the deadline ends. */
-const watching = <A>(
-  subject: Watchable.Watchable<A>,
-  holds: (value: A) => boolean,
-  matcherName: string,
-  description: string,
-  condition: string
-): Effect.Effect<void, ExpectationFailed | Target.TargetGone> =>
-  Effect.gen(function*() {
-    const record = yield* Operation.record
-    const id = record.id
-    const started = now()
-    const history: Array<Diagnostics.ObservedValue> = []
-    const triggers = new Set<"initial" | "change" | "interval">(["initial"])
-    let checks = 0
-    const found = yield* subject.changes.pipe(
-      Stream.filter((value) => {
-        checks++
-        if (checks > 1) triggers.add("change")
-        Operation.appendObservation(history, value)
-        return holds(value)
-      }),
-      Stream.runHead,
-      BrowserClock.until(record.budget.at)
-    )
-    if (Option.isSome(found) && Option.isSome(found.value)) return
-    return yield* Effect.fail(failure(id, description, condition, started, history, checks, triggers))
-  }).pipe(Operation.named(`Expect.${matcherName}`, { attributes: { "browser.subject": description } }))
-
-/**
- * An expectation on any other effect: run again at `CheckInterval` until its value holds or the deadline ends.
- * The subject runs under the expectation's deadline, so a check still running at it, or failing with it, is a
- * check that didn't finish, and the expectation fails with what the others saw.
- */
-const polling = Operation.fn("Expect.that")(
-  function*<A, E, R>(subject: Effect.Effect<A, E, R>, condition: Condition.Condition<A>) {
-    const record = yield* Operation.record
-    const id = record.id
-    const budget = record.budget
-    const interval = Duration.toMillis(yield* Effect.service(CheckInterval))
-    const started = now()
-    const history: Array<Diagnostics.ObservedValue> = []
-    const triggers = new Set<"initial" | "change" | "interval">(["initial"])
-    let checks = 0
-    const failed = () =>
-      failure(id, "the subject", ConditionImpl.describe(condition), started, history, checks, triggers)
-    while (true) {
-      checks++
-      const checked = yield* Operation.under(subject, budget.at).pipe(
-        Effect.map(Option.some),
-        // A shorter deadline inside the subject is the subject's own failure
-        Effect.catchIf(
-          (error: E) => Deadline.isTimeout(error) && record.left() <= 0,
-          () => Effect.succeedNone
-        ),
-        BrowserClock.timeoutOn(record.clock, record.left()),
-        Effect.map(Option.flatten)
-      )
-      if (Option.isNone(checked)) {
-        Operation.appendObservation(history, { error: "a check was still running at the deadline" })
-        return yield* Effect.fail(failed())
-      }
-      Operation.appendObservation(history, checked.value)
-      if (ConditionImpl.holds(condition, checked.value)) return
-      const left = record.left()
-      if (left <= 0) return yield* Effect.fail(failed())
-      triggers.add("interval")
-      // On the browser's clock: Effect's would stop under TestClock (QUIRKS.md, Q235)
-      yield* record.clock.sleep(Math.min(interval, left))
-    }
-  }
-)
