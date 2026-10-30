@@ -182,7 +182,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
               : target.kind === "shared_worker"
               ? { _tag: "Shared" }
               : { _tag: "Service", scope: Option.none() },
-            url: target.url,
+            url: Urls.reported(target.url),
             page: Option.fromUndefinedOr(target.page?.id),
             context: Option.fromUndefinedOr((target.page?.context ?? state.workerContexts.get(target))?.id)
           }

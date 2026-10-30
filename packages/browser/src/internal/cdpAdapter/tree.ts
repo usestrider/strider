@@ -9,6 +9,7 @@ import * as Option from "effect/Option"
 import * as L1Target from "../../Target.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Urls from "../urls.ts"
 import { releaseDocument } from "./responses.ts"
 import {
   type ContextEntry,
@@ -140,7 +141,7 @@ export const commit = (
     _tag: "DocumentCommitted",
     document: document.id,
     navigable: frame.id,
-    url: snapshot.url,
+    url: Urls.reported(snapshot.url),
     origin: snapshot.origin,
     createdBy: createdBy(navigation),
     replaced: Option.fromUndefinedOr(old?.id),
@@ -195,7 +196,7 @@ export const startNavigation = (
     _tag: "NavigationStarted",
     navigation: navigation.id,
     navigable: frame.id,
-    url,
+    url: Urls.reported(url),
     initiatedAs: type
   })
   return navigation

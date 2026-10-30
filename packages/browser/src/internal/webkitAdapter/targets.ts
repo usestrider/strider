@@ -24,6 +24,7 @@ import * as Worker from "../../webkit-stock-protocol/Worker.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
+import * as Urls from "../urls.ts"
 import * as Envelope from "../webkitEnvelope.ts"
 import * as WebKitWire from "../webkitWire.ts"
 import { mainRealmOf } from "./console.ts"
@@ -94,7 +95,7 @@ const pageProxyCreated = (state: State, params: Envelope.PageProxyCreatedParams)
       : launchedCreated
       ? { _tag: "Created" }
       : { _tag: "Opened", opener: Option.none() },
-    url: "about:blank"
+    url: Urls.reported("about:blank")
   })
   state.control.sync(session, pageProxyGate(page))
 }
@@ -221,7 +222,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         kind: {
           _tag: "Worker",
           worker: { _tag: "Dedicated", owner: Option.fromUndefinedOr(mainRealmOf(target)?.id) },
-          url: params.url,
+          url: Urls.reported(params.url),
           page: Option.some(target.page.id),
           context: Option.some(target.page.context.id)
         }

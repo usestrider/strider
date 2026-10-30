@@ -13,7 +13,6 @@ import * as Handles from "./handles.ts"
 import type * as Model from "./model.ts"
 import * as Navigated from "./navigated.ts"
 import * as Operation from "./operation.ts"
-import * as Urls from "./urls.ts"
 
 const succeeded = (event: Model.NavigationEvent) =>
   event.outcome._tag === "Committed" || event.outcome._tag === "SameDocument" || event.outcome._tag === "Restored" ||
@@ -51,7 +50,7 @@ export const { history, next, stream } = EventModule.make<
               "PageNavigation.next",
               event.navigation,
               event.frame,
-              Option.some(Urls.reported(event.url)),
+              Option.some(event.url),
               event.url,
               event.outcome,
               Operation.idNow()

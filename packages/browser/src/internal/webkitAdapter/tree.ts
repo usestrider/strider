@@ -10,6 +10,7 @@ import type * as PageNavigation from "../../PageNavigation.ts"
 import * as L1Target from "../../Target.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Urls from "../urls.ts"
 import { forgetRealm } from "./evaluation.ts"
 import {
   type ContextEntry,
@@ -107,7 +108,7 @@ export const commit = (
     _tag: "DocumentCommitted",
     document: document.id,
     navigable: frame.id,
-    url: snapshot.url,
+    url: Urls.reported(snapshot.url),
     origin: snapshot.origin === "" ? "null" : snapshot.origin,
     createdBy,
     replaced: Option.fromUndefinedOr(old?.id),
@@ -221,7 +222,7 @@ export const startNavigationAs = (
     _tag: "NavigationStarted",
     navigation: navigation.id,
     navigable: frame.id,
-    url,
+    url: Urls.reported(url),
     initiatedAs: type
   })
   return navigation

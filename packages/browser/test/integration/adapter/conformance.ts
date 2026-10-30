@@ -378,7 +378,7 @@ export const conformance = (backend: Backend) =>
               )
               yield* mainRealm(world, frame.frame)
             }
-            const urls = frames.map((frame) =>
+            const urls: Array<string> = frames.map((frame) =>
               world.facts.all("DocumentCommitted").filter((fact) => fact.navigable === frame.frame).at(-1)!.url
             )
             assert.sameMembers(urls, [`${world.site.origin}/child`, `${world.site.crossSite}/child`])

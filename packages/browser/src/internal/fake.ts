@@ -177,13 +177,13 @@ export const connect = (
             context,
             kind,
             origin: kind === "popup" ? { _tag: "Opened", opener } : { _tag: "Created" },
-            url: page.url
+            url: Urls.reported(page.url)
           },
           {
             _tag: "DocumentCommitted",
             document: page.document,
             navigable: page.id,
-            url: page.url,
+            url: Urls.reported(page.url),
             origin: "null",
             createdBy: { _tag: "InitialBlank" },
             replaced: Option.none(),
@@ -204,12 +204,12 @@ export const connect = (
         page.document = ids.document()
         page.url = url
         yield* emit(
-          { _tag: "NavigationStarted", navigation, navigable: page.id, url, initiatedAs },
+          { _tag: "NavigationStarted", navigation, navigable: page.id, url: Urls.reported(url), initiatedAs },
           {
             _tag: "DocumentCommitted",
             document: page.document,
             navigable: page.id,
-            url,
+            url: Urls.reported(url),
             origin,
             createdBy: { _tag: "Navigation", navigation },
             replaced: Option.some(replaced),

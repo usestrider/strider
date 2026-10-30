@@ -10,27 +10,26 @@ import * as Stream from "effect/Stream"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import type * as Target from "../Target.ts"
+import type * as Url from "../Url.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import type * as Model from "./model.ts"
-import * as Urls from "./urls.ts"
 
 /** A navigation that got somewhere, at `at` (where it ended); `None` for one that didn't. */
 export const succeeded = (
   model: Model.Model,
   navigation: PageNavigation.Id,
   frame: Target.NavigableId,
-  at: string,
+  at: Url.Url,
   outcome: Adapter.NavigationOutcome
 ): Option.Option<PageNavigation.PageNavigation> => {
-  const url = Urls.reported(at)
   switch (outcome._tag) {
     case "Committed":
       return Option.some({
         _tag: "Committed",
         id: navigation,
         frame,
-        url,
+        url: at,
         document: outcome.document,
         response: Option.flatMap(outcome.response, model.response)
       })
@@ -39,14 +38,14 @@ export const succeeded = (
         _tag: "SameDocument",
         id: navigation,
         frame,
-        url,
+        url: at,
         document: outcome.document,
         via: outcome.via
       })
     case "Restored":
-      return Option.some({ _tag: "Restored", id: navigation, frame, url, document: outcome.document })
+      return Option.some({ _tag: "Restored", id: navigation, frame, url: at, document: outcome.document })
     case "Activated":
-      return Option.some({ _tag: "Activated", id: navigation, frame, url, document: outcome.document })
+      return Option.some({ _tag: "Activated", id: navigation, frame, url: at, document: outcome.document })
     default:
       return Option.none()
   }

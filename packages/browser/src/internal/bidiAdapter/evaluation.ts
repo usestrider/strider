@@ -198,7 +198,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
             ? { _tag: "Shared" }
             : { _tag: "Service", scope: Option.none() },
           // A worker realm's origin is its script's URL
-          url: params.origin,
+          url: Urls.reported(params.origin),
           page: Option.fromUndefinedOr(page?.id),
           context: Option.fromUndefinedOr(page?.context.id)
         }
