@@ -258,7 +258,7 @@ export class SnapshotImpl extends Snapshot.Data implements Snapshot.Snapshot<Loc
               documents: [previous.document, this.document],
               hint: "Refs name nodes of one document; diff two snapshots of the same document"
             }),
-            diagnostics: Operation.diagnostics(Operation.operationId())
+            diagnostics: Operation.diagnosticsNow()
           })
         )
       }

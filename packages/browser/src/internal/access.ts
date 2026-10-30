@@ -45,7 +45,7 @@ export const check = (grant: Option.Option<Grant>): Effect.Effect<void, Target.T
         new Target.TargetGone({
           target: grant.value.target,
           reason: { _tag: "AccessReleased" },
-          diagnostics: Operation.diagnostics(Operation.operationId())
+          diagnostics: Operation.diagnosticsNow()
         })
       )
       : Effect.void

@@ -844,7 +844,7 @@ export class LocatorImpl implements Locator.Locator {
         expected: "a UI Events key value, such as \"Enter\" or \"a\", or one character",
         hint: `${JSON.stringify(key)} isn't a key`
       }),
-      Operation.operationId()
+      Operation.idNow()
     )
   }
 
@@ -1398,7 +1398,7 @@ export class LocatorImpl implements Locator.Locator {
       })
       return yield* attempts.pipe(Effect.catchTag("Deadline", (failure) => Effect.fail(timedOut(failure.hint))))
     }).pipe(
-      Effect.raceFirst(Runtime.pageEnded(owner.page, Operation.operationId())),
+      Effect.raceFirst(Runtime.pageEnded(owner.page)),
       Operation.named(operation, {
         attributes: {
           "browser.locator": this.description,

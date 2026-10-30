@@ -397,7 +397,7 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
     return script
   })
 
-  const clockError = (operation: string, reason: PageClock.PageClockErrorReason, id = Operation.operationId()) =>
+  const clockError = (operation: string, reason: PageClock.PageClockErrorReason, id = Operation.idNow()) =>
     new PageClock.PageClockError({ operation, reason, diagnostics: Operation.diagnostics(id) })
 
   const backendFailure = (method: string, hint: string) =>

@@ -280,7 +280,7 @@ const subscription = (
   })
 
 const responseError = (url: Url.Url, reason: ResponseErrorReason) =>
-  new ResponseError({ url, reason, diagnostics: Operation.diagnostics(Operation.operationId()) })
+  new ResponseError({ url, reason, diagnostics: Operation.diagnosticsNow() })
 
 const unavailable = (url: Url.Url, why: BodyUnavailable["why"], hint: string) =>
   responseError(url, new BodyUnavailable({ why, hint }))
@@ -404,7 +404,7 @@ const collect = (
   return runtime.model.adapter.declare(scope, { _tag: "BodyCollection", bodies: ["response"], maxBytes: limit }).pipe(
     Effect.asVoid,
     Effect.mapError((error) => {
-      const id = Operation.operationId()
+      const id = Operation.idNow()
       const mapped = Operation.fromAdapter(error, id, runtime.backend)
       return mapped._tag === "Timeout" ? mapped.error : new Subscription.SubscriptionError({
         operation,

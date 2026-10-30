@@ -87,7 +87,7 @@ export const acquire = <H>(
           read: Effect.flatMap(Operation.record, ({ id }) =>
             adapter.accessibilityTree(page.id).pipe(
               Effect.mapError(fromAdapter(runtime, capability.name, id)),
-              Effect.raceFirst(Runtime.pageEnded(page, id))
+              Effect.raceFirst(Runtime.pageEnded(page))
             )).pipe(Operation.named("Capability.AxTree.read", { attributes }))
         }
         return reader as H
@@ -97,7 +97,7 @@ export const acquire = <H>(
         const recording: Capability.VideoRecording = {
           file: file.pipe(
             Effect.map((path) => path as FilePath.Local),
-            Effect.mapError(fromAdapter(runtime, capability.name, Operation.operationId()))
+            Effect.mapError(fromAdapter(runtime, capability.name, Operation.idNow()))
           )
         }
         return recording as H
@@ -118,10 +118,10 @@ export const acquire = <H>(
             Stream.catch((error) =>
               Stream.fromEffect(Effect.flatMap(Deferred.poll(page.closed), (closed) =>
                 Option.isSome(closed)
-                  ? Effect.flatMap(closed.value, (reason) => Effect.fail(gone(page, reason, Operation.operationId())))
+                  ? Effect.flatMap(closed.value, (reason) => Effect.fail(gone(page, reason, Operation.idNow())))
                   : Effect.die(error)))
             ),
-            Stream.interruptWhen(Runtime.pageEnded(page, id))
+            Stream.interruptWhen(Runtime.pageEnded(page))
           )
         }
         return control as H

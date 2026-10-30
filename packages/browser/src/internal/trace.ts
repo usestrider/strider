@@ -300,7 +300,7 @@ export const start = Effect.fnUntraced(function*(
     // A second on the browser's clock
     Effect.flatMap(
       BrowserClock.after(1000),
-      (at) => Runtime.element(runtime, page, subject.steps, Operation.operationId(), at)
+      (at) => Runtime.element(runtime, page, subject.steps, Operation.idNow(), at)
     ).pipe(
       Effect.map((found): Option.Option<Capture.CaptureTarget> =>
         found._tag === "Found" ? Option.some({ node: found.node, secret: subject.secret }) : Option.none()

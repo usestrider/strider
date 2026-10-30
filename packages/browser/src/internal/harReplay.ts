@@ -148,7 +148,7 @@ export const fromHar = (
   options?: Options | undefined
 ): Effect.Effect<Route.Handler<never, never, "request">, Har.HarError, FileSystem.FileSystem> =>
   Effect.gen(function*() {
-    const id = Operation.operationId()
+    const id = Operation.idNow()
     const { entries, files } = yield* read(path).pipe(
       Effect.mapError((error) =>
         new Har.HarError({

@@ -23,7 +23,7 @@ import * as Serialization from "./serialization.ts"
 const TypeId = "~@usestrider/browser/BrowserWorker"
 
 export const make = (runtime: Runtime.Runtime, entry: Model.WorkerEntry): BrowserWorker.BrowserWorker => {
-  const failure = (reason: BrowserWorker.BrowserWorkerErrorReason, id = Operation.operationId()) =>
+  const failure = (reason: BrowserWorker.BrowserWorkerErrorReason, id = Operation.idNow()) =>
     new BrowserWorker.BrowserWorkerError({ reason, diagnostics: Operation.diagnostics(id) })
 
   const evaluate = Operation.fn("BrowserWorker.evaluate", { attributes: { "browser.realm.id": entry.realm } })(

@@ -271,7 +271,7 @@ export const record = (
                 hint: failure.hint,
                 ...(failure.cause === undefined ? {} : { cause: failure.cause })
               }),
-              diagnostics: Operation.diagnostics(Operation.operationId())
+              diagnostics: Operation.diagnosticsNow()
             })
           ),
           Operation.named("Har.exportHar", { attributes: { ...Spans.scopeAttributes(scopeOf), "browser.path": path } })

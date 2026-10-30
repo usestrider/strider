@@ -564,12 +564,10 @@ export const element = (
   )
 
 /** Waits for a page to end, as a failure: raced against an operation, it ends the operation with `TargetGone`. */
-export const pageEnded = (page: Model.PageEntry, id: Diagnostics.OperationId) =>
-  Effect.flatMap(Deferred.await(page.closed), (reason) =>
-    Effect.fail(
-      new Target.TargetGone({
-        target: { _tag: "Page", id: page.id },
-        reason,
-        diagnostics: Operation.diagnostics(id)
-      })
-    ))
+export const pageEnded = (page: Model.PageEntry) =>
+  Effect.flatMap(
+    Deferred.await(page.closed),
+    (reason) =>
+      Effect.flatMap(Operation.currentDiagnostics, (diagnostics) =>
+        Effect.fail(new Target.TargetGone({ target: { _tag: "Page", id: page.id }, reason, diagnostics })))
+  )

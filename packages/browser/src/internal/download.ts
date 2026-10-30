@@ -24,7 +24,7 @@ const TypeId = "~@usestrider/browser/Download"
 
 export const make = (runtime: Runtime.Runtime, entry: Model.DownloadEntry): Download.Download => {
   const failure = (operation: string, reason: Download.DownloadErrorReason) =>
-    new Download.DownloadError({ operation, reason, diagnostics: Operation.diagnostics(Operation.operationId()) })
+    new Download.DownloadError({ operation, reason, diagnostics: Operation.diagnosticsNow() })
 
   /** Why the download's file is gone: its context ended, taking its directory. */
   const contextGone = Effect.map(
@@ -34,7 +34,7 @@ export const make = (runtime: Runtime.Runtime, entry: Model.DownloadEntry): Down
         new Target.TargetGone({
           target: { _tag: "UserContext" },
           reason,
-          diagnostics: Operation.diagnostics(Operation.operationId())
+          diagnostics: Operation.diagnosticsNow()
         }))
   )
 

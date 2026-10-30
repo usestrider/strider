@@ -85,7 +85,7 @@ export const requires = (
             backend: runtime.backend,
             hint: entry.limitations.length > 0 ? entry.limitations.join("; ") : `${runtime.backend} reports none`
           }),
-          diagnostics: Operation.diagnostics(Operation.operationId())
+          diagnostics: Operation.diagnosticsNow()
         })
       )
   })

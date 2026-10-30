@@ -186,7 +186,7 @@ const toAdapter = (
 const bodyError =
   (owner: Owner, pattern: string) =>
   (error: Adapter.AdapterError | Deadline.Timeout): Route.RouteError | Target.TargetGone | Deadline.Timeout => {
-    const id = Operation.operationId()
+    const id = Operation.idNow()
     const mapped = Operation.fromAdapter(error, id, owner.runtime.backend)
     return mapped._tag !== "Reason"
       ? mapped.error

@@ -10,6 +10,7 @@ import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
+import type * as Diagnostics from "../Diagnostics.ts"
 import type * as Emulation from "../Emulation.ts"
 import * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
@@ -149,7 +150,7 @@ export interface Owner {
 export const declare = (
   owner: Owner,
   overrides: ReadonlyArray<Field>,
-  id: ReturnType<typeof Operation.operationId>
+  id: Diagnostics.OperationId
 ): Effect.Effect<
   Declaration.Registration,
   Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout,

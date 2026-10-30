@@ -258,7 +258,7 @@ export const next = <PE = never, PR = never>(
           Option.some(event.url as Url.Url),
           event.url,
           event.outcome,
-          Operation.operationId()
+          Operation.idNow()
         )
         // The deadline is `next`'s, which bounds the whole wait
         yield* Navigated.reached(model, result, waitUntil, Option.none())

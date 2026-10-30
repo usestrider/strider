@@ -184,7 +184,7 @@ export const keyboard = (owner: Owner): Keyboard.Keyboard => ({
   hold: Effect.fnUntraced(function*(key: Keyboard.Key | string) {
     const definition = Keys.definition(key, layoutOf(owner.runtime, owner.page))
     if (definition === undefined) {
-      return yield* Effect.fail(keyboardError("Keyboard.hold")(unknownKey(key), Operation.operationId()))
+      return yield* Effect.fail(keyboardError("Keyboard.hold")(unknownKey(key), Operation.idNow()))
     }
     yield* sending(
       owner,
@@ -219,7 +219,7 @@ export const mouse = (owner: Owner): Mouse.Mouse => ({
     if (Input.anyModifier(owner.page.inputState, modifiers)) {
       const missing = yield* unsupported(owner, "input.pointerModifiers")
       if (Option.isSome(missing)) {
-        return yield* Effect.fail(mouseError("Mouse.click")(missing.value, Operation.operationId()))
+        return yield* Effect.fail(mouseError("Mouse.click")(missing.value, Operation.idNow()))
       }
     }
     yield* sending(

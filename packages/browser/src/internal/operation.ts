@@ -2,18 +2,21 @@
  * What every L1 operation shares (CONCEPTS.md §9): an operation id, one deadline captured when it starts, the
  * diagnostic envelope its errors carry, and the mapping of an adapter's failures onto the public reasons. An
  * operation run through `named` keeps a record of what it did, from which its `Timeout` is built, and is provided as
- * `Operation.Current`, the public module's service, which the library reads where it is optional.
+ * `Operation.Current`, the public module's service, which the library reads where it is optional: an error built
+ * inside an operation takes its diagnostics from the record there, and one built outside any has an id of its own.
  */
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
+import * as References from "effect/References"
 import * as Deadline from "../Deadline.ts"
 import * as Diagnostics from "../Diagnostics.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
-import * as Operation from "../Operation.ts"
+import type * as Operation from "../Operation.ts"
 import * as Reason from "../Reason.ts"
 import * as Target from "../Target.ts"
 import { type AdapterError, now } from "./adapter.ts"
@@ -23,7 +26,16 @@ import * as Spans from "./spans.ts"
 let operations = 0
 
 /** A new operation id, unique within the process. */
-export const operationId = (): Diagnostics.OperationId => `OP${++operations}` as Diagnostics.OperationId
+const operationId = (): Diagnostics.OperationId => `OP${++operations}` as Diagnostics.OperationId
+
+/** `Operation.Current`'s key, the public tag's runtime identity, which `Operation.ts` declares its class with. */
+export const CurrentKey = "@usestrider/browser/Operation/Current"
+
+/**
+ * `Operation.Current`, by its key: the same slot in a context as the public class, which this module can't load,
+ * since `Operation.ts` loads this one.
+ */
+const Current = Context.Service<Operation.Current, Operation.Operation>(CurrentKey)
 
 /** An operation's deadline: when it ends, and the budget it was given. */
 export interface Budget {
@@ -50,8 +62,9 @@ export const under = <A, E, R>(self: Effect.Effect<A, E, R>, at: MonotonicInstan
 export const observed = (value: unknown): Diagnostics.ObservedValue => ({ at: now(), value })
 
 /**
- * The diagnostic envelope of an operation's error. While the operation runs through `named`, what the options don't
- * say comes from its record, so an error built by id carries what the operation did.
+ * The diagnostic envelope of an operation's error. Built inside the operation, what the options don't say comes from
+ * its record, read from `Operation.Current` in the running fiber, so an error built by id carries what the operation
+ * did.
  */
 export const diagnostics = (
   id: Diagnostics.OperationId,
@@ -61,7 +74,8 @@ export const diagnostics = (
     readonly last?: Option.Option<Diagnostics.ObservedValue> | undefined
   } = {}
 ): Diagnostics.Diagnostics => {
-  const record = running.get(id)
+  const current = running()
+  const record = current?.id === id ? current : undefined
   return new Diagnostics.Diagnostics({
     operationId: id,
     dispatch: options.dispatch ?? record?.dispatch ?? { _tag: "NotSent" },
@@ -143,9 +157,6 @@ export const appendObservation = (
 
 /** Where an operation stopped. */
 export type Phase = Deadline.Timeout["phase"]
-
-/** The records of the operations running, by id, so an error built by id finds its operation's. */
-const running = new Map<Diagnostics.OperationId, Record>()
 
 /** How far a dispatch got: not sent, then may have been sent, then acknowledged. */
 const reach = (dispatch: Diagnostics.DispatchState): number =>
@@ -305,7 +316,7 @@ const isNoMatch = (value: unknown): boolean =>
 
 /** The record of the operation running, if any: `Operation.Current`, which the library reads where it is optional. */
 export const current: Effect.Effect<Option.Option<Record>> = Effect.map(
-  Effect.serviceOption(Operation.Current),
+  Effect.serviceOption(Current),
   Option.filter((each): each is Record => each instanceof Record)
 )
 
@@ -317,6 +328,34 @@ export const record: Effect.Effect<Record> = Effect.flatMap(
     onSome: Effect.succeed
   })
 )
+
+/**
+ * The diagnostic envelope for an error raised now: the running operation's, from its record, or, outside any
+ * operation, one with an id of its own and nothing recorded.
+ */
+export const currentDiagnostics: Effect.Effect<Diagnostics.Diagnostics> = Effect.map(
+  current,
+  Option.match({ onNone: () => diagnostics(operationId()), onSome: (record) => record.diagnostics() })
+)
+
+/**
+ * The same, read where no effect runs, such as as a channel ends: the operation running in the current fiber, if
+ * any, else an id of its own.
+ */
+export const diagnosticsNow = (): Diagnostics.Diagnostics => {
+  const record = running()
+  return record === undefined ? diagnostics(operationId()) : record.diagnostics()
+}
+
+/** The id of the operation running in the current fiber, or, outside any operation, one of its own. */
+export const idNow = (): Diagnostics.OperationId => running()?.id ?? operationId()
+
+/** The record `Operation.Current` holds in the current fiber, read where no effect runs. */
+const running = (): Record | undefined => {
+  const fiber = Fiber.getCurrent()
+  const operation = fiber === undefined ? undefined : Context.getOrUndefined(fiber.context, Current)
+  return operation instanceof Record ? operation : undefined
+}
 
 /** The record `Operation.Current` holds, as the public members read it; one provided by hand is a defect. */
 export const recordOf = (operation: Operation.Operation): Effect.Effect<Record> =>
@@ -352,12 +391,10 @@ export const named =
   <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, Operation.Current>> =>
     Effect.gen(function*() {
       const record = yield* start(name)
-      running.set(record.id, record)
-      return yield* under(Effect.provideService(self, Operation.Current, record), record.budget.at).pipe(
+      return yield* under(Effect.provideService(self, Current, record), record.budget.at).pipe(
         Effect.mapError((error) =>
           Deadline.isTimeout(error) && error.diagnostics.operationId !== record.id ? record.adopt(error) : error
         ),
-        Effect.ensuring(Effect.sync(() => running.delete(record.id))),
         asStep(record)
       )
     }).pipe(Spans.operation(name, options))
@@ -374,8 +411,7 @@ export const apart =
     Effect.flatMap(
       BrowserClock.after(Duration.toMillis(budget)),
       (at) =>
-        Effect.flatMap(under(start(name), at), (record) =>
-          under(Effect.provideService(self, Operation.Current, record), at))
+        Effect.flatMap(under(start(name), at), (record) => under(Effect.provideService(self, Current, record), at))
     )
 
 /**
@@ -384,11 +420,68 @@ export const apart =
  */
 export const detached = <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
   self.pipe(
-    Effect.updateContext((context: Context.Context<R>) =>
-      Context.omit(Operation.Current)(context) as Context.Context<R>
-    ),
+    Effect.updateContext((context: Context.Context<R>) => Context.omit(Current)(context) as Context.Context<R>),
     Effect.provideService(Deadline.CurrentDeadline, Option.none())
   )
+
+/** The frame of whoever called the function that called `trace`. */
+const caller = (error: Error | undefined): () => string | undefined => {
+  let line: string | undefined
+  return () => {
+    if (line === undefined && error?.stack !== undefined) line = error.stack.split("\n")[3]?.trim()
+    return line
+  }
+}
+
+/**
+ * An error made with room for three frames: `trace`, the function calling it, and that one's caller; none where
+ * stack traces are off, as `Effect.fn` makes them.
+ */
+const trace = (): Error | undefined => {
+  const limit = Error.stackTraceLimit
+  if (limit === 0) return undefined
+  Error.stackTraceLimit = 3
+  const error = new Error()
+  Error.stackTraceLimit = limit
+  return error
+}
+
+/**
+ * The stack frames `Effect.fn` gives what it runs, without its span: where the function was called, and where it
+ * was defined, which a failure's rendering lists under the operation's name.
+ */
+const framed = <A, E, R>(
+  self: Effect.Effect<A, E, R>,
+  name: string,
+  call: Error | undefined,
+  definition: () => string | undefined
+): Effect.Effect<A, E, R> =>
+  Effect.updateService(self, References.CurrentStackFrame, (parent) => ({
+    name,
+    stack: caller(call),
+    parent: { name: `${name} (definition)`, stack: definition, parent }
+  }))
+
+/**
+ * `Effect.fn` as an operation: each call runs its body, then `pipeables`, with the first of them `named`, so the
+ * operation's span and record cover the body and the rest wrap it; and its failures carry the frames of the call
+ * and of the definition, as `Effect.fn`'s do.
+ */
+export const fnWith = (name: string, options: Spans.Options = {}) => {
+  // The call made where the function is defined
+  // oxlint-disable-next-line typescript/no-unsafe-function-type
+  return (body: Function, ...pipeables: Array<Function>): (...args: Array<any>) => Effect.Effect<any, any, any> => {
+    const definition = caller(trace())
+    const untraced = Effect.fnUntraced(
+      body as never,
+      (effect: Effect.Effect<unknown, unknown, unknown>) => named(name, options)(effect),
+      ...pipeables as []
+    ) as (...args: Array<any>) => Effect.Effect<any, any, any>
+    return function(this: unknown, ...args: Array<any>) {
+      return framed(untraced.apply(this, args), name, trace(), definition)
+    }
+  }
+}
 
 /** `Effect.fn` as an operation: each call runs its body through `named`, with the operation's span and record. */
 export const fn =
@@ -405,7 +498,4 @@ export const fn =
     [Eff] extends [never] ? never
       : [Eff] extends [Effect.Effect<infer _A, infer _E, infer R>] ? R
       : never
-  > => {
-    const untraced = Effect.fnUntraced(body)
-    return (...args) => named(name, options)(untraced(...args))
-  }
+  > => fnWith(name, options)(body) as never

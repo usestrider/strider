@@ -418,7 +418,7 @@ export const choose = (
         expected: "one file, for a chooser that accepts one",
         hint: `${list.length} files were given, so the chooser is canceled rather than given the first`
       }),
-      diagnostics: Operation.diagnostics(Operation.operationId())
+      diagnostics: Operation.diagnosticsNow()
     })
   )
 }

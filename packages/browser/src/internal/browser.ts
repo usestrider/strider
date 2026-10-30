@@ -267,7 +267,7 @@ const makeDeniedContext = (
   entry: Model.ContextEntry,
   control: Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Scope.Scope>
 ): UserContext.UserContext => {
-  const id = () => Operation.operationId()
+  const id = () => Operation.idNow()
   const notPermitted = (member: string) =>
     new Reason.NotPermitted({
       required: "control",
@@ -396,7 +396,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       if (Option.isSome(known)) return known.value
       const grant = yield* Access.acquire(level, { _tag: "Page", id: entry.id })
       if (level === "inspect") {
-        const id = Operation.operationId()
+        const id = Operation.idNow()
         const budget = yield* Operation.budget
         yield* Evaluation.pageRealm(
           runtime,

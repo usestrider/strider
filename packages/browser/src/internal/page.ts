@@ -231,7 +231,7 @@ export const make = (owner: PageOwner): Page.Page => {
       }
       return Option.some(result)
     }).pipe(
-      Effect.raceFirst(Runtime.pageEnded(entry, Operation.operationId())),
+      Effect.raceFirst(Runtime.pageEnded(entry)),
       Operation.named(operation, {
         attributes: {
           "browser.page.id": entry.id,
@@ -374,7 +374,7 @@ export const make = (owner: PageOwner): Page.Page => {
             expected: "an absolute URL",
             hint: `${JSON.stringify(url)} doesn't parse`
           }),
-          Operation.operationId()
+          Operation.idNow()
         ))
       }
       return navigate(
