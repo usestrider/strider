@@ -2,8 +2,10 @@
  * HAR replay: a route handler that answers requests from a recorded HAR.
  *
  * - **Reading.** The file is read once, as the handler is made: a HAR, or the zip `content: "attach"` writes,
- *   told apart by the zip's signature, never by the file's extension. Bodies come from an entry's `text`, base64
- *   where its `encoding` (a response's) or `_encoding` (a request's) says so, or the zip file its `_file` names.
+ *   told apart by the zip's signature, never by the file's extension. It is decoded with the schema an export
+ *   writes with (`harLog.ts`), so one that isn't HAR 1.2 fails as the handler is made. Bodies come from an
+ *   entry's `text`, base64 where its `encoding` (a response's) or `_encoding` (a request's) says so, or the zip
+ *   file its `_file` names.
  * - **Matching.** An entry matches a request by method and URL, and by body where both have one; the latest
  *   matching entry wins, as a later recording of the same request is the newer answer.
  * - **Answering.** A matched entry's response is fulfilled as recorded: a redirect as a redirect, which the
@@ -11,6 +13,7 @@
  *   an encoding or a length go, and a `Set-Cookie` whose value an export redacted goes with them. An entry that
  *   failed without a response is replayed as a failure.
  */
+import * as Bytes from "effect/Bytes"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/encoding/Base64"
 import * as Zip from "effect/encoding/Zip"
@@ -23,36 +26,9 @@ import * as Stream from "effect/Stream"
 import * as Har from "../Har.ts"
 import * as Reason from "../Reason.ts"
 import type * as Route from "../Route.ts"
+import * as HarLog from "./harLog.ts"
 import * as Operation from "./operation.ts"
 import * as RouteDecision from "./routeDecision.ts"
-
-const Header = Schema.Struct({ name: Schema.String, value: Schema.String })
-
-const Body = {
-  text: Schema.optional(Schema.String),
-  _file: Schema.optional(Schema.String)
-}
-
-/** What replay reads of a HAR: the rest of an entry is the recording's. */
-const Log = Schema.Struct({
-  log: Schema.Struct({
-    entries: Schema.Array(Schema.Struct({
-      request: Schema.Struct({
-        method: Schema.String,
-        url: Schema.String,
-        postData: Schema.optional(Schema.Struct({ ...Body, _encoding: Schema.optional(Schema.String) }))
-      }),
-      response: Schema.Struct({
-        status: Schema.Number,
-        statusText: Schema.optional(Schema.String),
-        headers: Schema.Array(Header),
-        content: Schema.Struct({ ...Body, encoding: Schema.optional(Schema.String) })
-      })
-    }))
-  })
-})
-
-type Entry = typeof Log.Type["log"]["entries"][number]
 
 /** Settings for `Route.fromHar`. */
 export interface Options {
@@ -60,8 +36,6 @@ export interface Options {
 }
 
 const zipSignature = [0x50, 0x4b, 0x03, 0x04]
-
-const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((byte, at) => byte === b[at])
 
 /** The headers a decoded body can't be replayed with. */
 const describesEncoding = new Set(["content-encoding", "content-length", "transfer-encoding"])
@@ -76,14 +50,7 @@ const read = Effect.fnUntraced(function*(path: string) {
     yield* Stream.make(bytes).pipe(
       Stream.pipeThroughChannel(Zip.decode()),
       Stream.runForEach((entry) =>
-        Stream.runCollect(entry.body).pipe(Effect.map((chunks) => {
-          const all = Array.from(chunks)
-          const content = new Uint8Array(all.reduce((size, chunk) => size + chunk.length, 0))
-          let offset = 0
-          for (const chunk of all) {
-            content.set(chunk, offset)
-            offset += chunk.length
-          }
+        Stream.mkUint8Array(entry.body).pipe(Effect.map((content) => {
           files.set(entry.header.path, content)
         }))
       )
@@ -96,7 +63,7 @@ const read = Effect.fnUntraced(function*(path: string) {
     }
     har = found
   }
-  const log = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Log))(new TextDecoder().decode(har)).pipe(
+  const log = yield* Schema.decodeUnknownEffect(HarLog.LogJson)(new TextDecoder().decode(har)).pipe(
     Effect.mapError((error) =>
       new Reason.InvalidInput({ input: "path", expected: "a HAR 1.2 log", hint: `${path}: ${error.message}` })
     )
@@ -119,7 +86,7 @@ const bodyOf = (
 }
 
 /** An entry's response, as a route fulfills it. */
-const responseOf = (entry: Entry, files: ReadonlyMap<string, Uint8Array>) => {
+const responseOf = (entry: HarLog.Entry, files: ReadonlyMap<string, Uint8Array>) => {
   const { response } = entry
   const headers: Array<[string, string]> = []
   const setCookies: Array<string> = []
@@ -135,7 +102,7 @@ const responseOf = (entry: Entry, files: ReadonlyMap<string, Uint8Array>) => {
   const body = bodyOf(response.content, response.content.encoding === "base64", files)
   return HttpServerResponse.uint8Array(Option.getOrElse(body, () => new Uint8Array()), {
     status: response.status,
-    ...(response.statusText === undefined || response.statusText === "" ? {} : { statusText: response.statusText }),
+    ...(response.statusText === "" ? {} : { statusText: response.statusText }),
     headers,
     ...(contentType === undefined ? {} : { contentType }),
     ...(setCookies.length === 0 ? {} : { cookies: Cookies.fromSetCookie(setCookies) })
@@ -173,7 +140,7 @@ export const fromHar = (
             matching = candidates.filter((entry) =>
               Option.match(bodyOf(entry.request.postData, entry.request.postData?._encoding === "base64", files), {
                 onNone: () => true,
-                onSome: (recorded) => sameBytes(recorded, sent.value)
+                onSome: (recorded) => Bytes.Equivalence(recorded, sent.value)
               })
             )
           }

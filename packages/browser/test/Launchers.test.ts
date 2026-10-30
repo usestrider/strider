@@ -74,6 +74,22 @@ describe("Chromium launcher", () => {
         assert.deepStrictEqual(error.reason.code, Option.some(3))
         assert.include(error.reason.stderrTail, "broken profile")
       }))
+
+    it.effect("finds a stderr line written before it looked, and none once stderr ends without one", () =>
+      Effect.gen(function*() {
+        const launched = yield* Launch.spawn(
+          "/bin/sh",
+          ["-c", "printf 'starting\\nlistening on ws://127.0.0.1:9/session\\npartial' >&2"],
+          "/tmp",
+          {}
+        )
+        yield* launched.handle.exitCode.pipe(Effect.ignore)
+        const listening = yield* launched.stderrLine(/listening on (ws:\/\/\S+)/)
+        assert.strictEqual(Option.getOrThrow(listening)[1], "ws://127.0.0.1:9/session")
+        // The lines before the first call were kept for it alone
+        assert(Option.isNone(yield* launched.stderrLine(/starting/)))
+        assert.strictEqual(yield* launched.stderrTail, "starting\nlistening on ws://127.0.0.1:9/session\npartial")
+      }))
   })
 })
 

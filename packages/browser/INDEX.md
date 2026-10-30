@@ -1631,11 +1631,14 @@ Accessibility snapshots of a page, for agents and for checking a page's structur
 - `type RefId = typeof RefId.Type`
 - `type Generation = typeof Generation.Type`
 - `type InteractivityEvidence = typeof InteractivityEvidence.Type`
+- `type Role = | { readonly _tag: "Aria"; readonly role: AriaRole.AriaRole } | { readonly _tag: "Inferred" readonly role: "clickable" | "editable" | "focusable" readonly evidence: readonly [InteractivityEvidence, .…`
+- `type Name = typeof Name.Type`
+- `type State = typeof State.Type`
 - `interface Node`
   - `readonly ref: Option.Option<RefId>`
-  - `readonly role: | { readonly _tag: "Aria"; readonly role: AriaRole.AriaRole } | { readonly _tag: "Inferred" readonly role: "clickable" | "editable" | "focusable…`
-  - `readonly name: | { readonly _tag: "Accessible"; readonly value: string } | { readonly _tag: "Inferred" readonly value: string readonly from: "text" | "title" |…`
-  - `readonly states: ReadonlySet<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed">`
+  - `readonly role: Role`
+  - `readonly name: Name`
+  - `readonly states: ReadonlySet<State>`
   - `readonly children: ReadonlyArray<Node>`
 - `interface NodeEncoded`
   - `readonly ref: Option.Option<string>`
@@ -1660,6 +1663,9 @@ Accessibility snapshots of a page, for agents and for checking a page's structur
 - `const RefId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Snapshot/RefId"))`
 - `const Generation = Schema.Number.pipe(Schema.brand("~@usestrider/browser/Snapshot/Generation"))`
 - `const InteractivityEvidence = Schema.Literals(["clickListener", "cursorPointer", "tabindex", "contentEditable", "onclickAttribute"])`
+- `const Role: Schema.Codec<Role>`
+- `const Name = Schema.Union([Schema.TaggedStruct("Accessible", { value: Schema.String }), Schema.TaggedStruct("Inferred", { value: Schema.String, from: Schema.Literals(["text", "title", "placeholder", "alt", "nearb…`
+- `const State = Schema.Literals(["checked", "expanded", "selected", "disabled", "focused", "pressed"])`
 - `const Node: Schema.Codec<Node, NodeEncoded>`
 
 *guards*

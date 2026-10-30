@@ -1181,7 +1181,7 @@ export const start = Command.make(
         // After the command that asked has had its answer
         stop: (keepIt) => void setTimeout(() => Deferred.doneUnsafe(stopped, Exit.succeed(keepIt)), 50),
         lastActivity: () => last,
-        idleTimeout: Duration.format(idle),
+        idleTimeout: flags.idle.replace(/\s+/g, " "),
         owner: Option.getOrUndefined(flags.ownerPid)
       }
       const nodeServer = yield* Effect.promise(() => import("@effect/platform-node/NodeSocketServer"))
@@ -1202,9 +1202,9 @@ export const start = Command.make(
       }).pipe(Effect.forkScoped)
       const where = browser._tag === "Launch" ? `at ${browser.executablePath}` : `attached to ${browser.endpoint}`
       ready(
-        `session ${flags.name} · ${instance.info.product} ${where} · focus ${focus} · idle timeout ${
-          Duration.format(idle)
-        }${Option.isSome(flags.ownerPid) ? ` · ends with process ${flags.ownerPid.value}` : ""}${
+        `session ${flags.name} · ${instance.info.product} ${where} · focus ${focus} · idle timeout ${daemon.idleTimeout}${
+          Option.isSome(flags.ownerPid) ? ` · ends with process ${flags.ownerPid.value}` : ""
+        }${
           Option.isSome(flags.state)
             ? ` · state from ${flags.state.value}`
             : Option.isSome(flags.fork)

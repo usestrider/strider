@@ -17,6 +17,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
+import * as Schema from "effect/Schema"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as CookieJar from "../CookieJar.ts"
 import * as Deadline from "../Deadline.ts"
@@ -36,31 +37,38 @@ import * as Storage from "./storage.ts"
 
 // ── In the page ───────────────────────────────────────────────────────────────────────────────────────────
 
-/** One origin's storage as the page gives it: entries, and databases with encoded records. */
-interface Read {
-  readonly local: ReadonlyArray<readonly [string, string]>
-  readonly indexedDb: ReadonlyArray<{
-    readonly name: string
-    readonly version: number
-    readonly stores: ReadonlyArray<{
-      readonly name: string
-      readonly keyPath: string | ReadonlyArray<string> | null
-      readonly autoIncrement: boolean
-      readonly indexes: ReadonlyArray<{
-        readonly name: string
-        readonly keyPath: string | ReadonlyArray<string>
-        readonly unique: boolean
-        readonly multiEntry: boolean
-      }>
-      readonly records: ReadonlyArray<{ readonly key: unknown; readonly value: unknown }>
-    }>
-  }>
-}
+const KeyPath = Schema.Union([Schema.String, Schema.Array(Schema.String)])
 
-/** What `readOrigin` answers: the storage, or what it couldn't encode, and where. */
-type ReadAnswer =
-  | { readonly _tag: "Read"; readonly read: Read }
-  | { readonly _tag: "Unencodable"; readonly database: string; readonly store: string; readonly what: string }
+/** One origin's storage as the page gives it: entries, and databases with encoded records. */
+const Read = Schema.Struct({
+  local: Schema.Array(Schema.Tuple([Schema.String, Schema.String])),
+  indexedDb: Schema.Array(Schema.Struct({
+    name: Schema.String,
+    version: Schema.Number,
+    stores: Schema.Array(Schema.Struct({
+      name: Schema.String,
+      keyPath: Schema.NullOr(KeyPath),
+      autoIncrement: Schema.Boolean,
+      indexes: Schema.Array(Schema.Struct({
+        name: Schema.String,
+        keyPath: KeyPath,
+        unique: Schema.Boolean,
+        multiEntry: Schema.Boolean
+      })),
+      records: Schema.Array(Schema.Struct({ key: Schema.Unknown, value: Schema.Unknown }))
+    }))
+  }))
+})
+
+type Read = typeof Read.Type
+
+/** What `readOrigin` answers, as JSON text: the storage, or what it couldn't encode, and where. */
+const ReadAnswer = Schema.fromJsonString(Schema.Union([
+  Schema.TaggedStruct("Read", { read: Read }),
+  Schema.TaggedStruct("Unencodable", { database: Schema.String, store: Schema.String, what: Schema.String })
+]))
+
+type ReadAnswer = typeof ReadAnswer.Type
 
 /**
  * Reads the document's origin storage, as JSON text. Self-contained: its source is evaluated in the page.
@@ -458,7 +466,20 @@ export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id) =
         Effect.mapError(evaluationFailure(operation, id))
       )
       if (Option.isNone(text)) continue
-      const answer = JSON.parse(text.value as string) as ReadAnswer
+      const answer = yield* Schema.decodeUnknownEffect(ReadAnswer)(text.value).pipe(
+        Effect.mapError((error) =>
+          contextError(
+            new Reason.BackendFailure({
+              kind: "IncompatibleResponse",
+              method: operation,
+              metadata: {},
+              hint: `${source.origin}: the page's storage didn't read as expected (${error.message})`
+            }),
+            id,
+            operation
+          )
+        )
+      )
       if (answer._tag === "Unencodable") {
         return yield* Effect.fail(contextError(
           new Reason.Unsupported({

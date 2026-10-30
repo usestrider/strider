@@ -21,8 +21,9 @@
  * wrapped command never arrived. Unwrapping never publishes the wrapper events themselves.
  */
 import * as Predicate from "effect/Predicate"
+import * as Result from "effect/Result"
 import type * as Protocol from "../protocol/Protocol.ts"
-import type { ErrorMatcher, Incoming, Wire } from "./protocolClient.ts"
+import { type ErrorMatcher, type Incoming, isRecord, parseRecord, type Wire } from "./protocolClient.ts"
 
 /** Where a session key routes: a page proxy, a target in it, or a worker in that target. */
 export type Route =
@@ -114,8 +115,6 @@ export const errors: ReadonlyArray<ErrorMatcher> = [
   }
 ]
 
-const isRecord = (u: unknown): u is Record<string, unknown> => typeof u === "object" && u !== null && !Array.isArray(u)
-
 const wrap = (id: number, method: string, params: unknown): Record<string, unknown> => ({ id, method, params })
 
 export const encode = (id: number, method: string, params: unknown, sessionKey: Protocol.SessionKey | undefined) => {
@@ -131,50 +130,51 @@ export const encode = (id: number, method: string, params: unknown, sessionKey: 
   return JSON.stringify({ ...message, pageProxyId: to.pageProxyId })
 }
 
-const reply = (envelope: Record<string, unknown>, id: number): Incoming => {
+const reply = (envelope: Record<string, unknown>, id: number): Result.Result<Incoming, string> => {
   const error = envelope.error
   if (error !== undefined) {
     if (!isRecord(error) || !Predicate.isNumber(error.code) || !Predicate.isString(error.message)) {
-      throw new Error(`reply ${id} has a malformed error`)
+      return Result.fail(`reply ${id} has a malformed error`)
     }
     // A wrapper's error is the error of the command it carried
-    return { _tag: "ErrorReply", id: Math.abs(id), error: { code: error.code, message: error.message } }
+    return Result.succeed({ _tag: "ErrorReply", id: Math.abs(id), error: { code: error.code, message: error.message } })
   }
-  return id < 0 ? { _tag: "Ignore" } : { _tag: "Reply", id, result: envelope.result }
+  return Result.succeed(id < 0 ? { _tag: "Ignore" } : { _tag: "Reply", id, result: envelope.result })
 }
 
-const unwrap = (envelope: Record<string, unknown>, at: Route | undefined): Incoming => {
+const unwrap = (envelope: Record<string, unknown>, at: Route | undefined): Result.Result<Incoming, string> => {
   if (typeof envelope.id === "number") return reply(envelope, envelope.id)
   const method = envelope.method
   const params = envelope.params
-  if (typeof method !== "string") throw new Error("the envelope is neither a reply nor an event")
+  if (typeof method !== "string") return Result.fail("the envelope is neither a reply nor an event")
   if (at?._tag === "PageProxy" && method === "Target.dispatchMessageFromTarget" && isRecord(params)) {
-    if (typeof params.targetId !== "string" || typeof params.message !== "string") {
-      throw new Error("Target.dispatchMessageFromTarget without a target or a message")
+    const { message, targetId } = params
+    if (typeof targetId !== "string" || typeof message !== "string") {
+      return Result.fail("Target.dispatchMessageFromTarget without a target or a message")
     }
-    return unwrap(parse(params.message), { _tag: "Target", pageProxyId: at.pageProxyId, targetId: params.targetId })
+    return Result.flatMap(
+      parseRecord(message),
+      (inner) => unwrap(inner, { _tag: "Target", pageProxyId: at.pageProxyId, targetId })
+    )
   }
   if (at?._tag === "Target" && method === "Worker.dispatchMessageFromWorker" && isRecord(params)) {
-    if (typeof params.workerId !== "string" || typeof params.message !== "string") {
-      throw new Error("Worker.dispatchMessageFromWorker without a worker or a message")
+    const { message, workerId } = params
+    if (typeof workerId !== "string" || typeof message !== "string") {
+      return Result.fail("Worker.dispatchMessageFromWorker without a worker or a message")
     }
-    return unwrap(parse(params.message), { ...at, _tag: "Worker", workerId: params.workerId })
+    return Result.flatMap(parseRecord(message), (inner) => unwrap(inner, { ...at, _tag: "Worker", workerId }))
   }
-  return { _tag: "Event", key: at === undefined ? undefined : key(at), method, params }
+  return Result.succeed({ _tag: "Event", key: at === undefined ? undefined : key(at), method, params })
 }
 
-const parse = (message: string): Record<string, unknown> => {
-  const envelope: unknown = JSON.parse(message)
-  if (!isRecord(envelope)) throw new Error("the envelope isn't an object")
-  return envelope
-}
-
-export const decode = (message: string): Incoming => {
-  const envelope = parse(message)
-  const pageProxyId = envelope.pageProxyId
-  if (pageProxyId !== undefined && typeof pageProxyId !== "string") throw new Error("a pageProxyId that isn't text")
-  return unwrap(envelope, pageProxyId === undefined ? undefined : { _tag: "PageProxy", pageProxyId })
-}
+export const decode = (message: string): Result.Result<Incoming, string> =>
+  Result.flatMap(parseRecord(message), (envelope) => {
+    const pageProxyId = envelope.pageProxyId
+    if (pageProxyId !== undefined && typeof pageProxyId !== "string") {
+      return Result.fail("a pageProxyId that isn't text")
+    }
+    return unwrap(envelope, pageProxyId === undefined ? undefined : { _tag: "PageProxy", pageProxyId })
+  })
 
 export const wire: Wire = {
   encode,

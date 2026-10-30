@@ -108,6 +108,24 @@ through `safaridriver` or Safari Technology Preview's WebDriver BiDi. Windows ha
 calls share cookies without saying so. The cost was accepted: a second browser's session is ready about 0.6 s after launch, and each browser is up to
 0.8 GB resident.
 
+**An id an adapter minted that has ended is `Gone`; only one it never minted is `Foreign`.** L1 can name a page,
+document or realm in the moment between its end in the adapter and the fact that tells L1, and `Operation.fromAdapter`
+raises `Foreign` as a defect, so that race must not be `Foreign`. The adapter kit (`adapterKit.ts`) knows what a
+connection minted as ranges of each kind's counter, a few numbers however many ids. Rejected: a tombstone per ended
+entry, which grows with every request and realm, or forgets and turns `Foreign` again once bounded; and prefixing ids
+with their connection, which would change every id L1 and the tests see.
+
+**Adapters keep their state in one object their per-domain modules take, on a shared kit.** Each adapter was one
+closure of 3,000 lines over two or three dozen tables, so nothing in it could move to a file of its own, and the three
+had copied the same bookkeeping and drifted apart: an empty reference sent for a handle not held, empty bytes for
+base64 that didn't decode, a race in reporting a navigation that never started, and two ways each to wait for a
+document's realm and to send what the fold can't wait for. The kit holds that bookkeeping once: ids, the fact buffer,
+waits on the model checked after each flush, commands the fold can't wait for in a `FiberSet` in the connection's
+scope, expectations, typed event handlers and value handling. Rejected: a base class, which would bring back one
+object closing over everything; and a fully generic navigable tree, since each protocol commits documents and
+realms differently (CDP keeps the initial realm, WebKit drops a replaced document's, BiDi restores from its past), so
+the kit takes hooks for its tables instead.
+
 ## The browser model (L1)
 
 **Backend failures are typed reasons, not defects.** A reply outside the supported schema is an external
