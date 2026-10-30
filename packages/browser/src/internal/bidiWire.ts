@@ -6,7 +6,8 @@
  * `{ type: "event", method, params }`. There is one session per connection, and nothing on the wire routes an
  * event to a context, so every event belongs to the root session and the adapter routes it by its parameters.
  */
-import type { ErrorMatcher, Incoming, Wire } from "./protocolClient.ts"
+import * as Result from "effect/Result"
+import { type ErrorMatcher, type Incoming, parseRecord, type Wire } from "./protocolClient.ts"
 
 const spec = "WebDriver BiDi §Errors, w3c/webdriver-bidi f922e6a"
 const recorded = "Firefox 158.0, recorded 2026-10-20; checked by test/integration/Firefox.test.ts"
@@ -47,36 +48,34 @@ export const errors: ReadonlyArray<ErrorMatcher> = [
   }
 ]
 
-const isRecord = (u: unknown): u is Record<string, unknown> => typeof u === "object" && u !== null && !Array.isArray(u)
+const incoming = (envelope: Record<string, unknown>): Result.Result<Incoming, string> => {
+  switch (envelope.type) {
+    case "success":
+      if (typeof envelope.id !== "number") return Result.fail("a success without an id")
+      return Result.succeed({ _tag: "Reply", id: envelope.id, result: envelope.result })
+    case "error":
+      if (typeof envelope.id !== "number") {
+        // An error with no id answers a message the browser couldn't read: ours, so it's a bug here
+        return Result.fail(
+          `the browser couldn't read a message: ${String(envelope.error)} (${String(envelope.message)})`
+        )
+      }
+      return Result.succeed({
+        _tag: "ErrorReply",
+        id: envelope.id,
+        error: { code: String(envelope.error), message: String(envelope.message ?? "") }
+      })
+    case "event":
+      if (typeof envelope.method !== "string") return Result.fail("an event without a method")
+      return Result.succeed({ _tag: "Event", key: undefined, method: envelope.method, params: envelope.params })
+    default:
+      return Result.fail(`an envelope of type ${String(envelope.type)}`)
+  }
+}
 
 export const wire: Wire = {
   encode: (id, method, params) => JSON.stringify({ id, method, params: params ?? {} }),
-  decode: (message): Incoming => {
-    const envelope: unknown = JSON.parse(message)
-    if (!isRecord(envelope)) throw new Error("the envelope isn't an object")
-    switch (envelope.type) {
-      case "success":
-        if (typeof envelope.id !== "number") throw new Error("a success without an id")
-        return { _tag: "Reply", id: envelope.id, result: envelope.result }
-      case "error":
-        if (typeof envelope.id !== "number") {
-          // An error with no id answers a message the browser couldn't read: ours, so it's a bug here
-          throw new Error(
-            `the browser couldn't read a message: ${String(envelope.error)} (${String(envelope.message)})`
-          )
-        }
-        return {
-          _tag: "ErrorReply",
-          id: envelope.id,
-          error: { code: String(envelope.error), message: String(envelope.message ?? "") }
-        }
-      case "event":
-        if (typeof envelope.method !== "string") throw new Error("an event without a method")
-        return { _tag: "Event", key: undefined, method: envelope.method, params: envelope.params }
-      default:
-        throw new Error(`an envelope of type ${String(envelope.type)}`)
-    }
-  },
+  decode: (message) => Result.flatMap(parseRecord(message), incoming),
   lifecycle: () => {},
   errors
 }

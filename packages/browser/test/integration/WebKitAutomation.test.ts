@@ -11,6 +11,7 @@ import * as Protocol from "@usestrider/browser/protocol/Protocol"
 import * as Automation from "@usestrider/browser/webkit-automation-protocol/Automation"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -230,7 +231,7 @@ describe("WebKit's Automation protocol, over stock WebKitGTK's inspector socket"
           yield* transport.messages.pipe(
             Stream.runForEach((text) =>
               Effect.suspend(() => {
-                const incoming = WebKitWire.decode(text)
+                const incoming = Result.getOrThrowWith(WebKitWire.decode(text), (why) => new Error(why))
                 if (incoming._tag === "Reply" || incoming._tag === "ErrorReply") {
                   const reply = replies.get(incoming.id)
                   return reply === undefined ? Effect.void : Deferred.succeed(reply, incoming)

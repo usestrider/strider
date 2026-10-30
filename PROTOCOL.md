@@ -270,7 +270,7 @@ transport ─► dispatcher ─► per-session ordered fold ─► publisher ─
 6. **`drainObserved`** waits until the fold has processed every event received *up to now* on selected sessions. It is a local processing barrier, not proof that everything a command caused has arrived.
 7. **Ordering.** Order is guaranteed per session only. Handlers never run on the reader or the fold.
 
-**Built** (2026-10-20), in the client every backend shares (`src/internal/protocolClient.ts`):
+**Built** (2026-10-20), in the client every backend shares (`src/internal/protocolClient.ts`, with its worker in `ingestion.ts` and its subscriber buffers in `subscriberBuffer.ts`):
 
 - **Dispatcher and worker.** The reader numbers every message it receives, replies included, resolves replies, applies the session lifecycle, and queues events. One worker per connection takes them in that order: it decodes and folds the events the fold names, then publishes to subscribers. One worker rather than one per session, because decoding is synchronous work on one thread either way, and per-session order follows from the global order.
 - **The fold** is a backend adapter's, given when the client is made: the events it needs, `apply`, `lost`, `resync` and `ended`. Every hook runs in the worker and must not wait. `CdpConnection` has none, so its worker only publishes. A fold that fails is a bug, and ends the connection with that description rather than leaving everything waiting on a worker that's gone.

@@ -10,7 +10,6 @@
  * The headers go with the WebSocket handshake, and with Chromium's and WebKit's HTTP requests.
  */
 import * as Effect from "effect/Effect"
-import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as Redacted from "effect/Redacted"
@@ -52,8 +51,14 @@ const plainHeaders = (headers: Browser.ConnectOptions["headers"]) =>
 
 const Version = Schema.Struct({ webSocketDebuggerUrl: Schema.String })
 
-/** Chromium's browser WebSocket: the URL given, or the one its HTTP endpoint's `/json/version` names. */
-export const chromiumWebSocket = (endpoint: string, options: Browser.ConnectOptions | undefined) =>
+/**
+ * Chromium's browser WebSocket: the URL given, or the one its HTTP endpoint's `/json/version` names, asked
+ * through the `HttpClient` in context.
+ */
+export const chromiumWebSocket = (
+  endpoint: string,
+  options: Browser.ConnectOptions | undefined
+): Effect.Effect<string, Browser.BrowserError, HttpClient.HttpClient> =>
   Effect.gen(function*() {
     const url = yield* parse(
       endpoint,
@@ -71,7 +76,6 @@ export const chromiumWebSocket = (endpoint: string, options: Browser.ConnectOpti
     ).pipe(
       Effect.flatMap((response) => response.json),
       Effect.flatMap(Schema.decodeUnknownEffect(Version)),
-      Effect.provide(FetchHttpClient.layer),
       Effect.catch((error) => refused(`${version.href} named no browser WebSocket: ${error.message}`))
     )
     return answer.webSocketDebuggerUrl

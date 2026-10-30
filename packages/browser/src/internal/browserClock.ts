@@ -10,7 +10,6 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
-import { now } from "./adapter.ts"
 
 /** How a browser's time is read and waited on. */
 export interface BrowserClock {
@@ -29,7 +28,11 @@ export const fromClock = (clock: Clock.Clock): BrowserClock => ({
 /** Effect's live `Clock`, which `TestClock` doesn't replace for whoever holds it. */
 const liveClock: Clock.Clock = Clock.Clock.defaultValue()
 
-/** The live monotonic clock: a real browser's, read as `Adapter.now` reads it. */
+/** Now, on the live monotonic clock, in nanoseconds. */
+export const now = (): MonotonicInstant.MonotonicInstant =>
+  Math.round(performance.now() * 1e6) as MonotonicInstant.MonotonicInstant
+
+/** The live monotonic clock: a real browser's. */
 export const live: BrowserClock = { now, sleep: fromClock(liveClock).sleep }
 
 /**
