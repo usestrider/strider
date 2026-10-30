@@ -117,8 +117,24 @@ describe("strider", () => {
       Effect.scoped(Effect.gen(function*() {
         const env = environment()
         const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "sized", ...args)
-        const started = yield* strider(env, "start", "--name", "sized", `--${backend}`, executable, "--viewport", "1440x1000")
+        const started = yield* strider(
+          env,
+          "start",
+          "--name",
+          "sized",
+          `--${backend}`,
+          executable,
+          "--viewport",
+          "1440x1000"
+        )
         assert.strictEqual(started.code, 0, started.err)
+        const ledger = path.join(env.XDG_STATE_HOME, "strider", "ledger")
+        const records = fs.readdirSync(ledger).map((file) =>
+          JSON.parse(fs.readFileSync(path.join(ledger, file), "utf8"))
+        )
+        const owned = records.flatMap((record) => record.items).filter((item) => item._tag === "Browser")
+        assert.strictEqual(owned.length, 1)
+        const browserPid = owned[0].pid
         try {
           assert.include(started.out, "viewport 1440x1000")
           const served = yield* site
@@ -154,7 +170,31 @@ describe("strider", () => {
         } finally {
           assert.strictEqual((yield* run("stop")).code, 0)
         }
+        const deadline = Date.now() + 5000
+        const alive = () => {
+          try {
+            process.kill(browserPid, 0)
+            return true
+          } catch {
+            return false
+          }
+        }
+        while (alive() && Date.now() < deadline) yield* Effect.sleep("10 millis")
+        assert.isFalse(alive(), `owned ${backend} process ${browserPid} survived stop`)
         assert.notInclude((yield* strider(env, "sessions")).out, "sized")
+        const invalid = yield* strider(
+          env,
+          "start",
+          "--name",
+          "invalid",
+          `--${backend}`,
+          executable,
+          "--viewport",
+          "0x600"
+        )
+        assert.notStrictEqual(invalid.code, 0)
+        assert.include(invalid.err, "positive integer CSS pixels")
+        assert.isFalse(fs.existsSync(path.join(env.XDG_RUNTIME_DIR, "strider", "invalid")))
       })), timeout)
   }
 

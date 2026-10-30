@@ -25,6 +25,11 @@ export interface Opened {
 /** A command the session ran, as the test repeats it, or how it came to know a page no command opened. */
 export type Step =
   | {
+    readonly _tag: "Viewport"
+    readonly page: string
+    readonly viewport: { readonly width: number; readonly height: number }
+  }
+  | {
     readonly _tag: "NewPage"
     readonly page: string
     readonly url: string | undefined
@@ -64,7 +69,7 @@ const reads = new Set(["pages", "tabs", "snapshot", "find", "screenshot", "histo
  */
 const namedPages = (steps: ReadonlyArray<Step>): ReadonlySet<string> => {
   const named = new Set(steps.flatMap((step) =>
-    step._tag === "Rename"
+    step._tag === "Viewport" ? [step.page] : step._tag === "Rename"
       ? [step.from]
       : step._tag === "Tool" && !reads.has(step.tool) && step.tool !== "release" && typeof step.params.page === "string"
       ? [step.params.page]
@@ -208,11 +213,18 @@ export const render = (options: {
   readonly fork?: string | undefined
   /** The profile `start --user-data-dir` gave the session's browser, which that browser keeps locked. */
   readonly userDataDir?: string | undefined
+  readonly viewport?: { readonly width: number; readonly height: number } | undefined
   readonly steps: ReadonlyArray<Step>
 }): { readonly text: string; readonly placeholders: ReadonlyArray<string> } => {
   const used = new Set<string>(["Browser"])
   const placeholders: Array<string> = []
-  const focus = focusFor(options.browser) === "emulated" ? `focus: "emulated"` : undefined
+  const contextOptions = [
+    focusFor(options.browser) === "emulated" ? `focus: "emulated"` : undefined,
+    options.viewport === undefined
+      ? undefined
+      : `emulation: { viewport: { width: ${options.viewport.width}, height: ${options.viewport.height} } }`
+  ].filter((value) => value !== undefined).join(", ")
+  const settings = contextOptions === "" ? undefined : contextOptions
   // What the test can't start from, it says, and starts without
   const started = [
     ...(options.fork === undefined ? [] : [
@@ -223,12 +235,12 @@ export const render = (options: {
     ])
   ]
   const body: Array<string> = options.state === undefined
-    ? [...started, `const context = yield* Browser.newContext(${focus === undefined ? "" : `{ ${focus} }`})`]
+    ? [...started, `const context = yield* Browser.newContext(${settings === undefined ? "" : `{ ${settings} }`})`]
     : [
       ...started,
       `const saved = yield* (yield* FileSystem.FileSystem).readFileString(${quote(options.state)})`,
       `const context = yield* Browser.newContext({ storageState: yield* Schema.decodeEffect(StorageState.Json)(saved)${
-        focus === undefined ? "" : `, ${focus}`
+        settings === undefined ? "" : `, ${settings}`
       } })`
     ]
   if (options.state !== undefined) used.add("StorageState")
@@ -336,7 +348,19 @@ export const render = (options: {
     if (parts.length === 3 && parts[0] === "" && parts[2] === "") return secret(parts[1]!)
     return parts.length > 1 ? `Redacted.make(${revealed(text)})` : quote(text)
   }
+  const viewports = new Map<string, string>()
   for (const step of options.steps) {
+    if (step._tag === "Viewport") {
+      const page = use(step.page)
+      const registration = fresh(`${page}Viewport`)
+      body.push(
+        `const ${registration} = yield* ${page}.emulate({ viewport: { width: ${step.viewport.width}, height: ${step.viewport.height} } })`
+      )
+      const previous = viewports.get(page)
+      if (previous !== undefined) body.push(`yield* ${previous}.remove`)
+      viewports.set(page, registration)
+      continue
+    }
     if (step._tag === "Segment") {
       // A segment runs only inside a session: its code goes here by hand, declaring the pages later steps name
       const pages = (step.pages ?? []).filter((page) => named.has(page) && !variables.has(page)).map(declare)
@@ -378,7 +402,13 @@ export const render = (options: {
       // `page name`: later steps name the page by its new name, which is a variable of its own from here
       const from = use(step.from)
       variables.delete(step.from)
-      body.push(`const ${declare(step.to)} = ${from}`)
+      const to = declare(step.to)
+      body.push(`const ${to} = ${from}`)
+      const viewport = viewports.get(from)
+      if (viewport !== undefined) {
+        viewports.delete(from)
+        viewports.set(to, viewport)
+      }
       continue
     }
     if (reads.has(step.tool)) continue

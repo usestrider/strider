@@ -79,7 +79,9 @@ describe("strider help", () => {
   })
 
   it("discovers page subcommands and reaches page new's argument help without a session", () => {
-    assert.match(help("-s", "help-check", "page"), /^\s+new\b/m)
+    const pages = help("-s", "help-check", "page")
+    assert.match(pages, /^\s+new\b/m)
+    assert.match(pages, /^\s+viewport\b/m)
     const text = help("-s", "help-check", "page", "new")
     assert.match(text, /USAGE/)
     assert.match(text, /\burl\b/)
@@ -98,6 +100,7 @@ describe("strider help", () => {
         "user-data-dir",
         "state",
         "fork",
+        "viewport",
         "idle",
         "owner-pid",
         "secret"
@@ -167,6 +170,7 @@ describe("strider help", () => {
         "user-data-dir",
         "state",
         "fork",
+        "viewport",
         "idle",
         "owner-pid",
         "secret"

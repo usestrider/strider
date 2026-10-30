@@ -8,16 +8,20 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Ledger } from "@usestrider/browser"
+import { Declaration, Reason } from "@usestrider/browser"
 import { BrowserToolkit } from "@usestrider/browser/ai"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Scope from "effect/Scope"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
+import * as Daemon from "../src/internal/cli/daemon.ts"
 import * as ExportTest from "../src/internal/cli/exportTest.ts"
 import * as Mcp from "../src/internal/cli/mcp.ts"
 import * as Recorder from "../src/internal/cli/recorder.ts"
+import * as Operation from "../src/internal/operation.ts"
 
 describe("Ledger", () => {
   it.effect("records what a program owns while it owns it, and forgets it as the program ends", () =>
@@ -59,11 +63,24 @@ describe("strider mcp", () => {
     assert.deepStrictEqual(Mcp.parse(["-s", "shop", "mcp"], 7, {}), { _tag: "Serve", session: "shop" })
     assert.deepStrictEqual(Mcp.parse(["mcp"], 7, { STRIDER_SESSION: "env" }), { _tag: "Serve", session: "env" })
     assert.strictEqual(Mcp.parse(["mcp"], 7, {})._tag, "Invalid")
-    assert.deepStrictEqual(Mcp.parse(["mcp", "--start", "--chromium", "/bin/chromium"], 7, {}), {
-      _tag: "Start",
-      session: "mcp-7",
-      start: ["start", "--name", "mcp-7", "--chromium", "/bin/chromium", "--owner-pid", "7"]
-    })
+    assert.deepStrictEqual(
+      Mcp.parse(["mcp", "--start", "--chromium", "/bin/chromium", "--viewport", "1440x1000"], 7, {}),
+      {
+        _tag: "Start",
+        session: "mcp-7",
+        start: [
+          "start",
+          "--name",
+          "mcp-7",
+          "--chromium",
+          "/bin/chromium",
+          "--viewport",
+          "1440x1000",
+          "--owner-pid",
+          "7"
+        ]
+      }
+    )
     assert.deepStrictEqual(
       Mcp.parse(["mcp", "--start", "--keep", "--name", "kept", "--firefox", "/bin/firefox"], 7, {}),
       {
@@ -77,6 +94,28 @@ describe("strider mcp", () => {
 
 describe("strider export test", () => {
   const launched = { _tag: "Launch", backend: "chromium", executablePath: "/usr/bin/chromium" } as const
+  it("keeps startup sizing and replaces overrides across page renames", () => {
+    const { text, placeholders } = ExportTest.render({
+      name: "sized",
+      browser: launched,
+      secrets: {},
+      state: undefined,
+      viewport: { width: 1440, height: 1000 },
+      steps: [
+        { _tag: "NewPage", page: "main", url: undefined },
+        { _tag: "Viewport", page: "main", viewport: { width: 800, height: 600 } },
+        { _tag: "Rename", from: "main", to: "shop" },
+        { _tag: "Viewport", page: "shop", viewport: { width: 640, height: 480 } }
+      ]
+    })
+    assert.deepStrictEqual(placeholders, [])
+    assert.include(text, "emulation: { viewport: { width: 1440, height: 1000 } }")
+    assert.include(text, "const mainViewport = yield* main.emulate({ viewport: { width: 800, height: 600 } })")
+    assert.include(
+      text,
+      "const shopViewport = yield* shop.emulate({ viewport: { width: 640, height: 480 } })\n        yield* mainViewport.remove"
+    )
+  })
   const tool = (name: string, params: Record<string, unknown>, result?: string): ExportTest.Step => ({
     _tag: "Tool",
     tool: name,
@@ -670,4 +709,45 @@ describe("strider export test's recorder", () => {
     recorder.popup({ id: "D", name: "p3", opener: "A", openerName: "shop" })
     assert.deepStrictEqual(recorder.steps, [{ _tag: "Segment", file: "pay.ts", pages: ["p1", "p2", "p3"] }])
   })
+})
+
+describe("CLI viewport overrides", () => {
+  it.effect("releases replaced scopes and preserves the last override on capability failure", () =>
+    Effect.gen(function*() {
+      const active = new Set<number>()
+      const unsupported = new Declaration.DeclarationError({
+        declaration: "Page.emulate",
+        diagnostics: Operation.diagnostics(Operation.operationId()),
+        reason: new Reason.Unsupported({ capability: "emulation.viewport", backend: "test", hint: "unavailable" })
+      })
+      yield* Effect.scoped(Effect.gen(function*() {
+        const owner = { scope: yield* Effect.scope, viewports: new Map<string, Scope.Closeable>() }
+        const page = {
+          id: "page",
+          emulate: Effect.fnUntraced(
+            function*(settings: { readonly viewport?: { readonly width: number } | undefined }) {
+              const width = settings.viewport!.width
+              if (width === 999) return yield* Effect.fail(unsupported)
+              active.add(width)
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => {
+                  active.delete(width)
+                })
+              )
+              return { remove: Effect.void }
+            }
+          )
+        }
+        yield* Daemon.setViewport(owner, page, { width: 800, height: 600 })
+        for (const width of [900, 1000, 1100]) {
+          yield* Daemon.setViewport(owner, page, { width, height: 600 })
+          assert.deepStrictEqual([...active], [width])
+          assert.strictEqual(owner.viewports.size, 1)
+        }
+        const failed = yield* Daemon.setViewport(owner, page, { width: 999, height: 600 }).pipe(Effect.flip)
+        assert.strictEqual(failed, unsupported)
+        assert.deepStrictEqual([...active], [1100])
+      }))
+      assert.strictEqual(active.size, 0)
+    }))
 })
