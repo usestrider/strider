@@ -23,7 +23,6 @@ import * as Schema from "effect/Schema"
 import type * as AriaPattern from "./AriaPattern.ts"
 import type * as Condition from "./Condition.ts"
 import * as Diagnostics from "./Diagnostics.ts"
-import * as AriaPatterns from "./internal/ariaPattern.ts"
 import * as ConditionImpl from "./internal/condition.ts"
 import * as ExpectImpl from "./internal/expect.ts"
 import * as Locator from "./Locator.ts"
@@ -70,8 +69,7 @@ export interface DualMatcher<S, Args extends ReadonlyArray<unknown>> {
  * @category matchers
  * @since 0.1.0
  */
-export const toBeVisible: Matcher<Locator.ReadonlyLocator> = (locator) =>
-  ExpectImpl.expectLocator(locator, { _tag: "Visible" }, "toBeVisible", "to be visible")
+export const toBeVisible: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectImpl.toBeVisible(locator)
 
 /**
  * Expects no match to be visible: passes when every match is hidden, or when nothing matches.
@@ -91,8 +89,7 @@ export const toBeVisible: Matcher<Locator.ReadonlyLocator> = (locator) =>
  * @category matchers
  * @since 0.1.0
  */
-export const toBeHidden: Matcher<Locator.ReadonlyLocator> = (locator) =>
-  ExpectImpl.expectLocator(locator, { _tag: "Hidden" }, "toBeHidden", "to be hidden")
+export const toBeHidden: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectImpl.toBeHidden(locator)
 
 /**
  * Expects the one match to be enabled.
@@ -113,8 +110,7 @@ export const toBeHidden: Matcher<Locator.ReadonlyLocator> = (locator) =>
  * @category matchers
  * @since 0.1.0
  */
-export const toBeEnabled: Matcher<Locator.ReadonlyLocator> = (locator) =>
-  ExpectImpl.expectLocator(locator, { _tag: "Enabled" }, "toBeEnabled", "to be enabled")
+export const toBeEnabled: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectImpl.toBeEnabled(locator)
 
 /**
  * Expects the one match to be disabled.
@@ -134,8 +130,7 @@ export const toBeEnabled: Matcher<Locator.ReadonlyLocator> = (locator) =>
  * @category matchers
  * @since 0.1.0
  */
-export const toBeDisabled: Matcher<Locator.ReadonlyLocator> = (locator) =>
-  ExpectImpl.expectLocator(locator, { _tag: "Disabled" }, "toBeDisabled", "to be disabled")
+export const toBeDisabled: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectImpl.toBeDisabled(locator)
 
 /**
  * Expects the one match to be checked.
@@ -159,8 +154,7 @@ export const toBeDisabled: Matcher<Locator.ReadonlyLocator> = (locator) =>
  * @category matchers
  * @since 0.1.0
  */
-export const toBeChecked: Matcher<Locator.ReadonlyLocator> = (locator) =>
-  ExpectImpl.expectLocator(locator, { _tag: "Checked" }, "toBeChecked", "to be checked")
+export const toBeChecked: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectImpl.toBeChecked(locator)
 
 /**
  * Expects the one match to have focus.
@@ -181,8 +175,7 @@ export const toBeChecked: Matcher<Locator.ReadonlyLocator> = (locator) =>
  * @category matchers
  * @since 0.1.0
  */
-export const toBeFocused: Matcher<Locator.ReadonlyLocator> = (locator) =>
-  ExpectImpl.expectLocator(locator, { _tag: "Focused" }, "toBeFocused", "to have focus")
+export const toBeFocused: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectImpl.toBeFocused(locator)
 
 /**
  * Expects the one match to accept input.
@@ -203,8 +196,7 @@ export const toBeFocused: Matcher<Locator.ReadonlyLocator> = (locator) =>
  * @category matchers
  * @since 0.1.0
  */
-export const toBeEditable: Matcher<Locator.ReadonlyLocator> = (locator) =>
-  ExpectImpl.expectLocator(locator, { _tag: "Editable" }, "toBeEditable", "to be editable")
+export const toBeEditable: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectImpl.toBeEditable(locator)
 
 /**
  * Expects the one match's text to match `expected`, or, given a list, as many matches as the list has entries,
@@ -234,16 +226,11 @@ export const toBeEditable: Matcher<Locator.ReadonlyLocator> = (locator) =>
 export const toHaveText: DualMatcher<
   Locator.ReadonlyLocator,
   [expected: string | RegExp | ReadonlyArray<string | RegExp>]
-> = dual(2, (locator: Locator.ReadonlyLocator, expected: string | RegExp | ReadonlyArray<string | RegExp>) => {
-  const list = Array.isArray(expected)
-  const all = (list ? expected : [expected]) as ReadonlyArray<string | RegExp>
-  return ExpectImpl.expectLocator(
-    locator,
-    { _tag: "Text", expected: all.map((each) => ExpectImpl.matcher(each, true)), list },
-    "toHaveText",
-    `to have the text ${list ? `[${all.map(ExpectImpl.show).join(", ")}]` : ExpectImpl.show(all[0]!)}`
-  )
-})
+> = dual(
+  2,
+  (locator: Locator.ReadonlyLocator, expected: string | RegExp | ReadonlyArray<string | RegExp>) =>
+    ExpectImpl.toHaveText(locator, expected)
+)
 
 /**
  * Expects the text of the one match to contain `expected`. A string is matched case-sensitively, after whitespace
@@ -266,13 +253,7 @@ export const toHaveText: DualMatcher<
  */
 export const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]> = dual(
   2,
-  (locator: Locator.ReadonlyLocator, expected: string | RegExp) =>
-    ExpectImpl.expectLocator(
-      locator,
-      { _tag: "ContainsText", expected: ExpectImpl.matcher(expected, false) },
-      "toContainText",
-      `to contain the text ${ExpectImpl.show(expected)}`
-    )
+  (locator: Locator.ReadonlyLocator, expected: string | RegExp) => ExpectImpl.toContainText(locator, expected)
 )
 
 /**
@@ -296,13 +277,7 @@ export const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: stri
  */
 export const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]> = dual(
   2,
-  (locator: Locator.ReadonlyLocator, expected: string | RegExp) =>
-    ExpectImpl.expectLocator(
-      locator,
-      { _tag: "Value", expected: ExpectImpl.matcher(expected, true) },
-      "toHaveValue",
-      `to have the value ${ExpectImpl.show(expected)}`
-    )
+  (locator: Locator.ReadonlyLocator, expected: string | RegExp) => ExpectImpl.toHaveValue(locator, expected)
 )
 
 /**
@@ -331,12 +306,7 @@ export const toHaveAttribute: DualMatcher<
 > = dual(
   (args) => Locator.isLocator(args[0]),
   (locator: Locator.ReadonlyLocator, name: string, expected?: string | RegExp) =>
-    ExpectImpl.expectLocator(
-      locator,
-      { _tag: "Attribute", name, expected: expected === undefined ? null : ExpectImpl.matcher(expected, true) },
-      "toHaveAttribute",
-      `to have the attribute ${name}${expected === undefined ? "" : ` ${ExpectImpl.show(expected)}`}`
-    )
+    ExpectImpl.toHaveAttribute(locator, name, expected)
 )
 
 /**
@@ -359,13 +329,7 @@ export const toHaveAttribute: DualMatcher<
  */
 export const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]> = dual(
   2,
-  (locator: Locator.ReadonlyLocator, count: number) =>
-    ExpectImpl.expectLocator(
-      locator,
-      { _tag: "Count", count },
-      "toHaveCount",
-      `to match ${count} element${count === 1 ? "" : "s"}`
-    )
+  (locator: Locator.ReadonlyLocator, count: number) => ExpectImpl.toHaveCount(locator, count)
 )
 
 /**
@@ -399,15 +363,7 @@ export const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]> 
  */
 export const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPattern.AriaPattern]> = dual(
   2,
-  (locator: Locator.ReadonlyLocator, pattern: AriaPattern.AriaPattern) => {
-    const data = AriaPatterns.pattern(pattern)
-    return ExpectImpl.expectLocator(
-      locator,
-      { _tag: "Aria", pattern: data },
-      "toMatchAria",
-      `to match ${AriaPatterns.describe(data)}`
-    )
-  }
+  (locator: Locator.ReadonlyLocator, pattern: AriaPattern.AriaPattern) => ExpectImpl.toMatchAria(locator, pattern)
 )
 
 /**
@@ -431,7 +387,7 @@ export const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPat
  */
 export const toHaveURL: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]> = dual(
   2,
-  (page: Page.ReadonlyPage, expected: string | RegExp) => ExpectImpl.url(page, expected)
+  (page: Page.ReadonlyPage, expected: string | RegExp) => ExpectImpl.toHaveURL(page, expected)
 )
 
 /**
@@ -454,7 +410,7 @@ export const toHaveURL: DualMatcher<Page.ReadonlyPage, [expected: string | RegEx
  */
 export const toHaveTitle: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]> = dual(
   2,
-  (page: Page.ReadonlyPage, expected: string | RegExp) => ExpectImpl.title(page, expected)
+  (page: Page.ReadonlyPage, expected: string | RegExp) => ExpectImpl.toHaveTitle(page, expected)
 )
 
 /**

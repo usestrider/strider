@@ -6,6 +6,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
+import type * as AriaPattern from "../AriaPattern.ts"
 import type * as Condition from "../Condition.ts"
 import * as Deadline from "../Deadline.ts"
 import * as Diagnostics from "../Diagnostics.ts"
@@ -16,6 +17,7 @@ import type * as Target from "../Target.ts"
 import type * as Watchable from "../Watchable.ts"
 import * as Access from "./access.ts"
 import { now } from "./adapter.ts"
+import * as AriaPatterns from "./ariaPattern.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as ConditionImpl from "./condition.ts"
 import type * as Engine from "./engine.ts"
@@ -289,7 +291,7 @@ export const polling = Operation.fn("Expect.that")(
 )
 
 /** The page's URL is expected to match: checked on each change of it. */
-export const url = (page: Page.ReadonlyPage, expected: string | RegExp) =>
+export const toHaveURL = (page: Page.ReadonlyPage, expected: string | RegExp) =>
   watching(
     page.url,
     (url: string) =>
@@ -300,12 +302,83 @@ export const url = (page: Page.ReadonlyPage, expected: string | RegExp) =>
   )
 
 /** The page's title is expected to match, in the page. */
-export const title = (page: Page.ReadonlyPage, expected: string | RegExp) => {
+export const toHaveTitle = (page: Page.ReadonlyPage, expected: string | RegExp) => {
   const { entry, grant, runtime } = Handles.page(page)
   return expectIn(
     { runtime, page: entry, grant, steps: [], description: `page ${page.id}` },
     { _tag: "Title", expected: matcher(expected, true) },
     "toHaveTitle",
     `to have the title ${show(expected)}`
+  )
+}
+
+// ── The matchers' expectations: what each public matcher expects of its subject ──────────────────────────
+
+const stateOf =
+  (tag: "Visible" | "Hidden" | "Enabled" | "Disabled" | "Checked" | "Focused" | "Editable") =>
+  (matcherName: string, condition: string) =>
+  (locator: Locator.ReadonlyLocator) => expectLocator(locator, { _tag: tag }, matcherName, condition)
+
+export const toBeVisible = stateOf("Visible")("toBeVisible", "to be visible")
+export const toBeHidden = stateOf("Hidden")("toBeHidden", "to be hidden")
+export const toBeEnabled = stateOf("Enabled")("toBeEnabled", "to be enabled")
+export const toBeDisabled = stateOf("Disabled")("toBeDisabled", "to be disabled")
+export const toBeChecked = stateOf("Checked")("toBeChecked", "to be checked")
+export const toBeFocused = stateOf("Focused")("toBeFocused", "to have focus")
+export const toBeEditable = stateOf("Editable")("toBeEditable", "to be editable")
+
+export const toHaveText = (
+  locator: Locator.ReadonlyLocator,
+  expected: string | RegExp | ReadonlyArray<string | RegExp>
+) => {
+  const list = Array.isArray(expected)
+  const all = (list ? expected : [expected]) as ReadonlyArray<string | RegExp>
+  return expectLocator(
+    locator,
+    { _tag: "Text", expected: all.map((each) => matcher(each, true)), list },
+    "toHaveText",
+    `to have the text ${list ? `[${all.map(show).join(", ")}]` : show(all[0]!)}`
+  )
+}
+
+export const toContainText = (locator: Locator.ReadonlyLocator, expected: string | RegExp) =>
+  expectLocator(
+    locator,
+    { _tag: "ContainsText", expected: matcher(expected, false) },
+    "toContainText",
+    `to contain the text ${show(expected)}`
+  )
+
+export const toHaveValue = (locator: Locator.ReadonlyLocator, expected: string | RegExp) =>
+  expectLocator(
+    locator,
+    { _tag: "Value", expected: matcher(expected, true) },
+    "toHaveValue",
+    `to have the value ${show(expected)}`
+  )
+
+export const toHaveAttribute = (locator: Locator.ReadonlyLocator, name: string, expected?: string | RegExp) =>
+  expectLocator(
+    locator,
+    { _tag: "Attribute", name, expected: expected === undefined ? null : matcher(expected, true) },
+    "toHaveAttribute",
+    `to have the attribute ${name}${expected === undefined ? "" : ` ${show(expected)}`}`
+  )
+
+export const toHaveCount = (locator: Locator.ReadonlyLocator, count: number) =>
+  expectLocator(
+    locator,
+    { _tag: "Count", count },
+    "toHaveCount",
+    `to match ${count} element${count === 1 ? "" : "s"}`
+  )
+
+export const toMatchAria = (locator: Locator.ReadonlyLocator, pattern: AriaPattern.AriaPattern) => {
+  const data = AriaPatterns.pattern(pattern)
+  return expectLocator(
+    locator,
+    { _tag: "Aria", pattern: data },
+    "toMatchAria",
+    `to match ${AriaPatterns.describe(data)}`
   )
 }
