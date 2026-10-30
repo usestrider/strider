@@ -159,7 +159,7 @@ const observeMembers = (owner: ObservedOwner) => {
 
 /** A page the connection observes: its state, its events, and the upgrades. */
 export const observed = (owner: ObservedOwner): Page.ObservedPage => {
-  const page = observeMembers(owner) as unknown as Page.ObservedPage
+  const page: Page.ObservedPage = observeMembers(owner)
   Handles.registerPage(page, { runtime: owner.runtime, entry: owner.entry, grant: Option.none() })
   return page
 }
