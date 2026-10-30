@@ -1160,7 +1160,7 @@ export const start = Command.make(
         shots: 0,
         stop: (keepIt, request) => void (stopping = { ...request, keep: keepIt }),
         lastActivity: () => last,
-        idleTimeout: Duration.format(idle),
+        idleTimeout: flags.idle.replace(/\s+/g, " "),
         owner: Option.getOrUndefined(flags.ownerPid)
       }
       const touch = () => void (last = performance.now())
@@ -1189,9 +1189,9 @@ export const start = Command.make(
       const where = browser._tag === "Launch" ? `at ${browser.executablePath}` : `attached to ${browser.endpoint}`
       yield* ready(
         yield* Announce,
-        `session ${flags.name} · ${instance.info.product} ${where} · focus ${focus} · idle timeout ${
-          Duration.format(idle)
-        }${Option.isSome(flags.ownerPid) ? ` · ends with process ${flags.ownerPid.value}` : ""}${
+        `session ${flags.name} · ${instance.info.product} ${where} · focus ${focus} · idle timeout ${daemon.idleTimeout}${
+          Option.isSome(flags.ownerPid) ? ` · ends with process ${flags.ownerPid.value}` : ""
+        }${
           Option.isSome(flags.state)
             ? ` · state from ${flags.state.value}`
             : Option.isSome(flags.fork)

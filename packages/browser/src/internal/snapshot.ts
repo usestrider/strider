@@ -10,8 +10,10 @@
  * - **`text`** is the tree as indented YAML (`Engine.renderText`).
  */
 import * as Effect from "effect/Effect"
+import type * as Equivalence from "effect/Equivalence"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
@@ -212,8 +214,11 @@ const lineOf = (node: Snapshot.Node): string =>
   }).replace(/^- /, "")
 
 /** What a diff compares of a node: its role, name and states. */
-const sameNode = (a: Snapshot.Node, b: Snapshot.Node) =>
-  JSON.stringify([a.role, a.name, [...a.states].sort()]) === JSON.stringify([b.role, b.name, [...b.states].sort()])
+const sameNode: Equivalence.Equivalence<Snapshot.Node> = Schema.toEquivalence(Schema.Struct({
+  role: Snapshot.Role,
+  name: Snapshot.Name,
+  states: Schema.ReadonlySet(Snapshot.State)
+}))
 
 export class SnapshotImpl extends Snapshot.Data implements Snapshot.Snapshot<LocatorImpl.LocatorImpl> {
   readonly [TypeId] = TypeId as typeof TypeId

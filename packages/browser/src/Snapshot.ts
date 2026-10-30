@@ -89,6 +89,82 @@ export const InteractivityEvidence = Schema.Literals([
 export type InteractivityEvidence = typeof InteractivityEvidence.Type
 
 /**
+ * A node's role and where it came from: the accessibility tree's (`Aria`), or one inferred from what the node does
+ * (`Inferred`), with the evidence for it.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type Role =
+  | { readonly _tag: "Aria"; readonly role: AriaRole.AriaRole }
+  | {
+    readonly _tag: "Inferred"
+    readonly role: "clickable" | "editable" | "focusable"
+    readonly evidence: readonly [InteractivityEvidence, ...Array<InteractivityEvidence>]
+  }
+
+/**
+ * Schema for a node's role and where it came from.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Role: Schema.Codec<Role> = Schema.Union([
+  // A role is an open string (`AriaRole`): one added after this version still decodes
+  Schema.TaggedStruct("Aria", { role: Schema.String }),
+  Schema.TaggedStruct("Inferred", {
+    role: Schema.Literals(["clickable", "editable", "focusable"]),
+    evidence: Schema.NonEmptyArray(InteractivityEvidence)
+  })
+]) as Schema.Codec<Role>
+
+/**
+ * Schema for a node's name and where it came from: its accessible name (`Accessible`), one inferred from the page
+ * (`Inferred`), which says what it came `from`, or none.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Name = Schema.Union([
+  Schema.TaggedStruct("Accessible", { value: Schema.String }),
+  Schema.TaggedStruct("Inferred", {
+    value: Schema.String,
+    from: Schema.Literals(["text", "title", "placeholder", "alt", "nearbyLabel"])
+  }),
+  Schema.TaggedStruct("None", {})
+])
+
+/**
+ * A node's name and where it came from.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type Name = typeof Name.Type
+
+/**
+ * Schema for a state a node can be in.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const State = Schema.Literals(["checked", "expanded", "selected", "disabled", "focused", "pressed"])
+
+/**
+ * A state a node can be in, such as `checked` or `disabled`.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type State = typeof State.Type
+
+/**
  * One node of a snapshot tree.
  *
  * **Details**
@@ -102,22 +178,9 @@ export type InteractivityEvidence = typeof InteractivityEvidence.Type
  */
 export interface Node {
   readonly ref: Option.Option<RefId>
-  readonly role:
-    | { readonly _tag: "Aria"; readonly role: AriaRole.AriaRole }
-    | {
-      readonly _tag: "Inferred"
-      readonly role: "clickable" | "editable" | "focusable"
-      readonly evidence: readonly [InteractivityEvidence, ...Array<InteractivityEvidence>]
-    }
-  readonly name:
-    | { readonly _tag: "Accessible"; readonly value: string }
-    | {
-      readonly _tag: "Inferred"
-      readonly value: string
-      readonly from: "text" | "title" | "placeholder" | "alt" | "nearbyLabel"
-    }
-    | { readonly _tag: "None" }
-  readonly states: ReadonlySet<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed">
+  readonly role: Role
+  readonly name: Name
+  readonly states: ReadonlySet<State>
   readonly children: ReadonlyArray<Node>
 }
 
@@ -145,23 +208,9 @@ export interface NodeEncoded {
  */
 export const Node: Schema.Codec<Node, NodeEncoded> = Schema.Struct({
   ref: Schema.Option(RefId),
-  role: Schema.Union([
-    // A role is an open string (`AriaRole`): one added after this version still decodes
-    Schema.TaggedStruct("Aria", { role: Schema.String }),
-    Schema.TaggedStruct("Inferred", {
-      role: Schema.Literals(["clickable", "editable", "focusable"]),
-      evidence: Schema.NonEmptyArray(InteractivityEvidence)
-    })
-  ]),
-  name: Schema.Union([
-    Schema.TaggedStruct("Accessible", { value: Schema.String }),
-    Schema.TaggedStruct("Inferred", {
-      value: Schema.String,
-      from: Schema.Literals(["text", "title", "placeholder", "alt", "nearbyLabel"])
-    }),
-    Schema.TaggedStruct("None", {})
-  ]),
-  states: Schema.ReadonlySet(Schema.Literals(["checked", "expanded", "selected", "disabled", "focused", "pressed"])),
+  role: Role,
+  name: Name,
+  states: Schema.ReadonlySet(State),
   children: Schema.Array(Schema.suspend((): Schema.Codec<Node, NodeEncoded> => Node))
 })
 
