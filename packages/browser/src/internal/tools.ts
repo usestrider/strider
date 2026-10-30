@@ -233,7 +233,8 @@ export const dialog = tool(
   Schema.Struct({ registration: Schema.String })
 )
 
-export const toolkit = Toolkit.make(
+/** Every tool, in the order a model lists them. */
+const all = [
   pages,
   newPage,
   tabs,
@@ -255,6 +256,14 @@ export const toolkit = Toolkit.make(
   history,
   route,
   dialog
-)
+] as const
+
+export const toolkit = Toolkit.make(...all)
 
 export type Tools = typeof toolkit.tools
+
+/** A tool's name. */
+export type ToolName = keyof Tools
+
+/** Schema for a tool's name. */
+export const ToolName = Schema.Literals(all.map((tool) => tool.name))

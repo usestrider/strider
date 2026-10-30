@@ -12,6 +12,7 @@
  */
 import * as McpProtocol from "effect/ai/McpProtocol"
 import * as McpServer from "effect/ai/McpServer"
+import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
@@ -68,46 +69,41 @@ export const parse = (
 }
 
 /** A tool call, forwarded to the session's daemon, and its result decoded by the tool's own Schemas. */
-const forward = (rootDir: string, session: string, name: keyof Tools.Tools) => (params: unknown) =>
+const forward = (client: Client.Client, session: string, name: keyof Tools.Tools) => (params: unknown) =>
   Effect.gen(function*() {
     const tool = Tools.toolkit.tools[name]
-    const answer = yield* Effect.promise(() => Client.callTool(rootDir, session, name, params))
-    if (answer._tag === "NoResult") {
-      return yield* Effect.fail(new Tools.ToolFailure({ error: "NoSession", message: answer.message }))
-    }
-    if (answer.failure) {
-      return yield* Effect.flatMap(
-        Schema.decodeUnknownEffect(tool.failureSchema as typeof Tools.ToolFailure)(answer.value).pipe(Effect.orDie),
-        Effect.fail
-      )
-    }
-    return yield* Schema.decodeUnknownEffect(tool.successSchema as Schema.Top)(answer.value).pipe(Effect.orDie)
+    const encoded = yield* Schema.encodeUnknownEffect(tool.parametersSchema)(params).pipe(Effect.orDie)
+    const value = yield* client.Tool({ tool: name, params: encoded }).pipe(
+      Effect.catchTag("RpcClientError", (error) =>
+        Effect.fail(
+          new Tools.ToolFailure({
+            error: "NoSession",
+            message: Client.unreachable(error)
+              ? `The session ${session} isn't running: ${error.message}`
+              : `The session ${session} didn't answer: ${error.message}`
+          })
+        ))
+    )
+    return yield* Schema.decodeUnknownEffect(tool.successSchema)(value).pipe(Effect.orDie)
   })
 
 /** Serves the session's tools over standard input and output, until the client goes. */
 export const run = Effect.fnUntraced(
   function*(argv: ReadonlyArray<string>, bin: string, stdio: Layer.Layer<Stdio.Stdio>) {
     const process = Node.process
-    const rootDir = Session.root(process.env, (yield* Effect.promise(() => Node.os())).tmpdir())
+    const rootDir = yield* Client.sessionRoot
     const asked = parse(argv, process.pid, process.env)
     if (asked._tag === "Invalid") {
-      process.stderr.write(`${asked.message}\n`)
-      process.exitCode = Session.exitCodes.CliError!
-      return
+      yield* Console.error(asked.message)
+      return yield* new Client.Exit({ code: Session.exitCodes.CliError! })
     }
-    if (asked._tag === "Start") {
-      const code = yield* Effect.promise(() =>
-        Client.start(asked.start, bin, (text) => void process.stderr.write(`${text}\n`))
-      )
-      if (code !== 0) {
-        process.exitCode = code
-        return
-      }
-    }
+    // Standard output is the client's: what start reports goes to standard error
+    if (asked._tag === "Start") yield* Client.start(asked.start, bin, Console.error)
+    const client = yield* Client.session(rootDir, asked.session)
     const handlers = Object.fromEntries(
       (Object.keys(Tools.toolkit.tools) as Array<keyof Tools.Tools>).map((name) => [
         name,
-        forward(rootDir, asked.session, name)
+        forward(client, asked.session, name)
       ])
     )
     const server = McpServer.toolkit(Tools.toolkit).pipe(
@@ -123,5 +119,6 @@ export const run = Effect.fnUntraced(
     )
     // Standard output is the client's: what the server logs goes to standard error
     return yield* Layer.launch(server).pipe(Effect.provideService(Logger.LogToStderr, true))
-  }
+  },
+  Effect.scoped
 )

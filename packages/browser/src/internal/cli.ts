@@ -10,13 +10,13 @@ import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
-import * as Path from "effect/Path"
+
 import * as Schema from "effect/Schema"
 import * as Ledger from "../Ledger.ts"
 import * as Browsers from "./browsers.ts"
 import * as Client from "./cli/client.ts"
-import * as Daemon from "./cli/daemon.ts"
 import * as Node from "./cli/node.ts"
+import type * as Protocol from "./cli/protocol.ts"
 import * as Session from "./cli/session.ts"
 
 // The platform and environment, where the runtime has them; the package doesn't assume Node.
@@ -92,8 +92,6 @@ export const browsers = Command.make(
   )
 )
 
-const sessionRoot = Effect.map(Effect.promise(() => Node.os()), (os) => Session.root(Node.process.env, os.tmpdir()))
-
 /** The bytes a directory holds, its subdirectories included. */
 const sizeOf = (fs: FileSystem.FileSystem, dir: string): Effect.Effect<number> =>
   Effect.flatMap(
@@ -121,38 +119,47 @@ const holder = (fs: FileSystem.FileSystem, dir: string) =>
       return Number.isFinite(pid) && Node.alive(pid) ? Option.some(pid) : Option.none()
     }))
 
+/** A session `strider sessions` lists: one running, as it describes itself, or one a crash left behind. */
+type Listed =
+  | Protocol.SessionInfo & { readonly running: true }
+  | { readonly name: string; readonly running: false; readonly dir: string; readonly size: number }
+
 /** `strider sessions`: every session, running or left behind by a crash. */
 export const sessions = Command.make(
   "sessions",
   { json },
   Effect.fnUntraced(function*({ json }) {
     const fs = yield* FileSystem.FileSystem
-    const rootDir = yield* sessionRoot
+    const rootDir = yield* Client.sessionRoot
     const names = (yield* fs.readDirectory(rootDir).pipe(Effect.orElseSucceed(() => []))).filter((name) =>
       Session.nameRule.test(name)
     ).sort()
-    const found: Array<Record<string, unknown>> = []
+    const found: Array<Listed> = []
     for (const name of names) {
       const paths = Session.paths(rootDir, name)
-      const pid = yield* holder(fs, paths.dir)
-      const answer = Option.isSome(pid)
-        ? yield* Effect.promise(() => Client.ask(rootDir, name, ["info"]))
-        : { code: 1, out: "" }
-      if (answer.code === 0) found.push({ ...JSON.parse(answer.out) as Record<string, unknown>, running: true })
-      else found.push({ name, running: false, dir: paths.dir, size: yield* sizeOf(fs, paths.dir) })
+      const info = Option.isSome(yield* holder(fs, paths.dir))
+        ? yield* Effect.scoped(Effect.flatMap(Client.session(rootDir, name), (client) => client.Info())).pipe(
+          Effect.option
+        )
+        : Option.none()
+      found.push(
+        Option.isSome(info)
+          ? { ...info.value, running: true }
+          : { name, running: false, dir: paths.dir, size: yield* sizeOf(fs, paths.dir) }
+      )
     }
     if (json) return yield* Console.log(JSON.stringify(found, null, 2))
     if (found.length === 0) return yield* Console.log("No sessions. strider start starts one.")
     for (const session of found) {
       yield* Console.log(
-        session.running === true
+        session.running
           ? `${session.name}  ${session.browser} · pages ${
-            (session.pages as ReadonlyArray<string>).join(", ") || "none"
+            session.pages.join(", ") || "none"
           } · idle ${session.idle} s of ${session.idleTimeout}${
             session.owner === null ? "" : ` · ends with process ${session.owner}`
           }`
           : `${session.name}  left behind by a session that didn't end cleanly · ${
-            megabytes(session.size as number)
+            megabytes(session.size)
           } at ${session.dir} · strider prune ${session.name} removes it`
       )
     }
@@ -258,7 +265,7 @@ export const prune = Command.make(
     if (Option.isNone(given)) return yield* pruneLedger(yes)
     const name = given.value
     const fs = yield* FileSystem.FileSystem
-    const rootDir = yield* sessionRoot
+    const rootDir = yield* Client.sessionRoot
     const paths = Session.paths(rootDir, name)
     if (!(yield* fs.exists(paths.dir).pipe(Effect.orElseSucceed(() => false)))) {
       return yield* Console.log(`No session named ${name} is left behind`)
@@ -296,58 +303,50 @@ const forHelp = (command: Command.Command.Any): Command.Command<any, any> =>
     Command.withSubcommands(command.subcommands.flatMap((group) => group.commands.map(forHelp)))
   )
 
-/** MCP uses its own startup parser; this view shares the daemon's forwarded flag definitions. */
-const mcpHelp = Command.make("mcp", {
-  ...Daemon.startFlags,
-  name: Flag.String("name").pipe(
-    Flag.withDescription("Name the started session; defaults to -s or mcp-<pid>"),
-    Flag.optional
-  ),
-  start: Flag.Boolean("start").pipe(
-    Flag.withDescription("Start a session with the launch options below; otherwise serve -s or STRIDER_SESSION"),
-    Flag.withDefault(false)
-  ),
-  keep: Flag.Boolean("keep").pipe(
-    Flag.withDescription("With --start, keep the session running after this MCP process exits"),
-    Flag.withDefault(false)
+/**
+ * The complete command tree, for local help: the daemon's, loaded only for help, since a forwarded command needs
+ * none of it. Session handlers never run here.
+ */
+export const help = Effect.map(Effect.promise(() => import("./cli/daemon.ts")), (Daemon) => {
+  /** MCP uses its own startup parser; this view shares the daemon's forwarded flag definitions. */
+  const mcpHelp = Command.make("mcp", {
+    ...Daemon.startFlags,
+    name: Flag.String("name").pipe(
+      Flag.withDescription("Name the started session; defaults to -s or mcp-<pid>"),
+      Flag.optional
+    ),
+    start: Flag.Boolean("start").pipe(
+      Flag.withDescription("Start a session with the launch options below; otherwise serve -s or STRIDER_SESSION"),
+      Flag.withDefault(false)
+    ),
+    keep: Flag.Boolean("keep").pipe(
+      Flag.withDescription("With --start, keep the session running after this MCP process exits"),
+      Flag.withDefault(false)
+    )
+  }).pipe(Command.withDescription("Serve a session's tools over MCP on standard input and output"))
+  const sessionCommands = Daemon.commands(() => {
+    throw new Error("Help must not access a session")
+  })
+  return Command.make("strider").pipe(
+    Command.withSharedFlags(Daemon.selectors),
+    Command.withSubcommands([
+      forHelp(Daemon.start),
+      mcpHelp,
+      forHelp(browsers),
+      forHelp(sessions),
+      forHelp(prune),
+      ...sessionCommands.subcommands
+        .flatMap((group) =>
+          group.commands.map((command) => forHelp(command).pipe(Command.withSharedFlags(Daemon.output)))
+        )
+    ]),
+    Command.withDescription(
+      "Strider: Effect-native browser automation. strider start --name <name> --chromium <path> starts a session; strider -s <name> -p <page> <command> drives it."
+    )
   )
-}).pipe(Command.withDescription("Serve a session's tools over MCP on standard input and output"))
-
-/** The complete command tree, for local help. Session handlers never run here. */
-const sessionCommands = Daemon.commands(() => {
-  throw new Error("Help must not access a session")
 })
-const help = Command.make("strider").pipe(
-  Command.withSharedFlags(Daemon.selectors),
-  Command.withSubcommands([
-    forHelp(Daemon.start),
-    mcpHelp,
-    forHelp(browsers),
-    forHelp(sessions),
-    forHelp(prune),
-    ...sessionCommands.subcommands
-      .flatMap((group) =>
-        group.commands.map((command) => forHelp(command).pipe(Command.withSharedFlags(Daemon.output)))
-      )
-  ]),
-  Command.withDescription(
-    "Strider: Effect-native browser automation. strider start --name <name> --chromium <path> starts a session; strider -s <name> -p <page> <command> drives it."
-  )
-)
 
 /** The commands that execute locally without a session. */
 export const strider = Command.make("strider").pipe(
   Command.withSubcommands([browsers, sessions, prune])
 )
-
-/** Runs the commands that need no session, with the package's version. */
-export const run = Effect.fnUntraced(function*(argv: ReadonlyArray<string>) {
-  const fs = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  const manifest = yield* path.fromFileUrl(new URL("../../package.json", import.meta.url))
-  const { version } = JSON.parse(yield* fs.readFileString(manifest)) as { readonly version: string }
-  return yield* Command.runWith(
-    Session.helpRequested(argv) || Session.scan(argv).command === undefined ? help : strider,
-    { version }
-  )(argv)
-})

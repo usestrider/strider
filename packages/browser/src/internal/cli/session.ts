@@ -1,7 +1,7 @@
 /**
- * What the `strider` client and its daemons share (CLI.md): where a session lives, the
- * names it may have, and the lines they exchange over its socket. Nothing here loads Effect, so the client
- * forwards a command without it.
+ * What the `strider` client and its daemons share (CLI.md): where a session lives, the names it may have, the lock
+ * that says which process holds it, and how a command's arguments name its session. What they exchange over its
+ * socket is `protocol.ts`'s.
  *
  * ```
  * $XDG_RUNTIME_DIR/strider/   the OS temporary directory's strider/ where there is no runtime directory
@@ -10,6 +10,10 @@
  *     profile/  downloads/  artifacts/
  * ```
  */
+import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
+import * as Schema from "effect/Schema"
 
 /** A session's name: lowercase letters, digits and dashes, short enough for a Unix socket's path. */
 export const nameRule = /^[a-z0-9][a-z0-9-]{0,31}$/
@@ -40,26 +44,6 @@ export const ledgerRoot = (env: Readonly<Record<string, string | undefined>>, ho
   `${
     env.XDG_STATE_HOME !== undefined && env.XDG_STATE_HOME !== "" ? env.XDG_STATE_HOME : `${home}/.local/state`
   }/strider/ledger`
-
-/** A command, as the client sends it: one JSON line. An `Interrupt` line after it interrupts the command. */
-export type Request =
-  | { readonly _tag: "Command"; readonly argv: ReadonlyArray<string>; readonly cwd: string }
-  | { readonly _tag: "Interrupt" }
-  /** One of the toolkit's tools, called as a model calls it: `strider mcp` forwards these. */
-  | { readonly _tag: "Tool"; readonly tool: string; readonly params: unknown }
-
-/** What a daemon answers, one JSON line each: output, then the exit code, which ends the answer. */
-export type Response =
-  | { readonly _tag: "Out"; readonly text: string }
-  | { readonly _tag: "Err"; readonly text: string }
-  | { readonly _tag: "Exit"; readonly code: number }
-  /** A tool's result, encoded by its Schema: its success, or, with `failure`, its `ToolFailure`. */
-  | { readonly _tag: "ToolResult"; readonly failure: boolean; readonly value: unknown }
-
-/** What a daemon prints as it starts: its spec, once it serves, or why it couldn't. */
-export type Started =
-  | { readonly _tag: "Ready"; readonly text: string }
-  | { readonly _tag: "Failed"; readonly text: string; readonly code: number }
 
 /** The shared flags that take a separate value. */
 const valued = new Set(["-s", "--session", "-p", "--page"])
@@ -129,3 +113,15 @@ export const exitCodes: Readonly<Record<string, number>> = {
   NotPermitted: 17,
   NoSession: 20
 }
+
+/** The package's `package.json`, as far as the command reads it. */
+const Manifest = Schema.fromJsonString(Schema.Struct({ version: Schema.String }))
+
+/** The package's version, from its `package.json`: what `--version` prints, and the MCP server reports. */
+export const version = Effect.gen(function*() {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  // This module is three directories below the package's root, in src/ and in dist/ alike
+  const manifest = yield* path.fromFileUrl(new URL("../../../package.json", import.meta.url))
+  return (yield* Schema.decodeEffect(Manifest)(yield* fs.readFileString(manifest))).version
+}).pipe(Effect.orDie)
