@@ -25,6 +25,7 @@ import {
   contextKey,
   documentOf,
   type Event,
+  frameKey,
   type RealmEntry,
   realmOf,
   type State
@@ -152,7 +153,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (target === undefined || target.page.provisional === target) return
       const context = params.context
       if (context.type === "internal") return
-      const frame = state.frames.get(context.frameId)
+      const frame = state.frames.get(frameKey(target, context.frameId))
       const document = frame?.document
       if (frame === undefined || document === undefined) return
       const realm: RealmEntry = {

@@ -102,11 +102,18 @@ export const webSocket = (
     Spans.operation("Browser.connect", { attributes: { "browser.endpoint": url } })
   )
 
-/** Stock WebKit's inspector server at its HTTP endpoint, as one transport: its pages, read from its list. */
+/**
+ * Stock WebKit's inspector server at its HTTP endpoint, as one transport: its pages, read from its list through the
+ * `HttpClient` in context.
+ */
 export const webkitInspector = (
   endpoint: string,
   options: Browser.ConnectOptions | undefined
-): Effect.Effect<Transport.Transport, Browser.BrowserError, Scope.Scope | Socket.WebSocketConstructor> =>
+): Effect.Effect<
+  Transport.Transport,
+  Browser.BrowserError,
+  Scope.Scope | Socket.WebSocketConstructor | HttpClient.HttpClient
+> =>
   Effect.gen(function*() {
     const url = yield* parse(
       endpoint,

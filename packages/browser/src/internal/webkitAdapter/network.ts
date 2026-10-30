@@ -18,6 +18,8 @@ import type * as ProtocolClient from "../protocolClient.ts"
 import {
   endedThing,
   type Event,
+  frameKey,
+  loaderKey,
   type NavigationEntry,
   placement,
   type RequestEntry,
@@ -138,15 +140,16 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         request.requestHeaders = params.request.headers
         state.hops.set(request.hop, request)
       } else {
-        const frame = state.frames.get(params.frameId)
+        const frame = state.frames.get(frameKey(target, params.frameId))
+        const loader = loaderKey(target, params.loaderId)
         let navigation: NavigationEntry | undefined
         if (params.type === "Document" && frame !== undefined) {
-          navigation = state.navigations.get(params.loaderId)
+          navigation = state.navigations.get(loader)
           if (
-            navigation === undefined && frame.document?.loaderId !== params.loaderId &&
-            errorPage(state, frame, params.loaderId, params.request.url) === undefined
+            navigation === undefined && frame.document?.loaderId !== loader &&
+            errorPage(state, frame, loader, params.request.url) === undefined
           ) {
-            navigation = startNavigation(state, frame, params.loaderId, params.request.url, "crossDocument", false)
+            navigation = startNavigation(state, frame, loader, params.request.url, "crossDocument", false)
           }
         }
         const worker = params.targetId === undefined
@@ -224,7 +227,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.requestServedFromMemoryCache, (params, { state, session, target }) => {
       // A request answered from the memory cache without a load: its request, response and end at once
       if (target === undefined) return
-      const frame = state.frames.get(params.frameId)
+      const frame = state.frames.get(frameKey(target, params.frameId))
       const resource = params.resource
       const id = state.ids.request()
       const request: RequestEntry = {

@@ -24,6 +24,7 @@ import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
 import type * as Protocol from "../protocol/Protocol.ts"
 import { type ErrorMatcher, type Incoming, isRecord, parseRecord, type Wire } from "./protocolClient.ts"
+import * as Envelope from "./webkitEnvelope.ts"
 
 /** Where a session key routes: a page proxy, a target in it, or a worker in that target. */
 export type Route =
@@ -70,8 +71,7 @@ const recorded =
 
 /**
  * WebKit's error table. WebKit reports failures as JSON-RPC codes plus English text, so rows match both; a
- * reworded message falls through to `Unrecognized` and fails the integration test, never a guess. One row is the
- * transports' own: a page proxy that is gone, answered as WebKit's inspector proxies answer one.
+ * reworded message falls through to `Unrecognized` and fails the integration test, never a guess.
  */
 export const errors: ReadonlyArray<ErrorMatcher> = [
   {
@@ -85,12 +85,6 @@ export const errors: ReadonlyArray<ErrorMatcher> = [
     becomes: { _tag: "Rejected", reason: "InvalidArgument" },
     evidence:
       `JSON-RPC 2.0 §5.1, "Invalid params"; "Some arguments of method 'Runtime.evaluate' can't be processed", for a missing expression, and Automation's missing handle, ${recorded}`
-  },
-  {
-    match: { code: -32602, message: "Cannot find page proxy with provided 'pageProxyId'" },
-    becomes: { _tag: "SessionEnded", why: "detached" },
-    evidence:
-      "the transports' answer to a command for a page that is gone (webkitStockTransport.ts, webkitAutomation.ts)"
   },
   {
     match: { code: -32000, message: "Missing target for given targetId" },
@@ -127,7 +121,7 @@ export const encode = (id: number, method: string, params: unknown, sessionKey: 
   if (to._tag !== "PageProxy") {
     message = wrap(-id, "Target.sendMessageToTarget", { targetId: to.targetId, message: JSON.stringify(message) })
   }
-  return JSON.stringify({ ...message, pageProxyId: to.pageProxyId })
+  return Envelope.wrap(to.pageProxyId, JSON.stringify(message))
 }
 
 const reply = (envelope: Record<string, unknown>, id: number): Result.Result<Incoming, string> => {

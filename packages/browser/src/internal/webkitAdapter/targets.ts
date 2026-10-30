@@ -31,6 +31,8 @@ import { configureTarget } from "./declare.ts"
 import {
   type Event,
   type FrameEntry,
+  frameKey,
+  loaderKey,
   type PageEntry,
   placement,
   type RealmEntry,
@@ -235,23 +237,27 @@ export const register = (handlers: Kit.Handlers<Event>) =>
 /** Installs a resource tree: the documents it shows, which the events after it build on. */
 const installTree = (state: State, target: TargetEntry, tree: Page.FrameResourceTree, first: boolean) => {
   const page = target.page
-  target.mainFrameId = tree.frame.id
+  const mainFrame = frameKey(target, tree.frame.id)
+  target.mainFrameId = mainFrame
   if (page.provisional === target) {
     // The navigation it loads commits in the page's main frame, under this frame id
-    state.frames.set(tree.frame.id, page.main)
+    state.frames.set(mainFrame, page.main)
     return
   }
-  page.main.frameId = tree.frame.id
-  state.frames.set(tree.frame.id, page.main)
+  page.main.frameId = mainFrame
+  state.frames.set(mainFrame, page.main)
   const visit = (node: Page.FrameResourceTree, frame: FrameEntry) => {
-    if (frame.document?.loaderId !== node.frame.loaderId || frame.document === undefined) {
+    const loader = node.frame.loaderId === ""
+      ? `initial:${frameKey(target, node.frame.id)}`
+      : loaderKey(target, node.frame.loaderId)
+    if (frame.document?.loaderId !== loader || frame.document === undefined) {
       const blank = node.frame.url === "" || node.frame.url === "about:blank"
-      const navigation = state.navigations.get(node.frame.loaderId)
+      const navigation = state.navigations.get(loader)
       const document = commit(
         state,
         frame,
         {
-          loaderId: node.frame.loaderId === "" ? `initial:${node.frame.id}` : node.frame.loaderId,
+          loaderId: loader,
           url: node.frame.url === "" ? "about:blank" : node.frame.url,
           origin: node.frame.securityOrigin
         },
@@ -272,7 +278,8 @@ const installTree = (state: State, target: TargetEntry, tree: Page.FrameResource
       }
     }
     for (const child of node.childFrames ?? []) {
-      visit(child, state.frames.get(child.frame.id) ?? addFrame(state, child.frame.id, frame))
+      const key = frameKey(target, child.frame.id)
+      visit(child, state.frames.get(key) ?? addFrame(state, key, frame))
     }
   }
   visit(tree, page.main)

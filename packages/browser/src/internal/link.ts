@@ -10,7 +10,8 @@
  * - **Fail fast.** `whenOpen(write)` runs `write` only while the connection isn't lost, and otherwise fails with
  *   the loss at once, so nothing waits on a connection that's gone.
  *
- * Everything but `whenOpen` is synchronous, so a transport can call it from a platform callback.
+ * Everything but `whenOpen` is synchronous, so a transport can call it from a platform callback. A link carries
+ * text, as `Transport.Transport` does, unless a connection beneath one carries messages of its own framing.
  */
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
@@ -20,40 +21,45 @@ import * as Stream from "effect/Stream"
 import * as Transport from "../protocol/Transport.ts"
 
 /** A transport's shared state. */
-export interface Link {
+export interface Link<A = string> {
   /** Queues a message for `messages`. Ignored after the loss. */
-  readonly receive: (message: string) => void
+  readonly receive: (message: A) => void
   /** Loses the connection, if it isn't lost already. */
   readonly lose: (reason: Transport.ConnectionLost) => void
   /** The loss, or `undefined` while the connection lives. */
   readonly lost: () => Transport.ConnectionLost | undefined
   /** Runs `write` while the connection lives; fails with the loss after it. */
   readonly whenOpen: <E>(write: Effect.Effect<void, E>) => Effect.Effect<void, E | Transport.TransportError>
-  readonly messages: Stream.Stream<string, Transport.TransportError>
+  readonly messages: Stream.Stream<A, Transport.TransportError>
   readonly closed: Effect.Effect<Transport.ConnectionLost>
 }
 
 /** Makes a link, open until its first `lose`. */
-export const make: () => Effect.Effect<Link> = Effect.fnUntraced(function*() {
-  const lost = yield* Deferred.make<Transport.ConnectionLost>()
-  const inbox = yield* Queue.unbounded<string, Transport.TransportError | Cause.Done>()
-  let reason: Transport.ConnectionLost | undefined
-  return {
-    receive: (message) => {
-      Queue.offerUnsafe(inbox, message)
-    },
-    lose: (next) => {
-      if (reason !== undefined) return
-      reason = next
-      Deferred.doneUnsafe(lost, Effect.succeed(next))
-      Queue.failCauseUnsafe(inbox, Cause.fail(new Transport.TransportError({ reason: next })))
-    },
-    lost: () => reason,
-    whenOpen: <E>(write: Effect.Effect<void, E>) =>
-      Effect.suspend((): Effect.Effect<void, E | Transport.TransportError> =>
-        reason === undefined ? write : Effect.fail(new Transport.TransportError({ reason }))
-      ),
-    messages: Stream.fromQueue(inbox),
-    closed: Deferred.await(lost)
-  } satisfies Link
-})
+export const make = <A = string>(): Effect.Effect<Link<A>> =>
+  Effect.map(
+    Effect.all([
+      Deferred.make<Transport.ConnectionLost>(),
+      Queue.unbounded<A, Transport.TransportError | Cause.Done>()
+    ]),
+    ([lost, inbox]) => {
+      let reason: Transport.ConnectionLost | undefined
+      return {
+        receive: (message) => {
+          Queue.offerUnsafe(inbox, message)
+        },
+        lose: (next) => {
+          if (reason !== undefined) return
+          reason = next
+          Deferred.doneUnsafe(lost, Effect.succeed(next))
+          Queue.failCauseUnsafe(inbox, Cause.fail(new Transport.TransportError({ reason: next })))
+        },
+        lost: () => reason,
+        whenOpen: <E>(write: Effect.Effect<void, E>) =>
+          Effect.suspend((): Effect.Effect<void, E | Transport.TransportError> =>
+            reason === undefined ? write : Effect.fail(new Transport.TransportError({ reason }))
+          ),
+        messages: Stream.fromQueue(inbox),
+        closed: Deferred.await(lost)
+      } satisfies Link<A>
+    }
+  )

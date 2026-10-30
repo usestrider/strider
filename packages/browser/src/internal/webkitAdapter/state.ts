@@ -1,6 +1,11 @@
 /**
  * The WebKit adapter's state: its tables from WebKit's ids to L1's, and the kit's pieces, in one object every module
  * of the adapter takes (`adapterKit.ts`).
+ *
+ * Identity: stock WebKit numbers frames, loaders and requests from `0.1` in each web process (QUIRKS.md, Q195), and
+ * a page's targets are its processes, so each is keyed by the session of the target that named it: frames
+ * (`frameKey`), loaders (`loaderKey`), requests (`requestKey`) and execution contexts (`contextKey`). Commands take
+ * the target's own ids, as WebKit gave them.
  */
 import type * as Cache from "effect/Cache"
 import type * as Deferred from "effect/Deferred"
@@ -58,7 +63,7 @@ export interface TargetEntry {
   readonly targetId: string
   readonly session: ProtocolClient.Session
   readonly page: PageEntry
-  /** The main frame's id in this target's process. */
+  /** The main frame's key in this target's process (`frameKey`). */
   mainFrameId: string | undefined
   /** The intercepts last applied, so that a change is applied once. */
   intercepts: ReadonlyArray<{ readonly url: string; readonly stage: "request" | "response" }>
@@ -77,7 +82,7 @@ export interface WorkerEntry {
 }
 
 export interface FrameEntry extends Kit.NavigableNode<FrameEntry> {
-  /** The frame's id in its current target. */
+  /** The frame's key in its current target (`frameKey`). */
   frameId: string
   readonly page: PageEntry
   document: DocumentEntry | undefined
@@ -89,6 +94,7 @@ export interface FrameEntry extends Kit.NavigableNode<FrameEntry> {
 export interface DocumentEntry {
   readonly id: L1Target.DocumentId
   readonly frame: FrameEntry
+  /** Its loader's key (`loaderKey`). */
   loaderId: string
   url: string
   readonly realms: Set<RealmEntry>
@@ -109,6 +115,7 @@ export interface RealmEntry extends Kit.RealmNode {
 
 export interface NavigationEntry extends Kit.NavigationNode {
   readonly frame: FrameEntry
+  /** Its loader's key (`loaderKey`). */
   readonly loaderId: string
   readonly url: string
   readonly sameDocument: boolean
@@ -121,6 +128,7 @@ export interface NavigationEntry extends Kit.NavigationNode {
 export interface RequestEntry {
   readonly id: NetworkRequest.Id
   readonly session: ProtocolClient.Session
+  /** WebKit's id, its target's own. */
   readonly requestId: string
   redirects: number
   hop: NetworkRequest.HopId
@@ -338,6 +346,12 @@ export const eventOf = (state: State, session: ProtocolClient.Session): Event =>
 export const contextKey = (target: TargetEntry, contextId: number) => `${target.session.key ?? ""}|${contextId}`
 
 export const requestKey = (session: ProtocolClient.Session, requestId: string) => `${session.key ?? ""}|${requestId}`
+
+/** A frame's key: its id, which its target's process numbered. */
+export const frameKey = (target: TargetEntry, frameId: string) => `${target.session.key ?? ""}|${frameId}`
+
+/** A loader's key: its id, which its target's process numbered. */
+export const loaderKey = (target: TargetEntry, loaderId: string) => `${target.session.key ?? ""}|${loaderId}`
 
 /** An object group's anchor's key: the realm it's made in, and the group. */
 export const anchorKey = (realm: L1Target.RealmId, group: string) => JSON.stringify([realm, group])

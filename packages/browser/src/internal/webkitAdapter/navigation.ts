@@ -15,44 +15,47 @@ import * as Page from "../../webkit-stock-protocol/Page.ts"
 import * as Runtime from "../../webkit-stock-protocol/Runtime.ts"
 import * as Kit from "../adapterKit.ts"
 import { realmFor } from "./evaluation.ts"
-import { type Event, frameById, pageOf, realmOf, type State, targetOf } from "./state.ts"
+import { type Event, frameById, frameKey, loaderKey, pageOf, realmOf, type State, targetOf } from "./state.ts"
 import { addFrame, commit, endNavigation, errorPage, removeFrame, startNavigation, withoutFragment } from "./tree.ts"
 
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
-    .on(Page.frameDetached, (params, { state }) => {
-      const frame = state.frames.get(params.frameId)
+    .on(Page.frameDetached, (params, { state, target }) => {
+      if (target === undefined) return
+      const frame = state.frames.get(frameKey(target, params.frameId))
       if (frame === undefined || frame.parent === undefined) return
       removeFrame(state, frame, { _tag: "FrameDetached" }, "webkit:Page.frameDetached")
     })
     .on(Page.frameNavigated, (params, { state, target }) => {
       if (target === undefined) return
       const f = params.frame
-      let frame = state.frames.get(f.id)
+      const key = frameKey(target, f.id)
+      const loader = loaderKey(target, f.loaderId)
+      let frame = state.frames.get(key)
       if (frame === undefined) {
-        const parent = f.parentId === undefined ? undefined : state.frames.get(f.parentId)
+        const parent = f.parentId === undefined ? undefined : state.frames.get(frameKey(target, f.parentId))
         if (parent === undefined) return
-        frame = addFrame(state, f.id, parent)
+        frame = addFrame(state, key, parent)
       }
-      const failed = state.navigations.has(f.loaderId) ? undefined : errorPage(state, frame, f.loaderId, f.url)
+      const failed = state.navigations.has(loader) ? undefined : errorPage(state, frame, loader, f.url)
       if (failed !== undefined) {
         commit(
           state,
           frame,
-          { loaderId: f.loaderId, url: f.url, origin: f.securityOrigin },
+          { loaderId: loader, url: f.url, origin: f.securityOrigin },
           { _tag: "ErrorPage", navigation: failed },
           "webkit:Page.frameNavigated"
         )
         return
       }
-      const navigation = state.navigations.get(f.loaderId) ??
-        startNavigation(state, frame, f.loaderId, f.url, "crossDocument", false)
+      const navigation = state.navigations.get(loader) ??
+        startNavigation(state, frame, loader, f.url, "crossDocument", false)
       const document = commit(
         state,
         frame,
-        { loaderId: f.loaderId, url: f.url, origin: f.securityOrigin },
+        { loaderId: loader, url: f.url, origin: f.securityOrigin },
         { _tag: "Navigation", navigation: navigation.id },
         "webkit:Page.frameNavigated"
       )
