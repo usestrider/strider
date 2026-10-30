@@ -208,12 +208,13 @@ const syntheticDrag = (
   return accepted ? "dropped" : "refused"
 }
 
-export class LocatorImpl implements Locator.Locator {
+export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   readonly [LocatorTypeId] = LocatorTypeId as typeof LocatorTypeId
   readonly owner: Owner
   readonly steps: ReadonlyArray<Engine.Step>
   readonly label: Option.Option<string>
   constructor(owner: Owner, steps: ReadonlyArray<Engine.Step>, label: Option.Option<string> = Option.none()) {
+    super()
     this.owner = owner
     this.steps = steps
     this.label = label
@@ -1426,14 +1427,11 @@ export class LocatorImpl implements Locator.Locator {
   pipe() {
     return pipeArguments(this, arguments)
   }
-  toString() {
+  override toString() {
     return `Locator(${this.description})`
   }
   toJSON() {
     return { _id: "Locator", page: this.owner.page.id, locator: this.description }
-  }
-  [Inspectable.NodeInspectSymbol]() {
-    return this.toJSON()
   }
 }
 

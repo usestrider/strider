@@ -61,8 +61,9 @@ export const within: {
   2,
   <A, E, R>(self: Effect.Effect<A, E, R>, duration: Duration.Input): Effect.Effect<A, E, R> =>
     Effect.flatMap(Effect.all([CurrentDeadlineEffect, BrowserClockEffect]), ([enclosing, clock]) => {
-      const own =
-        (clock.now() + Duration.toMillis(Duration.fromInputUnsafe(duration)) * 1e6) as MonotonicInstant.MonotonicInstant
+      // A duration without end has no nanoseconds: its deadline never comes
+      const nanos = Option.match(Duration.toNanos(duration), { onNone: () => Infinity, onSome: Number })
+      const own = (clock.now() + nanos) as MonotonicInstant.MonotonicInstant
       const deadline = Option.match(enclosing, { onNone: () => own, onSome: (at) => Math.min(at, own) })
       return Effect.provideService(self, CurrentDeadline, Option.some(deadline as MonotonicInstant.MonotonicInstant))
     })
