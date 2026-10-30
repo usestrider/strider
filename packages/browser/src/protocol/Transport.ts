@@ -405,23 +405,20 @@ export const webSocket: (
       Effect.forkScoped
     )
 
+    const sendFailed = (error: Socket.SocketError) =>
+      Effect.suspend(() => {
+        const cause = error.reason._tag === "SocketWriteError" ? error.reason.cause : error.reason
+        link.lose(remote(`Sending failed: ${describe(cause)}`))
+        return Effect.fail(new TransportError({ reason: link.lost()! }))
+      })
+
     return {
       send: (message: string) =>
         link.whenOpen(Effect.suspend(() =>
           // A closing WebSocket drops what it's sent without a word. Its close is on the way to the reader,
           // behind the messages before it, so the send fails here and the reader loses the connection.
           opened.readyState === 1
-            ? Effect.catch(writer.write(message), (error) =>
-              Effect.suspend(() => {
-                link.lose(
-                  remote(
-                    `Sending failed: ${
-                      describe(Predicate.hasProperty(error.reason, "cause") ? error.reason.cause : error.reason)
-                    }`
-                  )
-                )
-                return Effect.fail(new TransportError({ reason: link.lost()! }))
-              }))
+            ? Effect.catch(writer.write(message), sendFailed)
             : Effect.fail(new TransportError({ reason: remote("The WebSocket is closing") }))
         )),
       messages: link.messages,
