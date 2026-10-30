@@ -336,7 +336,15 @@ interface SessionState {
  * Starts a client on a transport. The reader and the worker run in the scope; closing the scope stops them
  * and ends every session.
  */
-export const make = Effect.fnUntraced(function*(transport: Transport.Transport, wire: Wire, options?: Options) {
+export const make: (
+  transport: Transport.Transport,
+  wire: Wire,
+  options?: Options
+) => Effect.Effect<Client, never, Scope.Scope> = Effect.fnUntraced(function*(
+  transport: Transport.Transport,
+  wire: Wire,
+  options?: Options
+) {
   const validation = yield* Protocol.CurrentValidation
   const pending = new Map<number, Pending>()
   const sessions = new Map<Protocol.SessionKey, SessionState>()
@@ -555,14 +563,28 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
   })
 
   const makeSession = (key: Protocol.SessionKey | undefined, parent: SessionState | undefined): SessionState => {
-    const handle = {
+    function subscribeTo<M extends string, A>(
+      event: Protocol.EventDef<M, A>,
+      options: Protocol.SlidingOptions<A>
+    ): Effect.Effect<Stream.Stream<A | Protocol.Gap, Protocol.ProtocolError>, never, Scope.Scope>
+    function subscribeTo<M extends string, A>(
+      event: Protocol.EventDef<M, A>,
+      options?: Protocol.SubscribeOptions<A> | undefined
+    ): Effect.Effect<Stream.Stream<A, Protocol.ProtocolError>, never, Scope.Scope>
+    function subscribeTo<M extends string, A>(
+      event: Protocol.EventDef<M, A>,
+      options?: Protocol.SubscribeOptions<A> | Protocol.SlidingOptions<A> | undefined
+    ) {
+      return subscribe(state, event, options)
+    }
+    const handle: Session = {
       key,
       send: (command) => Effect.map(send(state, command), ({ result }) => result),
       sendSequenced: (command) => send(state, command),
-      subscribe: (event: Protocol.EventDef<string, any>, options?: any) => subscribe(state, event, options),
+      subscribe: subscribeTo,
       drainObserved: Effect.suspend(() => ingestion.drained(state.ingest)),
       ended: Effect.suspend(() => Deferred.await(state.ingest.ended))
-    } as Session
+    }
     const state: SessionState = {
       key,
       parent,
@@ -696,4 +718,4 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
     children: (session) => Array.from(states.get(session)?.children ?? [], (child) => child.handle),
     closed: Deferred.await(closed)
   } satisfies Client
-}) as (transport: Transport.Transport, wire: Wire, options?: Options) => Effect.Effect<Client, never, Scope.Scope>
+})
