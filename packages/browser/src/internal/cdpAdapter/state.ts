@@ -109,6 +109,12 @@ export interface NavigationEntry extends Kit.NavigationNode {
   failed: string | undefined
 }
 
+/** A hop's headers as the network sent or received them, from an `ExtraInfo` event. */
+export interface ExtraInfo {
+  readonly phase: "request" | "response"
+  readonly headers: Network.Headers
+}
+
 export interface RequestEntry {
   readonly id: NetworkRequest.Id
   readonly target: TargetEntry
@@ -131,6 +137,16 @@ export interface RequestEntry {
   /** The current hop's headers as the request event gave them, and whether the headers sent were reported. */
   requestHeaders: Network.Headers
   sentReported: boolean
+  /**
+   * `ExtraInfo` for hops that haven't started, in the order it came: the network's events can overtake the
+   * page's, so a redirect's next hop can have its headers before the redirect is reported.
+   */
+  readonly ahead: Array<ExtraInfo>
+  /**
+   * Earlier hops whose redirect said `ExtraInfo` would come, reported before it did: the next of each phase is
+   * theirs, oldest first.
+   */
+  readonly owed: Array<{ readonly hop: NetworkRequest.HopId; readonly phase: ExtraInfo["phase"] }>
   /**
    * Each hop's request body: whether it had one, and its bytes as the event carried them, kept where a body
    * collection covers the page (Q164).
@@ -226,7 +242,7 @@ export interface State {
   /** Retires a finished request by its key: finished requests stay answerable while there is room (Q177). */
   readonly retire: (key: string) => void
   /** ExtraInfo that came before its request, by request key; a few hundred at most. */
-  readonly earlyHeaders: Map<string, Array<{ phase: "request" | "response"; headers: Network.Headers }>>
+  readonly earlyHeaders: Map<string, Array<ExtraInfo>>
   /** Requests a route failed, by their `Network` key: an abort a route made has nothing after it to end it. */
   readonly routeFailed: Set<string>
   readonly obligations: Map<Adapter.ObligationId, ObligationEntry>

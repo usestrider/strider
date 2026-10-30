@@ -15,7 +15,16 @@ import * as Kit from "../adapterKit.ts"
 import * as Urls from "../urls.ts"
 import { postData, resourceTypes } from "./mapping.ts"
 import { emitResponse, release, servedBy } from "./responses.ts"
-import { type Event, frameOf, placement, type RequestEntry, requestKey, type State, type TargetEntry } from "./state.ts"
+import {
+  type Event,
+  type ExtraInfo,
+  frameOf,
+  placement,
+  type RequestEntry,
+  requestKey,
+  type State,
+  type TargetEntry
+} from "./state.ts"
 import { endNavigation } from "./tree.ts"
 
 /** A hop this connection no longer keeps: it keeps the last finished requests while there is room (Q177). */
@@ -39,19 +48,35 @@ const sentBody = (state: State, target: TargetEntry, request: Network.Request) =
   }
 }
 
-/** The headers as sent and received: to the request's current hop, or kept until it is sent. */
-const rawHeaders = (state: State, key: string, phase: "request" | "response", headers: Network.Headers) => {
-  const request = state.requests.get(key)
-  if (request !== undefined) {
-    state.buffer.emit({ _tag: "HopHeaders", hop: request.hop, phase, headers: Kit.headersOf(headers) })
-    if (phase === "response") {
-      request.received = headers
-      release(state, request)
-    } else request.sentReported = true
+/**
+ * Gives a hop the headers the network sent or received for it. A request's `ExtraInfo` comes in hop order, but
+ * can overtake the page's events, so it goes to the earliest hop still waiting for it: an earlier hop reported
+ * before it came, then the current hop, or else a hop not started yet (QUIRKS.md, Q158).
+ */
+const assign = (state: State, request: RequestEntry, { headers, phase }: ExtraInfo) => {
+  const owed = request.owed.findIndex((entry) => entry.phase === phase)
+  if (owed !== -1) {
+    const { hop } = request.owed.splice(owed, 1)[0]!
+    state.buffer.emit({ _tag: "HopHeaders", hop, phase, headers: Kit.headersOf(headers) })
     return
   }
+  if (phase === "request" ? request.sentReported : request.received !== undefined) {
+    request.ahead.push({ phase, headers })
+    return
+  }
+  state.buffer.emit({ _tag: "HopHeaders", hop: request.hop, phase, headers: Kit.headersOf(headers) })
+  if (phase === "response") {
+    request.received = headers
+    release(state, request)
+  } else request.sentReported = true
+}
+
+/** The headers as sent and received: to the hop they belong to, or kept until its request is sent. */
+const rawHeaders = (state: State, key: string, extra: ExtraInfo) => {
+  const request = state.requests.get(key)
+  if (request !== undefined) return assign(state, request, extra)
   const early = state.earlyHeaders.get(key) ?? []
-  early.push({ phase, headers })
+  early.push(extra)
   state.earlyHeaders.set(key, early)
   if (state.earlyHeaders.size > 500) state.earlyHeaders.delete(state.earlyHeaders.keys().next().value!)
 }
@@ -88,7 +113,20 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (target === undefined) return
       const key = requestKey(target, params.requestId)
       let request = state.requests.get(key)
+      let ahead: ReadonlyArray<ExtraInfo> = []
       if (request !== undefined && params.redirectResponse !== undefined) {
+        // The redirect says whether `ExtraInfo` comes for the hop it ends: what hasn't come yet is owed to it
+        if (params.redirectHasExtraInfo === true) {
+          if (!request.sentReported) request.owed.push({ hop: request.hop, phase: "request" })
+          if (request.received === undefined) request.owed.push({ hop: request.hop, phase: "response" })
+        } else if (params.redirectHasExtraInfo === false && !request.sentReported) {
+          state.buffer.emit({
+            _tag: "HopHeaders",
+            hop: request.hop,
+            phase: "request",
+            headers: Kit.headersOf(request.requestHeaders)
+          })
+        }
         emitResponse(state, request, params.redirectResponse)
         state.buffer.emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
         // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
@@ -101,6 +139,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         request.url = params.request.url
         request.sentBodies[request.redirects] = sentBody(state, target, params.request)
         state.hops.set(request.hop, request)
+        ahead = request.ahead.splice(0)
       } else {
         const frame = frameOf(state, params.frameId)
         const navigation = params.type === "Document" ? state.navigations.get(params.loaderId) : undefined
@@ -122,6 +161,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           held: undefined,
           requestHeaders: params.request.headers,
           sentReported: false,
+          ahead: [],
+          owed: [],
           sentBodies: [sentBody(state, target, params.request)]
         }
         state.requests.set(key, request)
@@ -153,20 +194,17 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const early = state.earlyHeaders.get(key)
       if (early !== undefined) {
         state.earlyHeaders.delete(key)
-        for (const { phase, headers } of early) {
-          state.buffer.emit({ _tag: "HopHeaders", hop: request.hop, phase, headers: Kit.headersOf(headers) })
-          if (phase === "response") request.received = headers
-          else request.sentReported = true
-        }
+        ahead = early
       }
+      for (const extra of ahead) assign(state, request, extra)
     })
     .on(Network.requestWillBeSentExtraInfo, (params, { state, target }) => {
       if (target === undefined) return
-      rawHeaders(state, requestKey(target, params.requestId), "request", params.headers)
+      rawHeaders(state, requestKey(target, params.requestId), { phase: "request", headers: params.headers })
     })
     .on(Network.responseReceivedExtraInfo, (params, { state, target }) => {
       if (target === undefined) return
-      rawHeaders(state, requestKey(target, params.requestId), "response", params.headers)
+      rawHeaders(state, requestKey(target, params.requestId), { phase: "response", headers: params.headers })
     })
     .on(Network.requestServedFromCache, (params, { state, target }) => {
       if (target === undefined) return
