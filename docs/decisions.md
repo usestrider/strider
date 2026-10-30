@@ -128,6 +128,29 @@ the kit takes hooks for its tables instead.
 
 ## The browser model (L1)
 
+**The fold is the model's one writer, and a caller's setting is a command in its stream.** Every write goes through
+the fold: entity state, and the caller's settings (handlers, routes, a context's options, a page's owner, grants, a
+`beforeunload` stay). The adapter's facts and the caller's commands are one inbox that one fiber applies in turn, and
+registering returns once the registration is applied. Who decides an obligation is chosen as its opening is folded.
+Each entity has one state, whose ref only the fold holds; readers get its read side and entities by id, never the
+model's tables. Deciding, releasing and installing the engine happen apart, and send back what they write.
+
+- **Why.** CONCEPTS.md said the fold was the only writer, and the code didn't do it: a page had three refs and five
+  mutable fields, and eleven places outside the fold wrote the model's maps. A handler registered after a dialog
+  opened could still decide it, depending on when the decider's fiber ran, so whether a handler applied was a race
+  between a fact and a registration. In one stream, the order is defined: what folds after a registration returned
+  is the registration's. A ref only the fold holds makes the rule a compile error to break.
+- **Cost.** A fact waits for the fold's fiber to take it, two scheduler turns, where it was folded on the adapter's
+  fiber. `Browser.layerTest` timelines that open a dialog at their first instant, before the test registers its
+  handler, now get the policy's decision, as a browser would give one.
+- **Exceptions.** A page's input state is the input permit's holder's to write, at the rate of input events. Where
+  the engine is installed is the runtime's `Cache`, which dedupes concurrent installs: an install waits on the
+  browser, which no step may do, and the memo is neither the browser's state nor a caller's setting.
+- **Rejected:** settings the caller writes directly, as they were, which leaves the race and a rule only prose
+  states; leaving it as it was and correcting CONCEPTS.md instead, which keeps the race; and a lock the fold and
+  callers take in turn, which avoids the scheduler turns but runs each step on its caller's fiber, with the caller's
+  operation and deadline in context for whatever the step forks, and isn't first-come first-served.
+
 **Backend failures are typed reasons, not defects.** A reply outside the supported schema is an external
 compatibility failure, not a broken invariant of the caller's program. A long-running service must be able to catch,
 report and isolate it without `catchCause` and without losing its other jobs. The error channel stays small because
