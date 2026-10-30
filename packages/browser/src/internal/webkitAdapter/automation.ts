@@ -7,6 +7,7 @@
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Schedule from "effect/Schedule"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as L1Target from "../../Target.ts"
 import type * as UserContext from "../../UserContext.ts"
@@ -83,13 +84,23 @@ const pairOnce = Effect.fnUntraced(function*(state: State, page: PageEntry) {
   }
   return Option.none()
 })
+
+// Automation announces no context, so a page not yet paired is looked for again, on the live clock, until it's found
+const pairingSchedule = Schedule.spaced("50 millis")
+const pairingAttempts = 99
+
 export const pageHandleOf = Effect.fnUntraced(function*(state: State, page: PageEntry) {
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if (page.ended) break
-    const found = yield* state.pairing.withPermits(1)(pairOnce(state, page))
-    if (Option.isSome(found)) return found.value
-    yield* BrowserClock.live.sleep(50)
-  }
+  const found = yield* Effect.suspend(() =>
+    page.ended ? Effect.succeedNone : state.pairing.withPermits(1)(pairOnce(state, page))
+  ).pipe(
+    Effect.repeat({
+      schedule: pairingSchedule,
+      times: pairingAttempts,
+      until: (paired) => Option.isSome(paired) || page.ended
+    }),
+    BrowserClock.onLive
+  )
+  if (Option.isSome(found)) return found.value
   return yield* Effect.fail(
     Kit.gone({ _tag: "Page", id: page.id }, page.closing ?? new L1Target.PageClosed({ by: "browser" }))
   )
@@ -141,7 +152,8 @@ export const settleDialog = Effect.fnUntraced(function*(
   )
   if (!showing) return
   if (page.dialog === undefined) yield* reportDialog(state, page, handle, process)
-  while (page.dialog !== undefined && !page.ended) yield* BrowserClock.live.sleep(20)
+  // The dialog's end reaches the model as a fact, which wakes the wait
+  yield* state.buffer.waitFor(() => page.dialog === undefined || page.ended ? true : undefined)
 })
 
 // Stock WebKit's Automation reports a dialog only when asked, and not its kind (QUIRKS.md, Q206)
@@ -151,8 +163,7 @@ export const watchDialogs = Effect.fnUntraced(function*(
   handle: Automation.BrowsingContextHandle,
   process: WebKitAutomation.Process
 ) {
-  while (!page.ended) {
-    yield* BrowserClock.live.sleep(100)
+  const look = Effect.gen(function*() {
     const showing = yield* Automation.isShowingJavaScriptDialog({ browsingContextHandle: handle }).pipe(
       Protocol.on(process.automation),
       Effect.map(({ result }) => result),
@@ -163,7 +174,11 @@ export const watchDialogs = Effect.fnUntraced(function*(
     } else if (!showing && page.dialog !== undefined) {
       yield* state.buffer.run(() => promptClosed(state, page, "webkit:Automation.isShowingJavaScriptDialog"))
     }
-  }
+  })
+  yield* Effect.suspend(() => page.ended ? Effect.void : look).pipe(
+    Effect.repeat({ schedule: Schedule.spaced("100 millis"), until: () => page.ended }),
+    BrowserClock.onLive
+  )
 })
 
 // ── The viewport ──────────────────────────────────────────────────────────────────────────────────────────
@@ -266,16 +281,37 @@ export const createPageLaunched = Effect.fnUntraced(function*(state: State, id: 
     process,
     Automation.waitForNavigationToComplete({ browsingContextHandle: handle, pageLoadStrategy: "Normal" })
   )
-  for (let attempt = 0; attempt < 100; attempt++) {
+  // A page the browser reports in this context, unpaired or paired to our handle by another creation's search
+  const candidate = () => {
+    for (const page of state.pages.values()) {
+      if (page.context === context && !page.ended && state.pageHandles.get(page) !== undefined) {
+        if (state.pageHandles.get(page) === handle) return page
+      } else if (page.context === context && !page.ended) return page
+    }
+    return undefined
+  }
+  const round = Effect.gen(function*() {
     yield* state.root().drainObserved
     for (const page of state.pages.values()) {
-      if (page.context !== context || page.ended || state.pageHandles.has(page)) continue
+      if (page.context !== context || page.ended) continue
+      if (state.pageHandles.has(page)) {
+        if (state.pageHandles.get(page) === handle) return Option.some(page.id)
+        continue
+      }
       yield* Deferred.await(page.ready)
       const paired = yield* state.pairing.withPermits(1)(pairOnce(state, page))
-      if (Option.isSome(paired) && paired.value === handle) return page.id
+      if (Option.isSome(paired) && paired.value === handle) return Option.some(page.id)
     }
-    yield* BrowserClock.live.sleep(50)
-  }
+    return Option.none<L1Target.NavigableId>()
+  })
+  // The page arrives as the inspector's event, which wakes the wait; its pairing is then looked for until found
+  const found = yield* state.buffer.waitFor(candidate).pipe(
+    Effect.andThen(round.pipe(
+      Effect.repeat({ schedule: pairingSchedule, times: pairingAttempts, until: Option.isSome })
+    )),
+    BrowserClock.onLive
+  )
+  if (Option.isSome(found)) return found.value
   return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.PageClosed({ by: "browser" })))
 })
 
