@@ -67,7 +67,7 @@ export interface Registry {
     declaration: Adapter.Declaration,
     id: Adapter.RegistrationId
   ) => Registered
-  readonly remove: (id: Adapter.RegistrationId) => Registered | undefined
+  readonly remove: (id: Adapter.RegistrationId) => Option.Option<Registered>
   readonly all: () => ReadonlyArray<Registered>
   /** The effective override of each kind for a placement. */
   readonly overrides: (placement: Placement) => ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
@@ -123,7 +123,7 @@ export const make = (): Registry => {
       return entry
     },
     remove: (id) => {
-      const entry = registered.get(id)
+      const entry = Option.fromUndefinedOr(registered.get(id))
       registered.delete(id)
       return entry
     },
