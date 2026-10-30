@@ -35,7 +35,7 @@ export const forward = async (argv: ReadonlyArray<string>): Promise<number> => {
     )
     return Session.exitCodes.NoSession!
   }
-  // The session goes first, so the daemon reads it as every command's
+  // Supply the environment default as a shared flag when no explicit session was given.
   const args = named === undefined ? ["-s", name, ...argv] : [...argv]
   const sessions = await running(rootDir)
   const net = await Node.net()
