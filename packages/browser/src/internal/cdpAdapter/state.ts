@@ -190,7 +190,7 @@ export type ObligationEntry =
 export interface DownloadEntry {
   readonly id: Download.Id
   readonly guid: string
-  readonly directory: string | undefined
+  readonly directory: Option.Option<string>
   /** The context it was started in, which canceling it names. */
   readonly context: ContextEntry | undefined
   ended: boolean
@@ -345,7 +345,9 @@ export const placement = (page: PageEntry): Declarations.Placement => ({ page: p
 /** Where a context's downloads go, if a declaration allows them to a directory. */
 export const downloadDirectory = (state: State, context: UserContext.Id) => {
   const behavior = state.registry.downloads(context)
-  return Option.isSome(behavior) && behavior.value._tag === "Allow" ? behavior.value.directory : undefined
+  return Option.isSome(behavior) && behavior.value._tag === "Allow"
+    ? Option.fromUndefinedOr(behavior.value.directory)
+    : Option.none<string>()
 }
 
 // ── Lookups: an id this connection minted that ended is Gone, any other Foreign ───────────────────────────
