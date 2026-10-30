@@ -1,7 +1,7 @@
 /**
  * The fold (CONCEPTS.md §2): the only writer of the model. The adapter's facts and the caller's commands are one
- * ordered stream, an inbox that one fiber in the model's scope takes from, applying each input in full before the
- * next. A fact is the adapter's sink, so it is folded in receive order, before the adapter publishes the event; a
+ * ordered stream: each input is applied in full, one at a time, in the order it arrived, with the model's context.
+ * A fact is the adapter's sink, so it is folded in receive order, before the adapter publishes the event; a
  * command is how a caller's setting reaches the model, such as a handler's registration, so it is ordered against
  * the facts: a dialog folded after a registration returned is that handler's to decide.
  *
@@ -129,26 +129,40 @@ export const make = Effect.fnUntraced(function*(options: {
 
   // ── The stream ──
 
-  const inbox = yield* Queue.unbounded<Input>()
-  let stopped = false
-  const run = (input: Input) =>
-    Effect.uninterruptible(Effect.flatMap(Effect.exit(input.step), (exit) => Deferred.done(input.done, exit)))
-  yield* Effect.forever(Effect.flatMap(Queue.take(inbox), run)).pipe(
-    // Once the model's scope closes, nothing else writes: what is left, and whatever comes after, is applied where
-    // it was asked for
-    Effect.ensuring(Effect.suspend(() => {
-      stopped = true
-      return Effect.flatMap(Queue.clear(inbox), (left) => Effect.forEach(left, run, { discard: true }))
-    })),
-    Effect.forkIn(modelScope)
-  )
-  /** Enqueues a step and waits until the fold has applied it. */
+  // Every step runs with the model's context, whoever applies it: what it forks carries no caller's operation,
+  // deadline or span
+  const context = yield* Effect.context<never>()
+  const inbox: Array<Input> = []
+  let busy = false
+  /** Applies what arrived while a step ran, in arrival order; idle once there is nothing left. */
+  const drain: Effect.Effect<void> = Effect.suspend(() => {
+    const next = inbox.shift()
+    if (next === undefined) {
+      busy = false
+      return Effect.void
+    }
+    return Effect.exit(Effect.provideContext(next.step, context)).pipe(
+      Effect.flatMap((exit) => Deferred.done(next.done, exit)),
+      Effect.andThen(drain)
+    )
+  })
+  /**
+   * Applies a step in its turn and returns once it is applied. An input that finds the fold idle is applied at once,
+   * on its caller's fiber, and then whatever arrived meanwhile; one that finds a step running waits in the inbox
+   * for the fiber applying it. So a protocol event's facts, which the adapter delivers back to back, are applied
+   * back to back, and no reader sees half of one.
+   */
   const apply = <A>(step: Effect.Effect<A>): Effect.Effect<A> =>
-    Effect.suspend(() => {
-      if (stopped) return step
-      const done = Deferred.makeUnsafe<A>()
-      Queue.offerUnsafe(inbox, { step, done: done as Deferred.Deferred<unknown> })
-      return Deferred.await(done)
+    Effect.suspend((): Effect.Effect<A> => {
+      if (busy) {
+        const done = Deferred.makeUnsafe<A>()
+        inbox.push({ step, done: done as Deferred.Deferred<unknown> })
+        return Deferred.await(done)
+      }
+      busy = true
+      return Effect.uninterruptible(
+        Effect.flatMap(Effect.exit(Effect.provideContext(step, context)), (exit) => Effect.as(drain, exit))
+      ).pipe(Effect.flatten)
     })
 
   // ── State: the refs behind every entity's `Readable`, which only the fold holds ──
