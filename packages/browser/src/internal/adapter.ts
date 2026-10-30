@@ -36,6 +36,7 @@ import type * as Transport from "../protocol/Transport.ts"
 import type * as Route from "../Route.ts"
 import type * as Target from "../Target.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
+import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as BrowserClock from "./browserClock.ts"
 
@@ -211,7 +212,7 @@ export type Fact =
     readonly context: UserContext.Id
     readonly kind: "tab" | "popup"
     readonly origin: PageOrigin
-    readonly url: string
+    readonly url: Url.Url
   }
   | { readonly _tag: "PageReady"; readonly page: Target.NavigableId }
   | { readonly _tag: "PageInitializationFailed"; readonly page: Target.NavigableId; readonly description: string }
@@ -231,7 +232,7 @@ export type Fact =
     readonly _tag: "DocumentCommitted"
     readonly document: Target.DocumentId
     readonly navigable: Target.NavigableId
-    readonly url: string
+    readonly url: Url.Url
     readonly origin: string
     readonly createdBy: DocumentCreatedBy
     /** The document it replaced, which ended with `DocumentReplaced`. */
@@ -241,7 +242,7 @@ export type Fact =
   | {
     readonly _tag: "DocumentUrlChanged"
     readonly document: Target.DocumentId
-    readonly url: string
+    readonly url: Url.Url
     readonly navigation: PageNavigation.Id
     readonly via: "fragment" | "historyApi"
   }
@@ -265,7 +266,7 @@ export type Fact =
       | {
         readonly _tag: "Worker"
         readonly worker: WorkerKind
-        readonly url: string
+        readonly url: Url.Url
         readonly page: Option.Option<Target.NavigableId>
         /** The worker's context, when the backend says: a page's, or a shared or service worker's own. */
         readonly context: Option.Option<UserContext.Id>
@@ -277,7 +278,7 @@ export type Fact =
     readonly _tag: "NavigationStarted"
     readonly navigation: PageNavigation.Id
     readonly navigable: Target.NavigableId
-    readonly url: string
+    readonly url: Url.Url
     readonly initiatedAs: InitiatedAs
   }
   | {
@@ -317,7 +318,7 @@ export type Fact =
     readonly _tag: "ConnectionOpened"
     readonly connection: NetworkConnection.Id
     readonly kind: NetworkConnection.Kind
-    readonly url: string
+    readonly url: Url.Url
     readonly navigable: Option.Option<Target.NavigableId>
   }
   | {
@@ -343,7 +344,7 @@ export type Fact =
     readonly _tag: "DownloadStarted"
     readonly download: Download.Id
     readonly page: Target.NavigableId
-    readonly url: string
+    readonly url: Url.Url
     readonly suggestedFilename: string
   }
   | {

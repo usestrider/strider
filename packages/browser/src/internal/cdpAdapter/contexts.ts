@@ -15,6 +15,7 @@ import * as L1Target from "../../Target.ts"
 import type * as UserContext from "../../UserContext.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Urls from "../urls.ts"
 import { applyDownloads } from "./declare.ts"
 import { whileSwapping } from "./navigation.ts"
 import {
@@ -39,7 +40,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const download: DownloadEntry = {
         id: state.ids.download(),
         guid: params.guid,
-        directory: frame === undefined ? undefined : downloadDirectory(state, frame.page.context.id),
+        directory: frame === undefined ? Option.none() : downloadDirectory(state, frame.page.context.id),
         context: frame?.page.context,
         ended: false
       }
@@ -50,7 +51,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         _tag: "DownloadStarted",
         download: download.id,
         page: frame.page.id,
-        url: params.url,
+        url: Urls.reported(params.url),
         suggestedFilename: params.suggestedFilename
       })
       // A navigation in flight on that frame, to that URL, became this download
@@ -84,9 +85,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         outcome: params.state === "completed"
           ? {
             _tag: "Completed",
-            path: Option.fromUndefinedOr(
-              params.filePath ??
-                (download.directory === undefined ? undefined : `${download.directory}/${download.guid}`)
+            path: Option.fromUndefinedOr(params.filePath).pipe(
+              Option.orElse(() => Option.map(download.directory, (directory) => `${directory}/${download.guid}`))
             )
           }
           : { _tag: "Canceled" }
@@ -185,15 +185,13 @@ export const activatePage = (state: State, id: L1Target.NavigableId) =>
 
 // ── Downloads ─────────────────────────────────────────────────────────────────────────────────────────────
 
-const downloadOf = (state: State, id: Download.Id) => Kit.lookup(state.ids, state.downloadsById, id, endedThing)
+const downloadOf = (state: State, id: Download.Id) =>
+  Kit.lookup(state.ids, state.downloadsById, id, () => endedThing({ _tag: "Download", id }))
 
 export const downloadPath = (state: State, id: Download.Id) =>
   Effect.map(
     downloadOf(state, id),
-    (download) =>
-      download.directory === undefined
-        ? Option.none<string>()
-        : Option.some(`${download.directory}/${download.guid}`)
+    (download) => Option.map(download.directory, (directory) => `${directory}/${download.guid}`)
   )
 
 export const cancelDownload = (state: State, id: Download.Id) =>

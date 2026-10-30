@@ -18,7 +18,6 @@ import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
 import * as Serialization from "./serialization.ts"
-import * as Urls from "./urls.ts"
 
 const TypeId = "~@usestrider/browser/BrowserWorker"
 
@@ -84,7 +83,7 @@ export const make = (runtime: Runtime.Runtime, entry: Model.WorkerEntry): Browse
     [TypeId]: TypeId,
     realm: entry.realm,
     kind: entry.kind,
-    url: Urls.reported(entry.url),
+    url: entry.url,
     closed: Deferred.await(entry.closed),
     evaluate,
     pipe() {

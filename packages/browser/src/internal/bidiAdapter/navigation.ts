@@ -11,6 +11,7 @@ import type * as PageNavigation from "../../PageNavigation.ts"
 import type * as Protocol from "../../protocol/Protocol.ts"
 import type * as L1Target from "../../Target.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Urls from "../urls.ts"
 import { errorPage, errorText, intended, originOf } from "./mapping.ts"
 import {
   type Event,
@@ -38,7 +39,13 @@ const sameDocument = (
   const navigation = (bidi === null ? undefined : state.navigations.get(bidi)) ??
     startNavigation(state, navigable, bidi ?? `same:${navigable.bidi}:${url}:${Math.random()}`, url, via, true)
   document.url = url
-  state.buffer.emit({ _tag: "DocumentUrlChanged", document: document.id, url, navigation: navigation.id, via })
+  state.buffer.emit({
+    _tag: "DocumentUrlChanged",
+    document: document.id,
+    url: Urls.reported(url),
+    navigation: navigation.id,
+    via
+  })
   endNavigation(
     state,
     navigation,

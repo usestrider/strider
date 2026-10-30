@@ -9,6 +9,7 @@ import type * as PageNavigation from "../../PageNavigation.ts"
 import * as L1Target from "../../Target.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Urls from "../urls.ts"
 import type { ContextEntry, DocumentEntry, NavigableEntry, NavigationEntry, RealmEntry, State } from "./state.ts"
 
 // ── Ending things ─────────────────────────────────────────────────────────────────────────────────────────
@@ -92,7 +93,7 @@ export const commit = (
     _tag: "DocumentCommitted",
     document: document.id,
     navigable: navigable.id,
-    url,
+    url: Urls.reported(url),
     origin,
     createdBy,
     replaced: Option.fromUndefinedOr(old?.id),
@@ -171,7 +172,7 @@ export const startNavigation = (
     _tag: "NavigationStarted",
     navigation: navigation.id,
     navigable: navigable.id,
-    url,
+    url: Urls.reported(url),
     initiatedAs
   })
   return navigation
@@ -241,7 +242,7 @@ export const addNavigable = (state: State, info: {
         : info.originalOpener === null
         ? { _tag: "Created" }
         : { _tag: "Opened", opener: openerId },
-      url: info.url
+      url: Urls.reported(info.url)
     })
   } else {
     parent.children.add(navigable)

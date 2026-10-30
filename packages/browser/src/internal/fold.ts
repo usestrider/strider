@@ -27,6 +27,7 @@ import type * as NetworkRequest from "../NetworkRequest.ts"
 import type * as NetworkResponse from "../NetworkResponse.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Target from "../Target.ts"
+import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
 import * as Events from "./events.ts"
@@ -35,6 +36,7 @@ import type * as Model from "./model.ts"
 import * as NetworkIndex from "./networkIndex.ts"
 import type * as Obligations from "./obligations.ts"
 import * as Readable from "./readable.ts"
+import * as Urls from "./urls.ts"
 
 /** The most navigations remembered at once: a page's own navigations nobody waits for are dropped oldest first. */
 const maxNavigations = 256
@@ -188,7 +190,7 @@ export const make = Effect.fnUntraced(function*(options: {
   // A page's navigations and its frames', from their start to their end: where they went, for the event
   const started = NetworkIndex.bounded<
     PageNavigation.Id,
-    { readonly page: Model.PageEntry; readonly frame: Target.NavigableId; readonly url: string }
+    { readonly page: Model.PageEntry; readonly frame: Target.NavigableId; readonly url: Url.Url }
   >(maxNavigations)
   const navigationHops = new Set<NetworkRequest.HopId>()
   const responses = NetworkIndex.bounded<NetworkRequest.HopId, NetworkResponse.NetworkResponse>(maxResponses)
@@ -401,7 +403,7 @@ export const make = Effect.fnUntraced(function*(options: {
   }
 
   /** The URL a navigation ended at, by its outcome's document; else where it was going. */
-  const endedAt = (outcome: Adapter.NavigationOutcome, url: string) => {
+  const endedAt = (outcome: Adapter.NavigationOutcome, url: Url.Url) => {
     switch (outcome._tag) {
       case "Committed":
       case "SameDocument":
@@ -490,7 +492,7 @@ export const make = Effect.fnUntraced(function*(options: {
           // A popup is reported to its opener, when the backend names one; before the
           // context's pages change, so a caller woken by that change subscribes after it, as with every event
           if (Option.isSome(opener)) {
-            const known = placeholder(fact.url) ? Option.none<string>() : Option.some(fact.url)
+            const known = placeholder(fact.url) ? Option.none<Url.Url>() : Option.some(fact.url)
             const event: Model.PopupEvent = { page: entry, url: yield* cell(known) }
             const published = Events.publish(opener.value.events.popup, event)
             if (Option.isNone(known)) {
@@ -514,7 +516,7 @@ export const make = Effect.fnUntraced(function*(options: {
             id: fact.frame,
             parent: fact.parent,
             document: Option.none(),
-            url: "about:blank"
+            url: Urls.reported("about:blank")
           }
           yield* update(page.value.state, (state) => ({
             ...state,

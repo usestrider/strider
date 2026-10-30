@@ -24,6 +24,7 @@ import * as L1Target from "../../Target.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
+import * as Urls from "../urls.ts"
 import { configureTarget } from "./declare.ts"
 import { targetKind } from "./mapping.ts"
 import { type Event, type FrameEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
@@ -89,7 +90,7 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
           : info.openerId === undefined
           ? { _tag: "Created" }
           : { _tag: "Opened", opener: openerId },
-        url: info.url
+        url: Urls.reported(info.url)
       })
       state.control.sync(session, gate(state, entry, page, params.waitingForDebugger, state.attachedAtConnect))
       return

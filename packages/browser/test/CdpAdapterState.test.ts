@@ -1,7 +1,7 @@
 /**
  * The CDP adapter's state, without a browser: a page that ended takes its input state with it, and an operation
  * that names it after gets `Gone` with the page's reason, never `Foreign`; a redirect's hops each get the headers
- * the network received for them, in whatever order the browser's events come.
+ * the network received for them, in whatever order the browser's events come; a realm that ended takes its handles.
  */
 import { assert, describe, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
@@ -12,6 +12,7 @@ import * as Network from "../src/internal/cdpAdapter/network.ts"
 import * as Responses from "../src/internal/cdpAdapter/responses.ts"
 import * as State from "../src/internal/cdpAdapter/state.ts"
 import * as Tree from "../src/internal/cdpAdapter/tree.ts"
+import * as Groups from "../src/internal/objectGroups.ts"
 import type * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as Target from "../src/Target.ts"
 
@@ -174,6 +175,54 @@ describe("CdpAdapter state", () => {
       assert.strictEqual(document.reason._tag, "Gone")
       const realm = yield* State.realmOf(state, state.ids.realm()).pipe(Effect.flip)
       assert.strictEqual(realm.reason._tag, "Gone")
+    }))
+})
+
+describe("CdpAdapter handles", () => {
+  it.effect("drops the handles of a realm that ended, and a later use fails as Gone", () =>
+    Effect.gen(function*() {
+      const { state, target } = yield* withPage()
+      const realm = Tree.addRealm(state, {
+        uniqueId: "U1",
+        contextId: 1,
+        target,
+        frame: undefined,
+        world: { _tag: "Main" },
+        origin: "http://127.0.0.1:8000"
+      })
+      const kept = Tree.addRealm(state, {
+        uniqueId: "U2",
+        contextId: 2,
+        target,
+        frame: undefined,
+        world: { _tag: "Main" },
+        origin: "http://127.0.0.1:8000"
+      })
+      const handle = state.ids.handle()
+      const grouped = state.ids.handle()
+      const other = state.ids.handle()
+      state.handles.set(handle, { target, realm, objectId: "O1", group: undefined })
+      state.handles.set(grouped, { target, realm, objectId: "O2", group: "g" })
+      state.handles.set(other, { target, realm: kept, objectId: "O3", group: "g" })
+      Groups.join(state.groups, "g", grouped)
+      Groups.join(state.groups, "g", other)
+
+      Tree.removeRealm(state, realm, new Target.RealmDestroyed({}))
+
+      assert.deepStrictEqual([...state.handles.keys()], [other])
+      assert.deepStrictEqual([...(state.groups.get("g") ?? [])], [other])
+      // The kit's rule for a handle that is not held: one this connection minted is Gone
+      const use = (id: Adapter.HandleId) =>
+        Kit.argument<string>({ _tag: "Handle", handle: id }, {
+          ids: state.ids,
+          realm: realm.id,
+          value: () => "value",
+          handle: (held) => state.handles.get(held)?.objectId,
+          node: () => undefined
+        })
+      const gone = yield* use(handle).pipe(Effect.flip)
+      assert.strictEqual(gone.reason._tag, "Gone")
+      assert.strictEqual(yield* use(other), "O3")
     }))
 })
 

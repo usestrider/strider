@@ -12,6 +12,7 @@ import * as L1Target from "../../Target.ts"
 import type * as UserContext from "../../UserContext.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Urls from "../urls.ts"
 import { applyKind } from "./declare.ts"
 import {
   type ContextEntry,
@@ -56,7 +57,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           _tag: "DownloadStarted",
           download: download.id,
           page: navigable.page.id,
-          url: params.url,
+          url: Urls.reported(params.url),
           suggestedFilename: params.suggestedFilename
         })
       }

@@ -297,7 +297,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         _tag: "ConnectionOpened",
         connection: id,
         kind: "webSocket",
-        url: params.url,
+        url: Urls.reported(params.url),
         navigable: Option.fromUndefinedOr(target.page?.id)
       })
     })
@@ -325,7 +325,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           _tag: "ConnectionOpened",
           connection: id,
           kind: "eventSource",
-          url: state.requests.get(key)?.url ?? "",
+          url: Urls.reported(state.requests.get(key)?.url ?? ""),
           navigable: Option.fromUndefinedOr(target.page?.id)
         })
       }

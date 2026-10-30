@@ -326,7 +326,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         _tag: "ConnectionOpened",
         connection: id,
         kind: "webSocket",
-        url: params.url,
+        url: Urls.reported(params.url),
         navigable: Option.fromUndefinedOr(page?.id)
       })
     })

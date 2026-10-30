@@ -182,7 +182,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
               : target.kind === "shared_worker"
               ? { _tag: "Shared" }
               : { _tag: "Service", scope: Option.none() },
-            url: target.url,
+            url: Urls.reported(target.url),
             page: Option.fromUndefinedOr(target.page?.id),
             context: Option.fromUndefinedOr((target.page?.context ?? state.workerContexts.get(target))?.id)
           }
@@ -370,7 +370,7 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
       { type: object.type as Runtime.DeepSerializedValueType, value: object.value }
     if (call.result === "handle" && object.objectId !== undefined) {
       const handle = state.ids.handle()
-      state.handles.set(handle, { target: realm.target, objectId: object.objectId, group: call.group })
+      state.handles.set(handle, { target: realm.target, realm, objectId: object.objectId, group: call.group })
       if (call.group !== undefined) Groups.join(state.groups, call.group, handle)
       return withHandle(toRemoteValue(object.deepSerializedValue ?? { type: object.type }, documentOf), handle)
     }

@@ -65,7 +65,7 @@ const opened = ({ status }: Model.PageState): Option.Option<Page.Status> =>
     ? Option.none()
     : Option.some(
       status._tag === "Open"
-        ? { _tag: "Open", url: Urls.reported(status.url), document: status.document, prompt: status.prompt }
+        ? { _tag: "Open", url: status.url, document: status.document, prompt: status.prompt }
         : { _tag: "Closed", reason: status.reason }
     )
 
@@ -77,12 +77,12 @@ const frameTree = (page: Target.NavigableId, state: Model.PageState): Page.Frame
   const children = (parent: Target.NavigableId): ReadonlyArray<Page.FrameTree> =>
     state.frames.filter((frame) => frame.parent === parent).map((frame) => ({
       id: frame.id,
-      url: Urls.reported(frame.url),
+      url: frame.url,
       // No backend reports a frame's name, and `window.name` is its document's to read
       name: Option.none(),
       children: children(frame.id)
     }))
-  return { id: page, url: Urls.reported(state.status.url), name: Option.none(), children: children(page) }
+  return { id: page, url: state.status.url, name: Option.none(), children: children(page) }
 }
 
 const pageError = (operation: string, reason: Page.PageErrorReason, id: Diagnostics.OperationId) =>
@@ -117,8 +117,7 @@ const observeMembers = (owner: ObservedOwner) => {
     }),
     url: Watchable.make({
       ref: entry.state,
-      project: ({ status }: Model.PageState) =>
-        status._tag === "Opening" ? Option.none() : Option.some(Urls.reported(status.url)),
+      project: ({ status }: Model.PageState) => status._tag === "Opening" ? Option.none() : Option.some(status.url),
       ended: pageEnded,
       target: { _tag: "Page", id: entry.id },
       operation: "Page.url.waitFor"
@@ -220,7 +219,7 @@ export const make = (owner: PageOwner): Page.Page => {
       const document = "document" in outcome ? model.document(outcome.document) : Option.none()
       const at = Option.isSome(document)
         ? (yield* document.value.state.get).url
-        : Option.getOrElse(url, () => "")
+        : Option.getOrElse(url, () => Urls.reported(""))
       const result = yield* Navigation.settle(
         model,
         operation,

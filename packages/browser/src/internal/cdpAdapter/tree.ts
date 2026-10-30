@@ -9,6 +9,7 @@ import * as Option from "effect/Option"
 import * as L1Target from "../../Target.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Urls from "../urls.ts"
 import { releaseDocument } from "./responses.ts"
 import {
   type ContextEntry,
@@ -30,7 +31,20 @@ export const removeRealm = (state: State, realm: RealmEntry, reason: L1Target.Cl
     state.realmsByContext.delete(contextKey(realm.target, realm.contextId))
     state.realmsByUnique.delete(realm.uniqueId)
     if (realm.target.realm === realm) realm.target.realm = undefined
+    forgetHandles(state, realm)
   })
+
+/** The handles a realm made go with it: a later use of one fails as `Gone`, its realm's end. */
+const forgetHandles = (state: State, realm: RealmEntry) => {
+  for (const [id, handle] of state.handles) {
+    if (handle.realm !== realm) continue
+    state.handles.delete(id)
+    if (handle.group === undefined) continue
+    const members = state.groups.get(handle.group)
+    members?.delete(id)
+    if (members?.size === 0) state.groups.delete(handle.group)
+  }
+}
 
 export const endNavigation = (
   state: State,
@@ -127,7 +141,7 @@ export const commit = (
     _tag: "DocumentCommitted",
     document: document.id,
     navigable: frame.id,
-    url: snapshot.url,
+    url: Urls.reported(snapshot.url),
     origin: snapshot.origin,
     createdBy: createdBy(navigation),
     replaced: Option.fromUndefinedOr(old?.id),
@@ -182,7 +196,7 @@ export const startNavigation = (
     _tag: "NavigationStarted",
     navigation: navigation.id,
     navigable: frame.id,
-    url,
+    url: Urls.reported(url),
     initiatedAs: type
   })
   return navigation

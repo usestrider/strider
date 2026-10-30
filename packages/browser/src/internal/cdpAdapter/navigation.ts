@@ -12,6 +12,7 @@ import type * as PageNavigation from "../../PageNavigation.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as L1Target from "../../Target.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Urls from "../urls.ts"
 import { initiatedAs, isSameDocument } from "./mapping.ts"
 import { type Event, frameById, frameOf, pageOf, type State } from "./state.ts"
 import { addFrame, commit, endNavigation, removeFrame, startNavigation } from "./tree.ts"
@@ -128,7 +129,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       state.buffer.emit({
         _tag: "DocumentUrlChanged",
         document: document.id,
-        url: params.url,
+        url: Urls.reported(params.url),
         navigation: navigation.id,
         via
       })

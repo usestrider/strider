@@ -30,6 +30,7 @@ import type * as Page from "../Page.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import type * as Target from "../Target.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
+import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BoundedAdapter from "./boundedAdapter.ts"
@@ -45,16 +46,16 @@ export type DialogPolicy = "dismiss" | "accept" | "leaveOpen"
 
 /** A page's status: opening until its first document commits, then open, then closed. */
 export type PageStatus =
-  | { readonly _tag: "Opening"; readonly url: string }
+  | { readonly _tag: "Opening"; readonly url: Url.Url }
   | {
     readonly _tag: "Open"
-    readonly url: string
+    readonly url: Url.Url
     readonly document: Page.DocumentStatus
     readonly prompt: Option.Option<Page.Prompt>
     /** The open prompt, when nothing will decide it: no handler, and a `"leaveOpen"` policy. */
     readonly undecided: Option.Option<UndecidedPrompt>
   }
-  | { readonly _tag: "Closed"; readonly reason: Target.CloseReason; readonly url: string }
+  | { readonly _tag: "Closed"; readonly reason: Target.CloseReason; readonly url: Url.Url }
 
 /** A prompt nothing will decide, as `Reason.PromptBlocking` names it. */
 export interface UndecidedPrompt {
@@ -65,7 +66,7 @@ export interface UndecidedPrompt {
 /** A popup, as its opener's channel has it; its URL arrives with its first navigation. */
 export interface PopupEvent {
   readonly page: PageEntry
-  readonly url: Readable<Option.Option<string>>
+  readonly url: Readable<Option.Option<Url.Url>>
 }
 
 /** A dialog, as the adapter reported it. */
@@ -129,7 +130,7 @@ export interface NavigationEvent {
   /** The navigable it happened in: the page's own id, or a frame's. */
   readonly frame: Target.NavigableId
   /** Where it ended: the committed document's URL, or the one a same-document navigation set; else where it was going. */
-  readonly url: string
+  readonly url: Url.Url
   readonly outcome: Adapter.NavigationOutcome
 }
 
@@ -193,7 +194,7 @@ export interface DownloadEntry {
   /** Fixed: the page that started it, and its context. */
   readonly page: PageEntry
   readonly context: ContextEntry
-  readonly url: string
+  readonly url: Url.Url
   readonly suggestedFilename: string
   readonly state: Readable<DownloadState>
 }
@@ -202,7 +203,7 @@ export interface WorkerEntry {
   readonly realm: Target.RealmId
   /** Fixed: a realm never changes kind, URL or owner. */
   readonly kind: BrowserWorker.Kind
-  readonly url: string
+  readonly url: Url.Url
   readonly page: Option.Option<PageEntry>
   readonly context: Option.Option<ContextEntry>
   readonly closed: Deferred.Deferred<Target.CloseReason>
@@ -212,7 +213,7 @@ export interface ConnectionEntry {
   readonly id: NetworkConnection.Id
   /** Fixed at open. */
   readonly kind: NetworkConnection.Kind
-  readonly url: string
+  readonly url: Url.Url
   readonly openedAt: DateTime.Utc
   readonly page: PageEntry
   readonly frames: Events.Channel<NetworkConnection.Frame>
@@ -252,7 +253,7 @@ export interface FrameEntry {
   readonly id: Target.NavigableId
   readonly parent: Target.NavigableId
   readonly document: Option.Option<Target.DocumentId>
-  readonly url: string
+  readonly url: Url.Url
 }
 
 /** Everything about a page that changes: what the browser says of it, and the caller's settings for it. */
@@ -342,7 +343,7 @@ export interface ContextEntry {
 
 /** What changes about a document: its URL, which a same-document navigation changes, and its readiness. */
 export interface DocumentState {
-  readonly url: string
+  readonly url: Url.Url
   readonly readiness: "loading" | "interactive" | "complete"
 }
 

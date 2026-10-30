@@ -190,7 +190,7 @@ export type ObligationEntry =
 export interface DownloadEntry {
   readonly id: Download.Id
   readonly guid: string
-  readonly directory: string | undefined
+  readonly directory: Option.Option<string>
   /** The context it was started in, which canceling it names. */
   readonly context: ContextEntry | undefined
   ended: boolean
@@ -198,6 +198,8 @@ export interface DownloadEntry {
 
 export interface HandleEntry {
   readonly target: TargetEntry
+  /** The realm it was made in, which takes it when it ends. */
+  readonly realm: RealmEntry
   readonly objectId: string
   /** The object group it was made in (Q132). */
   readonly group: string | undefined
@@ -345,7 +347,9 @@ export const placement = (page: PageEntry): Declarations.Placement => ({ page: p
 /** Where a context's downloads go, if a declaration allows them to a directory. */
 export const downloadDirectory = (state: State, context: UserContext.Id) => {
   const behavior = state.registry.downloads(context)
-  return Option.isSome(behavior) && behavior.value._tag === "Allow" ? behavior.value.directory : undefined
+  return Option.isSome(behavior) && behavior.value._tag === "Allow"
+    ? Option.fromUndefinedOr(behavior.value.directory)
+    : Option.none<string>()
 }
 
 // ── Lookups: an id this connection minted that ended is Gone, any other Foreign ───────────────────────────
@@ -394,8 +398,5 @@ export const realmOf = (state: State, id: L1Target.RealmId): Effect.Effect<Realm
     (realm) => !realm.ended
   )
 
-/**
- * An obligation, a download or a hop has no target of its own to name: one that ended is reported against the
- * browser, which L1 treats as the end it is.
- */
-export const endedThing = () => Kit.gone({ _tag: "Browser" }, new L1Target.PageClosed({ by: "browser" }))
+/** An obligation, a download or a hop that ended, named as the target it was. */
+export const endedThing = (target: L1Target.Description) => Kit.gone(target, new L1Target.PageClosed({ by: "browser" }))

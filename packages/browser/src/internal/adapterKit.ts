@@ -47,6 +47,7 @@ import * as Target from "../Target.ts"
 import * as Adapter from "./adapter.ts"
 import type * as ConsoleFormat from "./consoleFormat.ts"
 import type * as ProtocolClient from "./protocolClient.ts"
+import * as Urls from "./urls.ts"
 
 // ── Errors ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -409,7 +410,7 @@ export const neverStarted = (
         _tag: "NavigationStarted",
         navigation: options.navigation,
         navigable: options.navigable,
-        url: options.url,
+        url: Urls.reported(options.url),
         initiatedAs: "crossDocument"
       })
       buffer.emit({

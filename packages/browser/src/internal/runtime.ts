@@ -101,7 +101,7 @@ export interface Runtime {
     navigation: PageNavigation.Id,
     frame: Target.NavigableId,
     url: Option.Option<Url.Url>,
-    at: string,
+    at: Url.Url,
     outcome: Adapter.NavigationOutcome,
     id: Diagnostics.OperationId
   ) => Effect.Effect<PageNavigation.PageNavigation, Page.PageError>
