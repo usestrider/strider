@@ -471,7 +471,8 @@ describe("strider", () => {
           }
         } finally {
           // A daemon killed outright leaves its directory, listed until pruned
-          process.kill(Number.parseInt(fs.readFileSync(lock, "utf8"), 10), "SIGKILL")
+          // Its lock names it by its process id and when it started
+          process.kill(JSON.parse(fs.readFileSync(lock, "utf8")).pid, "SIGKILL")
         }
         yield* Effect.sleep("500 millis")
         assert.match((yield* run("sessions")).out, /first  left behind by a session that didn't end cleanly/)
