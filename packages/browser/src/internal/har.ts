@@ -285,7 +285,12 @@ const requestCookies = (
     return { name: pair.slice(0, at), value: writing.include.has("cookies") ? pair.slice(at + 1) : redacted }
   })
 
-/** The cookies a response set, from its `Set-Cookie` headers. */
+/**
+ * The cookies a response set, from its `Set-Cookie` headers, as the response wrote them. Effect's
+ * `Cookies.fromSetCookie` isn't used: it reads a cookie for a jar, so it drops a cookie whose name isn't a token
+ * and a path that doesn't start with `/`, takes the leading `.` off a domain and lowercases `SameSite`, where a HAR
+ * records what the server sent.
+ */
 const responseCookies = (
   headers: Readonly<Record<string, string | undefined>>,
   writing: Writing
@@ -298,17 +303,23 @@ const responseCookies = (
       value: writing.include.has("cookies") ? pair!.slice(at + 1) : redacted
     }
     for (const attribute of attributes) {
-      const [key, value = ""] = attribute.split("=")
-      switch (key!.toLowerCase()) {
+      // An attribute's value runs to the end, `=` and all
+      const equals = attribute.indexOf("=")
+      const key = equals < 0 ? attribute : attribute.slice(0, equals).trim()
+      const value = equals < 0 ? "" : attribute.slice(equals + 1).trim()
+      switch (key.toLowerCase()) {
         case "path":
           cookie.path = value
           break
         case "domain":
           cookie.domain = value
           break
-        case "expires":
-          cookie.expires = value
+        case "expires": {
+          // HAR writes a cookie's expiry in ISO 8601; a date that doesn't parse is left out
+          const date = new Date(value)
+          if (!Number.isNaN(date.getTime())) cookie.expires = date.toISOString()
           break
+        }
         case "httponly":
           cookie.httpOnly = true
           break

@@ -325,7 +325,10 @@ describe("A HAR an export writes", () => {
             status: 200,
             headers: {
               "content-type": "application/json",
-              "set-cookie": "seen=1; Path=/; Domain=.example.com; Expires=Fri, 30 Oct 2026 12:00:00 GMT; HttpOnly"
+              "set-cookie": [
+                "seen=1; Path=/; Domain=.example.com; Expires=Fri, 30 Oct 2026 12:00:00 GMT; HttpOnly",
+                "flavor=oat; Path=/a=b; SameSite=Lax; Expires=someday"
+              ].join("\n")
             }
           }, { request: json(`{"q":"shoes"}`), response: json(`["boots"]`) }),
           answered(sent("POST", search, "application/json", "Q2.0"), {
@@ -349,14 +352,16 @@ describe("A HAR an export writes", () => {
       // The schema writes every field the entries hold, in the order they hold them
       assert.strictEqual(text, JSON.stringify(log, null, 2))
       const [shoesEntry, , logoEntry] = log.log.entries
+      // A cookie as the response set it, its domain's dot kept, but its expiry in ISO 8601 as HAR has it, and
+      // left out where it isn't a date
       assert.deepStrictEqual(shoesEntry!.response.cookies, [{
         name: "seen",
         value: "1",
         path: "/",
         domain: ".example.com",
-        expires: "Fri, 30 Oct 2026 12:00:00 GMT",
+        expires: "2026-10-30T12:00:00.000Z",
         httpOnly: true
-      }])
+      }, { name: "flavor", value: "oat", path: "/a=b", sameSite: "Lax" }])
       // A body that isn't text is base64: a response's says so in HAR's `encoding`, a request's in `_encoding`
       assert.strictEqual(logoEntry!.response.content.encoding, "base64")
       assert.strictEqual(logoEntry!.request.postData?._encoding, "base64")
