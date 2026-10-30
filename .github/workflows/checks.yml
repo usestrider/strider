@@ -1,9 +1,13 @@
-# The standard checks, on every push and pull request: in the Nix environment's default
-# shell, so Node and pnpm are the pinned ones, as on a maintainer's machine.
+# The standard checks, on every pull request and every push to main: in the Nix environment's
+# default shell, so Node and pnpm are the pinned ones, as on a maintainer's machine. As in
+# Effect's CI, a branch is checked once it has a pull request, at its head: the commits it
+# gathers before then, a failing test ahead of its fix among them, aren't run on their own,
+# and each push to a pull request's branch runs once.
 name: Checks
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
