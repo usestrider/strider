@@ -51,7 +51,7 @@ The README's principles, as they apply to this layer, written the way Effect's o
 - **One error per module, with its detail in a `reason`** (principle 10), as `HttpClientError`, `SocketError` and `AiError` are built. An operation fails with its module's error (`Locator.LocatorError`, `Page.PageError`, `Download.DownloadError`, `Declaration.DeclarationError`), and recovery matches the reason: `Effect.catchReason("LocatorError", "StrictViolation", …)`.
 - **Reasons are classes.** Each is a `Schema.Error` with a `_tag`, its own fields, and a `hint`. A reason that belongs to one module is declared there (`Locator.StrictViolation`, `PageNavigation.NavigationFailed`); reasons several modules share live in `Reason` (`InvalidInput`, `NotPermitted`, `Unsupported`, `BackendFailure`, `EvaluationThrown`, `NotSerializable`). The module error derives its `message` from the reason, lifts the reason's `cause`, carries the `Diagnostics` envelope, and has a guard (`Locator.isLocatorError`).
 - **Two errors cross every module:** `Target.TargetGone` and `Deadline.Timeout`, as Effect keeps `Cause.TimeoutError` outside any one module. Event streams add `Subscription.EventOverflow`.
-- **Backends add detail by augmentation.** `Reason.BackendFailure` carries `metadata`, which each backend extends with `declare module` (`cdp`, `bidi`, `webkit`), as provider packages extend `AiError`'s metadata. CDP error codes are typed where the Chromium backend is imported, and this layer never knows them.
+- **A backend's detail is the failure's `cause`.** `Reason.BackendFailure` carries the browser's own error (`Protocol.ProtocolError`) as `cause`, with its code and message, so this layer never knows a backend's codes.
 - **Every reason carries a hint,** shown in the rendered message:
   - `NotPermitted`: "call `.control` on this page"
   - `StaleRef`: "refs end with their document; use a locator or take a new snapshot"
@@ -1059,7 +1059,7 @@ class NotPermitted extends Schema.Error<NotPermitted>("@usestrider/browser/Reaso
   required: Schema.Literals(["inspect", "control", "browserWide"]),
   hint: Schema.String                                    // "call `.control` on this page"
 }) {}
-// InvalidInput{input, expected}, Unsupported{capability, backend}, BackendFailure{kind, method, metadata, cause},
+// InvalidInput{input, expected}, Unsupported{capability, backend}, BackendFailure{kind, method, cause},
 // EvaluationThrown{exception}, NotSerializable{path}
 
 // Locator: the module's own reasons, then the module's error

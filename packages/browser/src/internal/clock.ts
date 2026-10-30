@@ -403,8 +403,7 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
   const clockError = (operation: string, reason: PageClock.PageClockErrorReason, id = Operation.idNow()) =>
     new PageClock.PageClockError({ operation, reason, diagnostics: Operation.diagnostics(id) })
 
-  const backendFailure = (method: string, hint: string) =>
-    new Reason.BackendFailure({ kind: "Rejected", method, metadata: {}, hint })
+  const backendFailure = (method: string, hint: string) => new Reason.BackendFailure({ kind: "Rejected", method, hint })
 
   /** The installed timeline, or why an operation can't run on it. */
   const require = (operation: string, modes: ReadonlyArray<State["mode"]>) =>

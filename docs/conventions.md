@@ -230,17 +230,7 @@ Effect puts operations on handles as members (`client.get`, `handle.kill`), and 
   - A reason that wraps a failure carries its own `cause` (`BackendFailure`, `Locator.FileUnreadable`, the recordings' `WriteFailed`).
 - **Recovery matches the reason:** `Effect.catchReason("LocatorError", "StrictViolation", …)` (`ai-docs/src/01_effect/04_errors/20_reason-errors.ts`). `Effect.catchReason(tag, "Unsupported", …)` works for any module's tag.
 - **Errors that cross every module:** `Target.TargetGone`, which lives with the ids and close reasons that describe targets, and `Deadline.Timeout`. Event streams add `Subscription.EventOverflow`.
-- **Backends add detail by augmentation.** `Reason.BackendFailure.metadata` is `Reason.BackendMetadata`, which each backend extends:
-
-  ```ts
-  declare module "../Reason.ts" {
-    interface BackendMetadata {
-      readonly cdp?: { readonly code: number; readonly message: string; readonly data: string | null } | null
-    }
-  }
-  ```
-
-  `bidi` and `webkit` are declared alike. CDP error codes are typed where the Chromium backend is imported, and the ergonomic layer never knows them.
+- **A backend's detail is the failure's `cause`.** `Reason.BackendFailure` carries the browser's own error (`Protocol.ProtocolError`) as `cause`, with its code and message; there is no per-backend field to extend.
 - **There are no verb-family errors** (`ActionError`, `ReadError`, `NavigationError`, …). Errors are per module, and error channels stay small because failures are reasons inside them.
 
 ## Tracing

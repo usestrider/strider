@@ -128,7 +128,6 @@ export const fromAdapter = (
         reason: new Reason.BackendFailure({
           kind: cause._tag === "Decode" ? "IncompatibleResponse" : "Rejected",
           method: "method" in cause && typeof cause.method === "string" ? cause.method : "unknown",
-          metadata: {},
           hint: cause.message,
           cause: reason.error
         })

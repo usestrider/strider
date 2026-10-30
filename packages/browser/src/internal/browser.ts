@@ -76,7 +76,7 @@ const asContextReason = (
   reason._tag === "InvalidInput" || reason._tag === "NotPermitted" || reason._tag === "Unsupported" ||
     reason._tag === "BackendFailure"
     ? reason
-    : new Reason.BackendFailure({ kind: "Rejected", method: "Browser.newContext", metadata: {}, hint: reason.message })
+    : new Reason.BackendFailure({ kind: "Rejected", method: "Browser.newContext", hint: reason.message })
 
 const objectMembers = (name: string, id: string) => ({
   pipe() {
@@ -560,7 +560,6 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
                 new Reason.BackendFailure({
                   kind: "Rejected",
                   method: "FileSystem.makeTempDirectoryScoped",
-                  metadata: {},
                   hint: `Couldn't create the context's download directory: ${error.message}`
                 }),
                 id

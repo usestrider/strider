@@ -23,13 +23,6 @@ import * as Connect from "../internal/connect.ts"
 import * as LaunchOptions from "../internal/launchOptions.ts"
 import type * as Url from "../Url.ts"
 
-declare module "../Reason.ts" {
-  // CDP detail for a BackendFailure
-  interface BackendMetadata {
-    readonly cdp?: { readonly code: number; readonly message: string; readonly data: string | null } | null
-  }
-}
-
 /**
  * Launches the Chromium, Chrome or Edge executable at `executablePath` and provides it as `Browser`.
  *

@@ -56,7 +56,6 @@ const sending = <E>(
           new Reason.BackendFailure({
             kind: "Rejected",
             method: "input",
-            metadata: {},
             hint: `A held input's release failed (${unknown.value}), and failed again when sent before this ` +
               "gesture, so the page's input state is unknown"
           }),

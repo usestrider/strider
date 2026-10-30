@@ -285,7 +285,6 @@ const storageFailure = (operation: string, record: Operation.Record) =>
       new Reason.BackendFailure({
         kind: "Rejected",
         method: operation,
-        metadata: {},
         hint: name === "SecurityError"
           ? `The document's origin has no storage, as an opaque one hasn't (${message})`
           : `${name}: ${message}`
@@ -297,7 +296,7 @@ const storageFailure = (operation: string, record: Operation.Record) =>
     operation,
     reason._tag === "Unsupported" || reason._tag === "BackendFailure"
       ? reason
-      : new Reason.BackendFailure({ kind: "Rejected", method: operation, metadata: {}, hint: reason.message }),
+      : new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: reason.message }),
     id
   )
 }

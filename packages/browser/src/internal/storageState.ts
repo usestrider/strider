@@ -352,17 +352,16 @@ const contextError = (reason: UserContext.UserContextErrorReason, id: Diagnostic
 const evaluationFailure = (operation: string, id: Diagnostics.OperationId) => (failure: Evaluation.Failure) =>
   contextError(
     failure._tag === "Gone"
-      ? new Reason.BackendFailure({ kind: "Rejected", method: operation, metadata: {}, hint: failure.error.message })
+      ? new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: failure.error.message })
       : failure._tag === "Deadline"
       ? new Reason.BackendFailure({
         kind: "Rejected",
         method: operation,
-        metadata: {},
         hint: "The page didn't answer before the deadline"
       })
       : failure.reason._tag === "Unsupported" || failure.reason._tag === "BackendFailure"
       ? failure.reason
-      : new Reason.BackendFailure({ kind: "Rejected", method: operation, metadata: {}, hint: failure.reason.message }),
+      : new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: failure.reason.message }),
     id,
     operation
   )
@@ -424,7 +423,6 @@ export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id) =
             : new Reason.BackendFailure({
               kind: "Rejected",
               method: operation,
-              metadata: {},
               hint: mapped.error.message
             }),
           id,
@@ -465,7 +463,6 @@ export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id) =
             new Reason.BackendFailure({
               kind: "IncompatibleResponse",
               method: operation,
-              metadata: {},
               hint: `${source.origin}: the page's storage didn't read as expected (${error.message})`
             }),
             id,
@@ -569,7 +566,6 @@ export const applyState = (
           : new Reason.BackendFailure({
             kind: "Rejected",
             method: operation,
-            metadata: {},
             hint: mapped.error.message
           }),
         id,
@@ -612,7 +608,6 @@ export const applyState = (
               new Reason.BackendFailure({
                 kind: "Rejected",
                 method: operation,
-                metadata: {},
                 hint: `Writing ${origin.origin}'s storage failed: ${
                   String((failure as { message?: string }).message ?? failure)
                 }`
@@ -686,4 +681,4 @@ const asReason = (reason: { readonly _tag: string; readonly message: string }, o
   reason._tag === "InvalidInput" || reason._tag === "NotPermitted" || reason._tag === "Unsupported" ||
     reason._tag === "BackendFailure"
     ? reason as UserContext.UserContextErrorReason
-    : new Reason.BackendFailure({ kind: "Rejected", method: operation, metadata: {}, hint: reason.message })
+    : new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: reason.message })

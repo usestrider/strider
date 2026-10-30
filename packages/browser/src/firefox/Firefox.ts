@@ -22,13 +22,6 @@ import * as FirefoxLauncher from "../internal/firefoxLauncher.ts"
 import * as LaunchOptions from "../internal/launchOptions.ts"
 import type * as Url from "../Url.ts"
 
-declare module "../Reason.ts" {
-  // WebDriver BiDi detail for a BackendFailure
-  interface BackendMetadata {
-    readonly bidi?: { readonly error: string; readonly message: string; readonly stacktrace: string | null } | null
-  }
-}
-
 /**
  * Launches the Firefox executable at `executablePath` and provides it as `Browser`.
  *

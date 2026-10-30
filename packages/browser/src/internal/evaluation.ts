@@ -250,7 +250,7 @@ const asHandleFailure = (operation: string, record: Operation.Record) => (failur
     // A handle's operations have no `PromptBlocking`: a dialog nothing decides holds the realm as a failure would
     ? handleError(
       operation,
-      new Reason.BackendFailure({ kind: "Rejected", method: operation, metadata: {}, hint: failure.reason.message }),
+      new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: failure.reason.message }),
       id
     )
     : handleError(operation, failure.reason, id)

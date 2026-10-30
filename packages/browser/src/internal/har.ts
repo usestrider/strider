@@ -102,7 +102,6 @@ export const collect = (
           ? new Reason.BackendFailure({
             kind: "Rejected",
             method: "BodyCollection",
-            metadata: {},
             hint: mapped.error.message
           })
           : mapped.reason

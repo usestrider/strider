@@ -1325,7 +1325,6 @@ export class LocatorImpl implements Locator.Locator {
                 new Reason.BackendFailure({
                   kind: "Rejected",
                   method: "input",
-                  metadata: {},
                   hint: `A held input's release failed (${unknown.value}), and failed again when sent before this ` +
                     "gesture, so the page's input state is unknown"
                 }),
@@ -1357,7 +1356,7 @@ export class LocatorImpl implements Locator.Locator {
                   )
                   : this.error(
                     operation,
-                    new Reason.BackendFailure({ kind: "Rejected", method: "input", metadata: {}, hint: "deadline" }),
+                    new Reason.BackendFailure({ kind: "Rejected", method: "input", hint: "deadline" }),
                     id,
                     { _tag: "MayHaveBeenSent" }
                   )

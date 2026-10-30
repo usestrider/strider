@@ -351,7 +351,6 @@ const decode = (text: string): Effect.Effect<Engine.Response, SendFailure> =>
       reason: new Reason.BackendFailure({
         kind: "IncompatibleResponse",
         method: "engine",
-        metadata: {},
         hint:
           `The query engine's answer isn't one it gives, so a page script may have answered in its place: ${error.message}`,
         cause: error

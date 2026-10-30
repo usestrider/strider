@@ -26,13 +26,6 @@ import * as WebKitAutomation from "../internal/webkitAutomation.ts"
 import type * as SocketConnector from "../protocol/SocketConnector.ts"
 import type * as Url from "../Url.ts"
 
-declare module "../Reason.ts" {
-  // WebKit inspector detail for a BackendFailure
-  interface BackendMetadata {
-    readonly webkit?: { readonly code: number; readonly message: string } | null
-  }
-}
-
 /**
  * Launches WebKitGTK's or WPE's MiniBrowser in automation mode and provides it as `Browser`.
  *

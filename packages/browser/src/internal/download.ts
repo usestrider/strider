@@ -92,7 +92,6 @@ export const make = (runtime: Runtime.Runtime, entry: Model.DownloadEntry): Down
         new Reason.BackendFailure({
           kind: "IncompatibleResponse",
           method: "download",
-          metadata: {},
           hint: "The browser didn't say where it wrote the download"
         })
       ))
@@ -112,7 +111,7 @@ export const make = (runtime: Runtime.Runtime, entry: Model.DownloadEntry): Down
         onNone: () =>
           Effect.fail(failure(
             operation,
-            new Reason.BackendFailure({ kind: "Rejected", method: "FileSystem", metadata: {}, hint: message })
+            new Reason.BackendFailure({ kind: "Rejected", method: "FileSystem", hint: message })
           ))
       })
     )

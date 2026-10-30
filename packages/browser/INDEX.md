@@ -654,7 +654,7 @@ File choosers: the file picker a page opens when a file input is clicked.
 *handlers*
 
 - `const handle: <E, R>(page: Page.Page, handler: (chooser: Pending) => Effect.Effect<Decision, E, R>) => Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope | R>`
-- `const choose = (files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>) => (chooser: Pending): Effect.Effect<Decision, FileChooserError> => { const list: ReadonlyArray<FileInput.FileInput> = Array.isArray(…`
+- `const choose = (files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>) => (chooser: Pending): Effect.Effect<Decision, FileChooserError> => FileChooserImpl.choose(files)(chooser)`
 
 *guards*
 
@@ -1536,23 +1536,13 @@ Failure reasons that more than one module's error can carry.
   - `readonly _tag: string`
   - `readonly hint: string`
   - `readonly message: string`
-- `type Metadata = typeof Metadata.Type`
-
-*schemas*
-
-- `const Metadata = Schema.Record(Schema.String, Schema.NullOr(Schema.MutableJson))`
-
-*configuration*
-
-- `interface BackendMetadata`
-  - `readonly [key: string]: Metadata[string] | undefined`
 
 *reasons*
 
 - `class InvalidInput: Schema.Error { input, expected, hint }`
 - `class NotPermitted: Schema.Error { required, hint }`
 - `class Unsupported: Schema.Error { capability, backend, hint }`
-- `class BackendFailure: Schema.Error { kind, method, metadata, hint, cause }`
+- `class BackendFailure: Schema.Error { kind, method, hint, cause }`
 - `class EvaluationThrown: Schema.Error { exception, hint }`
 - `class NotSerializable: Schema.Error { path, hint }`
 - `class PromptBlocking: Schema.Error { kind, text, hint }`
