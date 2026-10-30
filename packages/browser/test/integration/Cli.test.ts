@@ -598,6 +598,21 @@ describe("strider", () => {
     timeout
   )
 
+  it.live("exits 0 when its MCP client closes standard input", () =>
+    Effect.callback<number | null>((resume) => {
+      const child = spawn(process.execPath, [bin, "-s", "nobody", "mcp"], {
+        env: { ...process.env, ...environment() },
+        stdio: ["pipe", "pipe", "pipe"]
+      })
+      const timer = setTimeout(() => child.kill(), 30_000)
+      child.on("close", (code) => {
+        clearTimeout(timer)
+        resume(Effect.succeed(code))
+      })
+      for (const message of handshake) child.stdin.write(`${JSON.stringify(message)}\n`)
+      child.stdin.end()
+    }).pipe(Effect.map((code) => assert.strictEqual(code, 0))), timeout)
+
   it.live("attaches to Firefox's remote agent by an endpoint with no path", () =>
     Effect.scoped(
       Effect.gen(function*() {

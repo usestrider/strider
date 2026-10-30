@@ -14,11 +14,14 @@ import * as McpProtocol from "effect/ai/McpProtocol"
 import * as McpSchema from "effect/ai/McpSchema"
 import * as McpServer from "effect/ai/McpServer"
 import type * as Toolkit from "effect/ai/Toolkit"
+import * as Cause from "effect/Cause"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Base64 from "effect/encoding/Base64"
+import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
@@ -230,8 +233,13 @@ const serve = Effect.fnUntraced(
       })),
       Layer.provide(stdio)
     )
-    // Standard output is the client's: what the server logs goes to standard error
-    return yield* Layer.launch(server).pipe(Effect.provideService(Logger.LogToStderr, true))
+    // Standard output is the client's: what the server logs goes to standard error. Effect's stdio transport ends
+    // the fiber that built the server, as an interruption, when the client closes standard input; the server runs
+    // in a fiber of its own, so its client going is how this finishes, with code 0, where a signal interrupting the
+    // process still interrupts it
+    const serving = yield* Layer.launch(server).pipe(Effect.provideService(Logger.LogToStderr, true), Effect.forkChild)
+    const exit = yield* Effect.exit(Fiber.join(serving))
+    if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) return yield* Effect.failCause(exit.cause)
   },
   Effect.scoped
 )
