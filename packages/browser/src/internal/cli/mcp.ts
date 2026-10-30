@@ -32,19 +32,23 @@ export const parse = (
   | { readonly _tag: "Start"; readonly session: string; readonly start: ReadonlyArray<string> }
   | { readonly _tag: "Invalid"; readonly message: string } =>
 {
-  const rest = [...argv]
+  const rest = [...Session.withoutSession(argv)]
   const at = rest.indexOf("mcp")
   if (at >= 0) rest.splice(at, 1)
-  let session = Session.scan(argv).session
-  const take = (flag: string): string | undefined => {
+  const session = Session.scan(argv).session
+  const option = (flag: string): number => {
     const index = rest.indexOf(flag)
+    const boundary = rest.indexOf("--")
+    return boundary >= 0 && index >= boundary ? -1 : index
+  }
+  const take = (flag: string): string | undefined => {
+    const index = option(flag)
     if (index < 0) return undefined
     const value = rest[index + 1]
     rest.splice(index, 2)
     return value
   }
-  session = take("-s") ?? take("--session") ?? session
-  const start = rest.indexOf("--start")
+  const start = option("--start")
   if (start < 0) {
     const name = session ?? env.STRIDER_SESSION
     return name === undefined || name === ""
@@ -52,7 +56,7 @@ export const parse = (
       : { _tag: "Serve", session: name }
   }
   rest.splice(start, 1)
-  const keep = rest.indexOf("--keep")
+  const keep = option("--keep")
   if (keep >= 0) rest.splice(keep, 1)
   const name = take("--name") ?? session ?? `mcp-${pid}`
   return {

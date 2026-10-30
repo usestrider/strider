@@ -5,6 +5,8 @@ couldn't describe truthfully without the code changing, or a doc that still need
 code does. An entry is marked when it's settled: **Fixed** or **Documented**, with its commit, or **Not a bug**,
 saying why; one with no marker is open.*
 
+**Closed** on 2026-10-29: nothing more is added here. New issues go on the Rookery board (`.agents/AGENTS.md`, Issues). Entries stay citable (`ISSUES.md, I3`).
+
 ## Bugs
 
 **I1. Chromium's PDF capability reads `unknown` when headless.** `cdpAdapter.ts:636` looks for `Headless` in the

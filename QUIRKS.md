@@ -15,7 +15,7 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 
 An entry with no marker is open.
 
-**Adding one.** When building or probing turns up something weird, add it here in the same commit, at the end of its section, with the next number. Numbers are stable, so documents and code comments can cite them (`QUIRKS.md, Q12`).
+**Closed** on 2026-10-29: nothing more is added here. New findings are issues on the Rookery board (`.agents/AGENTS.md`, Issues). Numbers stay stable, so documents and code comments can still cite them (`QUIRKS.md, Q12`).
 
 ## Browsers: navigation, history and documents
 
@@ -1418,3 +1418,19 @@ An entry with no marker is open.
 - *Seen:* the pinned integration environment's full suite during ROOK-85 review, with `rookery lock browser -- pnpm test:integration`: 539 tests passed and three failed, this test, Q180's Chromium crash test and the CLI newline regression. Q256's Firefox history test passed in that run.
 - *We:* leave the launcher, adapter and test unchanged and report the failure separately from the CLI correction. No workaround, retry or delay was added.
 - *Reconsider:* capture the launch and protocol traffic and trace why the browser did not list its session before changing the launcher, adapter or test; whether this depends on a full run is not yet established.
+
+**Q258. A session flag after the command never reached the daemon** (Ours). `strider stop -s checkout`, as documented, reported no session and left the browser running, although `strider -s checkout stop` worked. The client's routing scan stopped at the command; the daemon's shared flags already accepted either order.
+- *Seen:* ROOK-84's CLI integration regressions on Chromium 155.0.8059.79, with `STRIDER_SESSION` empty.
+- *We:* scan session flags before and after the command, preserving inline command values and stopping at `--`. Explicit flags override the environment default, and MCP uses the same scan.
+- **Resolved:** both stop forms pass, including assertions that the session disappears from the listing and its directory is removed.
+- *Reconsider:* keeping the client's lightweight routing scan aligned with the daemon's shared flags when those flags change.
+
+**Q259. A WebKit expectation failure can contain no observations in a full integration run** (Untraced). `WebKit slice > fails an expectation that never holds, with what it saw` failed at `test/integration/slice/slice.ts:173`: its failure history was `[]`, where the test expected one observation with `{ matches: 2, visible: 2 }`.
+- *Seen:* ROOK-84's merge validation against pinned stock WebKit, through `rookery lock browser -- pnpm test:integration`; 537 tests passed and two failed, the other having Q180's Chromium crash-notification symptom. No isolated reproduction or protocol trace was collected, so the cause and whether it depends on a full run are unknown.
+- *We:* retain the expectation test and implementation unchanged, with no retry or delay. Report the red suite for follow-up rather than treating the merge as fully validated.
+- *Reconsider:* trace the expectation's evaluation and deadline to establish why its failure held no observation before deciding what to change.
+
+**Q260. Independent CLI help calls exhausted one test's time budget on CI** (Ours). The nested-command description test started seven synchronous Node processes under one five-second test budget. Two GitHub checks at `33674aa` took 7399 ms and 7035 ms and timed out, while local runs passed. Another test combined several MCP help calls and reached 4822 ms on CI.
+- *Seen:* ROOK-90's durable CI failures and the opt-in subprocess timings in `dd0b80b`. Locally the seven calls totalled 2361 ms; separate phase tracing showed dependency loading and evaluation dominated each process, with only 6–8 ms from starting the CLI runner to its first output. CI phase timings were unavailable, so that phase breakdown is established only locally.
+- *We:* each independent invocation has its own named test; assertions about the same output stay together, including toolkit descriptions. The five-second test budget, ten-second subprocess limit, actual subprocess boundary and argument coverage stay intact.
+- *Reconsider:* if an individual invocation exceeds its budget, measure its phases on the failing runner before changing CLI loading or the timeout.
