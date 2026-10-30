@@ -10,6 +10,7 @@
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
 import * as Schema from "effect/Schema"
+import * as Snapshot from "../Snapshot.ts"
 
 /** Why a tool call failed: the library error's tag, its reason's, and its message with the hint. */
 export class ToolFailure extends Schema.Class<ToolFailure>("@usestrider/browser/ai/BrowserToolkit/ToolFailure")({
@@ -23,7 +24,11 @@ const PageName = Schema.String.annotate({ description: "The page, by the name `p
 // The tools that act bring their page to the front first, as a person would
 const front = " Brings the page to the front first."
 
-const Target = Schema.String.annotate({
+/** A ref, as a target names one: `e` and a number, decoded to a `Snapshot.RefId`. */
+export const Ref = Snapshot.RefId.pipe(Schema.check(Schema.isPattern(/^e\d+$/)))
+
+/** A target: a ref, which is checked against the page's latest snapshot, or a locator string. */
+const Target = Schema.Union([Ref, Schema.String]).annotate({
   description:
     "A ref from the page's latest snapshot (e12), or role=button[name=\"Save\"], text=\"Add to cart\", label=Email, testid=cart or css=…"
 })
@@ -156,6 +161,21 @@ export const scroll = tool(
 
 export const Event = Schema.Literals(["navigation", "popup", "dialog", "download", "response", "console"])
 
+/** The states `expect` waits for. */
+export const ExpectedState = Schema.Literals(["visible", "hidden", "enabled", "disabled", "checked"])
+
+/** The event logs `history` reads. */
+export const HistoryKind = Schema.Literals(["navigation", "console", "network", "dialog", "download", "exception"])
+
+/** The console levels `history` narrows to. */
+export const ConsoleLevel = Schema.Literals(["debug", "log", "info", "warning", "error"])
+
+/** What `route` does with a request. */
+export const RouteAction = Schema.Literals(["abort", "continue", "fulfill"])
+
+/** What `dialog` decides. */
+export const DialogDecision = Schema.Literals(["accept", "dismiss"])
+
 export const next = tool(
   "next",
   "Starts waiting for the page's next event of a kind, from now; returns a wait to collect with await. A response needs a URL pattern.",
@@ -182,7 +202,7 @@ export const expect = tool(
   {
     page: PageName,
     target: Target,
-    state: Schema.Literals(["visible", "hidden", "enabled", "disabled", "checked"]),
+    state: ExpectedState,
     text: Schema.optional(Schema.String)
   },
   Schema.String
@@ -193,8 +213,8 @@ export const history = tool(
   "What the page's event log recorded of a kind, oldest first. Console messages can be narrowed to a level, and network to the failed requests: no response for a reason other than cancellation, or a status of 400 or more.",
   {
     page: PageName,
-    kind: Schema.Literals(["navigation", "console", "network", "dialog", "download", "exception"]),
-    level: Schema.optional(Schema.Literals(["debug", "log", "info", "warning", "error"])),
+    kind: HistoryKind,
+    level: Schema.optional(ConsoleLevel),
     failed: Schema.optional(Schema.Boolean)
   },
   Schema.Array(Schema.String)
@@ -218,7 +238,7 @@ export const route = tool(
   {
     page: PageName,
     pattern: Schema.String,
-    action: Schema.Literals(["abort", "continue", "fulfill"]),
+    action: RouteAction,
     status: Schema.optional(Schema.Number),
     body: Schema.optional(Schema.String),
     contentType: Schema.optional(Schema.String)
@@ -229,7 +249,7 @@ export const route = tool(
 export const dialog = tool(
   "dialog",
   "Decides the page's dialogs from now on: accept (with text, for a prompt) or dismiss.",
-  { page: PageName, decision: Schema.Literals(["accept", "dismiss"]), text: Schema.optional(Schema.String) },
+  { page: PageName, decision: DialogDecision, text: Schema.optional(Schema.String) },
   Schema.Struct({ registration: Schema.String })
 )
 
@@ -267,3 +287,32 @@ export type ToolName = keyof Tools
 
 /** Schema for a tool's name. */
 export const ToolName = Schema.Literals(all.map((tool) => tool.name))
+
+/** A tool's parameters, decoded. */
+export type Params<K extends ToolName> = Tool.Parameters<Tools[K]>
+
+/** What a tool's call did: its result without the digest. */
+export type Outcome<K extends ToolName> = Tool.Success<Tools[K]>["outcome"]
+
+/** A call of a tool, by its name, with that tool's parameters. */
+export type Call<K extends ToolName = ToolName> = Calls[K]
+
+/**
+ * A tool's call, from its name and its parameters. TypeScript can't relate a name and parameters typed by the same
+ * generic name to the call of that name (TypeScript#30581), so this is the one place they're put together.
+ */
+export const call = <K extends ToolName>(tool: K, params: Params<K>): Call<K> => ({ tool, params }) as Call<K>
+
+/** Each tool's call, by its name. */
+export type Calls = { readonly [K in ToolName]: { readonly tool: K; readonly params: Params<K> } }
+
+/**
+ * Each tool's parameters and success Schemas, by its name, typed so that code generic in a tool's name encodes and
+ * decodes what that tool takes and gives.
+ */
+export const schemas: {
+  readonly [K in ToolName]: {
+    readonly parametersSchema: Schema.Codec<Params<K>, Tool.ParametersEncoded<Tools[K]>>
+    readonly successSchema: Schema.Codec<Tool.Success<Tools[K]>, Tool.SuccessEncoded<Tools[K]>>
+  }
+} = toolkit.tools

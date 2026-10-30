@@ -12,6 +12,7 @@
  */
 import * as McpProtocol from "effect/ai/McpProtocol"
 import * as McpServer from "effect/ai/McpServer"
+import type * as Toolkit from "effect/ai/Toolkit"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
 import * as Console from "effect/Console"
@@ -124,23 +125,24 @@ export const parse = Effect.fnUntraced(function*(
 })
 
 /** A tool call, forwarded to the session's daemon, and its result decoded by the tool's own Schemas. */
-const forward = (client: Client.Client, session: string, name: keyof Tools.Tools) => (params: unknown) =>
-  Effect.gen(function*() {
-    const tool = Tools.toolkit.tools[name]
-    const encoded = yield* Schema.encodeUnknownEffect(tool.parametersSchema)(params).pipe(Effect.orDie)
-    const value = yield* client.Tool({ tool: name, params: encoded }).pipe(
-      Effect.catchTag("RpcClientError", (error) =>
-        Effect.fail(
-          new Tools.ToolFailure({
-            error: "NoSession",
-            message: Client.unreachable(error)
-              ? `The session ${session} isn't running: ${error.message}`
-              : `The session ${session} didn't answer: ${error.message}`
-          })
-        ))
-    )
-    return yield* Schema.decodeUnknownEffect(tool.successSchema)(value).pipe(Effect.orDie)
-  })
+const forward =
+  <K extends Tools.ToolName>(client: Client.Client, session: string, name: K) => (params: Tools.Params<K>) =>
+    Effect.gen(function*() {
+      const schemas = Tools.schemas[name]
+      const encoded = yield* Schema.encodeEffect(schemas.parametersSchema)(params).pipe(Effect.orDie)
+      const value = yield* client.Tool({ tool: name, params: encoded }).pipe(
+        Effect.catchTag("RpcClientError", (error) =>
+          Effect.fail(
+            new Tools.ToolFailure({
+              error: "NoSession",
+              message: Client.unreachable(error)
+                ? `The session ${session} isn't running: ${error.message}`
+                : `The session ${session} didn't answer: ${error.message}`
+            })
+          ))
+      )
+      return yield* Schema.decodeUnknownEffect(schemas.successSchema)(value).pipe(Effect.orDie)
+    })
 
 /** Serves a session's tools over standard input and output, starting it first if asked, until the client goes. */
 const serve = Effect.fnUntraced(
@@ -153,14 +155,33 @@ const serve = Effect.fnUntraced(
     if (plan._tag === "Start") yield* Client.start(plan.start, bin, Console.error)
     const rootDir = yield* Client.sessionRoot
     const client = yield* Client.session(rootDir, plan.session)
-    const handlers = Object.fromEntries(
-      (Object.keys(Tools.toolkit.tools) as Array<keyof Tools.Tools>).map((name) => [
-        name,
-        forward(client, plan.session, name)
-      ])
-    )
+    const to = <K extends Tools.ToolName>(name: K) => forward(client, plan.session, name)
+    // Each tool's call goes to the session's daemon
+    const handlers: Toolkit.HandlersFrom<Tools.Tools> = {
+      pages: to("pages"),
+      newPage: to("newPage"),
+      tabs: to("tabs"),
+      control: to("control"),
+      release: to("release"),
+      goto: to("goto"),
+      back: to("back"),
+      snapshot: to("snapshot"),
+      find: to("find"),
+      screenshot: to("screenshot"),
+      click: to("click"),
+      fill: to("fill"),
+      press: to("press"),
+      select: to("select"),
+      scroll: to("scroll"),
+      next: to("next"),
+      await: to("await"),
+      expect: to("expect"),
+      history: to("history"),
+      route: to("route"),
+      dialog: to("dialog")
+    }
     const server = McpServer.toolkit(Tools.toolkit).pipe(
-      Layer.provide(Tools.toolkit.toLayer(handlers as never)),
+      Layer.provide(Tools.toolkit.toLayer(handlers)),
       Layer.provide(McpServer.layerStdio({
         name: "strider",
         version: yield* Session.version,

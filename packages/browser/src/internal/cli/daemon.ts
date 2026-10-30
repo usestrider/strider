@@ -29,9 +29,11 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Queue from "effect/Queue"
 import * as Redacted from "effect/Redacted"
+import * as Result from "effect/Result"
 import * as RpcSerialization from "effect/rpc/RpcSerialization"
 import * as RpcServer from "effect/rpc/RpcServer"
 import * as Schema from "effect/Schema"
@@ -63,8 +65,8 @@ import * as Session from "./session.ts"
 // ── The session ──
 
 /** How a command shows a tool's outcome: its text, and the files it wrote. */
-type Present = (
-  outcome: any
+type Present<K extends Tools.ToolName> = (
+  outcome: Tools.Outcome<K>
 ) => Effect.Effect<{ readonly text: string; readonly files?: ReadonlyArray<string> }, never, FileSystem.FileSystem>
 
 interface Daemon {
@@ -91,24 +93,50 @@ interface Daemon {
   shots: number
 }
 
-/** A tool's final result, as the toolkit's `handle` gives it; the toolkit's tools give no preliminary ones. */
-const callTool = (daemon: Daemon, tool: keyof Tools.Tools, params: Record<string, unknown>) =>
-  Effect.flatMap(daemon.session.toolkit.handle(tool, params as never), Stream.runLast)
+/**
+ * A tool's final result, as the toolkit's `handle` gives it, its success decoded by the tool's Schema, or its
+ * failure; the toolkit's tools give no preliminary results.
+ */
+const callTool = Effect.fnUntraced(function*<K extends Tools.ToolName>(daemon: Daemon, call: Tools.Call<K>) {
+  const schemas = Tools.schemas[call.tool]
+  const params = yield* Schema.encodeEffect(schemas.parametersSchema)(call.params).pipe(
+    Effect.mapError(ToolkitImpl.toFailure)
+  )
+  const results = yield* daemon.session.toolkit.handle(call.tool, params).pipe(Effect.mapError(ToolkitImpl.toFailure))
+  const last = yield* Stream.runLast(results).pipe(Effect.mapError(ToolkitImpl.toFailure))
+  if (Option.isNone(last)) {
+    return yield* Effect.fail(new Tools.ToolFailure({ error: "NoResult", message: `${call.tool} gave no result` }))
+  }
+  if (last.value.isFailure) return yield* Effect.fail(ToolkitImpl.toFailure(last.value.result))
+  return yield* Schema.decodeUnknownEffect(schemas.successSchema)(last.value.encodedResult).pipe(Effect.orDie)
+})
+
+/** The page a tool call names, if its tool takes one. */
+const pageOf = (call: Tools.Call): string | undefined => "page" in call.params ? call.params.page : undefined
 
 /** A tool call's target as a query on its page, for the exported test: a ref is the locator its snapshot names. */
-const targetOf = (daemon: Daemon, params: Record<string, unknown>) => {
-  const page = typeof params.page === "string" ? params.page : undefined
-  return typeof params.target === "string" && page !== undefined
-    ? ExportTest.queryOf(params.target, Option.getOrUndefined(daemon.session.latest(page)))
+const targetOf = (daemon: Daemon, call: Tools.Call) => {
+  const page = pageOf(call)
+  return "target" in call.params && call.params.target !== undefined && page !== undefined
+    ? ExportTest.queryOf(call.params.target, Option.getOrUndefined(daemon.session.latest(page)))
     : undefined
 }
 
 /** The tools that act on a page, and so may open a popup as they run. */
-const actions = new Set(["newPage", "goto", "back", "click", "fill", "press", "select", "scroll"])
+const actions: ReadonlySet<Tools.ToolName> = new Set([
+  "newPage",
+  "goto",
+  "back",
+  "click",
+  "fill",
+  "press",
+  "select",
+  "scroll"
+])
 
 /** The page a command names, by id, as the session knows it now, or as its pages list it. */
-const named = (daemon: Daemon, page: unknown): Effect.Effect<ReadonlyArray<string>> =>
-  typeof page !== "string" ? Effect.succeed([]) : Option.match(daemon.session.named(page), {
+const named = (daemon: Daemon, page: string | undefined): Effect.Effect<ReadonlyArray<string>> =>
+  page === undefined ? Effect.succeed([]) : Option.match(daemon.session.named(page), {
     onSome: (found) => Effect.succeed([found.id]),
     onNone: () =>
       Effect.map(
@@ -126,7 +154,7 @@ const recording = <A, E, R>(
   daemon: Daemon,
   kind: Recorder.Running["kind"] | undefined,
   effect: (running: Recorder.Running | undefined) => Effect.Effect<A, E, R>,
-  page?: unknown
+  page?: string | undefined
 ) =>
   kind === undefined ? effect(undefined) : Effect.acquireUseRelease(
     Effect.map(named(daemon, page), (pages) => daemon.recorder.begin(kind, pages)),
@@ -138,34 +166,35 @@ const recording = <A, E, R>(
 /** Records a successful tool call for `export test`, with the pages it declares and the popup waits it starts. */
 const record = (
   daemon: Daemon,
-  name: string,
-  params: Record<string, unknown>,
+  call: Tools.Call,
   outcome: unknown,
   target: string | undefined,
   running: Recorder.Running | undefined
 ) => {
   const result = typeof outcome === "string" ? outcome : handleOf(outcome)
-  daemon.recorder.record({ _tag: "Tool", tool: name, params, target, result }, running)
-  const id = (page: unknown) =>
-    typeof page === "string" ? Option.getOrUndefined(daemon.session.named(page))?.id : undefined
+  daemon.recorder.record({ _tag: "Tool", ...call, target, result }, running)
+  const id = (page: string | undefined) =>
+    page === undefined ? undefined : Option.getOrUndefined(daemon.session.named(page))?.id
   // A page newPage opened or control took, and a popup await collected, is declared by its step
-  const declared = name === "newPage" || name === "control"
+  const declared = call.tool === "newPage" || call.tool === "control"
     ? id(result)
-    : name === "await" && result !== undefined
+    : call.tool === "await" && result !== undefined
     ? id(/^popup (\S+),/.exec(result)?.[1])
     : undefined
   if (declared !== undefined) daemon.recorder.declared(declared)
   // A popup wait gives the next popup its page opens
-  const opener = id(params.page)
-  if (name === "next" && params.event === "popup" && result !== undefined && opener !== undefined) {
+  const opener = id(pageOf(call))
+  if (call.tool === "next" && call.params.event === "popup" && result !== undefined && opener !== undefined) {
     daemon.recorder.waiting(result, opener)
   }
 }
 
 /** The handle a tool call printed: a wait's, a route's or dialog handler's registration, or a page's name. */
 const handleOf = (outcome: unknown): string | undefined => {
-  const made = outcome as { readonly wait?: string; readonly registration?: string; readonly page?: string }
-  return made.wait ?? made.registration ?? made.page
+  for (const key of ["wait", "registration", "page"]) {
+    if (Predicate.hasProperty(outcome, key) && typeof outcome[key] === "string") return outcome[key]
+  }
+  return undefined
 }
 
 /** Why a command failed: the error's tag, its reason's, and its message. */
@@ -209,37 +238,32 @@ export const commands = (getDaemon: () => Daemon) => {
   const plain = (outcome: unknown) =>
     Effect.succeed({ text: typeof outcome === "string" ? outcome : JSON.stringify(outcome) })
   /** Runs a tool and prints its result, as text or JSON; a failed one fails the command. */
-  const tool = (
-    name: keyof Tools.Tools,
-    params: Record<string, unknown>,
-    present: Present = plain
-  ) => toolWith(name, params, present)
-  const toolWith = (
-    name: keyof Tools.Tools,
-    params: Record<string, unknown>,
-    present: Present
-  ) =>
-    recording(
+  const tool = <K extends Tools.ToolName>(
+    name: K,
+    params: Tools.Params<K>,
+    present: Present<K> = plain
+  ) => {
+    const call = Tools.call(name, params)
+    return recording(
       getDaemon(),
       actions.has(name) ? "action" : undefined,
-      (running) => toolIn(name, params, present, running),
-      params.page
+      (running) => toolIn(call, present, running),
+      pageOf(call)
     )
-  const toolIn = Effect.fnUntraced(function*(
-    name: keyof Tools.Tools,
-    params: Record<string, unknown>,
-    present: Present,
+  }
+  const toolIn = Effect.fnUntraced(function*<K extends Tools.ToolName>(
+    call: Tools.Call<K>,
+    present: Present<K>,
     running: Recorder.Running | undefined
   ) {
     const config = yield* root
     const started = performance.now()
-    const page = typeof params.page === "string" ? params.page : undefined
+    const page = pageOf(call)
     // Read before the call: a ref is the locator its snapshot named, which the call may replace
-    const target = targetOf(getDaemon(), params)
-    const result = yield* Effect.orDie(callTool(getDaemon(), name, params))
-    const last = Option.getOrThrow(result)
-    if (last.isFailure) {
-      const failure = last.result as Tools.ToolFailure
+    const target = targetOf(getDaemon(), call)
+    const result = yield* Effect.result(callTool(getDaemon(), call))
+    if (Result.isFailure(result)) {
+      const failure = result.failure
       if (config.json) {
         yield* Console.log(
           JSON.stringify({ page, outcome: { _tag: "Failed", ...failure }, elapsed: elapsedSince(started) })
@@ -247,9 +271,9 @@ export const commands = (getDaemon: () => Daemon) => {
       }
       return yield* Effect.fail(new CommandFailed(failure))
     }
-    const value = last.result as { readonly outcome: unknown; readonly sinceLast: ReadonlyArray<string> }
+    const value = result.success
     const shown = yield* present(value.outcome)
-    record(getDaemon(), name, params, value.outcome, target, running)
+    record(getDaemon(), call, value.outcome, target, running)
     if (config.json) {
       yield* Console.log(JSON.stringify({
         page,
@@ -280,7 +304,7 @@ export const commands = (getDaemon: () => Daemon) => {
     "pages",
     {},
     () =>
-      tool("pages", {}, (outcome: ReadonlyArray<{ page: string; url: string }>) =>
+      tool("pages", {}, (outcome) =>
         Effect.succeed({
           text: outcome.map((each) => `${each.page}  ${each.url}`).join("\n") || "no pages"
         }))
@@ -288,7 +312,7 @@ export const commands = (getDaemon: () => Daemon) => {
   const snapshot = Command.make(
     "snapshot",
     {},
-    () => Effect.flatMap(pageFlag, (page) => tool("snapshot", { page }, (text: string) => Effect.succeed({ text })))
+    () => Effect.flatMap(pageFlag, (page) => tool("snapshot", { page }, (text) => Effect.succeed({ text })))
   )
   const find = Command.make(
     "find",
@@ -309,7 +333,7 @@ export const commands = (getDaemon: () => Daemon) => {
           tool(
             "find",
             params,
-            (found: ReadonlyArray<{ ref: string; role: string; name: string; path: string }>) =>
+            (found) =>
               Effect.succeed({
                 text: found.length === 0
                   ? `nothing in the latest snapshot matches ${JSON.stringify(query)}`
@@ -329,7 +353,7 @@ export const commands = (getDaemon: () => Daemon) => {
       Effect.flatMap(
         pageFlag,
         (page) =>
-          tool("screenshot", { page }, (outcome: { data: string }) =>
+          tool("screenshot", { page }, (outcome) =>
             Effect.gen(function*() {
               const fs = yield* FileSystem.FileSystem
               const file = `${getDaemon().paths.artifacts}/${page}-${++getDaemon().shots}.png`
@@ -346,7 +370,7 @@ export const commands = (getDaemon: () => Daemon) => {
       Effect.flatMap(
         onPage((page) => ({ page, url })),
         (params) =>
-          tool("goto", params, (outcome: { url: string; status?: number }) =>
+          tool("goto", params, (outcome) =>
             Effect.succeed({ text: `at ${outcome.url}${outcome.status === undefined ? "" : ` (${outcome.status})`}` }))
       )
   )
@@ -355,7 +379,7 @@ export const commands = (getDaemon: () => Daemon) => {
     {},
     () =>
       Effect.flatMap(pageFlag, (page) =>
-        tool("back", { page }, (outcome: { url?: string }) =>
+        tool("back", { page }, (outcome) =>
           Effect.succeed({
             text: outcome.url === undefined ? "no history entry to go back to" : `back at ${outcome.url}`
           })))
@@ -393,7 +417,7 @@ export const commands = (getDaemon: () => Daemon) => {
   const next = Command.make(
     "next",
     {
-      event: Argument.Literals("event", ["navigation", "popup", "dialog", "download", "response", "console"]),
+      event: Argument.Literals("event", Tools.Event.literals),
       url: Flag.String("url").pipe(Flag.optional),
       within: Flag.String("within").pipe(Flag.optional)
     },
@@ -406,7 +430,7 @@ export const commands = (getDaemon: () => Daemon) => {
           ...(Option.isSome(within) ? { within: within.value } : {})
         })),
         (params) =>
-          tool("next", params, (outcome: { wait: string }) =>
+          tool("next", params, (outcome) =>
             Effect.succeed({
               text: `${outcome.wait}: waiting for the next ${event} from now${
                 Option.isSome(within) ? `, for at most ${within.value}` : ""
@@ -419,7 +443,7 @@ export const commands = (getDaemon: () => Daemon) => {
     "expect",
     {
       target,
-      state: Argument.Literals("state", ["visible", "hidden", "enabled", "disabled", "checked"]),
+      state: Argument.Literals("state", Tools.ExpectedState.literals),
       text: Flag.String("text").pipe(Flag.optional)
     },
     ({ target, state, text }) =>
@@ -431,8 +455,8 @@ export const commands = (getDaemon: () => Daemon) => {
   const history = Command.make(
     "history",
     {
-      kind: Argument.Literals("kind", ["navigation", "console", "network", "dialog", "download", "exception"]),
-      level: Flag.Literals("level", ["debug", "log", "info", "warning", "error"]).pipe(
+      kind: Argument.Literals("kind", Tools.HistoryKind.literals),
+      level: Flag.Literals("level", Tools.ConsoleLevel.literals).pipe(
         Flag.withDescription("Console messages at this level"),
         Flag.optional
       ),
@@ -450,7 +474,7 @@ export const commands = (getDaemon: () => Daemon) => {
           ...(failed ? { failed } : {})
         })),
         (params) =>
-          tool("history", params, (entries: ReadonlyArray<string>) =>
+          tool("history", params, (entries) =>
             Effect.succeed({ text: entries.length === 0 ? `no ${kind} recorded` : entries.join("\n") }))
       )
   )
@@ -458,7 +482,7 @@ export const commands = (getDaemon: () => Daemon) => {
     "route",
     {
       pattern: Argument.String("pattern"),
-      action: Argument.Literals("action", ["abort", "continue", "fulfill"]),
+      action: Argument.Literals("action", Tools.RouteAction.literals),
       status: Flag.Int("status").pipe(Flag.optional),
       body: Flag.String("body").pipe(Flag.optional),
       contentType: Flag.String("content-type").pipe(Flag.optional)
@@ -474,7 +498,7 @@ export const commands = (getDaemon: () => Daemon) => {
           ...(Option.isSome(contentType) ? { contentType: contentType.value } : {})
         })),
         (params) =>
-          tool("route", params, (outcome: { registration: string }) =>
+          tool("route", params, (outcome) =>
             Effect.succeed({
               text: `${outcome.registration}: ${action} ${pattern}; strider remove ${outcome.registration} ends it`
             }))
@@ -485,14 +509,14 @@ export const commands = (getDaemon: () => Daemon) => {
       Command.make(
         "handle",
         {
-          decision: Argument.Literals("decision", ["accept", "dismiss"]),
+          decision: Argument.Literals("decision", Tools.DialogDecision.literals),
           text: Flag.String("text").pipe(Flag.optional)
         },
         ({ decision, text }) =>
           Effect.flatMap(
             onPage((page) => ({ page, decision, ...(Option.isSome(text) ? { text: text.value } : {}) })),
             (params) =>
-              tool("dialog", params, (outcome: { registration: string }) =>
+              tool("dialog", params, (outcome) =>
                 Effect.succeed({
                   text: `${outcome.registration}: dialogs ${decision}ed; strider remove ${outcome.registration} ends it`
                 }))
@@ -546,7 +570,7 @@ export const commands = (getDaemon: () => Daemon) => {
     "tabs",
     {},
     () =>
-      tool("tabs", {}, (outcome: ReadonlyArray<{ tab: string; url: string }>) =>
+      tool("tabs", {}, (outcome) =>
         Effect.succeed({
           text: outcome.map((each) => `${each.tab}  ${each.url}`).join("\n") ||
             "no tabs beyond the session's pages"
@@ -566,7 +590,7 @@ export const commands = (getDaemon: () => Daemon) => {
           ...(Option.isSome(url) ? { url: url.value } : {}),
           ...(Option.isSome(name) ? { name: name.value } : {})
         }
-        yield* tool("control", params, (outcome: { page: string; url: string }) =>
+        yield* tool("control", params, (outcome) =>
           Effect.succeed({
             text: `${outcome.page} at ${outcome.url}, controlled until strider release -p ${outcome.page}`
           }))
@@ -816,9 +840,29 @@ const exitOf = (exit: Exit.Exit<unknown, unknown>): { readonly code: number; rea
     : { code: 1, message: `the command died: ${Cause.pretty(exit.cause)}` }
 }
 
-/** A tool call's parameters, as fields. */
-const fields = (params: unknown): Record<string, unknown> =>
-  typeof params === "object" && params !== null ? params as Record<string, unknown> : {}
+/**
+ * A tool called as a model calls it, for strider mcp: its parameters, encoded, decoded by its Schema, and its result
+ * encoded by its Schema, or its failure.
+ */
+const callAsModel = Effect.fnUntraced(function*<K extends Tools.ToolName>(
+  daemon: Daemon,
+  tool: K,
+  encoded: unknown,
+  touch: () => void
+) {
+  const params = yield* Schema.decodeUnknownEffect(Tools.schemas[tool].parametersSchema)(encoded).pipe(
+    Effect.mapError((error) => new Tools.ToolFailure({ error: "InvalidInput", message: error.message }))
+  )
+  const call = Tools.call(tool, params)
+  return yield* recording(daemon, actions.has(tool) ? "action" : undefined, (running) =>
+    Effect.gen(function*() {
+      touch()
+      const target = targetOf(daemon, call)
+      const success = yield* callTool(daemon, call)
+      record(daemon, call, success.outcome, target, running)
+      return yield* Schema.encodeEffect(Tools.schemas[tool].successSchema)(success).pipe(Effect.orDie)
+    }).pipe(Effect.ensuring(Effect.sync(touch))), pageOf(call))
+})
 
 /** The session's calls: its commands, its tools as a model calls them, what it is, and its state. */
 const handlers = (daemon: Daemon, tree: ReturnType<typeof commands>, version: string, touch: () => void) =>
@@ -840,28 +884,7 @@ const handlers = (daemon: Daemon, tree: ReturnType<typeof commands>, version: st
           yield* Queue.end(queue)
         }).pipe(Effect.ensuring(Effect.sync(touch)))
       ),
-    // A tool called as a model calls it, for strider mcp: its encoded result, or its failure
-    Tool: ({ params, tool }) =>
-      recording(daemon, actions.has(tool) ? "action" : undefined, (running) =>
-        Effect.gen(function*() {
-          touch()
-          const target = targetOf(daemon, fields(params))
-          const last = yield* callTool(daemon, tool, fields(params)).pipe(Effect.mapError(ToolkitImpl.toFailure))
-          if (Option.isNone(last)) {
-            return yield* Effect.fail(new Tools.ToolFailure({ error: "NoResult", message: `${tool} gave no result` }))
-          }
-          const result = last.value
-          if (result.isFailure) return yield* Effect.fail(ToolkitImpl.toFailure(result.result))
-          record(
-            daemon,
-            tool,
-            fields(params),
-            (result.result as { readonly outcome: unknown }).outcome,
-            target,
-            running
-          )
-          return result.encodedResult
-        }).pipe(Effect.ensuring(Effect.sync(touch))), fields(params).page),
+    Tool: ({ params, tool }) => callAsModel(daemon, tool, params, touch),
     Info: () =>
       Effect.map(daemon.session.pages, (pages) => ({
         name: daemon.name,

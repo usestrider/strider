@@ -8,7 +8,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Ledger } from "@usestrider/browser"
-import { BrowserToolkit } from "@usestrider/browser/ai"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
@@ -19,6 +18,7 @@ import * as ExportTest from "../src/internal/cli/exportTest.ts"
 import * as Mcp from "../src/internal/cli/mcp.ts"
 import * as Recorder from "../src/internal/cli/recorder.ts"
 import * as Session from "../src/internal/cli/session.ts"
+import * as Tools from "../src/internal/tools.ts"
 
 describe("Session.scan", () => {
   it("reads the session before stop", () => {
@@ -170,13 +170,10 @@ describe("strider mcp", () => {
 
 describe("strider export test", () => {
   const launched = { _tag: "Launch", backend: "chromium", executablePath: "/usr/bin/chromium" } as const
-  const tool = (name: string, params: Record<string, unknown>, result?: string): ExportTest.Step => ({
-    _tag: "Tool",
-    tool: name,
-    params,
-    target: undefined,
-    result
-  })
+  const tool = <K extends Tools.ToolName>(name: K, params: Tools.Params<K>, result?: string): ExportTest.Step => {
+    const call: Tools.Call = Tools.call(name, params)
+    return { _tag: "Tool", ...call, target: undefined, result }
+  }
 
   it("marks a tab the session took with control, until its release, which a test takes itself", () => {
     const { placeholders, text } = ExportTest.render({
@@ -246,8 +243,14 @@ describe("strider export test", () => {
     const exported = (steps: ReadonlyArray<ExportTest.Step>) =>
       ExportTest.render({ name: "shop", browser: launched, secrets: {}, state: undefined, steps }).text
     const opened: ExportTest.Step = { _tag: "NewPage", page: "main", url: undefined }
-    for (const name of Object.keys(BrowserToolkit.toolkit.tools)) {
-      const step: ExportTest.Step = { _tag: "Tool", tool: name, params, target: `locator("#field")`, result: "w1" }
+    for (const name of Tools.ToolName.literals) {
+      // One set of parameters that every tool's statement finds what it needs in
+      const step: ExportTest.Step = {
+        _tag: "Tool",
+        ...Tools.call(name, params as Tools.Params<typeof name> & typeof params),
+        target: `locator("#field")`,
+        result: "w1"
+      }
       const text = exported([opened, step])
       if (reads.includes(name)) assert.strictEqual(text, exported([opened]), `${name} is a read`)
       else assert.notStrictEqual(text, exported([opened]), `${name} has no statement`)
