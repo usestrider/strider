@@ -66,7 +66,7 @@ A read-only `Watchable` and an inherited `Deadline` are candidates for Effect it
 - Configuration with a default is a `Context.Reference` (`ai-docs/src/01_effect/03_services/10_reference.ts`). A reference is named descriptively in its module, as `Headers.CurrentRedactedNames` is.
 
 **Strider.**
-- **Services** are an interface and a constant of the same name: `export const Browser: Context.Service<Browser, Browser> = Context.Service<Browser>("@usestrider/browser/Browser")`. Likewise `@usestrider/browser/test/TestRun` and `CurrentSession`.
+- **Services** are an interface and a constant of the same name: `export const Browser: Context.Service<Browser, Browser> = Context.Service<Browser>("@usestrider/browser/Browser")`. Likewise `@usestrider/browser/test/TestRun`, `CurrentSession`, `Protocol.ProtocolSession` and `SocketConnector`. This is the form of Effect's `FileSystem`, `HttpServerRequest` and `LanguageModel`, whose documented interface is the service; the class form, `class X extends Context.Service<X, Shape>()(key)`, is Effect's default where the service's name isn't its shape's, as `Cause.StackTrace` and `Model.ProviderName` are, and it is `Operation.Current`'s, whose value is an `Operation`. A service is never both: the form follows whether its type parameter and its value are the same type.
 - **References** are keyed `"@usestrider/browser/<Module>/<Name>"`.
   - A reference to the value in force is `Current…`: `Deadline.CurrentDeadline`, `Diagnostics.CurrentPreset`, `Ledger.CurrentLedger`, `Protocol.CurrentValidation`.
   - A setting is named for what it sets: `Deadline.DefaultBudget`, `Expect.CheckInterval`, `Subscription.Capacity`, `NetworkResponse.BodyLimit`, `Page.UserGesture`, `Protocol.CommandTimeout`, `Browser.TraceProtocolCommands`.
