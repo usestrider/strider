@@ -351,7 +351,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
 // A request's body: stock WebKit's text, which it decoded as UTF-8 or else Latin-1 (QUIRKS.md, Q221)
 export const bodyOf = (postData: string): Uint8Array => new TextEncoder().encode(postData)
 
-const hopOf = (state: State, hop: NetworkRequest.HopId) => Kit.lookup(state.ids, state.hops, hop, endedThing)
+const hopOf = (state: State, hop: NetworkRequest.HopId) =>
+  Kit.lookup(state.ids, state.hops, hop, () => endedThing({ _tag: "Hop", id: hop }))
 
 export const requestBody = (state: State, hop: NetworkRequest.HopId) =>
   Effect.map(hopOf(state, hop), (request) => {

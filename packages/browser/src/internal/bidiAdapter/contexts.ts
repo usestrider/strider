@@ -158,7 +158,8 @@ export const activatePage = (state: State, id: L1Target.NavigableId) =>
     Effect.flatMap((navigable) => Kit.protocol(state.send(BrowsingContext.activate({ context: navigable.bidi }))))
   )
 
-const downloadOf = (state: State, id: Download.Id) => Kit.lookup(state.ids, state.downloadsById, id, endedThing)
+const downloadOf = (state: State, id: Download.Id) =>
+  Kit.lookup(state.ids, state.downloadsById, id, () => endedThing({ _tag: "Download", id }))
 
 export const downloadPath = (state: State, id: Download.Id) =>
   Effect.map(downloadOf(state, id), (download) => Option.fromUndefinedOr(download.path))

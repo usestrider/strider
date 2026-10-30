@@ -160,7 +160,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
 // ── Operations ────────────────────────────────────────────────────────────────────────────────────────────
 
 const obligationOf = (state: State, id: Adapter.ObligationId) =>
-  Kit.lookup(state.ids, state.obligations, id, endedThing)
+  Kit.lookup(state.ids, state.obligations, id, () => endedThing({ _tag: "Obligation", id }))
 
 export const resolve = Effect.fnUntraced(function*(
   state: State,
@@ -248,7 +248,9 @@ export const resolve = Effect.fnUntraced(function*(
         return yield* Effect.fail(Kit.unsupported(decision._tag, "A dialog is accepted or dismissed"))
       }
       // A dialog answered already, or closed, is over
-      if (obligation.page.dialog !== id || obligation.answer !== undefined) return yield* Effect.fail(endedThing())
+      if (obligation.page.dialog !== id || obligation.answer !== undefined) {
+        return yield* Effect.fail(endedThing({ _tag: "Obligation", id }))
+      }
       const handle = yield* pageHandleOf(state, obligation.page)
       const process = yield* processOfContext(state, obligation.page.context)
       const promptText = decision._tag === "Accept" ? Option.getOrUndefined(decision.promptText) : undefined

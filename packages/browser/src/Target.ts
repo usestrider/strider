@@ -1,7 +1,8 @@
 /**
  * What operations act on, how each one is identified, and how it ends.
  *
- * A target is a page, a frame, a document, a JavaScript realm, a user context or the browser. Strider gives each an
+ * A target is a page, a frame, a document, a JavaScript realm, a user context or the browser. A dialog or file
+ * chooser awaiting a decision, a download and a request's hop can also end, and are named when they do. Strider gives each an
  * id, which only means something where it came from, so ids are accepted only in branded form and checked against
  * their origin when used. When a target ends, every operation on it fails with `TargetGone`, which says what ended
  * and why.
@@ -401,7 +402,10 @@ export const Description = Schema.Union([
   Schema.TaggedStruct("Document", { id: DocumentId }),
   Schema.TaggedStruct("Realm", { id: RealmId }),
   Schema.TaggedStruct("UserContext", {}),
-  Schema.TaggedStruct("Browser", {})
+  Schema.TaggedStruct("Browser", {}),
+  Schema.TaggedStruct("Obligation", { id: Schema.String }),
+  Schema.TaggedStruct("Download", { id: Schema.String }),
+  Schema.TaggedStruct("Hop", { id: Schema.String })
 ])
 
 /**

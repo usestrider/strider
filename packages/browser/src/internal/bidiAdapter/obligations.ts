@@ -188,7 +188,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
 // ── Operations ────────────────────────────────────────────────────────────────────────────────────────────
 
 const obligationOf = (state: State, id: Adapter.ObligationId) =>
-  Kit.lookup(state.ids, state.obligations, id, endedThing)
+  Kit.lookup(state.ids, state.obligations, id, () => endedThing({ _tag: "Obligation", id }))
 
 const refused = (method: string) =>
   Effect.fail(new Protocol.ProtocolError({ reason: new Protocol.Unsupported({ method }) }))
