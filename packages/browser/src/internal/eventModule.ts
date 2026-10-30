@@ -63,7 +63,7 @@ export interface EventModule<T, F, B, DE = never> {
     filter?: F | undefined,
     where?: Subscription.Where<B, PE, PR> | undefined
   ) => Effect.Effect<
-    Stream.Stream<B, PE | DE | Subscription.EventOverflow | Target.TargetGone>,
+    Stream.Stream<B, PE | Subscription.EventOverflow | Target.TargetGone>,
     Subscription.SubscriptionError,
     Scope.Scope | PR
   >

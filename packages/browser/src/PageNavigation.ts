@@ -19,14 +19,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
-import * as Events from "./internal/events.ts"
-import * as Filters from "./internal/filters.ts"
-import * as Handles from "./internal/handles.ts"
-import type * as Model from "./internal/model.ts"
-import * as Navigated from "./internal/navigated.ts"
-import * as Operation from "./internal/operation.ts"
-import type * as Runtime from "./internal/runtime.ts"
-import * as Urls from "./internal/urls.ts"
+import * as PageNavigationImpl from "./internal/pageNavigation.ts"
 import * as NetworkResponse from "./NetworkResponse.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -173,41 +166,6 @@ export interface NextFilter extends Filter {
   readonly waitUntil?: LoadState | undefined
 }
 
-// ── Implementation ──
-
-const kind = (
-  runtime: Runtime.Runtime,
-  operation: string
-): Events.Kind<Model.NavigationEvent, PageNavigation> => ({
-  operation,
-  noun: "a navigation",
-  // Only a navigation that got somewhere is delivered as one (`succeeded` accepts nothing else)
-  deliver: (event) =>
-    Option.getOrThrow(Navigated.succeeded(runtime.model, event.navigation, event.frame, event.url, event.outcome))
-})
-
-const succeeded = (event: Model.NavigationEvent) =>
-  event.outcome._tag === "Committed" || event.outcome._tag === "SameDocument" || event.outcome._tag === "Restored" ||
-  event.outcome._tag === "Activated"
-
-const subscription = (target: Page.ObservedPage, filter: Filter | undefined, operation: string) =>
-  Effect.suspend(() => {
-    const behind = Handles.page(target)
-    const all = filter?.frames === "all"
-    return Effect.map(Filters.url(operation, filter?.url), (matches) => {
-      const ours = (entry: Events.Entry<Model.NavigationEvent>) => all || entry.value.frame === behind.entry.id
-      return {
-        behind,
-        kind: kind(behind.runtime, operation),
-        channel: behind.entry.events.navigation,
-        matches: (entry: Events.Entry<Model.NavigationEvent>) =>
-          ours(entry) && Filters.urlMatches(matches, entry.value.url),
-        accepts: (entry: Events.Entry<Model.NavigationEvent>) =>
-          ours(entry) && succeeded(entry.value) && Filters.urlMatches(matches, entry.value.url)
-      }
-    })
-  })
-
 /**
  * Subscribes to a page's navigations and returns the wait: an effect that gives the first match, the same each
  * time it runs.
@@ -246,33 +204,7 @@ export const next = <PE = never, PR = never>(
   Effect.Effect<PageNavigation, Page.PageError | PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
-> =>
-  Effect.flatMap(subscription(target, filter, "PageNavigation.next"), ({ behind, channel, kind, matches }) => {
-    const waitUntil = filter?.waitUntil ?? "commit"
-    const { model } = behind.runtime
-    const delivery: Events.Delivery<Model.NavigationEvent, PageNavigation, Page.PageError> = {
-      deliver: Effect.fnUntraced(function*(event) {
-        const result = yield* behind.runtime.settle(
-          "PageNavigation.next",
-          event.navigation,
-          event.frame,
-          Option.some(Urls.reported(event.url)),
-          event.url,
-          event.outcome,
-          Operation.idNow()
-        )
-        // The deadline is `next`'s, which bounds the whole wait
-        yield* Navigated.reached(model, result, waitUntil, Option.none())
-        return result
-      }),
-      unfinished: (event) => `A navigation to ${event.url} committed, but its document hadn't reached ${waitUntil}`
-    }
-    return Events.next(kind, channel, matches, where, delivery)
-  }).pipe(
-    Operation.named("PageNavigation.next", {
-      attributes: { "browser.navigation.wait_until": filter?.waitUntil ?? "commit" }
-    })
-  )
+> => PageNavigationImpl.next(target, filter, where)
 
 /**
  * Subscribes to a page's navigations and emits every successful match from now on: `Committed`, `SameDocument`,
@@ -305,11 +237,7 @@ export const stream = <PE = never, PR = never>(
   Stream.Stream<PageNavigation, PE | Subscription.EventOverflow | Target.TargetGone>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
-> =>
-  Effect.flatMap(
-    subscription(target, filter, "PageNavigation.stream"),
-    ({ accepts, channel, kind }) => Events.stream(kind, channel, accepts, where)
-  )
+> => PageNavigationImpl.stream(target, filter, where)
 
 /**
  * Reads the successful navigations still in the page's event log, as `stream` emits them; never waits.
@@ -334,10 +262,7 @@ export const history = (
   target: Page.ObservedPage,
   filter?: Filter | undefined
 ): Effect.Effect<Subscription.History<PageNavigation>, Subscription.SubscriptionError> =>
-  Effect.flatMap(
-    subscription(target, filter, "PageNavigation.history"),
-    ({ accepts, channel, kind }) => Events.history(kind, channel, accepts)
-  )
+  PageNavigationImpl.history(target, filter)
 
 /** ` to <url>`, where a reason knows where its navigation was going; nothing where it doesn't. */
 const going = (url: Option.Option<Url.Url>): string =>
