@@ -15,7 +15,7 @@ import * as Evaluation from "../src/internal/bidiAdapter/evaluation.ts"
 import * as State from "../src/internal/bidiAdapter/state.ts"
 import * as Tree from "../src/internal/bidiAdapter/tree.ts"
 import type * as ProtocolClient from "../src/internal/protocolClient.ts"
-import type * as Protocol from "../src/protocol/Protocol.ts"
+import * as Protocol from "../src/protocol/Protocol.ts"
 import * as Target from "../src/Target.ts"
 
 const control: ProtocolClient.FoldControl = {
@@ -25,14 +25,18 @@ const control: ProtocolClient.FoldControl = {
 }
 
 /** A session that answers each command from `replies`, by method, and records what was sent. */
-const session = (replies: Readonly<Record<string, unknown>>) => {
+const session = (
+  replies: Readonly<Record<string, unknown>>,
+  failures: Readonly<Record<string, () => Protocol.ProtocolError>> = {}
+) => {
   const sent: Array<string> = []
   const root = {
     key: undefined,
     send: (command: Protocol.Command<string, unknown, unknown>) =>
-      Effect.sync(() => {
+      Effect.suspend(() => {
         sent.push(command.method)
-        return replies[command.method]
+        const failure = failures[command.method]
+        return failure === undefined ? Effect.succeed(replies[command.method]) : Effect.fail(failure())
       }),
     drainObserved: Effect.void
   } as unknown as ProtocolClient.Session
@@ -40,10 +44,13 @@ const session = (replies: Readonly<Record<string, unknown>>) => {
 }
 
 /** A state with one page in the default context, its document, and the document's main realm. */
-const withPage = Effect.fnUntraced(function*(replies: Readonly<Record<string, unknown>> = {}) {
+const withPage = Effect.fnUntraced(function*(
+  replies: Readonly<Record<string, unknown>> = {},
+  failures: Readonly<Record<string, () => Protocol.ProtocolError>> = {}
+) {
   const buffer = yield* Kit.makeFactBuffer(() => Effect.void)
   buffer.connect(control)
-  const { root, sent } = session(replies)
+  const { root, sent } = session(replies, failures)
   const state = State.make({
     connect: { sink: () => Effect.void, ownership: "launched" },
     ids: Kit.makeIds(),
@@ -129,6 +136,45 @@ describe("BidiAdapter state", () => {
       const foreign = yield* call(Kit.makeIds().handle())
       assert.strictEqual(foreign.reason._tag, "Foreign")
       assert.deepStrictEqual(sent, [])
+    }))
+
+  it.effect("fails a call cut short when its page closes as Gone, and any other failure as the protocol's", () =>
+    Effect.gen(function*() {
+      const call = {
+        functionDeclaration: "() => 1",
+        arguments: [],
+        awaitPromise: false,
+        result: "value",
+        userActivation: false
+      } as const
+      const refused = () =>
+        new Protocol.ProtocolError({ reason: new Protocol.Unsupported({ method: "script.callFunction" }) })
+      // The realm ends while the call is in flight, and the browser answers it with an error
+      let ending: State.RealmEntry | undefined
+      const cut = yield* withPage({}, {
+        "script.callFunction": () => {
+          if (ending !== undefined) ending.ended = true
+          return refused()
+        }
+      })
+      ending = cut.realm
+      const ended = yield* Evaluation.evaluate(cut.state, cut.realm.id, call).pipe(Effect.flip)
+      assert.deepStrictEqual(ended.reason, {
+        _tag: "Gone",
+        target: { _tag: "Realm", id: cut.realm.id },
+        reason: new Target.RealmDestroyed({})
+      })
+      // The session ending is the page's closing, too
+      const closed = yield* withPage({}, {
+        "script.callFunction": () =>
+          new Protocol.ProtocolError({ reason: new Protocol.SessionEnded({ why: "targetDestroyed" }) })
+      })
+      const sessionEnded = yield* Evaluation.evaluate(closed.state, closed.realm.id, call).pipe(Effect.flip)
+      assert.strictEqual(sessionEnded.reason._tag, "Gone")
+      // A refusal from a realm that is still there is the protocol's own error
+      const live = yield* withPage({}, { "script.callFunction": refused })
+      const unsupported = yield* Evaluation.evaluate(live.state, live.realm.id, call).pipe(Effect.flip)
+      assert.strictEqual(unsupported.reason._tag, "Unsupported")
     }))
 
   it.effect("fails a screenshot whose base64 doesn't decode, rather than giving empty bytes", () =>

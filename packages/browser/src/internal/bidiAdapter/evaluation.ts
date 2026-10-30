@@ -324,7 +324,8 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
       // A shared id names a node in every realm of its document
       node: (node) => ({ sharedId: node.binding as Script.SharedId })
     }))
-  const reply = yield* Kit.protocol(state.send(Script.callFunction({
+  // A call cut short when its page closes is `Gone`, not the protocol's error
+  const reply = yield* state.send(Script.callFunction({
     functionDeclaration: call.functionDeclaration,
     awaitPromise: call.awaitPromise,
     target: { realm: realm.bidi },
@@ -332,7 +333,7 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
     resultOwnership: keep ? "root" : "none",
     serializationOptions: { maxObjectDepth: keep ? 0 : 64, maxDomDepth: 0 },
     userActivation: call.userActivation
-  })))
+  })).pipe(Effect.mapError(Kit.realmFailure(id, () => realm.ended)))
   if (reply.type === "exception") {
     const details = reply.exceptionDetails
     return {
