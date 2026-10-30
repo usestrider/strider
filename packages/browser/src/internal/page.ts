@@ -332,8 +332,10 @@ export const make = (owner: PageOwner): Page.Page => {
     snapshot: (options) =>
       Effect.gen(function*() {
         const record = yield* Operation.record
+        const snapshotOwner = { runtime, page: entry, grant: owner.grant }
         const taken = yield* Snapshots.take(
-          { runtime, page: entry, grant: owner.grant },
+          snapshotOwner,
+          LocatorImpl.locatorOn(snapshotOwner),
           null,
           options,
           record.id,

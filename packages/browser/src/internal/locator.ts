@@ -42,7 +42,7 @@ import * as FileInputImpl from "./fileInput.ts"
 import * as Filters from "./filters.ts"
 import * as Input from "./input.ts"
 import * as Keys from "./keys.ts"
-import type * as Model from "./model.ts"
+import type { Locate, Owner } from "./locatorOwner.ts"
 import * as Operation from "./operation.ts"
 import * as Recorders from "./recorders.ts"
 import * as Runtime from "./runtime.ts"
@@ -151,14 +151,6 @@ export const staleRef = (why: Engine.Stale): Locator.StaleRef =>
 
 const LocatorTypeId = "~@usestrider/browser/Locator"
 
-/** The page a locator belongs to, and the grant it was made under. */
-export interface Owner {
-  readonly runtime: Runtime.Runtime
-  readonly page: Model.PageEntry
-  /** `None` for a page controlled for its life. */
-  readonly grant: Option.Option<Access.Grant>
-}
-
 /**
  * An HTML drag the page dispatches, run in the isolated world with the element and the
  * target: untrusted events sharing one `DataTransfer`, in the order HTML's drag-and-drop model fires them, with a
@@ -207,6 +199,9 @@ const syntheticDrag = (
   fire(source, "dragend", end)
   return accepted ? "dropped" : "refused"
 }
+
+/** How a snapshot of this owner's page makes the locator for a ref. */
+export const locatorOn = (owner: Owner): Locate => (steps, label) => new LocatorImpl(owner, steps, label)
 
 export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   readonly [LocatorTypeId] = LocatorTypeId as typeof LocatorTypeId
@@ -367,9 +362,10 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       yield* Access.check(this.owner.grant)
       const record = yield* Operation.record
       const id = record.id
-      const taken = yield* Snapshots.take(this.owner, this.steps, options, id, record.budget.at).pipe(
-        Effect.mapError((failure) => this.sendFailure(operation, failure, record))
-      )
+      const taken = yield* Snapshots.take(this.owner, locatorOn(this.owner), this.steps, options, id, record.budget.at)
+        .pipe(
+          Effect.mapError((failure) => this.sendFailure(operation, failure, record))
+        )
       if (taken._tag === "Taken") return taken.snapshot as Snapshot.Snapshot<Locator.Locator>
       if (taken.response._tag === "NoMatch") {
         return yield* Effect.fail(this.error(
