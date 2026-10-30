@@ -7,7 +7,7 @@
  */
 import type * as Deferred from "effect/Deferred"
 import type * as Effect from "effect/Effect"
-import type * as Option from "effect/Option"
+import * as Option from "effect/Option"
 import type * as Input from "../../cdp/Input.ts"
 import type * as Network from "../../cdp/Network.ts"
 import type * as Dialog from "../../Dialog.ts"
@@ -329,7 +329,7 @@ export const placement = (page: PageEntry): Declarations.Placement => ({ page: p
 /** Where a context's downloads go, if a declaration allows them to a directory. */
 export const downloadDirectory = (state: State, context: UserContext.Id) => {
   const behavior = state.registry.downloads(context)
-  return behavior?._tag === "Allow" ? behavior.directory : undefined
+  return Option.isSome(behavior) && behavior.value._tag === "Allow" ? behavior.value.directory : undefined
 }
 
 // ── Lookups: an id this connection minted that ended is Gone, any other Foreign ───────────────────────────

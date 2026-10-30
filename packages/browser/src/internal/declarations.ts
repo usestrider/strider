@@ -12,6 +12,7 @@
  *   dependency is gone, or threw, doesn't run.
  * - **Intercepts** are the union of every pattern in scope, per phase.
  */
+import * as Option from "effect/Option"
 import type * as Target from "../Target.ts"
 import type * as UserContext from "../UserContext.ts"
 import type * as Adapter from "./adapter.ts"
@@ -72,7 +73,12 @@ export interface Registry {
   readonly overrides: (placement: Placement) => ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
   /**
    * The init-script bundle for a dedicated worker: the main world's scripts declared for workers, in the same
-   * order, or `undefined` where there are none.
+   * order, or `None` where there are none.
+   */
+  readonly workerBundleOption: (placement: Placement) => Option.Option<string>
+  /**
+   * Temporary: `workerBundleOption`, as `undefined` for `None`, for the WebKit adapter, which is being rewritten.
+   * When it takes the `Option`, this goes and `workerBundleOption` becomes `workerBundle`.
    */
   readonly workerBundle: (placement: Placement) => string | undefined
   /** The init-script bundle for each world, by world key. */
@@ -88,13 +94,18 @@ export interface Registry {
   /** The download behavior of a context: the most specific, then most recent. */
   readonly downloads: (
     context: UserContext.Id
-  ) => Extract<Adapter.Declaration, { _tag: "Downloads" }>["behavior"] | undefined
+  ) => Option.Option<Extract<Adapter.Declaration, { _tag: "Downloads" }>["behavior"]>
   readonly fileChooser: (placement: Placement) => boolean
   /** Whether a placement's authentication challenges are paused, whatever its intercepts. */
   readonly challenges: (placement: Placement) => boolean
   /**
-   * The largest body of a kind, a request's or a response's, that a collection in force keeps, or `undefined`
+   * The largest body of a kind, a request's or a response's, that a collection in force keeps, or `None`
    * where none keeps that kind (QUIRKS.md, Q160 and Q164).
+   */
+  readonly bodyLimitOption: (placement: Placement, body: "request" | "response") => Option.Option<number>
+  /**
+   * Temporary: `bodyLimitOption`, as `undefined` for `None`, for the WebKit adapter, which is being rewritten. When
+   * it takes the `Option`, this goes and `bodyLimitOption` becomes `bodyLimit`.
    */
   readonly bodyLimit: (placement: Placement, body: "request" | "response") => number | undefined
 }
@@ -115,7 +126,7 @@ export const make = (): Registry => {
       )
   const byPrecedence = (a: Registered, b: Registered) =>
     specificity(a.scope) - specificity(b.scope) || a.sequence - b.sequence
-  return {
+  const registry: Registry = {
     add: (scope, declaration, id) => {
       const entry = { id, scope, declaration, sequence: sequence++ }
       registered.set(id, entry)
@@ -127,15 +138,16 @@ export const make = (): Registry => {
       return entry
     },
     all: () => [...registered.values()],
-    bodyLimit: (placement, body) => {
-      let limit: number | undefined
+    bodyLimitOption: (placement, body) => {
+      let limit = Option.none<number>()
       for (const entry of inScope(placement)) {
         if (entry.declaration._tag === "BodyCollection" && entry.declaration.bodies.includes(body)) {
-          limit = Math.max(limit ?? 0, entry.declaration.maxBytes)
+          limit = Option.some(Math.max(Option.getOrElse(limit, () => 0), entry.declaration.maxBytes))
         }
       }
       return limit
     },
+    bodyLimit: (placement, body) => Option.getOrUndefined(registry.bodyLimitOption(placement, body)),
     overrides: (placement) => {
       const effective = new Map<Adapter.Override["_tag"], Adapter.Override>()
       // Least specific and oldest first, so the winner is written last
@@ -146,12 +158,13 @@ export const make = (): Registry => {
       }
       return effective
     },
-    workerBundle: (placement) => {
+    workerBundleOption: (placement) => {
       const sources = scriptsOf(placement)
         .filter((entry) => entry.declaration.workers && entry.declaration.world._tag === "Main")
         .map((entry) => wrap(entry.id, entry.declaration.source, entry.declaration.after))
-      return sources.length === 0 ? undefined : block(sources)
+      return sources.length === 0 ? Option.none() : Option.some(block(sources))
     },
+    workerBundle: (placement) => Option.getOrUndefined(registry.workerBundleOption(placement)),
     bundles: (placement) => {
       const scripts = scriptsOf(placement)
       const bundles = new Map<string, { world: Adapter.World; sources: Array<string> }>()
@@ -186,11 +199,12 @@ export const make = (): Registry => {
         if (entry.scope._tag === "UserContext" && entry.scope.context !== context) continue
         if (winner === undefined || byPrecedence(winner, entry) < 0) winner = entry
       }
-      return winner?.declaration._tag === "Downloads" ? winner.declaration.behavior : undefined
+      return winner?.declaration._tag === "Downloads" ? Option.some(winner.declaration.behavior) : Option.none()
     },
     fileChooser: (placement) => inScope(placement).some((entry) => entry.declaration._tag === "FileChooser"),
     challenges: (placement) => inScope(placement).some((entry) => entry.declaration._tag === "Challenges")
   }
+  return registry
 }
 
 /** Which scripts of a bundle ran without throwing in this document; a name no script will use. */

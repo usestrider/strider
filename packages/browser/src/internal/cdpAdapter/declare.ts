@@ -201,12 +201,13 @@ const applyIntercepts = Effect.fnUntraced(function*(state: State, target: Target
 // Chromium keeps a response's body on its own, until the page moves on: where bodies are collected, it keeps them in
 // the browser, past the next navigation (QUIRKS.md, Q160)
 const keepBodies = (state: State, target: TargetEntry, page: PageEntry) => {
-  const limit = state.registry.bodyLimit(placement(page), "response")
-  return limit === undefined
+  const limit = state.registry.bodyLimitOption(placement(page), "response")
+  return Option.isNone(limit)
     ? Effect.void
-    : Network.configureDurableMessages({ maxTotalBufferSize: 10 * limit, maxResourceBufferSize: limit }).pipe(
-      Protocol.on(target.session)
-    )
+    : Network.configureDurableMessages({
+      maxTotalBufferSize: 10 * limit.value,
+      maxResourceBufferSize: limit.value
+    }).pipe(Protocol.on(target.session))
 }
 
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
@@ -263,8 +264,8 @@ const applyDeclaration = (state: State, declaration: Adapter.Declaration, scope:
 export const applyDownloads = (state: State, context: ContextEntry) => {
   const behavior = state.registry.downloads(context.id)
   return BrowserCdp.setDownloadBehavior({
-    behavior: behavior === undefined ? "default" : behavior._tag === "Allow" ? "allowAndName" : "deny",
-    ...(behavior?._tag === "Allow" ? { downloadPath: behavior.directory } : {}),
+    behavior: Option.isNone(behavior) ? "default" : behavior.value._tag === "Allow" ? "allowAndName" : "deny",
+    ...(Option.isSome(behavior) && behavior.value._tag === "Allow" ? { downloadPath: behavior.value.directory } : {}),
     ...(context.browserContextId === undefined
       ? {}
       : { browserContextId: context.browserContextId as BrowserCdp.BrowserContextID }),

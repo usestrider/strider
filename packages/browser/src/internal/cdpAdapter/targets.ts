@@ -277,7 +277,7 @@ const workerGate = Effect.fnUntraced(function*(state: State, target: TargetEntry
   // A dedicated worker that gets init scripts pauses before its first script, where its global is whole: one
   // waiting for the debugger has no timers yet (QUIRKS.md, Q187)
   const scripted = target.kind === "worker" && target.page !== undefined && waiting &&
-    state.registry.workerBundle(placement(target.page)) !== undefined
+    Option.isSome(state.registry.workerBundleOption(placement(target.page)))
   if (scripted) {
     yield* Effect.all([
       Debugger.enable({}).pipe(on),
@@ -303,10 +303,12 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Debugger.paused, (params, { state, target }) => {
       if (target === undefined || target.kind !== "worker" || params.reason !== "instrumentation") return
       const on = Protocol.on(target.session)
-      const bundle = target.page === undefined ? undefined : state.registry.workerBundle(placement(target.page))
+      const bundle = target.page === undefined
+        ? Option.none<string>()
+        : state.registry.workerBundleOption(placement(target.page))
       state.buffer.later(
         Effect.all([
-          bundle === undefined ? Effect.void : Runtime.evaluate({ expression: bundle }).pipe(on),
+          Option.isNone(bundle) ? Effect.void : Runtime.evaluate({ expression: bundle.value }).pipe(on),
           // Disabling the debugger clears its breakpoint
           Debugger.resume({}).pipe(on),
           Debugger.disable().pipe(on)

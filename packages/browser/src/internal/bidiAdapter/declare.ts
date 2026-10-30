@@ -231,10 +231,10 @@ export const applyDownloads = (state: State, scope: Adapter.DeclarationScope) =>
   const context = scope._tag === "UserContext" ? scope.context : state.defaultContext
   const behavior = state.registry.downloads(context)
   return state.send(BrowserBidi.setDownloadBehavior({
-    downloadBehavior: behavior === undefined
+    downloadBehavior: Option.isNone(behavior)
       ? null
-      : behavior._tag === "Allow"
-      ? { type: "allowed", destinationFolder: behavior.directory }
+      : behavior.value._tag === "Allow"
+      ? { type: "allowed", destinationFolder: behavior.value.directory }
       : { type: "denied" },
     ...(scope._tag === "UserContext" ? scopeParams(state, scope) : {})
   }))

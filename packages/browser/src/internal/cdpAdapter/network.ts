@@ -28,12 +28,14 @@ const notKept = (state: State, hop: NetworkRequest.HopId) =>
 
 /** A request's body is kept as its event carried it where a body collection covers the page and it fits. */
 const sentBody = (state: State, target: TargetEntry, request: Network.Request) => {
-  const limit = target.page === undefined ? undefined : state.registry.bodyLimit(placement(target.page), "request")
+  const limit = target.page === undefined
+    ? Option.none<number>()
+    : state.registry.bodyLimitOption(placement(target.page), "request")
   return {
     hasBody: request.hasPostData === true,
-    carried: limit === undefined
+    carried: Option.isNone(limit)
       ? Option.none<Uint8Array>()
-      : Option.filter(postData(request), (bytes) => bytes.length <= limit)
+      : Option.filter(postData(request), (bytes) => bytes.length <= limit.value)
   }
 }
 

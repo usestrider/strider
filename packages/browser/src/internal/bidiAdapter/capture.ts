@@ -97,17 +97,17 @@ export const video = Effect.fnUntraced(function*(state: State, id: L1Target.Navi
     )
   }
   const behavior = state.registry.downloads(navigable.context.id)
-  if (behavior === undefined || behavior._tag === "Deny") {
+  if (Option.isNone(behavior) || behavior.value._tag === "Deny") {
     return yield* Effect.fail(Kit.unsupported(
       "capability.video",
-      behavior === undefined
+      Option.isNone(behavior)
         ? "The page's context declares no downloads directory, where the file would go"
         : "The page's context denies downloads, and the file would go where they do"
     ))
   }
   const started = yield* Kit.protocol(state.send(BrowsingContext.startScreencast({
     context: navigable.bidi,
-    destinationFolder: behavior.directory
+    destinationFolder: behavior.value.directory
   })))
   const written = Deferred.makeUnsafe<string, Adapter.AdapterError>()
   yield* Effect.addFinalizer(() =>
