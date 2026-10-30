@@ -22,7 +22,6 @@
  * @since 0.1.0
  */
 import * as Cause from "effect/Cause"
-import * as Deferred from "effect/Deferred"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
@@ -34,6 +33,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Socket from "effect/socket/Socket"
 import * as Stream from "effect/Stream"
+import * as Link from "../internal/link.ts"
 
 /**
  * A browser connection's messages, in both directions.
@@ -196,36 +196,6 @@ class MessageTooLong extends Error {
   }
 }
 
-/**
- * The state both transports share: the inbox, the loss signal, and fail-fast sends.
- */
-const makeLink = Effect.fnUntraced(function*() {
-  const lost = yield* Deferred.make<ConnectionLost>()
-  const inbox = yield* Queue.unbounded<string, TransportError | Cause.Done>()
-  let reason: ConnectionLost | undefined
-  const lose = (next: ConnectionLost): void => {
-    if (reason !== undefined) return
-    reason = next
-    Deferred.doneUnsafe(lost, Effect.succeed(next))
-    Queue.failCauseUnsafe(inbox, Cause.fail(new TransportError({ reason: next })))
-  }
-  const ifOpen = (write: () => void): Effect.Effect<void, TransportError> =>
-    Effect.suspend(() => {
-      if (reason !== undefined) return Effect.fail(new TransportError({ reason }))
-      write()
-      return Effect.void
-    })
-  return {
-    lose,
-    ifOpen,
-    receive: (message: string): void => {
-      Queue.offerUnsafe(inbox, message)
-    },
-    messages: Stream.fromQueue(inbox),
-    closed: Deferred.await(lost)
-  }
-})
-
 const describe = (cause: unknown): string =>
   Predicate.hasProperty(cause, "message") && typeof cause.message === "string" ? cause.message : String(cause)
 
@@ -266,7 +236,7 @@ const describe = (cause: unknown): string =>
  */
 export const pipe: (handle: ChildProcessSpawner.ChildProcessHandle) => Effect.Effect<Transport, never, Scope.Scope> =
   Effect.fnUntraced(function*(handle: ChildProcessSpawner.ChildProcessHandle) {
-    const link = yield* makeLink()
+    const link = yield* Link.make()
     const outbox = yield* Queue.unbounded<Uint8Array, Cause.Done>()
     const remote = (description: string) => new ConnectionLost({ initiator: "remote", description })
 
@@ -310,9 +280,9 @@ export const pipe: (handle: ChildProcessSpawner.ChildProcessHandle) => Effect.Ef
 
     return {
       send: (message: string) =>
-        link.ifOpen(() => {
+        link.whenOpen(Effect.sync(() => {
           Queue.offerUnsafe(outbox, encoder.encode(message + "\0"))
-        }),
+        })),
       messages: link.messages,
       closed: link.closed
     }
@@ -350,7 +320,7 @@ const decoder = new TextDecoder()
  *
  * Succeeds once the connection is open, and fails with `ConnectFailed` if it doesn't open within
  * `openTimeout`. The connection is lost when either side closes it. Closing the scope closes it with code
- * 1000.
+ * 1000. A message sent while the WebSocket is closing fails rather than vanish.
  *
  * **Gotchas**
  *
@@ -379,90 +349,125 @@ export const webSocket: (
 ) => Effect.Effect<Transport, TransportError, Scope.Scope | Socket.WebSocketConstructor> = Effect.fnUntraced(
   function*(url: string, options?: WebSocketOptions | undefined) {
     const construct = yield* Socket.WebSocketConstructor
-    const link = yield* makeLink()
-    const connectFailed = (description: string) => new TransportError({ reason: new ConnectFailed({ description }) })
+    const timeout = options?.openTimeout ?? "10 seconds"
     const headers = options?.headers === undefined ? undefined : Object.fromEntries(
       Object.entries(options.headers).map((
         [name, value]
       ) => [name, Redacted.isRedacted(value) ? Redacted.value(value) : value])
     )
-    const ws = yield* Effect.try({
-      try: () => construct(url, headers === undefined ? undefined : { headers }),
-      catch: (cause) => connectFailed(describe(cause))
-    })
-
-    ws.addEventListener("message", (event) => {
-      const data = event.data
-      if (typeof data === "string") link.receive(data)
-      else if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) link.receive(decoder.decode(data))
-      else {link.lose(
-          new ConnectionLost({ initiator: "remote", description: "The browser sent a message that isn't text" })
-        )}
-    })
-    ws.addEventListener("close", (event) => {
-      link.lose(
-        new ConnectionLost({
-          initiator: "remote",
-          description: `The WebSocket closed with code ${event.code}${event.reason ? `: ${event.reason}` : ""}`
-        })
-      )
-    })
-    yield* Effect.addFinalizer(() =>
-      Effect.sync(() => {
-        link.lose(new ConnectionLost({ initiator: "local", description: "The connection was closed" }))
-        ws.close(1000)
-      })
+    // `Socket` dials once for every reader, so the reader is acquired once, below, and this is the WebSocket.
+    let ws: Socket.WebSocketLike | undefined
+    const socket = yield* Socket.fromWebSocket(
+      Effect.acquireRelease(
+        Effect.try({
+          try: () => (ws = construct(url, headers === undefined ? undefined : { headers })),
+          catch: (cause) => new Socket.SocketError({ reason: new Socket.SocketOpenError({ kind: "Unknown", cause }) })
+        }),
+        (ws) => Effect.sync(() => ws.close(1000))
+      ),
+      { openTimeout: timeout }
     )
+    const reader = yield* socket.reader.pipe(
+      Effect.mapError((error) =>
+        new TransportError({ reason: new ConnectFailed({ description: openFailure(error.reason, timeout) }) })
+      )
+    )
+    const writer = yield* socket.writer
+    const opened = ws!
+    const link = yield* Link.make()
+    const remote = (description: string) => new ConnectionLost({ initiator: "remote", description })
 
-    const timeout = options?.openTimeout ?? "10 seconds"
-    yield* Effect.callback<void, TransportError>((resume) => {
-      if (ws.readyState === 1) return resume(Effect.void)
-      const onOpen = () => {
-        cleanup()
-        resume(Effect.void)
-      }
-      const onError = (event: Socket.WebSocketEvent) => {
-        cleanup()
-        resume(
-          Effect.fail(
-            connectFailed(Predicate.hasProperty(event, "message") ? describe(event) : "The connection failed")
-          )
-        )
-      }
-      const onClose = (event: Socket.WebSocketEvent) => {
-        cleanup()
-        resume(Effect.fail(connectFailed(`The WebSocket closed with code ${event.code} before opening`)))
-      }
-      const cleanup = () => {
-        ws.removeEventListener("open", onOpen)
-        ws.removeEventListener("error", onError)
-        ws.removeEventListener("close", onClose)
-      }
-      ws.addEventListener("open", onOpen)
-      ws.addEventListener("error", onError)
-      ws.addEventListener("close", onClose)
-      return Effect.sync(cleanup)
-    }).pipe(
-      Effect.timeoutOrElse({
-        duration: timeout,
-        orElse: () => Effect.fail(connectFailed(`The WebSocket didn't open within ${String(timeout)}`))
-      })
+    // Added after the reader, so it runs before the reader's release: the loss is this side's, never the close
+    // the release reports to the reader.
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => link.lose(new ConnectionLost({ initiator: "local", description: "The connection was closed" })))
+    )
+    // One fiber reads for as long as the scope, handing each message to the link. The socket fails after the
+    // messages that arrived before its close or error, and that loses the connection.
+    yield* reader.pull.pipe(
+      Effect.flatMap((frames) =>
+        Effect.sync(() => {
+          for (const frame of frames) {
+            if (typeof frame === "string") {
+              link.receive(frame)
+              continue
+            }
+            try {
+              link.receive(decoder.decode(frame))
+            } catch (cause) {
+              link.lose(remote(new MessageTooLong(frame.byteLength, cause).message))
+            }
+          }
+        })
+      ),
+      Effect.forever,
+      Effect.catch((error) => Effect.sync(() => link.lose(remote(lostWith(error.reason))))),
+      Effect.forkScoped
     )
 
     return {
       send: (message: string) =>
-        link.ifOpen(() => {
-          try {
-            ws.send(message)
-          } catch (cause) {
-            link.lose(new ConnectionLost({ initiator: "remote", description: `Sending failed: ${describe(cause)}` }))
-          }
-        }),
+        link.whenOpen(Effect.suspend(() =>
+          // A closing WebSocket drops what it's sent without a word. Its close is on the way to the reader,
+          // behind the messages before it, so the send fails here and the reader loses the connection.
+          opened.readyState === 1
+            ? Effect.catch(writer.write(message), (error) =>
+              Effect.suspend(() => {
+                link.lose(
+                  remote(
+                    `Sending failed: ${
+                      describe(Predicate.hasProperty(error.reason, "cause") ? error.reason.cause : error.reason)
+                    }`
+                  )
+                )
+                return Effect.fail(new TransportError({ reason: link.lost()! }))
+              }))
+            : Effect.fail(new TransportError({ reason: remote("The WebSocket is closing") }))
+        )),
       messages: link.messages,
       closed: link.closed
     }
   }
 )
+
+const closedWith = (reason: Socket.SocketCloseError): string =>
+  `The WebSocket closed with code ${reason.code}${reason.closeReason ? `: ${reason.closeReason}` : ""}`
+
+/** An error event's message, when it has one. */
+const eventMessage = (event: unknown): string | undefined =>
+  Predicate.hasProperty(event, "message") && typeof event.message === "string" && event.message !== ""
+    ? event.message
+    : undefined
+
+/** Why a WebSocket didn't open. */
+const openFailure = (reason: Socket.SocketErrorReason, timeout: Duration.Input): string => {
+  switch (reason._tag) {
+    case "SocketOpenError":
+      if (reason.kind === "Timeout") return `The WebSocket didn't open within ${String(timeout)}`
+      // The constructor's exception, or the WebSocket's error event
+      return reason.cause instanceof Error
+        ? reason.cause.message
+        : eventMessage(reason.cause) ?? "The connection failed"
+    case "SocketCloseError":
+      return `${closedWith(reason)} before opening`
+    default:
+      return reason.message
+  }
+}
+
+/** Why an open WebSocket was lost. */
+const lostWith = (reason: Socket.SocketErrorReason): string => {
+  switch (reason._tag) {
+    case "SocketCloseError":
+      return closedWith(reason)
+    case "SocketReadError": {
+      const message = eventMessage(reason.cause)
+      return message === undefined ? "The WebSocket failed" : `The WebSocket failed: ${message}`
+    }
+    default:
+      return reason.message
+  }
+}
 
 /**
  * Reason for a connection that couldn't be made: refused, rejected at the handshake, or not open in time.
