@@ -233,6 +233,15 @@ wraps `registerTool` and `unregisterTool` before the page's scripts run. `Page.m
 tools. `BrowserToolkit` gains `pageTools` and `callPageTool`, which checks the model's arguments against the tool's
 input schema and marks every result as the page's untrusted input.
 
+**The `strider` client loads Effect, and talks to its session's daemon through one `effect/rpc` group.** Each caller,
+the command, `strider mcp`, `strider sessions` and `start --fork`, uses the same RPC client over the session's Unix
+socket, so what crosses it is a Schema: a command's output and exit code, a tool call's parameters and result, the
+session's description. Interrupting a call interrupts the command in the daemon, which is what Ctrl-C and an MCP
+client's cancellation need. A forwarded command loads only the client, about 175 ms, against about 45 ms for the
+Effect-free client it replaced. Rejected: keeping that client, a hand-written JSON-lines protocol with an untyped
+parse at each end and a second, Effect-based copy of it for `strider mcp`, `sessions` and `--fork`; its saving
+didn't pay for two protocols.
+
 ## Testing
 
 **`Browser.layerTest` emulates no DOM.** A fake browser with a DOM would be a second engine to keep honest, and real
