@@ -8,8 +8,9 @@
  * `attachToTarget` that caused it; `Target.detachedFromTarget` ends it.
  */
 import * as Predicate from "effect/Predicate"
+import * as Result from "effect/Result"
 import type * as Protocol from "../protocol/Protocol.ts"
-import type { ErrorMatcher, Incoming, Wire } from "./protocolClient.ts"
+import { type ErrorMatcher, type Incoming, isRecord, parseRecord, type Wire } from "./protocolClient.ts"
 
 const recorded = "Chromium 155.0.8059.79, recorded 2026-10-19; checked by test/integration/Chromium.test.ts"
 
@@ -50,29 +51,36 @@ export const errors: ReadonlyArray<ErrorMatcher> = [
   }
 ]
 
-const isRecord = (u: unknown): u is Record<string, unknown> => typeof u === "object" && u !== null && !Array.isArray(u)
-
 const sessionKey = (u: unknown): Protocol.SessionKey | undefined =>
   typeof u === "string" ? u as Protocol.SessionKey : undefined
 
+const incoming = (envelope: Record<string, unknown>): Result.Result<Incoming, string> => {
+  if (typeof envelope.id === "number") {
+    const error = envelope.error
+    if (error === undefined) return Result.succeed({ _tag: "Reply", id: envelope.id, result: envelope.result })
+    if (isRecord(error) && Predicate.isNumber(error.code) && Predicate.isString(error.message)) {
+      return Result.succeed({
+        _tag: "ErrorReply",
+        id: envelope.id,
+        error: { code: error.code, message: error.message }
+      })
+    }
+    return Result.fail(`reply ${envelope.id} has a malformed error`)
+  }
+  if (typeof envelope.method === "string") {
+    return Result.succeed({
+      _tag: "Event",
+      key: sessionKey(envelope.sessionId),
+      method: envelope.method,
+      params: envelope.params
+    })
+  }
+  return Result.fail("the envelope is neither a reply nor an event")
+}
+
 export const wire: Wire = {
   encode: (id, method, params, key) => JSON.stringify({ id, method, params, sessionId: key }),
-  decode: (message): Incoming => {
-    const envelope: unknown = JSON.parse(message)
-    if (!isRecord(envelope)) throw new Error("the envelope isn't an object")
-    if (typeof envelope.id === "number") {
-      const error = envelope.error
-      if (error === undefined) return { _tag: "Reply", id: envelope.id, result: envelope.result }
-      if (isRecord(error) && Predicate.isNumber(error.code) && Predicate.isString(error.message)) {
-        return { _tag: "ErrorReply", id: envelope.id, error: { code: error.code, message: error.message } }
-      }
-      throw new Error(`reply ${envelope.id} has a malformed error`)
-    }
-    if (typeof envelope.method === "string") {
-      return { _tag: "Event", key: sessionKey(envelope.sessionId), method: envelope.method, params: envelope.params }
-    }
-    throw new Error("the envelope is neither a reply nor an event")
-  },
+  decode: (message) => Result.flatMap(parseRecord(message), incoming),
   lifecycle: (event, sessions) => {
     if (!isRecord(event.params)) return
     const key = sessionKey(event.params.sessionId)

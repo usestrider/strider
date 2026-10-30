@@ -26,6 +26,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as FiberSet from "effect/FiberSet"
 import * as Option from "effect/Option"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import type * as SchemaAST from "effect/SchemaAST"
 import type * as Scope from "effect/Scope"
@@ -86,10 +87,28 @@ export interface Lifecycle {
 /** What a backend supplies. */
 export interface Wire {
   readonly encode: (id: number, method: string, params: unknown, key: Protocol.SessionKey | undefined) => string
-  /** Decodes an envelope. Throws on one that is malformed, which ends the connection. */
-  readonly decode: (message: string) => Incoming
+  /**
+   * Decodes an envelope, or fails with what is wrong with it. A malformed envelope ends the connection, since
+   * nothing after it can be trusted to be in step.
+   */
+  readonly decode: (message: string) => Result.Result<Incoming, string>
   readonly lifecycle: (event: Extract<Incoming, { _tag: "Event" }>, sessions: Lifecycle) => void
   readonly errors: ReadonlyArray<ErrorMatcher>
+}
+
+/** Whether a value is a JSON object. */
+export const isRecord = (u: unknown): u is Record<string, unknown> =>
+  typeof u === "object" && u !== null && !Array.isArray(u)
+
+/** Parses a message that must be a JSON object, as every wire's envelope is. */
+export const parseRecord = (message: string): Result.Result<Record<string, unknown>, string> => {
+  let envelope: unknown
+  try {
+    envelope = JSON.parse(message)
+  } catch (cause) {
+    return Result.fail(cause instanceof Error ? cause.message : String(cause))
+  }
+  return isRecord(envelope) ? Result.succeed(envelope) : Result.fail("the envelope isn't an object")
 }
 
 /** The most a session may have queued for the worker before its model is unavailable. */
@@ -619,18 +638,17 @@ export const make: (
   const dispatch = (message: string): void => {
     if (lost !== undefined) return
     received++
-    let incoming: Incoming
-    try {
-      incoming = wire.decode(message)
-    } catch (cause) {
+    const decoded = wire.decode(message)
+    if (Result.isFailure(decoded)) {
       loseConnection(
         new ConnectionLost({
           initiator: "remote",
-          description: `The browser sent a malformed message: ${cause instanceof Error ? cause.message : String(cause)}`
+          description: `The browser sent a malformed message: ${decoded.failure}`
         })
       )
       return
     }
+    const incoming = decoded.success
     switch (incoming._tag) {
       case "Reply":
       case "ErrorReply": {

@@ -11,10 +11,13 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
+import * as BidiWire from "../src/internal/bidiWire.ts"
 import * as CdpWire from "../src/internal/cdpWire.ts"
 import * as Ingestion from "../src/internal/ingestion.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
+import * as WebKitWire from "../src/internal/webkitWire.ts"
 import { type FakeBrowser, makeBrowser } from "./utils/FakeBrowser.ts"
 
 interface Recorder {
@@ -304,4 +307,42 @@ describe("ProtocolClient", () => {
       assert.deepStrictEqual(ProtocolClient.valuesAt({}, "/exceptionDetails/exception/objectId"), [])
       assert.strictEqual(Ingestion.utf8Length("aé😀"), 1 + 2 + 4)
     }))
+})
+
+describe("Wire.decode", () => {
+  const wires = { cdp: CdpWire.wire, bidi: BidiWire.wire, webkit: WebKitWire.wire }
+  const fromTarget = (message: string) =>
+    JSON.stringify({ pageProxyId: "5", method: "Target.dispatchMessageFromTarget", params: { targetId: "t", message } })
+
+  it("fails, without throwing, on a message that isn't a JSON object, on every wire", () => {
+    for (const [name, wire] of Object.entries(wires)) {
+      for (const message of ["{", "[]", "1", "null"]) {
+        assert(Result.isFailure(wire.decode(message)), `${name} decodes ${message}`)
+      }
+    }
+  })
+
+  it("fails on an envelope that is neither a reply nor an event, saying why", () => {
+    assert.deepStrictEqual(
+      CdpWire.wire.decode("{\"id\":1,\"error\":\"nope\"}"),
+      Result.fail("reply 1 has a malformed error")
+    )
+    assert.deepStrictEqual(BidiWire.wire.decode("{\"type\":\"other\"}"), Result.fail("an envelope of type other"))
+    assert(Result.isFailure(WebKitWire.wire.decode(fromTarget("{"))))
+  })
+
+  it("unwraps a WebKit target's event to its session", () => {
+    const decoded = WebKitWire.wire.decode(
+      fromTarget(JSON.stringify({ method: "Page.loadEventFired", params: { timestamp: 1 } }))
+    )
+    assert.deepStrictEqual(
+      decoded,
+      Result.succeed<ProtocolClient.Incoming>({
+        _tag: "Event",
+        key: WebKitWire.targetKey("5", "t"),
+        method: "Page.loadEventFired",
+        params: { timestamp: 1 }
+      })
+    )
+  })
 })
