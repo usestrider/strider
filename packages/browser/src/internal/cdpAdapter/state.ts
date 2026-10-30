@@ -138,13 +138,13 @@ export interface RequestEntry {
   requestHeaders: Network.Headers
   sentReported: boolean
   /**
-   * `ExtraInfo` for hops that haven't started, in the order it came: the network's events can overtake the
-   * page's, so a redirect's next hop can have its headers before the redirect is reported.
+   * `ExtraInfo` no hop has said it is owed, in the order it came: a hop says whether it gets one only as it ends,
+   * by its redirect or its response, and the network's events can overtake the page's, so this can be the
+   * current hop's or a later one's.
    */
   readonly ahead: Array<ExtraInfo>
   /**
-   * Earlier hops whose redirect said `ExtraInfo` would come, reported before it did: the next of each phase is
-   * theirs, oldest first.
+   * Hops that ended saying `ExtraInfo` would come, before it did: the next of each phase is theirs, oldest first.
    */
   readonly owed: Array<{ readonly hop: NetworkRequest.HopId; readonly phase: ExtraInfo["phase"] }>
   /**

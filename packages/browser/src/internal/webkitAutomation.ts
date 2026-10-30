@@ -19,6 +19,7 @@
  */
 import * as Data from "effect/Data"
 import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import type * as FileSystem from "effect/FileSystem"
@@ -28,6 +29,7 @@ import * as Random from "effect/Random"
 import * as Schedule from "effect/Schedule"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
+import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Protocol from "../protocol/Protocol.ts"
 import * as SocketConnector from "../protocol/SocketConnector.ts"
 import * as Transport from "../protocol/Transport.ts"
@@ -48,6 +50,12 @@ import * as WebKitWire from "./webkitWire.ts"
 export const automationArguments = (executablePath: string): Option.Option<ReadonlyArray<string>> =>
   executablePath.split(/[\\/]/).at(-1) === "MiniBrowser" ? Option.some(["--automation"]) : Option.none()
 
+/** `self`'s value, or `None` once `deadline` passes on the live clock: a launched browser's time. */
+const byDeadline = (deadline: MonotonicInstant.MonotonicInstant) => <A, E, R>(self: Effect.Effect<A, E, R>) =>
+  Effect.suspend(() =>
+    BrowserClock.timeoutOn(BrowserClock.live, BrowserClock.millisLeft(BrowserClock.live, deadline))(self)
+  )
+
 /** What a launch takes. */
 export interface Settings {
   readonly executablePath: string
@@ -56,6 +64,13 @@ export interface Settings {
   readonly userDataDir?: string | undefined
   /** @default false */
   readonly coreDumps?: boolean | undefined
+  /**
+   * How long each process has, from its start, to answer on its inspector server and start its session, with its
+   * first windows listed.
+   *
+   * @default "30 seconds"
+   */
+  readonly timeout?: Duration.Input | undefined
   /** Wraps each process's Automation transport, as the drift test's recorder does (`test/integration/record.ts`). */
   readonly wrapAutomation?: ((transport: Transport.Transport) => Transport.Transport) | undefined
 }
@@ -117,7 +132,12 @@ const scopeClosed = () => new Transport.ConnectionLost({ initiator: "local", des
  * Starts one browser in automation mode, on a port nothing listens on, tried until the browser starts its server
  * there: one that's taken, it says so on stderr, and keeps running without it (QUIRKS.md, Q216).
  */
-const spawnProcess = Effect.fnUntraced(function*(settings: Settings, index: number, options: ProcessOptions) {
+const spawnProcess = Effect.fnUntraced(function*(
+  settings: Settings,
+  index: number,
+  options: ProcessOptions,
+  deadline: MonotonicInstant.MonotonicInstant
+) {
   const connector = yield* SocketConnector.SocketConnector
   const scope = yield* Effect.scope
   const path = yield* Launch.executable(settings.executablePath)
@@ -150,8 +170,13 @@ const spawnProcess = Effect.fnUntraced(function*(settings: Settings, index: numb
     const outcome = yield* Effect.raceFirst(
       connector.connect({ host: "127.0.0.1", port }).pipe(
         Scope.provide(own),
-        Effect.retry({ schedule: Schedule.spaced("100 millis"), times: 99 }),
-        Effect.map((connection) => ({ _tag: "Connected" as const, connection })),
+        Effect.retry({ schedule: Schedule.spaced("100 millis") }),
+        byDeadline(deadline),
+        Effect.map((connection) =>
+          Option.isSome(connection)
+            ? { _tag: "Connected" as const, connection: connection.value }
+            : { _tag: "Silent" as const }
+        ),
         Effect.orElseSucceed(() => ({ _tag: "Silent" as const })),
         BrowserClock.onLive
       ),
@@ -188,7 +213,18 @@ const startProcess = Effect.fnUntraced(function*(
   options: ProcessOptions,
   pages: Envelope.Endpoint
 ) {
-  const { connection, launched } = yield* spawnProcess(settings, index, options)
+  // One deadline for the process to start, on the live clock: a starved machine's browser is slow at each step
+  const timeout = Duration.fromInputUnsafe(settings.timeout ?? "30 seconds")
+  const deadline = (BrowserClock.now() + Duration.toMillis(timeout) * 1e6) as MonotonicInstant.MonotonicInstant
+  const within = `within ${Duration.format(timeout)}`
+  const waitFor = <A>(deferred: Deferred.Deferred<A>, never: string) =>
+    Deferred.await(deferred).pipe(
+      byDeadline(deadline),
+      Effect.flatMap((value) =>
+        Option.isSome(value) ? Effect.succeed(value.value) : Launch.refused(`${never} ${within}`)
+      )
+    )
+  const { connection, launched } = yield* spawnProcess(settings, index, options, deadline)
   const socket = yield* InspectorSocket.connect(connection)
   const started = yield* Deferred.make<{ readonly browserName: string; readonly browserVersion: string }>()
   const automationReady = yield* Deferred.make<bigint>()
@@ -290,18 +326,8 @@ const startProcess = Effect.fnUntraced(function*(
   }).pipe(
     Effect.catch((error) => Launch.refused(error.message))
   )
-  const browser = yield* Deferred.await(started).pipe(
-    Effect.timeoutOrElse({
-      duration: "10 seconds",
-      orElse: () => Launch.refused("The browser never started a session")
-    })
-  )
-  const target = yield* Deferred.await(automationReady).pipe(
-    Effect.timeoutOrElse({
-      duration: "10 seconds",
-      orElse: () => Launch.refused("The browser never listed its session")
-    })
-  )
+  const browser = yield* waitFor(started, "The browser didn't start a session")
+  const target = yield* waitFor(automationReady, "The browser didn't list its session")
   const automationTransport: Transport.Transport = {
     send: (text) => socket.send({ _tag: "SendMessageToBackend", connection: connectionId, target, message: text }),
     messages: automationLink.messages,
@@ -315,12 +341,7 @@ const startProcess = Effect.fnUntraced(function*(
     effect.pipe(Effect.catch((error) => Launch.refused(`The browser's session refused: ${error.message}`)))
 
   // The first window: the default context's first tab, or this context's anchor
-  const first = yield* Deferred.await(firstList).pipe(
-    Effect.timeoutOrElse({
-      duration: "10 seconds",
-      orElse: () => Launch.refused("The browser never listed its first page")
-    })
-  )
+  const first = yield* waitFor(firstList, "The browser didn't list its first page")
   // The first window has loaded nothing, and the first `createBrowsingContext` takes it rather than open one
   // (MiniBrowser's `browser_window_get_or_create_web_view_for_automation`; QUIRKS.md, Q213): it's claimed first
   const claimed = (yield* run(Automation.createBrowsingContext({}).pipe(Protocol.on(client.root)))).handle
@@ -334,12 +355,7 @@ const startProcess = Effect.fnUntraced(function*(
     const opened = yield* Deferred.make<bigint>()
     holdNext = opened
     anchor = (yield* run(Automation.createBrowsingContext({}).pipe(Protocol.on(client.root)))).handle
-    yield* Deferred.await(opened).pipe(
-      Effect.timeoutOrElse({
-        duration: "10 seconds",
-        orElse: () => Launch.refused("The browser never listed its anchor")
-      })
-    )
+    yield* waitFor(opened, "The browser didn't list its anchor")
   } else {
     for (const page of first) {
       initial.delete(page.id)
