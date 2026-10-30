@@ -744,6 +744,7 @@ export const connect: (
       // A response still waiting for its headers goes with the ones it has
       release(request)
       requests.delete(key)
+      headerStreams.delete(key)
       for (let hop = 0; hop <= request.redirects; hop++) hops.delete(ids.hop(request.id, hop))
     })
     const obligations = new Map<Adapter.ObligationId, ObligationEntry>()
@@ -1606,6 +1607,7 @@ export const connect: (
         const key = requestKey(target, params.requestId)
         let request = requests.get(key)
         if (request !== undefined && params.redirectResponse !== undefined) {
+          expectHeaders(key, request, params.redirectHasExtraInfo === true)
           emitResponse(request, params.redirectResponse)
           emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
           // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
@@ -1670,17 +1672,11 @@ export const connect: (
             at: Adapter.now()
           })
         })
-        const early = earlyHeaders.get(key)
-        if (early !== undefined) {
-          earlyHeaders.delete(key)
-          for (const { phase, headers } of early) {
-            emit({ _tag: "HopHeaders", hop: request.hop, phase, headers: headersOf(headers) })
-            if (phase === "response") request.received = headers
-            else request.sentReported = true
-          }
-        }
+        const stream = headersFor(key)
+        stream.hops.push({ hop: request.hop, expected: undefined, request: false, response: false })
+        flushHeaders(key)
       },
-      // The headers as sent and received: to the request's current hop, or kept until it is sent
+      // Each ExtraInfo stream follows hop order, independently of the main events.
       [Network.requestWillBeSentExtraInfo.method]: (target, params: Network.RequestWillBeSentExtraInfoParams) => {
         if (target === undefined) return
         rawHeaders(requestKey(target, params.requestId), "request", params.headers)
@@ -1699,12 +1695,7 @@ export const connect: (
         if (target === undefined) return
         const request = requests.get(requestKey(target, params.requestId))
         if (request === undefined) return
-        // A response that says no ExtraInfo will come, as one from a cache, was sent with the request event's
-        // headers, if it was sent at all
-        if (!params.hasExtraInfo && !request.sentReported) {
-          request.sentReported = true
-          emit({ _tag: "HopHeaders", hop: request.hop, phase: "request", headers: headersOf(request.requestHeaders) })
-        }
+        expectHeaders(requestKey(target, params.requestId), request, params.hasExtraInfo === true)
         // The network's headers, `Set-Cookie` among them, come in an `ExtraInfo` the response says will follow;
         // it is reported with them (QUIRKS.md, Q158). A response from a cache, a service worker
         // or a route can say so too and get none, so only the network's waits
@@ -1735,6 +1726,10 @@ export const connect: (
         const routed = routeFailed.delete(requestKey(target, params.requestId))
         const request = requests.get(requestKey(target, params.requestId))
         if (request === undefined) return
+        // A failure before the response supplies no ExtraInfo flag. It cannot redirect again, so any
+        // remaining headers belong to this last hop, including ones that arrive after the failure.
+        const key = requestKey(target, params.requestId)
+        if (headersFor(key).hops.at(-1)?.expected === undefined) expectHeaders(key, request, true)
         // A request that fails after its response gets no more: the response goes with the headers it has
         release(request)
         emit({
@@ -1912,22 +1907,62 @@ export const connect: (
       }
     }
 
-    // ExtraInfo that came before its request, by request key; a few hundred at most
-    const earlyHeaders = new Map<string, Array<{ phase: "request" | "response"; headers: Network.Headers }>>()
-    const rawHeaders = (key: string, phase: "request" | "response", headers: Network.Headers) => {
-      const request = requests.get(key)
-      if (request !== undefined) {
-        emit({ _tag: "HopHeaders", hop: request.hop, phase, headers: headersOf(headers) })
-        if (phase === "response") {
-          request.received = headers
-          release(request)
-        } else request.sentReported = true
-        return
+    // CDP orders each ExtraInfo stream, but not relative to main events. A hop's response flag
+    // decides whether it consumes an item from each stream; never attribute by the current hop.
+    const headerStreams = new Map<string, {
+      hops: Array<{ hop: NetworkRequest.HopId; expected: boolean | undefined; request: boolean; response: boolean }>
+      request: Array<Network.Headers>
+      response: Array<Network.Headers>
+    }>()
+    const headersFor = (key: string) => {
+      let stream = headerStreams.get(key)
+      if (stream === undefined) {
+        stream = { hops: [], request: [], response: [] }
+        headerStreams.set(key, stream)
       }
-      const early = earlyHeaders.get(key) ?? []
-      early.push({ phase, headers })
-      earlyHeaders.set(key, early)
-      if (earlyHeaders.size > 500) earlyHeaders.delete(earlyHeaders.keys().next().value!)
+      return stream
+    }
+    const flushHeaders = (key: string) => {
+      const stream = headersFor(key)
+      const request = requests.get(key)
+      for (const phase of ["request", "response"] as const) {
+        for (const hop of stream.hops) {
+          if (hop.expected === undefined) break
+          if (!hop.expected || hop[phase]) continue
+          const headers = stream[phase].shift()
+          if (headers === undefined) break
+          hop[phase] = true
+          emit({ _tag: "HopHeaders", hop: hop.hop, phase, headers: headersOf(headers) })
+          if (request?.hop === hop.hop) {
+            if (phase === "response") {
+              request.received = headers
+              release(request)
+            } else request.sentReported = true
+          }
+        }
+      }
+    }
+    const expectHeaders = (key: string, request: RequestEntry, expected: boolean) => {
+      const hop = headersFor(key).hops.find((hop) => hop.hop === request.hop)!
+      hop.expected = expected
+      flushHeaders(key)
+      if (!expected && !request.sentReported) {
+        request.sentReported = true
+        emit({ _tag: "HopHeaders", hop: request.hop, phase: "request", headers: headersOf(request.requestHeaders) })
+      }
+    }
+    const rawHeaders = (key: string, phase: "request" | "response", headers: Network.Headers) => {
+      headersFor(key)[phase].push(headers)
+      flushHeaders(key)
+      // Bound unsolicited events that never get a main request, as well as retained requests.
+      if (headerStreams.size > requests.size + 500) {
+        for (const candidate of headerStreams.keys()) {
+          if (!requests.has(candidate)) {
+            headerStreams.delete(candidate)
+            break
+          }
+        }
+      }
     }
 
     // Reports a held response, then what came after it
