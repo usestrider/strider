@@ -1365,46 +1365,38 @@ export class LocatorImpl implements Locator.Locator {
             )
           }
         )
-      while (true) {
-        const left = record.left()
-        if (left <= 0) return yield* Effect.fail(timedOut())
-        const first = yield* round(Runtime.roundCap(left), false).pipe(
-          Effect.flatMap(settle),
-          Effect.catch((failure) =>
-            failure._tag === "Deadline" ? Effect.fail(timedOut(failure.hint)) : Effect.fail(failure)
-          )
-        )
-        if (Option.isNone(first)) continue
-        // Input to a page is serialized; acquiring the permit takes from the deadline, and the checks run again
-        const outcome = yield* owner.page.input.withPermit(Effect.gen({ self: this }, function*() {
-          const apply = options?.trial !== true
-          const answer = yield* round(Runtime.roundCap(record.left()), apply).pipe(
-            Effect.catch((failure) =>
-              failure._tag === "Deadline" ? Effect.fail(timedOut(failure.hint)) : Effect.fail(failure)
+      // A round that reached the deadline is the action's own Timeout, with what the record saw
+      const attempts = Effect.gen({ self: this }, function*() {
+        while (true) {
+          const left = record.left()
+          if (left <= 0) return yield* Effect.fail(timedOut())
+          const first = yield* round(Runtime.roundCap(left), false).pipe(Effect.flatMap(settle))
+          if (Option.isNone(first)) continue
+          // Input to a page is serialized; acquiring the permit takes from the deadline, and the checks run again
+          const outcome = yield* owner.page.input.withPermit(Effect.gen({ self: this }, function*() {
+            const apply = options?.trial !== true
+            const answer = yield* round(Runtime.roundCap(record.left()), apply)
+            const disarm = this.disarm(answer.routed.document, id)
+            const again = yield* settle(answer).pipe(
+              // A guard the round armed comes off when the point outside its frame wasn't ready
+              Effect.tap((ready) =>
+                Option.isNone(ready) && apply && answer.response._tag === "Ready" ? Effect.ignore(disarm) : Effect.void
+              )
             )
-          )
-          const disarm = this.disarm(answer.routed.document, id)
-          const again = yield* settle(answer).pipe(
-            Effect.catch((failure) =>
-              failure._tag === "Deadline" ? Effect.fail(timedOut(failure.hint)) : Effect.fail(failure)
-            ),
-            // A guard the round armed comes off when the point outside its frame wasn't ready
-            Effect.tap((ready) =>
-              Option.isNone(ready) && apply && answer.response._tag === "Ready" ? Effect.ignore(disarm) : Effect.void
-            )
-          )
-          if (Option.isNone(again)) return "again" as const
-          // A trial stops at the last check, holding the permit as the action would
-          if (options?.trial === true) return "done" as const
-          const done = yield* perform(again.value.response, { send: send(again.value), disarm }, record)
-          if (done === "done") return "done" as const
-          // The guard stopped the gesture before the page saw it: nothing happened, so check again
-          record.markNotSent()
-          record.observe(done.retry)
-          return "again" as const
-        })).pipe((permitted) => record.bound(permitted, () => hint()))
-        if (outcome === "done") return
-      }
+            if (Option.isNone(again)) return "again" as const
+            // A trial stops at the last check, holding the permit as the action would
+            if (options?.trial === true) return "done" as const
+            const done = yield* perform(again.value.response, { send: send(again.value), disarm }, record)
+            if (done === "done") return "done" as const
+            // The guard stopped the gesture before the page saw it: nothing happened, so check again
+            record.markNotSent()
+            record.observe(done.retry)
+            return "again" as const
+          })).pipe((permitted) => record.bound(permitted, () => hint()))
+          if (outcome === "done") return
+        }
+      })
+      return yield* attempts.pipe(Effect.catchTag("Deadline", (failure) => Effect.fail(timedOut(failure.hint))))
     }).pipe(
       Effect.raceFirst(Runtime.pageEnded(owner.page, Operation.operationId())),
       Operation.named(operation, {
