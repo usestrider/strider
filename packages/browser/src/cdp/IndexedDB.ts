@@ -131,7 +131,7 @@ export const Key = /*#__PURE__*/ Schema.suspend(() =>
     date: Schema.optional(Schema.Number),
     array: Schema.optional(Schema.Array(Key))
   }).annotate({ identifier: "IndexedDB.Key" })
-) as any as Schema.Codec<Key>
+) as any as Schema.Codec<Key, unknown>
 
 /**
  * Key type.
@@ -255,7 +255,7 @@ export const KeyRange = /*#__PURE__*/ Schema.suspend(() =>
     lowerOpen: Schema.Boolean,
     upperOpen: Schema.Boolean
   }).annotate({ identifier: "IndexedDB.KeyRange" })
-) as any as Schema.Codec<KeyRange>
+) as any as Schema.Codec<KeyRange, unknown>
 
 /**
  * Object store.
@@ -477,7 +477,7 @@ export const DeleteObjectStoreEntriesParams = /*#__PURE__*/ Schema.suspend(() =>
     objectStoreName: Schema.String,
     keyRange: KeyRange
   }).annotate({ identifier: "IndexedDB.DeleteObjectStoreEntriesParams" })
-) as any as Schema.Codec<DeleteObjectStoreEntriesParams>
+) as any as Schema.Codec<DeleteObjectStoreEntriesParams, unknown>
 
 /**
  * Gets metadata of an object store.
@@ -627,7 +627,7 @@ export const RequestDataParams = /*#__PURE__*/ Schema.suspend(() =>
     pageSize: Schema.Int,
     keyRange: Schema.optional(KeyRange)
   }).annotate({ identifier: "IndexedDB.RequestDataParams" })
-) as any as Schema.Codec<RequestDataParams>
+) as any as Schema.Codec<RequestDataParams, unknown>
 
 /**
  * Requests data from object store or index.

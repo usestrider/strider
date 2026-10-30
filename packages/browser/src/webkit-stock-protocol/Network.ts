@@ -145,7 +145,7 @@ export const Initiator = /*#__PURE__*/ Schema.suspend(() =>
     lineNumber: Schema.optional(Schema.Number),
     nodeId: Schema.optional(DOM.NodeId)
   }).annotate({ identifier: "Network.Initiator" })
-) as any as Schema.Codec<Initiator>
+) as any as Schema.Codec<Initiator, unknown>
 
 /**
  * Type of this initiator.
@@ -1445,7 +1445,7 @@ export const RequestServedFromMemoryCacheParams = /*#__PURE__*/ Schema.suspend((
     initiator: Initiator,
     resource: CachedResource
   }).annotate({ identifier: "Network.RequestServedFromMemoryCacheParams" })
-) as any as Schema.Codec<RequestServedFromMemoryCacheParams>
+) as any as Schema.Codec<RequestServedFromMemoryCacheParams, unknown>
 
 /**
  * Fired when page is about to send HTTP request.
@@ -1516,7 +1516,7 @@ export const RequestWillBeSentParams = /*#__PURE__*/ Schema.suspend(() =>
     type: Schema.optional(Page.ResourceType),
     targetId: Schema.optional(Schema.String)
   }).annotate({ identifier: "Network.RequestWillBeSentParams" })
-) as any as Schema.Codec<RequestWillBeSentParams>
+) as any as Schema.Codec<RequestWillBeSentParams, unknown>
 
 /**
  * Resolves JavaScript WebSocket object for given request id.
@@ -1575,7 +1575,7 @@ export const ResolveWebSocketResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     object: Runtime.RemoteObject
   }).annotate({ identifier: "Network.ResolveWebSocketResult" })
-) as any as Schema.Codec<ResolveWebSocketResult>
+) as any as Schema.Codec<ResolveWebSocketResult, unknown>
 
 /**
  * Fired when HTTP response has been intercepted. The frontend must response with <code>Network.interceptContinue</code> or <code>Network.interceptWithResponse</code>` to continue this response.
