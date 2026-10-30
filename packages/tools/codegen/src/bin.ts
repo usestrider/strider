@@ -20,11 +20,14 @@ import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { Argument, Command, Flag } from "effect/cli"
 import * as Console from "effect/Console"
+import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
+import * as Hex from "effect/encoding/Hex"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
-import { execFileSync } from "node:child_process"
-import { createHash } from "node:crypto"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import { CodegenError, fromThrown } from "./CodegenError.ts"
 import { emit } from "./Emit.ts"
 import * as Keyboards from "./Keyboards.ts"
@@ -53,16 +56,30 @@ const writeOrCheck = Effect.fnUntraced(function*(
 
 /** Formats generated source with the repository's dprint configuration, as if the file were at `file`. */
 const format = (root: string, file: string, source: string) =>
-  Effect.try({
-    try: () =>
-      execFileSync(`${root}/node_modules/.bin/dprint`, ["fmt", "--stdin", file], {
-        cwd: root,
-        input: source,
-        encoding: "utf8",
-        maxBuffer: 64 * 1024 * 1024
-      }),
-    catch: (cause) => new CodegenError({ message: `dprint couldn't format ${file}`, cause })
-  })
+  Effect.gen(function*() {
+    const dprint = yield* ChildProcess.make(`${root}/node_modules/.bin/dprint`, ["fmt", "--stdin", file], {
+      cwd: root,
+      stdin: Stream.make(new TextEncoder().encode(source))
+    })
+    const [formatted, errors, exitCode] = yield* Effect.all([
+      Stream.mkString(Stream.decodeText(dprint.stdout)),
+      Stream.mkString(Stream.decodeText(dprint.stderr)),
+      dprint.exitCode
+    ], { concurrency: "unbounded" })
+    if (exitCode !== 0) {
+      return yield* new CodegenError({ message: `dprint couldn't format ${file}: ${errors.trim()}` })
+    }
+    return formatted
+  }).pipe(
+    Effect.scoped,
+    Effect.catchTag("PlatformError", (cause) => new CodegenError({ message: `dprint couldn't format ${file}`, cause }))
+  )
+
+/** What `trace-contract` checks: the release the contract was read from, and each file's SHA-256 then. */
+const TraceContract = Schema.Struct({
+  release: Schema.String,
+  files: Schema.Record(Schema.String, Schema.String)
+})
 
 const backend = Argument.Literals("backend", Backend.literals)
 const check = Flag.Boolean("check").pipe(Flag.withDefault(false))
@@ -153,13 +170,14 @@ const traceContract = Command.make(
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const contract = JSON.parse(
+      const crypto = yield* Crypto.Crypto
+      const contract = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(TraceContract))(
         yield* fs.readFileString(path.join(process.cwd(), "packages/tools/codegen/trace-contract.json"))
-      ) as { readonly release: string; readonly files: Readonly<Record<string, string>> }
+      )
       const changed: Array<string> = []
       for (const [file, expected] of Object.entries(contract.files)) {
         const bytes = yield* fs.readFile(path.join(checkout, file))
-        const actual = createHash("sha256").update(bytes).digest("hex")
+        const actual = Hex.encode(yield* crypto.digest("SHA-256", bytes))
         if (actual !== expected) changed.push(file)
         yield* Console.log(`${file}: ${actual === expected ? "as read" : "changed"}`)
       }

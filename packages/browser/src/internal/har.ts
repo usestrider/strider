@@ -11,8 +11,8 @@
  * - **Redaction.** Cookie values, `Authorization` and `Proxy-Authorization`, and a URL's credentials are
  *   `REDACTED` unless the export includes their class; a request's body is left out unless it includes
  *   `requestBodies`.
- * - **Playwright's extensions**, which its trace viewer reads: `_monotonicTime`, `_resourceType`, `_frameref`,
- *   `_transferSize`, `_failureText`, `_file` and `_webSocketMessages`; and ours, `_servedBy` and `_incomplete`.
+ * - **The format** is `harLog.ts`'s schema, which replay reads with: HAR 1.2, Playwright's extensions, which its
+ *   trace viewer reads, and ours.
  */
 import * as ByteSize from "effect/ByteSize"
 import * as Deferred from "effect/Deferred"
@@ -24,6 +24,7 @@ import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import type * as Types from "effect/Types"
 import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as Har from "../Har.ts"
@@ -34,6 +35,7 @@ import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Events from "./events.ts"
 import type * as Handles from "./handles.ts"
+import type * as HarLog from "./harLog.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Recordings from "./recordings.ts"
@@ -220,11 +222,6 @@ export const start = (
 
 // ── HAR 1.2 ──
 
-export interface Header {
-  readonly name: string
-  readonly value: string
-}
-
 /** How an export writes entries. */
 export interface Writing {
   readonly detail: "full" | "minimal"
@@ -261,7 +258,10 @@ const cookiePair = (pair: string, writing: Writing): string => {
 }
 
 /** Headers as HAR lists them, a repeated one once per value, with secrets redacted. */
-const headersOf = (headers: Readonly<Record<string, string | undefined>>, writing: Writing): Array<Header> =>
+const headersOf = (
+  headers: Readonly<Record<string, string | undefined>>,
+  writing: Writing
+): Array<typeof HarLog.NameValue.Type> =>
   Object.entries(headers).flatMap(([name, joined]) =>
     (joined ?? "").split("\n").map((value) => ({
       name,
@@ -276,33 +276,50 @@ const headersOf = (headers: Readonly<Record<string, string | undefined>>, writin
   )
 
 /** The cookies a request sent, from its `Cookie` header. */
-const requestCookies = (headers: Readonly<Record<string, string | undefined>>, writing: Writing) =>
+const requestCookies = (
+  headers: Readonly<Record<string, string | undefined>>,
+  writing: Writing
+): Array<typeof HarLog.Cookie.Type> =>
   (headers.cookie ?? "").split(/;\s*/).filter((pair) => pair.includes("=")).map((pair) => {
     const at = pair.indexOf("=")
     return { name: pair.slice(0, at), value: writing.include.has("cookies") ? pair.slice(at + 1) : redacted }
   })
 
-/** The cookies a response set, from its `Set-Cookie` headers. */
-const responseCookies = (headers: Readonly<Record<string, string | undefined>>, writing: Writing) =>
+/**
+ * The cookies a response set, from its `Set-Cookie` headers, as the response wrote them. Effect's
+ * `Cookies.fromSetCookie` isn't used: it reads a cookie for a jar, so it drops a cookie whose name isn't a token
+ * and a path that doesn't start with `/`, takes the leading `.` off a domain and lowercases `SameSite`, where a HAR
+ * records what the server sent.
+ */
+const responseCookies = (
+  headers: Readonly<Record<string, string | undefined>>,
+  writing: Writing
+): Array<typeof HarLog.Cookie.Type> =>
   (headers["set-cookie"] ?? "").split("\n").filter((line) => line.includes("=")).map((line) => {
     const [pair, ...attributes] = line.split(";").map((part) => part.trim())
     const at = pair!.indexOf("=")
-    const cookie: Record<string, string | boolean> = {
+    const cookie: Types.Mutable<typeof HarLog.Cookie.Type> = {
       name: pair!.slice(0, at),
       value: writing.include.has("cookies") ? pair!.slice(at + 1) : redacted
     }
     for (const attribute of attributes) {
-      const [key, value = ""] = attribute.split("=")
-      switch (key!.toLowerCase()) {
+      // An attribute's value runs to the end, `=` and all
+      const equals = attribute.indexOf("=")
+      const key = equals < 0 ? attribute : attribute.slice(0, equals).trim()
+      const value = equals < 0 ? "" : attribute.slice(equals + 1).trim()
+      switch (key.toLowerCase()) {
         case "path":
           cookie.path = value
           break
         case "domain":
           cookie.domain = value
           break
-        case "expires":
-          cookie.expires = value
+        case "expires": {
+          // HAR writes a cookie's expiry in ISO 8601; a date that doesn't parse is left out
+          const date = new Date(value)
+          if (!Number.isNaN(date.getTime())) cookie.expires = date.toISOString()
           break
+        }
         case "httponly":
           cookie.httpOnly = true
           break
@@ -319,7 +336,7 @@ const responseCookies = (headers: Readonly<Record<string, string | undefined>>, 
 
 const queryOf = (url: string) => {
   try {
-    const query: Array<Header> = []
+    const query: Array<typeof HarLog.NameValue.Type> = []
     new URL(url).searchParams.forEach((value, name) => query.push({ name, value }))
     return query
   } catch {
@@ -333,6 +350,7 @@ const textual = (mimeType: string) =>
 /**
  * A request's body as HAR's `postData` (Q164): text where its type is textual, with a form's `params`;
  * otherwise base64 with `_encoding` where bodies are embedded, or a file beside the HAR where they are attached.
+ * HAR's `postData` has no `encoding`, as a response's `content` has, so the flag is an extension.
  */
 const postDataOf = (
   request: NetworkRequest.NetworkRequest,
@@ -340,7 +358,7 @@ const postDataOf = (
   headers: Readonly<Record<string, string | undefined>>,
   writing: Writing
 ): {
-  readonly postData: Record<string, unknown>
+  readonly postData: typeof HarLog.PostData.Type
   readonly file: Option.Option<{ path: string; content: Uint8Array }>
 } => {
   const mimeType = (headers["content-type"] ?? "application/octet-stream").split(";")[0]!.trim()
@@ -370,7 +388,7 @@ export const entryOf = (
   clock: Recordings.Clock,
   writing: Writing
 ): {
-  readonly entry: Record<string, unknown>
+  readonly entry: HarLog.Entry
   readonly files: ReadonlyArray<{ path: string; content: Uint8Array }>
 } => {
   const { request } = recorded
@@ -405,7 +423,7 @@ export const entryOf = (
     ),
     () => ""
   )
-  const content: Record<string, unknown> = {
+  const content: Types.Mutable<typeof HarLog.Content.Type> = {
     size: Option.match(recorded.body, { onNone: () => -1, onSome: (body) => body.length }),
     mimeType
   }
@@ -432,7 +450,7 @@ export const entryOf = (
     ? Option.some(postDataOf(request, recorded.requestBody.value, requestHeaders, writing))
     : Option.none()
   const status = Option.match(response, { onNone: () => -1, onSome: (response) => response.status })
-  const entry: Record<string, unknown> = {
+  const entry: HarLog.Entry = {
     ...(request.initiator._tag === "Document" ? { pageref: request.initiator.navigable } : {}),
     startedDateTime: Recordings.wallTime(clock, request.at),
     time,
@@ -475,7 +493,7 @@ export const entryOf = (
     ...(Option.isNone(end) ? { _incomplete: true } : {}),
     ...(recorded.frames.length === 0 ? {} : {
       _webSocketMessages: recorded.frames.map((frame) => ({
-        type: frame.direction === "sent" ? "send" : "receive",
+        type: frame.direction === "sent" ? "send" as const : "receive" as const,
         time: (clock.wall + (frame.at - clock.monotonic) / 1e6) / 1e3,
         opcode: frame.payload._tag === "Text" ? 1 : 2,
         data: frame.payload._tag === "Text" ? frame.payload.text : Encoding.encode(frame.payload.bytes)
@@ -497,7 +515,7 @@ export const logOf = (
   clock: Recordings.Clock,
   writing: Writing,
   browser: { readonly name: string; readonly version: string }
-) => {
+): { readonly log: HarLog.Log; readonly files: ReadonlyArray<{ path: string; content: Uint8Array }> } => {
   const files: Array<{ path: string; content: Uint8Array }> = []
   const written = entries.map((recorded) => {
     const { entry, files: named } = entryOf(recorded, clock, writing)
@@ -511,7 +529,7 @@ export const logOf = (
       )
     )
   ]
-  const log = {
+  const log: HarLog.Log = {
     log: {
       version: "1.2",
       creator: { name: "Strider", version: "0.1.0" },
