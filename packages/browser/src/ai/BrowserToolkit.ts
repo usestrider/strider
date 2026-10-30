@@ -46,28 +46,7 @@ export type SecretName = typeof SecretName.Type
  * @category models
  * @since 0.1.0
  */
-export type ToolName =
-  | "pages"
-  | "newPage"
-  | "tabs"
-  | "control"
-  | "release"
-  | "goto"
-  | "back"
-  | "snapshot"
-  | "find"
-  | "screenshot"
-  | "click"
-  | "fill"
-  | "press"
-  | "select"
-  | "scroll"
-  | "next"
-  | "await"
-  | "expect"
-  | "history"
-  | "route"
-  | "dialog"
+export type ToolName = keyof Tools
 
 /**
  * The toolkit's tool definitions, by name.

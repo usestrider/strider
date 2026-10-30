@@ -25,6 +25,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Redacted from "effect/Redacted"
+import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import type * as CapturePolicy from "../ai/CapturePolicy.ts"
 import type * as Browser from "../Browser.ts"
@@ -120,6 +121,8 @@ export const masked = (text: string): string => {
   }).join("\n")
 }
 
+const isRef = Schema.is(Tools.Ref)
+
 /** A locator string's query, or a ref's locator from the page's latest snapshot. */
 const parseTarget = (
   page: Page.Page,
@@ -130,9 +133,9 @@ const parseTarget = (
 ): Effect.Effect<Locator.Locator, Tools.ToolFailure> =>
   Effect.suspend(() => {
     const invalid = (hint: string) => Effect.fail(failed("InvalidInput", `${JSON.stringify(target)}: ${hint}`))
-    if (/^e\d+$/.test(target)) {
+    if (isRef(target)) {
       const snapshot = latest(name)
-      if (Option.isNone(snapshot) || !snapshot.value.refs.has(target as Snapshot.RefId)) {
+      if (Option.isNone(snapshot) || !snapshot.value.refs.has(target)) {
         const elsewhere = owner(target)
         return invalid(
           Option.isSome(elsewhere) && elsewhere.value !== name
@@ -142,7 +145,7 @@ const parseTarget = (
             : `${name}'s latest snapshot has no ${target}`
         )
       }
-      return Effect.succeed(snapshot.value.ref(target as Snapshot.RefId))
+      return Effect.succeed(snapshot.value.ref(target))
     }
     const quoted = (value: string) => /^"(.*)"$/.exec(value)?.[1]
     const [kind, ...rest] = target.split("=")
