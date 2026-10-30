@@ -18,6 +18,7 @@
 import * as Cause from "effect/Cause"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Hex from "effect/encoding/Hex"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
@@ -164,7 +165,7 @@ const png: Adapter.ScreenshotOptions = {
 /** A text's SHA-1, in hex: the name of a stylesheet's file in the trace, as the viewer's own traces name theirs. */
 const digest = (text: string) =>
   Effect.promise(() => crypto.subtle.digest("SHA-1", new TextEncoder().encode(text))).pipe(
-    Effect.map((hash) => Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join(""))
+    Effect.map((hash) => Hex.encode(new Uint8Array(hash)))
   )
 
 /**

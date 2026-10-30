@@ -11,6 +11,7 @@
  *   an encoding or a length go, and a `Set-Cookie` whose value an export redacted goes with them. An entry that
  *   failed without a response is replayed as a failure.
  */
+import * as Bytes from "effect/Bytes"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/encoding/Base64"
 import * as Zip from "effect/encoding/Zip"
@@ -61,8 +62,6 @@ export interface Options {
 
 const zipSignature = [0x50, 0x4b, 0x03, 0x04]
 
-const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((byte, at) => byte === b[at])
-
 /** The headers a decoded body can't be replayed with. */
 const describesEncoding = new Set(["content-encoding", "content-length", "transfer-encoding"])
 
@@ -76,14 +75,7 @@ const read = Effect.fnUntraced(function*(path: string) {
     yield* Stream.make(bytes).pipe(
       Stream.pipeThroughChannel(Zip.decode()),
       Stream.runForEach((entry) =>
-        Stream.runCollect(entry.body).pipe(Effect.map((chunks) => {
-          const all = Array.from(chunks)
-          const content = new Uint8Array(all.reduce((size, chunk) => size + chunk.length, 0))
-          let offset = 0
-          for (const chunk of all) {
-            content.set(chunk, offset)
-            offset += chunk.length
-          }
+        Stream.mkUint8Array(entry.body).pipe(Effect.map((content) => {
           files.set(entry.header.path, content)
         }))
       )
@@ -173,7 +165,7 @@ export const fromHar = (
             matching = candidates.filter((entry) =>
               Option.match(bodyOf(entry.request.postData, entry.request.postData?._encoding === "base64", files), {
                 onNone: () => true,
-                onSome: (recorded) => sameBytes(recorded, sent.value)
+                onSome: (recorded) => Bytes.Equivalence(recorded, sent.value)
               })
             )
           }
