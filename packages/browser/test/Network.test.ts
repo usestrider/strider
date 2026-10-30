@@ -12,14 +12,18 @@ import * as Cookies from "effect/http/Cookies"
 import * as Headers from "effect/http/Headers"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import * as Har from "../src/internal/har.ts"
+import * as HarLog from "../src/internal/harLog.ts"
+import type * as Model from "../src/internal/model.ts"
 import * as RouteDecision from "../src/internal/routeDecision.ts"
 import * as Routes from "../src/internal/routes.ts"
 import * as NetworkRequest from "../src/NetworkRequest.ts"
+import * as NetworkResponse from "../src/NetworkResponse.ts"
 
 describe("A URLPattern route's intercept", () => {
   it("covers the pattern's fixed prefix, written as a URL has it", () => {
@@ -136,6 +140,8 @@ const entry = (
   response: { readonly status: number; readonly text?: string; readonly headers?: ReadonlyArray<[string, string]> },
   postData?: string
 ) => ({
+  startedDateTime: "2026-10-30T00:00:00.000Z",
+  time: -1,
   request: {
     method,
     url,
@@ -162,7 +168,8 @@ const entry = (
   timings: { send: 0, wait: 0, receive: 0 }
 })
 
-const harOf = (entries: ReadonlyArray<unknown>) => JSON.stringify({ log: { version: "1.2", entries } })
+const harOf = (entries: ReadonlyArray<unknown>) =>
+  JSON.stringify({ log: { version: "1.2", creator: { name: "test", version: "0" }, entries } })
 
 const paused = (method: NetworkRequest.NetworkRequest["method"], url: string, body?: string): Route.RequestPhase => ({
   phase: "request",
@@ -250,5 +257,126 @@ describe("Route.fromHar", () => {
       assert.strictEqual(error.reason._tag, "InvalidInput")
       const missing = yield* Effect.flip(Route.fromHar(path.join(directory, "missing.har")))
       assert.strictEqual(missing.reason._tag, "ReadFailed")
+    }).pipe(Effect.provide(NodeServices.layer)))
+})
+
+describe("A HAR an export writes", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-har-"))
+  const clock = { wall: Date.UTC(2026, 9, 30), monotonic: 0 as NetworkRequest.NetworkRequest["at"] }
+  const at = (millis: number) => (millis * 1e6) as NetworkRequest.NetworkRequest["at"]
+  const sent = (method: NetworkRequest.NetworkRequest["method"], url: string, type: string, hop: string) =>
+    new NetworkRequest.NetworkRequest({
+      ...request(method, url, { "content-type": type }),
+      hop: hop as NetworkRequest.HopId,
+      at: at(1)
+    })
+
+  /** A hop that finished with a response, as the model holds it. */
+  const answered = (
+    request: NetworkRequest.NetworkRequest,
+    response: { readonly status: number; readonly headers: Record<string, string> },
+    bodies: { readonly request: Uint8Array; readonly response: Uint8Array }
+  ): Har.Recorded => {
+    const hop: Model.HopEntry = {
+      request,
+      response: Option.some(
+        new NetworkResponse.NetworkResponse({
+          hop: request.hop,
+          url: request.url,
+          status: response.status as NetworkResponse.StatusCode,
+          statusText: "OK",
+          httpVersion: Option.some("http/1.1"),
+          headers: Headers.fromInput(response.headers),
+          servedBy: "network",
+          at: at(2)
+        })
+      ),
+      sent: Option.none(),
+      sentKnown: Deferred.makeUnsafe<void>(),
+      received: Option.none(),
+      end: Deferred.makeUnsafe<Model.HopEnd>(),
+      page: Option.none(),
+      context: Option.none()
+    }
+    return {
+      request,
+      hop: Option.some(hop),
+      end: Option.some({
+        _tag: "Finished",
+        encodedBytes: bodies.response.length,
+        at: at(3),
+        httpVersion: Option.none()
+      }),
+      body: Option.some(bodies.response),
+      requestBody: Option.some(bodies.request),
+      frames: [],
+      done: Deferred.makeUnsafe<void>()
+    }
+  }
+
+  it.effect("is read back by replay, which answers with the bodies the recording had", () =>
+    Effect.gen(function*() {
+      const json = (text: string) => new TextEncoder().encode(text)
+      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
+      const search = "https://shop.example.com/api/search"
+      const { log } = Har.logOf(
+        [
+          answered(sent("POST", search, "application/json", "Q1.0"), {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+              "set-cookie": "seen=1; Path=/; Domain=.example.com; Expires=Fri, 30 Oct 2026 12:00:00 GMT; HttpOnly"
+            }
+          }, { request: json(`{"q":"shoes"}`), response: json(`["boots"]`) }),
+          answered(sent("POST", search, "application/json", "Q2.0"), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }, { request: json(`{"q":"hats"}`), response: json(`["caps"]`) }),
+          answered(sent("PUT", "https://shop.example.com/logo", "image/png", "Q3.0"), {
+            status: 201,
+            headers: { "content-type": "image/png" }
+          }, { request: png, response: png })
+        ],
+        clock,
+        {
+          detail: "full",
+          include: new Set(["requestBodies", "cookies"]),
+          bodies: { _tag: "Embed" }
+        },
+        { name: "Chromium", version: "155" }
+      )
+      const text = yield* Schema.encodeEffect(HarLog.LogJson)(log)
+      // The schema writes every field the entries hold, in the order they hold them
+      assert.strictEqual(text, JSON.stringify(log, null, 2))
+      const [shoesEntry, , logoEntry] = log.log.entries
+      assert.deepStrictEqual(shoesEntry!.response.cookies, [{
+        name: "seen",
+        value: "1",
+        path: "/",
+        domain: ".example.com",
+        expires: "Fri, 30 Oct 2026 12:00:00 GMT",
+        httpOnly: true
+      }])
+      // A body that isn't text is base64: a response's says so in HAR's `encoding`, a request's in `_encoding`
+      assert.strictEqual(logoEntry!.response.content.encoding, "base64")
+      assert.strictEqual(logoEntry!.request.postData?._encoding, "base64")
+
+      const file = path.join(directory, "written.har")
+      fs.writeFileSync(file, text)
+      const handler = yield* Route.fromHar(file)
+      const hats = fulfilled(yield* handler(paused("POST", search, `{"q":"hats"}`)))
+      assert.strictEqual(bodyText(hats), `["caps"]`)
+      const shoes = fulfilled(yield* handler(paused("POST", search, `{"q":"shoes"}`)))
+      assert.strictEqual(bodyText(shoes), `["boots"]`)
+      assert.strictEqual(shoes.cookies.cookies.seen?.value, "1")
+      const logo = fulfilled(
+        yield* handler({
+          phase: "request",
+          request: request("PUT", "https://shop.example.com/logo"),
+          requestBody: Effect.succeed(Option.some(png))
+        })
+      )
+      assert.strictEqual(logo.status, 201)
+      assert.deepStrictEqual(logo.body._tag === "Uint8Array" ? Array.from(logo.body.body) : [], Array.from(png))
     }).pipe(Effect.provide(NodeServices.layer)))
 })

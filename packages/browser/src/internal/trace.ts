@@ -22,6 +22,7 @@ import * as Hex from "effect/encoding/Hex"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
+import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -40,6 +41,7 @@ import * as Capture from "./capture.ts"
 import * as Events from "./events.ts"
 import * as Filters from "./filters.ts"
 import * as HarImpl from "./har.ts"
+import * as HarLog from "./harLog.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Recorders from "./recorders.ts"
@@ -161,6 +163,12 @@ const png: Adapter.ScreenshotOptions = {
   scale: "device",
   omitBackground: false
 }
+
+/** A line of `trace.network`: one HAR entry, which the trace viewer reads as a resource. */
+const ResourceSnapshot = Schema.fromJsonString(Schema.Struct({
+  type: Schema.Literal("resource-snapshot"),
+  snapshot: HarLog.Entry
+}))
 
 /** A text's SHA-1, in hex: the name of a stylesheet's file in the trace, as the viewer's own traces name theirs. */
 const digest = (text: string) =>
@@ -687,7 +695,15 @@ export const start = Effect.fnUntraced(function*(
         include: new Set(),
         bodies: { _tag: "File", prefix: "resources/" }
       }, { name: info.product, version: info.version })
-      const resources = log.log.entries.map((entry) => JSON.stringify({ type: "resource-snapshot", snapshot: entry }))
+      const resources = yield* Effect.forEach(
+        log.log.entries,
+        (entry) => Schema.encodeEffect(ResourceSnapshot)({ type: "resource-snapshot", snapshot: entry })
+      ).pipe(
+        Effect.mapError((error): Recordings.WriteFailure => ({
+          path: "",
+          hint: `The network's entries couldn't be encoded: ${error.message}`
+        }))
+      )
       files.push({ path: "trace.network", content: resources.length === 0 ? "" : `${resources.join("\n")}\n` })
       files.push(...bodies)
     }
