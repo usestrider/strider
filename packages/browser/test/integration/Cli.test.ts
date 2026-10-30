@@ -634,6 +634,30 @@ describe("strider", () => {
       }).pipe(Effect.provide(NodeServices.layer))
     ), timeout)
 
+  it.live("shows what a daemon wrote to standard error when it dies before it serves", () =>
+    Effect.gen(function*() {
+      const env = environment()
+      // A module the daemon, and only the daemon, fails to load, as one that fails at import time does
+      const preload = path.join(env.XDG_RUNTIME_DIR, "boom.mjs")
+      fs.writeFileSync(
+        preload,
+        `if (process.argv.includes("__daemon")) { console.error("boom at import"); process.exit(3) }\n`
+      )
+      const started = yield* strider(
+        { ...env, NODE_OPTIONS: `--import=${preload}` },
+        "start",
+        "--name",
+        "doomed",
+        "--chromium",
+        chromium.executable
+      )
+      assert.strictEqual(started.code, 3)
+      assert.include(started.err, "exited before it served (3)")
+      assert.include(started.err, "boom at import")
+      // Nothing is left beside the sessions
+      assert.deepStrictEqual(fs.readdirSync(env.XDG_RUNTIME_DIR).filter((name) => name.startsWith(".start-")), [])
+    }), timeout)
+
   it.live("fails at once on what a command can't mean, with exit codes of its own", () =>
     Effect.gen(function*() {
       const env = environment()

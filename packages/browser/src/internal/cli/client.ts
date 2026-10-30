@@ -115,6 +115,12 @@ export const forward = Effect.fnUntraced(function*(argv: ReadonlyArray<string>) 
   )
 })
 
+/** The last lines of a daemon's standard error, as many as read well in a terminal. */
+const tail = (text: string): string => {
+  const lines = text.split("\n")
+  return (lines.length > 20 ? ["…", ...lines.slice(-20)] : lines).join("\n")
+}
+
 /**
  * `strider start`: starts the session's daemon, detached, with this command's arguments, and prints what it
  * answers once it serves, or why it couldn't start. `say` prints the spec: on standard output, unless that is
@@ -122,7 +128,8 @@ export const forward = Effect.fnUntraced(function*(argv: ReadonlyArray<string>) 
  *
  * The daemon answers over a socket this process listens on for the start alone, whose path is its first argument,
  * not over a pipe: a pipe it kept open would keep this process waiting for as long as the session runs. It has no
- * standard input or output of its own.
+ * standard input or output of its own, but its standard error goes to a file beside the socket until it has started,
+ * so a daemon that dies before it answers, such as at import time, before it has a log, has its last words shown.
  */
 export const start = Effect.fnUntraced(function*(
   argv: ReadonlyArray<string>,
@@ -147,9 +154,17 @@ export const start = Effect.fnUntraced(function*(
         Effect.ignore
       )
     ).pipe(Effect.forkScoped)
+    const errors = `${rootDir}/.start-${process.pid}.log`
+    yield* Effect.addFinalizer(() => fs.remove(errors).pipe(Effect.ignore))
+    const daemonArgs = [...process.execArgv, bin, "__daemon", path, ...argv]
+    // The shell opens the file for the daemon's standard error and becomes it; the daemon needs no code for this,
+    // and fails before any of it runs just as well
+    const [command, commandArgs] = process.platform === "win32"
+      ? [process.execPath, daemonArgs] as const
+      : ["sh", ["-c", "log=$1; shift; exec \"$@\" 2>>\"$log\"", "sh", errors, process.execPath, ...daemonArgs]] as const
     const daemon = yield* ChildProcess.make(
-      process.execPath,
-      [...process.execArgv, bin, "__daemon", path, ...argv],
+      command,
+      commandArgs,
       { detached: true, cwd: process.cwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" }
     )
     const answer = yield* Effect.raceFirst(
@@ -159,6 +174,11 @@ export const start = Effect.fnUntraced(function*(
     if (Option.isNone(answer)) {
       const code = yield* daemon.exitCode.pipe(Effect.orElseSucceed(() => 1))
       yield* Console.error(`The session's daemon exited before it served${code === 0 ? "" : ` (${code})`}`)
+      const last = yield* fs.readFileString(errors).pipe(
+        Effect.map((text) => text.trim()),
+        Effect.orElseSucceed(() => "")
+      )
+      if (last !== "") yield* Console.error(`Its standard error ended:\n${tail(last)}`)
       return yield* new Exit({ code: code === 0 ? 1 : code })
     }
     const started = yield* Schema.decodeEffect(Protocol.StartedJson)(answer.value).pipe(
