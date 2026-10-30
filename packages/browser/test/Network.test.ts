@@ -277,8 +277,7 @@ describe("A HAR an export writes", () => {
     response: { readonly status: number; readonly headers: Record<string, string> },
     bodies: { readonly request: Uint8Array; readonly response: Uint8Array }
   ): Har.Recorded => {
-    const hop: Model.HopEntry = {
-      request,
+    const state: Model.HopState = {
       response: Option.some(
         new NetworkResponse.NetworkResponse({
           hop: request.hop,
@@ -292,8 +291,12 @@ describe("A HAR an export writes", () => {
         })
       ),
       sent: Option.none(),
+      received: Option.none()
+    }
+    const hop: Model.HopEntry = {
+      request,
+      state: { get: Effect.succeed(state), changes: Stream.make(state), getUnsafe: () => state },
       sentKnown: Deferred.makeUnsafe<void>(),
-      received: Option.none(),
       end: Deferred.makeUnsafe<Model.HopEnd>(),
       page: Option.none(),
       context: Option.none()
