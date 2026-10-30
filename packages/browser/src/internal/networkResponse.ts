@@ -207,6 +207,9 @@ const delivery = <B, DE, DR>(
       Effect.mapError((error) =>
         Deadline.isTimeout(error)
           ? unavailable(url, "streaming", "The browser didn't hand the body over before the deadline")
+          // The browser followed it, whatever its headers say: the backend keeps only the last hop's body
+          : error.reason._tag === "Unsupported" && error.reason.capability === "body.redirect"
+          ? unavailable(url, "redirect", "A redirect hop has no body; its next hop has one")
           : unavailable(url, "evicted", `The browser no longer has it: ${error.message}`)
       )
     )

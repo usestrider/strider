@@ -1,17 +1,20 @@
 /**
  * The CDP adapter's state, without a browser: a page that ended takes its input state with it, and an operation
- * that names it after gets `Gone` with the page's reason, never `Foreign`.
+ * that names it after gets `Gone` with the page's reason, never `Foreign`; a redirect's hops each get the headers
+ * the network received for them, in whatever order the browser's events come.
  */
 import { assert, describe, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
+import * as Network from "../src/internal/cdpAdapter/network.ts"
 import * as Responses from "../src/internal/cdpAdapter/responses.ts"
 import * as State from "../src/internal/cdpAdapter/state.ts"
 import * as Tree from "../src/internal/cdpAdapter/tree.ts"
 import type * as ProtocolClient from "../src/internal/protocolClient.ts"
 
-const session = {} as ProtocolClient.Session
+const session = { key: "S1" } as ProtocolClient.Session
 
 const control: ProtocolClient.FoldControl = {
   sync: () => {},
@@ -19,9 +22,10 @@ const control: ProtocolClient.FoldControl = {
   run: (effect) => effect
 }
 
-/** A state with one page in the default context. */
+/** A state with one page in the default context, and the facts it reports once flushed. */
 const withPage = Effect.fnUntraced(function*() {
-  const buffer = yield* Kit.makeFactBuffer(() => Effect.void)
+  const facts: Array<Adapter.Fact> = []
+  const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
   buffer.connect(control)
   const state = State.make({
     connect: { sink: () => Effect.void, ownership: "launched" },
@@ -63,7 +67,74 @@ const withPage = Effect.fnUntraced(function*() {
   const main = Tree.newFrame({ frameId: "T1", id: page.id, page, parent: undefined, owner: target })
   state.frames.set("T1", main)
   state.navigables.set(page.id, main)
-  return { state, page }
+  return { state, page, target, facts }
+})
+
+// ── A redirect's headers ──
+
+const origin = "http://127.0.0.1:8000"
+
+const sent = (url: string, redirect?: { readonly location: string }) => ({
+  requestId: "R1",
+  loaderId: "L1",
+  documentURL: `${origin}/`,
+  request: { url, method: "GET", headers: { Accept: "*/*" } },
+  timestamp: 0,
+  wallTime: 0,
+  initiator: { type: "script" },
+  type: "Fetch",
+  frameId: "T1",
+  ...(redirect === undefined ? {} : {
+    redirectHasExtraInfo: true,
+    redirectResponse: {
+      url: `${origin}/redirect`,
+      status: 302,
+      statusText: "Found",
+      headers: { Location: redirect.location },
+      mimeType: "text/plain",
+      protocol: "http/1.1"
+    }
+  })
+})
+
+const received = (statusCode: number, headers: Record<string, string>) => ({
+  requestId: "R1",
+  blockedCookies: [],
+  headers,
+  statusCode
+})
+
+const sentAs = (headers: Record<string, string>) => ({ requestId: "R1", associatedCookies: [], headers })
+
+const landed = {
+  requestId: "R1",
+  loaderId: "L1",
+  timestamp: 0,
+  type: "Fetch",
+  hasExtraInfo: true,
+  frameId: "T1",
+  response: {
+    url: `${origin}/landed`,
+    status: 200,
+    statusText: "OK",
+    headers: { "Content-Type": "text/plain" },
+    mimeType: "text/plain",
+    protocol: "http/1.1"
+  }
+}
+
+/** Plays a redirect's events in the order given, and gives back the responses and hop headers it reported. */
+const play = Effect.fnUntraced(function*(order: ReadonlyArray<readonly [string, unknown]>) {
+  const { facts, state, target } = yield* withPage()
+  const handlers = Network.register(Kit.handlers<State.Event>())
+  for (const [method, params] of order) handlers.apply(method, params, { state, target })
+  yield* state.buffer.flush
+  const responses = facts.flatMap((fact) => fact._tag === "ResponseReceived" ? [fact.response] : [])
+  const hopHeaders = (phase: "request" | "response", name: string) =>
+    facts.flatMap((fact) =>
+      fact._tag === "HopHeaders" && fact.phase === phase ? [[fact.hop, fact.headers[name]] as const] : []
+    )
+  return { responses, sent: hopHeaders("request", "cookie"), received: hopHeaders("response", "set-cookie") }
 })
 
 describe("CdpAdapter state", () => {
@@ -103,4 +174,61 @@ describe("CdpAdapter state", () => {
       const realm = yield* State.realmOf(state, state.ids.realm()).pipe(Effect.flip)
       assert.strictEqual(realm.reason._tag, "Gone")
     }))
+})
+
+describe("CdpAdapter redirect headers", () => {
+  // The page's events, and the network's, which come in hop order but can overtake the page's
+  const first = ["Network.requestWillBeSent", sent(`${origin}/redirect`)] as const
+  const redirect = ["Network.requestWillBeSent", sent(`${origin}/landed`, { location: "/landed" })] as const
+  const response = ["Network.responseReceived", landed] as const
+  const sent0 = ["Network.requestWillBeSentExtraInfo", sentAs({ Cookie: "q=0" })] as const
+  const sent1 = ["Network.requestWillBeSentExtraInfo", sentAs({ Cookie: "q=1" })] as const
+  const received0 = [
+    "Network.responseReceivedExtraInfo",
+    received(302, { Location: "/landed", "Set-Cookie": "a=1" })
+  ] as const
+  const received1 = [
+    "Network.responseReceivedExtraInfo",
+    received(200, { "Content-Type": "text/plain", "Set-Cookie": "b=2" })
+  ] as const
+
+  for (
+    const [name, order] of [
+      ["in order", [first, sent0, received0, redirect, sent1, received1, response]],
+      // These two recorded under load; the next, which fails the redirect, is the same race a step further
+      ["with a hop's headers sent before its request", [sent0, first, received0, redirect, sent1, received1, response]],
+      ["with the next hop's headers sent before the redirect", [
+        first,
+        sent0,
+        received0,
+        sent1,
+        redirect,
+        received1,
+        response
+      ]],
+      ["with the next hop's response before the redirect", [
+        first,
+        sent0,
+        received0,
+        sent1,
+        received1,
+        redirect,
+        response
+      ]],
+      ["with every ExtraInfo before the request", [sent0, received0, sent1, received1, first, redirect, response]],
+      ["with the redirect before its ExtraInfo", [first, redirect, sent0, received0, sent1, received1, response]]
+    ] as const
+  ) {
+    it.effect(`gives each hop its own headers, ${name}`, () =>
+      Effect.gen(function*() {
+        const { received, responses, sent } = yield* play(order)
+        assert.deepStrictEqual(responses.map((response) => response.status), [302, 200])
+        const [hop, last] = responses
+        assert.strictEqual(hop!.headers["location"], "/landed")
+        assert.isUndefined(last!.headers["location"])
+        assert.strictEqual(last!.headers["set-cookie"], "b=2")
+        assert.deepStrictEqual(sent, [[hop!.hop, "q=0"], [last!.hop, "q=1"]])
+        assert.deepStrictEqual(received, [[hop!.hop, "a=1"], [last!.hop, "b=2"]])
+      }))
+  }
 })
