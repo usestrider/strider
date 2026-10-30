@@ -45,9 +45,16 @@ export const covers = (scope: Adapter.DeclarationScope, placement: Placement): b
   }
 }
 
-/** A `*` glob over a whole URL, as L0's intercepts mean it: `*` matches anything, `/` included. */
-export const glob = (pattern: string): RegExp =>
-  new RegExp(`^${pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`)
+/**
+ * A `*` glob over a whole URL, as L0's intercepts mean it (`Declaration`'s `Intercept`): `*` matches anything, `/`
+ * included, and every other character itself. The source of a regular expression, for a protocol that takes one as
+ * text (WebKit's interception); every character a regular expression gives a meaning, `/` too, is escaped.
+ */
+export const globSource = (pattern: string): string =>
+  `^${pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\/]/g, "\\$&")).join(".*")}$`
+
+/** The glob as a regular expression, for an adapter that checks a URL against it itself. Every adapter uses this one. */
+export const glob = (pattern: string): RegExp => new RegExp(globSource(pattern))
 
 /** A world's key, for bundles. */
 export const worldKey = (world: Adapter.World): string => world._tag === "Main" ? "" : world.name
