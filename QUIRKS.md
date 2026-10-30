@@ -15,7 +15,7 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 
 An entry with no marker is open.
 
-**Adding one.** When building or probing turns up something weird, add it here in the same commit, at the end of its section, with the next number. Numbers are stable, so documents and code comments can cite them (`QUIRKS.md, Q12`).
+**Closed** on 2026-10-29: nothing more is added here. New findings are issues on the Rookery board (`.agents/AGENTS.md`, Issues). Numbers stay stable, so documents and code comments can still cite them (`QUIRKS.md, Q12`).
 
 ## Browsers: navigation, history and documents
 
@@ -1409,7 +1409,7 @@ An entry with no marker is open.
 - *We:* a command acts on the page it names with `-p`, on the page it opens, from the moment the toolkit opens it (`page new`, or `newPage` through `strider mcp`), and on the popups given to it; a segment acts on every page. A popup goes to the command acting on its opener as it opened, or, when none is, to the last that acted on it. When two commands act on its opener at once, the session can't know which opened it, and the test has a placeholder for it.
 - *Reconsider:* the popup's opening event's initiator, where a backend reports the script or the input that opened it, which would single out the command even on one page.
 
-**Q254. Stock WebKit's failing expectation sometimes has no observations in a full run** (Browser, or ours: not traced). The slice test `fails an expectation that never holds, with what it saw` expected one history value, `{ matches: 2, visible: 2 }`, but got an empty history from `ExpectationFailed` at `slice/slice.ts:173`.
-- *Seen:* once in three full integration runs while checking the CLI startup fix for ROOK-88, on pinned WebKitGTK 2.54.1; the other two runs passed this test. No protocol recording was enabled.
-- *We:* leave the assertion unchanged; the CLI startup fix does not change expectations or the WebKit adapter.
-- *Reconsider:* trace the expectation's deadline and the page query's protocol messages to establish why no observation reached its history, without a retry or a delay.
+**Q256. Independent CLI help calls exhausted one test's time budget on CI** (Ours). The nested-command description test started seven synchronous Node processes under one five-second test budget. Two GitHub checks at `33674aa` took 7399 ms and 7035 ms and timed out, while local runs passed. Another test combined several MCP help calls and reached 4822 ms on CI.
+- *Seen:* ROOK-90's durable CI failures and the opt-in subprocess timings in `dd0b80b`. Locally the seven calls totalled 2361 ms; separate phase tracing showed dependency loading and evaluation dominated each process, with only 6–8 ms from starting the CLI runner to its first output. CI phase timings were unavailable, so that phase breakdown is established only locally.
+- *We:* each independent invocation has its own named test; assertions about the same output stay together, including toolkit descriptions. The five-second test budget, ten-second subprocess limit, actual subprocess boundary and argument coverage stay intact.
+- *Reconsider:* if an individual invocation exceeds its budget, measure its phases on the failing runner before changing CLI loading or the timeout.
