@@ -303,11 +303,15 @@ export interface Owner {
   readonly conflicting: () => Option.Option<string>
 }
 
-/** Every timeline, by what owns it: a page's entry or a context's. */
-const timelines = new WeakMap<object, { installed: Option.Option<Installed> }>()
+/** Every timeline of a connection, by what owns it: a page's entry or a context's. The runtime holds them. */
+export type Timelines = WeakMap<object, { installed: Option.Option<Installed> }>
+
+/** A connection's timelines, none yet. */
+export const makeTimelines = (): Timelines => new WeakMap()
 
 /** Whether a page's or a context's clock is installed. */
-export const isInstalled = (owner: object): boolean => Option.isSome(timelines.get(owner)?.installed ?? Option.none())
+export const isInstalled = (timelines: Timelines, owner: object): boolean =>
+  Option.isSome(timelines.get(owner)?.installed ?? Option.none())
 
 const stateOf = (mode: PageClock.Mode): State | string => {
   const time = (input: DateTime.DateTime.Input) => Option.map(DateTime.make(input), DateTime.toEpochMillis)
@@ -332,7 +336,7 @@ const stateOf = (mode: PageClock.Mode): State | string => {
 /** A page clock over a timeline. */
 export const make = (owner: Owner, key: object): PageClock.PageClock => {
   const timeline = { installed: Option.none<Installed>() }
-  timelines.set(key, timeline)
+  owner.runtime.timelines.set(key, timeline)
   const token = `@usestrider/browser/clock/${crypto.randomUUID()}`
   const adapter = owner.runtime.model.adapter
 

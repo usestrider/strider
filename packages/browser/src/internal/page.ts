@@ -451,7 +451,8 @@ export const make = (owner: PageOwner): Page.Page => {
       pages: () => [entry],
       name: "Page.clock",
       // One timeline covers a page
-      conflicting: () => Clock.isInstalled(entry.contextEntry) ? Option.some("UserContext.clock") : Option.none()
+      conflicting: () =>
+        Clock.isInstalled(runtime.timelines, entry.contextEntry) ? Option.some("UserContext.clock") : Option.none()
     }, entry),
     route: <E, R, P extends Route.Phase = "request">(
       pattern: Url.Pattern | string,

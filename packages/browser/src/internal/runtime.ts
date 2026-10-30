@@ -37,6 +37,7 @@ import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
+import type * as Clock from "./clock.ts"
 import * as Engine from "./engine.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
@@ -89,6 +90,8 @@ export interface Runtime {
   readonly path: Option.Option<Path.Path>
   /** Where the engine is installed, per document (`makeEngineRealms`). */
   readonly engineRealms: EngineRealms
+  /** The page clocks installed, by the page or context that owns each. */
+  readonly timelines: Clock.Timelines
   /**
    * A navigation's outcome as `goto` reports it (`navigation.ts`), for `PageNavigation`, which can't import `Page`
    * without a load cycle.

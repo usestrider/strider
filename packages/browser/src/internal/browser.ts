@@ -169,7 +169,7 @@ const makeContext = (
       name: "UserContext.clock",
       // One timeline covers a page
       conflicting: () =>
-        entry.state.getUnsafe().pages.some((page) => Clock.isInstalled(page))
+        entry.state.getUnsafe().pages.some((page) => Clock.isInstalled(runtime.timelines, page))
           ? Option.some("Page.clock")
           : Option.none()
     }, entry),
@@ -486,6 +486,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
     fileSystem: yield* Effect.serviceOption(FileSystem.FileSystem),
     path: yield* Effect.serviceOption(Path.Path),
     engineRealms: yield* Runtime.makeEngineRealms(model),
+    timelines: Clock.makeTimelines(),
     settle: (operation, navigation, frame, url, at, outcome, id) =>
       Navigation.settle(model, operation, navigation, frame, url, at, outcome, id)
   }
