@@ -1409,6 +1409,17 @@ An entry with no marker is open.
 - *We:* a command acts on the page it names with `-p`, on the page it opens, from the moment the toolkit opens it (`page new`, or `newPage` through `strider mcp`), and on the popups given to it; a segment acts on every page. A popup goes to the command acting on its opener as it opened, or, when none is, to the last that acted on it. When two commands act on its opener at once, the session can't know which opened it, and the test has a placeholder for it.
 - *Reconsider:* the popup's opening event's initiator, where a backend reports the script or the input that opened it, which would single out the command even on one page.
 
+**Q254. A session flag after the command never reached the daemon** (Ours). `strider stop -s checkout`, as documented, reported no session and left the browser running, although `strider -s checkout stop` worked. The client's routing scan stopped at the command; the daemon's shared flags already accepted either order.
+- *Seen:* ROOK-84's CLI integration regressions on Chromium 155.0.8059.79, with `STRIDER_SESSION` empty.
+- *We:* scan session flags before and after the command, preserving inline command values and stopping at `--`. Explicit flags override the environment default, and MCP uses the same scan.
+- **Resolved:** both stop forms pass, including assertions that the session disappears from the listing and its directory is removed.
+- *Reconsider:* keeping the client's lightweight routing scan aligned with the daemon's shared flags when those flags change.
+
+**Q255. A WebKit expectation failure can contain no observations in a full integration run** (Untraced). `WebKit slice > fails an expectation that never holds, with what it saw` failed at `test/integration/slice/slice.ts:173`: its failure history was `[]`, where the test expected one observation with `{ matches: 2, visible: 2 }`.
+- *Seen:* ROOK-84's merge validation against pinned stock WebKit, through `rookery lock browser -- pnpm test:integration`; 537 tests passed and two failed, the other having Q180's Chromium crash-notification symptom. No isolated reproduction or protocol trace was collected, so the cause and whether it depends on a full run are unknown.
+- *We:* retain the expectation test and implementation unchanged, with no retry or delay. Report the red suite for follow-up rather than treating the merge as fully validated.
+- *Reconsider:* trace the expectation's evaluation and deadline to establish why its failure held no observation before deciding what to change.
+
 **Q256. Independent CLI help calls exhausted one test's time budget on CI** (Ours). The nested-command description test started seven synchronous Node processes under one five-second test budget. Two GitHub checks at `33674aa` took 7399 ms and 7035 ms and timed out, while local runs passed. Another test combined several MCP help calls and reached 4822 ms on CI.
 - *Seen:* ROOK-90's durable CI failures and the opt-in subprocess timings in `dd0b80b`. Locally the seven calls totalled 2361 ms; separate phase tracing showed dependency loading and evaluation dominated each process, with only 6–8 ms from starting the CLI runner to its first output. CI phase timings were unavailable, so that phase breakdown is established only locally.
 - *We:* each independent invocation has its own named test; assertions about the same output stay together, including toolkit descriptions. The five-second test budget, ten-second subprocess limit, actual subprocess boundary and argument coverage stay intact.

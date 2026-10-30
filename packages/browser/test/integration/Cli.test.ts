@@ -160,6 +160,41 @@ describe("strider", () => {
       }).pipe(Effect.provide(NodeServices.layer))
     ), timeout)
 
+  for (const position of ["before", "after"] as const) {
+    it.live(`stops a session with -s ${position} the subcommand`, () =>
+      Effect.gen(function*() {
+        const env = { ...environment(), STRIDER_SESSION: "" }
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const started = yield* run("start", "--name", "checkout", "--chromium", chromium.executable)
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          // A different environment default must never override an explicit routing flag.
+          for (const flags of [["-s", "checkout"], ["--session", "checkout"], ["--session=checkout"]]) {
+            for (const args of [[...flags, "pages"], ["pages", ...flags]]) {
+              const listed = yield* strider({ ...env, STRIDER_SESSION: "wrong-session" }, ...args)
+              assert.strictEqual(listed.code, 0, listed.err)
+            }
+          }
+          const stopped = yield* run(
+            ...(position === "before" ? ["-s", "checkout", "stop"] : ["stop", "-s", "checkout"])
+          )
+          // The stop reply precedes the daemon closing its browser and deleting its directory.
+          yield* Effect.sleep("1 second")
+          const remaining = yield* run("sessions")
+          assert.strictEqual(stopped.code, 0, `${stopped.err}Sessions after stop: ${remaining.out}`)
+          assert.include(stopped.out, "stopping checkout")
+          assert.strictEqual(remaining.code, 0, remaining.err)
+          assert.notInclude(remaining.out, "checkout")
+          assert.isFalse(fs.existsSync(path.join(env.XDG_RUNTIME_DIR, "strider", "checkout")))
+        } finally {
+          yield* run("-s", "checkout", "stop")
+          yield* Effect.sleep("1 second")
+          fs.rmSync(env.XDG_RUNTIME_DIR, { recursive: true, force: true })
+          fs.rmSync(env.XDG_STATE_HOME, { recursive: true, force: true })
+        }
+      }), timeout)
+  }
+
   it.live("starts a session, drives its pages by name, and ends it", () =>
     Effect.scoped(Effect.gen(function*() {
       const served = yield* site
