@@ -173,6 +173,30 @@ describe("WebKit launcher", () => {
         assert.deepInclude(headless.reason, { _tag: "InvalidInput", input: "headless" })
       }))
   })
+
+  // A browser that never starts its inspector server: each connection is refused
+  const refusing = Layer.merge(
+    NodeServices.layer,
+    SocketConnector.layer((endpoint) => NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port }))
+  )
+  layer(refusing, { excludeTestServices: true })((it) => {
+    it.effect.skipIf(process.platform === "win32")(
+      "gives up on a browser that never answers at its timeout",
+      () =>
+        Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-test-" })
+          yield* fs.writeFileString(`${directory}/MiniBrowser`, "#!/bin/sh\nexec sleep 30\n")
+          yield* fs.chmod(`${directory}/MiniBrowser`, 0o755)
+          const started = performance.now()
+          const error = yield* Effect.scoped(
+            WebKitAutomation.start({ executablePath: `${directory}/MiniBrowser`, timeout: "500 millis" })
+          ).pipe(Effect.flip)
+          assert.include(JSON.stringify(error.reason), "never answered")
+          assert.isBelow(performance.now() - started, 5000)
+        })
+    )
+  })
 })
 
 describe("Core dumps", () => {
