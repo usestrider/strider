@@ -10,7 +10,16 @@ import captured from "./fixtures/redirect-extra-info.ts"
 import { makeBrowser } from "./utils/FakeBrowser.ts"
 
 describe("CDP adapter redirect headers", () => {
-  for (const ordering of ["captured", "early ExtraInfo"] as const) {
+  for (
+    const ordering of [
+      "captured",
+      "early ExtraInfo",
+      "all early",
+      "all late",
+      "first without ExtraInfo",
+      "last without ExtraInfo"
+    ] as const
+  ) {
     for (const assertion of ["per-hop headers", "JSON HAR body"] as const) {
       it.effect(`attributes redirected request ExtraInfo to its own hop: ${ordering}, ${assertion}`, () =>
         Effect.gen(function*() {
@@ -79,9 +88,38 @@ describe("CDP adapter redirect headers", () => {
           // ROOK-104 #10: Chromium 155 capture lines 63, 65–70, 72, 80, unchanged payloads.
           // The vendored CDP requestWillBeSentExtraInfo contract permits either event to arrive first.
           // Preserve ExtraInfo order, moving only the second request ExtraInfo before its main event.
-          const reordered = [...captured]
-          const secondExtra = reordered.splice(4, 1)[0]!
-          reordered.splice(ordering === "captured" ? 4 : 3, 0, secondExtra)
+          const events = structuredClone(captured)
+          // Give response headers distinct values so attribution cannot pass by matching identical headers.
+          Object.assign(events[2]!.params.headers!, { "x-hop": "first" })
+          Object.assign(events[5]!.params.headers!, { "x-hop": "last" })
+          let reordered = [...events]
+          if (ordering === "early ExtraInfo") {
+            reordered = [events[0]!, events[1]!, events[2]!, events[4]!, events[3]!, ...events.slice(5)]
+          }
+          if (ordering === "all early") {
+            reordered = [events[1]!, events[2]!, events[4]!, events[5]!, events[0]!, events[3]!, ...events.slice(6)]
+          }
+          if (ordering === "all late") {
+            reordered = [
+              events[0]!,
+              events[3]!,
+              events[6]!,
+              events[1]!,
+              events[2]!,
+              events[4]!,
+              events[5]!,
+              ...events.slice(7)
+            ]
+          }
+          if (ordering === "first without ExtraInfo") {
+            Object.assign(events[3]!.params, { redirectHasExtraInfo: false })
+            reordered = [events[0]!, events[4]!, events[5]!, events[3]!, ...events.slice(6)]
+          }
+          if (ordering === "last without ExtraInfo") {
+            Object.assign(events[6]!.params, { hasExtraInfo: false })
+            Object.assign(events[3]!.params.request!.headers, { "content-type": "application/json" })
+            reordered = [events[0]!, events[3]!, events[1]!, events[2]!, ...events.slice(6)]
+          }
           for (const event of reordered) {
             yield* browser.receive({ method: event.method, params: event.params, sessionId: "S1" })
           }
@@ -92,6 +130,17 @@ describe("CDP adapter redirect headers", () => {
           )
           assert.strictEqual(requests.length, 2)
           if (assertion === "per-hop headers") {
+            const received = facts.filter((fact): fact is Extract<Adapter.Fact, { _tag: "HopHeaders" }> =>
+              fact._tag === "HopHeaders" && fact.phase === "response"
+            )
+            assert.deepStrictEqual(
+              received.map((fact) => ({ hop: fact.hop, value: fact.headers["x-hop"] })),
+              ordering === "first without ExtraInfo" ?
+                [{ hop: requests[1]!.request.hop, value: "last" }]
+                : ordering === "last without ExtraInfo" ?
+                [{ hop: requests[0]!.request.hop, value: "first" }]
+                : [{ hop: requests[0]!.request.hop, value: "first" }, { hop: requests[1]!.request.hop, value: "last" }]
+            )
             assert.deepStrictEqual(
               headers.map((fact) => ({ hop: fact.hop, contentType: fact.headers["content-type"] })),
               [
