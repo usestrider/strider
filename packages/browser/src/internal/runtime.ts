@@ -306,6 +306,25 @@ const callEngine = (
     }))
   )
 
+/**
+ * The engine's answer, decoded. One that isn't an answer the engine gives fails as `IncompatibleResponse`: where
+ * the engine shares the page's world (stock WebKit), a page's script can call back in its place.
+ */
+const decode = (text: string): Effect.Effect<Engine.Response, SendFailure> =>
+  Engine.decodeResponse(text).pipe(
+    Effect.mapError((error): SendFailure => ({
+      _tag: "Reason",
+      reason: new Reason.BackendFailure({
+        kind: "IncompatibleResponse",
+        method: "engine",
+        metadata: {},
+        hint:
+          `The query engine's answer isn't one it gives, so a page script may have answered in its place: ${error.message}`,
+        cause: error
+      })
+    }))
+  )
+
 /** The one match in a document, by its node binding, or the engine's answer for why there is none. */
 type Element =
   | { readonly _tag: "Found"; readonly node: Adapter.NodeBinding }
@@ -332,8 +351,9 @@ const elementIn = (
           return Effect.succeed(Option.some<Element>({ _tag: "Found", node: value.node }))
         }
         if (value.type === "string") {
-          return Effect.succeed(
-            Option.some<Element>({ _tag: "Response", response: JSON.parse(value.value) as Engine.Response })
+          return Effect.map(
+            decode(value.value),
+            (response) => Option.some<Element>({ _tag: "Response", response })
           )
         }
         return Effect.die(new Error("The engine's element came back without a node binding"))
@@ -464,7 +484,7 @@ export const sendRouted = (
           onNone: () => Effect.succeedNone,
           onSome: (value) =>
             value.type === "string"
-              ? Effect.succeedSome({ response: JSON.parse(value.value) as Engine.Response, routed })
+              ? Effect.map(decode(value.value), (response) => Option.some({ response, routed }))
               : Effect.die(new Error("The engine answered with something other than text"))
         }))
       )
@@ -497,10 +517,10 @@ export const sendToDocument = (
     Effect.suspend(() =>
       runtime.model.documents.has(document)
         ? callEngine(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
-          Effect.map(
-            Option.flatMap((value) =>
-              value.type === "string" ? Option.some(JSON.parse(value.value) as Engine.Response) : Option.none()
-            )
+          Effect.flatMap((value) =>
+            Option.isSome(value) && value.value.type === "string"
+              ? Effect.asSome(decode(value.value.value))
+              : Effect.succeedNone
           )
         )
         : Effect.succeedNone
