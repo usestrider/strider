@@ -16,6 +16,7 @@ describe("CDP adapter redirect headers", () => {
       "early ExtraInfo",
       "all early",
       "all late",
+      "failed last hop",
       "first without ExtraInfo",
       "last without ExtraInfo"
     ] as const
@@ -65,7 +66,8 @@ describe("CDP adapter redirect headers", () => {
                 yield* Deferred.succeed(ready, undefined)
               }
               if (
-                fact._tag === "RequestFinished" && facts.filter((fact) => fact._tag === "RequestFinished").length === 2
+                (fact._tag === "RequestFinished" || fact._tag === "RequestFailed") &&
+                facts.filter((fact) => fact._tag === "RequestFinished" || fact._tag === "RequestFailed").length === 2
               ) {
                 yield* Deferred.succeed(finished, undefined)
               }
@@ -120,8 +122,23 @@ describe("CDP adapter redirect headers", () => {
             Object.assign(events[3]!.params.request!.headers, { "content-type": "application/json" })
             reordered = [events[0]!, events[3]!, events[1]!, events[2]!, ...events.slice(6)]
           }
+          if (ordering === "failed last hop") {
+            reordered = events.slice(0, 6)
+          }
           for (const event of reordered) {
             yield* browser.receive({ method: event.method, params: event.params, sessionId: "S1" })
+          }
+          if (ordering === "failed last hop") {
+            yield* browser.receive({
+              method: "Network.loadingFailed",
+              sessionId: "S1",
+              params: {
+                requestId: events[0]!.params.requestId,
+                timestamp: 772297,
+                type: "Fetch",
+                errorText: "net::ERR_FAILED"
+              }
+            })
           }
           yield* Deferred.await(finished)
           const requests = facts.filter((fact) => fact._tag === "RequestSent")
