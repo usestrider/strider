@@ -35,6 +35,7 @@ import type * as Route from "../Route.ts"
 import type * as Target from "../Target.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
 import type * as UserContext from "../UserContext.ts"
+import * as BrowserClock from "./browserClock.ts"
 
 // ── Ids ───────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -98,8 +99,7 @@ export const makeIds = (): Ids => {
 }
 
 /** Now, on the live monotonic clock, in nanoseconds. */
-export const now = (): MonotonicInstant.MonotonicInstant =>
-  Math.round(performance.now() * 1e6) as MonotonicInstant.MonotonicInstant
+export const now: () => MonotonicInstant.MonotonicInstant = BrowserClock.now
 
 // ── Facts ─────────────────────────────────────────────────────────────────────────────────────────────────
 
