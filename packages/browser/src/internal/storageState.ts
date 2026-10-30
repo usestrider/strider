@@ -373,9 +373,9 @@ interface Source {
 /** One document per origin and partition, of the documents open in the context's pages and frames. */
 const sourcesOf = Effect.fnUntraced(function*(runtime: Runtime.Runtime, context: UserContext.Id) {
   const sources = new Map<string, Source>()
-  for (const page of runtime.model.pages.values()) {
+  for (const page of yield* runtime.model.pages.get) {
     if (page.context !== context) continue
-    const state = yield* SubscriptionRef.get(page.state)
+    const { frames, status: state } = yield* page.state.get
     if (state._tag !== "Open") continue
     let top: URL
     try {
@@ -386,14 +386,14 @@ const sourcesOf = Effect.fnUntraced(function*(runtime: Runtime.Runtime, context:
     const topSite = siteOf(top)
     const documents = [
       state.document.id,
-      ...(yield* SubscriptionRef.get(page.tree)).frames.flatMap((frame) => Option.toArray(frame.document))
+      ...frames.flatMap((frame) => Option.toArray(frame.document))
     ]
     for (const document of documents) {
-      const entry = runtime.model.documents.get(document)
-      if (entry === undefined) continue
+      const entry = runtime.model.document(document)
+      if (Option.isNone(entry)) continue
       let url: URL
       try {
-        url = new URL(entry.url)
+        url = new URL((yield* entry.value.state.get).url)
       } catch {
         continue
       }
@@ -610,7 +610,7 @@ export const applyState = (
         let document: Target.DocumentId
         if (origin.partition._tag === "Unpartitioned") {
           yield* page.goto(seed, { waitUntil: "load" }).pipe(Effect.mapError(write))
-          const state = yield* SubscriptionRef.get(entry.state)
+          const state = (yield* entry.state.get).status
           if (state._tag !== "Open") return yield* Effect.fail(write(new Error("the page closed")))
           document = state.document.id
         } else {

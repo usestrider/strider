@@ -8,7 +8,6 @@ import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import { pipeArguments } from "effect/Pipeable"
 import * as Stream from "effect/Stream"
-import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Deadline from "../Deadline.ts"
 import * as Download from "../Download.ts"
 import type * as FileInput from "../FileInput.ts"
@@ -28,7 +27,7 @@ export const make = (runtime: Runtime.Runtime, entry: Model.DownloadEntry): Down
 
   /** Why the download's file is gone: its context ended, taking its directory. */
   const contextGone = Effect.map(
-    SubscriptionRef.get(entry.context.state),
+    entry.context.state.get,
     (state) =>
       Option.map(state.closed, (reason) =>
         new Target.TargetGone({
@@ -41,8 +40,9 @@ export const make = (runtime: Runtime.Runtime, entry: Model.DownloadEntry): Down
   /** Waits for the download to end, under the deadline in force: where it was written, once completed. */
   const completed = Effect.fnUntraced(function*(operation: string) {
     const record = yield* Operation.record
-    record.observe(yield* SubscriptionRef.get(entry.status))
-    const terminal = yield* SubscriptionRef.changes(entry.status).pipe(
+    record.observe((yield* entry.state.get).status)
+    const terminal = yield* entry.state.changes.pipe(
+      Stream.map((state) => state.status),
       Stream.filter((status) => status._tag !== "InProgress"),
       Stream.runHead,
       (waiting) => record.bound(waiting, () => Option.some("The download was still in progress at the deadline"))
@@ -69,7 +69,7 @@ export const make = (runtime: Runtime.Runtime, entry: Model.DownloadEntry): Down
           new Download.DownloadFailed({ why: status.reason, hint: "The browser stopped the download" })
         ))
       default:
-        return entry.path
+        return (yield* entry.state.get).path
     }
   })
 
@@ -123,11 +123,11 @@ export const make = (runtime: Runtime.Runtime, entry: Model.DownloadEntry): Down
     url: entry.url as Url.Url,
     suggestedFilename: entry.suggestedFilename as FileInput.FileName,
     status: Watchable.make({
-      ref: entry.status,
-      project: Option.some,
+      ref: entry.state,
+      project: (state) => Option.some(state.status),
       // A download ends with its context as `Canceled`, a final value, so the watchable never ends with it
       ended: () => Option.none(),
-      final: (status) => status._tag !== "InProgress",
+      final: (state) => state.status._tag !== "InProgress",
       target: { _tag: "UserContext" },
       operation: "Download.status.waitFor"
     }),

@@ -138,7 +138,7 @@ export const start = (
           Effect.orElseSucceed(() => Option.none<Uint8Array>())
         )
       }
-      const response = hop.response
+      const response = (yield* hop.state.get).response
       if (
         settings.content !== "omit" && end._tag === "Finished" && Option.isSome(response) &&
         hasBody(response.value.status)
@@ -374,12 +374,14 @@ export const entryOf = (
   readonly files: ReadonlyArray<{ path: string; content: Uint8Array }>
 } => {
   const { request } = recorded
-  const response = Option.flatMap(recorded.hop, (hop) => hop.response)
+  // What the hop received, as it is now
+  const received_ = Option.map(recorded.hop, (hop) => hop.state.getUnsafe())
+  const response = Option.flatMap(received_, (state) => state.response)
   const end = recorded.end
   const minimal = writing.detail === "minimal"
   // The headers as the network sent and received them, where the backend reports them apart (CDP's ExtraInfo)
-  const sent = Option.flatMap(recorded.hop, (hop) => hop.sent)
-  const received = Option.flatMap(recorded.hop, (hop) => hop.received)
+  const sent = Option.flatMap(received_, (state) => state.sent)
+  const received = Option.flatMap(received_, (state) => state.received)
   const requestHeaders = Option.getOrElse(sent, () => request.headers) as Readonly<Record<string, string>>
   const responseHeaders: Readonly<Record<string, string | undefined>> = Option.match(response, {
     onNone: () => ({}),

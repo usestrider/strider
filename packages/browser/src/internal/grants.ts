@@ -1,6 +1,7 @@
 /**
  * Permission grants. L0's reset clears every grant in a context, so L1 keeps the grants
- * in force per context and recomputes on each change: a removal resets, then grants what remains. Each name is
+ * in force in the context's state, which the model's fold writes, and recomputes on each change: a removal resets,
+ * then grants what remains. Each name is
  * granted on its own, so a name a backend rejects (Firefox's list is shorter) fails naming it.
  */
 import * as Effect from "effect/Effect"
@@ -12,16 +13,9 @@ import * as Declaration from "../Declaration.ts"
 import * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
 import type * as UserContext from "../UserContext.ts"
+import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
-
-interface Grant {
-  readonly origin: Option.Option<string>
-  readonly permissions: ReadonlyArray<string>
-}
-
-/** The grants in force, per context. */
-const contexts = new Map<UserContext.Id, Array<Grant>>()
 
 const origin = (input: string | undefined): Option.Option<string> | undefined => {
   if (input === undefined) return Option.none()
@@ -34,7 +28,7 @@ const origin = (input: string | undefined): Option.Option<string> | undefined =>
 
 export const grant = (
   runtime: Runtime.Runtime,
-  context: UserContext.Id,
+  entry: Model.ContextEntry,
   operation: string,
   permissions: ReadonlyArray<UserContext.Permission>,
   options: UserContext.GrantOptions | undefined
@@ -46,6 +40,7 @@ export const grant = (
   Effect.gen(function*() {
     const { id } = yield* Operation.record
     const adapter = runtime.model.adapter
+    const context = entry.id
     const fail = (reason: Declaration.DeclarationErrorReason) =>
       new Declaration.DeclarationError({ declaration: operation, reason, diagnostics: Operation.diagnostics(id) })
     const where = origin(options?.origin)
@@ -73,10 +68,9 @@ export const grant = (
           : failure.reason
       )
     }
-    const list = contexts.get(context) ?? []
-    contexts.set(context, list)
-    const entry: Grant = { origin: where, permissions: [...permissions] }
-    const apply = (grants: ReadonlyArray<Grant>) =>
+    const grant: Model.GrantEntry = { origin: where, permissions: [...permissions] }
+    const inForce = Effect.map(entry.state.get, (state) => state.grants)
+    const apply = (grants: ReadonlyArray<Model.GrantEntry>) =>
       Effect.forEach(grants, (each) => adapter.grantPermissions(context, each.origin, each.permissions), {
         discard: true
       })
@@ -87,7 +81,7 @@ export const grant = (
         // What this call granted goes again, with the grants before it: cleanup, which the deadline doesn't end
         Effect.onError(() =>
           adapter.resetPermissions(context).pipe(
-            Effect.andThen(apply(list)),
+            Effect.andThen(Effect.flatMap(inForce, apply)),
             Effect.ignore,
             Effect.andThen(Scope.close(scope, Exit.void)),
             Operation.detached
@@ -95,17 +89,17 @@ export const grant = (
         )
       )
     }
-    list.push(entry)
+    // What a removal grants again, after it resets; once this one is removed, the others
     yield* Scope.addFinalizer(
       scope,
-      Effect.suspend(() => {
-        const index = list.indexOf(entry)
-        if (index >= 0) list.splice(index, 1)
-        if (list.length === 0) contexts.delete(context)
-        return adapter.resetPermissions(context).pipe(Effect.andThen(apply(list)), Effect.ignore, Operation.detached)
-      })
+      adapter.resetPermissions(context).pipe(
+        Effect.andThen(Effect.flatMap(inForce, apply)),
+        Effect.ignore,
+        Operation.detached
+      )
     )
+    yield* runtime.model.grant(entry, grant).pipe(Scope.provide(scope))
     return { remove: Scope.close(scope, Exit.void) } satisfies Declaration.Registration
   }).pipe(Operation.named(operation, {
-    attributes: { "browser.context.id": context, "browser.permissions": permissions.join(",") }
+    attributes: { "browser.context.id": entry.id, "browser.permissions": permissions.join(",") }
   }))

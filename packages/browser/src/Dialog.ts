@@ -409,7 +409,7 @@ export const handle = <E, R>(
       Effect.andThen(Handlers.requires(runtime, "Dialog.handle", "prompts")),
       Effect.andThen(Handlers.register({
         page: entry,
-        handlers: entry.promptHandlers,
+        add: (handler) => runtime.model.handlePrompts(entry, handler),
         handler,
         pending: toPending,
         decision: (chosen) =>

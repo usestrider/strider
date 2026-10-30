@@ -15,7 +15,7 @@ import * as Fiber from "effect/Fiber"
 import * as FiberSet from "effect/FiberSet"
 import * as Option from "effect/Option"
 import * as References from "effect/References"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
@@ -37,7 +37,8 @@ export const report = (message: string, cause: Cause.Cause<unknown>) =>
 export interface Options<S, P, D, E, R> {
   readonly page: Model.PageEntry
   /** The page's registrations of this kind, oldest first. */
-  readonly handlers: Array<Model.Handler<S>>
+  /** Adds the registration to the page for the scope, as a command the model's fold applies (`Model.handlePrompts`). */
+  readonly add: (handler: Model.Handler<S>) => Effect.Effect<void, never, Scope.Scope>
   readonly handler: (pending: P) => Effect.Effect<D, E, R>
   /** What the handler is given for an obligation. */
   readonly pending: (subject: S) => P
@@ -137,12 +138,10 @@ export const register = <S, P, D, E, R>(
         return Option.some(applied.value)
       })
     }
-    options.handlers.push(registration)
-    const remove = Effect.sync(() => {
-      const index = options.handlers.indexOf(registration)
-      if (index >= 0) options.handlers.splice(index, 1)
-    })
-    yield* Effect.addFinalizer(() => remove)
+    // In force once this returns: an obligation folded after it is this handler's to decide
+    const scope = yield* Scope.fork(yield* Effect.scope)
+    yield* options.add(registration).pipe(Scope.provide(scope))
+    const remove = Scope.close(scope, Exit.void)
     const registered: Declaration.HandlerRegistration = {
       remove,
       handled: Watchable.make({

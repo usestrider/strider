@@ -310,7 +310,7 @@ export const handle = <E, R>(
       Effect.andThen(Handlers.requires(runtime, "FileChooser.handle", "fileChooser")),
       Effect.andThen(Handlers.register({
         page: entry,
-        handlers: entry.chooserHandlers,
+        add: (handler) => runtime.model.handleChoosers(entry, handler),
         handler,
         pending: toPending,
         decision: (chosen, chooser): Effect.Effect<Adapter.Decision | Handlers.Staged, unknown> => {

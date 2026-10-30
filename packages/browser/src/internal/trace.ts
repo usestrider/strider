@@ -254,7 +254,7 @@ export const start = Effect.fnUntraced(function*(
   let calls = 0
 
   const pageOf = (id: unknown): Option.Option<Model.PageEntry> =>
-    typeof id === "string" ? Option.fromNullishOr(runtime.model.pages.get(id as Target.NavigableId)) : Option.none()
+    typeof id === "string" ? runtime.model.page(id as Target.NavigableId) : Option.none()
 
   const covers = (attributes: Readonly<Record<string, unknown>>): boolean => {
     const page = attributes["browser.page.id"]
@@ -437,12 +437,8 @@ export const start = Effect.fnUntraced(function*(
       })
     if (target._tag === "Page") yield* follow(target.entry)
     else {
-      yield* SubscriptionRef.changes(target.entry.state).pipe(
-        Stream.runForEach((state) =>
-          Effect.forEach(state.pages, (id) => Option.match(pageOf(id), { onNone: () => Effect.void, onSome: follow }), {
-            discard: true
-          })
-        ),
+      yield* target.entry.state.changes.pipe(
+        Stream.runForEach((state) => Effect.forEach(state.pages, follow, { discard: true })),
         Operation.detached,
         Effect.forkIn(own)
       )

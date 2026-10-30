@@ -22,7 +22,6 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
-import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
 import * as PageClock from "../PageClock.ts"
@@ -343,17 +342,21 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
    */
   const broadcast = (functionDeclaration: string, workers: boolean) =>
     Effect.flatMap(
-      workers
-        ? Effect.map(Effect.forEach(owner.pages(), (page) => SubscriptionRef.get(page.workers)), (each) => each.flat())
-        : Effect.succeed([]),
-      (dedicated) =>
+      Effect.forEach(owner.pages(), (page) => page.state.get),
+      (states) =>
         Effect.forEach(
           [
-            ...[...owner.runtime.model.documents.values()].filter((document) => {
-              const page = owner.runtime.model.pageOf(document.navigable)
-              return Option.isSome(page) && owner.pages().includes(page.value)
-            }).map((document) => ({ url: document.url, realm: adapter.realm(document.id, { _tag: "Main" }) })),
-            ...dedicated.map((worker) => ({ url: worker.url, realm: Effect.succeed(worker.realm) }))
+            // Each page's document and its frames'
+            ...states.flatMap((state) => [
+              ...(state.status._tag === "Open" ? [{ id: state.status.document.id, url: state.status.url }] : []),
+              ...state.frames.flatMap((frame) =>
+                Option.toArray(Option.map(frame.document, (id) => ({ id, url: frame.url })))
+              )
+            ]).map((document) => ({ url: document.url, realm: adapter.realm(document.id, { _tag: "Main" }) })),
+            ...(workers ? states.flatMap((state) => state.workers) : []).map((worker) => ({
+              url: worker.url,
+              realm: Effect.succeed(worker.realm)
+            }))
           ],
           (where) =>
             where.realm.pipe(

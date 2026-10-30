@@ -14,10 +14,12 @@ import type * as Deadline from "../Deadline.ts"
 import * as Target from "../Target.ts"
 import * as Watchable from "../Watchable.ts"
 import * as Operation from "./operation.ts"
+import type * as Readable from "./readable.ts"
 
 /** How to read a watchable from an entity's state. */
 export interface Source<S, A> {
-  readonly ref: SubscriptionRef.SubscriptionRef<S>
+  /** The state: an entity's, which only the fold writes, or a ref of the module's own. */
+  readonly ref: Readable.Readable<S> | SubscriptionRef.SubscriptionRef<S>
   /** The value, or `None` while there is none to show yet. */
   readonly project: (state: S) => Option.Option<A>
   /** Why the entity ended, once it has: the terminal state. */
@@ -33,9 +35,14 @@ export interface Source<S, A> {
   readonly operation: string
 }
 
+const changesOf = <S>(ref: Readable.Readable<S> | SubscriptionRef.SubscriptionRef<S>): Stream.Stream<S> =>
+  SubscriptionRef.isSubscriptionRef(ref)
+    ? SubscriptionRef.changes(ref as SubscriptionRef.SubscriptionRef<S>)
+    : (ref as Readable.Readable<S>).changes
+
 /** The states from now on: the current one first, ending after the terminal or final one. */
 const states = <S, A>(source: Source<S, A>) =>
-  SubscriptionRef.changes(source.ref).pipe(
+  changesOf(source.ref).pipe(
     Stream.takeUntil((state) => Option.isSome(source.ended(state)) || source.final?.(state) === true)
   )
 

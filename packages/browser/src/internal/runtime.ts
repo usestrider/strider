@@ -13,8 +13,11 @@
  * a dialog that a handler or the policy is deciding, within its deadline, and fails at once with
  * `PromptBlocking` when the page has one nothing will decide.
  */
+import * as Cache from "effect/Cache"
 import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import type * as FileSystem from "effect/FileSystem"
 import * as Filter from "effect/Filter"
 import * as Option from "effect/Option"
@@ -42,7 +45,7 @@ import * as Operation from "./operation.ts"
 export const utilityWorld: Adapter.World = { _tag: "Isolated", name: "__strider_utility__" }
 
 /** Whether the backend makes no worlds, as stock WebKit's inspector doesn't (QUIRKS.md, Q194). */
-const makesNoWorlds = (runtime: Runtime): Effect.Effect<boolean> =>
+const makesNoWorlds = (runtime: { readonly model: Model.Model }): Effect.Effect<boolean> =>
   Effect.map(
     SubscriptionRef.get(runtime.model.adapter.capabilities),
     (capabilities) =>
@@ -50,7 +53,7 @@ const makesNoWorlds = (runtime: Runtime): Effect.Effect<boolean> =>
   )
 
 /** The world the engine runs in: its own, or the page's where the backend makes no worlds. */
-export const engineWorld = (runtime: Runtime): Effect.Effect<Adapter.World> =>
+export const engineWorld = (runtime: { readonly model: Model.Model }): Effect.Effect<Adapter.World> =>
   Effect.map(makesNoWorlds(runtime), (none): Adapter.World => none ? { _tag: "Main" } : utilityWorld)
 
 /**
@@ -84,6 +87,8 @@ export interface Runtime {
   readonly fileSystem: Option.Option<FileSystem.FileSystem>
   /** Effect's `Path`, which a relative local file path is resolved with. */
   readonly path: Option.Option<Path.Path>
+  /** Where the engine is installed, per document (`makeEngineRealms`). */
+  readonly engineRealms: EngineRealms
   /**
    * A navigation's outcome as `goto` reports it (`navigation.ts`), for `PageNavigation`, which can't import `Page`
    * without a load cycle.
@@ -127,8 +132,10 @@ export const promptBlocking = (prompt: Model.UndecidedPrompt, dispatched: boolea
  * ends the operation at once rather than at its deadline.
  */
 export const promptBlocked = (page: Model.PageEntry, dispatched = false) =>
-  SubscriptionRef.changes(page.state).pipe(
-    Stream.filterMap(Filter.fromPredicateOption((state) => state._tag === "Open" ? state.undecided : Option.none())),
+  page.state.changes.pipe(
+    Stream.filterMap(
+      Filter.fromPredicateOption(({ status }) => status._tag === "Open" ? status.undecided : Option.none())
+    ),
     Stream.runHead,
     Effect.flatMap(Option.match({
       onNone: () => Effect.never,
@@ -143,10 +150,11 @@ const gone = (target: Target.Description, reason: Target.CloseReason, id: Diagno
 
 /** A page's open state, waiting while it is still opening; a closed page is gone. */
 export const openState = (page: Model.PageEntry, id: Diagnostics.OperationId) =>
-  SubscriptionRef.changes(page.state).pipe(
-    Stream.filter((state) => state._tag !== "Opening"),
+  page.state.changes.pipe(
+    Stream.map((state) => state.status),
+    Stream.filter((status) => status._tag !== "Opening"),
     Stream.runHead,
-    Effect.flatMap((state): Effect.Effect<Extract<Model.PageState, { _tag: "Open" }>, SendFailure> => {
+    Effect.flatMap((state): Effect.Effect<Extract<Model.PageStatus, { _tag: "Open" }>, SendFailure> => {
       if (Option.isNone(state)) {
         return Effect.fail(gone({ _tag: "Page", id: page.id }, { _tag: "PageClosed", by: "browser" }, id))
       }
@@ -179,18 +187,46 @@ const call = (
     userActivation: false
   })
 
-/** The realm of a document's utility world, with the engine installed. */
-const engineRealm = Effect.fnUntraced(function*(runtime: Runtime, document: Target.DocumentId) {
-  const known = runtime.model.engineRealms.get(document)
-  if (known !== undefined) return known
-  const realm = yield* runtime.model.adapter.realm(document, yield* engineWorld(runtime))
-  const installed = yield* call(runtime, realm, Engine.install, [])
-  if (installed._tag === "Exception") {
-    return yield* Effect.die(new Error(`The engine didn't install: ${installed.text}`))
-  }
-  runtime.model.engineRealms.set(document, realm)
-  return realm
-})
+/** The most documents whose engine's realm is remembered at once; a document forgotten installs it again, once. */
+const maxEngineRealms = 1000
+
+/** The realm of each document's engine world, the engine installed in it once, however many ask at once. */
+export type EngineRealms = Cache.Cache<Target.DocumentId, Target.RealmId, Adapter.AdapterError | Deadline.Timeout>
+
+/**
+ * The runtime's memo of where the engine is installed, a `Cache`, so concurrent requests to one document share one
+ * install. The install runs apart from the operation that asked first, so another's deadline isn't the first's,
+ * and each caller waits for it until its own (`engineRealm`). A failed install isn't kept: the next request tries
+ * again. An entry that goes stale, its realm gone or its engine missing, is invalidated by the request that finds
+ * it so, which installs again.
+ */
+export const makeEngineRealms = (model: Model.Model): Effect.Effect<EngineRealms> =>
+  Cache.makeWith(
+    Effect.fnUntraced(function*(document: Target.DocumentId) {
+      const realm = yield* model.adapter.realm(document, yield* engineWorld({ model }))
+      const installed = yield* model.adapter.evaluate(realm, {
+        functionDeclaration: Engine.install,
+        arguments: [],
+        awaitPromise: true,
+        result: "value",
+        userActivation: false
+      })
+      if (installed._tag === "Exception") {
+        return yield* Effect.die(new Error(`The engine didn't install: ${installed.text}`))
+      }
+      return realm
+    }, Operation.detached),
+    { capacity: maxEngineRealms, timeToLive: (exit) => Exit.isSuccess(exit) ? Duration.infinity : Duration.zero }
+  )
+
+/** The realm of a document's engine, with the engine installed, waited for until the operation's deadline. */
+const engineRealm = (runtime: Runtime, document: Target.DocumentId) =>
+  Effect.flatMap(Operation.current, (record) => {
+    const installed = Cache.get(runtime.engineRealms, document)
+    return Option.isNone(record)
+      ? installed
+      : record.value.bound(installed, () => Option.some("The engine wasn't installed in the page before the deadline"))
+  })
 
 /** One iframe on the way to a frame's document. */
 export interface Hop {
@@ -287,8 +323,7 @@ const callEngine = (
     Effect.map(Option.some),
     Effect.catch((error: Adapter.AdapterError | Deadline.Timeout) => {
       if (isMoved(error)) {
-        runtime.model.engineRealms.delete(document)
-        return Effect.succeed(Option.none<Adapter.RemoteResult>())
+        return Effect.as(Cache.invalidate(runtime.engineRealms, document), Option.none<Adapter.RemoteResult>())
       }
       return Effect.fail(fromAdapter(error, id, runtime.backend))
     }),
@@ -298,8 +333,7 @@ const callEngine = (
         if (result._tag === "Exception") return Effect.die(new Error(`The engine threw: ${result.text}`))
         if (result.value.type === "string" && result.value.value === Engine.missing) {
           // A realm that lost its engine, as a reused realm can: install again
-          runtime.model.engineRealms.delete(document)
-          return Effect.succeedNone
+          return Effect.as(Cache.invalidate(runtime.engineRealms, document), Option.none())
         }
         return Effect.succeed(Option.some(result.value))
       }
@@ -515,7 +549,7 @@ export const sendToDocument = (
 ): Effect.Effect<Option.Option<Engine.Response>, SendFailure> =>
   Effect.raceFirst(
     Effect.suspend(() =>
-      runtime.model.documents.has(document)
+      Option.isSome(runtime.model.document(document))
         ? callEngine(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
           Effect.flatMap((value) =>
             Option.isSome(value) && value.value.type === "string"

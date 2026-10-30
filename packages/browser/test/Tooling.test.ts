@@ -188,6 +188,7 @@ describe("Browser.layerTest", () => {
       const page = yield* Browser.newPage()
       const handler = yield* Dialog.handle(page, Dialog.dismissAll)
       const popups = yield* Popup.next(page)
+      // The dialog opens a tick in: a handler decides what opens after it is registered
       yield* TestClock.adjust("10 millis")
       assert.strictEqual(yield* handler.handled, 1)
       assert.strictEqual((yield* Dialog.history(page)).entries[0]?._tag, "Confirm")
@@ -196,7 +197,7 @@ describe("Browser.layerTest", () => {
       assert.strictEqual((yield* popup.status)._tag, "Open")
       yield* TestClock.adjust("10 millis")
       assert.deepStrictEqual(yield* page.closed, { _tag: "PageCrashed" })
-    })).pipe(Effect.provide(Browser.layerTest("dialog(confirm)-popup-crash"))))
+    })).pipe(Effect.provide(Browser.layerTest("-dialog(confirm)-popup-crash"))))
 
   it.effect("has no DOM: the engine is unsupported", () =>
     Effect.scoped(Effect.gen(function*() {

@@ -435,5 +435,5 @@ export const headersSent = (
       () => Option.some("The browser hadn't said which headers it sent by the deadline"),
       "waitingForEvent"
     )
-    return Option.getOrElse(hop.value.sent, () => request.headers)
+    return Option.getOrElse((yield* hop.value.state.get).sent, () => request.headers)
   }).pipe(Operation.named("NetworkRequest.headersSent", { attributes: { "browser.hop.id": request.hop } }))

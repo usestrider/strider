@@ -143,8 +143,8 @@ const unknownKey = (key: string) =>
   })
 
 /** The layout a page's context types with. */
-export const layoutOf = (runtime: Runtime.Runtime, page: Model.PageEntry): Keyboard.Layout =>
-  runtime.model.contexts.get(page.context)?.keyboardLayout ?? "us"
+export const layoutOf = (_runtime: Runtime.Runtime, page: Model.PageEntry): Keyboard.Layout =>
+  page.contextEntry.state.getUnsafe().settings.keyboardLayout
 
 export const keyboard = (owner: Owner): Keyboard.Keyboard => ({
   press: (key, options) =>
