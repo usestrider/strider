@@ -13,6 +13,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Stream from "effect/Stream"
 import * as CdpWire from "../src/internal/cdpWire.ts"
+import * as Ingestion from "../src/internal/ingestion.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import { type FakeBrowser, makeBrowser } from "./utils/FakeBrowser.ts"
 
@@ -301,6 +302,6 @@ describe("ProtocolClient", () => {
       assert.deepStrictEqual(ProtocolClient.valuesAt(result, "/result/*/get/objectId"), ["B"])
       assert.deepStrictEqual(ProtocolClient.valuesAt({ targetId: "T" }, "/targetId"), ["T"])
       assert.deepStrictEqual(ProtocolClient.valuesAt({}, "/exceptionDetails/exception/objectId"), [])
-      assert.strictEqual(ProtocolClient.utf8Length("aé😀"), 1 + 2 + 4)
+      assert.strictEqual(Ingestion.utf8Length("aé😀"), 1 + 2 + 4)
     }))
 })
