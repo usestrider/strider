@@ -5,7 +5,9 @@
  *   model, in L1's ids, delivered to a sink in receive order, before the events are published. L1's fold
  *   applies them to its entities and never sees a protocol event.
  * - **Ids.** The adapter mints every id when it first correlates something, per connection, and keeps the
- *   tables that map them to protocol ids. An id from another connection is `Foreign`.
+ *   tables that map them to protocol ids. An id this connection minted whose target has ended is `Gone`: L1 can
+ *   name one in the moment between its end and L1 hearing of it. Only an id this connection never minted is
+ *   `Foreign`, which is a bug in L1 (`adapterKit.ts`, Ids).
  * - **Operations.** Everything L1 asks of a backend, in L1's ids: contexts and pages, navigation, realms and
  *   evaluation, input, obligations, declarations, capture, storage, permissions, bodies and files.
  *
@@ -387,8 +389,12 @@ export type RemoteValue =
     readonly handle?: HandleId | undefined
     readonly value?: ReadonlyArray<readonly [RemoteValue | string, RemoteValue]> | undefined
   }
-  | { readonly type: "regexp"; readonly value: { readonly pattern: string; readonly flags?: string | undefined } }
-  | { readonly type: "date"; readonly value: string }
+  | {
+    readonly type: "regexp"
+    readonly handle?: HandleId | undefined
+    readonly value: { readonly pattern: string; readonly flags?: string | undefined }
+  }
+  | { readonly type: "date"; readonly handle?: HandleId | undefined; readonly value: string }
   | {
     readonly type: "node"
     readonly handle?: HandleId | undefined
@@ -436,8 +442,9 @@ export interface EvaluationCall {
   /** `"value"` serializes the result; `"handle"` keeps objects as handles the caller must release. */
   readonly result: "value" | "handle"
   /**
-   * The object group a handle result joins: `releaseHandles` given every handle of a group releases them in one
-   * command (QUIRKS.md, Q132).
+   * A backend hint: the object group a handle result joins, so that `releaseHandles` given every handle of a group
+   * releases them in one command (QUIRKS.md, Q132). It changes how handles are released, never what they are: a
+   * backend without groups (BiDi) ignores it, and L1 still releases each handle it holds.
    */
   readonly group?: string | undefined
   /** Grants transient user activation for the call. */
@@ -798,6 +805,11 @@ export interface ConnectOptions {
 export interface AdapterConnection {
   readonly info: Browser.Info
   readonly capabilities: SubscriptionRef.SubscriptionRef<Browser.CapabilitySet>
+  /**
+   * A backend hint, which no operation depends on: how widely the backend pauses new targets before their
+   * scripts run (PROTOCOL.md, Pause-on-start granularity). Whatever it says, a page is ready, with the declarations
+   * in force, when `createPage` returns; what a backend can't pause is in its capabilities (`pauseOnStart.*`).
+   */
   readonly pauseScope: PauseScope
   /** The default context: it exists for the whole connection. */
   readonly defaultContext: UserContext.Id

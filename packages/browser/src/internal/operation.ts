@@ -104,7 +104,8 @@ export const fromAdapter = (
         reason: new Reason.Unsupported({ capability: reason.capability, backend, hint: reason.hint })
       }
     case "Foreign":
-      // An id from another connection never reaches the adapter from L1: a bug
+      // An id from another connection never reaches the adapter from L1: a bug. One of this connection's whose
+      // target ended is `Gone` (`adapterKit.ts`, Ids), so a race with a target's end never lands here
       throw new Foreign({ id: reason.id })
     case "Protocol": {
       const cause = reason.error.reason
