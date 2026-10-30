@@ -11,6 +11,7 @@
 import type * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import type * as Layer from "effect/Layer"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Socket from "effect/socket/Socket"
@@ -151,7 +152,7 @@ export const layerConnect = (
 ): Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor> =>
   BrowserImpl.layer((sink) =>
     Effect.gen(function*() {
-      const url = yield* Connect.chromiumWebSocket(endpoint, options)
+      const url = yield* Connect.chromiumWebSocket(endpoint, options).pipe(Effect.provide(FetchHttpClient.layer))
       const transport = yield* Connect.webSocket(url, options)
       return yield* CdpAdapter.connect(transport, { sink, ownership: "attached" })
     })
