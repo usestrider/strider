@@ -16,6 +16,7 @@ import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import * as CdpAdapter from "../../../src/internal/cdpAdapter.ts"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
+import * as L1Target from "../../../src/Target.ts"
 import { assertPinned, chromium } from "../browsers.ts"
 import { makeRecorder, site } from "./harness.ts"
 
@@ -52,7 +53,7 @@ describe("Chromium adapter, CDP only", () => {
             )
             yield* Page.crash().pipe(Protocol.on(yield* other.session(sessionId)), Effect.ignore)
             const removed = yield* facts.when("NavigableRemoved", (fact) => fact.navigable === page)
-            assert.deepStrictEqual(removed.reason, { _tag: "PageCrashed" })
+            assert.deepStrictEqual(removed.reason, new L1Target.PageCrashed({}))
           }),
         timeout
       )
@@ -122,7 +123,7 @@ describe("Chromium adapter, CDP only", () => {
             assert.deepStrictEqual(closed.reason, {
               _tag: "Gone",
               target: { _tag: "Page", id: page },
-              reason: { _tag: "PageClosed", by: "command" }
+              reason: new L1Target.PageClosed({ by: "command" })
             })
             const replaced = yield* adapter.realm(document, { _tag: "Main" }).pipe(Effect.flip)
             assert.strictEqual(replaced.reason._tag, "Gone")

@@ -8,7 +8,7 @@ import * as Option from "effect/Option"
 import * as BrowserBidi from "../../bidi-protocol/Browser.ts"
 import * as BrowsingContext from "../../bidi-protocol/BrowsingContext.ts"
 import type * as Download from "../../Download.ts"
-import type * as L1Target from "../../Target.ts"
+import * as L1Target from "../../Target.ts"
 import type * as UserContext from "../../UserContext.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
@@ -39,10 +39,10 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         state,
         navigable,
         navigable.parent !== undefined
-          ? { _tag: "FrameDetached" }
+          ? new L1Target.FrameDetached({})
           : navigable.closing ?? (navigable.context.removing
-            ? { _tag: "PageClosed", by: "userContextRemoved" }
-            : { _tag: "PageClosed", by: "script" }),
+            ? new L1Target.PageClosed({ by: "userContextRemoved" })
+            : new L1Target.PageClosed({ by: "script" })),
         "bidi:browsingContext.contextDestroyed"
       )
     })
@@ -137,7 +137,7 @@ export const createPage = Effect.fnUntraced(function*(state: State, id: UserCont
   yield* state.root().drainObserved
   const navigable = state.navigables.get(created.context)
   if (navigable === undefined) {
-    return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, { _tag: "PageClosed", by: "browser" }))
+    return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.PageClosed({ by: "browser" })))
   }
   return navigable.id
 })
@@ -145,7 +145,7 @@ export const createPage = Effect.fnUntraced(function*(state: State, id: UserCont
 export const closePage = Effect.fnUntraced(
   function*(state: State, id: L1Target.NavigableId, options: { readonly runBeforeUnload: boolean }) {
     const navigable = yield* navigableById(state, id)
-    if (!options.runBeforeUnload) navigable.closing = { _tag: "PageClosed", by: "command" }
+    if (!options.runBeforeUnload) navigable.closing = new L1Target.PageClosed({ by: "command" })
     // The reply may wait on a beforeunload prompt, which the context's end reports
     state.buffer.start(
       state.send(BrowsingContext.close({ context: navigable.bidi, promptUnload: options.runBeforeUnload }))

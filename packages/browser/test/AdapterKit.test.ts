@@ -19,7 +19,7 @@ import * as Kit from "../src/internal/adapterKit.ts"
 import * as Declarations from "../src/internal/declarations.ts"
 import * as Operation from "../src/internal/operation.ts"
 import type * as ProtocolClient from "../src/internal/protocolClient.ts"
-import type * as Target from "../src/Target.ts"
+import * as Target from "../src/Target.ts"
 
 /** A client's control whose `run` runs `before` first, as events received ahead of it would be folded. */
 const control = (before: () => void = () => {}): ProtocolClient.FoldControl => ({
@@ -66,7 +66,7 @@ describe("AdapterKit", () => {
         const theirs = Kit.makeIds()
         const ended = ours.document()
         const table = new Map<Target.DocumentId, string>()
-        const gone = () => Kit.gone({ _tag: "Document", id: ended }, { _tag: "DocumentReplaced" })
+        const gone = () => Kit.gone({ _tag: "Document", id: ended }, new Target.DocumentReplaced({}))
         const own = yield* Kit.lookup(ours, table, ended, gone).pipe(Effect.flip)
         assert.strictEqual(reasonOf(own), "Gone")
         const foreign = yield* Kit.lookup(ours, table, theirs.document(), gone).pipe(Effect.flip)
@@ -85,7 +85,7 @@ describe("AdapterKit", () => {
           ids,
           table,
           page,
-          () => Kit.gone({ _tag: "Page", id: page }, { _tag: "PageClosed", by: "command" }),
+          () => Kit.gone({ _tag: "Page", id: page }, new Target.PageClosed({ by: "command" })),
           (entry) => !entry.ended
         ).pipe(Effect.flip)
         assert.strictEqual(reasonOf(error), "Gone")
@@ -110,8 +110,8 @@ describe("AdapterKit", () => {
         const unannounced: Kit.RealmNode = { id: ids.realm(), ended: false, pending: true, held: [] }
         buffer.emitFrom(unannounced, logged)
         let removed = 0
-        Kit.removeRealm(buffer, unannounced, { _tag: "RealmDestroyed" }, () => removed++)
-        Kit.removeRealm(buffer, unannounced, { _tag: "RealmDestroyed" }, () => removed++)
+        Kit.removeRealm(buffer, unannounced, new Target.RealmDestroyed({}), () => removed++)
+        Kit.removeRealm(buffer, unannounced, new Target.RealmDestroyed({}), () => removed++)
         yield* buffer.flush
         assert.strictEqual(removed, 1)
         assert.strictEqual(facts.length, 2)
@@ -257,7 +257,7 @@ describe("AdapterKit", () => {
         assert.deepStrictEqual(released.reason, {
           _tag: "Gone",
           target: { _tag: "Realm", id: realm },
-          reason: { _tag: "RealmDestroyed" }
+          reason: new Target.RealmDestroyed({})
         })
         const foreign = yield* resolve({ _tag: "Handle", handle: theirs.handle() }).pipe(Effect.flip)
         assert.strictEqual(foreign.reason._tag, "Foreign")
@@ -266,7 +266,7 @@ describe("AdapterKit", () => {
         assert.deepStrictEqual(node.reason, {
           _tag: "Gone",
           target: { _tag: "Document", id: document },
-          reason: { _tag: "DocumentReplaced" }
+          reason: new Target.DocumentReplaced({})
         })
         assert.strictEqual(yield* resolve({ _tag: "Value", value: { type: "null" } }), "value")
       }))

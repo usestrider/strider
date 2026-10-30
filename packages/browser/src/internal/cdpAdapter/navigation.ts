@@ -10,7 +10,7 @@ import * as Option from "effect/Option"
 import * as Page from "../../cdp/Page.ts"
 import type * as PageNavigation from "../../PageNavigation.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
-import type * as L1Target from "../../Target.ts"
+import * as L1Target from "../../Target.ts"
 import * as Kit from "../adapterKit.ts"
 import { initiatedAs, isSameDocument } from "./mapping.ts"
 import { type Event, frameById, frameOf, pageOf, type State } from "./state.ts"
@@ -37,7 +37,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Page.frameDetached, (params, { state }) => {
       const frame = state.frames.get(params.frameId)
       if (frame === undefined || params.reason === "swap") return
-      removeFrame(state, frame, { _tag: "FrameDetached" }, "cdp:Page.frameDetached")
+      removeFrame(state, frame, new L1Target.FrameDetached({}), "cdp:Page.frameDetached")
     })
     .on(Page.frameStartedNavigating, (params, { state }) => {
       const frame = state.frames.get(params.frameId)

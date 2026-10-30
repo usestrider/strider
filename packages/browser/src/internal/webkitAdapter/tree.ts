@@ -7,7 +7,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type * as PageNavigation from "../../PageNavigation.ts"
-import type * as L1Target from "../../Target.ts"
+import * as L1Target from "../../Target.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import { forgetRealm } from "./evaluation.ts"
@@ -88,7 +88,7 @@ export const commit = (
 ): DocumentEntry => {
   // Children of the replaced document end with it
   for (const child of Array.from(frame.children)) {
-    removeFrame(state, child, { _tag: "FrameDetached" }, "webkit: the parent's document was replaced")
+    removeFrame(state, child, new L1Target.FrameDetached({}), "webkit: the parent's document was replaced")
   }
   const old = frame.document
   const document: DocumentEntry = {
@@ -114,7 +114,7 @@ export const commit = (
     evidence
   })
   // WebKit never reports a context destroyed: the old document's realms end with it
-  if (old !== undefined) dropDocument(state, old, { _tag: "RealmDestroyed" })
+  if (old !== undefined) dropDocument(state, old, new L1Target.RealmDestroyed({}))
   return document
 }
 

@@ -156,7 +156,7 @@ export const openState = (page: Model.PageEntry, id: Diagnostics.OperationId) =>
     Stream.runHead,
     Effect.flatMap((state): Effect.Effect<Extract<Model.PageStatus, { _tag: "Open" }>, SendFailure> => {
       if (Option.isNone(state)) {
-        return Effect.fail(gone({ _tag: "Page", id: page.id }, { _tag: "PageClosed", by: "browser" }, id))
+        return Effect.fail(gone({ _tag: "Page", id: page.id }, new Target.PageClosed({ by: "browser" }), id))
       }
       const value = state.value
       return value._tag === "Open"
@@ -164,7 +164,7 @@ export const openState = (page: Model.PageEntry, id: Diagnostics.OperationId) =>
         : Effect.fail(
           gone(
             { _tag: "Page", id: page.id },
-            value._tag === "Closed" ? value.reason : { _tag: "PageClosed", by: "browser" },
+            value._tag === "Closed" ? value.reason : new Target.PageClosed({ by: "browser" }),
             id
           )
         )

@@ -6,7 +6,7 @@
 import * as Option from "effect/Option"
 import type * as BrowsingContext from "../../bidi-protocol/BrowsingContext.ts"
 import type * as PageNavigation from "../../PageNavigation.ts"
-import type * as L1Target from "../../Target.ts"
+import * as L1Target from "../../Target.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import type { ContextEntry, DocumentEntry, NavigableEntry, NavigationEntry, RealmEntry, State } from "./state.ts"
@@ -270,7 +270,7 @@ export const reconcile = (state: State, tree: BrowsingContext.GetTreeResult) => 
   for (const info of tree.contexts) visit(info)
   for (const navigable of Array.from(state.navigables.values())) {
     if (navigable.parent === undefined && !seen.has(navigable.bidi)) {
-      removeNavigable(state, navigable, { _tag: "ModelUnavailable" }, "bidi:browsingContext.getTree")
+      removeNavigable(state, navigable, new L1Target.ModelUnavailable({}), "bidi:browsingContext.getTree")
     }
   }
 }

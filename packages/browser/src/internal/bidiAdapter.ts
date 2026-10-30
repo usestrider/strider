@@ -25,7 +25,7 @@ import * as Session from "../bidi-protocol/Session.ts"
 import * as Browser from "../Browser.ts"
 import * as Protocol from "../protocol/Protocol.ts"
 import type * as Transport from "../protocol/Transport.ts"
-import type * as L1Target from "../Target.ts"
+import * as L1Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Kit from "./adapterKit.ts"
 import * as Capture from "./bidiAdapter/capture.ts"
@@ -221,7 +221,7 @@ const fold = (state: State.State): ProtocolClient.Fold => ({
       if (reason.why === "connectionLost" || reason.why === "modelUnavailable") {
         const why: L1Target.CloseReason = reason.why === "connectionLost"
           ? Kit.closed()
-          : { _tag: "ModelUnavailable" }
+          : new L1Target.ModelUnavailable({})
         for (const navigable of Array.from(state.navigables.values())) {
           if (navigable.parent === undefined) {
             Tree.removeNavigable(state, navigable, why, `bidi: the session ended (${reason.why})`)

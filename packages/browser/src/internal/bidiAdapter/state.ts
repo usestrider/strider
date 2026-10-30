@@ -16,7 +16,7 @@ import type * as Dialog from "../../Dialog.ts"
 import type * as Download from "../../Download.ts"
 import type * as NetworkRequest from "../../NetworkRequest.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
-import type * as L1Target from "../../Target.ts"
+import * as L1Target from "../../Target.ts"
 import type * as UserContext from "../../UserContext.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
@@ -284,7 +284,7 @@ export const scopeParams = (
 // ── Lookups: an id this connection minted that ended is Gone, any other Foreign ───────────────────────────
 
 const pageGone = (state: State, id: L1Target.NavigableId) =>
-  Kit.gone({ _tag: "Page", id }, state.endedPages.get(id) ?? { _tag: "PageClosed", by: "browser" })
+  Kit.gone({ _tag: "Page", id }, state.endedPages.get(id) ?? new L1Target.PageClosed({ by: "browser" }))
 
 /** A page or a frame. */
 export const navigableById = (
@@ -295,25 +295,36 @@ export const navigableById = (
     state.ids,
     state.navigablesById,
     id,
-    () => state.endedPages.has(id) ? pageGone(state, id) : Kit.gone({ _tag: "Frame", id }, { _tag: "FrameDetached" }),
+    () =>
+      state.endedPages.has(id) ? pageGone(state, id) : Kit.gone({ _tag: "Frame", id }, new L1Target.FrameDetached({})),
     (navigable) => !navigable.removed
   )
 
 export const contextOf = (state: State, id: UserContext.Id): Effect.Effect<ContextEntry, Adapter.AdapterError> =>
-  Kit.lookup(state.ids, state.contexts, id, () => Kit.gone({ _tag: "UserContext" }, { _tag: "UserContextRemoved" }))
+  Kit.lookup(
+    state.ids,
+    state.contexts,
+    id,
+    () => Kit.gone({ _tag: "UserContext" }, new L1Target.UserContextRemoved({}))
+  )
 
 export const documentOf = (
   state: State,
   id: L1Target.DocumentId
 ): Effect.Effect<DocumentEntry, Adapter.AdapterError> =>
-  Kit.lookup(state.ids, state.documents, id, () => Kit.gone({ _tag: "Document", id }, { _tag: "DocumentReplaced" }))
+  Kit.lookup(
+    state.ids,
+    state.documents,
+    id,
+    () => Kit.gone({ _tag: "Document", id }, new L1Target.DocumentReplaced({}))
+  )
 
 export const realmOf = (state: State, id: L1Target.RealmId): Effect.Effect<RealmEntry, Adapter.AdapterError> =>
   Kit.lookup(
     state.ids,
     state.realmsById,
     id,
-    () => Kit.gone({ _tag: "Realm", id }, { _tag: "RealmDestroyed" }),
+    () => Kit.gone({ _tag: "Realm", id }, new L1Target.RealmDestroyed({})),
     (realm) => !realm.ended
   )
 
@@ -321,4 +332,4 @@ export const realmOf = (state: State, id: L1Target.RealmId): Effect.Effect<Realm
  * An obligation, a download or a hop has no target of its own to name: one that ended is reported against the
  * browser, which L1 treats as the end it is.
  */
-export const endedThing = () => Kit.gone({ _tag: "Browser" }, { _tag: "PageClosed", by: "browser" })
+export const endedThing = () => Kit.gone({ _tag: "Browser" }, new L1Target.PageClosed({ by: "browser" }))

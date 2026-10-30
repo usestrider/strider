@@ -9,7 +9,7 @@ import * as Option from "effect/Option"
 import * as Log from "../../bidi-protocol/Log.ts"
 import * as Script from "../../bidi-protocol/Script.ts"
 import * as ConsoleMessage from "../../ConsoleMessage.ts"
-import type * as L1Target from "../../Target.ts"
+import * as L1Target from "../../Target.ts"
 import * as UncaughtException from "../../UncaughtException.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
@@ -207,7 +207,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Script.realmDestroyed, (params, { state }) => {
       const realm = state.realms.get(params.realm)
       // One created and destroyed before its document committed never reached the model
-      if (realm !== undefined) removeRealm(state, realm, { _tag: "RealmDestroyed" })
+      if (realm !== undefined) removeRealm(state, realm, new L1Target.RealmDestroyed({}))
     })
     .on(Log.entryAdded, (params, { state }) => {
       const realm = state.realms.get(params.source.realm)
@@ -287,7 +287,7 @@ export const realm = Effect.fnUntraced(function*(state: State, id: L1Target.Docu
       !realm.ended && realm.world._tag === world._tag &&
       (world._tag === "Main" || (realm.world._tag === "Isolated" && realm.world.name === world.name))
     )
-  const replaced = () => Kit.gone({ _tag: "Document", id }, { _tag: "DocumentReplaced" })
+  const replaced = () => Kit.gone({ _tag: "Document", id }, new L1Target.DocumentReplaced({}))
   if (world._tag === "Main") {
     // The main world's realm may be reported after the document commits: wait for it, or the document's end
     const found = yield* state.buffer.waitFor(() =>

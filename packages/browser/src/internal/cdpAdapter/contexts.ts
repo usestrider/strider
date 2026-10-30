@@ -11,7 +11,7 @@ import * as Page from "../../cdp/Page.ts"
 import * as Target from "../../cdp/Target.ts"
 import type * as Download from "../../Download.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
-import type * as L1Target from "../../Target.ts"
+import * as L1Target from "../../Target.ts"
 import type * as UserContext from "../../UserContext.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
@@ -154,7 +154,7 @@ export const createPage = Effect.fnUntraced(function*(state: State, id: UserCont
   yield* state.root().drainObserved
   const page = state.targetsById.get(targetId)?.page
   if (page === undefined) {
-    return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, { _tag: "PageClosed", by: "browser" }))
+    return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.PageClosed({ by: "browser" })))
   }
   yield* Deferred.await(page.ready)
   return page.id
@@ -171,7 +171,7 @@ export const closePage = Effect.fnUntraced(
     // it accepts says the swap is over; this one is the browser's, so it is answered with a dialog open or the
     // page's script stuck
     yield* Kit.protocol(whileSwapping(Page.getNavigationHistory().pipe(Protocol.on(page.target.session))))
-    page.closing = { _tag: "PageClosed", by: "command" }
+    page.closing = new L1Target.PageClosed({ by: "command" })
     yield* Kit.protocol(
       Target.closeTarget({ targetId: page.targetId as Target.TargetID }).pipe(Protocol.on(state.root()))
     )

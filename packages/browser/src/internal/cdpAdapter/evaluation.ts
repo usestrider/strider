@@ -11,7 +11,7 @@ import * as Page from "../../cdp/Page.ts"
 import * as Runtime from "../../cdp/Runtime.ts"
 import * as ConsoleMessage from "../../ConsoleMessage.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
-import type * as L1Target from "../../Target.ts"
+import * as L1Target from "../../Target.ts"
 import * as UncaughtException from "../../UncaughtException.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
@@ -214,12 +214,12 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Runtime.executionContextDestroyed, (params, { state, target }) => {
       if (target === undefined || params.executionContextUniqueId === undefined) return
       const realm = state.realmsByUnique.get(params.executionContextUniqueId)
-      if (realm !== undefined) removeRealm(state, realm, { _tag: "RealmDestroyed" })
+      if (realm !== undefined) removeRealm(state, realm, new L1Target.RealmDestroyed({}))
     })
     .on(Runtime.executionContextsCleared, (_params, { state, target }) => {
       for (const realm of Array.from(state.realms.values())) {
         if (realm.target === target && realm.frame !== undefined) {
-          removeRealm(state, realm, { _tag: "RealmDestroyed" })
+          removeRealm(state, realm, new L1Target.RealmDestroyed({}))
         }
       }
     })
@@ -293,7 +293,7 @@ export const realm = Effect.fnUntraced(function*(state: State, id: L1Target.Docu
       !realm.ended && realm.world._tag === world._tag &&
       (world._tag === "Main" || (realm.world._tag === "Isolated" && realm.world.name === world.name))
     )
-  const replaced = () => Kit.gone({ _tag: "Document", id }, { _tag: "DocumentReplaced" })
+  const replaced = () => Kit.gone({ _tag: "Document", id }, new L1Target.DocumentReplaced({}))
   if (world._tag === "Main") {
     // The main world's realm is reported a moment after the document commits: wait for it, or the document's end
     const found = yield* state.buffer.waitFor(() =>

@@ -267,6 +267,7 @@ type CloseReason =
   | FrameDetached | DocumentReplaced | DocumentEvicted | DocumentDestroyed | DocumentUnloaded
   | RealmDestroyed
   | NetworkConnectionClosed                              // a WebSocket or EventSource the page or the server closed
+// Each is a Schema.Error class with a `hint` (Target.PageClosed, ...). State holds the instances, and TargetGone carries the same one: nothing converts at the boundary.
 ```
 
 ## 3. Lifetimes, access and cleanup

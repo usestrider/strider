@@ -20,7 +20,7 @@ import * as Page from "../../cdp/Page.ts"
 import * as Runtime from "../../cdp/Runtime.ts"
 import * as Target from "../../cdp/Target.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
-import type * as L1Target from "../../Target.ts"
+import * as L1Target from "../../Target.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
@@ -139,7 +139,7 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
   state.workerContexts.delete(target)
   for (const realm of Array.from(state.realms.values())) {
     if (realm.target === target) {
-      removeRealm(state, realm, reason.why === "connectionLost" ? Kit.closed() : { _tag: "RealmDestroyed" })
+      removeRealm(state, realm, reason.why === "connectionLost" ? Kit.closed() : new L1Target.RealmDestroyed({}))
     }
   }
   switch (target.kind) {
@@ -148,10 +148,10 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
       const why: L1Target.CloseReason = reason.why === "connectionLost"
         ? Kit.closed()
         : reason.why === "modelUnavailable"
-        ? { _tag: "ModelUnavailable" }
+        ? new L1Target.ModelUnavailable({})
         : page.closing ?? (page.context.removing
-          ? { _tag: "PageClosed", by: "userContextRemoved" }
-          : { _tag: "PageClosed", by: "script" })
+          ? new L1Target.PageClosed({ by: "userContextRemoved" })
+          : new L1Target.PageClosed({ by: "script" }))
       endPage(state, page, why, `cdp: the page's session ended (${reason.why})`)
       return
     }
@@ -317,10 +317,10 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     })
     .on(Target.targetCrashed, (params, { state }) => {
       const page = state.targetsById.get(params.targetId)?.page
-      if (page !== undefined) endPage(state, page, { _tag: "PageCrashed" }, "cdp:Target.targetCrashed")
+      if (page !== undefined) endPage(state, page, new L1Target.PageCrashed({}), "cdp:Target.targetCrashed")
     })
     .on(Inspector.targetCrashed, (_params, { state, target }) => {
       if (target?.kind === "page" && target.page !== undefined) {
-        endPage(state, target.page, { _tag: "PageCrashed" }, "cdp:Inspector.targetCrashed")
+        endPage(state, target.page, new L1Target.PageCrashed({}), "cdp:Inspector.targetCrashed")
       }
     })

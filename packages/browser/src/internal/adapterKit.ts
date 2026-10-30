@@ -43,7 +43,7 @@ import type * as ConsoleMessage from "../ConsoleMessage.ts"
 import * as NetworkRequest from "../NetworkRequest.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Protocol from "../protocol/Protocol.ts"
-import type * as Target from "../Target.ts"
+import * as Target from "../Target.ts"
 import * as Adapter from "./adapter.ts"
 import type * as ConsoleFormat from "./consoleFormat.ts"
 import type * as ProtocolClient from "./protocolClient.ts"
@@ -63,7 +63,7 @@ export const unsupported = (capability: string, hint: string): Adapter.AdapterEr
   new Adapter.AdapterError({ reason: { _tag: "Unsupported", capability, hint } })
 
 /** Why targets end when the connection does. */
-export const closed = (): Target.CloseReason => ({ _tag: "ConnectionLost" })
+export const closed = (): Target.CloseReason => (new Target.ConnectionLost({}))
 
 /** A protocol failure as an adapter error (`Adapter.protocolError`). */
 export const protocolError = Adapter.protocolError
@@ -84,7 +84,7 @@ export const undecodable = (method: string, issue: string): Adapter.AdapterError
 export const realmFailure =
   (realm: Target.RealmId, ended: () => boolean) => (error: Protocol.ProtocolError): Adapter.AdapterError =>
     ended() || error.reason._tag === "SessionEnded"
-      ? gone({ _tag: "Realm", id: realm }, { _tag: "RealmDestroyed" })
+      ? gone({ _tag: "Realm", id: realm }, new Target.RealmDestroyed({}))
       : protocolError(error)
 
 // ── Ids ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -592,7 +592,7 @@ export const argument = <A>(
           ? Effect.succeed(resolved)
           : Effect.fail(
             missing(options.ids, local.handle, () =>
-              gone({ _tag: "Realm", id: options.realm }, { _tag: "RealmDestroyed" }))
+              gone({ _tag: "Realm", id: options.realm }, new Target.RealmDestroyed({})))
           )
       }
       case "Node": {
@@ -604,7 +604,7 @@ export const argument = <A>(
               options.ids,
               local.node.document,
               () =>
-                gone({ _tag: "Document", id: local.node.document }, { _tag: "DocumentReplaced" })
+                gone({ _tag: "Document", id: local.node.document }, new Target.DocumentReplaced({}))
             )
           )
       }

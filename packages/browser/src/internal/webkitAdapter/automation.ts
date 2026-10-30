@@ -8,7 +8,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Protocol from "../../protocol/Protocol.ts"
-import type * as L1Target from "../../Target.ts"
+import * as L1Target from "../../Target.ts"
 import type * as UserContext from "../../UserContext.ts"
 import * as Automation from "../../webkit-automation-protocol/Automation.ts"
 import * as Runtime from "../../webkit-stock-protocol/Runtime.ts"
@@ -28,7 +28,7 @@ export const processOfContext = (state: State, context: ContextEntry) =>
   Effect.suspend(() => {
     const process = state.automation?.process(context.browserContextId ?? "default")
     return process === undefined
-      ? Effect.fail(Kit.gone({ _tag: "UserContext" }, { _tag: "UserContextRemoved" }))
+      ? Effect.fail(Kit.gone({ _tag: "UserContext" }, new L1Target.UserContextRemoved({})))
       : Effect.succeed(process)
   })
 /** An Automation command, on a process's session. */
@@ -91,7 +91,7 @@ export const pageHandleOf = Effect.fnUntraced(function*(state: State, page: Page
     yield* BrowserClock.live.sleep(50)
   }
   return yield* Effect.fail(
-    Kit.gone({ _tag: "Page", id: page.id }, page.closing ?? { _tag: "PageClosed", by: "browser" })
+    Kit.gone({ _tag: "Page", id: page.id }, page.closing ?? new L1Target.PageClosed({ by: "browser" }))
   )
 })
 
@@ -276,7 +276,7 @@ export const createPageLaunched = Effect.fnUntraced(function*(state: State, id: 
     }
     yield* BrowserClock.live.sleep(50)
   }
-  return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, { _tag: "PageClosed", by: "browser" }))
+  return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.PageClosed({ by: "browser" })))
 })
 
 export const closePageLaunched = Effect.fnUntraced(
@@ -289,7 +289,7 @@ export const closePageLaunched = Effect.fnUntraced(
     }
     const handle = yield* pageHandleOf(state, page)
     const process = yield* processOfContext(state, page.context)
-    page.closing = { _tag: "PageClosed", by: "command" }
+    page.closing = new L1Target.PageClosed({ by: "command" })
     yield* automationOf(process, Automation.closeBrowsingContext({ handle }))
   }
 )

@@ -14,7 +14,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Protocol from "../../protocol/Protocol.ts"
-import type * as L1Target from "../../Target.ts"
+import * as L1Target from "../../Target.ts"
 import * as Console from "../../webkit-stock-protocol/Console.ts"
 import * as Network from "../../webkit-stock-protocol/Network.ts"
 import * as Page from "../../webkit-stock-protocol/Page.ts"
@@ -130,7 +130,7 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
   if (worker !== undefined) {
     state.workers.delete(session)
     if (worker.realm !== undefined) {
-      removeRealm(state, worker.realm, reason.why === "connectionLost" ? Kit.closed() : { _tag: "RealmDestroyed" })
+      removeRealm(state, worker.realm, reason.why === "connectionLost" ? Kit.closed() : new L1Target.RealmDestroyed({}))
     }
     return
   }
@@ -141,7 +141,7 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
     state.pausedRequests.delete(target)
     for (const realm of Array.from(state.realms.values())) {
       if (realm.target === target) {
-        removeRealm(state, realm, reason.why === "connectionLost" ? Kit.closed() : { _tag: "RealmDestroyed" })
+        removeRealm(state, realm, reason.why === "connectionLost" ? Kit.closed() : new L1Target.RealmDestroyed({}))
       }
     }
     const page = target.page
@@ -159,11 +159,11 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
   const why: L1Target.CloseReason = reason.why === "connectionLost"
     ? Kit.closed()
     : reason.why === "modelUnavailable"
-    ? { _tag: "ModelUnavailable" }
+    ? new L1Target.ModelUnavailable({})
     : page.closing ??
       (page.context.removing
-        ? { _tag: "PageClosed", by: "userContextRemoved" }
-        : { _tag: "PageClosed", by: "script" })
+        ? new L1Target.PageClosed({ by: "userContextRemoved" })
+        : new L1Target.PageClosed({ by: "script" }))
   endPage(state, page, why, `webkit: the page proxy's session ended (${reason.why})`)
 }
 

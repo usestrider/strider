@@ -10,7 +10,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Protocol from "../../protocol/Protocol.ts"
-import type * as L1Target from "../../Target.ts"
+import * as L1Target from "../../Target.ts"
 import * as Page from "../../webkit-stock-protocol/Page.ts"
 import * as Runtime from "../../webkit-stock-protocol/Runtime.ts"
 import * as Kit from "../adapterKit.ts"
@@ -26,7 +26,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (target === undefined) return
       const frame = state.frames.get(frameKey(target, params.frameId))
       if (frame === undefined || frame.parent === undefined) return
-      removeFrame(state, frame, { _tag: "FrameDetached" }, "webkit:Page.frameDetached")
+      removeFrame(state, frame, new L1Target.FrameDetached({}), "webkit:Page.frameDetached")
     })
     .on(Page.frameNavigated, (params, { state, target }) => {
       if (target === undefined) return
@@ -123,7 +123,7 @@ export const navigateByScript = Effect.fnUntraced(function*(
   // The page's document is known once its first snapshot is in
   yield* Deferred.await(frame.page.ready)
   if (frame.document === undefined) {
-    return yield* Effect.fail(Kit.gone({ _tag: "Frame", id: navigable }, { _tag: "DocumentReplaced" }))
+    return yield* Effect.fail(Kit.gone({ _tag: "Frame", id: navigable }, new L1Target.DocumentReplaced({})))
   }
   // A fragment of the document it shows: a navigation stock WebKit wouldn't report, so none would be seen to end
   // (QUIRKS.md, Q200)

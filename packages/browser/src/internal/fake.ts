@@ -23,7 +23,7 @@ import type * as Browser from "../Browser.ts"
 import * as NetworkRequest from "../NetworkRequest.ts"
 import * as NetworkResponse from "../NetworkResponse.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
-import type * as Target from "../Target.ts"
+import * as Target from "../Target.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
 import * as Urls from "./urls.ts"
@@ -304,9 +304,9 @@ export const connect = (
               yield* addPage(page.context, "popup", Option.some(page.id))
               break
             case "Crash":
-              return yield* end(page, { _tag: "PageCrashed" }, "fake: crash")
+              return yield* end(page, new Target.PageCrashed({}), "fake: crash")
             case "Close":
-              return yield* end(page, { _tag: "PageClosed", by: "script" }, "fake: |")
+              return yield* end(page, new Target.PageClosed({ by: "script" }), "fake: |")
           }
         }
       })
@@ -317,7 +317,7 @@ export const connect = (
         return page === undefined || page.ended
           ? Effect.fail(
             new Adapter.AdapterError({
-              reason: { _tag: "Gone", target: { _tag: "Page", id }, reason: { _tag: "PageClosed", by: "command" } }
+              reason: { _tag: "Gone", target: { _tag: "Page", id }, reason: new Target.PageClosed({ by: "command" }) }
             })
           )
           : Effect.succeed(page)
@@ -352,7 +352,9 @@ export const connect = (
       closePage: (id) =>
         Effect.suspend(() => {
           const page = pages.get(id)
-          return page === undefined ? Effect.void : end(page, { _tag: "PageClosed", by: "command" }, "fake: closePage")
+          return page === undefined
+            ? Effect.void
+            : end(page, new Target.PageClosed({ by: "command" }), "fake: closePage")
         }),
       activatePage: (id) => Effect.asVoid(pageOf(id)),
       navigate: (id, url) => Effect.flatMap(pageOf(id), (page) => commit(page, url, "crossDocument", true)),

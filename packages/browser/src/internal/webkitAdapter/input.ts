@@ -5,7 +5,7 @@
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Protocol from "../../protocol/Protocol.ts"
-import type * as L1Target from "../../Target.ts"
+import * as L1Target from "../../Target.ts"
 import * as Automation from "../../webkit-automation-protocol/Automation.ts"
 import * as Runtime from "../../webkit-stock-protocol/Runtime.ts"
 import type * as Adapter from "../adapter.ts"
@@ -312,7 +312,7 @@ const nodeHandleOf = Effect.fnUntraced(function*(state: State, node: Adapter.Nod
   const process = yield* processOfContext(state, frame.page.context)
   const frameHandle = yield* frameHandleOf(state, frame, handle, process)
   if (Option.isNone(frameHandle)) {
-    return yield* Effect.fail(Kit.gone({ _tag: "Document", id: node.document }, { _tag: "DocumentReplaced" }))
+    return yield* Effect.fail(Kit.gone({ _tag: "Document", id: node.document }, new L1Target.DocumentReplaced({})))
   }
   // WebKit's binding is the element's object id, in the page's world
   const { result } = yield* Kit.protocol(
@@ -336,7 +336,7 @@ const nodeHandleOf = Effect.fnUntraced(function*(state: State, node: Adapter.Nod
   const nodeHandle = reference === null ? undefined : Object.values(reference)[0]
   // An element its document no longer holds
   if (nodeHandle === undefined) {
-    return yield* Effect.fail(Kit.gone({ _tag: "Document", id: node.document }, { _tag: "DocumentReplaced" }))
+    return yield* Effect.fail(Kit.gone({ _tag: "Document", id: node.document }, new L1Target.DocumentReplaced({})))
   }
   return { frame, handle, process, frameHandle: frameHandle.value, nodeHandle: nodeHandle as Automation.NodeHandle }
 })

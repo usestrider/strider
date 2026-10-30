@@ -16,6 +16,7 @@ import * as State from "../src/internal/bidiAdapter/state.ts"
 import * as Tree from "../src/internal/bidiAdapter/tree.ts"
 import type * as ProtocolClient from "../src/internal/protocolClient.ts"
 import type * as Protocol from "../src/protocol/Protocol.ts"
+import * as Target from "../src/Target.ts"
 
 const control: ProtocolClient.FoldControl = {
   sync: () => {},
@@ -77,12 +78,12 @@ describe("BidiAdapter state", () => {
   it.effect("fails an operation on a page that ended as Gone, with why it ended", () =>
     Effect.gen(function*() {
       const { page, state } = yield* withPage()
-      Tree.removeNavigable(state, page, { _tag: "PageClosed", by: "command" }, "test")
+      Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
       const error = yield* State.navigableById(state, page.id).pipe(Effect.flip)
       assert.deepStrictEqual(error.reason, {
         _tag: "Gone",
         target: { _tag: "Page", id: page.id },
-        reason: { _tag: "PageClosed", by: "command" }
+        reason: new Target.PageClosed({ by: "command" })
       })
       const foreign = yield* State.navigableById(state, Kit.makeIds().navigable()).pipe(Effect.flip)
       assert.strictEqual(foreign.reason._tag, "Foreign")
@@ -91,12 +92,12 @@ describe("BidiAdapter state", () => {
   it.effect("fails the realm of a document that ended as Gone, and a realm that ended", () =>
     Effect.gen(function*() {
       const { document, page, realm, state } = yield* withPage()
-      Tree.removeNavigable(state, page, { _tag: "PageClosed", by: "command" }, "test")
+      Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
       const replaced = yield* Evaluation.realm(state, document.id, { _tag: "Main" }).pipe(Effect.flip)
       assert.deepStrictEqual(replaced.reason, {
         _tag: "Gone",
         target: { _tag: "Document", id: document.id },
-        reason: { _tag: "DocumentReplaced" }
+        reason: new Target.DocumentReplaced({})
       })
       const ended = yield* Evaluation.evaluate(state, realm.id, {
         functionDeclaration: "() => 1",
@@ -123,7 +124,7 @@ describe("BidiAdapter state", () => {
       assert.deepStrictEqual(released.reason, {
         _tag: "Gone",
         target: { _tag: "Realm", id: realm.id },
-        reason: { _tag: "RealmDestroyed" }
+        reason: new Target.RealmDestroyed({})
       })
       const foreign = yield* call(Kit.makeIds().handle())
       assert.strictEqual(foreign.reason._tag, "Foreign")

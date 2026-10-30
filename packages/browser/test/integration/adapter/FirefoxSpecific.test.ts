@@ -11,6 +11,7 @@ import * as Option from "effect/Option"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import * as BidiAdapter from "../../../src/internal/bidiAdapter.ts"
 import * as FirefoxLauncher from "../../../src/internal/firefoxLauncher.ts"
+import * as Target from "../../../src/Target.ts"
 import { assertPinned, firefox } from "../browsers.ts"
 import { makeRecorder, site } from "./harness.ts"
 
@@ -57,7 +58,7 @@ describe("Firefox adapter, BiDi only", () => {
             assert.deepStrictEqual(closed.reason, {
               _tag: "Gone",
               target: { _tag: "Page", id: page },
-              reason: { _tag: "PageClosed", by: "command" }
+              reason: new Target.PageClosed({ by: "command" })
             })
             const replaced = yield* adapter.realm(document, { _tag: "Main" }).pipe(Effect.flip)
             assert.strictEqual(replaced.reason._tag, "Gone")

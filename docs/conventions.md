@@ -229,7 +229,7 @@ Effect puts operations on handles as members (`client.get`, `handle.kill`), and 
   - Reasons several modules share live in `Reason`: `InvalidInput`, `NotPermitted`, `Unsupported`, `BackendFailure`, `EvaluationThrown`, `NotSerializable`, `PromptBlocking`.
   - A reason that wraps a failure carries its own `cause` (`BackendFailure`, `Locator.FileUnreadable`, the recordings' `WriteFailed`).
 - **Recovery matches the reason:** `Effect.catchReason("LocatorError", "StrictViolation", …)` (`ai-docs/src/01_effect/04_errors/20_reason-errors.ts`). `Effect.catchReason(tag, "Unsupported", …)` works for any module's tag.
-- **Errors that cross every module:** `Target.TargetGone`, which lives with the ids and close reasons that describe targets, and `Deadline.Timeout`. Event streams add `Subscription.EventOverflow`.
+- **Errors that cross every module:** `Target.TargetGone`, which lives with the ids that describe targets and the close reasons it carries (`Target.PageClosed`, `Target.FrameDetached`, …, `Schema.Error` classes like any other reason), and `Deadline.Timeout`. Event streams add `Subscription.EventOverflow`.
 - **A backend's detail is the failure's `cause`.** `Reason.BackendFailure` carries the browser's own error (`Protocol.ProtocolError`) as `cause`, with its code and message; there is no per-backend field to extend.
 - **There are no verb-family errors** (`ActionError`, `ReadError`, `NavigationError`, …). Errors are per module, and error channels stay small because failures are reasons inside them.
 

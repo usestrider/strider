@@ -151,14 +151,14 @@ export const attaching = (
             // Released: what the grant gave fails, and the page stays open
             const read = reasonOf(yield* Effect.exit(kept!.getByRole("heading").readText))
             assert.deepInclude(read, { _tag: "TargetGone" })
-            assert.deepStrictEqual((read as unknown as Target.TargetGone).reason, { _tag: "AccessReleased" })
+            assert.deepStrictEqual((read as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             const navigated = reasonOf(yield* Effect.exit(kept!.reload()))
-            assert.deepStrictEqual((navigated as unknown as Target.TargetGone).reason, { _tag: "AccessReleased" })
+            assert.deepStrictEqual((navigated as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             const routed = reasonOf(
               yield* Effect.exit(Effect.scoped(kept!.route("**", () => Effect.succeed(Route.abort()))))
             )
             // A declaration too: every member declares TargetGone (QUIRKS.md, Q143)
-            assert.deepStrictEqual((routed as unknown as Target.TargetGone).reason, { _tag: "AccessReleased" })
+            assert.deepStrictEqual((routed as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             assert.strictEqual((yield* first.status)._tag, "Open")
             // A grant's declarations go with it: the analytics call goes through now
             yield* Effect.scoped(Effect.gen(function*() {
@@ -208,7 +208,7 @@ export const attaching = (
           // TargetGone; the scope waited for the page's close (QUIRKS.md, Q135 and Q143)
           yield* page!.closed.pipe(Effect.timeout("10 seconds"))
           const listed = reasonOf(yield* Effect.exit(context!.cookies.list))
-          assert.deepStrictEqual((listed as unknown as Target.TargetGone).reason, { _tag: "AccessReleased" })
+          assert.deepStrictEqual((listed as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
           yield* Effect.scoped(Effect.flatMap(browser.defaultContext.control, (again) => again.cookies.clear))
         }), timeout)
 

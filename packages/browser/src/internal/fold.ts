@@ -26,7 +26,7 @@ import type * as NetworkConnection from "../NetworkConnection.ts"
 import type * as NetworkRequest from "../NetworkRequest.ts"
 import type * as NetworkResponse from "../NetworkResponse.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
-import type * as Target from "../Target.ts"
+import * as Target from "../Target.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
 import * as Events from "./events.ts"
@@ -281,7 +281,7 @@ export const make = Effect.fnUntraced(function*(options: {
     for (const frame of gone) frames.delete(frame)
     yield* update(page.state, (state) => ({ ...state, frames: state.frames.filter((frame) => !gone.has(frame.id)) }))
     for (const document of Array.from(documents.values())) {
-      if (gone.has(document.navigable)) yield* endDocument(document.id, { _tag: "FrameDetached" })
+      if (gone.has(document.navigable)) yield* endDocument(document.id, new Target.FrameDetached({}))
     }
   })
 
@@ -435,9 +435,9 @@ export const make = Effect.fnUntraced(function*(options: {
           if (context === undefined) return
           contexts.delete(fact.context)
           for (const page of Array.from(pages.values())) {
-            if (page.context === fact.context) yield* endPage(page, { _tag: "PageClosed", by: "userContextRemoved" })
+            if (page.context === fact.context) yield* endPage(page, new Target.PageClosed({ by: "userContextRemoved" }))
           }
-          yield* endContext(context, { _tag: "UserContextRemoved" })
+          yield* endContext(context, new Target.UserContextRemoved({}))
           return
         }
         case "PageAdded": {
@@ -543,7 +543,7 @@ export const make = Effect.fnUntraced(function*(options: {
           return
         }
         case "DocumentCommitted": {
-          if (Option.isSome(fact.replaced)) yield* endDocument(fact.replaced.value, { _tag: "DocumentReplaced" })
+          if (Option.isSome(fact.replaced)) yield* endDocument(fact.replaced.value, new Target.DocumentReplaced({}))
           const page = pages.get(fact.navigable)
           const owner = frames.get(fact.navigable)
           if (page === undefined && owner === undefined) return
@@ -774,7 +774,7 @@ export const make = Effect.fnUntraced(function*(options: {
         }
         case "ConnectionClosed": {
           const connection = connections.get(fact.connection)
-          if (connection !== undefined) yield* endConnection(connection, { _tag: "NetworkConnectionClosed" })
+          if (connection !== undefined) yield* endConnection(connection, new Target.NetworkConnectionClosed({}))
           return
         }
         case "DownloadStarted": {
@@ -904,7 +904,7 @@ export const make = Effect.fnUntraced(function*(options: {
     })
 
   const loseConnection = Effect.gen(function*() {
-    const reason: Target.CloseReason = { _tag: "ConnectionLost" }
+    const reason: Target.CloseReason = new Target.ConnectionLost({})
     for (const page of Array.from(pages.values())) yield* endPage(page, reason)
     for (const document of Array.from(documents.keys())) yield* endDocument(document, reason)
     for (const worker of Array.from(workers.values())) yield* endWorker(worker, reason)

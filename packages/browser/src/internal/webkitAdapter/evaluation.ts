@@ -12,7 +12,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Protocol from "../../protocol/Protocol.ts"
-import type * as L1Target from "../../Target.ts"
+import * as L1Target from "../../Target.ts"
 import * as Runtime from "../../webkit-stock-protocol/Runtime.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
@@ -194,14 +194,14 @@ export const realmFor = Effect.fnUntraced(function*(state: State, id: L1Target.D
     [...document.realms].find((realm) => !realm.ended && realm.world._tag === "Main") ??
       (state.documents.get(id) === document ? undefined : null)
   )
-  if (found === null) return yield* Effect.fail(Kit.gone({ _tag: "Document", id }, { _tag: "DocumentReplaced" }))
+  if (found === null) return yield* Effect.fail(Kit.gone({ _tag: "Document", id }, new L1Target.DocumentReplaced({})))
   return found.id
 })
 
 /** A command in a realm that failed: `Gone` where it was refused, as a context that's gone is, or the realm ended. */
 const madeIn = (realm: RealmEntry) => (error: Protocol.ProtocolError): Adapter.AdapterError =>
   error.reason._tag === "Rejected"
-    ? Kit.gone({ _tag: "Realm", id: realm.id }, { _tag: "RealmDestroyed" })
+    ? Kit.gone({ _tag: "Realm", id: realm.id }, new L1Target.RealmDestroyed({}))
     : Kit.realmFailure(realm.id, () => realm.ended)(error)
 
 /** An object an expression makes in a realm, by its id. */
@@ -215,7 +215,7 @@ const make = (realm: RealmEntry, params: Omit<Runtime.EvaluateParams, "contextId
     Effect.mapError(madeIn(realm)),
     Effect.flatMap((reply) =>
       reply.wasThrown === true || reply.result.objectId === undefined
-        ? Effect.fail(Kit.gone({ _tag: "Realm", id: realm.id }, { _tag: "RealmDestroyed" }))
+        ? Effect.fail(Kit.gone({ _tag: "Realm", id: realm.id }, new L1Target.RealmDestroyed({})))
         : Effect.succeed(reply.result.objectId as string)
     )
   )

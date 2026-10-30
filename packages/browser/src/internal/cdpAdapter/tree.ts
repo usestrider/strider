@@ -6,7 +6,7 @@
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import type * as L1Target from "../../Target.ts"
+import * as L1Target from "../../Target.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import { releaseDocument } from "./responses.ts"
@@ -109,7 +109,7 @@ export const commit = (
   releaseDocument(state, navigation)
   // Children of the document being replaced end with it: CDP doesn't say so (probe 8)
   for (const child of Array.from(frame.children)) {
-    removeFrame(state, child, { _tag: "FrameDetached" }, "cdp: the parent's document was replaced")
+    removeFrame(state, child, new L1Target.FrameDetached({}), "cdp: the parent's document was replaced")
   }
   const old = frame.document
   const document: DocumentEntry = {

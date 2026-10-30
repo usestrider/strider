@@ -10,6 +10,7 @@ import * as Responses from "../src/internal/cdpAdapter/responses.ts"
 import * as State from "../src/internal/cdpAdapter/state.ts"
 import * as Tree from "../src/internal/cdpAdapter/tree.ts"
 import type * as ProtocolClient from "../src/internal/protocolClient.ts"
+import * as Target from "../src/Target.ts"
 
 const session = {} as ProtocolClient.Session
 
@@ -73,7 +74,7 @@ describe("CdpAdapter state", () => {
       state.heldButtons.set(page.id, 1)
       state.drags.set(page.id, { data: { items: [], dragOperationsMask: 1 }, entered: true, stale: false })
       state.interceptingDrags.add(page.id)
-      Tree.endPage(state, page, { _tag: "PageClosed", by: "command" }, "test")
+      Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test")
       assert.isFalse(state.heldButtons.has(page.id))
       assert.isFalse(state.drags.has(page.id))
       assert.isFalse(state.interceptingDrags.has(page.id))
@@ -82,12 +83,12 @@ describe("CdpAdapter state", () => {
   it.effect("fails an operation on a page that ended as Gone, with why it ended", () =>
     Effect.gen(function*() {
       const { page, state } = yield* withPage()
-      Tree.endPage(state, page, { _tag: "PageCrashed" }, "test")
+      Tree.endPage(state, page, new Target.PageCrashed({}), "test")
       const error = yield* State.pageOf(state, page.id).pipe(Effect.flip)
       assert.deepStrictEqual(error.reason, {
         _tag: "Gone",
         target: { _tag: "Page", id: page.id },
-        reason: { _tag: "PageCrashed" }
+        reason: new Target.PageCrashed({})
       })
       const frame = yield* State.frameById(state, page.id).pipe(Effect.flip)
       assert.strictEqual(frame.reason._tag, "Gone")
