@@ -43,9 +43,21 @@ export const diagnostics = (step: string): Diagnostics.Diagnostics =>
     cleanup: { _tag: "NotNeeded" }
   })
 
+/** What a launch fails with. */
+export type LaunchError = Browser.BrowserError
+
 /** Fails a launch with a reason. */
 export const fail = (reason: Browser.BrowserErrorReason, step: string) =>
   Effect.fail(new Browser.BrowserError({ reason, diagnostics: diagnostics(step) }))
+
+/** Fails a launch whose browser refused the connection. */
+export const refused = (hint: string) => fail(new Browser.ConnectionFailed({ stage: "refused", hint }), "connect")
+
+/** Fails a launch given what it can't take. */
+export const invalidInput = (
+  input: { readonly input: string; readonly expected: string; readonly hint: string },
+  step: string
+) => fail(new Reason.InvalidInput(input), step)
 
 /** A launch's span: the executable it named and, where the backend has them, the launch profile it used. */
 export const span = (

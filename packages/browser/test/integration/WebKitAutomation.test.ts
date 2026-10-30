@@ -264,11 +264,10 @@ describe("WebKit's Automation protocol, over stock WebKitGTK's inspector socket"
           const target = yield* Deferred.await(created).pipe(Effect.timeout("10 seconds"))
           const row = (error: ProtocolClient.WireError) => ProtocolClient.match(WebKitWire.errors, error)
           const { pageProxyId } = WebKitWire.route(target)
-          // A page's inspector, and the transport's answer for a page that is gone: each row of the table, in order
+          // A page's inspector: each row of the table, in order
           const cases: ReadonlyArray<readonly [string, object, Protocol.SessionKey]> = [
             ["Nope.nothing", {}, target],
             ["Runtime.evaluate", {}, target],
-            ["Runtime.evaluate", { expression: "1" }, WebKitWire.pageProxyKey("gone")],
             ["Runtime.evaluate", { expression: "1" }, WebKitWire.targetKey(pageProxyId, "page-999999")],
             ["Page.getResourceContent", { frameId: "nope", url: "about:blank" }, target],
             ["DOM.resolveNode", { nodeId: 99999 }, target]

@@ -70,6 +70,8 @@ interface ErrorMatcher {
 
 - **One reader per connection.** Writes fail promptly after close. Effect 4.0.5's `Socket` writer *waits* for a reconnection after a disconnect, so L0 wraps it to fail instead.
 - **No reconnect.** A new connection is a new model namespace (CONCEPTS.md §1).
+- **A link holds what every transport promises** (`internal/link.ts`): messages in order to one consumer, then a failure carrying the loss once what came before it is delivered, and sends that fail at once after it. Stock WebKit's transports and its inspector socket are built on one too.
+- **Stock WebKit's pages reach the adapter through one endpoint** (`webkitEnvelope.ts`), which both its transports share: it announces each page, puts its `pageProxyId` in the page's text and routes commands by it, and serves the `Envelope` domain. It parses no page's message; a page's ids stay its target's own, which the adapter keys by the target's session (Q195).
 
 **Built** (2026-10-19). `@usestrider/browser/protocol` exports `Transport`: `pipe(handle)` over a process spawned with `Transport.pipeFds`, and `webSocket(url, options?)` through the `Socket.WebSocketConstructor` in context. Both are our own small, fail-fast transports; neither goes through Effect's `Socket`, so there is nothing to wrap.
 

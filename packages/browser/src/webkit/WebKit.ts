@@ -14,6 +14,7 @@
 import type * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import type * as Layer from "effect/Layer"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Socket from "effect/socket/Socket"
@@ -203,7 +204,7 @@ export const layerAttach = (
 ): Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor> =>
   BrowserImpl.layer((sink) =>
     Effect.flatMap(
-      Connect.webkitInspector(endpoint, options),
+      Connect.webkitInspector(endpoint, options).pipe(Effect.provide(FetchHttpClient.layer)),
       (transport) => WebKitAdapter.connect(transport, { sink, ownership: "attached" })
     )
   )
