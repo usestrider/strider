@@ -27,6 +27,7 @@ import * as Encoding from "effect/encoding/Base64"
 import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
@@ -1068,10 +1069,9 @@ export const start = Command.make(
         )
       }
       const browser = yield* browserOf(flags)
-      let idle: Duration.Duration
-      try {
-        idle = Duration.fromInputUnsafe(flags.idle as Duration.Input)
-      } catch {
+      // What Duration.fromInput reads, as a Schema decodes it from text
+      const parsed = Schema.decodeUnknownOption(Schema.DurationFromString)(flags.idle)
+      if (Option.isNone(parsed)) {
         return yield* Effect.fail(
           new CommandFailed({
             error: "InvalidInput",
@@ -1079,17 +1079,19 @@ export const start = Command.make(
           })
         )
       }
+      const idle = parsed.value
+      const version = yield* Session.version
       const rootDir = Session.root(process.env, (yield* Effect.promise(() => Node.os())).tmpdir())
       const paths = Session.paths(rootDir, flags.name)
       yield* fs.makeDirectory(rootDir, { recursive: true, mode: 0o700 }).pipe(Effect.mapError(failedWith))
       // The directory is the session's claim: taken when it exists
       if (yield* fs.exists(paths.dir).pipe(Effect.orElseSucceed(() => false))) {
-        const lock = yield* fs.readFileString(paths.lock).pipe(Effect.option)
-        const pid = Option.flatMap(lock, (text) => Option.fromUndefinedOr(Number.parseInt(text, 10) || undefined))
+        // Its lock names the daemon holding it, which a process reusing its id isn't
+        const running = Option.isSome(yield* Session.holder(fs, paths.dir))
         return yield* Effect.fail(
           new CommandFailed({
             error: "InvalidInput",
-            message: Option.exists(pid, Node.alive)
+            message: running
               ? `A session named ${flags.name} is running; strider stop -s ${flags.name} ends it`
               : `A session named ${flags.name} ended without cleaning up, and its directory remains at ${paths.dir}; strider prune ${flags.name} removes it`
           })
@@ -1120,112 +1122,140 @@ export const start = Command.make(
       let keep = false
       yield* Effect.addFinalizer(() =>
         keep
-          ? Effect.all([fs.remove(paths.socket), fs.remove(paths.lock)], { discard: true }).pipe(Effect.ignore)
+          // The socket may be gone with its server already, which leaves the lock to remove still
+          ? Effect.forEach([paths.socket, paths.lock], (path) => fs.remove(path).pipe(Effect.ignore), { discard: true })
           : fs.remove(paths.dir, { recursive: true }).pipe(Effect.ignore)
       )
-      yield* fs.writeFileString(paths.lock, `${process.pid}\n`).pipe(Effect.mapError(failedWith))
-      for (const dir of [paths.downloads, paths.artifacts]) {
-        yield* fs.makeDirectory(dir).pipe(Effect.mapError(failedWith))
-      }
-      // The session's own profile directory, made here: a launcher uses a directory it is given as it is
-      if (Option.isNone(flags.userDataDir)) yield* fs.makeDirectory(paths.profile).pipe(Effect.mapError(failedWith))
-      const userDataDir = Option.getOrElse(flags.userDataDir, () => paths.profile)
-      // What the session launches and makes is in the CLI's ledger, which strider prune reads if it dies
-      const os = yield* Effect.promise(() => Node.os())
-      const ledger = yield* Layer.build(Ledger.layer(Session.ledgerRoot(process.env, os.homedir())))
-      const services = yield* Layer.build(layerOf(browser, userDataDir)).pipe(
-        Effect.provideContext(ledger),
+      yield* fs.writeFileString(paths.lock, Schema.encodeSync(Session.Lock)(Session.self())).pipe(
         Effect.mapError(failedWith)
       )
-      const instance = Context.get(services, Browser.Browser)
-      const scope = yield* Effect.scope
-      // Every page of the session keeps rendering while another is in front, as a person's would: focus is
-      // emulated where the backend can, and Firefox opens new pages as windows (QUIRKS.md, Q19 and Q71)
-      const focus = ExportTest.focusFor(browser)
-      const context = yield* instance.newContext({
-        ...Option.match(initial, { onNone: () => ({}), onSome: (storageState) => ({ storageState }) }),
-        focus,
-        // The session's own directory, which strider stop --keep keeps
-        downloads: { directory: paths.downloads }
-      }).pipe(
-        Effect.mapError(failedWith)
+      // What the daemon logs goes to the session's log, as it has no output of its own
+      const log = yield* Logger.toFile(Logger.formatSimple, paths.log).pipe(Effect.mapError(failedWith))
+      keep = yield* serve(flags, { browser, idle, paths, initial, stateFile, forkOf, secrets, version }).pipe(
+        Effect.provide(Logger.layer([log]))
       )
-      const recorder = Recorder.make()
-      const session = yield* ToolkitImpl.makeSession({
-        context,
-        secrets,
-        capture: CapturePolicy.local,
-        // The session can take the browser's own tabs with control
-        browser: instance,
-        // A page no command opened, for the exported test to declare
-        seen: (seen) =>
-          seen._tag === "Listed"
-            ? recorder.listed({ id: seen.page.id, name: seen.name, index: seen.index })
-            : recorder.popup({ id: seen.page.id, name: seen.name, opener: seen.opener.id, openerName: seen.openerName })
-      })
-      const stopped = yield* Deferred.make<boolean>()
-      // The stop asked for, which ends the session once its answer is written
-      let stopping: (Request & { readonly keep: boolean }) | undefined
-      let last = performance.now()
-      const daemon: Daemon = {
-        name: flags.name,
-        paths,
-        browser,
-        secretVariables: flags.secret,
-        state: Option.getOrUndefined(Option.map(stateFile, (file) => file)),
-        // --state wins over --fork, as the context above was made
-        fork: Option.isSome(stateFile) ? undefined : Option.getOrUndefined(forkOf),
-        userDataDir: Option.getOrUndefined(flags.userDataDir),
-        context,
-        session,
-        scope,
-        recorder,
-        shots: 0,
-        stop: (keepIt, request) => void (stopping = { ...request, keep: keepIt }),
-        lastActivity: () => last,
-        idleTimeout: flags.idle.replace(/\s+/g, " "),
-        owner: Option.getOrUndefined(flags.ownerPid)
-      }
-      const touch = () => void (last = performance.now())
-      const written = (request: Request) => {
-        if (stopping !== undefined && stopping.client === request.client && stopping.id === request.id) {
-          Deferred.doneUnsafe(stopped, Exit.succeed(stopping.keep))
-        }
-      }
-      yield* Layer.build(
-        RpcServer.layer(Protocol.Rpcs, { disableTracing: true }).pipe(
-          Layer.provide(Protocol.Rpcs.toLayer(handlers(daemon, commands(() => daemon), "0.1.0", touch))),
-          Layer.provide(protocolTelling(written)),
-          Layer.provide(RpcSerialization.layerNdjson),
-          Layer.provide(NodeSocketServer.layer({ path: paths.socket }))
-        )
-      ).pipe(Effect.mapError(failedWith))
-      yield* Effect.gen(function*() {
-        while (true) {
-          yield* Effect.sleep("1 second")
-          if (performance.now() - last > Duration.toMillis(idle)) return yield* Deferred.succeed(stopped, false)
-          if (Option.isSome(flags.ownerPid) && !Node.alive(flags.ownerPid.value)) {
-            return yield* Deferred.succeed(stopped, false)
-          }
-        }
-      }).pipe(Effect.forkScoped)
-      const where = browser._tag === "Launch" ? `at ${browser.executablePath}` : `attached to ${browser.endpoint}`
-      yield* ready(
-        yield* Announce,
-        `session ${flags.name} · ${instance.info.product} ${where} · focus ${focus} · idle timeout ${daemon.idleTimeout}${
-          Option.isSome(flags.ownerPid) ? ` · ends with process ${flags.ownerPid.value}` : ""
-        }${
-          Option.isSome(flags.state)
-            ? ` · state from ${flags.state.value}`
-            : Option.isSome(flags.fork)
-            ? ` · forked from ${flags.fork.value}`
-            : ""
-        }`,
-        paths.log
-      )
-      keep = yield* Deferred.await(stopped)
     }).pipe(Effect.scoped)
 ).pipe(Command.withDescription("Start a named browser session"))
+
+/** What `start` found before the session's browser: where the session lives, its browser, and how it starts. */
+interface Prepared {
+  readonly browser: ExportTest.Browser
+  readonly idle: Duration.Duration
+  readonly paths: ReturnType<typeof Session.paths>
+  readonly initial: Option.Option<StorageState.StorageState>
+  readonly stateFile: Option.Option<string>
+  readonly forkOf: Option.Option<string>
+  readonly secrets: Readonly<Record<string, Redacted.Redacted<string>>>
+  readonly version: string
+}
+
+/** The session: its browser, context and toolkit, served until it stops; whether to keep its directory then. */
+const serve = Effect.fnUntraced(
+  function*(flags: Command.Command.Config.Infer<typeof startFlags>, prepared: Prepared) {
+    const fs = yield* FileSystem.FileSystem
+    const process = Node.process
+    const { browser, forkOf, idle, initial, paths, secrets, stateFile, version } = prepared
+    for (const dir of [paths.downloads, paths.artifacts]) {
+      yield* fs.makeDirectory(dir).pipe(Effect.mapError(failedWith))
+    }
+    // The session's own profile directory, made here: a launcher uses a directory it is given as it is
+    if (Option.isNone(flags.userDataDir)) yield* fs.makeDirectory(paths.profile).pipe(Effect.mapError(failedWith))
+    const userDataDir = Option.getOrElse(flags.userDataDir, () => paths.profile)
+    // What the session launches and makes is in the CLI's ledger, which strider prune reads if it dies
+    const os = yield* Effect.promise(() => Node.os())
+    const ledger = yield* Layer.build(Ledger.layer(Session.ledgerRoot(process.env, os.homedir())))
+    const services = yield* Layer.build(layerOf(browser, userDataDir)).pipe(
+      Effect.provideContext(ledger),
+      Effect.mapError(failedWith)
+    )
+    const instance = Context.get(services, Browser.Browser)
+    const scope = yield* Effect.scope
+    // Every page of the session keeps rendering while another is in front, as a person's would: focus is
+    // emulated where the backend can, and Firefox opens new pages as windows (QUIRKS.md, Q19 and Q71)
+    const focus = ExportTest.focusFor(browser)
+    const context = yield* instance.newContext({
+      ...Option.match(initial, { onNone: () => ({}), onSome: (storageState) => ({ storageState }) }),
+      focus,
+      // The session's own directory, which strider stop --keep keeps
+      downloads: { directory: paths.downloads }
+    }).pipe(
+      Effect.mapError(failedWith)
+    )
+    const recorder = Recorder.make()
+    const session = yield* ToolkitImpl.makeSession({
+      context,
+      secrets,
+      capture: CapturePolicy.local,
+      // The session can take the browser's own tabs with control
+      browser: instance,
+      // A page no command opened, for the exported test to declare
+      seen: (seen) =>
+        seen._tag === "Listed"
+          ? recorder.listed({ id: seen.page.id, name: seen.name, index: seen.index })
+          : recorder.popup({ id: seen.page.id, name: seen.name, opener: seen.opener.id, openerName: seen.openerName })
+    })
+    const stopped = yield* Deferred.make<boolean>()
+    // The stop asked for, which ends the session once its answer is written
+    let stopping: (Request & { readonly keep: boolean }) | undefined
+    let last = performance.now()
+    const daemon: Daemon = {
+      name: flags.name,
+      paths,
+      browser,
+      secretVariables: flags.secret,
+      state: Option.getOrUndefined(Option.map(stateFile, (file) => file)),
+      // --state wins over --fork, as the context above was made
+      fork: Option.isSome(stateFile) ? undefined : Option.getOrUndefined(forkOf),
+      userDataDir: Option.getOrUndefined(flags.userDataDir),
+      context,
+      session,
+      scope,
+      recorder,
+      shots: 0,
+      stop: (keepIt, request) => void (stopping = { ...request, keep: keepIt }),
+      lastActivity: () => last,
+      idleTimeout: flags.idle.replace(/\s+/g, " "),
+      owner: Option.getOrUndefined(flags.ownerPid)
+    }
+    const touch = () => void (last = performance.now())
+    const written = (request: Request) => {
+      if (stopping !== undefined && stopping.client === request.client && stopping.id === request.id) {
+        Deferred.doneUnsafe(stopped, Exit.succeed(stopping.keep))
+      }
+    }
+    yield* Layer.build(
+      RpcServer.layer(Protocol.Rpcs, { disableTracing: true }).pipe(
+        Layer.provide(Protocol.Rpcs.toLayer(handlers(daemon, commands(() => daemon), version, touch))),
+        Layer.provide(protocolTelling(written)),
+        Layer.provide(RpcSerialization.layerNdjson),
+        Layer.provide(NodeSocketServer.layer({ path: paths.socket }))
+      )
+    ).pipe(Effect.mapError(failedWith))
+    yield* Effect.gen(function*() {
+      while (true) {
+        yield* Effect.sleep("1 second")
+        if (performance.now() - last > Duration.toMillis(idle)) return yield* Deferred.succeed(stopped, false)
+        if (Option.isSome(flags.ownerPid) && !Node.alive(flags.ownerPid.value)) {
+          return yield* Deferred.succeed(stopped, false)
+        }
+      }
+    }).pipe(Effect.forkScoped)
+    const where = browser._tag === "Launch" ? `at ${browser.executablePath}` : `attached to ${browser.endpoint}`
+    yield* ready(
+      yield* Announce,
+      `session ${flags.name} · ${instance.info.product} ${where} · focus ${focus} · idle timeout ${daemon.idleTimeout}${
+        Option.isSome(flags.ownerPid) ? ` · ends with process ${flags.ownerPid.value}` : ""
+      }${
+        Option.isSome(flags.state)
+          ? ` · state from ${flags.state.value}`
+          : Option.isSome(flags.fork)
+          ? ` · forked from ${flags.fork.value}`
+          : ""
+      }`
+    )
+    return yield* Deferred.await(stopped)
+  }
+)
 
 let announced = false
 
@@ -1242,23 +1272,8 @@ const announce = (path: string, started: Protocol.Started) =>
     yield* writer.write(`${Schema.encodeSync(Protocol.StartedJson)(started)}\n`)
   })).pipe(Effect.ignore, Effect.ensuring(Effect.sync(() => void (announced = true))))
 
-/** Tells the client the session serves, then sends the daemon's own output to its log. */
-const ready = Effect.fnUntraced(function*(path: string, text: string, log: string) {
-  yield* announce(path, { _tag: "Ready", text })
-  const process = Node.process
-  void Node.fs().then((fs) => {
-    const append = (chunk: unknown) => {
-      try {
-        fs.appendFileSync(log, typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk as Uint8Array))
-      } catch {
-        // The directory went with the session
-      }
-      return true
-    }
-    ;(process.stdout as { write: (chunk: unknown) => boolean }).write = append
-    ;(process.stderr as { write: (chunk: unknown) => boolean }).write = append
-  })
-})
+/** Tells the client the session serves. */
+const ready = (path: string, text: string) => announce(path, { _tag: "Ready", text })
 
 /** Where the client that started the daemon listens for what became of the start. */
 class Announce extends Context.Service<Announce, string>()("@usestrider/browser/cli/Announce") {}
@@ -1269,16 +1284,18 @@ class Announce extends Context.Service<Announce, string>()("@usestrider/browser/
  */
 export const daemon = (announceTo: string, argv: ReadonlyArray<string>) => {
   const lines: Array<string> = []
-  return Command.runWith(Command.make("strider").pipe(Command.withSubcommands([start])), { version: "0.1.0" })(argv)
-    .pipe(
-      Effect.provideService(Console.Console, capture((line) => void lines.push(line.text))),
-      Effect.provideService(Announce, announceTo),
-      Effect.exit,
-      Effect.flatMap((exit) => {
-        if (announced) return Effect.void
-        const { code, message } = exitOf(exit)
-        const text = [...lines, ...(message === undefined ? [] : [message])].join("\n")
-        return announce(announceTo, { _tag: "Failed", text: text === "" ? "the session didn't start" : text, code })
-      })
-    )
+  return Effect.flatMap(
+    Session.version,
+    (version) => Command.runWith(Command.make("strider").pipe(Command.withSubcommands([start])), { version })(argv)
+  ).pipe(
+    Effect.provideService(Console.Console, capture((line) => void lines.push(line.text))),
+    Effect.provideService(Announce, announceTo),
+    Effect.exit,
+    Effect.flatMap((exit) => {
+      if (announced) return Effect.void
+      const { code, message } = exitOf(exit)
+      const text = [...lines, ...(message === undefined ? [] : [message])].join("\n")
+      return announce(announceTo, { _tag: "Failed", text: text === "" ? "the session didn't start" : text, code })
+    })
+  )
 }

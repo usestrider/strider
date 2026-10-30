@@ -12,8 +12,10 @@
  */
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
+import * as Node from "./node.ts"
 
 /** A session's name: lowercase letters, digits and dashes, short enough for a Unix socket's path. */
 export const nameRule = /^[a-z0-9][a-z0-9-]{0,31}$/
@@ -125,3 +127,46 @@ export const version = Effect.gen(function*() {
   const manifest = yield* path.fromFileUrl(new URL("../../../package.json", import.meta.url))
   return (yield* Schema.decodeEffect(Manifest)(yield* fs.readFileString(manifest))).version
 }).pipe(Effect.orDie)
+
+/** A process, by its id and when it started, in milliseconds since the epoch, as the ledger names its owner. */
+export const Owner = Schema.Struct({ pid: Schema.Number, startedAt: Schema.Number })
+export type Owner = typeof Owner.Type
+
+/** A session's lock: the daemon that holds it, by its id and when it started, so a reused id isn't taken for it. */
+export const Lock = Schema.fromJsonString(Owner)
+
+/** This process, as its lock names it: started when its clock's origin was, as the ledger has it. */
+export const self = (): Owner => ({ pid: Node.process.pid, startedAt: Math.round(performance.timeOrigin) })
+
+/** When a process started, in milliseconds since the epoch, where `/proc` says (Linux); `None` elsewhere. */
+export const startedAt = Effect.fnUntraced(
+  function*(fs: FileSystem.FileSystem, pid: number) {
+    const boot = (yield* fs.readFileString("/proc/stat")).match(/^btime (\d+)$/m)?.[1]
+    // The fields after the command's name, which is in parentheses and may hold spaces
+    const stat = (yield* fs.readFileString(`/proc/${pid}/stat`)).split(") ")[1]?.split(" ")
+    const ticks = stat?.[19]
+    if (boot === undefined || ticks === undefined) return Option.none<number>()
+    // Clock ticks since boot, a hundred a second on Linux
+    return Option.some((Number(boot) + Number(ticks) / 100) * 1000)
+  },
+  Effect.orElseSucceed(() => Option.none<number>())
+)
+
+/**
+ * Whether a program still runs, as a ledger's record or a session's lock names it: its process id is alive and, where `/proc` says when it started, it is
+ * the same process. When that can't be told, it counts as running, so nothing of a live program is reclaimed.
+ */
+export const stillRunning = Effect.fnUntraced(function*(fs: FileSystem.FileSystem, owner: Owner) {
+  if (!Node.alive(owner.pid)) return false
+  const started = yield* startedAt(fs, owner.pid)
+  return Option.isNone(started) || Math.abs(started.value - owner.startedAt) < 3000
+})
+
+/** The daemon that holds a session's lock, by its process id, while it runs. */
+export const holder = Effect.fnUntraced(function*(fs: FileSystem.FileSystem, dir: string) {
+  const text = yield* fs.readFileString(`${dir}/lock`).pipe(Effect.option)
+  if (Option.isNone(text)) return Option.none<number>()
+  const owner = Schema.decodeUnknownOption(Lock)(text.value)
+  if (Option.isNone(owner)) return Option.none<number>()
+  return (yield* stillRunning(fs, owner.value)) ? Option.some(owner.value.pid) : Option.none<number>()
+})

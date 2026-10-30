@@ -111,14 +111,6 @@ const sizeOf = (fs: FileSystem.FileSystem, dir: string): Effect.Effect<number> =
 
 const megabytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`
 
-/** Whether a session's daemon holds its lock. */
-const holder = (fs: FileSystem.FileSystem, dir: string) =>
-  Effect.map(fs.readFileString(`${dir}/lock`).pipe(Effect.option), (lock) =>
-    Option.flatMap(lock, (text) => {
-      const pid = Number.parseInt(text, 10)
-      return Number.isFinite(pid) && Node.alive(pid) ? Option.some(pid) : Option.none()
-    }))
-
 /** A session `strider sessions` lists: one running, as it describes itself, or one a crash left behind. */
 type Listed =
   | Protocol.SessionInfo & { readonly running: true }
@@ -137,7 +129,7 @@ export const sessions = Command.make(
     const found: Array<Listed> = []
     for (const name of names) {
       const paths = Session.paths(rootDir, name)
-      const info = Option.isSome(yield* holder(fs, paths.dir))
+      const info = Option.isSome(yield* Session.holder(fs, paths.dir))
         ? yield* Effect.scoped(Effect.flatMap(Client.session(rootDir, name), (client) => client.Info())).pipe(
           Effect.option
         )
@@ -178,30 +170,6 @@ const runningFrom = (fs: FileSystem.FileSystem, dir: string) =>
         ))
   )
 
-/** When a process started, in milliseconds since the epoch, where `/proc` says (Linux); `None` elsewhere. */
-const startedAt = Effect.fnUntraced(
-  function*(fs: FileSystem.FileSystem, pid: number) {
-    const boot = (yield* fs.readFileString("/proc/stat")).match(/^btime (\d+)$/m)?.[1]
-    // The fields after the command's name, which is in parentheses and may hold spaces
-    const stat = (yield* fs.readFileString(`/proc/${pid}/stat`)).split(") ")[1]?.split(" ")
-    const ticks = stat?.[19]
-    if (boot === undefined || ticks === undefined) return Option.none<number>()
-    // Clock ticks since boot, a hundred a second on Linux
-    return Option.some((Number(boot) + Number(ticks) / 100) * 1000)
-  },
-  Effect.orElseSucceed(() => Option.none<number>())
-)
-
-/**
- * Whether a ledger's program still runs: its process id is alive and, where `/proc` says when it started, it is
- * the same process. When that can't be told, it counts as running, so nothing of a live program is reclaimed.
- */
-const stillRunning = Effect.fnUntraced(function*(fs: FileSystem.FileSystem, owner: Ledger.Record["owner"]) {
-  if (!Node.alive(owner.pid)) return false
-  const started = yield* startedAt(fs, owner.pid)
-  return Option.isNone(started) || Math.abs(started.value - owner.startedAt) < 3000
-})
-
 /** `strider prune` with no name: what the ledger's ended programs left, reclaimed with `--yes`. */
 const pruneLedger = Effect.fnUntraced(function*(yes: boolean) {
   const fs = yield* FileSystem.FileSystem
@@ -210,7 +178,7 @@ const pruneLedger = Effect.fnUntraced(function*(yes: boolean) {
   const records = yield* Ledger.read(directory)
   let found = 0
   for (const { file, record } of records) {
-    if (yield* stillRunning(fs, record.owner)) continue
+    if (yield* Session.stillRunning(fs, record.owner)) continue
     found++
     yield* Console.log(
       `left by process ${record.owner.pid}, started ${new Date(record.owner.startedAt).toISOString()}, which has ended:`
@@ -270,7 +238,7 @@ export const prune = Command.make(
     if (!(yield* fs.exists(paths.dir).pipe(Effect.orElseSucceed(() => false)))) {
       return yield* Console.log(`No session named ${name} is left behind`)
     }
-    if (Option.isSome(yield* holder(fs, paths.dir))) {
+    if (Option.isSome(yield* Session.holder(fs, paths.dir))) {
       return yield* Console.error(`${name} is running; strider stop -s ${name} ends it`)
     }
     const browsers = yield* runningFrom(fs, paths.dir)
