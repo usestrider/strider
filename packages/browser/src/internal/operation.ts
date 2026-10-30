@@ -287,6 +287,8 @@ export class Record implements Operation.Operation {
     hint: () => Option.Option<string> = Option.none,
     phase?: Phase
   ): Effect.Effect<A, E | Deadline.Timeout, R> {
+    // Not `Effect.timeoutOption`, which sleeps on the fiber's `Clock`: the deadline is on the browser's clock, which
+    // `TestClock` doesn't move for a real browser (`browserClock.ts`)
     return Effect.suspend(() =>
       Effect.raceFirst(Effect.asSome(self), Effect.as(this.clock.sleep(this.left()), Option.none<A>()))
     ).pipe(

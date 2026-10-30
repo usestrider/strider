@@ -62,6 +62,8 @@ export const sleep = (millis: number): Effect.Effect<void> =>
   Effect.flatMap(Effect.service(CurrentClock), (clock) => clock.sleep(millis))
 
 /** `self`'s value, or `None` after `millis` on `clock`: `Effect.timeoutOption` on that clock. */
+// Deliberately not `Effect.timeoutOption`, which sleeps on the fiber's `Clock`: under `TestClock` a real browser's
+// wait would never end. The race sleeps on the browser's clock instead, the live one for a real browser
 export const timeoutOn = (clock: BrowserClock, millis: number) => <A, E, R>(self: Effect.Effect<A, E, R>) =>
   Effect.raceFirst(Effect.asSome(self), Effect.as(clock.sleep(millis), Option.none()))
 
