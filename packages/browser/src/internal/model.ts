@@ -65,7 +65,7 @@ export interface UndecidedPrompt {
 /** A popup, as its opener's channel has it; its URL arrives with its first navigation. */
 export interface PopupEvent {
   readonly page: PageEntry
-  url: Option.Option<string>
+  readonly url: Readable<Option.Option<string>>
 }
 
 /** A dialog, as the adapter reported it. */

@@ -12,8 +12,11 @@ import * as Handles from "./handles.ts"
 import type * as Model from "./model.ts"
 
 const accepts =
-  (matches: Option.Option<(url: string) => boolean>) => (entry: Events.Entry<Model.PopupEvent>): boolean =>
-    matches._tag === "None" || (entry.value.url._tag === "Some" && matches.value(entry.value.url.value))
+  (matches: Option.Option<(url: string) => boolean>) => (entry: Events.Entry<Model.PopupEvent>): boolean => {
+    if (matches._tag === "None") return true
+    const url = entry.value.url.getUnsafe()
+    return url._tag === "Some" && matches.value(url.value)
+  }
 
 // A popup is delivered as its handle: a `Page` when the connection controls it for life, as it does an owned page's
 // popups, and an observed page otherwise, `LeaveOpen`

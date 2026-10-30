@@ -363,7 +363,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
                   openerName: name()
                 })
                 note(`popup ${popupName} opened from ${name()}${
-                  Option.match(popup.url, {
+                  Option.match(popup.url.getUnsafe(), {
                     onNone: () => "",
                     onSome: (url) => ` at ${url}`
                   })

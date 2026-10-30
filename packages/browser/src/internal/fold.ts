@@ -202,7 +202,11 @@ export const make = Effect.fnUntraced(function*(options: {
   // Popups whose URL is still unknown, until their first navigation starts
   const popupUrls = new Map<
     Target.NavigableId,
-    { readonly channel: Events.Channel<Model.PopupEvent>; readonly entry: Events.Entry<Model.PopupEvent> }
+    {
+      readonly channel: Events.Channel<Model.PopupEvent>
+      readonly entry: Events.Entry<Model.PopupEvent>
+      readonly url: Model.PopupEvent["url"]
+    }
   >()
   const lost = yield* Deferred.make<void>()
   const obligations = yield* Queue.unbounded<Obligations.Obligation>()
@@ -486,13 +490,11 @@ export const make = Effect.fnUntraced(function*(options: {
           // A popup is reported to its opener, when the backend names one; before the
           // context's pages change, so a caller woken by that change subscribes after it, as with every event
           if (Option.isSome(opener)) {
-            const event: Model.PopupEvent = {
-              page: entry,
-              url: placeholder(fact.url) ? Option.none() : Option.some(fact.url)
-            }
+            const known = placeholder(fact.url) ? Option.none<string>() : Option.some(fact.url)
+            const event: Model.PopupEvent = { page: entry, url: yield* cell(known) }
             const published = Events.publish(opener.value.events.popup, event)
-            if (Option.isNone(event.url)) {
-              popupUrls.set(fact.page, { channel: opener.value.events.popup, entry: published })
+            if (Option.isNone(known)) {
+              popupUrls.set(fact.page, { channel: opener.value.events.popup, entry: published, url: event.url })
             }
           }
           // Forked, since a scope that already closed runs the release at once, and the fold must not wait on the
@@ -525,7 +527,7 @@ export const make = Effect.fnUntraced(function*(options: {
           const pending = popupUrls.get(fact.navigable)
           if (pending !== undefined && !placeholder(fact.url)) {
             popupUrls.delete(fact.navigable)
-            pending.entry.value.url = Option.some(fact.url)
+            yield* update(pending.url, () => Option.some(fact.url))
             Events.revise(pending.channel, pending.entry)
           }
           // A page's navigations are its events, and its frames' too, each naming its navigable
