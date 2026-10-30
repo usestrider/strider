@@ -90,6 +90,18 @@ describe("AdapterKit", () => {
         ).pipe(Effect.flip)
         assert.strictEqual(reasonOf(error), "Gone")
       }))
+
+    it("gives an ended obligation, download or hop the reason of its kind, and any other target none seen", () => {
+      const reasonTag = (target: Target.Description) => {
+        const error = Kit.ended(target)
+        assert.strictEqual(error.reason._tag, "Gone")
+        return error.reason._tag === "Gone" ? error.reason.reason._tag : undefined
+      }
+      assert.strictEqual(reasonTag({ _tag: "Obligation", id: "o" }), "ObligationEnded")
+      assert.strictEqual(reasonTag({ _tag: "Download", id: "d" }), "DownloadEnded")
+      assert.strictEqual(reasonTag({ _tag: "Hop", id: "h" }), "HopEnded")
+      assert.strictEqual(reasonTag({ _tag: "Browser" }), "Vanished")
+    })
   })
 
   describe("facts", () => {

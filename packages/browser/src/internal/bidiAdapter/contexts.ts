@@ -18,7 +18,6 @@ import {
   type ContextEntry,
   contextOf,
   type DownloadEntry,
-  endedThing,
   type Event,
   navigableById,
   navigableOf,
@@ -138,7 +137,7 @@ export const createPage = Effect.fnUntraced(function*(state: State, id: UserCont
   yield* state.root().drainObserved
   const navigable = state.navigables.get(created.context)
   if (navigable === undefined) {
-    return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.PageClosed({ by: "browser" })))
+    return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.Vanished({})))
   }
   return navigable.id
 })
@@ -160,7 +159,7 @@ export const activatePage = (state: State, id: L1Target.NavigableId) =>
   )
 
 const downloadOf = (state: State, id: Download.Id) =>
-  Kit.lookup(state.ids, state.downloadsById, id, () => endedThing({ _tag: "Download", id }))
+  Kit.lookup(state.ids, state.downloadsById, id, () => Kit.ended({ _tag: "Download", id }))
 
 export const downloadPath = (state: State, id: Download.Id) =>
   Effect.map(downloadOf(state, id), (download) => Option.fromUndefinedOr(download.path))

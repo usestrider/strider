@@ -16,7 +16,6 @@ import * as Kit from "../adapterKit.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
 import {
-  endedThing,
   type Event,
   frameKey,
   loaderKey,
@@ -352,7 +351,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
 export const bodyOf = (postData: string): Uint8Array => new TextEncoder().encode(postData)
 
 const hopOf = (state: State, hop: NetworkRequest.HopId) =>
-  Kit.lookup(state.ids, state.hops, hop, () => endedThing({ _tag: "Hop", id: hop }))
+  Kit.lookup(state.ids, state.hops, hop, () => Kit.ended({ _tag: "Hop", id: hop }))
 
 export const requestBody = (state: State, hop: NetworkRequest.HopId) =>
   Effect.map(hopOf(state, hop), (request) => {

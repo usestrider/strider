@@ -326,8 +326,7 @@ export class NetworkConnectionClosed
  * **Details**
  *
  * `by` says what closed it: `"command"` when `page.close` did, `"script"` when the page closed itself or the user
- * did, `"userContextRemoved"` when its context was removed, and `"browser"` when the browser closed or Strider
- * can no longer tell why.
+ * did, and `"userContextRemoved"` when its context was removed.
  *
  * @stability unstable
  * @category reasons
@@ -335,11 +334,80 @@ export class NetworkConnectionClosed
  */
 export class PageClosed extends Schema.Error<PageClosed>("@usestrider/browser/Target/PageClosed")({
   _tag: Schema.tag("PageClosed"),
-  by: Schema.Literals(["command", "script", "userContextRemoved", "browser"]),
+  by: Schema.Literals(["command", "script", "userContextRemoved"]),
   hint: hinted("Open a new page")
 }) {
   override get message(): string {
     return `The page closed (by ${this.by}; ${this.hint})`
+  }
+}
+
+/**
+ * Reason for a dialog, file chooser or paused request that ended before it was decided, or was decided already.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class ObligationEnded extends Schema.Error<ObligationEnded>("@usestrider/browser/Target/ObligationEnded")({
+  _tag: Schema.tag("ObligationEnded"),
+  hint: hinted("It was decided or its page moved on; handle the next one")
+}) {
+  override get message(): string {
+    return `The dialog, file chooser or paused request ended (${this.hint})`
+  }
+}
+
+/**
+ * Reason for a download that Strider no longer holds.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class DownloadEnded extends Schema.Error<DownloadEnded>("@usestrider/browser/Target/DownloadEnded")({
+  _tag: Schema.tag("DownloadEnded"),
+  hint: hinted("Start the download again")
+}) {
+  override get message(): string {
+    return `The download ended (${this.hint})`
+  }
+}
+
+/**
+ * Reason for a request's hop that Strider no longer holds.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class HopEnded extends Schema.Error<HopEnded>("@usestrider/browser/Target/HopEnded")({
+  _tag: Schema.tag("HopEnded"),
+  hint: hinted("Read a request soon after it finishes; Strider keeps only the latest ones")
+}) {
+  override get message(): string {
+    return `The request's hop ended (${this.hint})`
+  }
+}
+
+/**
+ * Reason for a target that ended for a reason Strider did not see.
+ *
+ * **Details**
+ *
+ * Strider knows the target is gone but was told neither why nor by what, such as a page that was created and gone
+ * before it could be reported. A cause Strider did see has a reason of its own.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class Vanished extends Schema.Error<Vanished>("@usestrider/browser/Target/Vanished")({
+  _tag: Schema.tag("Vanished"),
+  hint: hinted("Open it again; if it keeps happening, report it")
+}) {
+  override get message(): string {
+    return `It ended for a reason Strider did not see (${this.hint})`
   }
 }
 
@@ -352,6 +420,9 @@ export class PageClosed extends Schema.Error<PageClosed>("@usestrider/browser/Ta
  *   of the browser's state).
  * - Context and access: `UserContextRemoved`, `AccessReleased`, `PrerenderActivated`.
  * - Pages and frames: `PageClosed` (with what closed it), `PageCrashed`, `FrameDetached`.
+ * - Dialogs, file choosers, paused requests, downloads and request hops: `ObligationEnded` (a dialog, file chooser
+ *   or paused request), `DownloadEnded`, `HopEnded`.
+ * - No cause seen: `Vanished`, for a target Strider knows is gone but not why.
  * - Documents and realms: `DocumentReplaced`, `DocumentEvicted`, `DocumentDestroyed`, `DocumentUnloaded`,
  *   `RealmDestroyed`.
  * - Connections: `NetworkConnectionClosed`, for a WebSocket or EventSource the page or the server closed.
@@ -370,6 +441,9 @@ export const CloseReason = Schema.Union([
   AccessReleased,
   PrerenderActivated,
   PageClosed,
+  ObligationEnded,
+  DownloadEnded,
+  HopEnded,
   PageCrashed,
   FrameDetached,
   DocumentReplaced,
@@ -377,7 +451,8 @@ export const CloseReason = Schema.Union([
   DocumentDestroyed,
   DocumentUnloaded,
   RealmDestroyed,
-  NetworkConnectionClosed
+  NetworkConnectionClosed,
+  Vanished
 ])
 
 /**

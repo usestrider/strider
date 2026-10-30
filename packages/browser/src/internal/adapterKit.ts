@@ -55,6 +55,19 @@ import * as Urls from "./urls.ts"
 export const gone = (target: Target.Description, reason: Target.CloseReason): Adapter.AdapterError =>
   new Adapter.AdapterError({ reason: { _tag: "Gone", target, reason } })
 
+/** An obligation, a download or a hop that ended, with the reason for its kind; any other target, with none seen. */
+export const ended = (target: Target.Description): Adapter.AdapterError =>
+  gone(
+    target,
+    target._tag === "Obligation"
+      ? new Target.ObligationEnded({})
+      : target._tag === "Download"
+      ? new Target.DownloadEnded({})
+      : target._tag === "Hop"
+      ? new Target.HopEnded({})
+      : new Target.Vanished({})
+  )
+
 /** An id this connection never minted: a bug in L1. */
 export const foreign = (id: string): Adapter.AdapterError =>
   new Adapter.AdapterError({ reason: { _tag: "Foreign", id } })

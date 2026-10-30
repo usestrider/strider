@@ -355,7 +355,7 @@ export const downloadDirectory = (state: State, context: UserContext.Id) => {
 // ── Lookups: an id this connection minted that ended is Gone, any other Foreign ───────────────────────────
 
 const pageGone = (state: State, id: L1Target.NavigableId) =>
-  Kit.gone({ _tag: "Page", id }, state.endedPages.get(id) ?? new L1Target.PageClosed({ by: "browser" }))
+  Kit.gone({ _tag: "Page", id }, state.endedPages.get(id) ?? new L1Target.Vanished({}))
 
 export const pageOf = (state: State, id: L1Target.NavigableId): Effect.Effect<PageEntry, Adapter.AdapterError> =>
   Kit.lookup(state.ids, state.pages, id, () => pageGone(state, id), (page) => !page.ended)
@@ -397,6 +397,3 @@ export const realmOf = (state: State, id: L1Target.RealmId): Effect.Effect<Realm
     () => Kit.gone({ _tag: "Realm", id }, new L1Target.RealmDestroyed({})),
     (realm) => !realm.ended
   )
-
-/** An obligation, a download or a hop that ended, named as the target it was. */
-export const endedThing = (target: L1Target.Description) => Kit.gone(target, new L1Target.PageClosed({ by: "browser" }))

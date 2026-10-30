@@ -112,6 +112,7 @@ The `Browser` service, which every backend provides, with its accessors and the 
   - `readonly args?: ReadonlyArray<string> | undefined`
   - `readonly profile?: LaunchProfile.LaunchProfile | undefined`
   - `readonly userDataDir?: FilePath.Local | string | undefined`
+  - `readonly coreDumps?: boolean | undefined`
 - `interface ConnectOptions`
   - `readonly headers?: Readonly<Record<string, string | Redacted.Redacted<string>>> | undefined`
 - `interface Operation extends Tracing.Operation`
@@ -1746,7 +1747,7 @@ What operations act on, how each one is identified, and how it ends.
 - `const NavigableId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/NavigableId"))`
 - `const DocumentId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/DocumentId"))`
 - `const RealmId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/RealmId"))`
-- `const CloseReason = Schema.Union([BrowserClosed, BrowserCrashed, ConnectionLost, ModelUnavailable, UserContextRemoved, AccessReleased, PrerenderActivated, PageClosed, PageCrashed, FrameDetached, DocumentReplaced, Docume…`
+- `const CloseReason = Schema.Union([BrowserClosed, BrowserCrashed, ConnectionLost, ModelUnavailable, UserContextRemoved, AccessReleased, PrerenderActivated, PageClosed, ObligationEnded, DownloadEnded, HopEnded, PageCrashe…`
 - `const Description = Schema.Union([Schema.TaggedStruct("Page", { id: NavigableId }), Schema.TaggedStruct("Frame", { id: NavigableId }), Schema.TaggedStruct("Document", { id: DocumentId }), Schema.TaggedStruct("Realm", { …`
 - `const EventOrigin = Schema.Union([Schema.TaggedStruct("Page", { page: NavigableId }), Schema.TaggedStruct("Worker", { realm: RealmId })])`
 
@@ -1776,6 +1777,10 @@ What operations act on, how each one is identified, and how it ends.
 - `class RealmDestroyed: Schema.Error { hint }`
 - `class NetworkConnectionClosed: Schema.Error { hint }`
 - `class PageClosed: Schema.Error { by, hint }`
+- `class ObligationEnded: Schema.Error { hint }`
+- `class DownloadEnded: Schema.Error { hint }`
+- `class HopEnded: Schema.Error { hint }`
+- `class Vanished: Schema.Error { hint }`
 
 ### Trace
 

@@ -14,15 +14,7 @@ import * as Kit from "../adapterKit.ts"
 import * as Urls from "../urls.ts"
 import { automationOf, pageHandleOf, processOfContext } from "./automation.ts"
 import { bodyOf, servedBy } from "./network.ts"
-import {
-  endedThing,
-  type Event,
-  type PageEntry,
-  type RequestEntry,
-  requestKey,
-  type State,
-  type TargetEntry
-} from "./state.ts"
+import { type Event, type PageEntry, type RequestEntry, requestKey, type State, type TargetEntry } from "./state.ts"
 
 // ── Paused requests ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -160,7 +152,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
 // ── Operations ────────────────────────────────────────────────────────────────────────────────────────────
 
 const obligationOf = (state: State, id: Adapter.ObligationId) =>
-  Kit.lookup(state.ids, state.obligations, id, () => endedThing({ _tag: "Obligation", id }))
+  Kit.lookup(state.ids, state.obligations, id, () => Kit.ended({ _tag: "Obligation", id }))
 
 export const resolve = Effect.fnUntraced(function*(
   state: State,
@@ -249,7 +241,7 @@ export const resolve = Effect.fnUntraced(function*(
       }
       // A dialog answered already, or closed, is over
       if (obligation.page.dialog !== id || obligation.answer !== undefined) {
-        return yield* Effect.fail(endedThing({ _tag: "Obligation", id }))
+        return yield* Effect.fail(Kit.ended({ _tag: "Obligation", id }))
       }
       const handle = yield* pageHandleOf(state, obligation.page)
       const process = yield* processOfContext(state, obligation.page.context)

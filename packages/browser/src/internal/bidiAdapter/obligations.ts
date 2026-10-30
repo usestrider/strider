@@ -19,7 +19,6 @@ import * as Declarations from "../declarations.ts"
 import * as Urls from "../urls.ts"
 import { bidiHeaders, bytesOf, headersOf, originOf, resourceType } from "./mapping.ts"
 import {
-  endedThing,
   type Event,
   navigableOf,
   type ObligationEntry,
@@ -188,7 +187,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
 // ── Operations ────────────────────────────────────────────────────────────────────────────────────────────
 
 const obligationOf = (state: State, id: Adapter.ObligationId) =>
-  Kit.lookup(state.ids, state.obligations, id, () => endedThing({ _tag: "Obligation", id }))
+  Kit.lookup(state.ids, state.obligations, id, () => Kit.ended({ _tag: "Obligation", id }))
 
 const refused = (method: string) =>
   Effect.fail(new Protocol.ProtocolError({ reason: new Protocol.Unsupported({ method }) }))

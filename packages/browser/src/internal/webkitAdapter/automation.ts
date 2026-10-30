@@ -102,7 +102,7 @@ export const pageHandleOf = Effect.fnUntraced(function*(state: State, page: Page
   )
   if (Option.isSome(found)) return found.value
   return yield* Effect.fail(
-    Kit.gone({ _tag: "Page", id: page.id }, page.closing ?? new L1Target.PageClosed({ by: "browser" }))
+    Kit.gone({ _tag: "Page", id: page.id }, page.closing ?? new L1Target.Vanished({}))
   )
 })
 
@@ -312,7 +312,7 @@ export const createPageLaunched = Effect.fnUntraced(function*(state: State, id: 
     BrowserClock.onLive
   )
   if (Option.isSome(found)) return found.value
-  return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.PageClosed({ by: "browser" })))
+  return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.Vanished({})))
 })
 
 export const closePageLaunched = Effect.fnUntraced(

@@ -1087,7 +1087,8 @@ class LocatorError extends Schema.TaggedError<LocatorError>(LocatorErrorTypeId)(
 // Target and Deadline: the two that cross every module
 class TargetGone extends Schema.TaggedError<TargetGone>(TargetGoneTypeId)("TargetGone", {
   target: Description, reason: CloseReason, diagnostics: Diagnostics.Diagnostics }) {}
-// CloseReason = Schema.Union of Schema.Error classes in Target (BrowserClosed, PageClosed{by}, FrameDetached, ...),
+// CloseReason = Schema.Union of Schema.Error classes in Target (BrowserClosed, PageClosed{by}, FrameDetached, ObligationEnded,
+// DownloadEnded, HopEnded, Vanished (no cause seen), ...),
 // each with a hint that its message includes, built as `new Target.PageClosed({ by: "command" })`;
 // Effect.catchReason("TargetGone", "PageClosed", (closed) => ...) matches one
 class Timeout extends Schema.TaggedError<Timeout>(TimeoutTypeId)("Timeout", {

@@ -263,7 +263,9 @@ type Readiness = { _tag: "Ready" } | { _tag: "NotReady"; predicate: Predicate; r
 type CloseReason =
   | BrowserClosed | BrowserCrashed | ConnectionLost | ModelUnavailable
   | UserContextRemoved | AccessReleased | PrerenderActivated
-  | PageClosed /* by: command | script | userContextRemoved | browser */ | PageCrashed
+  | PageClosed /* by: command | script | userContextRemoved */ | PageCrashed
+  | ObligationEnded | DownloadEnded | HopEnded            // a dialog, file chooser or paused request; a download; a request hop
+  | Vanished                                              // gone for a reason nothing reported
   | FrameDetached | DocumentReplaced | DocumentEvicted | DocumentDestroyed | DocumentUnloaded
   | RealmDestroyed
   | NetworkConnectionClosed                              // a WebSocket or EventSource the page or the server closed

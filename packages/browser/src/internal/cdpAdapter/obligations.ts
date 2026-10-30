@@ -19,7 +19,6 @@ import * as Declarations from "../declarations.ts"
 import * as Urls from "../urls.ts"
 import { failReasons, fetchHeaders, postData, resourceTypes } from "./mapping.ts"
 import {
-  endedThing,
   type Event,
   frameOf,
   type ObligationEntry,
@@ -217,7 +216,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
 // ── Operations ────────────────────────────────────────────────────────────────────────────────────────────
 
 const obligationOf = (state: State, id: Adapter.ObligationId) =>
-  Kit.lookup(state.ids, state.obligations, id, () => endedThing({ _tag: "Obligation", id }))
+  Kit.lookup(state.ids, state.obligations, id, () => Kit.ended({ _tag: "Obligation", id }))
 
 const pausedOf = (state: State, id: Adapter.ObligationId) =>
   Effect.flatMap(
