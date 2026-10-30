@@ -15,7 +15,7 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 
 An entry with no marker is open.
 
-**Adding one.** When building or probing turns up something weird, add it here in the same commit, at the end of its section, with the next number. Numbers are stable, so documents and code comments can cite them (`QUIRKS.md, Q12`).
+**Closed** on 2026-10-29: nothing more is added here. New findings are issues on the Rookery board (`.agents/AGENTS.md`, Issues). Numbers stay stable, so documents and code comments can still cite them (`QUIRKS.md, Q12`).
 
 ## Browsers: navigation, history and documents
 
