@@ -1008,6 +1008,9 @@ const decodeState = (text: string, from: string) =>
     )
   )
 
+/** The capture policies `--capture` names, `CapturePolicy`'s presets. */
+const captures = ["local", "strict"] as const
+
 /** Launch and lifetime flags shared with MCP help. */
 export const startFlags = {
   name: Flag.String("name").pipe(Flag.withDescription("The session's name: lowercase letters, digits and dashes")),
@@ -1049,6 +1052,12 @@ export const startFlags = {
   secret: Flag.KeyValuePair("secret").pipe(
     Flag.withDescription("Bind a secret name to an environment variable, as name=VARIABLE; repeat for more secrets"),
     Flag.withDefault({})
+  ),
+  capture: Flag.Literals("capture", captures).pipe(
+    Flag.withDescription(
+      "What snapshots, screenshots and digests may hold: local allows everything, for pages you trust; strict denies screenshots, masks fields' text and leaves console text out (default: local)"
+    ),
+    Flag.withDefault("local")
   )
 }
 
@@ -1185,7 +1194,7 @@ const serve = Effect.fnUntraced(
     const session = yield* ToolkitImpl.makeSession({
       context,
       secrets,
-      capture: CapturePolicy.local,
+      capture: flags.capture === "strict" ? CapturePolicy.strict : CapturePolicy.local,
       // The session can take the browser's own tabs with control
       browser: instance,
       // A page no command opened, for the exported test to declare
@@ -1245,7 +1254,7 @@ const serve = Effect.fnUntraced(
       yield* Announce,
       `session ${flags.name} · ${instance.info.product} ${where} · focus ${focus} · idle timeout ${daemon.idleTimeout}${
         Option.isSome(flags.ownerPid) ? ` · ends with process ${flags.ownerPid.value}` : ""
-      }${
+      }${flags.capture === "strict" ? " · capture strict" : ""}${
         Option.isSome(flags.state)
           ? ` · state from ${flags.state.value}`
           : Option.isSome(flags.fork)

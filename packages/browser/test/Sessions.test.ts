@@ -186,7 +186,21 @@ describe("strider mcp", () => {
         }
       )
       assert.deepStrictEqual(
-        yield* parse(["mcp", "--start", "--chromium", "/bin/chromium", "--idle", "5 minutes", "--secret", "pw=PW"], {}),
+        yield* parse(
+          [
+            "mcp",
+            "--start",
+            "--chromium",
+            "/bin/chromium",
+            "--idle",
+            "5 minutes",
+            "--capture",
+            "strict",
+            "--secret",
+            "pw=PW"
+          ],
+          {}
+        ),
         {
           _tag: "Start",
           session: "mcp-7",
@@ -198,6 +212,8 @@ describe("strider mcp", () => {
             "/bin/chromium",
             "--idle",
             "5 minutes",
+            "--capture",
+            "strict",
             "--secret",
             "pw=PW",
             "--owner-pid",

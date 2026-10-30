@@ -47,6 +47,12 @@ const flags = {
     Flag.withDescription("Stop the started session after this duration without commands (default: 1 hour)"),
     Flag.optional
   ),
+  capture: Flag.Literals("capture", ["local", "strict"]).pipe(
+    Flag.withDescription(
+      "What the started session's snapshots, screenshots and digests may hold: local or strict (default: local)"
+    ),
+    Flag.optional
+  ),
   start: Flag.Boolean("start").pipe(
     Flag.withDescription("Start a session with the launch options below; otherwise serve -s or STRIDER_SESSION"),
     Flag.withDefault(false)
@@ -75,6 +81,7 @@ const startArgs = (name: string, given: Flags, pid: number): ReadonlyArray<strin
     ...option("state", given.state),
     ...option("fork", given.fork),
     ...option("idle", given.idle),
+    ...option("capture", given.capture),
     ...Object.entries(given.secret).flatMap(([secret, variable]) => ["--secret", `${secret}=${variable}`]),
     // The session ends with this process unless it is kept
     ...option("owner-pid", Option.orElse(given.ownerPid, () => given.keep ? Option.none() : Option.some(pid)))
