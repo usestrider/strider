@@ -19,7 +19,7 @@ import * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
 import * as Semaphore from "effect/Semaphore"
 import * as SubscriptionRef from "effect/SubscriptionRef"
-import * as Browser from "../Browser.ts"
+import type * as Browser from "../Browser.ts"
 import * as NetworkRequest from "../NetworkRequest.ts"
 import * as NetworkResponse from "../NetworkResponse.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
@@ -93,43 +93,55 @@ const noDom = "Browser.layerTest's pages have no DOM"
 const unsupported = (capability: string, hint = noDom) =>
   Effect.fail(new Adapter.AdapterError({ reason: { _tag: "Unsupported", capability, hint } }))
 
-const capabilities = () => {
-  const evidence = "Browser.layerTest's fake adapter"
-  const entry = (
-    name: string,
-    status: Browser.CapabilityEntry["status"],
-    limitations: ReadonlyArray<string> = []
-  ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
-  return new Browser.CapabilitySet({
-    entries: [
-      entry("userContexts", "supported"),
-      entry("prompts", "supported"),
-      entry("prompts.kind", "supported"),
-      entry("popups.opener", "supported"),
-      entry("close.runBeforeUnload", "supported", ["no page has a document to ask"]),
-      entry("engine", "unsupported", [noDom]),
-      entry("isolatedWorlds", "unsupported", [noDom]),
-      entry("input.native", "unsupported", [noDom]),
-      entry("interception.request", "unsupported", ["the timeline's requests are never paused"]),
-      entry("interception.response", "unsupported", ["the timeline's requests are never paused"]),
-      entry("interception.auth", "unsupported", ["the timeline's requests are never paused"]),
-      entry("network.challenges", "unsupported", ["the timeline's requests are never paused"]),
-      entry("bodies", "supported", ["every body is empty"]),
-      entry("console", "unsupported", ["the timeline has no console messages"]),
-      entry("fileChooser", "unsupported", [noDom]),
-      entry("downloads", "unsupported", ["the timeline has no downloads"]),
-      entry("screenshot", "unsupported", ["nothing is painted"]),
-      entry("pdf", "unsupported", ["nothing is painted"]),
-      entry("workers.evaluate", "unsupported", ["the timeline has no workers"]),
-      entry("capability.axTree", "unsupported", [noDom]),
-      entry("capability.screencast", "unsupported", ["nothing is painted"]),
-      entry("capability.video", "unsupported", ["nothing is painted"])
-    ]
-  })
-}
+const entry = (
+  name: string,
+  status: Browser.CapabilityEntry["status"],
+  limitations: ReadonlyArray<string> = []
+): Browser.CapabilityEntry => ({
+  name,
+  status,
+  evidence: "Browser.layerTest's fake adapter",
+  limitations: [...limitations]
+})
 
-/** Connects the fake for the layer's scope, its first page to play `steps`. */
-export const connect = (steps: ReadonlyArray<Step>) => (sink: Adapter.Sink) =>
+/** What the fake can do, as `Browser.layerTest` makes its `CapabilitySet` of. */
+export const capabilities: ReadonlyArray<Browser.CapabilityEntry> = [
+  entry("userContexts", "supported"),
+  entry("prompts", "supported"),
+  entry("prompts.kind", "supported"),
+  entry("popups.opener", "supported"),
+  entry("close.runBeforeUnload", "supported", ["no page has a document to ask"]),
+  entry("engine", "unsupported", [noDom]),
+  entry("isolatedWorlds", "unsupported", [noDom]),
+  entry("input.native", "unsupported", [noDom]),
+  entry("interception.request", "unsupported", ["the timeline's requests are never paused"]),
+  entry("interception.response", "unsupported", ["the timeline's requests are never paused"]),
+  entry("interception.auth", "unsupported", ["the timeline's requests are never paused"]),
+  entry("network.challenges", "unsupported", ["the timeline's requests are never paused"]),
+  entry("bodies", "supported", ["every body is empty"]),
+  entry("console", "unsupported", ["the timeline has no console messages"]),
+  entry("fileChooser", "unsupported", [noDom]),
+  entry("downloads", "unsupported", ["the timeline has no downloads"]),
+  entry("screenshot", "unsupported", ["nothing is painted"]),
+  entry("pdf", "unsupported", ["nothing is painted"]),
+  entry("workers.evaluate", "unsupported", ["the timeline has no workers"]),
+  entry("capability.axTree", "unsupported", [noDom]),
+  entry("capability.screencast", "unsupported", ["nothing is painted"]),
+  entry("capability.video", "unsupported", ["nothing is painted"])
+]
+
+/** What the fake is, as `Browser.layerTest` makes its `Info` of. */
+export const info = { product: "Fake", version: "1", protocol: "fake", revision: "layerTest" } as const
+
+/**
+ * Connects the fake for the layer's scope, its first page to play `steps`; `Browser.layerTest` makes what it
+ * reports itself as, so this module needn't load `Browser.ts`, which loads it.
+ */
+export const connect = (
+  steps: ReadonlyArray<Step>,
+  describe: { readonly info: Browser.Info; readonly capabilities: Browser.CapabilitySet }
+) =>
+(sink: Adapter.Sink) =>
   Effect.gen(function*() {
     const scope = yield* Effect.scope
     const ids = Adapter.makeIds()
@@ -312,8 +324,8 @@ export const connect = (steps: ReadonlyArray<Step>) => (sink: Adapter.Sink) =>
       })
 
     const adapter: Adapter.AdapterConnection = {
-      info: new Browser.Info({ product: "Fake", version: "1", protocol: "fake", revision: "layerTest" }),
-      capabilities: yield* SubscriptionRef.make(capabilities()),
+      info: describe.info,
+      capabilities: yield* SubscriptionRef.make(describe.capabilities),
       pauseScope: "browser",
       defaultContext,
       closed: Effect.never,

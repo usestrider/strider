@@ -25,7 +25,7 @@ import * as Path from "effect/Path"
 import { pipeArguments } from "effect/Pipeable"
 import type * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
-import * as Browser from "../Browser.ts"
+import type * as Browser from "../Browser.ts"
 import * as CookieJar from "../CookieJar.ts"
 import * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
@@ -41,6 +41,7 @@ import * as Url from "../Url.ts"
 import * as UserContext from "../UserContext.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BrowserService from "./browserService.ts"
 import * as Clock from "./clock.ts"
 import * as ConnectionImpl from "./connection.ts"
 import * as DownloadImpl from "./download.ts"
@@ -704,7 +705,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
 export const layer = <E, R>(
   connect: (sink: Adapter.Sink) => Effect.Effect<Adapter.AdapterConnection, E, R>
 ): Layer.Layer<Browser.Browser, E, Exclude<R, Scope.Scope>> =>
-  Layer.effect(Browser.Browser)(Effect.gen(function*() {
+  Layer.effect(BrowserService.Browser)(Effect.gen(function*() {
     const { sink, attach } = yield* Model.make()
     const adapter = yield* connect(sink)
     const model = yield* attach(adapter)

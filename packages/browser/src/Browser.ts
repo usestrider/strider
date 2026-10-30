@@ -30,6 +30,7 @@ import * as Diagnostics from "./Diagnostics.ts"
 import type * as FilePath from "./FilePath.ts"
 import * as BrowserImpl from "./internal/browser.ts"
 import * as BrowserClock from "./internal/browserClock.ts"
+import * as BrowserService from "./internal/browserService.ts"
 import * as Fake from "./internal/fake.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
 import * as Tracing from "./internal/tracing.ts"
@@ -218,7 +219,7 @@ export interface Browser {
  * @category tags
  * @since 0.1.0
  */
-export const Browser: Context.Service<Browser, Browser> = Context.Service<Browser>("@usestrider/browser/Browser")
+export const Browser: Context.Service<Browser, Browser> = BrowserService.Browser
 
 /**
  * Checks whether a value is a `Browser`.
@@ -403,7 +404,10 @@ export const layerTest = (timeline: string): Layer.Layer<Browser> =>
     Effect.sync(() =>
       // Its browser is a timeline on Effect's clock, which its deadlines are on too
       Layer.provideMerge(
-        BrowserImpl.layer(Fake.connect(Fake.parse(timeline))),
+        BrowserImpl.layer(Fake.connect(Fake.parse(timeline), {
+          info: new Info(Fake.info),
+          capabilities: new CapabilitySet({ entries: Fake.capabilities })
+        })),
         Layer.succeed(BrowserClock.CurrentClock, BrowserClock.fromClock(clock))
       )
     )
