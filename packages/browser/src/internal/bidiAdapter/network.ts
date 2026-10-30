@@ -8,9 +8,9 @@ import * as Option from "effect/Option"
 import * as Network from "../../bidi-protocol/Network.ts"
 import * as NetworkRequest from "../../NetworkRequest.ts"
 import * as NetworkResponse from "../../NetworkResponse.ts"
-import type * as Url from "../../Url.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Urls from "../urls.ts"
 import { bytesOf, headersOf, resourceType } from "./mapping.ts"
 import { pause, requestSnapshot } from "./obligations.ts"
 import { type Event, navigableOf, type RequestEntry, type State } from "./state.ts"
@@ -52,7 +52,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const snapshot = new NetworkRequest.NetworkRequest({
         hop: request.hop,
         method: Kit.methodOf(data.method),
-        url: data.url as Url.Url,
+        url: Urls.reported(data.url),
         headers: headersOf(data.headers),
         resourceType: resourceType(data),
         initiator: navigable === undefined
@@ -71,7 +71,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (request.navigation !== undefined) request.navigation.status = params.response.status
       const response = new NetworkResponse.NetworkResponse({
         hop: request.hop,
-        url: params.response.url as Url.Url,
+        url: Urls.reported(params.response.url),
         status: Math.min(599, Math.max(100, params.response.status || 200)) as NetworkResponse.StatusCode,
         statusText: params.response.statusText,
         httpVersion: Option.fromUndefinedOr(params.response.protocol || undefined),

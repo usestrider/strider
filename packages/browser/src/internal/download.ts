@@ -13,10 +13,10 @@ import * as Download from "../Download.ts"
 import type * as FileInput from "../FileInput.ts"
 import * as Reason from "../Reason.ts"
 import * as Target from "../Target.ts"
-import type * as Url from "../Url.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
+import * as Urls from "./urls.ts"
 import * as Watchable from "./watchable.ts"
 
 const TypeId = "~@usestrider/browser/Download"
@@ -120,7 +120,7 @@ export const make = (runtime: Runtime.Runtime, entry: Model.DownloadEntry): Down
   const download: Download.Download = {
     [TypeId]: TypeId,
     id: entry.id,
-    url: entry.url as Url.Url,
+    url: Urls.reported(entry.url),
     suggestedFilename: entry.suggestedFilename as FileInput.FileName,
     status: Watchable.make({
       ref: entry.state,

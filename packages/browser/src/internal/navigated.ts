@@ -10,10 +10,10 @@ import * as Stream from "effect/Stream"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import type * as Target from "../Target.ts"
-import type * as Url from "../Url.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import type * as Model from "./model.ts"
+import * as Urls from "./urls.ts"
 
 /** A navigation that got somewhere, at `at` (where it ended); `None` for one that didn't. */
 export const succeeded = (
@@ -23,7 +23,7 @@ export const succeeded = (
   at: string,
   outcome: Adapter.NavigationOutcome
 ): Option.Option<PageNavigation.PageNavigation> => {
-  const url = at as Url.Url
+  const url = Urls.reported(at)
   switch (outcome._tag) {
     case "Committed":
       return Option.some({

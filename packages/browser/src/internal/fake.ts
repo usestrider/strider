@@ -24,9 +24,9 @@ import * as NetworkRequest from "../NetworkRequest.ts"
 import * as NetworkResponse from "../NetworkResponse.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import type * as Target from "../Target.ts"
-import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
+import * as Urls from "./urls.ts"
 
 /** One step of a timeline. */
 export type Step =
@@ -257,7 +257,7 @@ export const connect = (
               )
               break
             case "Response": {
-              const url = `${origin}/${step.name}` as Url.Url
+              const url = Urls.reported(`${origin}/${step.name}`)
               const hop = ids.hop(ids.request(), 0)
               yield* emit(
                 {

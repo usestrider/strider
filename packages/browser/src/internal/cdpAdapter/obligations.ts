@@ -13,10 +13,10 @@ import * as Page from "../../cdp/Page.ts"
 import * as NetworkRequest from "../../NetworkRequest.ts"
 import * as NetworkResponse from "../../NetworkResponse.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
-import type * as Url from "../../Url.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Declarations from "../declarations.ts"
+import * as Urls from "../urls.ts"
 import { failReasons, fetchHeaders, postData, resourceTypes } from "./mapping.ts"
 import {
   endedThing,
@@ -40,7 +40,7 @@ const pausedRequest = (
   new NetworkRequest.NetworkRequest({
     hop,
     method: Kit.methodOf(request.method),
-    url: request.url as Url.Url,
+    url: Urls.reported(request.url),
     headers: Kit.headersOf(request.headers),
     resourceType: entry?.resourceType ?? resourceTypes[resourceType] ?? "other",
     initiator: entry?.frame !== undefined
@@ -104,7 +104,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
             : Option.some(
               new NetworkResponse.NetworkResponse({
                 hop,
-                url: params.request.url as Url.Url,
+                url: Urls.reported(params.request.url),
                 status: params.responseStatusCode as NetworkResponse.StatusCode,
                 statusText: params.responseStatusText ?? "",
                 httpVersion: Option.none(),

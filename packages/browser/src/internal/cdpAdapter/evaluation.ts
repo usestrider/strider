@@ -13,11 +13,11 @@ import * as ConsoleMessage from "../../ConsoleMessage.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as L1Target from "../../Target.ts"
 import * as UncaughtException from "../../UncaughtException.ts"
-import type * as Url from "../../Url.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as ConsoleFormat from "../consoleFormat.ts"
 import * as Groups from "../objectGroups.ts"
+import * as Urls from "../urls.ts"
 import { contextKey, documentOf, type Event, frameOf, realmOf, type State } from "./state.ts"
 import { addRealm, removeRealm } from "./tree.ts"
 
@@ -234,10 +234,13 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         message: new ConsoleMessage.ConsoleMessage({
           level: Kit.consoleLevel(params.type),
           text: ConsoleFormat.format(params.args.map(Kit.argumentOf)),
-          location: top === undefined || top.url === ""
-            ? Option.none()
-            // CDP's lines and columns are 0-based; a location is 1-based, as stack traces print it
-            : Option.some({ url: top.url as Url.Url, line: top.lineNumber + 1, column: top.columnNumber + 1 }),
+          // CDP's lines and columns are 0-based; a location is 1-based, as stack traces print it. A script with no URL,
+          // or one named by a string that isn't a URL, has no location
+          location: top === undefined ? Option.none() : Option.map(Urls.reportedOption(top.url), (url) => ({
+            url,
+            line: top.lineNumber + 1,
+            column: top.columnNumber + 1
+          })),
           origin: realm.frame !== undefined
             ? { _tag: "Page", page: realm.frame.page.id }
             : { _tag: "Worker", realm: realm.id },

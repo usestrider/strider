@@ -6,9 +6,9 @@
 import * as Option from "effect/Option"
 import type * as Network from "../../cdp/Network.ts"
 import * as NetworkResponse from "../../NetworkResponse.ts"
-import type * as Url from "../../Url.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Urls from "../urls.ts"
 import type { NavigationEntry, RequestEntry, State } from "./state.ts"
 
 /** What answered, from the response's flags and what came before it. */
@@ -29,7 +29,7 @@ export const emitResponse = (state: State, request: RequestEntry, response: Netw
     _tag: "ResponseReceived",
     response: new NetworkResponse.NetworkResponse({
       hop: request.hop,
-      url: response.url as Url.Url,
+      url: Urls.reported(response.url),
       status: Math.min(599, Math.max(100, response.status || 200)) as NetworkResponse.StatusCode,
       statusText: response.statusText,
       httpVersion: Option.fromUndefinedOr(response.protocol || undefined),

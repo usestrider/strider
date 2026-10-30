@@ -15,11 +15,41 @@ import * as Schema from "effect/Schema"
 /**
  * Schema for a BCP 47 locale, such as `de-DE`.
  *
+ * **Details**
+ *
+ * It decodes a string that `Intl.getCanonicalLocales` accepts as one language tag, and keeps it as written. `"de-DE"`
+ * and `"zh-Hant-TW"` pass; `"not a locale"` and `""` fail.
+ *
+ * **Example** (Checking a string)
+ *
+ * ```ts import.meta.vitest
+ * import { Emulation } from "@usestrider/browser"
+ * import { Result, Schema } from "effect"
+ *
+ * const ok = Emulation.Locale.make("de-DE") // an Emulation.Locale
+ * const bad = Schema.decodeUnknownResult(Emulation.Locale)("not a locale") // a failed Result
+ * console.log(ok, Result.isFailure(bad))
+ * ```
+ *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
  */
-export const Locale = Schema.String.pipe(Schema.brand("~@usestrider/browser/Emulation/Locale"))
+export const Locale = Schema.String.pipe(
+  Schema.check(
+    Schema.makeFilter(
+      (input: string) => {
+        try {
+          return Intl.getCanonicalLocales(input).length === 1
+        } catch {
+          return false
+        }
+      },
+      { expected: "a BCP 47 language tag, such as de-DE" }
+    )
+  ),
+  Schema.brand("~@usestrider/browser/Emulation/Locale")
+)
 
 /**
  * A BCP 47 locale, such as `de-DE`.
@@ -33,11 +63,42 @@ export type Locale = typeof Locale.Type
 /**
  * Schema for an IANA time zone, such as `Europe/Berlin`.
  *
+ * **Details**
+ *
+ * It decodes a name that `Intl.DateTimeFormat` accepts as a `timeZone`, and keeps it as written. `"Asia/Tokyo"` and
+ * `"UTC"` pass; `"Mars/Olympus"` fails.
+ *
+ * **Example** (Checking a string)
+ *
+ * ```ts import.meta.vitest
+ * import { Emulation } from "@usestrider/browser"
+ * import { Result, Schema } from "effect"
+ *
+ * const ok = Emulation.TimeZoneId.make("Europe/Berlin") // an Emulation.TimeZoneId
+ * const bad = Schema.decodeUnknownResult(Emulation.TimeZoneId)("Mars/Olympus") // a failed Result
+ * console.log(ok, Result.isFailure(bad))
+ * ```
+ *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
  */
-export const TimeZoneId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Emulation/TimeZoneId"))
+export const TimeZoneId = Schema.String.pipe(
+  Schema.check(
+    Schema.makeFilter(
+      (input: string) => {
+        try {
+          new Intl.DateTimeFormat(undefined, { timeZone: input })
+          return true
+        } catch {
+          return false
+        }
+      },
+      { expected: "an IANA time zone, such as Europe/Berlin" }
+    )
+  ),
+  Schema.brand("~@usestrider/browser/Emulation/TimeZoneId")
+)
 
 /**
  * An IANA time zone, such as `Europe/Berlin`.

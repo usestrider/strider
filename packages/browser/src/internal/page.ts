@@ -16,9 +16,11 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
 import * as Hash from "effect/Hash"
+import * as HttpUrl from "effect/http/Url"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import { pipeArguments } from "effect/Pipeable"
+import * as Result from "effect/Result"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type * as Deadline from "../Deadline.ts"
@@ -53,6 +55,7 @@ import * as Routes from "./routes.ts"
 import * as Runtime from "./runtime.ts"
 import * as Snapshots from "./snapshot.ts"
 import * as Storage from "./storage.ts"
+import * as Urls from "./urls.ts"
 import * as Watchable from "./watchable.ts"
 
 const PageTypeId = "~@usestrider/browser/Page"
@@ -62,7 +65,7 @@ const opened = ({ status }: Model.PageState): Option.Option<Page.Status> =>
     ? Option.none()
     : Option.some(
       status._tag === "Open"
-        ? { _tag: "Open", url: status.url as Url.Url, document: status.document, prompt: status.prompt }
+        ? { _tag: "Open", url: Urls.reported(status.url), document: status.document, prompt: status.prompt }
         : { _tag: "Closed", reason: status.reason }
     )
 
@@ -74,12 +77,12 @@ const frameTree = (page: Target.NavigableId, state: Model.PageState): Page.Frame
   const children = (parent: Target.NavigableId): ReadonlyArray<Page.FrameTree> =>
     state.frames.filter((frame) => frame.parent === parent).map((frame) => ({
       id: frame.id,
-      url: frame.url as Url.Url,
+      url: Urls.reported(frame.url),
       // No backend reports a frame's name, and `window.name` is its document's to read
       name: Option.none(),
       children: children(frame.id)
     }))
-  return { id: page, url: state.status.url as Url.Url, name: Option.none(), children: children(page) }
+  return { id: page, url: Urls.reported(state.status.url), name: Option.none(), children: children(page) }
 }
 
 const pageError = (operation: string, reason: Page.PageErrorReason, id: Diagnostics.OperationId) =>
@@ -115,7 +118,7 @@ const observeMembers = (owner: ObservedOwner) => {
     url: Watchable.make({
       ref: entry.state,
       project: ({ status }: Model.PageState) =>
-        status._tag === "Opening" ? Option.none() : Option.some(status.url as Url.Url),
+        status._tag === "Opening" ? Option.none() : Option.some(Urls.reported(status.url)),
       ended: pageEnded,
       target: { _tag: "Page", id: entry.id },
       operation: "Page.url.waitFor"
@@ -366,10 +369,8 @@ export const make = (owner: PageOwner): Page.Page => {
     capability: (capability) => Capabilities.acquire(runtime, entry, capability),
     context: owner.context,
     goto: (url, options) => {
-      let parsed: URL
-      try {
-        parsed = new URL(url)
-      } catch {
+      const result = HttpUrl.fromString(url)
+      if (Result.isFailure(result)) {
         return Effect.fail(pageError(
           "Page.goto",
           new Reason.InvalidInput({
@@ -380,9 +381,10 @@ export const make = (owner: PageOwner): Page.Page => {
           Operation.idNow()
         ))
       }
+      const parsed = result.success
       return navigate(
         "Page.goto",
-        Option.some(parsed.href as Url.Url),
+        Option.some(Urls.reported(parsed.href)),
         (id) =>
           Effect.map(adapter.navigate(entry.id, parsed.href, { referrer: Option.none() }), Option.some).pipe(
             Effect.mapError((error) => failure("Page.goto", id, error))

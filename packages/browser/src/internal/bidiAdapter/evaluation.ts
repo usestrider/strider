@@ -11,9 +11,9 @@ import * as Script from "../../bidi-protocol/Script.ts"
 import * as ConsoleMessage from "../../ConsoleMessage.ts"
 import type * as L1Target from "../../Target.ts"
 import * as UncaughtException from "../../UncaughtException.ts"
-import type * as Url from "../../Url.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Urls from "../urls.ts"
 import { documentOf, type Event, navigableOf, type RealmEntry, realmOf, type State } from "./state.ts"
 import { addWindowRealm, removeRealm } from "./tree.ts"
 
@@ -213,10 +213,13 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const realm = state.realms.get(params.source.realm)
       const navigable = navigableOf(state, params.source.context)
       const top = params.stackTrace?.callFrames[0]
-      const location = top === undefined || top.url === ""
-        ? Option.none()
-        // BiDi's lines and columns are 0-based; a location is 1-based, as stack traces print it
-        : Option.some({ url: top.url as Url.Url, line: top.lineNumber + 1, column: top.columnNumber + 1 })
+      // BiDi's lines and columns are 0-based; a location is 1-based, as stack traces print it. A script with no URL, or
+      // one named by a string that isn't a URL, has no location
+      const location = top === undefined ? Option.none() : Option.map(Urls.reportedOption(top.url), (url) => ({
+        url,
+        line: top.lineNumber + 1,
+        column: top.columnNumber + 1
+      }))
       const origin: L1Target.EventOrigin = navigable !== undefined
         ? { _tag: "Page", page: navigable.page.id }
         : realm !== undefined

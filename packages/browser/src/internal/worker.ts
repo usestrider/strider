@@ -11,7 +11,6 @@ import { pipeArguments } from "effect/Pipeable"
 import * as BrowserWorker from "../BrowserWorker.ts"
 import type * as JSHandle from "../JSHandle.ts"
 import * as Reason from "../Reason.ts"
-import type * as Url from "../Url.ts"
 import type * as Adapter from "./adapter.ts"
 import { exception } from "./evaluation.ts"
 import * as Filters from "./filters.ts"
@@ -19,6 +18,7 @@ import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
 import * as Serialization from "./serialization.ts"
+import * as Urls from "./urls.ts"
 
 const TypeId = "~@usestrider/browser/BrowserWorker"
 
@@ -84,7 +84,7 @@ export const make = (runtime: Runtime.Runtime, entry: Model.WorkerEntry): Browse
     [TypeId]: TypeId,
     realm: entry.realm,
     kind: entry.kind,
-    url: entry.url as Url.Url,
+    url: Urls.reported(entry.url),
     closed: Deferred.await(entry.closed),
     evaluate,
     pipe() {

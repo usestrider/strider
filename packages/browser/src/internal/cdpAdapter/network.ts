@@ -10,9 +10,9 @@ import * as Network from "../../cdp/Network.ts"
 import { Frame as NetworkConnectionFrame } from "../../NetworkConnection.ts"
 import * as NetworkRequest from "../../NetworkRequest.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
-import type * as Url from "../../Url.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Urls from "../urls.ts"
 import { postData, resourceTypes } from "./mapping.ts"
 import { emitResponse, release, servedBy } from "./responses.ts"
 import { type Event, frameOf, placement, type RequestEntry, requestKey, type State, type TargetEntry } from "./state.ts"
@@ -133,7 +133,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         request: new NetworkRequest.NetworkRequest({
           hop: request.hop,
           method: Kit.methodOf(params.request.method),
-          url: params.request.url as Url.Url,
+          url: Urls.reported(params.request.url),
           headers: Kit.headersOf(params.request.headers),
           resourceType: resourceTypes[params.type ?? "Other"] ?? "other",
           initiator: request.frame !== undefined

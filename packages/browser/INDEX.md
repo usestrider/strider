@@ -572,8 +572,8 @@ Emulated settings: viewport, locale, time zone, media features, network conditio
 
 *schemas*
 
-- `const Locale = Schema.String.pipe(Schema.brand("~@usestrider/browser/Emulation/Locale"))`
-- `const TimeZoneId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Emulation/TimeZoneId"))`
+- `const Locale = Schema.String.pipe(Schema.check(Schema.makeFilter((input: string) => { try { return Intl.getCanonicalLocales(input).length === 1 } catch { return false } }, { expected: "a BCP 47 language tag, such a…`
+- `const TimeZoneId = Schema.String.pipe(Schema.check(Schema.makeFilter((input: string) => { try { new Intl.DateTimeFormat(undefined, { timeZone: input }) return true } catch { return false } }, { expected: "an IANA time …`
 
 ### Expect
 
@@ -1225,7 +1225,7 @@ Operations of your own, kept as the library keeps its: one deadline for everythi
 
 *tags*
 
-- `class Current: Context.Service "@usestrider/browser/Operation/Current" {  }`
+- `class Current: Context.Service {  }`
 
 *models*
 
@@ -1499,8 +1499,8 @@ CSS pixels and device pixels, which differ by the device pixel ratio.
 
 *schemas*
 
-- `const Css = Schema.Number.pipe(Schema.brand("~@usestrider/browser/Pixels/Css"))`
-- `const Device = Schema.Number.pipe(Schema.brand("~@usestrider/browser/Pixels/Device"))`
+- `const Css = Schema.Number.pipe(Schema.check(Schema.isFinite()), Schema.brand("~@usestrider/browser/Pixels/Css"))`
+- `const Device = Schema.Number.pipe(Schema.check(Schema.isFinite()), Schema.brand("~@usestrider/browser/Pixels/Device"))`
 
 ### Popup
 
@@ -1836,10 +1836,10 @@ URLs, URL patterns, origins and sites, as branded strings.
 
 *schemas*
 
-- `const Url = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url/Url"))`
+- `const Url = Schema.String.pipe(Schema.check(Schema.makeFilter((input: string) => URL.canParse(input), { expected: "an absolute URL" })), Schema.brand("~@usestrider/browser/Url/Url"))`
 - `const Pattern = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url/Pattern"))`
-- `const Origin = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url/Origin"))`
-- `const Site = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url/Site"))`
+- `const Origin = Schema.String.pipe(Schema.check(Schema.makeFilter(isOrigin, { expected: "a serialized origin, such as https: Schema.brand("~@usestrider/browser/Url/Origin"))`
+- `const Site = Schema.String.pipe(Schema.check(Schema.makeFilter((input: string) => isOrigin(input) && URL.parse(input)!.port === "", { expected: "a site, such as https: })), Schema.brand("~@usestrider/browser/Url/…`
 
 ### UserContext
 
@@ -1926,7 +1926,7 @@ The agent toolkit: browser tools for a model, defined once, and served in your p
 *models*
 
 - `type SecretName = typeof SecretName.Type` (experimental)
-- `type ToolName = | "pages" | "newPage" | "tabs" | "control" | "release" | "goto" | "back" | "snapshot" | "find" | "screenshot" | "click" | "fill" | "press" | "select" | "scroll" | "next" | "await" | "expect" | "histo…` (experimental)
+- `type ToolName = keyof Tools` (experimental)
 - `type Tools = ToolsImpl.Tools` (experimental)
 - `const ToolFailure = ToolsImpl.ToolFailure` (experimental)
 - `type ToolFailure = ToolsImpl.ToolFailure` (experimental)

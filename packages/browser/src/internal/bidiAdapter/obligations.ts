@@ -13,10 +13,10 @@ import * as Network from "../../bidi-protocol/Network.ts"
 import * as NetworkRequest from "../../NetworkRequest.ts"
 import type * as NetworkResponse from "../../NetworkResponse.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
-import type * as Url from "../../Url.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Declarations from "../declarations.ts"
+import * as Urls from "../urls.ts"
 import { bidiHeaders, bytesOf, headersOf, originOf, resourceType } from "./mapping.ts"
 import {
   endedThing,
@@ -38,7 +38,7 @@ export const requestSnapshot = (
   new NetworkRequest.NetworkRequest({
     hop: request.hop,
     method: Kit.methodOf(params.request.method),
-    url: params.request.url as Url.Url,
+    url: Urls.reported(params.request.url),
     headers: headersOf(params.request.headers),
     resourceType: resourceType(params.request),
     initiator: request.navigable === undefined

@@ -26,6 +26,7 @@ import type * as Model from "./internal/model.ts"
 import * as Navigated from "./internal/navigated.ts"
 import * as Operation from "./internal/operation.ts"
 import type * as Runtime from "./internal/runtime.ts"
+import * as Urls from "./internal/urls.ts"
 import * as NetworkResponse from "./NetworkResponse.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -255,7 +256,7 @@ export const next = <PE = never, PR = never>(
           "PageNavigation.next",
           event.navigation,
           event.frame,
-          Option.some(event.url as Url.Url),
+          Option.some(Urls.reported(event.url)),
           event.url,
           event.outcome,
           Operation.idNow()

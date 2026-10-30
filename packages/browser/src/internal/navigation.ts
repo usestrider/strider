@@ -16,6 +16,7 @@ import type * as Adapter from "./adapter.ts"
 import type * as Model from "./model.ts"
 import * as Navigated from "./navigated.ts"
 import * as Operation from "./operation.ts"
+import * as Urls from "./urls.ts"
 
 const pageError = (operation: string, reason: Page.PageErrorReason, id: Diagnostics.OperationId) =>
   new Page.PageError({ operation, reason, diagnostics: Operation.diagnostics(id) })
@@ -44,7 +45,7 @@ export const settle = (
     case "Download":
       // `goto({ accept })`: the outcomes the caller asked for are navigations
       if (accept.includes("download")) {
-        return Effect.succeed({ _tag: "BecameDownload", id: navigation, frame, url: at as Url.Url })
+        return Effect.succeed({ _tag: "BecameDownload", id: navigation, frame, url: Urls.reported(at) })
       }
       return Effect.fail(pageError(
         operation,
@@ -60,7 +61,7 @@ export const settle = (
           _tag: "NoContent",
           id: navigation,
           frame,
-          url: at as Url.Url,
+          url: Urls.reported(at),
           response: Option.flatMap(outcome.response, model.response)
         })
       }

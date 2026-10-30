@@ -13,7 +13,7 @@ import * as Capability from "../Capability.ts"
 import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as FilePath from "../FilePath.ts"
-import type * as Pixels from "../Pixels.ts"
+import * as Pixels from "../Pixels.ts"
 import * as Reason from "../Reason.ts"
 import * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
@@ -110,8 +110,8 @@ export const acquire = <H>(
           frames: frames.pipe(
             Stream.map((frame): Capability.ScreencastFrame => ({
               at: frame.at,
-              width: frame.width as Pixels.Device,
-              height: frame.height as Pixels.Device,
+              width: Pixels.Device.make(frame.width),
+              height: Pixels.Device.make(frame.height),
               jpeg: frame.jpeg
             })),
             // The stream ends with the page: its session's end, as the page's
