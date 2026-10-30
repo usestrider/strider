@@ -6,7 +6,6 @@
 {"kind":"event","method":"Target.targetCreated","params":{"targetInfo":{"targetId":"page-8","type":"page"}}}
 {"kind":"error","method":"Nope.nothing","error":{"code":-32601,"message":"'Nope' domain was not found"},"becomes":{"_tag":"Unsupported"}}
 {"kind":"error","method":"Runtime.evaluate","error":{"code":-32602,"message":"Some arguments of method 'Runtime.evaluate' can't be processed"},"becomes":{"_tag":"Rejected","reason":"InvalidArgument"}}
-{"kind":"error","method":"Runtime.evaluate","error":{"code":-32602,"message":"Cannot find page proxy with provided 'pageProxyId'"},"becomes":{"_tag":"SessionEnded","why":"detached"}}
 {"kind":"error","method":"Runtime.evaluate","error":{"code":-32000,"message":"Missing target for given targetId"},"becomes":{"_tag":"SessionEnded","why":"detached"}}
 {"kind":"error","method":"Page.getResourceContent","error":{"code":-32000,"message":"Missing frame for given frameId"},"becomes":{"_tag":"Rejected","reason":"NoSuchFrame"}}
 {"kind":"error","method":"DOM.resolveNode","error":{"code":-32000,"message":"Missing node for given nodeId"},"becomes":{"_tag":"Rejected","reason":"NoSuchNode"}}

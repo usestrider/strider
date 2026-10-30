@@ -201,7 +201,7 @@ const applyIntercepts = Effect.fnUntraced(function*(state: State, target: Target
 // Chromium keeps a response's body on its own, until the page moves on: where bodies are collected, it keeps them in
 // the browser, past the next navigation (QUIRKS.md, Q160)
 const keepBodies = (state: State, target: TargetEntry, page: PageEntry) => {
-  const limit = state.registry.bodyLimitOption(placement(page), "response")
+  const limit = state.registry.bodyLimit(placement(page), "response")
   return Option.isNone(limit)
     ? Effect.void
     : Network.configureDurableMessages({

@@ -30,7 +30,7 @@ const notKept = (state: State, hop: NetworkRequest.HopId) =>
 const sentBody = (state: State, target: TargetEntry, request: Network.Request) => {
   const limit = target.page === undefined
     ? Option.none<number>()
-    : state.registry.bodyLimitOption(placement(target.page), "request")
+    : state.registry.bodyLimit(placement(target.page), "request")
   return {
     hasBody: request.hasPostData === true,
     carried: Option.isNone(limit)

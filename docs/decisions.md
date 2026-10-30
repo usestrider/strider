@@ -126,6 +126,17 @@ object closing over everything; and a fully generic navigable tree, since each p
 realms differently (CDP keeps the initial realm, WebKit drops a replaced document's, BiDi restores from its past), so
 the kit takes hooks for its tables instead.
 
+**A transport frames and routes; what a message means is its adapter's.** Stock WebKit numbers frames, loaders and
+requests anew in each web process (QUIRKS.md, Q195). Its transports qualified those ids inside each page's messages,
+by method, and answered a command to a page that was gone with an error of their own, so every message from a page
+was parsed and written out again twice before the wire parsed it, and a page's message that didn't parse was a
+defect in the transport's fiber. Now the WebKit adapter keys a target's ids by its session, as it keyed requests
+already, and the transports, through the envelope's endpoint (`webkitEnvelope.ts`), only put a page's `pageProxyId`
+in its text and route commands by it: the wire parses each message once, and a malformed one loses the connection.
+A command to a page that can't be reached is dropped; the page's end, which follows, fails it. Rejected: a wire
+decorator that qualifies decoded messages, which would still rewrite messages by method name, away from the tables
+that need the ids, and can't see which command a reply answers.
+
 ## The browser model (L1)
 
 **The fold is the model's one writer, and a caller's setting is a command in its stream.** Every write goes through

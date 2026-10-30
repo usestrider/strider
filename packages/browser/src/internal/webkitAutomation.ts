@@ -8,38 +8,36 @@
  * - **Each process's Automation session** is a protocol client of its own over the session's target: its root
  *   session takes the generated `Automation` commands.
  * - **Each process's pages** are the inspector's `WebPage` targets on the same socket, presented to the WebKit
- *   adapter on one transport in our envelope (`webkitEnvelope.ts`), as `webkitStockTransport.ts` presents an attached
- *   browser's: a page proxy's id is the process's and the target's, its context the process's, and its ids are
- *   qualified as that transport qualifies them (QUIRKS.md, Q195).
+ *   adapter on one transport, through the envelope's endpoint (`webkitEnvelope.ts`), as `webkitStockTransport.ts`
+ *   presents an attached browser's: a page proxy's id is the process's and the target's, and its context the
+ *   process's.
  * - **An anchor.** A browser exits when its last window closes (QUIRKS.md, Q213), so each process keeps a window of its own,
  *   minimized and never announced: a context's process keeps its first window; the default context's announces its
  *   first window as the browser's first tab, as every backend does (Q141), and opens one more.
  * - **The port.** A browser told a port that's taken keeps running without its server, saying so on stderr; the
  *   launch tries another.
  */
+import * as Data from "effect/Data"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import type * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
-import * as Queue from "effect/Queue"
 import * as Random from "effect/Random"
+import * as Schedule from "effect/Schedule"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
-import * as Browser from "../Browser.ts"
-import type * as Protocol from "../protocol/Protocol.ts"
-import * as Protocols from "../protocol/Protocol.ts"
+import * as Protocol from "../protocol/Protocol.ts"
 import * as SocketConnector from "../protocol/SocketConnector.ts"
 import * as Transport from "../protocol/Transport.ts"
-import * as Reason from "../Reason.ts"
 import * as Automation from "../webkit-automation-protocol/Automation.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Launch from "./launch.ts"
+import * as Link from "./link.ts"
 import * as ProtocolClient from "./protocolClient.ts"
 import * as Envelope from "./webkitEnvelope.ts"
 import * as InspectorSocket from "./webkitInspectorSocket.ts"
-import * as WebKitStockTransport from "./webkitStockTransport.ts"
 import * as WebKitWire from "./webkitWire.ts"
 
 /**
@@ -70,7 +68,7 @@ export interface ProcessOptions {
 
 /** A context's browser process, and its Automation session. */
 export interface Process {
-  /** Why its connection ended, once it has. */
+  /** Why its connection ended, once it has, and what it sent before is delivered. */
   readonly closed: Effect.Effect<Transport.ConnectionLost>
   /** The context's id in the envelope: `default` for the first process. */
   readonly key: string
@@ -93,108 +91,41 @@ export interface Group {
   /** The default context's process. */
   readonly first: Process
   /** A process for a new context. */
-  readonly launch: (options: ProcessOptions) => Effect.Effect<Process, Browser.BrowserError>
+  readonly launch: (options: ProcessOptions) => Effect.Effect<Process, Launch.LaunchError>
   /** A context's process, by its key. */
   readonly process: (key: string) => Process | undefined
 }
 
 const portRange = [49152, 65535] as const
 
-/** Every process's pages on one transport, and the announcements the adapter reads from it. */
-const makePages = Effect.fnUntraced(function*() {
-  const incoming = yield* Queue.unbounded<string>()
-  const lost = Deferred.makeUnsafe<Transport.ConnectionLost>()
-  const deliver = (message: Record<string, unknown>) => Queue.offerUnsafe(incoming, JSON.stringify(message))
-  // Each page proxy's way to its target, by its id
-  const routes = new Map<string, (message: string) => Effect.Effect<void, Transport.TransportError>>()
-  let enabled = false
-  const held: Array<Record<string, unknown>> = []
-  const announce = (message: Record<string, unknown>) => {
-    if (enabled) deliver(message)
-    else held.push(message)
-  }
-  const answering = new Map<string, string>()
-  const transport: Transport.Transport = {
-    send: (text) =>
-      Effect.suspend(() => {
-        const message = JSON.parse(text) as Record<string, unknown>
-        const { pageProxyId, ...rest } = message
-        if (typeof pageProxyId !== "string") {
-          if (message.method === Envelope.enable.method) {
-            // The pages open now are announced before the reply
-            enabled = true
-            for (const each of held.splice(0)) deliver(each)
-            deliver({ id: message.id, result: {} })
-          } else {
-            deliver({ id: message.id, error: { code: -32601, message: `'${String(message.method)}' was not found` } })
-          }
-          return Effect.void
-        }
-        const route = routes.get(pageProxyId)
-        if (route === undefined) {
-          deliver({
-            id: message.id,
-            pageProxyId,
-            error: { code: -32602, message: "Cannot find page proxy with provided 'pageProxyId'" }
-          })
-          return Effect.void
-        }
-        return route(
-          JSON.stringify(
-            WebKitStockTransport.unqualifyOutgoing(rest as Record<string, unknown>, pageProxyId, answering)
-          )
-        )
-      }),
-    messages: Stream.fromQueue(incoming).pipe(Stream.interruptWhen(Deferred.await(lost))),
-    closed: Deferred.await(lost)
-  }
-  return {
-    transport,
-    lost,
-    created: (
-      pageProxyId: string,
-      browserContextId: string,
-      route: (message: string) => Effect.Effect<void, Transport.TransportError>
-    ) => {
-      routes.set(pageProxyId, route)
-      announce({ method: Envelope.pageProxyCreated.method, params: { pageProxyId, browserContextId } })
-    },
-    destroyed: (pageProxyId: string) => {
-      if (!routes.delete(pageProxyId)) return
-      announce({ method: Envelope.pageProxyDestroyed.method, params: { pageProxyId } })
-    },
-    message: (pageProxyId: string, text: string) =>
-      announce({
-        ...WebKitStockTransport.qualifyIncoming(JSON.parse(text) as Record<string, unknown>, pageProxyId, answering),
-        pageProxyId
-      })
-  }
-})
+/** The port a launch tried was taken: another is tried. */
+class PortTaken extends Data.TaggedError("PortTaken") {}
 
-type Pages = Effect.Success<ReturnType<typeof makePages>>
+/** What a socket that ended was lost to. */
+const lossOf = (error: Transport.TransportError) =>
+  error.reason._tag === "ConnectionLost"
+    ? error.reason
+    : new Transport.ConnectionLost({ initiator: "remote", description: error.reason.description })
 
-const refused = (hint: string) => Launch.fail(new Browser.ConnectionFailed({ stage: "refused", hint }), "connect")
+const scopeClosed = () => new Transport.ConnectionLost({ initiator: "local", description: "The scope closed" })
 
-/** Starts one browser in automation mode, on a free port, and its session, for the scope. */
-const startProcess = Effect.fnUntraced(function*(
-  settings: Settings,
-  key: string,
-  index: number,
-  options: ProcessOptions,
-  pages: Pages
-) {
+// ── The launcher ──────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Starts one browser in automation mode, on a port nothing listens on, tried until the browser starts its server
+ * there: one that's taken, it says so on stderr, and keeps running without it (QUIRKS.md, Q216).
+ */
+const spawnProcess = Effect.fnUntraced(function*(settings: Settings, index: number, options: ProcessOptions) {
   const connector = yield* SocketConnector.SocketConnector
+  const scope = yield* Effect.scope
   const path = yield* Launch.executable(settings.executablePath)
   const automationArgs = automationArguments(path)
   if (Option.isNone(automationArgs)) {
-    return yield* Launch.fail(
-      new Reason.InvalidInput({
-        input: "executablePath",
-        expected: "WebKitGTK's or WPE's MiniBrowser, which this launches in automation mode",
-        hint: `${path} isn't one this launches in automation mode`
-      }),
-      "check the executable"
-    )
+    return yield* Launch.invalidInput({
+      input: "executablePath",
+      expected: "WebKitGTK's or WPE's MiniBrowser, which this launches in automation mode",
+      hint: `${path} isn't one this launches in automation mode`
+    }, "check the executable")
   }
   const directory = yield* Launch.profileDirectory(index === 0 ? settings.userDataDir : undefined, "strider-webkit-")
   const args = [
@@ -202,14 +133,10 @@ const startProcess = Effect.fnUntraced(function*(
     ...(options.timeZone === undefined ? [] : [`--time-zone=${options.timeZone}`]),
     ...(settings.args ?? [])
   ]
-  // A port nothing listens on, tried until the browser starts its server there: one that's taken, it says so on
-  // stderr, and keeps running without it (QUIRKS.md, Q216)
-  let connection: SocketConnector.Connection | undefined
-  let launched: Launch.Launched | undefined
-  for (let attempt = 0; attempt < 5 && connection === undefined; attempt++) {
+  const attempt = Effect.gen(function*() {
     const port = yield* Random.nextIntBetween(portRange[0], portRange[1])
-    const own = yield* Scope.fork(yield* Effect.scope)
-    const process = yield* Launch.spawn(path, args, directory, {
+    const own = yield* Scope.fork(scope)
+    const launched = yield* Launch.spawn(path, args, directory, {
       env: {
         WEBKIT_INSPECTOR_SERVER: `127.0.0.1:${port}`,
         XDG_DATA_HOME: `${directory}/data`,
@@ -218,37 +145,53 @@ const startProcess = Effect.fnUntraced(function*(
       }
     }).pipe(Scope.provide(own))
     const outcome = yield* Effect.raceFirst(
-      Effect.gen(function*() {
-        for (let tries = 0; tries < 100; tries++) {
-          const opened = yield* connector.connect({ host: "127.0.0.1", port }).pipe(Scope.provide(own), Effect.option)
-          if (Option.isSome(opened)) return { _tag: "Connected" as const, connection: opened.value }
-          yield* BrowserClock.live.sleep(100)
-        }
-        return { _tag: "Silent" as const }
-      }),
-      process.stderrLine(new RegExp(`Failed to start remote inspector server on 127\\.0\\.0\\.1:${port}`)).pipe(
+      connector.connect({ host: "127.0.0.1", port }).pipe(
+        Scope.provide(own),
+        Effect.retry({ schedule: Schedule.spaced("100 millis"), times: 99 }),
+        Effect.map((connection) => ({ _tag: "Connected" as const, connection })),
+        Effect.orElseSucceed(() => ({ _tag: "Silent" as const })),
+        BrowserClock.onLive
+      ),
+      launched.stderrLine(new RegExp(`Failed to start remote inspector server on 127\\.0\\.0\\.1:${port}`)).pipe(
         Effect.map((line) => Option.isSome(line) ? { _tag: "Taken" as const } : { _tag: "Exited" as const })
       )
     )
-    if (outcome._tag === "Connected") {
-      connection = outcome.connection
-      launched = process
-    } else if (outcome._tag === "Taken") {
-      yield* Scope.close(own, Exit.void)
-    } else {
-      return yield* Launch.notReady(process, `Its inspector server on port ${port} never answered`)
+    switch (outcome._tag) {
+      case "Connected":
+        return { connection: outcome.connection, launched }
+      case "Taken":
+        yield* Scope.close(own, Exit.void)
+        return yield* Effect.fail(new PortTaken())
+      default:
+        return yield* Launch.notReady(launched, `Its inspector server on port ${port} never answered`)
     }
-  }
-  if (connection === undefined || launched === undefined) {
-    return yield* refused("Five ports in a row were taken, so the browser's inspector server never started")
-  }
+  })
+  return yield* attempt.pipe(
+    Effect.retry({ while: (error) => error._tag === "PortTaken", times: 4 }),
+    Effect.catchTag(
+      "PortTaken",
+      () => Launch.refused("Five ports in a row were taken, so the browser's inspector server never started")
+    )
+  )
+})
 
-  // The session
+// ── A process's session ───────────────────────────────────────────────────────────────────────────────────
+
+/** Starts one browser in automation mode and its session, for the scope, its pages announced on `pages`. */
+const startProcess = Effect.fnUntraced(function*(
+  settings: Settings,
+  key: string,
+  index: number,
+  options: ProcessOptions,
+  pages: Envelope.Endpoint
+) {
+  const { connection, launched } = yield* spawnProcess(settings, index, options)
   const socket = yield* InspectorSocket.connect(connection)
   const started = yield* Deferred.make<{ readonly browserName: string; readonly browserVersion: string }>()
   const automationReady = yield* Deferred.make<bigint>()
   const firstList = yield* Deferred.make<ReadonlyArray<InspectorSocket.Target>>()
-  const automationIncoming = yield* Queue.unbounded<string>()
+  const ended = yield* Deferred.make<Transport.ConnectionLost>()
+  const automationLink = yield* Link.make()
   let connectionId = 0n
   let automationTarget: bigint | undefined
   // Page targets announced, by target id, and the ones that are this process's anchors
@@ -301,6 +244,15 @@ const startProcess = Effect.fnUntraced(function*(
     )
   })
 
+  // What the socket received, in order, then its loss, after its messages: the Automation session's end, and its
+  // pages'. The default context's process is the connection's, whose pages end with it
+  const lose = (reason: Transport.ConnectionLost) =>
+    Effect.sync(() => {
+      automationLink.lose(reason)
+      if (index === 0) pages.lose(reason)
+      else for (const pageProxyId of announced.values()) pages.destroyed(pageProxyId)
+      announced.clear()
+    }).pipe(Effect.andThen(Deferred.succeed(ended, reason)))
   yield* socket.messages.pipe(
     Stream.runForEach((message) =>
       Effect.gen(function*() {
@@ -311,7 +263,7 @@ const startProcess = Effect.fnUntraced(function*(
             connectionId = message.connection
             return yield* onTargets(message.targets)
           case "SendMessageToFrontend": {
-            if (message.target === automationTarget) return Queue.offerUnsafe(automationIncoming, message.message)
+            if (message.target === automationTarget) return automationLink.receive(message.message)
             const pageProxyId = announced.get(message.target)
             if (pageProxyId !== undefined) pages.message(pageProxyId, message.message)
             return
@@ -321,11 +273,8 @@ const startProcess = Effect.fnUntraced(function*(
         }
       })
     ),
-    Effect.ignore,
-    Effect.ensuring(Effect.sync(() => {
-      for (const pageProxyId of announced.values()) pages.destroyed(pageProxyId)
-      announced.clear()
-    })),
+    Effect.matchEffect({ onFailure: (error) => lose(lossOf(error)), onSuccess: () => lose(scopeClosed()) }),
+    Effect.onInterrupt(() => lose(scopeClosed())),
     Effect.forkScoped
   )
 
@@ -336,45 +285,57 @@ const startProcess = Effect.fnUntraced(function*(
       ? [["acceptInsecureCerts", { type: "b", value: true }]]
       : []
   }).pipe(
-    Effect.catch((error) => refused(error.message))
+    Effect.catch((error) => Launch.refused(error.message))
   )
   const browser = yield* Deferred.await(started).pipe(
-    Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => refused("The browser never started a session") })
+    Effect.timeoutOrElse({
+      duration: "10 seconds",
+      orElse: () => Launch.refused("The browser never started a session")
+    })
   )
   const target = yield* Deferred.await(automationReady).pipe(
-    Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => refused("The browser never listed its session") })
+    Effect.timeoutOrElse({
+      duration: "10 seconds",
+      orElse: () => Launch.refused("The browser never listed its session")
+    })
   )
   const automationTransport: Transport.Transport = {
     send: (text) => socket.send({ _tag: "SendMessageToBackend", connection: connectionId, target, message: text }),
-    messages: Stream.fromQueue(automationIncoming).pipe(Stream.interruptWhen(socket.closed)),
-    closed: socket.closed
+    messages: automationLink.messages,
+    closed: automationLink.closed
   }
   const client = yield* ProtocolClient.make(
     settings.wrapAutomation === undefined ? automationTransport : settings.wrapAutomation(automationTransport),
     WebKitWire.wire
   )
-  const run = <A>(effect: Effect.Effect<A, Protocols.ProtocolError, never>) =>
-    effect.pipe(Effect.catch((error) => refused(`The browser's session refused: ${error.message}`)))
+  const run = <A>(effect: Effect.Effect<A, Protocol.ProtocolError, never>) =>
+    effect.pipe(Effect.catch((error) => Launch.refused(`The browser's session refused: ${error.message}`)))
 
   // The first window: the default context's first tab, or this context's anchor
   const first = yield* Deferred.await(firstList).pipe(
-    Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => refused("The browser never listed its first page") })
+    Effect.timeoutOrElse({
+      duration: "10 seconds",
+      orElse: () => Launch.refused("The browser never listed its first page")
+    })
   )
   // The first window has loaded nothing, and the first `createBrowsingContext` takes it rather than open one
   // (MiniBrowser's `browser_window_get_or_create_web_view_for_automation`; QUIRKS.md, Q213): it's claimed first
-  const claimed = (yield* run(Automation.createBrowsingContext({}).pipe(Protocols.on(client.root)))).handle
+  const claimed = (yield* run(Automation.createBrowsingContext({}).pipe(Protocol.on(client.root)))).handle
   let anchor: Automation.BrowsingContextHandle
   if (index === 0) {
     // The default context's first window is the browser's first tab, and the anchor is a window more
     for (const page of first) {
       initial.delete(page.id)
-      yield* announce(page.id).pipe(Effect.catch((error) => refused(error.message)))
+      yield* announce(page.id).pipe(Effect.catch((error) => Launch.refused(error.message)))
     }
     const opened = yield* Deferred.make<bigint>()
     holdNext = opened
-    anchor = (yield* run(Automation.createBrowsingContext({}).pipe(Protocols.on(client.root)))).handle
+    anchor = (yield* run(Automation.createBrowsingContext({}).pipe(Protocol.on(client.root)))).handle
     yield* Deferred.await(opened).pipe(
-      Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => refused("The browser never listed its anchor") })
+      Effect.timeoutOrElse({
+        duration: "10 seconds",
+        orElse: () => Launch.refused("The browser never listed its anchor")
+      })
     )
   } else {
     for (const page of first) {
@@ -383,14 +344,13 @@ const startProcess = Effect.fnUntraced(function*(
     }
     anchor = claimed
   }
-  yield* run(Automation.hideWindowOfBrowsingContext({ handle: anchor }).pipe(Protocols.on(client.root)))
+  yield* run(Automation.hideWindowOfBrowsingContext({ handle: anchor }).pipe(Protocol.on(client.root)))
     .pipe(Effect.ignore)
 
-  const handle = launched.handle
   return {
     key,
-    kill: handle.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore),
-    closed: socket.closed,
+    kill: launched.handle.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore),
+    closed: Deferred.await(ended),
     browserName: browser.browserName,
     browserVersion: browser.browserVersion,
     automation: client.root,
@@ -398,29 +358,29 @@ const startProcess = Effect.fnUntraced(function*(
   } satisfies Omit<Process, "close">
 })
 
+// ── The group ─────────────────────────────────────────────────────────────────────────────────────────────
+
 /** Starts the default context's browser, and the transport of every process's pages, for the scope. */
 export const start: (
   settings: Settings
 ) => Effect.Effect<
   Group,
-  Browser.BrowserError,
+  Launch.LaunchError,
   Scope.Scope | FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner | SocketConnector.SocketConnector
 > = Effect.fnUntraced(function*(settings: Settings) {
   if (settings.headless === true) {
-    return yield* Launch.fail(
-      new Reason.InvalidInput({
-        input: "headless",
-        expected: "false: WebKitGTK has no headless mode",
-        hint: "Its window opens where DISPLAY or WAYLAND_DISPLAY says; give it one, such as Xvfb's"
-      }),
-      "check the options"
-    )
+    return yield* Launch.invalidInput({
+      input: "headless",
+      expected: "false: WebKitGTK has no headless mode",
+      hint: "Its window opens where DISPLAY or WAYLAND_DISPLAY says; give it one, such as Xvfb's"
+    }, "check the options")
   }
   const scope = yield* Effect.scope
   const context = yield* Effect.context<
     FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner | SocketConnector.SocketConnector
   >()
-  const pages = yield* makePages()
+  // The pages open are announced as `Envelope.enable` asks: each process announces its own as it starts
+  const pages = yield* Envelope.makeEndpoint(Effect.void)
   const processes = new Map<string, Process>()
   let next = 0
   const launch = Effect.fnUntraced(function*(options: ProcessOptions, key?: string) {
@@ -441,12 +401,9 @@ export const start: (
     processes.set(process.key, process)
     return process
   })
-  const first = yield* launch({}, "default")
   // The connection lives as long as the default context's browser
-  yield* Effect.forkIn(Effect.flatMap(first.closed, (lost) => Deferred.succeed(pages.lost, lost)), scope)
-  yield* Effect.addFinalizer(() =>
-    Deferred.succeed(pages.lost, new Transport.ConnectionLost({ initiator: "local", description: "The scope closed" }))
-  )
+  const first = yield* launch({}, "default")
+  yield* Effect.addFinalizer(() => Effect.sync(() => pages.lose(scopeClosed())))
   return {
     transport: pages.transport,
     first,
