@@ -394,8 +394,5 @@ export const realmOf = (state: State, id: L1Target.RealmId): Effect.Effect<Realm
     (realm) => !realm.ended
   )
 
-/**
- * An obligation, a download or a hop has no target of its own to name: one that ended is reported against the
- * browser, which L1 treats as the end it is.
- */
-export const endedThing = () => Kit.gone({ _tag: "Browser" }, new L1Target.PageClosed({ by: "browser" }))
+/** An obligation, a download or a hop that ended, named as the target it was. */
+export const endedThing = (target: L1Target.Description) => Kit.gone(target, new L1Target.PageClosed({ by: "browser" }))

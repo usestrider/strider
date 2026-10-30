@@ -185,7 +185,8 @@ export const activatePage = (state: State, id: L1Target.NavigableId) =>
 
 // ── Downloads ─────────────────────────────────────────────────────────────────────────────────────────────
 
-const downloadOf = (state: State, id: Download.Id) => Kit.lookup(state.ids, state.downloadsById, id, endedThing)
+const downloadOf = (state: State, id: Download.Id) =>
+  Kit.lookup(state.ids, state.downloadsById, id, () => endedThing({ _tag: "Download", id }))
 
 export const downloadPath = (state: State, id: Download.Id) =>
   Effect.map(
