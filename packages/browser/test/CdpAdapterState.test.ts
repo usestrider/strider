@@ -76,7 +76,11 @@ const withPage = Effect.fnUntraced(function*() {
 
 const origin = "http://127.0.0.1:8000"
 
-const sent = (url: string, redirect?: { readonly location: string }) => ({
+/** A hop's request event; for a redirect, with the response that ended the hop before and whether it had ExtraInfo. */
+const sent = (
+  url: string,
+  redirect?: { readonly from?: string; readonly location: string; readonly hasExtraInfo?: boolean }
+) => ({
   requestId: "R1",
   loaderId: "L1",
   documentURL: `${origin}/`,
@@ -87,9 +91,9 @@ const sent = (url: string, redirect?: { readonly location: string }) => ({
   type: "Fetch",
   frameId: "T1",
   ...(redirect === undefined ? {} : {
-    redirectHasExtraInfo: true,
+    redirectHasExtraInfo: redirect.hasExtraInfo ?? true,
     redirectResponse: {
-      url: `${origin}/redirect`,
+      url: `${origin}${redirect.from ?? "/redirect"}`,
       status: 302,
       statusText: "Found",
       headers: { Location: redirect.location },
@@ -108,12 +112,12 @@ const received = (statusCode: number, headers: Record<string, string>) => ({
 
 const sentAs = (headers: Record<string, string>) => ({ requestId: "R1", associatedCookies: [], headers })
 
-const landed = {
+const landedAs = (served?: { readonly hasExtraInfo: boolean; readonly fromDiskCache: boolean }) => ({
   requestId: "R1",
   loaderId: "L1",
   timestamp: 0,
   type: "Fetch",
-  hasExtraInfo: true,
+  hasExtraInfo: served?.hasExtraInfo ?? true,
   frameId: "T1",
   response: {
     url: `${origin}/landed`,
@@ -121,9 +125,12 @@ const landed = {
     statusText: "OK",
     headers: { "Content-Type": "text/plain" },
     mimeType: "text/plain",
-    protocol: "http/1.1"
+    protocol: "http/1.1",
+    ...(served === undefined ? {} : { fromDiskCache: served.fromDiskCache })
   }
-}
+})
+
+const landed = landedAs()
 
 /** Plays a redirect's events in the order given, and gives back the responses and hop headers it reported. */
 const play = Effect.fnUntraced(function*(order: ReadonlyArray<readonly [string, unknown]>) {
@@ -281,4 +288,113 @@ describe("CdpAdapter redirect headers", () => {
         assert.deepStrictEqual(received, [[hop!.hop, "a=1"], [last!.hop, "b=2"]])
       }))
   }
+})
+
+describe("CdpAdapter headers of a hop without ExtraInfo", () => {
+  // A hop from a cache or a service worker gets no ExtraInfo, and says so only as it ends: by its redirect's
+  // `redirectHasExtraInfo` or its response's `hasExtraInfo`. The network's events for a later hop can come first.
+  const first = ["Network.requestWillBeSent", sent(`${origin}/redirect`)] as const
+  const sent0 = ["Network.requestWillBeSentExtraInfo", sentAs({ Cookie: "q=0" })] as const
+  const received0 = [
+    "Network.responseReceivedExtraInfo",
+    received(302, { Location: "/landed", "Set-Cookie": "a=1" })
+  ] as const
+  const sent1 = ["Network.requestWillBeSentExtraInfo", sentAs({ Cookie: "q=1" })] as const
+  const received1 = [
+    "Network.responseReceivedExtraInfo",
+    received(200, { "Content-Type": "text/plain", "Set-Cookie": "b=2" })
+  ] as const
+
+  describe("a cached redirect to the network", () => {
+    const cached = [
+      "Network.requestWillBeSent",
+      sent(`${origin}/landed`, { location: "/landed", hasExtraInfo: false })
+    ] as const
+    const response = ["Network.responseReceived", landed] as const
+    for (
+      const [name, order] of [
+        ["in order", [first, cached, sent1, received1, response]],
+        ["with the next hop's headers sent before the redirect", [first, sent1, cached, received1, response]],
+        ["with the next hop's response before the redirect", [first, sent1, received1, cached, response]],
+        ["with the next hop's ExtraInfo before the request", [sent1, received1, first, cached, response]]
+      ] as const
+    ) {
+      it.effect(`gives the cached hop none of the next hop's headers, ${name}`, () =>
+        Effect.gen(function*() {
+          const { received, responses, sent } = yield* play(order)
+          assert.deepStrictEqual(responses.map((response) => response.status), [302, 200])
+          const [hop, last] = responses
+          assert.strictEqual(hop!.headers["location"], "/landed")
+          assert.isUndefined(hop!.headers["set-cookie"])
+          assert.strictEqual(last!.headers["set-cookie"], "b=2")
+          // The cached hop goes with its request event's headers, which have no cookie
+          assert.deepStrictEqual(sent, [[hop!.hop, undefined], [last!.hop, "q=1"]])
+          assert.deepStrictEqual(received, [[last!.hop, "b=2"]])
+        }))
+    }
+  })
+
+  describe("a redirect to a cached response", () => {
+    const redirect = ["Network.requestWillBeSent", sent(`${origin}/landed`, { location: "/landed" })] as const
+    for (
+      const [name, response] of [
+        ["that says it has none", landedAs({ hasExtraInfo: false, fromDiskCache: true })],
+        // Chromium can say a cached response has ExtraInfo and send none
+        ["that says it has some", landedAs({ hasExtraInfo: true, fromDiskCache: true })]
+      ] as const
+    ) {
+      for (
+        const [ordering, order] of [
+          ["in order", [first, sent0, received0, redirect]],
+          ["with the redirect before its ExtraInfo", [first, redirect, sent0, received0]]
+        ] as const
+      ) {
+        it.effect(`gives the network's hop its headers and the cached hop its own, ${name}, ${ordering}`, () =>
+          Effect.gen(function*() {
+            const { received, responses, sent } = yield* play([...order, ["Network.responseReceived", response]])
+            assert.deepStrictEqual(responses.map((response) => response.status), [302, 200])
+            const [hop, last] = responses
+            assert.strictEqual(last!.servedBy, "cache")
+            assert.isUndefined(last!.headers["set-cookie"])
+            assert.deepStrictEqual(sent, [[hop!.hop, "q=0"], [last!.hop, undefined]])
+            assert.deepStrictEqual(received, [[hop!.hop, "a=1"]])
+          }))
+      }
+    }
+  })
+
+  it.effect("gives a cached hop between two of the network's none of the last one's headers", () =>
+    Effect.gen(function*() {
+      const toCached = ["Network.requestWillBeSent", sent(`${origin}/cached`, { location: "/cached" })] as const
+      const fromCached = [
+        "Network.requestWillBeSent",
+        sent(`${origin}/landed`, { from: "/cached", location: "/landed", hasExtraInfo: false })
+      ] as const
+      // Every ExtraInfo comes before the page's events
+      const { received, responses, sent: sentHeaders } = yield* play([
+        sent0,
+        received0,
+        sent1,
+        received1,
+        first,
+        toCached,
+        fromCached,
+        ["Network.responseReceived", landed]
+      ])
+      assert.deepStrictEqual(responses.map((response) => response.status), [302, 302, 200])
+      const [hop, cached, last] = responses
+      assert.deepStrictEqual(sentHeaders, [[hop!.hop, "q=0"], [cached!.hop, undefined], [last!.hop, "q=1"]])
+      assert.deepStrictEqual(received, [[hop!.hop, "a=1"], [last!.hop, "b=2"]])
+      assert.strictEqual(last!.headers["set-cookie"], "b=2")
+    }))
+
+  it.effect("gives a request that fails the ExtraInfo that came for it", () =>
+    Effect.gen(function*() {
+      const failed = [
+        "Network.loadingFailed",
+        { requestId: "R1", timestamp: 0, type: "Fetch", errorText: "net::ERR_CONNECTION_RESET" }
+      ] as const
+      const { sent } = yield* play([first, sent0, failed])
+      assert.deepStrictEqual(sent.map(([, cookie]) => cookie), ["q=0"])
+    }))
 })

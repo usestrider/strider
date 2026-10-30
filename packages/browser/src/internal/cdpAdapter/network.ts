@@ -48,27 +48,50 @@ const sentBody = (state: State, target: TargetEntry, request: Network.Request) =
   }
 }
 
-/**
- * Gives a hop the headers the network sent or received for it. A request's `ExtraInfo` comes in hop order, but
- * can overtake the page's events, so it goes to the earliest hop still waiting for it: an earlier hop reported
- * before it came, then the current hop, or else a hop not started yet (QUIRKS.md, Q158).
- */
-const assign = (state: State, request: RequestEntry, { headers, phase }: ExtraInfo) => {
-  const owed = request.owed.findIndex((entry) => entry.phase === phase)
-  if (owed !== -1) {
-    const { hop } = request.owed.splice(owed, 1)[0]!
-    state.buffer.emit({ _tag: "HopHeaders", hop, phase, headers: Kit.headersOf(headers) })
-    return
-  }
-  if (phase === "request" ? request.sentReported : request.received !== undefined) {
-    request.ahead.push({ phase, headers })
-    return
-  }
-  state.buffer.emit({ _tag: "HopHeaders", hop: request.hop, phase, headers: Kit.headersOf(headers) })
+/** Reports headers the network sent or received for a hop; the current hop's received ones go with its response. */
+const deliver = (state: State, request: RequestEntry, hop: NetworkRequest.HopId, { headers, phase }: ExtraInfo) => {
+  state.buffer.emit({ _tag: "HopHeaders", hop, phase, headers: Kit.headersOf(headers) })
+  if (hop !== request.hop) return
   if (phase === "response") {
     request.received = headers
     release(state, request)
   } else request.sentReported = true
+}
+
+/**
+ * Gives a hop the headers the network sent or received for it. A request's `ExtraInfo` comes in hop order, for
+ * the hops that get one, but can overtake the page's events; and a hop says whether it gets one only as it ends:
+ * one from a cache or a service worker gets none, and would otherwise take the next hop's. So an `ExtraInfo` goes
+ * to the earliest hop that said it would get one and hasn't, or waits for a hop to say so (QUIRKS.md, Q158).
+ */
+const assign = (state: State, request: RequestEntry, extra: ExtraInfo) => {
+  const owed = request.owed.findIndex((entry) => entry.phase === extra.phase)
+  if (owed === -1) return void request.ahead.push(extra)
+  const { hop } = request.owed.splice(owed, 1)[0]!
+  deliver(state, request, hop, extra)
+}
+
+/** The current hop gets `ExtraInfo`: what of it waits is its own, as hops come in order, and the rest is owed it. */
+const expectExtraInfo = (state: State, request: RequestEntry, phases: ReadonlyArray<ExtraInfo["phase"]>) => {
+  const hop = request.hop
+  for (const phase of phases) {
+    if (phase === "request" ? request.sentReported : request.received !== undefined) continue
+    const waiting = request.ahead.findIndex((extra) => extra.phase === phase)
+    if (waiting === -1) request.owed.push({ hop, phase })
+    else deliver(state, request, hop, request.ahead.splice(waiting, 1)[0]!)
+  }
+}
+
+/** The current hop gets no `ExtraInfo`: it was sent with the request event's headers, if it was sent at all. */
+const noExtraInfo = (state: State, request: RequestEntry) => {
+  if (request.sentReported) return
+  request.sentReported = true
+  state.buffer.emit({
+    _tag: "HopHeaders",
+    hop: request.hop,
+    phase: "request",
+    headers: Kit.headersOf(request.requestHeaders)
+  })
 }
 
 /** The headers as sent and received: to the hop they belong to, or kept until its request is sent. */
@@ -113,20 +136,10 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (target === undefined) return
       const key = requestKey(target, params.requestId)
       let request = state.requests.get(key)
-      let ahead: ReadonlyArray<ExtraInfo> = []
       if (request !== undefined && params.redirectResponse !== undefined) {
-        // The redirect says whether `ExtraInfo` comes for the hop it ends: what hasn't come yet is owed to it
-        if (params.redirectHasExtraInfo === true) {
-          if (!request.sentReported) request.owed.push({ hop: request.hop, phase: "request" })
-          if (request.received === undefined) request.owed.push({ hop: request.hop, phase: "response" })
-        } else if (params.redirectHasExtraInfo === false && !request.sentReported) {
-          state.buffer.emit({
-            _tag: "HopHeaders",
-            hop: request.hop,
-            phase: "request",
-            headers: Kit.headersOf(request.requestHeaders)
-          })
-        }
+        // The redirect says whether `ExtraInfo` comes for the hop it ends
+        if (params.redirectHasExtraInfo === true) expectExtraInfo(state, request, ["request", "response"])
+        else noExtraInfo(state, request)
         emitResponse(state, request, params.redirectResponse)
         state.buffer.emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
         // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
@@ -139,7 +152,6 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         request.url = params.request.url
         request.sentBodies[request.redirects] = sentBody(state, target, params.request)
         state.hops.set(request.hop, request)
-        ahead = request.ahead.splice(0)
       } else {
         const frame = frameOf(state, params.frameId)
         const navigation = params.type === "Document" ? state.navigations.get(params.loaderId) : undefined
@@ -194,9 +206,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const early = state.earlyHeaders.get(key)
       if (early !== undefined) {
         state.earlyHeaders.delete(key)
-        ahead = early
+        for (const extra of early) assign(state, request, extra)
       }
-      for (const extra of ahead) assign(state, request, extra)
     })
     .on(Network.requestWillBeSentExtraInfo, (params, { state, target }) => {
       if (target === undefined) return
@@ -216,24 +227,15 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (target === undefined) return
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return
-      // A response that says no ExtraInfo will come, as one from a cache, was sent with the request event's
-      // headers, if it was sent at all
-      if (!params.hasExtraInfo && !request.sentReported) {
-        request.sentReported = true
-        state.buffer.emit({
-          _tag: "HopHeaders",
-          hop: request.hop,
-          phase: "request",
-          headers: Kit.headersOf(request.requestHeaders)
-        })
-      }
       // The network's headers, `Set-Cookie` among them, come in an `ExtraInfo` the response says will follow; it
       // is reported with them (QUIRKS.md, Q158). A response from a cache, a service worker or a route can say so
-      // too and get none, so only the network's waits
-      if (params.hasExtraInfo && request.received === undefined && servedBy(request, params.response) === "network") {
+      // too and get none, so only the network's waits; one that gets none was sent with the request event's
+      // headers, if it was sent at all
+      if (params.hasExtraInfo === true && servedBy(request, params.response) === "network") {
         request.held = { response: params.response, after: [] }
-        return
+        return expectExtraInfo(state, request, ["request", "response"])
       }
+      noExtraInfo(state, request)
       emitResponse(state, request, params.response)
     })
     .on(Network.loadingFinished, (params, { state, target }) => {
@@ -257,7 +259,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const routed = state.routeFailed.delete(requestKey(target, params.requestId))
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return
-      // A request that fails after its response gets no more: the response goes with the headers it has
+      // A request that fails gets no more: what waits is its last hop's, and its response goes with the headers
+      // it has
+      expectExtraInfo(state, request, request.ahead.map((extra) => extra.phase))
       release(state, request)
       state.buffer.emit({
         _tag: "RequestFailed",
