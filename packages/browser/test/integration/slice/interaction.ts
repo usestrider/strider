@@ -85,8 +85,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         for (
           const [state, attributes, expected] of [
             ["checked", "aria-checked=\"true\" aria-selected=\"false\"", true],
-            ["unchecked", "aria-checked=\"false\" aria-selected=\"true\"", false],
-            ["absent", "aria-selected=\"true\"", false]
+            ["unchecked", "aria-checked=\"false\" aria-selected=\"true\"", false]
           ] as const
         ) {
           it.effect(`reads ${role} checked state from aria-checked when ${state}`, () =>
@@ -113,16 +112,14 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }))
           }), timeout)
 
-        for (const initial of [undefined, false, true] as const) {
+        for (const initial of [false, true] as const) {
           const checked = initial !== true
           it.effect(
             `${checked ? "checks" : "unchecks"} ${role} with aria-checked ${String(initial)}`,
             () =>
               Effect.gen(function*() {
                 const { url } = yield* fixture(() =>
-                  `<div id="target" role="${role}" ${initial === undefined ? "" : `aria-checked="${initial}"`} ${
-                    initial === undefined ? "" : `aria-selected="${!initial}"`
-                  } onclick="this.setAttribute('aria-checked', '${checked}')">Item</div>`
+                  `<div id="target" role="${role}" aria-checked="${initial}" aria-selected="${!initial}" onclick="this.setAttribute('aria-checked', '${checked}')">Item</div>`
                 )
                 yield* Effect.scoped(Effect.gen(function*() {
                   const page = yield* Browser.newPage()
@@ -139,7 +136,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         it.effect(`snapshots ${role} checked and selected independently`, () =>
           Effect.gen(function*() {
             const { url } = yield* fixture(() =>
-              `<div role="${role}" aria-label="Checked" aria-checked="true" aria-selected="false">Checked</div><div role="${role}" aria-label="Selected" aria-checked="false" aria-selected="true">Selected</div>`
+              `<div role="${role}" aria-label="Checked" aria-checked="true" aria-selected="false">Checked</div><div role="${role}" aria-label="Selected" aria-checked="false" aria-selected="true">Selected</div><div role="${role}" aria-label="Both" aria-checked="true" aria-selected="true">Both</div>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* Browser.newPage()
@@ -152,9 +149,103 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               assert.isFalse(checked.states.has("selected"))
               assert.isFalse(selected.states.has("checked"))
               assert.isTrue(selected.states.has("selected"))
+              const both = nodes.find((node) => node.name._tag === "Accessible" && node.name.value === "Both")!
+              assert.isTrue(both.states.has("checked"))
+              assert.isTrue(both.states.has("selected"))
             }))
           }), timeout)
       }
+
+      // ROOK-117: optional checkability must be established before dispatching input.
+      for (const kind of ["option", "treeitem", "native option"] as const) {
+        for (const state of ["absent", "undefined"] as const) {
+          for (const operation of ["read", "check", "uncheck"] as const) {
+            it.effect(
+              `rejects ${kind} checked ${operation} before input when aria-checked is ${state}`,
+              () =>
+                Effect.gen(function*() {
+                  const attribute = state === "absent" ? "" : "aria-checked=\"undefined\""
+                  const { url } = yield* fixture(() =>
+                    `${
+                      kind === "native option"
+                        ? `<select id="selection" size="2"><option value="a" selected>First</option><option id="target" value="b" ${attribute}>Second</option></select>`
+                        : `<div id="target" role="${kind}" aria-selected="true" ${attribute}>Item</div>`
+                    }<script>document.body.dataset.events = '0';
+                  for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'input', 'change', 'focusin', 'keydown']) {
+                    document.addEventListener(type, () => { document.body.dataset.events = String(Number(document.body.dataset.events) + 1) }, true)
+                  }</script>`
+                  )
+                  yield* Effect.scoped(Effect.gen(function*() {
+                    const page = yield* Browser.newPage()
+                    yield* page.goto(url)
+                    const target = page.locator("#target")
+                    const failure = yield* (operation === "read"
+                      ? target.isChecked
+                      : operation === "check"
+                      ? target.check()
+                      : target.uncheck()).pipe(
+                        Deadline.within("1 second"),
+                        Effect.match({
+                          onFailure: (error) => error,
+                          onSuccess: () => undefined
+                        })
+                      )
+                    assert.deepStrictEqual(yield* page.locator("body").readAttribute("data-events"), Option.some("0"))
+                    if (kind === "native option") {
+                      assert.strictEqual(yield* page.locator("#selection").readValue, "a")
+                    }
+                    assert(Locator.isLocatorError(failure) && failure.reason._tag === "WrongElement", String(failure))
+                  }))
+                }),
+              timeout
+            )
+          }
+        }
+      }
+
+      for (const role of ["checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"] as const) {
+        it.effect(`preserves ${role} checked defaults and actions`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="target" role="${role}" onclick="this.setAttribute('aria-checked', this.getAttribute('aria-checked') === 'true' ? 'false' : 'true')">Item</div><div id="undefined" role="${role}" aria-checked="undefined">Undefined</div>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const target = page.locator("#target")
+              assert.isFalse(yield* target.isChecked)
+              assert.isFalse(yield* page.locator("#undefined").isChecked)
+              yield* target.check()
+              assert.isTrue(yield* target.isChecked)
+              yield* target.uncheck()
+              assert.isFalse(yield* target.isChecked)
+            }))
+          }), timeout)
+      }
+
+      it.effect(
+        "preserves native checkbox and radio checked properties over ARIA states",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="checkbox" type="checkbox" role="option" aria-checked="undefined"><input id="radio" type="radio" role="treeitem" aria-checked="false"><input id="checked" type="checkbox" checked aria-checked="false">`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              for (const id of ["checkbox", "radio"]) {
+                const target = page.locator(`#${id}`)
+                assert.isFalse(yield* target.isChecked)
+                yield* target.check()
+                assert.isTrue(yield* target.isChecked)
+              }
+              yield* page.locator("#checkbox").uncheck()
+              assert.isFalse(yield* page.locator("#checkbox").isChecked)
+              assert.isTrue(yield* page.locator("#checked").isChecked)
+            }))
+          }),
+        timeout
+      )
 
       it.effect("chooses options, checks boxes and sets files", () =>
         Effect.gen(function*() {
