@@ -61,10 +61,13 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         : state.requests.get(requestKey(target, params.networkId))
       // Fetch ids identify requests, while a Network id spans a redirect chain. A matching Fetch id
       // survives a URL override and both pause phases. Otherwise a different observed id or URL belongs
-      // to a later hop, whose Network event can still be waiting (ROOK-136).
+      // to a later hop, whose Network event can still be waiting (ROOK-136). An initial Network hop
+      // cannot own a pause naming a predecessor. Beyond that hop, an unobserved Fetch identity on a
+      // repeated URL still cannot distinguish an early pause from a late one (ROOK-139).
       const request = known !== undefined &&
           (known.attribution.fetchId === params.requestId ||
-            (known.attribution.fetchId === undefined && known.url === params.request.url))
+            (known.attribution.fetchId === undefined && known.url === params.request.url &&
+              (known.redirects > 0 || params.redirectedRequestId === undefined)))
         ? known
         : undefined
       const phase = params.responseStatusCode !== undefined || params.responseErrorReason !== undefined
