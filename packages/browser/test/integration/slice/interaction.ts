@@ -5,6 +5,7 @@
  */
 import { assert, describe, layer } from "@effect/vitest"
 import { Browser, Condition, Deadline, Expect, FileInput, Keyboard, Locator, Mouse } from "@usestrider/browser"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -79,6 +80,59 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             assert(Locator.isLocatorError(unknown) && unknown.reason._tag === "InvalidInput", String(unknown))
           }))
         }), timeout)
+
+      // ROOK-121: JavaScript callers bypass the string type, including inside Redacted.
+      for (
+        const [label, value] of [
+          ["number", 123],
+          ["null", null],
+          ["undefined", undefined],
+          ["boolean", true],
+          ["object", {}],
+          ["Redacted number", Redacted.make(123)],
+          ["nonnumeric text", "abc"],
+          ["Redacted nonnumeric text", Redacted.make("abc")]
+        ] as const
+      ) {
+        it.effect(`fill rejects ${label} without mutation or events`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" type="number" value="42" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const field = page.locator("#field")
+              const result = yield* field.fill(value as unknown as string).pipe(Effect.exit)
+              const error = result._tag === "Failure" ? Cause.findErrorOption(result.cause) : Option.none()
+              assert.deepStrictEqual({
+                value: yield* field.readValue,
+                events: yield* page.locator("#events").readText,
+                reason: Option.isSome(error) && Locator.isLocatorError(error.value)
+                  ? error.value.reason._tag
+                  : result._tag
+              }, { value: "42", events: "", reason: "InvalidInput" })
+            }))
+          }), timeout)
+      }
+
+      it.effect(
+        "fill preserves valid numeric strings, Redacted strings and empty clearing",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<input id="field" type="number" value="42">`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const field = page.locator("#field")
+              for (const value of ["123", "-12.5", Redacted.make("7"), "", Redacted.make("")]) {
+                yield* field.fill(value)
+                assert.strictEqual(yield* field.readValue, Redacted.isRedacted(value) ? Redacted.value(value) : value)
+              }
+            }))
+          }),
+        timeout
+      )
 
       it.effect("chooses options, checks boxes and sets files", () =>
         Effect.gen(function*() {
