@@ -141,6 +141,36 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect("fill rejects number-input text without focusing the input", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="other"><input id="field" type="number" value="42" onfocus="events.textContent += 'focus;'" onselect="events.textContent += 'select;'"><p id="events"></p>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.locator("#other").focus()
+            yield* page.locator("#field").fill("abc").pipe(Effect.exit)
+            assert.strictEqual(yield* page.locator("#events").readText, "")
+            yield* page.keyboard.press("z")
+            assert.strictEqual(yield* page.locator("#other").readValue, "z")
+          }))
+        }), timeout)
+
+      it.effect("fill ignores a number input's min, max and step", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() => `<input id="field" type="number" min="10" max="20" step="3" value="13">`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const field = page.locator("#field")
+            for (const value of ["5", "25", "14.5"]) {
+              yield* field.fill(value)
+              assert.strictEqual(yield* field.readValue, value)
+            }
+          }))
+        }), timeout)
+
       it.effect("chooses options, checks boxes and sets files", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
