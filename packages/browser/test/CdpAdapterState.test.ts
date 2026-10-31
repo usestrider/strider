@@ -14,6 +14,8 @@ import * as Obligations from "../src/internal/cdpAdapter/obligations.ts"
 import * as Responses from "../src/internal/cdpAdapter/responses.ts"
 import * as State from "../src/internal/cdpAdapter/state.ts"
 import * as Tree from "../src/internal/cdpAdapter/tree.ts"
+import * as Targets from "../src/internal/cdpAdapter/targets.ts"
+import * as Protocol from "../src/protocol/Protocol.ts"
 import * as Groups from "../src/internal/objectGroups.ts"
 import type * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as Target from "../src/Target.ts"
@@ -402,10 +404,12 @@ describe("CdpAdapter headers of a hop without ExtraInfo", () => {
 })
 
 describe("CdpAdapter routed response source", () => {
-  for (const end of ["failure", "finish", "page"]) {
+  for (const end of ["failure", "finish", "page", "session"]) {
     it.effect(`discards early fulfillment attribution on ${end}`, () =>
       Effect.gen(function*() {
-        const { facts, state, target, page } = yield* withPage()
+        const { facts, state, target: original, page } = yield* withPage()
+        const target: State.TargetEntry = end === "session" ? { ...original, kind: "worker" } : original
+        state.targets.set(session, target)
         const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
         const event = { state, target }
         handlers.apply("Fetch.requestPaused", {
@@ -422,7 +426,8 @@ describe("CdpAdapter routed response source", () => {
           body: new Uint8Array()
         })
         if (end === "page") Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test")
-        else {handlers.apply(end === "failure" ? "Network.loadingFailed" : "Network.loadingFinished", {
+        else if (end === "session") Targets.ended(state, session, new Protocol.SessionEnded({ why: "targetDestroyed" }))
+        else { handlers.apply(end === "failure" ? "Network.loadingFailed" : "Network.loadingFinished", {
             requestId: "R1",
             timestamp: 0,
             errorText: "net::ERR_FAILED",
@@ -438,48 +443,48 @@ describe("CdpAdapter routed response source", () => {
       }))
   }
   for (const early of [false, true]) {
-  it.effect(`keeps an early redirected pause off the previous hop with first pause ${early ? "before" : "after"} request`, () =>
-    Effect.gen(function*() {
-      const { facts, state, target } = yield* withPage()
-      const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
-      const event = { state, target }
-      if (!early) handlers.apply("Network.requestWillBeSent", sent(`${origin}/redirect`), event)
-      const pause = (requestId: string, redirectedRequestId?: string) =>
-        handlers.apply("Fetch.requestPaused", {
-          requestId,
-          redirectedRequestId,
-          networkId: "R1",
-          frameId: "T1",
-          resourceType: "Fetch",
-          request: sent(`${origin}/redirect`).request
-        }, event)
-      pause("F1")
-      yield* Obligations.resolve(state, [...state.obligations.keys()][0]!, {
-        _tag: "Continue",
-        overrides: Option.none()
-      })
-      if (early) handlers.apply("Network.requestWillBeSent", sent(`${origin}/redirect`), event)
-      pause("F2", "F1")
-      yield* Obligations.resolve(state, [...state.obligations.keys()][0]!, {
-        _tag: "Fulfill",
-        status: 200,
-        headers: {},
-        body: new Uint8Array()
-      })
-      // The URL can repeat; Fetch's redirect identity distinguishes the hops.
-      handlers.apply(
-        "Network.requestWillBeSent",
-        sent(`${origin}/redirect`, {
-          location: "/redirect",
-          hasExtraInfo: false
-        }),
-        event
-      )
-      handlers.apply("Network.responseReceived", landedAs({ hasExtraInfo: false, fromDiskCache: false }), event)
-      yield* state.buffer.flush
-      const responses = facts.flatMap((fact) => fact._tag === "ResponseReceived" ? [fact.response.servedBy] : [])
-      assert.deepStrictEqual(responses, ["network", "route"])
-    }))
+    it.effect(`keeps an early redirected pause off the previous hop with first pause ${early ? "before" : "after"} request`, () =>
+      Effect.gen(function*() {
+        const { facts, state, target } = yield* withPage()
+        const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+        const event = { state, target }
+        if (!early) handlers.apply("Network.requestWillBeSent", sent(`${origin}/redirect`), event)
+        const pause = (requestId: string, redirectedRequestId?: string) =>
+          handlers.apply("Fetch.requestPaused", {
+            requestId,
+            redirectedRequestId,
+            networkId: "R1",
+            frameId: "T1",
+            resourceType: "Fetch",
+            request: sent(`${origin}/redirect`).request
+          }, event)
+        pause("F1")
+        yield* Obligations.resolve(state, [...state.obligations.keys()][0]!, {
+          _tag: "Continue",
+          overrides: Option.none()
+        })
+        if (early) handlers.apply("Network.requestWillBeSent", sent(`${origin}/redirect`), event)
+        pause("F2", "F1")
+        yield* Obligations.resolve(state, [...state.obligations.keys()][0]!, {
+          _tag: "Fulfill",
+          status: 200,
+          headers: {},
+          body: new Uint8Array()
+        })
+        // The URL can repeat; Fetch's redirect identity distinguishes the hops.
+        handlers.apply(
+          "Network.requestWillBeSent",
+          sent(`${origin}/redirect`, {
+            location: "/redirect",
+            hasExtraInfo: false
+          }),
+          event
+        )
+        handlers.apply("Network.responseReceived", landedAs({ hasExtraInfo: false, fromDiskCache: false }), event)
+        yield* state.buffer.flush
+        const responses = facts.flatMap((fact) => fact._tag === "ResponseReceived" ? [fact.response.servedBy] : [])
+        assert.deepStrictEqual(responses, ["network", "route"])
+      }))
   }
   // ROOK-136: the failing order permutes captured events; it was not captured in the live failure.
   for (const order of ["pause before request", "request before pause", "fulfill before request"]) {
