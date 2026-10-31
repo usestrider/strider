@@ -1291,9 +1291,13 @@ export function engine(render: (root: SnapNode) => string) {
       element.select()
       return
     }
-    let host = element
-    while (host.parentElement?.isContentEditable) host = host.parentElement
-    host.focus()
+    if (document.designMode === "on") {
+      window.focus()
+    } else {
+      let host = element
+      while (host.parentElement?.isContentEditable) host = host.parentElement
+      host.focus()
+    }
     const selection = getSelection()
     if (selection === null) return
     const range = document.createRange()
