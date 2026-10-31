@@ -129,7 +129,7 @@ export type Read =
   | { readonly _tag: "Html" }
   | { readonly _tag: "Attribute"; readonly name: string }
   | { readonly _tag: "Enabled" }
-  | { readonly _tag: "Checked" }
+  | { readonly _tag: "Checked"; readonly followLabel?: boolean }
 
 /** What an expectation waits for. */
 export type Expectation =
@@ -1559,7 +1559,8 @@ export function engine(render: (root: SnapNode) => string) {
       case "Enabled":
         return { _tag: "Read", value: enabled(element) }
       case "Checked": {
-        const checked = checkedOf(element)
+        const control = request.read.followLabel && element instanceof HTMLLabelElement ? element.control : element
+        const checked = control === null ? null : checkedOf(control)
         return checked === null ? wrong("a checkbox, a radio or an ARIA checkable") : { _tag: "Read", value: checked }
       }
     }

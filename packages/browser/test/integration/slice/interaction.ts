@@ -147,6 +147,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 yield* Effect.scoped(Effect.gen(function*() {
                   const page = yield* Browser.newPage()
                   yield* page.goto(url)
+                  const initialUrl = yield* page.url
                   const label = page.locator("#label")
                   const options = { position: { x: 280, y: 20 } }
                   yield* checked ? label.check(options) : label.uncheck(options)
@@ -158,7 +159,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     : label.uncheck({ position: { x: 20, y: 20 } })
                   assert.strictEqual(yield* page.locator("#box").isChecked, checked)
                   assert.strictEqual(yield* page.locator("#out").readText, "label:280:20:true")
-                  yield* page.pipe(Expect.toHaveURL(url))
+                  yield* page.pipe(Expect.toHaveURL(initialUrl))
                 }))
               }),
             timeout

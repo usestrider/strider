@@ -907,7 +907,9 @@ export interface Locator extends ReadonlyLocator {
    * **Details**
    *
    * If it's already checked, nothing is sent. Otherwise it clicks, then reads the state again: a click that didn't
-   * check it fails with `StateUnchanged{expected: "checked"}`. Any other element fails at once with `WrongElement`.
+   * check it fails with `StateUnchanged{expected: "checked"}`. A label reads its associated control's state, but
+   * the click and any position remain on the label. A label without a checkable control, or any other element,
+   * fails at once with `WrongElement`. This does not change `isChecked` or checked expectations on labels.
    *
    * **Example** (Accepting the terms)
    *
@@ -923,7 +925,8 @@ export interface Locator extends ReadonlyLocator {
   check(options?: PointerOptions | undefined): ActionEffect
   /**
    * Unchecks a checkbox or an ARIA checkable, and confirms it became unchecked. Checks: the same as `click`. It
-   * works as `check` does, failing with `StateUnchanged{expected: "unchecked"}`.
+   * works as `check` does, including reading a label's associated control while clicking the label at the requested
+   * label-relative position, and fails with `StateUnchanged{expected: "unchecked"}` if the state stays checked.
    *
    * **Example** (Opting out of offers)
    *

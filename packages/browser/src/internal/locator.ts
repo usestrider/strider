@@ -1007,7 +1007,8 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   private setChecked(operation: string, checked: boolean, options: Locator.PointerOptions | undefined) {
     const expected = checked ? "checked" : "unchecked"
     return Effect.gen({ self: this }, function*() {
-      const now = yield* this.isChecked.pipe(
+      const read = this.readOne(operation, { _tag: "Checked", followLabel: true }, (value) => value as boolean)
+      const now = yield* read.pipe(
         Effect.catchIf(
           (error): error is Locator.LocatorError => Locator.isLocatorError(error) && error.reason._tag === "NoMatch",
           () => Effect.succeed(undefined)
@@ -1019,7 +1020,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         options,
         (state, point) => Input.click(state, point, "left", 1, options?.modifiers ?? [])
       )
-      const after = yield* this.isChecked
+      const after = yield* read
       if (after !== checked) {
         return yield* Effect.fail(this.error(
           operation,

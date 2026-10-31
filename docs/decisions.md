@@ -327,6 +327,14 @@ along with negative indexing, which removes a useful selection.
 index. Rejected: canonicalizing `nth(0)` to `first` and `nth(-1)` to `last`, which hides the call a user
 needs to find and, for a negative index, would name a different selection.
 
+**Checking a label reads its associated control and clicks the label.** `check` and `uncheck` use the
+browser's native label association for their before and after state reads. Pointer targeting, actionability and
+positions still belong to the selected label, so native activation decides whether the control changes; a prevented
+activation yields `StateUnchanged`. Public `isChecked` and checked expectations keep reading the selected element.
+Rejected: refusing labels, which prevents normal label activation; redirecting the pointer to the control, which
+changes the requested target and coordinates; and teaching all checked reads to follow labels, which changes the
+meaning of read and expectation APIs beyond these actions. (ROOK-118.)
+
 ## Agents
 
 **Page-provided tools (WebMCP) are designed, and built once a browser ships the API.** A page registers tools with
