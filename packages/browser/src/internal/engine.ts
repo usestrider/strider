@@ -1506,12 +1506,21 @@ export function engine(render: (root: SnapNode) => string) {
         return answer
       case "Fill": {
         if (settable(element)) {
-          element.focus()
-          element.value = action.value
-          // A value the input refuses, such as "soon" for a date, leaves it otherwise
-          if (element.value !== action.value) {
+          // Validate on a detached copy: sanitization must not change the live input on refusal.
+          // Keep attributes such as min, max, step and value (the range step base).
+          const candidate = element.cloneNode(false) as HTMLInputElement
+          candidate.value = action.value
+          const accepted = element.type === "range"
+            ? /^-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(action.value) &&
+              Number.isFinite(Number(action.value)) && candidate.valueAsNumber === Number(action.value)
+            : element.type === "color"
+            ? candidate.value === action.value.toLowerCase()
+            : candidate.value !== "" || action.value === ""
+          if (!accepted) {
             return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
           }
+          element.focus()
+          element.value = candidate.value
           fire(element, "input")
           fire(element, "change")
           return { ...answer, fill: "set" }

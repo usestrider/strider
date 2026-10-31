@@ -994,7 +994,9 @@ export interface Locator extends ReadonlyLocator {
    * - A text input, a textarea or a `contenteditable` element is focused and its contents selected from an
    *   isolated world of Strider's, then the value is inserted as text, as an input method would.
    * - An input whose value isn't typed (`date`, `time`, `color`, `range` and their kin) has it set from that
-   *   world, with `input` and `change` dispatched; a value it refuses fails with `InvalidInput`.
+   *   world, with `input` then `change` dispatched. Equivalent browser serialization is accepted, such as
+   *   lowercase color hex or omitted zero seconds. A malformed value, or a range value changed by clamping
+   *   or rounding, fails with `InvalidInput` without changing the value or dispatching those events.
    * - An element that can't be edited fails at once with `NotEditable`. A read-only one is waited for, and a
    *   timeout reports it as `ReadOnly`.
    * - A `Redacted` value is typed into the page but never shown in spans, traces or errors.

@@ -65,6 +65,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             assert.strictEqual(yield* page.locator("#rich").readText, "new text")
             yield* page.locator("#day").fill("2026-10-23")
             assert.strictEqual(yield* page.locator("#day").readValue, "2026-10-23")
+            yield* page.locator("#day").clear()
+            assert.strictEqual(yield* page.locator("#day").readValue, "")
             const refused = yield* page.locator("#day").fill("soon").pipe(Effect.flip)
             assert(Locator.isLocatorError(refused) && refused.reason._tag === "InvalidInput", String(refused))
             const plain = yield* page.locator("#plain").fill("x").pipe(Effect.flip)
@@ -85,8 +87,12 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         const [type, value, expected] of [
           ["range", "42.0", "42"],
           ["range", "1e1", "10"],
+          ["range", "0", "0"],
+          ["range", "100", "100"],
           ["color", "#AbCd00", "#abcd00"],
-          ["datetime-local", "2020-03-02T06:20:00", "2020-03-02T06:20"]
+          ["datetime-local", "2020-03-02T06:20:00", "2020-03-02T06:20"],
+          ["datetime-local", "2020-03-02T06:20:01.123", "2020-03-02T06:20:01.123"],
+          ["datetime-local", "", ""]
         ] as const
       ) {
         it.effect(`fills normalized ${type} value ${value}`, () =>
