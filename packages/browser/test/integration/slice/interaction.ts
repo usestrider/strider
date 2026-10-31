@@ -158,13 +158,17 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
 
       // ROOK-117: optional checkability must be established before dispatching input.
       for (const kind of ["option", "treeitem", "native option"] as const) {
-        for (const state of ["absent", "undefined"] as const) {
+        for (const state of ["absent", "undefined", "empty"] as const) {
           for (const operation of ["read", "check", "uncheck"] as const) {
             it.effect(
               `rejects ${kind} checked ${operation} before input when aria-checked is ${state}`,
               () =>
                 Effect.gen(function*() {
-                  const attribute = state === "absent" ? "" : "aria-checked=\"undefined\""
+                  const attribute = state === "absent"
+                    ? ""
+                    : state === "empty"
+                    ? "aria-checked=\"\""
+                    : "aria-checked=\"undefined\""
                   const { url } = yield* fixture(() =>
                     `${
                       kind === "native option"
