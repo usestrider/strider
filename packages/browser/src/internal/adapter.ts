@@ -821,9 +821,17 @@ export interface AdapterConnection {
   readonly createUserContext: (
     options: UserContextOptions
   ) => Effect.Effect<UserContext.Id, AdapterError>
+  /**
+   * Removes a context, returning once the browser has answered; its end, after its pages', is `UserContextRemoved`,
+   * which L1 waits for (`Model.remove`). A second call while the removal is under way does nothing.
+   */
   readonly removeUserContext: (context: UserContext.Id) => Effect.Effect<void, AdapterError>
   /** Creates a page and waits until it is ready: initialized, with the declarations in force. */
   readonly createPage: (context: UserContext.Id) => Effect.Effect<Target.NavigableId, AdapterError>
+  /**
+   * Closes a page, returning once the browser has answered, or once the command is sent where the reply waits on a
+   * beforeunload prompt; its end is the page's fact, which L1 waits for.
+   */
   readonly closePage: (
     page: Target.NavigableId,
     options: { readonly runBeforeUnload: boolean }

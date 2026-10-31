@@ -12,9 +12,12 @@
  * the readiness `waitUntil` asks for of the document it committed, all under one deadline; a navigation with
  * no outcome by then is `Timeout{postcondition}` (CONCEPTS.md §4).
  */
+import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
+import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Hash from "effect/Hash"
 import * as HttpUrl from "effect/http/Url"
 import * as Inspectable from "effect/Inspectable"
@@ -498,32 +501,38 @@ export const make = (owner: PageOwner): Page.Page => {
           ? entry.state.changes.pipe(Stream.filter((state) => state.stayed > stays), Stream.runHead)
           : Effect.never
         record.markSent()
-        const outcome = yield* Effect.gen(function*() {
-          yield* adapter.closePage(entry.id, { runBeforeUnload }).pipe(Effect.catch((error): Effect.Effect<
-            void,
-            Page.PageError | Deadline.Timeout
-          > => {
-            const mapped = Operation.fromAdapter(error, id, runtime.backend)
+        // Sent apart, in the model's scope: the close runs to its own end, whenever this stops waiting
+        const close = yield* model.closeApart(entry.id, { runBeforeUnload })
+        // Its failure, unless the page was gone already, which its end reports; its reply is no outcome
+        const refused = Effect.flatMap(
+          Fiber.await(close),
+          (exit): Effect.Effect<never, Page.PageError | Deadline.Timeout> => {
+            // Interrupted, it went with the model's scope, and the connection's loss ends the page
+            const error = Exit.isFailure(exit) ? Cause.findErrorOption(exit.cause) : Option.none()
+            if (Option.isNone(error)) return Effect.never
+            const mapped = Operation.fromAdapter(error.value, id, runtime.backend)
             // A backend that can't ask the page refuses to, naming the capability (`close.runBeforeUnload`)
             return mapped._tag === "Gone"
-              ? Effect.void
+              ? Effect.never
               : mapped._tag === "Timeout"
               ? Effect.fail(mapped.error)
               : Effect.fail(pageError("Page.close", mapped.reason, id))
-          }))
-          return yield* Deferred.await(entry.closed).pipe(
+          }
+        )
+        // Done once the page ends, whether or not the browser has answered the close
+        const outcome = yield* record.bound(
+          Deferred.await(entry.closed).pipe(
             Effect.as("closed" as const),
-            Effect.raceFirst(Effect.as(stayed, "stayed" as const))
-          )
-        }).pipe(
-          (closing) =>
-            record.bound(closing, () =>
-              Option.some(
-                runBeforeUnload
-                  ? "The browser was asked to close the page, and hadn't confirmed it by the deadline; a " +
-                    "beforeunload prompt nothing decided keeps it open"
-                  : "The browser was asked to close the page, and hadn't confirmed it by the deadline"
-              ))
+            Effect.raceFirst(Effect.as(stayed, "stayed" as const)),
+            Effect.raceFirst(refused)
+          ),
+          () =>
+            Option.some(
+              runBeforeUnload
+                ? "The browser was asked to close the page, and hadn't confirmed it by the deadline; a " +
+                  "beforeunload prompt nothing decided keeps it open"
+                : "The browser was asked to close the page, and hadn't confirmed it by the deadline"
+            )
         )
         if (outcome === "stayed") {
           return yield* Effect.fail(pageError(

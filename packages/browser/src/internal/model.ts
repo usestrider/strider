@@ -14,6 +14,7 @@
 import type * as DateTime from "effect/DateTime"
 import type * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import type * as Fiber from "effect/Fiber"
 import type * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
@@ -419,6 +420,19 @@ export interface Model {
    * only while `by` still owns it.
    */
   readonly release: (page: Target.NavigableId, by?: Scope.Scope) => Effect.Effect<void>
+  /**
+   * Sends a page's close in a fiber of the model's scope, which runs to its own end however long its sender waits:
+   * `Page.close` waits for the page's end instead.
+   */
+  readonly closeApart: (
+    page: Target.NavigableId,
+    options: { readonly runBeforeUnload: boolean }
+  ) => Effect.Effect<Fiber.Fiber<void, Adapter.AdapterError>>
+  /**
+   * Removes a context its creator's scope released, and waits for its end, after its pages', under the default
+   * budget.
+   */
+  readonly remove: (context: ContextEntry) => Effect.Effect<void>
   /** Moves a page's ownership to `to`, which then releases it (CONCEPTS.md §3, transfers). */
   readonly transfer: (page: Target.NavigableId, to: Scope.Scope) => Effect.Effect<void>
 }
@@ -469,6 +483,8 @@ export const make = Effect.fnUntraced(function*() {
         grant: fold.grant,
         own: fold.own,
         release,
+        closeApart: ownership.closeApart,
+        remove: ownership.remove,
         transfer: (page, to) =>
           Effect.suspend(() => {
             const entry = fold.page(page)

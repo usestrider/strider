@@ -257,14 +257,20 @@ export const removeUserContextLaunched = Effect.fnUntraced(function*(state: Stat
       Kit.unsupported("removeDefaultContext", "The default context exists for the whole connection")
     )
   }
+  // A removal under way reports the context's end
+  if (context.removing) return
+  const process = yield* processOfContext(state, context)
   context.removing = true
   const inContext = [...state.pages.values()].filter((page) => page.context === context)
-  const process = yield* processOfContext(state, context)
   yield* process.close
-  yield* Effect.forEach(inContext, (page) => page.session.ended, { discard: true })
-  state.contexts.delete(id)
-  if (context.browserContextId !== undefined) state.contextsByWk.delete(context.browserContextId)
-  yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextRemoved", context: id }))
+  // Its pages' sessions end as the process's connection does. The context ends after they have, which L1 waits for
+  // under a budget of its own (`Model.remove`)
+  state.buffer.start(Effect.gen(function*() {
+    yield* Effect.forEach(inContext, (page) => page.session.ended, { discard: true })
+    state.contexts.delete(id)
+    if (context.browserContextId !== undefined) state.contextsByWk.delete(context.browserContextId)
+    yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextRemoved", context: id }))
+  }))
 })
 
 export const createPageLaunched = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {

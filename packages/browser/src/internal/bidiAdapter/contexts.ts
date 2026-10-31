@@ -118,8 +118,14 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
       Kit.unsupported("removeDefaultContext", "The default context exists for the whole connection")
     )
   }
+  // A removal under way reports the context's end
+  if (context.removing) return
   context.removing = true
-  yield* Kit.protocol(state.send(BrowserBidi.removeUserContext({ userContext: context.bidi })))
+  yield* Kit.protocol(state.send(BrowserBidi.removeUserContext({ userContext: context.bidi }))).pipe(
+    Effect.tapError(() => Effect.sync(() => context.removing = false))
+  )
+  // The command closes the context's navigables before it answers, and their `contextDestroyed` events come
+  // before the reply on the one connection: once they are folded, its pages have ended, so the context ends now
   yield* state.root().drainObserved
   state.contexts.delete(id)
   state.contextsByBidi.delete(context.bidi)

@@ -123,17 +123,24 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
       Kit.unsupported("removeDefaultContext", "The default context exists for the whole connection")
     )
   }
+  // A removal under way reports the context's end
+  if (context.removing) return
   context.removing = true
   const inContext = [...state.pages.values()].filter((page) => page.context === context)
+  const browserContextId = context.browserContextId
   yield* Kit.protocol(
-    Target.disposeBrowserContext({ browserContextId: context.browserContextId as BrowserCdp.BrowserContextID }).pipe(
+    Target.disposeBrowserContext({ browserContextId: browserContextId as BrowserCdp.BrowserContextID }).pipe(
       Protocol.on(state.root())
     )
-  )
-  yield* Effect.forEach(inContext, (page) => page.target.session.ended, { discard: true })
-  state.contexts.delete(id)
-  state.contextsByCdp.delete(context.browserContextId)
-  yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextRemoved", context: id }))
+  ).pipe(Effect.tapError(() => Effect.sync(() => context.removing = false)))
+  // Chromium may answer before its pages' sessions end. The context ends after they have, which L1 waits for under
+  // a budget of its own (`Model.remove`); they end with the connection at the latest
+  state.buffer.start(Effect.gen(function*() {
+    yield* Effect.forEach(inContext, (page) => page.target.session.ended, { discard: true })
+    state.contexts.delete(id)
+    state.contextsByCdp.delete(browserContextId)
+    yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextRemoved", context: id }))
+  }))
 })
 
 export const createPage = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {
