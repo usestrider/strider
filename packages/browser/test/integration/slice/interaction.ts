@@ -147,6 +147,28 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         )
       }
 
+      for (const action of ["check", "uncheck"] as const) {
+        it.effect(`trial ${action} rejects a disabled checkbox`, () =>
+          Effect.gen(function*() {
+            const checked = action === "uncheck"
+            const { url } = yield* fixture(() =>
+              `<input id="c" type="checkbox" disabled ${checked ? "checked" : ""} onclick="${say("'clicked'")}">${out}`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const box = page.locator("#c")
+              const failure = yield* box[action]({ trial: true }).pipe(
+                Deadline.within("300 millis"),
+                Effect.flip
+              )
+              assert(Deadline.isTimeout(failure), String(failure))
+              assert.strictEqual(yield* box.isChecked, checked)
+              assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+            }))
+          }), timeout)
+      }
+
       it.effect("double-clicks, hovers, taps, and holds modifiers where the backend can", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
