@@ -1,0 +1,4 @@
+# Vendored sources are verified byte-for-byte, including upstream line endings and whitespace.
+astro/** -text -whitespace
+playwright/** -text -whitespace
+vite/** -text -whitespace
