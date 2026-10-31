@@ -59,11 +59,14 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const known = params.networkId === undefined
         ? undefined
         : state.requests.get(requestKey(target, params.networkId))
-      // A redirected Fetch pause can precede the Network event that advances the mutable request entry.
-      const request =
-        params.redirectedRequestId !== undefined && known?.attribution.fetchId === params.redirectedRequestId
-          ? undefined
-          : known
+      // Fetch ids identify requests, while a Network id spans a redirect chain. A matching Fetch id
+      // survives a URL override and both pause phases. Otherwise a different observed id or URL belongs
+      // to a later hop, whose Network event can still be waiting (ROOK-136).
+      const request = known !== undefined &&
+          (known.attribution.fetchId === params.requestId ||
+            (known.attribution.fetchId === undefined && known.url === params.request.url))
+        ? known
+        : undefined
       const phase = params.responseStatusCode !== undefined || params.responseErrorReason !== undefined
         ? "response"
         : "request"
