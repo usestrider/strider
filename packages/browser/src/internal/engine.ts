@@ -1559,8 +1559,11 @@ export function engine(render: (root: SnapNode) => string) {
       case "Enabled":
         return { _tag: "Read", value: enabled(element) }
       case "Checked": {
-        const control = request.read.followLabel && element instanceof HTMLLabelElement ? element.control : element
-        const checked = control === null ? null : checkedOf(control)
+        let checked = checkedOf(element)
+        if (checked === null && request.read.followLabel && element instanceof HTMLLabelElement) {
+          const control = element.control
+          checked = control === null ? null : checkedOf(control)
+        }
         return checked === null ? wrong("a checkbox, a radio or an ARIA checkable") : { _tag: "Read", value: checked }
       }
     }
