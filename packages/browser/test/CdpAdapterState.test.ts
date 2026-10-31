@@ -437,30 +437,50 @@ describe("CdpAdapter routed response source", () => {
         assert.strictEqual(responses[0]!.servedBy, "network")
       }))
   }
-  it.effect("keeps an early redirected pause off the previous hop", () => Effect.gen(function*() {
-    const { facts, state, target } = yield* withPage()
-    const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
-    const event = { state, target }
-    handlers.apply("Network.requestWillBeSent", sent(`${origin}/redirect`), event)
-    const pause = (requestId: string, redirectedRequestId?: string) => handlers.apply("Fetch.requestPaused", {
-      requestId, redirectedRequestId, networkId: "R1", frameId: "T1", resourceType: "Fetch",
-      request: sent(`${origin}/redirect`).request
-    }, event)
-    pause("F1")
-    yield* Obligations.resolve(state, [...state.obligations.keys()][0]!, { _tag: "Continue", overrides: Option.none() })
-    pause("F2", "F1")
-    yield* Obligations.resolve(state, [...state.obligations.keys()][0]!, {
-      _tag: "Fulfill", status: 200, headers: {}, body: new Uint8Array()
-    })
-    // The URL can repeat; Fetch's redirect identity distinguishes the hops.
-    handlers.apply("Network.requestWillBeSent", sent(`${origin}/redirect`, {
-      location: "/redirect", hasExtraInfo: false
-    }), event)
-    handlers.apply("Network.responseReceived", landedAs({ hasExtraInfo: false, fromDiskCache: false }), event)
-    yield* state.buffer.flush
-    const responses = facts.flatMap((fact) => fact._tag === "ResponseReceived" ? [fact.response.servedBy] : [])
-    assert.deepStrictEqual(responses, ["network", "route"])
-  }))
+  for (const early of [false, true]) {
+  it.effect(`keeps an early redirected pause off the previous hop with first pause ${early ? "before" : "after"} request`, () =>
+    Effect.gen(function*() {
+      const { facts, state, target } = yield* withPage()
+      const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+      const event = { state, target }
+      if (!early) handlers.apply("Network.requestWillBeSent", sent(`${origin}/redirect`), event)
+      const pause = (requestId: string, redirectedRequestId?: string) =>
+        handlers.apply("Fetch.requestPaused", {
+          requestId,
+          redirectedRequestId,
+          networkId: "R1",
+          frameId: "T1",
+          resourceType: "Fetch",
+          request: sent(`${origin}/redirect`).request
+        }, event)
+      pause("F1")
+      yield* Obligations.resolve(state, [...state.obligations.keys()][0]!, {
+        _tag: "Continue",
+        overrides: Option.none()
+      })
+      if (early) handlers.apply("Network.requestWillBeSent", sent(`${origin}/redirect`), event)
+      pause("F2", "F1")
+      yield* Obligations.resolve(state, [...state.obligations.keys()][0]!, {
+        _tag: "Fulfill",
+        status: 200,
+        headers: {},
+        body: new Uint8Array()
+      })
+      // The URL can repeat; Fetch's redirect identity distinguishes the hops.
+      handlers.apply(
+        "Network.requestWillBeSent",
+        sent(`${origin}/redirect`, {
+          location: "/redirect",
+          hasExtraInfo: false
+        }),
+        event
+      )
+      handlers.apply("Network.responseReceived", landedAs({ hasExtraInfo: false, fromDiskCache: false }), event)
+      yield* state.buffer.flush
+      const responses = facts.flatMap((fact) => fact._tag === "ResponseReceived" ? [fact.response.servedBy] : [])
+      assert.deepStrictEqual(responses, ["network", "route"])
+    }))
+  }
   // ROOK-136: the failing order permutes captured events; it was not captured in the live failure.
   for (const order of ["pause before request", "request before pause", "fulfill before request"]) {
     it.effect(`attributes a fulfilled response to its route with ${order}`, () =>
