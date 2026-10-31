@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
 import * as Network from "../src/internal/cdpAdapter/network.ts"
+import * as Obligations from "../src/internal/cdpAdapter/obligations.ts"
 import * as Responses from "../src/internal/cdpAdapter/responses.ts"
 import * as State from "../src/internal/cdpAdapter/state.ts"
 import * as Tree from "../src/internal/cdpAdapter/tree.ts"
@@ -16,7 +17,7 @@ import * as Groups from "../src/internal/objectGroups.ts"
 import type * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as Target from "../src/Target.ts"
 
-const session = { key: "S1" } as ProtocolClient.Session
+const session = { key: "S1", send: () => Effect.succeed({}) } as unknown as ProtocolClient.Session
 
 const control: ProtocolClient.FoldControl = {
   sync: () => {},
@@ -397,4 +398,45 @@ describe("CdpAdapter headers of a hop without ExtraInfo", () => {
       const { sent } = yield* play([first, sent0, failed])
       assert.deepStrictEqual(sent.map(([, cookie]) => cookie), ["q=0"])
     }))
+})
+
+describe("CdpAdapter routed response source", () => {
+  // ROOK-136: the failing order permutes captured events; it was not captured in the live failure.
+  for (const early of [true, false]) {
+    it.effect(`attributes a fulfilled response to its route with ${early ? "pause before request" : "request before pause"}`, () =>
+      Effect.gen(function*() {
+        const { facts, state, target } = yield* withPage()
+        const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+        const event = { state, target }
+        const request = sent(`${origin}/landed`)
+        // The helper's target has no page attached, so the real pause handler accepts the interception
+        // without requiring a declaration registry entry.
+        const pause = () =>
+          handlers.apply("Fetch.requestPaused", {
+            requestId: "F1",
+            networkId: "R1",
+            frameId: "T1",
+            resourceType: "Fetch",
+            request: request.request
+          }, event)
+        if (early) pause()
+        handlers.apply("Network.requestWillBeSent", request, event)
+        if (!early) pause()
+        const obligations = [...state.obligations.values()]
+        assert.strictEqual(obligations.length, 1)
+        const obligation = obligations[0]!
+        assert.strictEqual(obligation._tag, "PausedRequest")
+        yield* Obligations.resolve(state, obligation.id, {
+          _tag: "Fulfill",
+          status: 200,
+          headers: { "content-type": "text/plain" },
+          body: new TextEncoder().encode("from the route")
+        })
+        handlers.apply("Network.responseReceived", landedAs({ hasExtraInfo: false, fromDiskCache: false }), event)
+        yield* state.buffer.flush
+        const responses = facts.flatMap((fact) => fact._tag === "ResponseReceived" ? [fact.response] : [])
+        assert.strictEqual(responses.length, 1)
+        assert.strictEqual(responses[0]!.servedBy, "route")
+      }))
+  }
 })
