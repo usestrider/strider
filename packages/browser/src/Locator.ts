@@ -544,7 +544,7 @@ export interface ReadonlyLocator
    *
    * Native checkbox and radio inputs use their checked property. ARIA roles `checkbox`, `radio`, `switch`,
    * `menuitemcheckbox`, `menuitemradio`, `option` and `treeitem` use `aria-checked`. For `option` and `treeitem`,
-   * absent `aria-checked` or the literal value `"undefined"` means checking is unsupported and fails with
+   * absent or empty `aria-checked`, or the literal value `"undefined"`, means checking is unsupported and fails with
    * `WrongElement` before input; `"false"` means checkable but unchecked. For the other roles, absent or
    * `"undefined"` reads false. Selection through `aria-selected` is independent. Other elements fail with
    * `WrongElement`. See the [WAI-ARIA checked state](https://www.w3.org/TR/wai-aria-1.2/#aria-checked).

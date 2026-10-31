@@ -1210,7 +1210,9 @@ export function engine(render: (root: SnapNode) => string) {
     const role = roleOf(element)
     if (role === null || !CHECKABLE_ROLES.has(role)) return null
     const state = element.getAttribute("aria-checked")
-    if ((role === "option" || role === "treeitem") && (state === null || state === "undefined")) return null
+    if ((role === "option" || role === "treeitem") && (state === null || state === "" || state === "undefined")) {
+      return null
+    }
     return state === "true"
   }
 
