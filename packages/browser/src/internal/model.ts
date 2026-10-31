@@ -428,6 +428,11 @@ export interface Model {
     page: Target.NavigableId,
     options: { readonly runBeforeUnload: boolean }
   ) => Effect.Effect<Fiber.Fiber<void, Adapter.AdapterError>>
+  /**
+   * Removes a context its creator's scope released, and waits for its end, after its pages', under the default
+   * budget.
+   */
+  readonly remove: (context: ContextEntry) => Effect.Effect<void>
   /** Moves a page's ownership to `to`, which then releases it (CONCEPTS.md §3, transfers). */
   readonly transfer: (page: Target.NavigableId, to: Scope.Scope) => Effect.Effect<void>
 }
@@ -479,6 +484,7 @@ export const make = Effect.fnUntraced(function*() {
         own: fold.own,
         release,
         closeApart: ownership.closeApart,
+        remove: ownership.remove,
         transfer: (page, to) =>
           Effect.suspend(() => {
             const entry = fold.page(page)

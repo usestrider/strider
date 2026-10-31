@@ -159,10 +159,12 @@ const BrowserClockEffect = Effect.service(BrowserClock.CurrentClock)
  *
  * **Details**
  *
- * It also bounds closing a page you own when its scope closes, whatever deadline encloses the scope: the close
- * waits up to this long for the browser to report the page ended, then stops waiting and leaves the page as it is.
- * Halfway through, a close still waiting logs a warning naming the page and whether the browser has answered the
- * command to close it, and it warns again if it stops waiting with the page still open.
+ * It also bounds closing a page you own, and removing a context Strider created, when its scope closes, whatever
+ * deadline encloses the scope: the close waits up to this long for the browser to report the page or the context
+ * ended, then stops waiting and leaves it as it is, though the command it sent goes on. Halfway through, a close
+ * still waiting logs a warning naming the page or the context and what it waits on: the browser's answer to the
+ * command, or the end, or for a context the pages that haven't ended. It warns again if it stops waiting with the
+ * page or the context still open.
  *
  * @stability unstable
  * @category references

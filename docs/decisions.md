@@ -218,14 +218,31 @@ still open, and when the browser refused the close.
   with the release; a setting of its own for the warning, a second knob for one wait; and waiting out the budget
   after a refused close, which waits for nothing.
 
-`Page.close` waits the same way. It sends its close in a fiber of the model's scope and is done once the page ends,
-whether or not the browser has answered; being an operation, it keeps its own deadline, and fails with `Timeout` only
-when the page hasn't ended by then, with the browser's refusal, or with `CloseCanceled` once a handler stays.
+`Page.close` and a context's removal wait the same way. `Page.close` sends its close in a fiber of the model's
+scope and is done once the page ends, whether or not the browser has answered; being an operation, it keeps its own
+deadline, and fails with `Timeout` only when the page hasn't ended by then, with the browser's refusal, or with
+`CloseCanceled` once a handler stays. A context the library created is removed when its scope closes by the
+mechanism a page's release uses (`ownership.ts`, `Model.remove`): the adapter's `removeUserContext` returns once the
+browser has answered, and reports the context's end, after its pages', as `UserContextRemoved`; the removal waits
+for that end under `DefaultBudget` from when it starts, warns halfway naming the context and whether the browser has
+answered or which of its pages haven't ended, and warns again as it stops. A command that fails because its target or
+the connection is gone already ends either wait without a warning, since the fold reports the end, and a target that
+has ended, as everything has once the connection is lost, sends nothing and isn't waited for.
 
 - **Why.** `Page.close` waited for the reply and then the end inside one bound, so a page that ended before a late
   reply failed the close with `Timeout` though it was closed, and the bound interrupted the close, between Chromium's
-  two commands if it fell there.
-- **Rejected:** waiting for the reply first, which reports a closed page as a timeout.
+  two commands if it fell there. Removing a context waited, in the CDP and WebKit adapters, for the dispose and then
+  every page's session, with no bound at all: its finalizer ran under `Browser.newContext`'s captured deadline, which
+  no adapter reads, so a browser that never ended a page held the scope's close forever, silently. The wait belongs
+  in L1 because only the end differs by backend, and each adapter already knows its own: Chromium may answer the
+  dispose before its pages' sessions end, a stock WebKit context's pages end with its process's connection, and
+  Firefox answers `browser.removeUserContext` after the `contextDestroyed` events of its pages, which the adapter
+  folds before it reports the end. So each adapter reports the end as a fact, as it does a page's, and L1 has one wait
+  for both, with one set of warnings.
+- **Rejected:** bounding each adapter's wait in its own way, three mechanisms with three warnings and the dispose
+  still in the finalizer's fiber; keeping the wait in the adapter and racing the whole call in L1, whose warning
+  couldn't tell the dispose's reply from the pages' ends; a deadline on the finalizer, which would interrupt the
+  dispose; and `Page.close` waiting for the reply first, which reports a closed page as a timeout.
 
 **An operation keeps a record, and its `Timeout` comes from it.** An operation notes facts as they happen: what it
 observed, that its input or call may have reached the browser, that the browser confirmed it. Its `Timeout` takes its

@@ -572,15 +572,15 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         made = downloads.value
         yield* ledger.add({ _tag: "Directory", path: downloads.value })
       }
-      const created = yield* Effect.acquireRelease(
-        adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: false }).pipe(Effect.catch(failed)),
-        (context) =>
-          adapter.removeUserContext(context).pipe(
-            Effect.ignore,
-            Effect.ensuring(Effect.sync(() => contexts.delete(context)))
-          )
+      // Removed when the scope closes, waiting for its end under a budget of its own (`Model.remove`)
+      const entry = yield* Effect.acquireRelease(
+        adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: false }).pipe(
+          Effect.catch(failed),
+          Effect.flatMap(model.context)
+        ),
+        (entry) => model.remove(entry).pipe(Effect.ensuring(Effect.sync(() => contexts.delete(entry.id))))
       )
-      const entry = yield* model.context(created)
+      const created = entry.id
       // Owned contexts decide dialogs no handler claims at once, and cancel file choosers no handler answers
       // (CONCEPTS.md §5)
       const settings = (yield* entry.state.get).settings

@@ -1,7 +1,8 @@
 /**
- * Closing a page through the public API, over the fake browser with its close replaced: `Page.close` is done once
- * the page ends, whether or not the browser has answered, keeps its `Timeout` and its refusals, and never cuts the
- * close short.
+ * Closing a page and removing a context through the public API, over the fake browser with its close or removal
+ * replaced: `Page.close` is done once the page ends, whether or not the browser has answered, keeps its `Timeout`
+ * and its refusals, and never cuts the close short; a context's scope, as it closes, waits for the context's end
+ * under a budget of its own, warns, and never cuts the removal short.
  */
 import { assert, describe, it } from "@effect/vitest"
 import { Browser, Deadline, Dialog } from "@usestrider/browser"
@@ -11,6 +12,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import { TestClock } from "effect/testing"
 import type * as Dialogs from "../src/Dialog.ts"
@@ -140,5 +142,39 @@ describe("Page.close", () => {
             )
             : fake.resolve(decided, decision)
       }))))
+    }))
+})
+
+describe("a context's removal", () => {
+  it.effect("stops waiting at its own budget as its scope closes, warning, and doesn't cut the removal short", () =>
+    Effect.gen(function*() {
+      const interrupted = yield* Deferred.make<void>()
+      const warnings: Array<string> = []
+      const logger = Logger.make((options) => {
+        const message = (options.message as ReadonlyArray<string>).join(" ")
+        if (options.logLevel === "Warn" && message.startsWith("Context ")) warnings.push(message)
+      })
+      yield* Effect.gen(function*() {
+        // Its finalizer is added inside Browser.newContext, here under a deadline of a second, which isn't its budget
+        const removal = yield* Effect.scoped(Browser.newContext().pipe(Deadline.within("1 second"))).pipe(
+          Effect.map((context) => context.id),
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* TestClock.adjust("2 seconds")
+        assert.isUndefined(removal.pollUnsafe())
+        assert.deepStrictEqual(warnings, [])
+        yield* TestClock.adjust("28 seconds")
+        const context = yield* Fiber.join(removal)
+        assert.deepStrictEqual(warnings, [
+          `Context ${context} is still being removed after 15s: the browser hasn't answered the command to remove ` +
+          "it; its removal waits up to 30s for the context to end",
+          `Context ${context} didn't end within 30s of its removal: the browser hasn't answered the command to ` +
+          "remove it; its removal stopped waiting"
+        ])
+        assert.isFalse(yield* Deferred.isDone(interrupted))
+      }).pipe(
+        Effect.provide(layer(() => ({ removeUserContext: () => Effect.never.pipe(noting(interrupted)) }))),
+        Effect.provideService(Logger.CurrentLoggers, new Set([logger]))
+      )
     }))
 })
