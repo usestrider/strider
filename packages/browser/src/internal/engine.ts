@@ -1170,11 +1170,11 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /** Text inputs whose value is typed; the other input types have it set. */
-  const TYPED = new Set(["", "text", "search", "email", "password", "tel", "url", "number"])
+  const TYPED = new Set(["text", "search", "email", "password", "tel", "url", "number"])
 
   const typed = (element: Element): element is HTMLInputElement | HTMLTextAreaElement =>
     element instanceof HTMLTextAreaElement ||
-    (element instanceof HTMLInputElement && TYPED.has(element.getAttribute("type")?.toLowerCase() ?? ""))
+    (element instanceof HTMLInputElement && TYPED.has(element.type))
 
   const SET = new Set(["date", "datetime-local", "month", "week", "time", "color", "range"])
 
