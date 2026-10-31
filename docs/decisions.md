@@ -327,6 +327,8 @@ along with negative indexing, which removes a useful selection.
 index. Rejected: canonicalizing `nth(0)` to `first` and `nth(-1)` to `last`, which hides the call a user
 needs to find and, for a negative index, would name a different selection.
 
+**Checked and selected are independent states.** All supported ARIA checkable roles, including option and treeitem, read `aria-checked`, with an absent value meaning false. Native checkbox/radio inputs keep their checked property; native options keep their selected property. Reads, expectations, actions and snapshots agree. Rejected: using `aria-selected` as checked for option/treeitem, which conflates two independent states and makes check/uncheck reject or skip valid controls; suppressing checked in snapshots of selectable roles, which hides a state the other operations observe.
+
 ## Agents
 
 **Page-provided tools (WebMCP) are designed, and built once a browser ships the API.** A page registers tools with

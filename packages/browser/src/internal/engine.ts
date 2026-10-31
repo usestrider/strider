@@ -1209,8 +1209,7 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const role = roleOf(element)
     if (role === null || !CHECKABLE_ROLES.has(role)) return null
-    const state = element.getAttribute(role === "option" || role === "treeitem" ? "aria-selected" : "aria-checked")
-    return state === null ? (role === "option" || role === "treeitem" ? null : false) : state === "true"
+    return element.getAttribute("aria-checked") === "true"
   }
 
   /** The element with focus, through open shadow roots. */
@@ -1745,9 +1744,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   const statesOf = (element: Element, role: string | null): Array<string> => {
     const states: Array<string> = []
-    const selectable = role === "option" || role === "treeitem" || role === "tab" || role === "gridcell" ||
-      role === "row"
-    if (!selectable && checkedOf(element) === true) states.push("checked")
+    if (checkedOf(element) === true) states.push("checked")
     if (element.getAttribute("aria-expanded") === "true") states.push("expanded")
     if (
       element.getAttribute("aria-selected") === "true" ||

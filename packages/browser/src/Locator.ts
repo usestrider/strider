@@ -540,6 +540,12 @@ export interface ReadonlyLocator
   /**
    * Whether the one match is checked now.
    *
+   * **Details**
+   *
+   * Native checkbox and radio inputs use their checked property. ARIA roles `checkbox`, `radio`, `switch`,
+   * `menuitemcheckbox`, `menuitemradio`, `option` and `treeitem` use `aria-checked`; an absent value is false.
+   * Selection through `aria-selected` is independent. Other elements fail with `WrongElement`.
+   *
    * **Example** (Reading a preference)
    *
    * ```ts import.meta.vitest
@@ -906,6 +912,7 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
+   * Checked state follows `isChecked`, including its supported ARIA roles and absent `aria-checked` default.
    * If it's already checked, nothing is sent. Otherwise it clicks, then reads the state again: a click that didn't
    * check it fails with `StateUnchanged{expected: "checked"}`. Any other element fails at once with `WrongElement`.
    *
@@ -923,7 +930,8 @@ export interface Locator extends ReadonlyLocator {
   check(options?: PointerOptions | undefined): ActionEffect
   /**
    * Unchecks a checkbox or an ARIA checkable, and confirms it became unchecked. Checks: the same as `click`. It
-   * works as `check` does, failing with `StateUnchanged{expected: "unchecked"}`.
+   * works as `check` does, using the checked state described by `isChecked` and failing with
+   * `StateUnchanged{expected: "unchecked"}`.
    *
    * **Example** (Opting out of offers)
    *

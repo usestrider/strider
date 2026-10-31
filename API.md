@@ -447,6 +447,8 @@ select nothing; strict reads fail with `NoMatch` and actions wait for a match un
 and `last` select the first and last match separately, and select nothing when the list is empty. Errors and
 traces preserve the selection as written: `nth(0)`, `nth(-1)`, `first` or `last`.
 
+Checked state uses the native checked property for checkbox and radio inputs. ARIA roles `checkbox`, `radio`, `switch`, `menuitemcheckbox`, `menuitemradio`, `option` and `treeitem` use `aria-checked`, with an absent value treated as false. `aria-selected` is independent: snapshots report checked and selected separately, and native options retain their native selected state.
+
 ```ts
 interface ReadonlyLocator extends Queries<ReadonlyLocator>, Pipeable, Equal.Equal, Inspectable {
   // queries are relative to this locator
