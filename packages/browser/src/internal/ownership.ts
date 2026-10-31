@@ -20,6 +20,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
+import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import type * as Model from "./model.ts"
@@ -29,6 +30,14 @@ export interface Ownership {
   /** The adapter, once the model has it: a release before then waits for it. */
   readonly connected: Deferred.Deferred<Adapter.AdapterConnection>
   readonly attach: (adapter: Adapter.AdapterConnection) => Effect.Effect<void>
+  /**
+   * Sends a page's close in a fiber of the model's scope, which runs to its own end however long its sender waits,
+   * and returns the fiber: `Page.close` waits for the page's end, under its own deadline, rather than the reply.
+   */
+  readonly closeApart: (
+    page: Target.NavigableId,
+    options: { readonly runBeforeUnload: boolean }
+  ) => Effect.Effect<Fiber.Fiber<void, Adapter.AdapterError>>
   /**
    * Closes a page its owner's scope released, unless it already closed, and waits for the page's end under the
    * default budget: a page created right after must not meet a browser still closing this one (QUIRKS.md, Q119
@@ -58,6 +67,11 @@ export const make = Effect.fnUntraced(function*() {
   const ownership: Ownership = {
     connected,
     attach: (adapter) => Effect.asVoid(Deferred.succeed(connected, adapter)),
+    closeApart: (page, options) =>
+      Effect.flatMap(
+        Deferred.await(connected),
+        (adapter) => Effect.forkIn(adapter.closePage(page, options), modelScope)
+      ),
     release: Effect.fnUntraced(
       function*(page: Model.PageEntry, by?: Scope.Scope) {
         const state = yield* page.state.get

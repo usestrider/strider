@@ -329,11 +329,13 @@ export const make = Effect.fnUntraced(function*(options: {
       status: state.status._tag === "Closed" ? state.status : { _tag: "Closed", reason, url: state.status.url },
       frames: []
     }))
-    yield* Deferred.succeed(page.closed, reason)
+    // Out of its context's pages before its end is told, so whoever waits for the end, as `Page.close` does, finds
+    // it gone from the context too
     yield* update(page.contextEntry.state, (state) => ({
       ...state,
       pages: state.pages.filter((each) => each !== page)
     }))
+    yield* Deferred.succeed(page.closed, reason)
     for (const document of Array.from(documents.values())) {
       if (document.navigable === page.id) yield* endDocument(document.id, reason)
     }

@@ -218,6 +218,15 @@ still open, and when the browser refused the close.
   with the release; a setting of its own for the warning, a second knob for one wait; and waiting out the budget
   after a refused close, which waits for nothing.
 
+`Page.close` waits the same way. It sends its close in a fiber of the model's scope and is done once the page ends,
+whether or not the browser has answered; being an operation, it keeps its own deadline, and fails with `Timeout` only
+when the page hasn't ended by then, with the browser's refusal, or with `CloseCanceled` once a handler stays.
+
+- **Why.** `Page.close` waited for the reply and then the end inside one bound, so a page that ended before a late
+  reply failed the close with `Timeout` though it was closed, and the bound interrupted the close, between Chromium's
+  two commands if it fell there.
+- **Rejected:** waiting for the reply first, which reports a closed page as a timeout.
+
 **An operation keeps a record, and its `Timeout` comes from it.** An operation notes facts as they happen: what it
 observed, that its input or call may have reached the browser, that the browser confirmed it. Its `Timeout` takes its
 phase from them, by the meanings `Deadline.Timeout` documents, and a wait inside it is bounded in one place, the
