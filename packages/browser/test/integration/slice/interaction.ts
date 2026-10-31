@@ -80,6 +80,82 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      // ROOK-117: selection and checked state are independent on these ARIA roles.
+      for (const role of ["option", "treeitem"] as const) {
+        for (
+          const [state, attributes, expected] of [
+            ["checked", "aria-checked=\"true\" aria-selected=\"false\"", true],
+            ["unchecked", "aria-checked=\"false\" aria-selected=\"true\"", false],
+            ["absent", "aria-selected=\"true\"", false]
+          ] as const
+        ) {
+          it.effect(`reads ${role} checked state from aria-checked when ${state}`, () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() => `<div id="target" role="${role}" ${attributes}>Item</div>`)
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const target = page.locator("#target")
+                assert.strictEqual(yield* target.isChecked, expected)
+              }))
+            }), timeout)
+        }
+
+        it.effect(`expects ${role} checked state independently of selection`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="target" role="${role}" aria-checked="true" aria-selected="false">Item</div>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#target").pipe(Expect.toBeChecked, Deadline.within("1 second"))
+            }))
+          }), timeout)
+
+        for (const initial of [undefined, false, true] as const) {
+          const checked = initial !== true
+          it.effect(
+            `${checked ? "checks" : "unchecks"} ${role} with aria-checked ${String(initial)}`,
+            () =>
+              Effect.gen(function*() {
+                const { url } = yield* fixture(() =>
+                  `<div id="target" role="${role}" ${initial === undefined ? "" : `aria-checked="${initial}"`} ${
+                    initial === undefined ? "" : `aria-selected="${!initial}"`
+                  } onclick="this.setAttribute('aria-checked', '${checked}')">Item</div>`
+                )
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const target = page.locator("#target")
+                  yield* checked ? target.check() : target.uncheck()
+                  assert.deepStrictEqual(yield* target.readAttribute("aria-checked"), Option.some(String(checked)))
+                }))
+              }),
+            timeout
+          )
+        }
+
+        it.effect(`snapshots ${role} checked and selected independently`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div role="${role}" aria-label="Checked" aria-checked="true" aria-selected="false">Checked</div><div role="${role}" aria-label="Selected" aria-checked="false" aria-selected="true">Selected</div>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const snapshot = yield* page.snapshot()
+              const nodes = [...snapshot.refs.values()]
+              const checked = nodes.find((node) => node.name._tag === "Accessible" && node.name.value === "Checked")!
+              const selected = nodes.find((node) => node.name._tag === "Accessible" && node.name.value === "Selected")!
+              assert.isTrue(checked.states.has("checked"))
+              assert.isFalse(checked.states.has("selected"))
+              assert.isFalse(selected.states.has("checked"))
+              assert.isTrue(selected.states.has("selected"))
+            }))
+          }), timeout)
+      }
+
       it.effect("chooses options, checks boxes and sets files", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
