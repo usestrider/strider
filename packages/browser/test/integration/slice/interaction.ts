@@ -123,6 +123,70 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      // ROOK-118: state belongs to the control; pointer input still belongs to the label.
+      for (const association of ["explicit", "wrapping"] as const) {
+        for (const checked of [true, false]) {
+          it.effect(
+            `${checked ? "checks" : "unchecks"} a ${association} label beside its link`,
+            () =>
+              Effect.gen(function*() {
+                const input = `<input id="box" type="checkbox" ${
+                  checked ? "" : "checked"
+                } style="position:absolute;left:10px;top:10px">`
+                const { url } = yield* fixture(() =>
+                  `${association === "explicit" ? input : ""}<label id="label" ${
+                    association === "explicit" ? "for=\"box\"" : ""
+                  } style="position:absolute;left:200px;top:100px;width:300px;height:40px" onpointerdown="${
+                    say(
+                      "event.target.id + ':' + (event.clientX - 200) + ':' + (event.clientY - 100) + ':' + event.isTrusted"
+                    )
+                  }">${
+                    association === "wrapping" ? input : ""
+                  }<a href="#wrong" style="display:inline-block;width:240px">A long link</a> Toggle</label>${out}`
+                )
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const label = page.locator("#label")
+                  const options = { position: { x: 280, y: 20 } }
+                  yield* checked ? label.check(options) : label.uncheck(options)
+                  assert.strictEqual(yield* page.locator("#box").isChecked, checked)
+                  assert.strictEqual(yield* page.locator("#out").readText, "label:280:20:true")
+                  // An already-correct state sends no pointer input, even over the embedded link.
+                  yield* checked
+                    ? label.check({ position: { x: 20, y: 20 } })
+                    : label.uncheck({ position: { x: 20, y: 20 } })
+                  assert.strictEqual(yield* page.locator("#box").isChecked, checked)
+                  assert.strictEqual(yield* page.locator("#out").readText, "label:280:20:true")
+                  yield* page.pipe(Expect.toHaveURL(url))
+                }))
+              }),
+            timeout
+          )
+        }
+      }
+
+      it.effect("rejects labels without an associated checkable control", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<label id="missing" for="absent">Missing</label><label id="text" for="field">Text</label><input id="field"><label id="plain">Plain</label>${out}<script>document.addEventListener('pointerdown', () => { ${
+              say("'pointer sent'")
+            } })</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            for (const id of ["missing", "text", "plain"]) {
+              const label = page.locator(`#${id}`)
+              for (const action of [label.check(), label.uncheck()]) {
+                const error = yield* action.pipe(Effect.flip)
+                assert(Locator.isLocatorError(error) && error.reason._tag === "WrongElement", String(error))
+              }
+            }
+            assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+          }))
+        }), timeout)
+
       it.effect("double-clicks, hovers, taps, and holds modifiers where the backend can", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
