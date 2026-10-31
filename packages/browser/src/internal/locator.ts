@@ -826,7 +826,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           new Reason.InvalidInput({
             input: "value",
             expected: `a value ${final.element} takes`,
-            hint: "The input refused the value; a date input takes a date such as 2026-10-23"
+            hint: "Use a value the input accepts, such as a finite number for number inputs or 2026-10-23 for dates"
           }),
           id
         )
@@ -1043,6 +1043,17 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     options: Locator.ActionOptions | undefined
   ) {
     const text = Redacted.isRedacted(value) ? Redacted.value(value) : value
+    if (typeof text !== "string") {
+      return Effect.fail(this.error(
+        operation,
+        new Reason.InvalidInput({
+          input: "value",
+          expected: "a string or Redacted string",
+          hint: "Fill requires text"
+        }),
+        Operation.idNow()
+      ))
+    }
     return this.act(
       operation,
       options,

@@ -519,6 +519,13 @@ declare const relative: Queries<RelativeLocator>
 page.getByRole("row").filter({ has: Locator.relative.getByRole("button", { name: "Delete" }) })
 ```
 
+`fill` requires a string (also inside `Redacted`); other runtime values fail with `InvalidInput` before browser dispatch.
+For number inputs, it accepts empty clearing or a finite HTML floating-point string: optional minus, digits with an
+optional fractional part (or a leading decimal point and digits), and an optional exponent (`1e2`). Whitespace,
+a leading plus, a trailing decimal point, hexadecimal and non-finite values fail with `InvalidInput` before focus,
+selection or mutation. The input's min, max and step do not restrict fill. Redacted values never appear in diagnostics.
+
+
 - **How a locator finds elements** is CONCEPTS.md §8, Queries: one engine of ours, in each document's utility world, the same on every backend. Text is text content with whitespace collapsed, never `innerText`; `getByText` finds the smallest element that says it; `getByRole` uses the explicit or HTML-AAM implicit role and the accname 1.2 name.
 - **Actionability is the CONCEPTS.md §8 predicate set**, evaluated in one injected round trip per attempt. An attempt checks at each animation frame, in the page, for up to a second; when the checks pass, the action takes the page's input permit, checks once more, and dispatches (CONCEPTS.md §5, Actions). At the deadline it fails with `Timeout{phase}`, `waitingForCondition`, or `resolving` when nothing ever matched, whose hint explains the last reason: "Another element covers the element's action point: div.toast "Saved"". Each action documents its checks:
   - `click`, `dblclick`, `tap`, `check`, `uncheck`, `dragTo`: visible, stable, enabled, notInert, inViewport (scrolling into view), receivesPointer; a drag's target is checked visible, enabled, notInert and inViewport;
