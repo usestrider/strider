@@ -144,11 +144,13 @@ describe("BidiAdapter state", () => {
       assert.strictEqual(nextEnded!.outcome._tag, "Committed")
     }))
 
-  for (const scenario of [
-    { name: "matches an ordinary error-page commit to its intended URL", started: false, matches: true },
-    { name: "keeps a started navigation correlated through a redirected error page", started: true, matches: false },
-    { name: "keeps redirect URL fallback on navigationStarted", started: true, matches: true }
-  ]) {
+  for (
+    const scenario of [
+      { name: "matches an ordinary error-page commit to its intended URL", started: false, matches: true },
+      { name: "keeps a started navigation correlated through a redirected error page", started: true, matches: false },
+      { name: "keeps redirect URL fallback on navigationStarted", started: true, matches: true }
+    ]
+  ) {
     it.effect(scenario.name, () =>
       Effect.gen(function*() {
         const { facts, page, state } = yield* withPage()
@@ -184,7 +186,8 @@ describe("BidiAdapter state", () => {
         const committed = facts.find((fact) => fact._tag === "DocumentCommitted" && fact.document === document.id)
         assert.isDefined(committed)
         assert.deepStrictEqual(committed!._tag === "DocumentCommitted" && committed!.createdBy, {
-          _tag: "ErrorPage", navigation: reserved
+          _tag: "ErrorPage",
+          navigation: reserved
         })
       }))
   }

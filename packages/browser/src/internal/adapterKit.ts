@@ -391,11 +391,19 @@ export const unexpect = (expectations: Expectations, id: PageNavigation.Id): boo
   return true
 }
 
-/** The expectation a navigation the browser announced fulfils: the oldest to its URL, else the oldest. */
-export const take = (expectations: Expectations, url: string): Expected | undefined => {
+/** The oldest expectation matching the URL, with an optional fallback for redirects. */
+export const take = (
+  expectations: Expectations,
+  url: string,
+  options?: { readonly fallback?: boolean | undefined }
+): Expected | undefined => {
   const normalized = normalize(url)
   const index = expectations.list.findIndex((expected) => normalize(expected.url) === normalized)
-  return index >= 0 ? expectations.list.splice(index, 1)[0] : expectations.list.shift()
+  return index >= 0
+    ? expectations.list.splice(index, 1)[0]
+    : options?.fallback === false
+    ? undefined
+    : expectations.list.shift()
 }
 
 /**

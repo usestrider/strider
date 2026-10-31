@@ -137,10 +137,10 @@ export const startNavigation = (
   url: string,
   type: Adapter.InitiatedAs,
   sameDocument: boolean,
-  /** A command's expectation, already taken; otherwise the first that matches is. */
-  taken?: { readonly id: PageNavigation.Id; readonly initiatedAs: Adapter.InitiatedAs }
+  /** A command's expectation, already taken; null means no match, undefined takes one here. */
+  taken?: { readonly id: PageNavigation.Id; readonly initiatedAs: Adapter.InitiatedAs } | null
 ): NavigationEntry => {
-  const expected = taken ?? Kit.take(navigable.expected, url)
+  const expected = taken === undefined ? Kit.take(navigable.expected, url) : taken
   const initiatedAs = expected?.initiatedAs ?? type
   const navigation: NavigationEntry = {
     id: expected?.id ?? state.ids.navigation(),

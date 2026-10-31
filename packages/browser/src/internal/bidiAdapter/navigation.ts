@@ -81,9 +81,20 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (navigable === undefined) return
       const url = params.url ?? ""
       const bidi = params.navigation ?? `committed:${navigable.bidi}:${url}`
-      const navigation = state.navigations.get(bidi) ??
-        startNavigation(state, navigable, bidi, intended(url), "crossDocument", false)
       const failed = errorPage(url)
+      // ROOK-130: an unannounced error page may belong to an already rejected command.
+      // Its intended URL can match an expectation, but it must not take another command's id.
+      // A known navigation keeps its id through redirects, regardless of the error page's URL.
+      const navigation = state.navigations.get(bidi) ??
+        startNavigation(
+          state,
+          navigable,
+          bidi,
+          intended(url),
+          "crossDocument",
+          false,
+          failed ? Kit.take(navigable.expected, intended(url), { fallback: false }) ?? null : undefined
+        )
       const document = commit(
         state,
         navigable,
