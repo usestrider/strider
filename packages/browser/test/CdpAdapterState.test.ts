@@ -524,6 +524,41 @@ describe("CdpAdapter routed response source", () => {
       }
     }
   }
+  for (const phase of ["request", "response"]) {
+    it.effect(`keeps an early ${phase} pause of a repeated URL's redirect hop off the first hop when Fetch names a previous request`, () =>
+      Effect.gen(function*() {
+        const { facts, state, target } = yield* withPage()
+        const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+        const event = { state, target }
+        // The first hop was never paused, so no Fetch id is known for it; Chromium names the request this hop
+        // redirected from even so (comment #35's probe), which only a later hop has.
+        handlers.apply("Network.requestWillBeSent", sent(`${origin}/redirect`), event)
+        handlers.apply("Fetch.requestPaused", {
+          requestId: "F2",
+          redirectedRequestId: "unobserved-previous-fetch-id",
+          networkId: "R1",
+          frameId: "T1",
+          resourceType: "Fetch",
+          request: sent(`${origin}/redirect`).request,
+          ...(phase === "response" ? { responseStatusCode: 200, responseHeaders: [] } : {})
+        }, event)
+        yield* Obligations.resolve(state, [...state.obligations.keys()][0]!, {
+          _tag: "Fulfill",
+          status: 200,
+          headers: {},
+          body: new Uint8Array()
+        })
+        handlers.apply(
+          "Network.requestWillBeSent",
+          sent(`${origin}/redirect`, { location: `${origin}/redirect`, hasExtraInfo: false }),
+          event
+        )
+        handlers.apply("Network.responseReceived", landedAs({ hasExtraInfo: false, fromDiskCache: false }), event)
+        yield* state.buffer.flush
+        const responses = facts.flatMap((fact) => fact._tag === "ResponseReceived" ? [fact.response.servedBy] : [])
+        assert.deepStrictEqual(responses, ["network", "route"])
+      }))
+  }
   it.effect("keeps a response pause on its Fetch request after a URL override", () =>
     Effect.gen(function*() {
       const { facts, state, target } = yield* withPage()
