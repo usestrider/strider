@@ -13,11 +13,11 @@ import * as Network from "../src/internal/cdpAdapter/network.ts"
 import * as Obligations from "../src/internal/cdpAdapter/obligations.ts"
 import * as Responses from "../src/internal/cdpAdapter/responses.ts"
 import * as State from "../src/internal/cdpAdapter/state.ts"
-import * as Tree from "../src/internal/cdpAdapter/tree.ts"
 import * as Targets from "../src/internal/cdpAdapter/targets.ts"
-import * as Protocol from "../src/protocol/Protocol.ts"
+import * as Tree from "../src/internal/cdpAdapter/tree.ts"
 import * as Groups from "../src/internal/objectGroups.ts"
 import type * as ProtocolClient from "../src/internal/protocolClient.ts"
+import * as Protocol from "../src/protocol/Protocol.ts"
 import * as Target from "../src/Target.ts"
 
 const session = { key: "S1", send: () => Effect.succeed({}) } as unknown as ProtocolClient.Session
@@ -427,7 +427,7 @@ describe("CdpAdapter routed response source", () => {
         })
         if (end === "page") Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test")
         else if (end === "session") Targets.ended(state, session, new Protocol.SessionEnded({ why: "targetDestroyed" }))
-        else { handlers.apply(end === "failure" ? "Network.loadingFailed" : "Network.loadingFinished", {
+        else {handlers.apply(end === "failure" ? "Network.loadingFailed" : "Network.loadingFinished", {
             requestId: "R1",
             timestamp: 0,
             errorText: "net::ERR_FAILED",
@@ -442,13 +442,14 @@ describe("CdpAdapter routed response source", () => {
         assert.strictEqual(responses[0]!.servedBy, "network")
       }))
   }
-  for (const early of [false, true]) {
-    it.effect(`keeps an early redirected pause off the previous hop with first pause ${early ? "before" : "after"} request`, () =>
+  for (const first of ["before", "after", "unwanted"]) {
+    it.effect(`keeps an early redirected pause off the previous hop with first pause ${first} request`, () =>
       Effect.gen(function*() {
-        const { facts, state, target } = yield* withPage()
+        const { facts, state, target: original, page } = yield* withPage()
+        const target = first === "unwanted" ? { ...original, page } : original
         const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
         const event = { state, target }
-        if (!early) handlers.apply("Network.requestWillBeSent", sent(`${origin}/redirect`), event)
+        if (first === "after") handlers.apply("Network.requestWillBeSent", sent(`${origin}/redirect`), event)
         const pause = (requestId: string, redirectedRequestId?: string) =>
           handlers.apply("Fetch.requestPaused", {
             requestId,
@@ -459,11 +460,15 @@ describe("CdpAdapter routed response source", () => {
             request: sent(`${origin}/redirect`).request
           }, event)
         pause("F1")
-        yield* Obligations.resolve(state, [...state.obligations.keys()][0]!, {
-          _tag: "Continue",
-          overrides: Option.none()
+        if (first === "unwanted") {
+          assert.strictEqual(state.obligations.size, 0)
+          state.registry.add({ _tag: "Page", page: page.id }, {
+            _tag: "Intercept", patterns: ["*"], phases: ["request"]
+          }, state.ids.registration())
+        } else yield* Obligations.resolve(state, [...state.obligations.keys()][0]!, {
+          _tag: "Continue", overrides: Option.none()
         })
-        if (early) handlers.apply("Network.requestWillBeSent", sent(`${origin}/redirect`), event)
+        if (first !== "after") handlers.apply("Network.requestWillBeSent", sent(`${origin}/redirect`), event)
         pause("F2", "F1")
         yield* Obligations.resolve(state, [...state.obligations.keys()][0]!, {
           _tag: "Fulfill",
