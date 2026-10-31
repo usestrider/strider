@@ -415,8 +415,8 @@ export interface Model {
   /** Makes `scope` the page's owner, which releases it, and its popups, as it closes. */
   readonly own: (page: PageEntry, scope: Scope.Scope) => Effect.Effect<void>
   /**
-   * Closes a page its owner's scope released, and waits for the close under the default budget; with `by`, only
-   * while `by` still owns it.
+   * Closes a page its owner's scope released, and waits for the page's end under the default budget; with `by`,
+   * only while `by` still owns it.
    */
   readonly release: (page: Target.NavigableId, by?: Scope.Scope) => Effect.Effect<void>
   /** Moves a page's ownership to `to`, which then releases it (CONCEPTS.md §3, transfers). */

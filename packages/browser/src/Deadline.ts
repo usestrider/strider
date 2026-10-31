@@ -157,6 +157,13 @@ const BrowserClockEffect = Effect.service(BrowserClock.CurrentClock)
 /**
  * Reference to the budget an operation gets when no deadline encloses it; 30 seconds unless set.
  *
+ * **Details**
+ *
+ * It also bounds closing a page you own when its scope closes, whatever deadline encloses the scope: the close
+ * waits up to this long for the browser to report the page ended, then stops waiting and leaves the page as it is.
+ * Halfway through, a close still waiting logs a warning naming the page and whether the browser has answered the
+ * command to close it, and it warns again if it stops waiting with the page still open.
+ *
  * @stability unstable
  * @category references
  * @since 0.1.0

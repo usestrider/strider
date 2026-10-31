@@ -197,6 +197,27 @@ operation, so cleanup happens after a deadline passed). A new method doesn't com
   operations, which cuts a command short of a longer deadline and needs a reason of its own for "no reply"; and
   marking a read as sent, which would tell the caller something may have changed when nothing did.
 
+**A page's release waits once, for the page's end.** When its owner's scope closes, an owned page's close is sent
+in a fiber of the model's scope, and the release waits for the page's end, not for the close's reply first, under a
+budget of its own: `Deadline.DefaultBudget` from when it starts. The close runs to its own end, its reply bounded by
+`Protocol.CommandTimeout`, however the release ends. A close that fails without ending the page ends the wait, since
+nothing else will. Halfway through its budget, a release still waiting logs a warning naming the page and what it
+waits on, the close's reply or, once that came, the page's end; it warns again if it stops waiting with the page
+still open, and when the browser refused the close.
+
+- **Why.** The release waited for the reply, up to `CommandTimeout`, and only then for the end, up to its budget, so
+  a browser slow on both kept a test's teardown about a minute (a WebKit frame test, under load, once). The page's
+  end is what a page created next must not meet unfinished (QUIRKS.md, Q119 and Q135); the reply adds nothing once it
+  came. The budget was the deadline in context, and a page's release, a finalizer of the scope it was created in,
+  captured `UserContext.newPage`'s: a page closed after that deadline didn't wait for its end at all, and one closed
+  before it waited what was left. A release is cleanup, which no operation bounds. A wait that stops without a word
+  leaves a slow browser invisible, so it says which step it is stuck on; half the budget is derived from the bound
+  itself, so a caller who sets `DefaultBudget` moves both.
+- **Rejected:** a deadline of the release's own on the close, which would cut cleanup short (a close interrupted
+  between Chromium's two commands never sends the second); forking the close as the release's child, which ends it
+  with the release; a setting of its own for the warning, a second knob for one wait; and waiting out the budget
+  after a refused close, which waits for nothing.
+
 **An operation keeps a record, and its `Timeout` comes from it.** An operation notes facts as they happen: what it
 observed, that its input or call may have reached the browser, that the browser confirmed it. Its `Timeout` takes its
 phase from them, by the meanings `Deadline.Timeout` documents, and a wait inside it is bounded in one place, the
