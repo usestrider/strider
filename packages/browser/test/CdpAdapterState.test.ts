@@ -402,8 +402,8 @@ describe("CdpAdapter headers of a hop without ExtraInfo", () => {
 
 describe("CdpAdapter routed response source", () => {
   // ROOK-136: the failing order permutes captured events; it was not captured in the live failure.
-  for (const early of [true, false]) {
-    it.effect(`attributes a fulfilled response to its route with ${early ? "pause before request" : "request before pause"}`, () =>
+  for (const order of ["pause before request", "request before pause", "fulfill before request"]) {
+    it.effect(`attributes a fulfilled response to its route with ${order}`, () =>
       Effect.gen(function*() {
         const { facts, state, target } = yield* withPage()
         const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
@@ -419,9 +419,9 @@ describe("CdpAdapter routed response source", () => {
             resourceType: "Fetch",
             request: request.request
           }, event)
-        if (early) pause()
-        handlers.apply("Network.requestWillBeSent", request, event)
-        if (!early) pause()
+        if (order !== "request before pause") pause()
+        if (order !== "fulfill before request") handlers.apply("Network.requestWillBeSent", request, event)
+        if (order === "request before pause") pause()
         const obligations = [...state.obligations.values()]
         assert.strictEqual(obligations.length, 1)
         const obligation = obligations[0]!
@@ -432,11 +432,19 @@ describe("CdpAdapter routed response source", () => {
           headers: { "content-type": "text/plain" },
           body: new TextEncoder().encode("from the route")
         })
+        if (order === "fulfill before request") handlers.apply("Network.requestWillBeSent", request, event)
         handlers.apply("Network.responseReceived", landedAs({ hasExtraInfo: false, fromDiskCache: false }), event)
         yield* state.buffer.flush
         const responses = facts.flatMap((fact) => fact._tag === "ResponseReceived" ? [fact.response] : [])
         assert.strictEqual(responses.length, 1)
         assert.strictEqual(responses[0]!.servedBy, "route")
+        handlers.apply("Network.requestWillBeSent", sent(`${origin}/next`, {
+          from: "/landed", location: "/next", hasExtraInfo: false
+        }), event)
+        handlers.apply("Network.responseReceived", landedAs({ hasExtraInfo: false, fromDiskCache: false }), event)
+        yield* state.buffer.flush
+        const last = facts.filter((fact) => fact._tag === "ResponseReceived").at(-1)!
+        assert.strictEqual(last.response.servedBy, "network")
       }))
   }
 })
