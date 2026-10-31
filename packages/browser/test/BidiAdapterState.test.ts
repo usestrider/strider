@@ -49,7 +49,8 @@ const withPage = Effect.fnUntraced(function*(
   replies: Readonly<Record<string, unknown>> = {},
   failures: Readonly<Record<string, () => Protocol.ProtocolError>> = {}
 ) {
-  const buffer = yield* Kit.makeFactBuffer(() => Effect.void)
+  const facts: Array<Adapter.Fact> = []
+  const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
   buffer.connect(control)
   const { root, sent } = session(replies, failures)
   const state = State.make({
@@ -79,7 +80,7 @@ const withPage = Effect.fnUntraced(function*(
   state.realms.set(realm.bidi, realm)
   state.realmsById.set(realm.id, realm)
   Tree.addWindowRealm(state, realm, document)
-  return { state, page, document, realm, sent }
+  return { state, page, document, realm, sent, facts }
 })
 
 describe("BidiAdapter state", () => {
@@ -142,6 +143,51 @@ describe("BidiAdapter state", () => {
       assert.isDefined(nextEnded)
       assert.strictEqual(nextEnded!.outcome._tag, "Committed")
     }))
+
+  for (const scenario of [
+    { name: "matches an ordinary error-page commit to its intended URL", started: false, matches: true },
+    { name: "keeps a started navigation correlated through a redirected error page", started: true, matches: false },
+    { name: "keeps redirect URL fallback on navigationStarted", started: true, matches: true }
+  ]) {
+    it.effect(scenario.name, () =>
+      Effect.gen(function*() {
+        const { facts, page, state } = yield* withPage()
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        const url = "http://example.com/"
+        const reserved = Kit.expect(state.ids, page.expected, url)
+        const next = Kit.expect(state.ids, page.expected, "http://next.example/")
+        const errorUrl = "about:neterror?e=dnsNotFound&u=" +
+          encodeURIComponent(scenario.matches ? url : "http://redirect.example/")
+        if (scenario.started) {
+          handlers.apply("browsingContext.navigationStarted", {
+            context: "C1",
+            navigation: "N1",
+            timestamp: 1,
+            url: "http://redirect.example/"
+          }, { state })
+          assert.strictEqual(state.navigations.get("N1")?.id, reserved)
+        }
+        handlers.apply("browsingContext.navigationCommitted", {
+          context: "C1",
+          navigation: "N1",
+          timestamp: 2,
+          url: errorUrl
+        }, { state })
+        const document = page.document!
+        assert.strictEqual(document.url, errorUrl)
+        assert.deepStrictEqual(page.expected.list.map((entry) => entry.id), [next])
+        // The error document belongs to the reserved navigation even without a start event.
+        yield* state.buffer.flush
+        const ended = facts.find((fact) => fact._tag === "NavigationEnded" && fact.navigation === reserved)
+        assert.isDefined(ended)
+        assert.strictEqual(ended!._tag === "NavigationEnded" && ended!.outcome._tag, "Failed")
+        const committed = facts.find((fact) => fact._tag === "DocumentCommitted" && fact.document === document.id)
+        assert.isDefined(committed)
+        assert.deepStrictEqual(committed!._tag === "DocumentCommitted" && committed!.createdBy, {
+          _tag: "ErrorPage", navigation: reserved
+        })
+      }))
+  }
 
   it.effect("fails an operation on a page that ended as Gone, with why it ended", () =>
     Effect.gen(function*() {
