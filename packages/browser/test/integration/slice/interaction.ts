@@ -236,6 +236,39 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      for (const checked of [true, false]) {
+        it.effect(
+          `prefers a label's own state over its conflicting control while ${checked ? "checking" : "unchecking"}`,
+          () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<input id="box" type="checkbox" ${
+                  checked ? "checked" : ""
+                }><label id="label" for="box" role="checkbox" aria-checked="${!checked}" onclick="event.preventDefault(); const next = this.getAttribute('aria-checked') !== 'true'; this.setAttribute('aria-checked', String(next)); document.getElementById('box').checked = !next; ${
+                  say("'clicked ' + event.isTrusted")
+                }">Toggle</label>${out}`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const label = page.locator("#label")
+                // The associated control disagrees even when the requested state already holds.
+                yield* checked ? label.uncheck() : label.check()
+                assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+                yield* checked ? label.check() : label.uncheck()
+                assert.strictEqual(yield* label.isChecked, checked)
+                assert.strictEqual(yield* page.locator("#box").isChecked, !checked)
+                assert.strictEqual(yield* page.locator("#out").readText, "clicked true")
+                yield* checked ? label.check() : label.uncheck()
+                assert.strictEqual(yield* label.isChecked, checked)
+                assert.strictEqual(yield* page.locator("#box").isChecked, !checked)
+                assert.strictEqual(yield* page.locator("#out").readText, "clicked true")
+              }))
+            }),
+          timeout
+        )
+      }
+
       it.effect("double-clicks, hovers, taps, and holds modifiers where the backend can", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
