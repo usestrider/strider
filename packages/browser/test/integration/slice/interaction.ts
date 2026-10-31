@@ -80,6 +80,61 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      // ROOK-119: browsers serialize valid values differently from their source spelling.
+      for (
+        const [type, value, expected] of [
+          ["range", "42.0", "42"],
+          ["range", "1e1", "10"],
+          ["color", "#AbCd00", "#abcd00"],
+          ["datetime-local", "2020-03-02T06:20:00", "2020-03-02T06:20"]
+        ] as const
+      ) {
+        it.effect(`fills normalized ${type} value ${value}`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" type="${type}" min="0" max="100" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#field").fill(value)
+              const actual = yield* page.locator("#field").readValue
+              assert.strictEqual(
+                type === "range" ? Number(actual) : actual,
+                type === "range" ? Number(expected) : expected
+              )
+              assert.strictEqual(yield* page.locator("#events").readText, "input;change;")
+            }))
+          }), timeout)
+      }
+
+      for (
+        const [type, initial, invalid] of [
+          ["range", "25", "soon"],
+          ["range", "25", "101"],
+          ["color", "#123456", "#gggggg"],
+          ["datetime-local", "2020-03-02T05:15", "2020-02-30T06:20"]
+        ] as const
+      ) {
+        it.effect(`rejects invalid ${type} value ${invalid} without mutation or events`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" type="${type}" min="0" max="100" value="${initial}" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const refused = yield* page.locator("#field").fill(invalid).pipe(Effect.flip)
+              assert(Locator.isLocatorError(refused) && refused.reason._tag === "InvalidInput", String(refused))
+              const state = {
+                value: yield* page.locator("#field").readValue,
+                events: yield* page.locator("#events").readText
+              }
+              assert.deepStrictEqual(state, { value: initial, events: "" })
+            }))
+          }), timeout)
+      }
+
       it.effect("chooses options, checks boxes and sets files", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
