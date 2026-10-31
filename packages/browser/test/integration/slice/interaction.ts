@@ -219,6 +219,23 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      // ROOK-118: a label that is itself an ARIA checkable keeps its own state, as it did before labels were followed.
+      it.effect("checks and unchecks a label that is itself an ARIA checkbox", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<label id="switch" role="checkbox" aria-checked="false" onclick="this.setAttribute('aria-checked', String(this.getAttribute('aria-checked') !== 'true'))">Toggle</label>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const label = page.locator("#switch")
+            yield* label.check()
+            assert.strictEqual(yield* label.isChecked, true)
+            yield* label.uncheck()
+            assert.strictEqual(yield* label.isChecked, false)
+          }))
+        }), timeout)
+
       it.effect("double-clicks, hovers, taps, and holds modifiers where the backend can", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
