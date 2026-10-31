@@ -112,6 +112,12 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         const [type, initial, invalid] of [
           ["range", "25", "soon"],
           ["range", "25", "101"],
+          ["range", "25", "-1"],
+          ["range", "25", "42.5"],
+          ["range", "25", ""],
+          ["range", "25", "0x19"],
+          ["range", "25", "Infinity"],
+          ["color", "#123456", ""],
           ["color", "#123456", "#gggggg"],
           ["datetime-local", "2020-03-02T05:15", "2020-02-30T06:20"]
         ] as const
