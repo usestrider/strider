@@ -12,6 +12,7 @@ import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
 import * as Capture from "../src/internal/bidiAdapter/capture.ts"
 import * as Evaluation from "../src/internal/bidiAdapter/evaluation.ts"
+import * as Navigation from "../src/internal/bidiAdapter/navigation.ts"
 import * as State from "../src/internal/bidiAdapter/state.ts"
 import * as Tree from "../src/internal/bidiAdapter/tree.ts"
 import type * as ProtocolClient from "../src/internal/protocolClient.ts"
@@ -82,6 +83,66 @@ const withPage = Effect.fnUntraced(function*(
 })
 
 describe("BidiAdapter state", () => {
+  it.effect("keeps a late failed-navigation commit from taking the next navigation id", () =>
+    Effect.gen(function*() {
+      const facts: Array<Adapter.Fact> = []
+      const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
+      buffer.connect(control)
+      const state = State.make({
+        connect: { sink: () => Effect.void, ownership: "launched" },
+        ids: Kit.makeIds(),
+        buffer,
+        control,
+        root: () => ({ drainObserved: Effect.void }) as ProtocolClient.Session
+      })
+      const page = Tree.addNavigable(state, {
+        context: "C1" as BrowsingContext.BrowsingContext,
+        userContext: "default",
+        originalOpener: null,
+        url: "about:blank"
+      }, false)!
+      const handlers = Navigation.register(Kit.handlers<State.Event>())
+      const refusedUrl = "http://127.0.0.1:9/refused"
+      const refused = Kit.expect(state.ids, page.expected, refusedUrl)
+      // The command has rejected; no navigation event has arrived yet.
+      yield* Kit.neverStarted(buffer, {
+        drained: Effect.void,
+        expectations: page.expected,
+        navigable: page.id,
+        navigation: refused,
+        url: refusedUrl,
+        error: "browsingContext.navigate rejected: Unrecognized (Error: deniedPortAccess)",
+        evidence: "bidi:browsingContext.navigate"
+      })
+      const nextUrl = "http://127.0.0.1:12345/hello"
+      const next = Kit.expect(state.ids, page.expected, nextUrl)
+      // ROOK-130: synthesized ordering inferred from the live failure, not captured protocol traffic.
+      // A late error-page commit arrives after the next command reserved its id.
+      handlers.apply("browsingContext.navigationCommitted", {
+        context: "C1",
+        navigation: "browser-refused",
+        timestamp: 1,
+        url: "about:neterror?e=deniedPortAccess&u=http%3A//127.0.0.1%3A9/refused"
+      }, { state })
+      handlers.apply("browsingContext.navigationStarted", {
+        context: "C1",
+        navigation: "browser-hello",
+        timestamp: 2,
+        url: nextUrl
+      }, { state })
+      handlers.apply("browsingContext.navigationCommitted", {
+        context: "C1",
+        navigation: "browser-hello",
+        timestamp: 3,
+        url: nextUrl
+      }, { state })
+      yield* buffer.flush
+      const ended = facts.filter((fact) => fact._tag === "NavigationEnded")
+      const nextEnded = ended.find((fact) => fact.navigation === next)
+      assert.isDefined(nextEnded)
+      assert.strictEqual(nextEnded!.outcome._tag, "Committed")
+    }))
+
   it.effect("fails an operation on a page that ended as Gone, with why it ended", () =>
     Effect.gen(function*() {
       const { page, state } = yield* withPage()
