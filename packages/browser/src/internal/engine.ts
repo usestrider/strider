@@ -1286,11 +1286,14 @@ export function engine(render: (root: SnapNode) => string) {
 
   /** Focuses an element and selects its contents, so text inserted next replaces them. */
   const selectContents = (element: HTMLElement) => {
-    element.focus()
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      element.focus()
       element.select()
       return
     }
+    let host = element
+    while (host.parentElement?.isContentEditable) host = host.parentElement
+    host.focus()
     const selection = getSelection()
     if (selection === null) return
     const range = document.createRange()
