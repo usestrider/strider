@@ -463,11 +463,14 @@ describe("CdpAdapter routed response source", () => {
         if (first === "unwanted") {
           assert.strictEqual(state.obligations.size, 0)
           state.registry.add({ _tag: "Page", page: page.id }, {
-            _tag: "Intercept", patterns: ["*"], phases: ["request"]
+            _tag: "Intercept",
+            patterns: ["*"],
+            phases: ["request"]
           }, state.ids.registration())
-        } else yield* Obligations.resolve(state, [...state.obligations.keys()][0]!, {
-          _tag: "Continue", overrides: Option.none()
-        })
+        } else {yield* Obligations.resolve(state, [...state.obligations.keys()][0]!, {
+            _tag: "Continue",
+            overrides: Option.none()
+          })}
         if (first !== "after") handlers.apply("Network.requestWillBeSent", sent(`${origin}/redirect`), event)
         pause("F2", "F1")
         yield* Obligations.resolve(state, [...state.obligations.keys()][0]!, {
