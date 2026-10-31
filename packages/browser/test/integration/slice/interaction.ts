@@ -91,6 +91,13 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           ["object", {}],
           ["Redacted number", Redacted.make(123)],
           ["nonnumeric text", "abc"],
+          ["whitespace", " "],
+          ["hexadecimal", "0x10"],
+          ["infinity", "Infinity"],
+          ["overflow", "1e309"],
+          ["leading plus", "+1"],
+          ["trailing decimal point", "1."],
+          ["incomplete exponent", "1e"],
           ["Redacted nonnumeric text", Redacted.make("abc")]
         ] as const
       ) {
@@ -125,7 +132,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const page = yield* Browser.newPage()
               yield* page.goto(url)
               const field = page.locator("#field")
-              for (const value of ["123", "-12.5", Redacted.make("7"), "", Redacted.make("")]) {
+              for (const value of ["123", "-12.5", ".5", "1e2", "-0", Redacted.make("7"), "", Redacted.make("")]) {
                 yield* field.fill(value)
                 assert.strictEqual(yield* field.readValue, Redacted.isRedacted(value) ? Redacted.value(value) : value)
               }
