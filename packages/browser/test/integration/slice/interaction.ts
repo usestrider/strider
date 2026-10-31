@@ -80,6 +80,33 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      it.effect(
+        "fills an inherited editable descendant across frames without replacing surrounding content",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture((origin) =>
+              `<div id="parent" contenteditable>old parent</div><iframe src="${
+                fixtureUrl(
+                  origin,
+                  `<body contenteditable onfocus="getSelection().selectAllChildren(this)"><p id="before">before</p><section><p id="target">old</p></section><p id="after">after</p></body>`
+                )
+              }"></iframe>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#parent").fill("parent")
+              const frame = page.frame(page.locator("iframe"))
+              yield* frame.locator("#target").fill("new")
+              assert.strictEqual(yield* frame.locator("#target").readText, "new")
+              assert.strictEqual(yield* frame.locator("#before").readText, "before")
+              assert.strictEqual(yield* frame.locator("#after").readText, "after")
+              assert.strictEqual(yield* page.locator("#parent").readText, "parent")
+            }))
+          }),
+        timeout
+      )
+
       it.effect("chooses options, checks boxes and sets files", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
