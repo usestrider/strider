@@ -401,6 +401,30 @@ describe("CdpAdapter headers of a hop without ExtraInfo", () => {
 })
 
 describe("CdpAdapter routed response source", () => {
+  for (const end of ["failure", "finish", "page"]) {
+    it.effect(`discards early fulfillment attribution on ${end}`, () => Effect.gen(function*() {
+      const { facts, state, target, page } = yield* withPage()
+      const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+      const event = { state, target }
+      handlers.apply("Fetch.requestPaused", {
+        requestId: "F1", networkId: "R1", frameId: "T1", resourceType: "Fetch",
+        request: sent(`${origin}/landed`).request
+      }, event)
+      yield* Obligations.resolve(state, [...state.obligations.keys()][0]!, {
+        _tag: "Fulfill", status: 200, headers: {}, body: new Uint8Array()
+      })
+      if (end === "page") Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test")
+      else handlers.apply(end === "failure" ? "Network.loadingFailed" : "Network.loadingFinished", {
+        requestId: "R1", timestamp: 0, errorText: "net::ERR_FAILED", encodedDataLength: 0, type: "Fetch"
+      }, event)
+      handlers.apply("Network.requestWillBeSent", sent(`${origin}/landed`), event)
+      handlers.apply("Network.responseReceived", landedAs({ hasExtraInfo: false, fromDiskCache: false }), event)
+      yield* state.buffer.flush
+      const responses = facts.flatMap((fact) => fact._tag === "ResponseReceived" ? [fact.response] : [])
+      assert.strictEqual(responses.length, 1)
+      assert.strictEqual(responses[0]!.servedBy, "network")
+    }))
+  }
   // ROOK-136: the failing order permutes captured events; it was not captured in the live failure.
   for (const order of ["pause before request", "request before pause", "fulfill before request"]) {
     it.effect(`attributes a fulfilled response to its route with ${order}`, () =>
