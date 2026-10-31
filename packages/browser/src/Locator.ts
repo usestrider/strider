@@ -543,8 +543,11 @@ export interface ReadonlyLocator
    * **Details**
    *
    * Native checkbox and radio inputs use their checked property. ARIA roles `checkbox`, `radio`, `switch`,
-   * `menuitemcheckbox`, `menuitemradio`, `option` and `treeitem` use `aria-checked`; an absent value is false.
-   * Selection through `aria-selected` is independent. Other elements fail with `WrongElement`.
+   * `menuitemcheckbox`, `menuitemradio`, `option` and `treeitem` use `aria-checked`. For `option` and `treeitem`,
+   * absent `aria-checked` or the literal value `"undefined"` means checking is unsupported and fails with
+   * `WrongElement` before input; `"false"` means checkable but unchecked. For the other roles, absent or
+   * `"undefined"` reads false. Selection through `aria-selected` is independent. Other elements fail with
+   * `WrongElement`. See the [WAI-ARIA checked state](https://www.w3.org/TR/wai-aria-1.2/#aria-checked).
    *
    * **Example** (Reading a preference)
    *
@@ -912,7 +915,7 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
-   * Checked state follows `isChecked`, including its supported ARIA roles and absent `aria-checked` default.
+   * Checked state follows `isChecked`, including its supported ARIA roles and optional checkability.
    * If it's already checked, nothing is sent. Otherwise it clicks, then reads the state again: a click that didn't
    * check it fails with `StateUnchanged{expected: "checked"}`. Any other element fails at once with `WrongElement`.
    *
