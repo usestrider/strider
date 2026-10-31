@@ -166,6 +166,37 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         }
       }
 
+      for (const checked of [true, false]) {
+        it.effect(
+          `reports StateUnchanged when a label activation is prevented while ${checked ? "checking" : "unchecking"}`,
+          () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<input id="box" type="checkbox" ${
+                  checked ? "" : "checked"
+                }><label id="label" for="box" onclick="event.preventDefault(); ${
+                  say("'prevented ' + event.isTrusted")
+                }">Toggle</label>${out}`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const label = page.locator("#label")
+                const error = yield* (checked ? label.check() : label.uncheck()).pipe(Effect.flip)
+                assert(Locator.isLocatorError(error) && error.reason._tag === "StateUnchanged", String(error))
+                if (Locator.isLocatorError(error) && error.reason._tag === "StateUnchanged") {
+                  assert.strictEqual(error.reason.expected, checked ? "checked" : "unchecked")
+                }
+                assert.strictEqual(yield* page.locator("#box").isChecked, !checked)
+                assert.strictEqual(yield* page.locator("#out").readText, "prevented true")
+                const read = yield* label.isChecked.pipe(Effect.flip)
+                assert(Locator.isLocatorError(read) && read.reason._tag === "WrongElement", String(read))
+              }))
+            }),
+          timeout
+        )
+      }
+
       it.effect("rejects labels without an associated checkable control", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
