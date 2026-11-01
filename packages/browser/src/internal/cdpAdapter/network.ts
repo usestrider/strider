@@ -143,6 +143,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         emitResponse(state, request, params.redirectResponse)
         state.buffer.emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
         // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
+        request.attribution = state.pendingAttribution.get(key) ?? { target, fulfilled: false }
         request.servedFromCache = false
         request.received = undefined
         request.requestHeaders = params.request.headers
@@ -167,7 +168,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           navigation,
           finished: Deferred.makeUnsafe(),
           servedFromCache: false,
-          fulfilled: false,
+          attribution: state.pendingAttribution.get(key) ?? { target, fulfilled: false },
           resourceType: resourceTypes[params.type ?? "Other"] ?? "other",
           received: undefined,
           held: undefined,
@@ -180,6 +181,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         state.requests.set(key, request)
         state.hops.set(request.hop, request)
       }
+      state.pendingAttribution.delete(key)
       if (request.navigation !== undefined && (params.requestId as string) === (params.loaderId as string)) {
         request.navigation.documentHop = request.hop
       }
@@ -240,6 +242,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     })
     .on(Network.loadingFinished, (params, { state, target }) => {
       if (target === undefined) return
+      state.pendingAttribution.delete(requestKey(target, params.requestId))
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return
       const finished: Adapter.Fact = {
@@ -256,6 +259,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     })
     .on(Network.loadingFailed, (params, { state, target }) => {
       if (target === undefined) return
+      state.pendingAttribution.delete(requestKey(target, params.requestId))
       const routed = state.routeFailed.delete(requestKey(target, params.requestId))
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return

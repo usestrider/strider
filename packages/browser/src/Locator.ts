@@ -917,7 +917,10 @@ export interface Locator extends ReadonlyLocator {
    *
    * Checked state follows `isChecked`, including its supported ARIA roles and optional checkability.
    * If it's already checked, nothing is sent. Otherwise it clicks, then reads the state again: a click that didn't
-   * check it fails with `StateUnchanged{expected: "checked"}`. Any other element fails at once with `WrongElement`.
+   * check it fails with `StateUnchanged{expected: "checked"}`. A label uses its own checked state when it is an
+   * ARIA checkable; otherwise it reads its associated control's state. The click and any position remain on the
+   * label. A label with neither its own checked state nor a checkable control, or any other non-checkable element,
+   * fails at once with `WrongElement`. This does not change `isChecked` or checked expectations on labels.
    *
    * **Example** (Accepting the terms)
    *
@@ -933,8 +936,9 @@ export interface Locator extends ReadonlyLocator {
   check(options?: PointerOptions | undefined): ActionEffect
   /**
    * Unchecks a checkbox or an ARIA checkable, and confirms it became unchecked. Checks: the same as `click`. It
-   * works as `check` does, using the checked state described by `isChecked` and failing with
-   * `StateUnchanged{expected: "unchecked"}`.
+   * works as `check` does, using the checked state and optional checkability described by `isChecked`. A label's
+   * own checked state takes precedence over its associated control's state, while the click stays at the requested
+   * label-relative position. It fails with `StateUnchanged{expected: "unchecked"}` if the state stays checked.
    *
    * **Example** (Opting out of offers)
    *
@@ -1008,6 +1012,12 @@ export interface Locator extends ReadonlyLocator {
    *   world, with `input` and `change` dispatched; a value it refuses fails with `InvalidInput`.
    * - An element that can't be edited fails at once with `NotEditable`. A read-only one is waited for, and a
    *   timeout reports it as `ReadOnly`.
+   * - The value must be a string, including inside `Redacted`; other runtime values fail with `InvalidInput`
+   *   before contacting the browser.
+   * - A number input takes an empty string to clear, or a finite HTML floating-point string: an optional minus,
+   *   digits with an optional fractional part (or a leading decimal point and digits), and an optional exponent
+   *   such as `1e2`. Whitespace, a leading plus, a trailing decimal point, hexadecimal and non-finite values fail
+   *   with `InvalidInput` before focus, selection or mutation. The input's min, max and step don't restrict fill.
    * - A `Redacted` value is typed into the page but never shown in spans, traces or errors.
    *
    * **Example** (Choosing a delivery date)
