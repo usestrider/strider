@@ -36,8 +36,19 @@ const sameDocument = (
   const navigable = navigableOf(state, context)
   const document = navigable?.document
   if (navigable === undefined || document === undefined) return
-  const navigation = (bidi === null ? undefined : state.navigations.get(bidi)) ??
-    startNavigation(state, navigable, bidi ?? `same:${navigable.bidi}:${url}:${Math.random()}`, url, via, true)
+  const known = bidi === null ? undefined : state.navigations.get(bidi)
+  const index = navigable.expected.list.findIndex((expected) => Kit.normalize(expected.url) === Kit.normalize(url))
+  const expected = known === undefined && index >= 0 ? navigable.expected.list.splice(index, 1)[0] : null
+  const navigation = known ??
+    startNavigation(
+      state,
+      navigable,
+      bidi ?? `same:${navigable.bidi}:${url}:${Math.random()}`,
+      url,
+      via,
+      true,
+      expected
+    )
   document.url = url
   state.buffer.emit({
     _tag: "DocumentUrlChanged",
@@ -71,56 +82,58 @@ const readiness = (state: State, context: string, bidi: string | null, readiness
 const committed = (state: State, navigable: NavigableEntry, params: BrowsingContext.NavigationInfo) => {
   const url = params.url ?? ""
   const bidi = params.navigation ?? `committed:${navigable.bidi}:${url}`
-  const failed = errorPage(url)
+  // A duplicate commit for the current document is not another document or outcome.
+  if (navigable.document?.navigation === bidi) return
+  const isError = errorPage(url)
+  const known = state.navigations.get(bidi)
+  const bound = navigable.commandNavigations.has(bidi)
   const rejected = navigable.failedNavigation
-  if (
-    failed && rejected !== undefined && (rejected.bidi === undefined
-      ? Kit.normalize(rejected.url) === Kit.normalize(intended(url))
-      : rejected.bidi === bidi) &&
-    !state.navigations.has(bidi) && !navigable.commandNavigations.has(bidi)
-  ) {
-    commit(
+  const identifiedFailure = rejected !== undefined && (rejected.bidi === bidi ||
+    (rejected.bidi === undefined && navigable.navigationCommands.size === 0 &&
+      Kit.normalize(rejected.url) === Kit.normalize(intended(url))))
+  if (isError && known === undefined && !bound) {
+    if (
+      navigable.pendingTerminals.some((event) =>
+        event.kind === "commit" && event.params.navigation === params.navigation
+      )
+    ) return
+    // Observe the browser's document now. A command reply can establish provenance later, but cannot
+    // change this immutable observation or commit the document a second time (ROOK-130).
+    const document = commit(
       state,
       navigable,
       url,
       originOf(url),
-      { _tag: "ErrorPage", navigation: rejected.id },
+      identifiedFailure ? { _tag: "ErrorPage", navigation: rejected!.id } : { _tag: "UnattributedErrorPage" },
       bidi,
       "bidi:browsingContext.navigationCommitted"
     )
-    navigable.failedNavigation = undefined
+    if (identifiedFailure) navigable.failedNavigation = undefined
+    else if (navigable.navigationCommands.size > 0) {
+      navigable.pendingTerminals.push({ kind: "commit", params, document: document.id, rejected })
+    }
     return
   }
-  if (!failed) navigable.failedNavigation = undefined
-  // Unannounced error pages need command reply identity, never URL equality (ROOK-130).
-  const navigation = state.navigations.get(bidi) ??
-    startNavigation(
-      state,
-      navigable,
-      bidi,
-      intended(url),
-      "crossDocument",
-      false,
-      failed ? null : undefined
-    )
+  const navigation = known ??
+    startNavigation(state, navigable, bidi, intended(url), "crossDocument", false, isError ? null : undefined)
   const document = commit(
     state,
     navigable,
     url,
     originOf(url),
-    failed ? { _tag: "ErrorPage", navigation: navigation.id } : { _tag: "Navigation", navigation: navigation.id },
+    isError ? { _tag: "ErrorPage", navigation: navigation.id } : { _tag: "Navigation", navigation: navigation.id },
     bidi,
     "bidi:browsingContext.navigationCommitted"
   )
   endNavigation(
     state,
     navigation,
-    failed
+    isError
       ? { _tag: "Failed", error: errorText(url), errorDocument: Option.some(document.id) }
       : { _tag: "Committed", document: document.id, response: Option.fromUndefinedOr(navigation.documentHop) },
     "bidi:browsingContext.navigationCommitted"
   )
-  if (failed && navigable.failedNavigation?.id === navigation.id) navigable.failedNavigation = undefined
+  if (isError || navigable.pendingTerminals.length === 0) navigable.failedNavigation = undefined
 }
 
 const failed = (state: State, navigable: NavigableEntry, params: BrowsingContext.NavigationInfo, aborted: boolean) => {
@@ -145,75 +158,95 @@ const started = (state: State, navigable: NavigableEntry, params: BrowsingContex
   startNavigation(state, navigable, params.navigation, intended(params.url ?? ""), "crossDocument", false)
 }
 
-const flushNavigationEvents = (state: State, navigable: NavigableEntry) => {
-  while (!navigable.removed && navigable.pendingNavigationEvents.length > 0) {
-    const event = navigable.pendingNavigationEvents[0]!
+/** Resolves attribution only; no deferred event can start a competing navigation or commit a document. */
+const resolveTerminals = (state: State, navigable: NavigableEntry) => {
+  for (let index = 0; !navigable.removed && index < navigable.pendingTerminals.length;) {
+    const event = navigable.pendingTerminals[index]!
     const bidi = event.params.navigation
-    // Another command's start or reply cannot identify this event. Keep it, and document
-    // commits after it, in wire order while any outstanding reply could still name it.
-    const identified = bidi !== null && (
-      state.navigations.has(bidi) || navigable.commandNavigations.has(bidi) ||
-      navigable.failedNavigation?.bidi === bidi
-    )
-    if (
-      !identified && navigable.navigationCommands.size > 0 &&
-      (event.kind === "failure" || event.kind === "abort" ||
-        (event.kind === "commit" && errorPage(event.params.url ?? "")))
-    ) return
-    navigable.pendingNavigationEvents.shift()
-    if (event.kind === "start") started(state, navigable, event.params)
-    else if (event.kind === "commit") committed(state, navigable, event.params)
-    else if (event.kind === "failure" || event.kind === "abort") {
+    const known = bidi === null ? undefined : state.navigations.get(bidi)
+    const bound = bidi !== null && navigable.commandNavigations.has(bidi)
+    const rejected = event.rejected ?? navigable.failedNavigation
+    const matchesFailure = !bound && rejected !== undefined && (known === undefined || known.id === rejected.id) &&
+      (rejected.bidi === bidi ||
+        (rejected.bidi === undefined && navigable.navigationCommands.size === 0 &&
+          Kit.normalize(rejected.url) === Kit.normalize(intended(event.params.url ?? ""))))
+    if (known === undefined && !bound && !matchesFailure && navigable.navigationCommands.size > 0) {
+      index++
+      continue
+    }
+    navigable.pendingTerminals.splice(index, 1)
+    if (event.kind !== "commit") {
       failed(state, navigable, event.params, event.kind === "abort")
-    } else if (event.kind === "fragment" || event.kind === "historyApi") {
-      sameDocument(
-        state,
-        event.params.context,
-        event.params.navigation,
-        event.params.url ?? "",
-        event.kind === "fragment" ? "fragment" : "historyApi"
-      )
-    } else readiness(state, event.params.context, event.params.navigation, event.kind)
+      continue
+    }
+    const navigation = known ?? (bound
+      ? startNavigation(state, navigable, bidi!, intended(event.params.url ?? ""), "crossDocument", false, null)
+      : undefined)
+    if (navigation !== undefined && !navigation.ended) {
+      // This existing outcome expresses the association without an extra fact.
+      endNavigation(state, navigation, {
+        _tag: "Failed",
+        error: errorText(event.params.url ?? ""),
+        errorDocument: Option.some(event.document!)
+      }, "bidi:browsingContext.navigationCommitted (correlated)")
+    } else if (matchesFailure) {
+      // Its Failed(None) was already published: a second NavigationEnded would be a second outcome.
+      state.buffer.emit({ _tag: "ErrorDocumentAttributed", document: event.document!, navigation: rejected!.id })
+    }
+    if (matchesFailure) navigable.failedNavigation = undefined
   }
-  for (const [bidi, navigation] of navigable.navigations) {
-    if (!navigation.ended) continue
-    navigable.navigations.delete(bidi)
-    if (state.navigations.get(bidi) === navigation) state.navigations.delete(bidi)
+  if (navigable.navigationCommands.size === 0 && navigable.pendingTerminals.length === 0) {
+    for (const [bidi, navigation] of navigable.navigations) {
+      if (!navigation.ended) continue
+      navigable.navigations.delete(bidi)
+      if (state.navigations.get(bidi) === navigation) state.navigations.delete(bidi)
+    }
   }
 }
 
-const enqueue = (
-  state: State,
-  params: BrowsingContext.NavigationInfo,
-  kind: NavigableEntry["pendingNavigationEvents"][number]["kind"]
-) => {
-  const navigable = navigableOf(state, params.context)
-  if (navigable === undefined) return
-  if (
-    kind === "start" && params.navigation !== null && !state.navigations.has(params.navigation) &&
-    !navigable.commandNavigations.has(params.navigation)
-  ) {
-    // Reserve identity at observation, before a command reply/rejection can remove its expectation.
-    // Starting, superseding and committing still happen only when this event reaches the queue head.
-    const expected = Kit.take(navigable.expected, intended(params.url ?? ""))
-    if (expected !== undefined) navigable.commandNavigations.set(params.navigation, expected)
+export const register = (handlers: Kit.Handlers<Event>) => {
+  const terminal = (state: State, params: BrowsingContext.NavigationInfo, kind: "failure" | "abort") => {
+    const navigable = navigableOf(state, params.context)
+    if (navigable === undefined) return
+    if (
+      params.navigation !== null &&
+      (state.navigations.has(params.navigation) || navigable.commandNavigations.has(params.navigation))
+    ) {
+      failed(state, navigable, params, kind === "abort")
+    } else if (navigable.navigationCommands.size > 0) {
+      navigable.pendingTerminals.push({ kind, params })
+    }
+    resolveTerminals(state, navigable)
   }
-  navigable.pendingNavigationEvents.push({ kind, params })
-  flushNavigationEvents(state, navigable)
+  return handlers
+    .on(BrowsingContext.navigationStarted, (params, { state }) => {
+      const navigable = navigableOf(state, params.context)
+      if (navigable === undefined) return
+      started(state, navigable, params)
+      resolveTerminals(state, navigable)
+    })
+    .on(BrowsingContext.navigationCommitted, (params, { state }) => {
+      const navigable = navigableOf(state, params.context)
+      if (navigable === undefined) return
+      committed(state, navigable, params)
+      resolveTerminals(state, navigable)
+    })
+    .on(BrowsingContext.navigationFailed, (params, { state }) => terminal(state, params, "failure"))
+    .on(BrowsingContext.navigationAborted, (params, { state }) => terminal(state, params, "abort"))
+    .on(
+      BrowsingContext.fragmentNavigated,
+      (params, { state }) => sameDocument(state, params.context, params.navigation, params.url ?? "", "fragment")
+    )
+    .on(
+      BrowsingContext.historyUpdated,
+      (params, { state }) => sameDocument(state, params.context, null, params.url ?? "", "historyApi")
+    )
+    .on(
+      BrowsingContext.domContentLoaded,
+      (params, { state }) => readiness(state, params.context, params.navigation, "interactive")
+    )
+    .on(BrowsingContext.load, (params, { state }) => readiness(state, params.context, params.navigation, "complete"))
 }
-
-export const register = (handlers: Kit.Handlers<Event>) =>
-  handlers
-    .on(BrowsingContext.navigationStarted, (params, { state }) => enqueue(state, params, "start"))
-    .on(BrowsingContext.navigationCommitted, (params, { state }) => enqueue(state, params, "commit"))
-    .on(BrowsingContext.navigationFailed, (params, { state }) => enqueue(state, params, "failure"))
-    .on(BrowsingContext.navigationAborted, (params, { state }) => enqueue(state, params, "abort"))
-    .on(BrowsingContext.fragmentNavigated, (params, { state }) => enqueue(state, params, "fragment"))
-    .on(BrowsingContext.historyUpdated, (params, { state }) =>
-      enqueue(state, { ...params, navigation: null }, "historyApi"))
-    .on(BrowsingContext.domContentLoaded, (params, { state }) =>
-      enqueue(state, params, "interactive"))
-    .on(BrowsingContext.load, (params, { state }) => enqueue(state, params, "complete"))
 
 // ── Operations ────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -273,7 +306,7 @@ const sendNavigation = (
       ),
       Effect.ensuring(state.buffer.run(() => {
         navigable.navigationCommands.delete(id)
-        flushNavigationEvents(state, navigable)
+        resolveTerminals(state, navigable)
       }))
     )
   })

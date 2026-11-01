@@ -53,9 +53,12 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
   /** Commands awaiting replies; unknown error commits wait for their navigation identities. */
   readonly navigationCommands: Set<PageNavigation.Id>
   readonly commandNavigations: Map<string, Kit.Expected>
-  readonly pendingNavigationEvents: Array<{
-    readonly kind: "start" | "commit" | "failure" | "abort" | "interactive" | "complete" | "fragment" | "historyApi"
+  /** Only unresolved terminal correlation waits; observation and other lifecycle events never wait behind it. */
+  readonly pendingTerminals: Array<{
+    readonly kind: "commit" | "failure" | "abort"
     readonly params: BrowsingContext.NavigationInfo
+    readonly document?: L1Target.DocumentId | undefined
+    readonly rejected?: (Kit.Expected & { readonly bidi?: string | undefined }) | undefined
   }>
   /** The last failure can still install its error document. */
   failedNavigation: (Kit.Expected & { readonly bidi?: string | undefined }) | undefined

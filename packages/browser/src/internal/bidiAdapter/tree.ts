@@ -40,8 +40,8 @@ export const endNavigation = (
         bidi: navigation.bidi
       }
     }
-    // Later events in the same ordered batch may still need this identity, even after supersession.
-    if (navigation.navigable.pendingNavigationEvents.length > 0) return
+    // Outstanding commands and their unresolved terminal correlations still need this identity.
+    if (navigation.navigable.navigationCommands.size > 0 || navigation.navigable.pendingTerminals.length > 0) return
     navigation.navigable.navigations.delete(navigation.bidi)
     if (state.navigations.get(navigation.bidi) === navigation) state.navigations.delete(navigation.bidi)
   })
@@ -59,7 +59,7 @@ export const removeNavigable = (
   Kit.removeNavigable(state.buffer, navigable, reason, evidence, (navigable, reason) => {
     navigable.navigationCommands.clear()
     navigable.commandNavigations.clear()
-    navigable.pendingNavigationEvents.length = 0
+    navigable.pendingTerminals.length = 0
     navigable.failedNavigation = undefined
     navigable.expected.list.length = 0
     for (const [bidi, navigation] of navigable.navigations) {
@@ -249,7 +249,7 @@ export const addNavigable = (state: State, info: {
     expected: Kit.makeExpectations(),
     navigationCommands: new Set(),
     commandNavigations: new Map(),
-    pendingNavigationEvents: [],
+    pendingTerminals: [],
     failedNavigation: undefined,
     past: new Map(),
     navigations: new Map(),

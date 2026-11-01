@@ -16,8 +16,11 @@ import * as Capture from "../src/internal/bidiAdapter/capture.ts"
 import * as Contexts from "../src/internal/bidiAdapter/contexts.ts"
 import * as Evaluation from "../src/internal/bidiAdapter/evaluation.ts"
 import * as Navigation from "../src/internal/bidiAdapter/navigation.ts"
+import * as Network from "../src/internal/bidiAdapter/network.ts"
+import * as Obligations from "../src/internal/bidiAdapter/obligations.ts"
 import * as State from "../src/internal/bidiAdapter/state.ts"
 import * as Tree from "../src/internal/bidiAdapter/tree.ts"
+import * as Fold from "../src/internal/fold.ts"
 import type * as ProtocolClient from "../src/internal/protocolClient.ts"
 import type * as PageNavigation from "../src/PageNavigation.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
@@ -90,6 +93,23 @@ const withPage = Effect.fnUntraced(function*(
   return { state, page, document, realm, sent, facts }
 })
 
+/** Attribution may arrive with the outcome, or separately when the outcome was already published. */
+const errorNavigation = (
+  facts: ReadonlyArray<Adapter.Fact>,
+  document: Extract<Adapter.Fact, { _tag: "DocumentCommitted" }>
+) => {
+  if (document.createdBy._tag === "ErrorPage") return document.createdBy.navigation
+  assert.deepStrictEqual(document.createdBy, { _tag: "UnattributedErrorPage" })
+  for (const fact of facts) {
+    if (fact._tag === "ErrorDocumentAttributed" && fact.document === document.document) return fact.navigation
+    if (
+      fact._tag === "NavigationEnded" && fact.outcome._tag === "Failed" &&
+      Option.isSome(fact.outcome.errorDocument) && fact.outcome.errorDocument.value === document.document
+    ) return fact.navigation
+  }
+  return undefined
+}
+
 describe("BidiAdapter state", () => {
   for (const ownsError of [true, false]) {
     it.effect(`preserves an immediately current error document and immutable provenance when the reply ${ownsError ? "owns" : "does not own"} it`, () =>
@@ -138,11 +158,9 @@ describe("BidiAdapter state", () => {
         const documents = facts.filter((fact) => fact._tag === "DocumentCommitted")
         const errorDocument = documents.find((fact) => fact.url === errorUrl)!
         assert.isDefined(errorDocument)
-        assert.strictEqual(errorDocument.createdBy._tag, "ErrorPage")
-        if (errorDocument.createdBy._tag === "ErrorPage") {
-          if (ownsError) assert.strictEqual(errorDocument.createdBy.navigation, reserved)
-          else assert.notStrictEqual(errorDocument.createdBy.navigation, reserved)
-        }
+        assert.deepStrictEqual(errorDocument.createdBy, { _tag: "UnattributedErrorPage" })
+        if (ownsError) assert.strictEqual(errorNavigation(facts, errorDocument), reserved)
+        else assert.isUndefined(errorNavigation(facts, errorDocument))
         assert.lengthOf(documents.filter((fact) => fact.url === second), 1)
         assert.strictEqual(documents.at(-1)!.url, second)
         assert.deepStrictEqual(documents.at(-1)!.createdBy, { _tag: "Navigation", navigation: newer })
@@ -174,13 +192,24 @@ describe("BidiAdapter state", () => {
       const release = yield* Deferred.make<void>()
       let calls = 0
       const { facts, page, state } = yield* withPage({
-        "browsingContext.navigate": Effect.suspend(() => ++calls === 1
-          ? Effect.fail(new Protocol.ProtocolError({ reason: new Protocol.Rejected({ method: "browsingContext.navigate", reason: "Unrecognized", code: "unknown error", description: "refused" }) }))
-          : Effect.gen(function*() {
-            yield* Deferred.succeed(entered, undefined)
-            yield* Deferred.await(release)
-            return { navigation: "retry", url }
-          }))
+        "browsingContext.navigate": Effect.suspend(() =>
+          ++calls === 1
+            ? Effect.fail(
+              new Protocol.ProtocolError({
+                reason: new Protocol.Rejected({
+                  method: "browsingContext.navigate",
+                  reason: "Unrecognized",
+                  code: "unknown error",
+                  description: "refused"
+                })
+              })
+            )
+            : Effect.gen(function*() {
+              yield* Deferred.succeed(entered, undefined)
+              yield* Deferred.await(release)
+              return { navigation: "retry", url }
+            })
+        )
       })
       const handlers = Navigation.register(Kit.handlers<State.Event>())
       const prior = yield* Navigation.navigate(state, page.id, url, { referrer: Option.none() })
@@ -190,7 +219,10 @@ describe("BidiAdapter state", () => {
       const running = yield* Effect.forkChild(Navigation.navigate(state, page.id, url, { referrer: Option.none() }))
       yield* Deferred.await(entered)
       handlers.apply("browsingContext.navigationCommitted", {
-        context: "C1", navigation: "old", url: errorUrl, timestamp: 1
+        context: "C1",
+        navigation: "old",
+        url: errorUrl,
+        timestamp: 1
       }, { state })
       assert.strictEqual(page.document!.url, errorUrl)
       const document = page.document!.id
@@ -201,7 +233,227 @@ describe("BidiAdapter state", () => {
       assert.lengthOf(facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === prior), 1)
       assert.include(facts.map((fact) => fact._tag as string), "ErrorDocumentAttributed")
       assert.deepInclude(facts, { _tag: "ErrorDocumentAttributed", document, navigation: prior })
+      assert.isEmpty(page.pendingTerminals)
     }))
+
+  for (const status of [204, 205, 500]) {
+    for (const completion of ["reply", "rejected", "interrupted"] as const) {
+      it.effect(`keeps request identity and ${status === 500 ? "fetch failure" : status} completion observable before command ${completion}`, () =>
+        Effect.gen(function*() {
+          const url = "http://example.com/next"
+          const entered = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          const { facts, page, state } = yield* withPage({
+            "browsingContext.navigate": Effect.gen(function*() {
+              yield* Deferred.succeed(entered, undefined)
+              yield* Deferred.await(release)
+              if (completion === "rejected") {
+                return yield* Effect.fail(
+                  new Protocol.ProtocolError({
+                    reason: new Protocol.Rejected({
+                      method: "browsingContext.navigate",
+                      reason: "Unrecognized",
+                      code: "unknown error",
+                      description: "failed"
+                    })
+                  })
+                )
+              }
+              return { navigation: "next", url }
+            })
+          })
+          const handlers = Network.register(Navigation.register(Kit.handlers<State.Event>()))
+          const event = (method: string, params: unknown) => handlers.apply(method, params, { state })
+          const running = yield* Effect.forkChild(Navigation.navigate(state, page.id, url, { referrer: Option.none() }))
+          yield* Deferred.await(entered)
+          const reserved = page.expected.list[0]!.id
+          // An unrelated unidentified terminal event must not hold this start or its network consumers.
+          event("browsingContext.navigationFailed", {
+            context: "C1",
+            navigation: "old",
+            url: "http://old.example/",
+            timestamp: 1
+          })
+          event("browsingContext.navigationStarted", { context: "C1", navigation: "next", url, timestamp: 2 })
+          const params = {
+            context: "C1",
+            navigation: "next",
+            timestamp: 3,
+            redirectCount: 0,
+            isBlocked: false,
+            request: { request: "request", url, method: "GET", headers: [], destination: "document", bodySize: 0 }
+          }
+          event("network.beforeRequestSent", params)
+          const request = state.requests.get("request")!
+          assert.strictEqual(request.navigation?.id, reserved)
+          event("network.responseStarted", {
+            ...params,
+            response: { url, status, statusText: "", protocol: "HTTP/1.1", headers: [], fromCache: false }
+          })
+          event("network.fetchError", {
+            ...params,
+            errorText: status === 500 ? "connection refused" : "NS_BINDING_ABORTED"
+          })
+          // Duplicate terminal events cannot add another outcome, before or after the reply.
+          event("browsingContext.navigationFailed", { context: "C1", navigation: "next", url, timestamp: 4 })
+          if (completion === "interrupted") yield* Fiber.interrupt(running)
+          else {
+            yield* Deferred.succeed(release, undefined)
+            assert.strictEqual(yield* Fiber.join(running), reserved)
+          }
+          event("browsingContext.navigationAborted", { context: "C1", navigation: "next", url, timestamp: 5 })
+          yield* state.buffer.flush
+          const ended = facts.filter((fact) => fact._tag === "NavigationEnded").filter((fact) =>
+            fact.navigation === reserved
+          )
+          assert.lengthOf(ended, 1)
+          assert.strictEqual(ended[0]!.outcome._tag, status === 500 ? "Failed" : "NoContent")
+          if (ended[0]!.outcome._tag === "NoContent") {
+            assert.strictEqual(ended[0]!.outcome.status, status)
+            assert.deepStrictEqual(ended[0]!.outcome.response, Option.some(request.hop))
+          }
+          const sent = facts.find((fact) => fact._tag === "RequestSent")!
+          assert.strictEqual(sent._tag, "RequestSent")
+          if (sent._tag === "RequestSent") {
+            assert.deepStrictEqual(sent.request.initiator, {
+              _tag: "Document",
+              navigable: page.id,
+              navigation: Option.some(reserved)
+            })
+          }
+          assert.strictEqual(page.document!.url, "about:blank")
+          assert.isEmpty(page.pendingTerminals)
+          assert.isEmpty(page.expected.list)
+          assert.isEmpty(page.commandNavigations)
+          assert.isEmpty(page.navigationCommands)
+          assert.isEmpty(state.navigations)
+        }))
+    }
+  }
+
+  for (const association of [false, true]) {
+    for (const frame of [false, true]) {
+      it.effect(`folds late ${association ? "association" : "outcome"} without changing the newer ${frame ? "frame" : "page"} document or readiness`, () =>
+        Effect.scoped(Effect.gen(function*() {
+          const first = "http://first.example/"
+          const second = "http://second.example/"
+          const entered = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          let calls = 0
+          const { facts, page, state, realm } = yield* withPage({
+            "browsingContext.navigate": Effect.suspend(() => {
+              calls++
+              if (association && calls === 1) {
+                return Effect.fail(
+                  new Protocol.ProtocolError({
+                    reason: new Protocol.Rejected({
+                      method: "browsingContext.navigate",
+                      reason: "Unrecognized",
+                      code: "unknown error",
+                      description: "refused"
+                    })
+                  })
+                )
+              }
+              if (calls === (association ? 2 : 1)) {
+                return Effect.gen(function*() {
+                  yield* Deferred.succeed(entered, undefined)
+                  yield* Deferred.await(release)
+                  return { navigation: association ? "other" : "error", url: first }
+                })
+              }
+              return Effect.succeed({ navigation: "newer", url: second })
+            })
+          })
+          const target = frame
+            ? Tree.addNavigable(state, {
+              context: "F1" as BrowsingContext.BrowsingContext,
+              parent: "C1" as BrowsingContext.BrowsingContext,
+              userContext: "default",
+              originalOpener: null,
+              url: "about:blank"
+            }, false)!
+            : page
+          const fold = yield* Fold.make({ release: () => Effect.void })
+          let cursor = 0
+          const pump = Effect.fnUntraced(function*() {
+            yield* state.buffer.flush
+            while (cursor < facts.length) yield* fold.sink(facts[cursor++]!)
+          })
+          yield* pump()
+          const modelPage = Option.getOrThrow(fold.page(page.id))
+          const handlers = Obligations.register(Navigation.register(Kit.handlers<State.Event>()))
+          const event = (method: string, navigation: string, url: string) =>
+            handlers.apply(method, { context: target.bidi, navigation, url, timestamp: 1 }, { state })
+          const prior = association
+            ? yield* Navigation.navigate(state, target.id, first, { referrer: Option.none() })
+            : undefined
+          const running = yield* Effect.forkChild(
+            Navigation.navigate(state, target.id, first, { referrer: Option.none() })
+          )
+          yield* Deferred.await(entered)
+          const reserved = target.expected.list[0]!.id
+          const errorUrl = "about:neterror?e=dnsNotFound&u=" + encodeURIComponent(first)
+          event("browsingContext.navigationCommitted", "error", errorUrl)
+          yield* pump()
+          const oldId = target.document!.id
+          const oldDocument = Option.getOrThrow(fold.document(oldId))
+          assert.strictEqual((yield* oldDocument.state.get).url, errorUrl)
+          assert.strictEqual(Option.getOrThrow(yield* fold.documentOf(target.id)), oldId)
+          yield* Navigation.navigate(state, target.id, second, { referrer: Option.none() })
+          event("browsingContext.navigationStarted", "newer", second)
+          event("browsingContext.navigationCommitted", "newer", second)
+          event("browsingContext.load", "newer", second)
+          handlers.apply("browsingContext.userPromptOpened", {
+            context: "C1",
+            type: "alert",
+            message: "still open",
+            defaultValue: ""
+          }, { state })
+          yield* pump()
+          const current = target.document!.id
+          const modelDocument = Option.getOrThrow(fold.document(current))
+          const pageBefore = yield* modelPage.state.get
+          assert.strictEqual(pageBefore.status._tag, "Open")
+          if (pageBefore.status._tag === "Open") assert.isTrue(Option.isSome(pageBefore.status.prompt))
+          const documentBefore = yield* modelDocument.state.get
+          assert.strictEqual(documentBefore.readiness, "complete")
+          assert.isTrue(yield* Deferred.isDone(oldDocument.ended))
+          const realmsBefore = facts.filter((fact) =>
+            fact._tag === "RealmAdded" || fact._tag === "RealmDocumentAdded"
+          ).length
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(running)
+          yield* pump()
+          assert.deepStrictEqual(yield* modelPage.state.get, pageBefore)
+          assert.deepStrictEqual(yield* modelDocument.state.get, documentBefore)
+          assert.strictEqual(Option.getOrThrow(yield* fold.documentOf(target.id)), current)
+          assert.isTrue(yield* Deferred.isDone(oldDocument.ended))
+          assert.isFalse(realm.ended)
+          assert.lengthOf(
+            facts.filter((fact) => fact._tag === "RealmAdded" || fact._tag === "RealmDocumentAdded"),
+            realmsBefore
+          )
+          const observed = facts.find((fact) => fact._tag === "DocumentCommitted" && fact.document === oldId)!
+          assert.strictEqual(
+            observed._tag === "DocumentCommitted" && errorNavigation(facts, observed),
+            association ? prior : reserved
+          )
+          if (association) {
+            const outcome = yield* Deferred.await((yield* fold.navigation(prior!)).outcome)
+            assert.strictEqual(outcome._tag, "Failed")
+            if (outcome._tag === "Failed") assert.isTrue(Option.isNone(outcome.errorDocument))
+          } else {
+            const outcome = yield* Deferred.await((yield* fold.navigation(reserved)).outcome)
+            assert.strictEqual(outcome._tag, "Failed")
+            if (outcome._tag === "Failed") assert.deepStrictEqual(outcome.errorDocument, Option.some(oldId))
+          }
+          assert.isEmpty(target.pendingTerminals)
+          Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
+          yield* pump()
+        })))
+    }
+  }
 
   it.effect("keeps a late failed-navigation commit from taking the next navigation id", () =>
     Effect.gen(function*() {
@@ -429,18 +681,19 @@ describe("BidiAdapter state", () => {
               [refused, reserved]
             )
             const errorDocument = facts.find((fact) =>
-              fact._tag === "DocumentCommitted" && fact.createdBy._tag === "ErrorPage"
+              fact._tag === "DocumentCommitted" &&
+              (fact.createdBy._tag === "ErrorPage" || fact.createdBy._tag === "UnattributedErrorPage")
             )
             assert.isDefined(errorDocument)
-            assert.deepStrictEqual(errorDocument!._tag === "DocumentCommitted" && errorDocument!.createdBy, {
-              _tag: "ErrorPage",
-              navigation: refused!
-            })
+            assert.strictEqual(
+              errorDocument!._tag === "DocumentCommitted" && errorNavigation(facts, errorDocument!),
+              refused!
+            )
           }
           assert.isEmpty(page.expected.list)
           assert.isEmpty(page.commandNavigations)
           assert.isEmpty(page.navigationCommands)
-          assert.isEmpty(page.pendingNavigationEvents)
+          assert.isEmpty(page.pendingTerminals)
           assert.isUndefined(page.failedNavigation)
         }))
     }
@@ -497,6 +750,19 @@ describe("BidiAdapter state", () => {
         facts.flatMap((fact) => fact._tag === "NavigationEnded" && fact.navigation === id ? [fact.outcome._tag] : [])
       assert.deepStrictEqual(outcomes(first), ["Download"])
       assert.deepStrictEqual(outcomes(reserved), ["Download"])
+      handlers.apply("browsingContext.downloadEnd", {
+        context: "C1",
+        download: "D1",
+        status: "complete",
+        filepath: "/tmp/download"
+      }, { state })
+      yield* state.buffer.flush
+      // Navigation and download completion are separate observations; neither may be lost behind correlation.
+      assert.isTrue(facts.some((fact) => fact._tag === "DownloadEnded" && fact.outcome._tag === "Completed"))
+      assert.isEmpty(page.pendingTerminals)
+      assert.isEmpty(page.expected.list)
+      assert.isEmpty(page.commandNavigations)
+      assert.isEmpty(page.navigationCommands)
     }))
 
   it.effect("keeps a navigation whose commit waits behind a held error page from being superseded by a later start", () =>
@@ -650,16 +916,13 @@ describe("BidiAdapter state", () => {
             _tag: "Navigation",
             navigation: firstReserved
           })
-          assert.deepStrictEqual(documents.find((fact) => fact.url === errorUrl)!.createdBy, {
-            _tag: "ErrorPage",
-            navigation: refused
-          })
+          assert.strictEqual(errorNavigation(facts, documents.find((fact) => fact.url === errorUrl)!), refused)
           assert.deepStrictEqual(documents.at(-1)!.createdBy, { _tag: "Navigation", navigation: secondReserved! })
           assert.strictEqual(page.document!.url, second)
           assert.isEmpty(page.expected.list)
           assert.isEmpty(page.commandNavigations)
           assert.isEmpty(page.navigationCommands)
-          assert.isEmpty(page.pendingNavigationEvents)
+          assert.isEmpty(page.pendingTerminals)
           assert.isEmpty(page.navigations)
           assert.isEmpty(state.navigations)
         }))
@@ -694,22 +957,23 @@ describe("BidiAdapter state", () => {
       event("browsingContext.navigationCommitted", "older", "about:neterror?e=dnsNotFound&u=http://older.example/")
       const secondReserved = yield* Navigation.navigate(state, page.id, second, { referrer: Option.none() })
       event("browsingContext.navigationStarted", "nb", second)
-      assert.strictEqual(page.commandNavigations.get("nb")?.id, secondReserved)
-      assert.isTrue(page.pendingNavigationEvents.some((event) => event.kind === "start"))
-      const firstEntry = state.navigations.get("na")!
+      assert.strictEqual(state.navigations.get("nb")?.id, secondReserved)
+      assert.isNotEmpty(page.pendingTerminals)
+      const firstEntry = state.navigations.get("nb")!
       Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
       assert.isTrue(firstEntry.ended)
       yield* Deferred.succeed(release, undefined)
       assert.strictEqual(yield* Fiber.join(running), firstReserved)
       yield* state.buffer.flush
       assert.deepStrictEqual(facts.filter((fact) => fact._tag === "NavigationStarted").map((fact) => fact.navigation), [
-        firstReserved
+        firstReserved,
+        secondReserved
       ])
-      assert.lengthOf(facts.filter((fact) => fact._tag === "DocumentCommitted"), 1)
+      assert.lengthOf(facts.filter((fact) => fact._tag === "DocumentCommitted"), 2)
       assert.isEmpty(page.expected.list)
       assert.isEmpty(page.commandNavigations)
       assert.isEmpty(page.navigationCommands)
-      assert.isEmpty(page.pendingNavigationEvents)
+      assert.isEmpty(page.pendingTerminals)
       assert.isEmpty(page.navigations)
       assert.isEmpty(state.navigations)
     }))
@@ -808,7 +1072,7 @@ describe("BidiAdapter state", () => {
             event("browsingContext.navigationCommitted", "na", errorUrl)
             const secondReserved = yield* Navigation.navigate(state, page.id, second, { referrer: Option.none() })
             event("browsingContext.navigationStarted", "nb", second)
-            assert.isNotEmpty(page.pendingNavigationEvents)
+            assert.isNotEmpty(page.pendingTerminals)
             if (newerCommitsFirst) {
               event("browsingContext.navigationCommitted", "nb", second)
               event("browsingContext.load", "nb", second)
@@ -838,12 +1102,8 @@ describe("BidiAdapter state", () => {
             const documents = facts.filter((fact) => fact._tag === "DocumentCommitted")
             const errorDocument = documents.find((fact) => fact.url === errorUrl)!
             assert.isDefined(errorDocument)
-            assert.strictEqual(errorDocument.createdBy._tag, "ErrorPage")
-            if (errorDocument.createdBy._tag === "ErrorPage") {
-              if (completion === "interrupted") {
-                assert.notStrictEqual(errorDocument.createdBy.navigation, secondReserved)
-              } else assert.strictEqual(errorDocument.createdBy.navigation, firstReserved)
-            }
+            if (completion === "interrupted") assert.isUndefined(errorNavigation(facts, errorDocument))
+            else assert.strictEqual(errorNavigation(facts, errorDocument), firstReserved)
             assert.strictEqual(documents.at(-1)!.url, second)
             assert.strictEqual(page.document!.url, second + "#new")
             assert.isTrue(page.document!.complete)
@@ -851,7 +1111,7 @@ describe("BidiAdapter state", () => {
             assert.isEmpty(page.expected.list)
             assert.isEmpty(page.commandNavigations)
             assert.isEmpty(page.navigationCommands)
-            assert.isEmpty(page.pendingNavigationEvents)
+            assert.isEmpty(page.pendingTerminals)
             assert.isUndefined(page.failedNavigation)
           }))
       }
@@ -917,20 +1177,21 @@ describe("BidiAdapter state", () => {
         assert.isEmpty(page.expected.list)
         assert.isEmpty(page.navigationCommands)
         assert.isEmpty(page.commandNavigations)
-        assert.isEmpty(page.pendingNavigationEvents)
+        assert.isEmpty(page.pendingTerminals)
         assert.isUndefined(page.failedNavigation)
         if (mode === "rejected") {
           const ended = facts.filter((fact) => fact._tag === "NavigationEnded")
           assert.lengthOf(ended, 1)
           assert.strictEqual(ended[0]!.outcome._tag, "Failed")
           const errorDocument = facts.find((fact) =>
-            fact._tag === "DocumentCommitted" && fact.createdBy._tag === "ErrorPage"
+            fact._tag === "DocumentCommitted" &&
+            (fact.createdBy._tag === "ErrorPage" || fact.createdBy._tag === "UnattributedErrorPage")
           )
           assert.isDefined(errorDocument)
-          assert.deepStrictEqual(errorDocument!._tag === "DocumentCommitted" && errorDocument!.createdBy, {
-            _tag: "ErrorPage",
-            navigation: ended[0]!.navigation
-          })
+          assert.strictEqual(
+            errorDocument!._tag === "DocumentCommitted" && errorNavigation(facts, errorDocument!),
+            ended[0]!.navigation
+          )
         }
       }))
   }
@@ -961,9 +1222,9 @@ describe("BidiAdapter state", () => {
         assert.strictEqual(ended[0]!.navigation, reserved)
         assert.strictEqual(ended[0]!.outcome._tag, "Failed")
         const document = facts.filter((fact) => fact._tag === "DocumentCommitted").at(-1)!
-        assert.deepStrictEqual(document.createdBy, { _tag: "ErrorPage", navigation: reserved })
+        assert.strictEqual(errorNavigation(facts, document), reserved)
         assert.isEmpty(page.commandNavigations)
-        assert.isEmpty(page.pendingNavigationEvents)
+        assert.isEmpty(page.pendingTerminals)
         assert.isUndefined(page.failedNavigation)
       }))
   }
@@ -1000,7 +1261,7 @@ describe("BidiAdapter state", () => {
         assert.strictEqual(started[0]!.initiatedAs, "reload")
         assert.isEmpty(page.expected.list)
         assert.isEmpty(page.commandNavigations)
-        assert.isEmpty(page.pendingNavigationEvents)
+        assert.isEmpty(page.pendingTerminals)
       }))
   }
 
