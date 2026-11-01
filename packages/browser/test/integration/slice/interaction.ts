@@ -46,6 +46,22 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      it.effect("fills an unknown input type as text", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() => `<input id="field" type="invalid-type" value="old">`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const field = page.locator("#field")
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => (document.querySelector("#field") as HTMLInputElement).type),
+              "text"
+            )
+            yield* field.fill("new text")
+            assert.strictEqual(yield* field.readValue, "new text")
+          }))
+        }), timeout)
+
       it.effect("fills, clears and types into every kind of field", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
