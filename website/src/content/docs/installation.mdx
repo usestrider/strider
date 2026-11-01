@@ -52,6 +52,8 @@ by changing the layer.
 - `layer` launches a browser with a temporary profile, deleted after it exits. The browser exits when the layer's
   scope closes.
 - Chromium and Firefox run headless unless `headless: false`. WebKit has no headless mode.
+- A launched browser starts with core dumps off, so a crashed page is reported at once; `coreDumps: true` leaves the
+  limit as the host sets it (it does nothing on Windows).
 - `layerConfig` reads the same options from configuration.
 - `layerConnect` and `layerAttach` attach to a running browser and leave it running. See
   [Attached browsers](/docs/pages/attaching).

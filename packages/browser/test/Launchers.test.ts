@@ -4,11 +4,13 @@
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
-import { assert, describe, layer } from "@effect/vitest"
+import { assert, describe, it, layer } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Schedule from "effect/Schedule"
+import { readFile } from "node:fs/promises"
 import * as ChromiumLauncher from "../src/internal/chromiumLauncher.ts"
 import * as FirefoxLauncher from "../src/internal/firefoxLauncher.ts"
 import * as Launch from "../src/internal/launch.ts"
@@ -73,6 +75,22 @@ describe("Chromium launcher", () => {
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(3))
         assert.include(error.reason.stderrTail, "broken profile")
+      }))
+
+    it.effect("finds a stderr line written before it looked, and none once stderr ends without one", () =>
+      Effect.gen(function*() {
+        const launched = yield* Launch.spawn(
+          "/bin/sh",
+          ["-c", "printf 'starting\\nlistening on ws://127.0.0.1:9/session\\npartial' >&2"],
+          "/tmp",
+          {}
+        )
+        yield* launched.handle.exitCode.pipe(Effect.ignore)
+        const listening = yield* launched.stderrLine(/listening on (ws:\/\/\S+)/)
+        assert.strictEqual(Option.getOrThrow(listening)[1], "ws://127.0.0.1:9/session")
+        // The lines before the first call were kept for it alone
+        assert(Option.isNone(yield* launched.stderrLine(/starting/)))
+        assert.strictEqual(yield* launched.stderrTail, "starting\nlistening on ws://127.0.0.1:9/session\npartial")
       }))
   })
 })
@@ -154,5 +172,86 @@ describe("WebKit launcher", () => {
         ).pipe(Effect.flip)
         assert.deepInclude(headless.reason, { _tag: "InvalidInput", input: "headless" })
       }))
+  })
+
+  // A browser that never starts its inspector server: each connection is refused
+  const refusing = Layer.merge(
+    NodeServices.layer,
+    SocketConnector.layer((endpoint) => NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port }))
+  )
+  layer(refusing, { excludeTestServices: true })((it) => {
+    it.effect.skipIf(process.platform === "win32")(
+      "gives up on a browser that never answers at its timeout",
+      () =>
+        Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-test-" })
+          yield* fs.writeFileString(`${directory}/MiniBrowser`, "#!/bin/sh\nexec sleep 30\n")
+          yield* fs.chmod(`${directory}/MiniBrowser`, 0o755)
+          const started = performance.now()
+          const error = yield* Effect.scoped(
+            WebKitAutomation.start({ executablePath: `${directory}/MiniBrowser`, timeout: "500 millis" })
+          ).pipe(Effect.flip)
+          assert.include(JSON.stringify(error.reason), "never answered")
+          assert.isBelow(performance.now() - started, 5000)
+        })
+    )
+  })
+})
+
+describe("Core dumps", () => {
+  it("starts a browser through sh, with the executable and its arguments as parameters, unless dumps are on", () => {
+    assert.deepStrictEqual(Launch.command("/opt/b rowser", ["--a", "$(x)"], true), ["/opt/b rowser", ["--a", "$(x)"]])
+    assert.deepStrictEqual(Launch.command("/opt/browser", ["--a", "; rm -rf /"], false, "linux"), [
+      "/bin/sh",
+      ["-c", "ulimit -c 0; exec \"$@\"", "sh", "/opt/browser", "--a", "; rm -rf /"]
+    ])
+    // Windows has no limit to lower and no sh
+    assert.deepStrictEqual(Launch.command("C:\\chrome.exe", ["--a"], false, "win32"), ["C:\\chrome.exe", ["--a"]])
+  })
+
+  layer(NodeServices.layer, { excludeTestServices: true })((it) => {
+    const limitOf = (pid: string, name: string) =>
+      Effect.promise(() => readFile(`/proc/${pid}/limits`, "utf8")).pipe(
+        Effect.map((text) =>
+          text.split("\n").find((line) => line.startsWith(name))?.slice(name.length).trim().replace(/\s+/g, " ")
+        )
+      )
+
+    // The process that is exec'd last is a node that waits, in place of a browser
+    const waiting = Effect.fnUntraced(function*(coreDumps: boolean | undefined) {
+      const launched = yield* Launch.spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], "/tmp", {
+        coreDumps
+      })
+      const pid = String(launched.handle.pid)
+      // Until the shell has exec'd, the process is the shell: its command line says so
+      yield* Effect.promise(() => readFile(`/proc/${pid}/cmdline`, "utf8")).pipe(
+        Effect.filterOrFail((line) => !line.startsWith("/bin/sh")),
+        Effect.retry({ schedule: Schedule.spaced("10 millis"), times: 500 })
+      )
+      return { launched, pid }
+    })
+
+    it.effect.skipIf(process.platform !== "linux")(
+      "has no core dump limit by default, in the process that was started",
+      () =>
+        Effect.gen(function*() {
+          for (const coreDumps of [undefined, false]) {
+            const { launched, pid } = yield* waiting(coreDumps)
+            assert.strictEqual(pid, String(launched.handle.pid))
+            assert.strictEqual(yield* limitOf(pid, "Max core file size"), "0 0 bytes")
+            assert.isTrue(yield* launched.handle.isRunning)
+          }
+        })
+    )
+
+    it.effect.skipIf(process.platform !== "linux")(
+      "leaves the limit as it was with coreDumps",
+      () =>
+        Effect.gen(function*() {
+          const { pid } = yield* waiting(true)
+          assert.strictEqual(yield* limitOf(pid, "Max core file size"), yield* limitOf("self", "Max core file size"))
+        })
+    )
   })
 })

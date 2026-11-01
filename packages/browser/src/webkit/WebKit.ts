@@ -14,6 +14,7 @@
 import type * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import type * as Layer from "effect/Layer"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Socket from "effect/socket/Socket"
@@ -25,13 +26,6 @@ import * as WebKitAdapter from "../internal/webkitAdapter.ts"
 import * as WebKitAutomation from "../internal/webkitAutomation.ts"
 import type * as SocketConnector from "../protocol/SocketConnector.ts"
 import type * as Url from "../Url.ts"
-
-declare module "../Reason.ts" {
-  // WebKit inspector detail for a BackendFailure
-  interface BackendMetadata {
-    readonly webkit?: { readonly code: number; readonly message: string } | null
-  }
-}
 
 /**
  * Launches WebKitGTK's or WPE's MiniBrowser in automation mode and provides it as `Browser`.
@@ -45,6 +39,9 @@ declare module "../Reason.ts" {
  * process of its own, with an ephemeral profile; the default context's process holds the browser's first tab. The
  * window opens on the display that `DISPLAY` or `WAYLAND_DISPLAY` names. The browser exits when the layer's scope
  * closes.
+ *
+ * The browser starts with core dumps off, so a process that crashes exits at once and the page is reported as
+ * crashed without waiting for the host to write a core. `coreDumps: true` leaves the limit as the host sets it.
  *
  * **Gotchas**
  *
@@ -63,6 +60,24 @@ declare module "../Reason.ts" {
  * - Linux only: WebKitGTK and WPE are the stock WebKit ports with an automation mode.
  * - A MiniBrowser from Nix needs `glib-networking`'s modules on `GIO_EXTRA_MODULES` for HTTPS, which otherwise
  *   fails with "TLS support is not available"; other distributions install them where GIO looks.
+ *
+ * **Example** (Keeping core dumps to debug a crash)
+ *
+ * ```ts import.meta.vitest
+ * import { NodeServices, NodeSocket } from "@effect/platform-node"
+ * import { SocketConnector } from "@usestrider/browser/protocol"
+ * import { WebKit } from "@usestrider/browser/webkit"
+ * import { Layer } from "effect"
+ *
+ * const Sockets = SocketConnector.layer((endpoint) =>
+ *   NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port })
+ * )
+ *
+ * const WebKitLive = WebKit.layer({
+ *   executablePath: "/usr/libexec/webkitgtk-6.0/MiniBrowser",
+ *   coreDumps: true
+ * }).pipe(Layer.provide([NodeServices.layer, Sockets]))
+ * ```
  *
  * **Example** (Launching WebKitGTK's MiniBrowser)
  *
@@ -203,7 +218,7 @@ export const layerAttach = (
 ): Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor> =>
   BrowserImpl.layer((sink) =>
     Effect.flatMap(
-      Connect.webkitInspector(endpoint, options),
+      Connect.webkitInspector(endpoint, options).pipe(Effect.provide(FetchHttpClient.layer)),
       (transport) => WebKitAdapter.connect(transport, { sink, ownership: "attached" })
     )
   )

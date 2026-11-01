@@ -56,7 +56,8 @@ const open = Effect.fnUntraced(function*(backend: Backend, html: string) {
     const result = yield* call(Engine.run, [string(JSON.stringify(request))])
     assert(result._tag === "Value", result._tag === "Exception" ? result.text : "")
     assert(result.value.type === "string")
-    return JSON.parse(result.value.value) as Engine.Response
+    // Decoded as the library decodes it, so every answer the tests see is one the schema accepts
+    return yield* Engine.decodeResponse(result.value.value).pipe(Effect.orDie)
   })
   return { send, adapter, page }
 })

@@ -94,6 +94,9 @@
               # An empty home of its own, deleted on exit, so no profile or cache of the user's is read
               export HOME="$(mktemp -d -t strider-home-XXXXXX)"
               trap 'rm -rf "$HOME"' EXIT
+              # No core dumps: a renderer that crashes, as a test crashes one, would otherwise hang while the host
+              # writes its core, about 35 s on two cores, and only then would the browser say the page crashed
+              ulimit -c 0
             '';
           };
         }

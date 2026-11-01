@@ -13,16 +13,11 @@
  * @stability unstable
  * @since 0.1.0
  */
-import * as Effect from "effect/Effect"
-import * as Option from "effect/Option"
+import type * as Effect from "effect/Effect"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
-import * as Events from "./internal/events.ts"
-import * as Filters from "./internal/filters.ts"
-import * as Handles from "./internal/handles.ts"
-import type * as Model from "./internal/model.ts"
-import * as Operation from "./internal/operation.ts"
+import * as PopupImpl from "./internal/popup.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
 import type * as Target from "./Target.ts"
@@ -44,38 +39,6 @@ export interface Filter {
    */
   readonly url?: Url.Pattern | string | undefined
 }
-
-// ── Implementation ──
-
-type Behind = Handles.Behind<Model.PageEntry>
-
-const accepts =
-  (_behind: Behind, matches: Option.Option<(url: string) => boolean>) => (entry: Events.Entry<Model.PopupEvent>) =>
-    Option.isNone(matches) || (Option.isSome(entry.value.url) && matches.value(entry.value.url.value))
-
-// A popup is delivered as its handle: a `Page` when the connection controls it for life, as it does an owned page's
-// popups, and an observed page otherwise, `LeaveOpen`
-const kind = (behind: Behind, operation: string): Events.Kind<Model.PopupEvent, Page.Page> => ({
-  operation,
-  noun: "a popup",
-  deliver: (event) => behind.runtime.observed(event.page) as Page.Page
-})
-
-/** Compiles the filter, failing with `InvalidInput` for a pattern that doesn't, then subscribes or reads. */
-const subscribe = <A, R>(
-  target: Page.ObservedPage,
-  filter: Filter | undefined,
-  operation: string,
-  subscribe: (behind: Behind, matches: Option.Option<(url: string) => boolean>) => Effect.Effect<A, never, R>
-): Effect.Effect<A, Subscription.SubscriptionError, R> =>
-  Effect.suspend(() => {
-    const behind = Handles.page(target)
-    // A backend that can't say which page opened a page reports no popups (QUIRKS.md, Q212)
-    return Filters.requires(behind.runtime, operation, "popups.opener").pipe(
-      Effect.andThen(Filters.url(operation, filter?.url)),
-      Effect.flatMap((matches) => subscribe(behind, matches))
-    )
-  })
 
 /**
  * Subscribes to the popups a page opens and returns the wait: an effect that gives the first match, with its
@@ -124,20 +87,7 @@ export const next: {
     Subscription.SubscriptionError,
     Scope.Scope | PR
   >
-} = (<PE, PR>(
-  target: Page.ObservedPage,
-  filter?: Filter,
-  where?: Subscription.Where<Page.Page, PE, PR>
-) =>
-  subscribe(
-    target,
-    filter,
-    "Popup.next",
-    (behind, matches) =>
-      Events.next(kind(behind, "Popup.next"), behind.entry.events.popup, accepts(behind, matches), where)
-  ).pipe(
-    Operation.named("Popup.next")
-  )) as typeof next
+} = PopupImpl.next as typeof next
 
 /**
  * Subscribes to the popups a page opens and emits every match from now on.
@@ -182,18 +132,7 @@ export const stream: {
     Subscription.SubscriptionError,
     Scope.Scope | PR
   >
-} = (<PE, PR>(
-  target: Page.ObservedPage,
-  filter?: Filter,
-  where?: Subscription.Where<Page.Page, PE, PR>
-) =>
-  subscribe(
-    target,
-    filter,
-    "Popup.stream",
-    (behind, matches) =>
-      Events.stream(kind(behind, "Popup.stream"), behind.entry.events.popup, accepts(behind, matches), where)
-  )) as typeof stream
+} = PopupImpl.stream as typeof stream
 
 /**
  * Reads the popups still in the page's event log; never waits.
@@ -229,11 +168,4 @@ export const history: {
     target: Page.ObservedPage,
     filter?: Filter | undefined
   ): Effect.Effect<Subscription.History<Page.ObservedPage>, Subscription.SubscriptionError>
-} = ((target: Page.ObservedPage, filter?: Filter) =>
-  subscribe(
-    target,
-    filter,
-    "Popup.history",
-    (behind, matches) =>
-      Events.history(kind(behind, "Popup.history"), behind.entry.events.popup, accepts(behind, matches))
-  )) as typeof history
+} = PopupImpl.history as typeof history

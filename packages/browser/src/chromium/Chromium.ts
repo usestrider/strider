@@ -11,6 +11,7 @@
 import type * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import type * as Layer from "effect/Layer"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Socket from "effect/socket/Socket"
@@ -22,13 +23,6 @@ import * as Connect from "../internal/connect.ts"
 import * as LaunchOptions from "../internal/launchOptions.ts"
 import type * as Url from "../Url.ts"
 
-declare module "../Reason.ts" {
-  // CDP detail for a BackendFailure
-  interface BackendMetadata {
-    readonly cdp?: { readonly code: number; readonly message: string; readonly data: string | null } | null
-  }
-}
-
 /**
  * Launches the Chromium, Chrome or Edge executable at `executablePath` and provides it as `Browser`.
  *
@@ -37,6 +31,24 @@ declare module "../Reason.ts" {
  * The browser gets a temporary profile, created before it starts and deleted after it exits, unless
  * `userDataDir` names one you own. It exits when the layer's scope closes. The layer starts it with the platform's
  * `ChildProcessSpawner` and `FileSystem`, which `NodeServices.layer` from `@effect/platform-node` provides.
+ *
+ * The browser starts with core dumps off, so a renderer that crashes exits at once and the page is reported as
+ * crashed without waiting for the host to write a core. `coreDumps: true` leaves the limit as the host sets it.
+ *
+ * **Example** (Keeping core dumps to debug a crash)
+ *
+ * ```ts import.meta.vitest
+ * import { NodeServices } from "@effect/platform-node"
+ * import { Chromium } from "@usestrider/browser/chromium"
+ * import { Layer } from "effect"
+ *
+ * const ChromiumLive = Chromium.layer({
+ *   executablePath: "/usr/bin/chromium",
+ *   coreDumps: true
+ * }).pipe(
+ *   Layer.provide(NodeServices.layer)
+ * )
+ * ```
  *
  * **Example** (Launching headless Chromium)
  *
@@ -151,7 +163,7 @@ export const layerConnect = (
 ): Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor> =>
   BrowserImpl.layer((sink) =>
     Effect.gen(function*() {
-      const url = yield* Connect.chromiumWebSocket(endpoint, options)
+      const url = yield* Connect.chromiumWebSocket(endpoint, options).pipe(Effect.provide(FetchHttpClient.layer))
       const transport = yield* Connect.webSocket(url, options)
       return yield* CdpAdapter.connect(transport, { sink, ownership: "attached" })
     })

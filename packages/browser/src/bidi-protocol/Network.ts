@@ -174,7 +174,7 @@ export const AuthCredentials = /*#__PURE__*/ Schema.suspend(() =>
     username: Schema.String,
     password: Schema.RedactedFromValue(Schema.String)
   }).annotate({ identifier: "network.AuthCredentials" })
-) as any as Schema.Codec<AuthCredentials>
+) as any as Schema.Codec<AuthCredentials, unknown>
 
 /**
  * `AuthRequiredParameters`.
@@ -214,7 +214,7 @@ export const AuthRequiredParameters = /*#__PURE__*/ Schema.suspend(() =>
     intercepts: Schema.optional(Schema.Array(Intercept)),
     response: ResponseData
   }).annotate({ identifier: "network.AuthRequiredParameters" })
-) as any as Schema.Codec<AuthRequiredParameters>
+) as any as Schema.Codec<AuthRequiredParameters, unknown>
 
 /**
  * `Base64Value`.
@@ -280,7 +280,7 @@ export const BeforeRequestSentParameters = /*#__PURE__*/ Schema.suspend(() =>
     intercepts: Schema.optional(Schema.Array(Intercept)),
     initiator: Schema.optional(Initiator)
   }).annotate({ identifier: "network.BeforeRequestSentParameters" })
-) as any as Schema.Codec<BeforeRequestSentParameters>
+) as any as Schema.Codec<BeforeRequestSentParameters, unknown>
 
 /**
  * `BytesValue`.
@@ -372,7 +372,7 @@ export const ContinueRequestParameters = /*#__PURE__*/ Schema.suspend(() =>
     method: Schema.optional(Schema.String),
     url: Schema.optional(Schema.String)
   }).annotate({ identifier: "network.ContinueRequestParameters" })
-) as any as Schema.Codec<ContinueRequestParameters>
+) as any as Schema.Codec<ContinueRequestParameters, unknown>
 
 /**
  * `ContinueRequestResult`.
@@ -426,7 +426,7 @@ export const ContinueResponseParameters = /*#__PURE__*/ Schema.suspend(() =>
     reasonPhrase: Schema.optional(Schema.String),
     statusCode: Schema.optional(Schema.Int)
   }).annotate({ identifier: "network.ContinueResponseParameters" })
-) as any as Schema.Codec<ContinueResponseParameters>
+) as any as Schema.Codec<ContinueResponseParameters, unknown>
 
 /**
  * `ContinueResponseResult`.
@@ -471,7 +471,7 @@ export const ContinueWithAuthParameters = /*#__PURE__*/ Schema.suspend(() =>
     ContinueWithAuthParametersContinueWithAuthCredentials,
     ContinueWithAuthParametersContinueWithAuthNoCredentials
   ])
-) as any as Schema.Codec<ContinueWithAuthParameters>
+) as any as Schema.Codec<ContinueWithAuthParameters, unknown>
 
 /**
  * `ContinueWithAuthParameters.ContinueWithAuthCredentials`.
@@ -499,7 +499,7 @@ export const ContinueWithAuthParametersContinueWithAuthCredentials = /*#__PURE__
     action: Schema.Literal("provideCredentials"),
     credentials: AuthCredentials
   }).annotate({ identifier: "network.ContinueWithAuthParametersContinueWithAuthCredentials" })
-) as any as Schema.Codec<ContinueWithAuthParametersContinueWithAuthCredentials>
+) as any as Schema.Codec<ContinueWithAuthParametersContinueWithAuthCredentials, unknown>
 
 /**
  * `ContinueWithAuthParameters.ContinueWithAuthNoCredentials`.
@@ -608,7 +608,7 @@ export const Cookie = /*#__PURE__*/ Schema.suspend(() =>
     sameSite: SameSite,
     expiry: Schema.optional(Schema.Int)
   }).annotate({ identifier: "network.Cookie" })
-) as any as Schema.Codec<Cookie>
+) as any as Schema.Codec<Cookie, unknown>
 
 /**
  * `CookieHeader`.
@@ -634,7 +634,7 @@ export const CookieHeader = /*#__PURE__*/ Schema.suspend(() =>
     name: Schema.String,
     value: Schema.RedactedFromValue(BytesValue)
   }).annotate({ identifier: "network.CookieHeader" })
-) as any as Schema.Codec<CookieHeader>
+) as any as Schema.Codec<CookieHeader, unknown>
 
 /**
  * `DataType` values.
@@ -783,7 +783,7 @@ export const FetchErrorParameters = /*#__PURE__*/ Schema.suspend(() =>
     intercepts: Schema.optional(Schema.Array(Intercept)),
     errorText: Schema.String
   }).annotate({ identifier: "network.FetchErrorParameters" })
-) as any as Schema.Codec<FetchErrorParameters>
+) as any as Schema.Codec<FetchErrorParameters, unknown>
 
 /**
  * `FetchTimingInfo`.
@@ -1042,7 +1042,7 @@ export const ProvideResponseParameters = /*#__PURE__*/ Schema.suspend(() =>
     reasonPhrase: Schema.optional(Schema.String),
     statusCode: Schema.optional(Schema.Int)
   }).annotate({ identifier: "network.ProvideResponseParameters" })
-) as any as Schema.Codec<ProvideResponseParameters>
+) as any as Schema.Codec<ProvideResponseParameters, unknown>
 
 /**
  * `ProvideResponseResult`.
@@ -1212,7 +1212,7 @@ export const RequestData = /*#__PURE__*/ Schema.suspend(() =>
     initiatorType: Schema.Union([Schema.String, Schema.Null]),
     timings: FetchTimingInfo
   }).annotate({ identifier: "network.RequestData" })
-) as any as Schema.Codec<RequestData>
+) as any as Schema.Codec<RequestData, unknown>
 
 /**
  * `ResponseCompletedParameters`.
@@ -1252,7 +1252,7 @@ export const ResponseCompletedParameters = /*#__PURE__*/ Schema.suspend(() =>
     intercepts: Schema.optional(Schema.Array(Intercept)),
     response: ResponseData
   }).annotate({ identifier: "network.ResponseCompletedParameters" })
-) as any as Schema.Codec<ResponseCompletedParameters>
+) as any as Schema.Codec<ResponseCompletedParameters, unknown>
 
 /**
  * `ResponseContent`.
@@ -1362,7 +1362,7 @@ export const ResponseStartedParameters = /*#__PURE__*/ Schema.suspend(() =>
     intercepts: Schema.optional(Schema.Array(Intercept)),
     response: ResponseData
   }).annotate({ identifier: "network.ResponseStartedParameters" })
-) as any as Schema.Codec<ResponseStartedParameters>
+) as any as Schema.Codec<ResponseStartedParameters, unknown>
 
 /**
  * `SameSite` values.
@@ -1494,7 +1494,7 @@ export const SetCookieHeader = /*#__PURE__*/ Schema.suspend(() =>
     sameSite: Schema.optional(SameSite),
     secure: Schema.optional(Schema.Boolean)
   }).annotate({ identifier: "network.SetCookieHeader" })
-) as any as Schema.Codec<SetCookieHeader>
+) as any as Schema.Codec<SetCookieHeader, unknown>
 
 /**
  * `SetExtraHeadersParameters`.

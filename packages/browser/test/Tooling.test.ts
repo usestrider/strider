@@ -16,6 +16,7 @@ import {
   Page,
   PageNavigation,
   Popup,
+  Target,
   Trace
 } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
@@ -180,7 +181,7 @@ describe("Browser.layerTest", () => {
       assert.strictEqual(committed.url, "https://example.test/")
       yield* TestClock.adjust("20 millis")
       const reason = yield* page.closed
-      assert.deepStrictEqual(reason, { _tag: "PageClosed", by: "script" })
+      assert.deepStrictEqual(reason, new Target.PageClosed({ by: "script" }))
     })).pipe(Effect.provide(Browser.layerTest("--resp(cart)--commit--load--|"))))
 
   it.effect("opens a timeline's dialogs and popups, decided and reported as a browser's are", () =>
@@ -188,6 +189,7 @@ describe("Browser.layerTest", () => {
       const page = yield* Browser.newPage()
       const handler = yield* Dialog.handle(page, Dialog.dismissAll)
       const popups = yield* Popup.next(page)
+      // The dialog opens a tick in: a handler decides what opens after it is registered
       yield* TestClock.adjust("10 millis")
       assert.strictEqual(yield* handler.handled, 1)
       assert.strictEqual((yield* Dialog.history(page)).entries[0]?._tag, "Confirm")
@@ -195,8 +197,8 @@ describe("Browser.layerTest", () => {
       const popup = yield* popups
       assert.strictEqual((yield* popup.status)._tag, "Open")
       yield* TestClock.adjust("10 millis")
-      assert.deepStrictEqual(yield* page.closed, { _tag: "PageCrashed" })
-    })).pipe(Effect.provide(Browser.layerTest("dialog(confirm)-popup-crash"))))
+      assert.deepStrictEqual(yield* page.closed, new Target.PageCrashed({}))
+    })).pipe(Effect.provide(Browser.layerTest("-dialog(confirm)-popup-crash"))))
 
   it.effect("has no DOM: the engine is unsupported", () =>
     Effect.scoped(Effect.gen(function*() {

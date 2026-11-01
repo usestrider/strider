@@ -12,6 +12,7 @@
  * ```
  */
 import * as Effect from "effect/Effect"
+import * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
 import * as fs from "node:fs"
 import type { Classification, Wire, WireError } from "../../src/internal/protocolClient.ts"
@@ -89,7 +90,10 @@ export const record = (
     if (typeof message.id === "number" && typeof message.method === "string") methods.set(message.id, message.method)
   }
   const received = (text: string) => {
-    const incoming = wire.decode(text)
+    const decoded = wire.decode(text)
+    // The client ends the connection on a malformed message; there is nothing to record
+    if (Result.isFailure(decoded)) return
+    const incoming = decoded.success
     switch (incoming._tag) {
       case "Event":
         return keep({ kind: "event", method: incoming.method, params: incoming.params })

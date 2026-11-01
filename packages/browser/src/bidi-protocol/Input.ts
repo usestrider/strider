@@ -93,7 +93,7 @@ export const KeyDownAction = /*#__PURE__*/ Schema.suspend(() =>
     type: Schema.Literal("keyDown"),
     value: Schema.RedactedFromValue(Schema.String)
   }).annotate({ identifier: "input.KeyDownAction" })
-) as any as Schema.Codec<KeyDownAction>
+) as any as Schema.Codec<KeyDownAction, unknown>
 
 /**
  * `KeySourceAction`.
@@ -113,7 +113,7 @@ export type KeySourceAction = PauseAction | KeyDownAction | KeyUpAction
  */
 export const KeySourceAction = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Union([PauseAction, KeyDownAction, KeyUpAction])
-) as any as Schema.Codec<KeySourceAction>
+) as any as Schema.Codec<KeySourceAction, unknown>
 
 /**
  * `KeySourceActions`.
@@ -141,7 +141,7 @@ export const KeySourceActions = /*#__PURE__*/ Schema.suspend(() =>
     id: Schema.String,
     actions: Schema.Array(KeySourceAction)
   }).annotate({ identifier: "input.KeySourceActions" })
-) as any as Schema.Codec<KeySourceActions>
+) as any as Schema.Codec<KeySourceActions, unknown>
 
 /**
  * `KeyUpAction`.
@@ -167,7 +167,7 @@ export const KeyUpAction = /*#__PURE__*/ Schema.suspend(() =>
     type: Schema.Literal("keyUp"),
     value: Schema.RedactedFromValue(Schema.String)
   }).annotate({ identifier: "input.KeyUpAction" })
-) as any as Schema.Codec<KeyUpAction>
+) as any as Schema.Codec<KeyUpAction, unknown>
 
 /**
  * `NoneSourceAction`.
@@ -285,7 +285,7 @@ export const PerformActionsParameters = /*#__PURE__*/ Schema.suspend(() =>
     context: BrowsingContext.BrowsingContext,
     actions: Schema.Array(SourceActions)
   }).annotate({ identifier: "input.PerformActionsParameters" })
-) as any as Schema.Codec<PerformActionsParameters>
+) as any as Schema.Codec<PerformActionsParameters, unknown>
 
 /**
  * `PerformActionsResult`.
@@ -623,7 +623,7 @@ export type SourceActions = NoneSourceActions | KeySourceActions | PointerSource
  */
 export const SourceActions = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Union([NoneSourceActions, KeySourceActions, PointerSourceActions, WheelSourceActions])
-) as any as Schema.Codec<SourceActions>
+) as any as Schema.Codec<SourceActions, unknown>
 
 /**
  * `WheelScrollAction`.

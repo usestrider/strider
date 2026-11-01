@@ -39,7 +39,7 @@ describe("module errors", () => {
   })
 
   it("names where a navigation was going, when its reason knows", () => {
-    const url = Option.some("http://127.0.0.1:9/" as Url.Url)
+    const url = Option.some(Url.Url.make("http://127.0.0.1:9/"))
     const failed = new PageNavigation.NavigationFailed({
       url,
       netError: "net::ERR_CONNECTION_REFUSED",

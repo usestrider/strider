@@ -968,6 +968,12 @@ export interface Page extends ReadonlyPage {
   /**
    * Closes the page without running `beforeunload`, so no prompt opens.
    *
+   * **Details**
+   *
+   * It is done once the browser reports the page ended, whether or not the browser has answered the command yet. If
+   * the page hasn't ended by the deadline, it fails with `Timeout`, and the browser goes on with the command, so the
+   * page may still close.
+   *
    * **Example** (Checking a second page, then closing it)
    *
    * ```ts import.meta.vitest

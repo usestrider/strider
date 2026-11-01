@@ -163,7 +163,7 @@ export const Tool = /*#__PURE__*/ Schema.suspend(() =>
     backendNodeId: Schema.optional(DOM.BackendNodeId),
     stackTrace: Schema.optional(Runtime.StackTrace)
   }).annotate({ identifier: "WebMCP.Tool" })
-) as any as Schema.Codec<Tool>
+) as any as Schema.Codec<Tool, unknown>
 
 /**
  * Cancels a pending tool invocation.
@@ -371,7 +371,7 @@ export const ToolsAddedParams = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     tools: Schema.Array(Tool)
   }).annotate({ identifier: "WebMCP.ToolsAddedParams" })
-) as any as Schema.Codec<ToolsAddedParams>
+) as any as Schema.Codec<ToolsAddedParams, unknown>
 
 /**
  * Event fired when tools are removed.

@@ -7,7 +7,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
 import type * as Declaration from "../Declaration.ts"
 import * as Target from "../Target.ts"
 import * as Operation from "./operation.ts"
@@ -22,35 +22,20 @@ export interface Grant {
   readonly onRelease: (finalizer: Effect.Effect<void>) => Effect.Effect<void>
 }
 
-/** A grant, released when the caller's scope closes: its finalizers run, the latest first. */
+/**
+ * A grant, released when the caller's scope closes: a scope forked from the caller's, whose finalizers run the
+ * latest first, and at once when added after it closed.
+ */
 export const acquire = (
   level: Grant["level"],
   target: Target.Description
 ): Effect.Effect<Grant, never, Scope.Scope> =>
-  Effect.gen(function*() {
-    let released = false
-    const finalizers: Array<Effect.Effect<void>> = []
-    const grant: Grant = {
-      level,
-      target,
-      released: () => released,
-      onRelease: (finalizer) =>
-        Effect.suspend(() => {
-          if (released) return finalizer
-          finalizers.push(finalizer)
-          return Effect.void
-        })
-    }
-    yield* Effect.addFinalizer(() =>
-      Effect.suspend(() => {
-        released = true
-        return Effect.forEach(finalizers.splice(0).reverse(), (finalizer) => Effect.ignore(finalizer), {
-          discard: true
-        })
-      })
-    )
-    return grant
-  })
+  Effect.map(Effect.flatMap(Effect.scope, (scope) => Scope.fork(scope)), (scope): Grant => ({
+    level,
+    target,
+    released: () => scope.state._tag === "Closed",
+    onRelease: (finalizer) => Scope.addFinalizer(scope, Effect.ignore(finalizer))
+  }))
 
 /** Fails with `TargetGone{AccessReleased}` once the grant is released; nothing for a handle with no grant. */
 export const check = (grant: Option.Option<Grant>): Effect.Effect<void, Target.TargetGone> =>
@@ -59,8 +44,8 @@ export const check = (grant: Option.Option<Grant>): Effect.Effect<void, Target.T
       ? Effect.fail(
         new Target.TargetGone({
           target: grant.value.target,
-          reason: { _tag: "AccessReleased" },
-          diagnostics: Operation.diagnostics(Operation.operationId())
+          reason: new Target.AccessReleased({}),
+          diagnostics: Operation.diagnosticsNow()
         })
       )
       : Effect.void

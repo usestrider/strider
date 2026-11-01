@@ -1,5 +1,10 @@
 # Scenarios: Strider and Playwright, side by side
 
+The [public upstream suites](upstream/README.md) port Vite, Astro and Playwright's regression tests to Strider, using
+their original assertions and fixtures. Run `pnpm test:upstream` for correctness, or `pnpm benchmark:upstream` for
+repeated per-case timings beside Playwright. These diagnostics report failures directly; the validated Vite and Astro
+cases also run with browser integration. The scenario and timing runner below is separate.
+
 A private workspace package, never published. It runs the same scenarios with Strider
 and with Playwright against the same stock Chromium, the one the integration environment pins, and writes what it
 found to [RESULTS.md](RESULTS.md):

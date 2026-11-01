@@ -542,7 +542,7 @@ export const GetCookiesResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     cookies: Schema.Array(Network.Cookie)
   }).annotate({ identifier: "Storage.GetCookiesResult" })
-) as any as Schema.Codec<GetCookiesResult>
+) as any as Schema.Codec<GetCookiesResult, unknown>
 
 /**
  * Returns the effective Related Website Sets in use by this profile for the browser
@@ -889,7 +889,7 @@ export const SetCookiesParams = /*#__PURE__*/ Schema.suspend(() =>
     cookies: Schema.Array(Network.CookieParam),
     browserContextId: Schema.optional(Browser.BrowserContextID)
   }).annotate({ identifier: "Storage.SetCookiesParams" })
-) as any as Schema.Codec<SetCookiesParams>
+) as any as Schema.Codec<SetCookiesParams, unknown>
 
 /**
  * Set tracking for a storage key's buckets.

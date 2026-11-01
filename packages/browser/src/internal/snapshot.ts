@@ -10,15 +10,18 @@
  * - **`text`** is the tree as indented YAML (`Engine.renderText`).
  */
 import * as Effect from "effect/Effect"
+import type * as Equivalence from "effect/Equivalence"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
+import type * as Locator from "../Locator.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Snapshot from "../Snapshot.ts"
 import type * as Target from "../Target.ts"
 import * as Engine from "./engine.ts"
-import * as LocatorImpl from "./locator.ts"
+import type { Locate, Owner } from "./locatorOwner.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
 
@@ -59,7 +62,8 @@ type Table = Map<string, ReadonlyArray<Engine.Step>>
  * inside it.
  */
 export const take = (
-  owner: LocatorImpl.Owner,
+  owner: Owner,
+  locate: Locate,
   steps: ReadonlyArray<Engine.Step> | null,
   options: Snapshot.Options | undefined,
   id: Diagnostics.OperationId,
@@ -150,7 +154,7 @@ export const take = (
           root: toNode(root),
           text: Engine.renderText(root)
         },
-        owner,
+        locate,
         table
       )
     } as const
@@ -213,14 +217,17 @@ const lineOf = (node: Snapshot.Node): string =>
     frame: false
   }).replace(/^- /, "")
 
-/** What a diff compares of a node: its role, name and states. */
-const sameNode = (a: Snapshot.Node, b: Snapshot.Node) =>
-  JSON.stringify([a.role, a.name, [...a.states].sort(), a.validationMessage]) ===
-    JSON.stringify([b.role, b.name, [...b.states].sort(), b.validationMessage])
+/** What a diff compares of a node: its role, name, states and validation message. */
+const sameNode: Equivalence.Equivalence<Snapshot.Node> = Schema.toEquivalence(Schema.Struct({
+  role: Snapshot.Role,
+  name: Snapshot.Name,
+  states: Schema.ReadonlySet(Snapshot.State),
+  validationMessage: Schema.Option(Schema.String)
+}))
 
-export class SnapshotImpl extends Snapshot.Data implements Snapshot.Snapshot<LocatorImpl.LocatorImpl> {
+export class SnapshotImpl extends Snapshot.Data implements Snapshot.Snapshot<Locator.Locator> {
   readonly [TypeId] = TypeId as typeof TypeId
-  #owner: LocatorImpl.Owner | undefined
+  #locate: Locate | undefined
   #table: Table = new Map()
   #refs: ReadonlyMap<Snapshot.RefId, Snapshot.Node> | undefined
 
@@ -232,11 +239,11 @@ export class SnapshotImpl extends Snapshot.Data implements Snapshot.Snapshot<Loc
       readonly root: Snapshot.Node
       readonly text: string
     },
-    owner: LocatorImpl.Owner,
+    locate: Locate,
     table: Table
   ): SnapshotImpl {
     const snapshot = new SnapshotImpl(data)
-    snapshot.#owner = owner
+    snapshot.#locate = locate
     snapshot.#table = table
     return snapshot
   }
@@ -245,11 +252,11 @@ export class SnapshotImpl extends Snapshot.Data implements Snapshot.Snapshot<Loc
     return this.#refs ??= refsOf(this.root)
   }
 
-  ref(id: Snapshot.RefId): LocatorImpl.LocatorImpl {
+  ref(id: Snapshot.RefId): Locator.Locator {
     // A ref no snapshot gave still makes a locator, which fails with `StaleRef` when used
     const steps = this.#table.get(id) ??
       [{ _tag: "Ref", document: this.document, generation: this.generation, ref: id } as const]
-    return new LocatorImpl.LocatorImpl(this.#owner!, steps, Option.some(`snapshot.ref(${JSON.stringify(id)})`))
+    return this.#locate!(steps, Option.some(`snapshot.ref(${JSON.stringify(id)})`))
   }
 
   diff(previous: Snapshot.Snapshot): Effect.Effect<Snapshot.Diff, Snapshot.SnapshotError> {
@@ -261,7 +268,7 @@ export class SnapshotImpl extends Snapshot.Data implements Snapshot.Snapshot<Loc
               documents: [previous.document, this.document],
               hint: "Refs name nodes of one document; diff two snapshots of the same document"
             }),
-            diagnostics: Operation.diagnostics(Operation.operationId())
+            diagnostics: Operation.diagnosticsNow()
           })
         )
       }

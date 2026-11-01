@@ -227,7 +227,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             yield* page.close()
             const error = yield* waiting.pipe(Effect.flip)
             assert(Target.isTargetGone(error), String(error))
-            assert.deepStrictEqual(error.reason, { _tag: "PageClosed", by: "command" })
+            assert.deepStrictEqual(error.reason, new Target.PageClosed({ by: "command" }))
           }))
         }), timeout)
 

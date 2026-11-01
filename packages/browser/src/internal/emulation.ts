@@ -6,11 +6,13 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
-import type * as Emulation from "../Emulation.ts"
+import type * as Diagnostics from "../Diagnostics.ts"
+import * as Emulation from "../Emulation.ts"
 import * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
@@ -48,20 +50,18 @@ export const fields = (settings: Emulation.Emulation): ReadonlyArray<Field> | Re
     })
   }
   if (settings.locale !== undefined) {
-    try {
-      new Intl.Locale(settings.locale)
-    } catch {
+    const locale = Schema.decodeUnknownOption(Emulation.Locale)(settings.locale)
+    if (Option.isNone(locale)) {
       return invalid("locale", "a BCP 47 language tag, such as de-DE", `${settings.locale} isn't one`)
     }
-    list.push({ capability: "emulation.locale", override: { _tag: "Locale", locale: settings.locale } })
+    list.push({ capability: "emulation.locale", override: { _tag: "Locale", locale: locale.value } })
   }
   if (settings.timezone !== undefined) {
-    try {
-      new Intl.DateTimeFormat(undefined, { timeZone: settings.timezone })
-    } catch {
+    const timeZone = Schema.decodeUnknownOption(Emulation.TimeZoneId)(settings.timezone)
+    if (Option.isNone(timeZone)) {
       return invalid("timezone", "an IANA time zone, such as Asia/Tokyo", `${settings.timezone} isn't one`)
     }
-    list.push({ capability: "emulation.timezone", override: { _tag: "TimeZone", timeZone: settings.timezone } })
+    list.push({ capability: "emulation.timezone", override: { _tag: "TimeZone", timeZone: timeZone.value } })
   }
   if (settings.geolocation !== undefined) {
     const geolocation = settings.geolocation
@@ -149,7 +149,7 @@ export interface Owner {
 export const declare = (
   owner: Owner,
   overrides: ReadonlyArray<Field>,
-  id: ReturnType<typeof Operation.operationId>
+  id: Diagnostics.OperationId
 ): Effect.Effect<
   Declaration.Registration,
   Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout,

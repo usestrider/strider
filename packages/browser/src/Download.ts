@@ -23,13 +23,8 @@ import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as FileInput from "./FileInput.ts"
 import type * as FilePath from "./FilePath.ts"
-import * as Events from "./internal/events.ts"
-import * as Filters from "./internal/filters.ts"
-import * as Handles from "./internal/handles.ts"
-import type * as Model from "./internal/model.ts"
-import * as Operation from "./internal/operation.ts"
+import * as DownloadEventsImpl from "./internal/downloadEvents.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
-import type * as Runtime from "./internal/runtime.ts"
 import type * as Page from "./Page.ts"
 import * as Reason from "./Reason.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -228,30 +223,6 @@ export interface Filter {
   readonly url?: Url.Pattern | string | undefined
 }
 
-// ── Implementation ──
-
-const kind = (
-  runtime: Runtime.Runtime,
-  operation: string
-): Events.Kind<Model.DownloadEntry, Download> => ({
-  operation,
-  noun: "a download",
-  deliver: (entry) => runtime.download(entry)
-})
-
-/** The target's channel and runtime, with its filter compiled. */
-const subscription = (target: Page.Page | UserContext.UserContext, filter: Filter | undefined, operation: string) =>
-  Effect.suspend(() => {
-    const found = Handles.target(target)
-    return Filters.requires(found.behind.runtime, operation, "downloads").pipe(
-      Effect.andThen(Filters.url(operation, filter?.url))
-    ).pipe(Effect.map((matches) => ({
-      kind: kind(found.behind.runtime, operation),
-      channel: found.behind.entry.events.download,
-      accepts: (entry: Events.Entry<Model.DownloadEntry>) => Filters.urlMatches(matches, entry.value.url)
-    })))
-  })
-
 /**
  * Subscribes to downloads and returns the wait: an effect that gives the first match, the same each time it runs.
  *
@@ -289,11 +260,7 @@ export const next = <PE = never, PR = never>(
   Effect.Effect<Download, PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
-> =>
-  Effect.flatMap(
-    subscription(target, filter, "Download.next"),
-    ({ accepts, channel, kind }) => Events.next(kind, channel, accepts, where)
-  ).pipe(Operation.named("Download.next"))
+> => DownloadEventsImpl.next(target, filter, where)
 
 /**
  * Subscribes to downloads and emits every match from now on.
@@ -332,11 +299,7 @@ export const stream = <PE = never, PR = never>(
   Stream.Stream<Download, PE | Subscription.EventOverflow | Target.TargetGone>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
-> =>
-  Effect.flatMap(
-    subscription(target, filter, "Download.stream"),
-    ({ accepts, channel, kind }) => Events.stream(kind, channel, accepts, where)
-  )
+> => DownloadEventsImpl.stream(target, filter, where)
 
 /**
  * Reads the downloads still in the event log; never waits.
@@ -366,10 +329,7 @@ export const history = (
   target: Page.Page | UserContext.UserContext,
   filter?: Filter | undefined
 ): Effect.Effect<Subscription.History<Download>, Subscription.SubscriptionError> =>
-  Effect.flatMap(
-    subscription(target, filter, "Download.history"),
-    ({ accepts, channel, kind }) => Events.history(kind, channel, accepts)
-  )
+  DownloadEventsImpl.history(target, filter)
 
 /**
  * Reason for a download that was canceled: by `cancel`, the page or the browser, or by its context closing before

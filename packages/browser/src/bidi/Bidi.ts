@@ -17,13 +17,6 @@ import * as BrowserImpl from "../internal/browser.ts"
 import * as Connect from "../internal/connect.ts"
 import type * as Url from "../Url.ts"
 
-declare module "../Reason.ts" {
-  // WebDriver BiDi detail for a BackendFailure
-  interface BackendMetadata {
-    readonly bidi?: { readonly error: string; readonly message: string; readonly stacktrace: string | null } | null
-  }
-}
-
 /**
  * Connects to a WebDriver BiDi endpoint and provides it as `Browser`.
  *

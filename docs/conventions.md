@@ -66,7 +66,7 @@ A read-only `Watchable` and an inherited `Deadline` are candidates for Effect it
 - Configuration with a default is a `Context.Reference` (`ai-docs/src/01_effect/03_services/10_reference.ts`). A reference is named descriptively in its module, as `Headers.CurrentRedactedNames` is.
 
 **Strider.**
-- **Services** are an interface and a constant of the same name: `export const Browser: Context.Service<Browser, Browser> = Context.Service<Browser>("@usestrider/browser/Browser")`. Likewise `@usestrider/browser/test/TestRun` and `CurrentSession`.
+- **Services** are an interface and a constant of the same name: `export const Browser: Context.Service<Browser, Browser> = Context.Service<Browser>("@usestrider/browser/Browser")`. Likewise `@usestrider/browser/test/TestRun`, `CurrentSession`, `Protocol.ProtocolSession` and `SocketConnector`. This is the form of Effect's `FileSystem`, `HttpServerRequest` and `LanguageModel`, whose documented interface is the service; the class form, `class X extends Context.Service<X, Shape>()(key)`, is Effect's default where the service's name isn't its shape's, as `Cause.StackTrace` and `Model.ProviderName` are, and it is `Operation.Current`'s, whose value is an `Operation`. A service is never both: the form follows whether its type parameter and its value are the same type.
 - **References** are keyed `"@usestrider/browser/<Module>/<Name>"`.
   - A reference to the value in force is `Current…`: `Deadline.CurrentDeadline`, `Diagnostics.CurrentPreset`, `Ledger.CurrentLedger`, `Protocol.CurrentValidation`.
   - A setting is named for what it sets: `Deadline.DefaultBudget`, `Expect.CheckInterval`, `Subscription.Capacity`, `NetworkResponse.BodyLimit`, `Page.UserGesture`, `Protocol.CommandTimeout`, `Browser.TraceProtocolCommands`.
@@ -229,18 +229,8 @@ Effect puts operations on handles as members (`client.get`, `handle.kill`), and 
   - Reasons several modules share live in `Reason`: `InvalidInput`, `NotPermitted`, `Unsupported`, `BackendFailure`, `EvaluationThrown`, `NotSerializable`, `PromptBlocking`.
   - A reason that wraps a failure carries its own `cause` (`BackendFailure`, `Locator.FileUnreadable`, the recordings' `WriteFailed`).
 - **Recovery matches the reason:** `Effect.catchReason("LocatorError", "StrictViolation", …)` (`ai-docs/src/01_effect/04_errors/20_reason-errors.ts`). `Effect.catchReason(tag, "Unsupported", …)` works for any module's tag.
-- **Errors that cross every module:** `Target.TargetGone`, which lives with the ids and close reasons that describe targets, and `Deadline.Timeout`. Event streams add `Subscription.EventOverflow`.
-- **Backends add detail by augmentation.** `Reason.BackendFailure.metadata` is `Reason.BackendMetadata`, which each backend extends:
-
-  ```ts
-  declare module "../Reason.ts" {
-    interface BackendMetadata {
-      readonly cdp?: { readonly code: number; readonly message: string; readonly data: string | null } | null
-    }
-  }
-  ```
-
-  `bidi` and `webkit` are declared alike. CDP error codes are typed where the Chromium backend is imported, and the ergonomic layer never knows them.
+- **Errors that cross every module:** `Target.TargetGone`, which lives with the ids that describe targets and the close reasons it carries (`Target.PageClosed`, `Target.FrameDetached`, …, `Schema.Error` classes like any other reason), and `Deadline.Timeout`. Event streams add `Subscription.EventOverflow`.
+- **A backend's detail is the failure's `cause`.** `Reason.BackendFailure` carries the browser's own error (`Protocol.ProtocolError`) as `cause`, with its code and message; there is no per-backend field to extend.
 - **There are no verb-family errors** (`ActionError`, `ReadError`, `NavigationError`, …). Errors are per module, and error channels stay small because failures are reasons inside them.
 
 ## Tracing
@@ -313,7 +303,7 @@ Effect puts operations on handles as members (`client.get`, `handle.kill`), and 
 - `pnpm examples` type-checks every example from that model against the package's source.
 - `pnpm index` writes `packages/browser/INDEX.md` from the sources, by entry point, module and `@category`.
 - `pnpm api-reference` writes `.data/api-reference/`: a manifest (package, version, git revision, TypeDoc version, barrels, and per module its name, export path, source, JSON file with SHA-256, and barrel), one TypeDoc JSON per module, and `jsdocs.json`. Any site, Strider's included, can render it as effect.website renders Effect's.
-- `pnpm all` runs them all, and CI runs `pnpm all` on every push.
+- `pnpm all` runs them all, and CI runs `pnpm all` on every pull request and every push to `main`.
 
 ## Tests
 

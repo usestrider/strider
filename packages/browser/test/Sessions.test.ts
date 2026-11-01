@@ -8,7 +8,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Ledger } from "@usestrider/browser"
-import { BrowserToolkit } from "@usestrider/browser/ai"
+import * as McpSchema from "effect/ai/McpSchema"
+import * as Tool from "effect/ai/Tool"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
@@ -18,6 +20,59 @@ import * as path from "node:path"
 import * as ExportTest from "../src/internal/cli/exportTest.ts"
 import * as Mcp from "../src/internal/cli/mcp.ts"
 import * as Recorder from "../src/internal/cli/recorder.ts"
+import * as Session from "../src/internal/cli/session.ts"
+import * as Tools from "../src/internal/tools.ts"
+
+describe("Session.scan", () => {
+  it("reads the session before stop", () => {
+    assert.deepStrictEqual(Session.scan(["-s", "checkout", "stop"]), { session: "checkout", command: "stop" })
+  })
+
+  it("reads the session after stop", () => {
+    assert.deepStrictEqual(Session.scan(["stop", "-s", "checkout"]), { session: "checkout", command: "stop" })
+  })
+  it("reads long session flags on either side of the command", () => {
+    for (const flags of [["--session", "checkout"], ["--session=checkout"], ["-s=checkout"]]) {
+      for (const argv of [[...flags, "stop"], ["stop", ...flags]]) {
+        assert.deepStrictEqual(Session.scan(argv), { session: "checkout", command: "stop" })
+      }
+    }
+  })
+
+  it("preserves inline command data and stops at the literal boundary", () => {
+    for (
+      const data of [
+        ["fill", "css=input", "text containing --session=other"],
+        ["expect", "css=p", "visible", "--text=--session=other"],
+        ["fill", "css=input", "--", "-s", "other"],
+        ["run", "file.ts", "--", "--session=other"]
+      ]
+    ) {
+      const argv = ["-s", "checkout", ...data]
+      assert.deepStrictEqual(Session.scan(argv), { session: "checkout", command: data[0] })
+      assert.deepStrictEqual(Session.withoutSession(argv), data)
+    }
+    assert.deepStrictEqual(Session.scan(["--", "-s", "other"]), { session: undefined, command: undefined })
+    assert.deepStrictEqual(Session.scan(["stop", "--", "--session=other"]), { session: undefined, command: "stop" })
+    assert.deepStrictEqual(Session.scan(["-p", "stop", "pages", "--session=checkout"]), {
+      session: "checkout",
+      command: "pages"
+    })
+    assert.deepStrictEqual(Session.scan(["stop", "-p", "--", "-s", "other"]), {
+      session: undefined,
+      command: "stop"
+    })
+  })
+
+  it("removes only session options before the literal boundary", () => {
+    for (const flags of [["-s", "checkout"], ["--session", "checkout"], ["--session=checkout"]]) {
+      const data = ["--page=stop", "fill", "css=input", "--", "--session=other", "-s", "literal"]
+      const argv = [...data.slice(0, 2), ...flags, ...data.slice(2)]
+      assert.deepStrictEqual(Session.scan(argv), { session: "checkout", command: "fill" })
+      assert.deepStrictEqual(Session.withoutSession(argv), data)
+    }
+  })
+})
 
 describe("Ledger", () => {
   it.effect("records what a program owns while it owns it, and forgets it as the program ends", () =>
@@ -54,36 +109,131 @@ describe("Ledger", () => {
 })
 
 describe("strider mcp", () => {
-  it("serves a session it is named, or one it starts, which ends with it unless kept", () => {
-    assert.deepStrictEqual(Mcp.parse(["mcp", "-s", "shop"], 7, {}), { _tag: "Serve", session: "shop" })
-    assert.deepStrictEqual(Mcp.parse(["-s", "shop", "mcp"], 7, {}), { _tag: "Serve", session: "shop" })
-    assert.deepStrictEqual(Mcp.parse(["mcp"], 7, { STRIDER_SESSION: "env" }), { _tag: "Serve", session: "env" })
-    assert.strictEqual(Mcp.parse(["mcp"], 7, {})._tag, "Invalid")
-    assert.deepStrictEqual(Mcp.parse(["mcp", "--start", "--chromium", "/bin/chromium"], 7, {}), {
-      _tag: "Start",
-      session: "mcp-7",
-      start: ["start", "--name", "mcp-7", "--chromium", "/bin/chromium", "--owner-pid", "7"]
-    })
-    assert.deepStrictEqual(
-      Mcp.parse(["mcp", "--start", "--keep", "--name", "kept", "--firefox", "/bin/firefox"], 7, {}),
-      {
-        _tag: "Start",
-        session: "kept",
-        start: ["start", "--name", "kept", "--firefox", "/bin/firefox"]
-      }
-    )
+  it("tells a client which tools only read and which act on a page as a person would", () => {
+    const hints = (name: Tools.ToolName) => {
+      const annotations = Tools.toolkit.tools[name].annotations
+      return [Context.get(annotations, Tool.Readonly), Context.get(annotations, Tool.Destructive)]
+    }
+    for (const name of ["pages", "tabs", "snapshot", "find", "screenshot", "history", "expect"] as const) {
+      assert.deepStrictEqual(hints(name), [true, false], name)
+    }
+    for (const name of ["newPage", "next", "await", "route", "dialog", "control", "release", "scroll"] as const) {
+      assert.deepStrictEqual(hints(name), [false, false], name)
+    }
+    for (const name of ["goto", "back", "click", "fill", "press", "select"] as const) {
+      assert.deepStrictEqual(hints(name), [false, true], name)
+    }
   })
+
+  it("gives a client a screenshot as an image, with the digest as text", () => {
+    const structuredContent = { outcome: { mediaType: "image/png", data: "iVBORw0K" }, sinceLast: ["navigated"] }
+    const answered = new McpSchema.CallToolResult({
+      structuredContent,
+      content: [{ type: "text", text: JSON.stringify(structuredContent) }]
+    })
+    const shown = Mcp.asImage(answered)
+    assert.instanceOf(shown, McpSchema.CallToolResult)
+    const [image, text] = (shown as McpSchema.CallToolResult).content
+    assert.deepStrictEqual(image, {
+      type: "image",
+      mimeType: "image/png",
+      data: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a])
+    })
+    assert.deepStrictEqual(text, { type: "text", text: JSON.stringify({ sinceLast: ["navigated"] }) })
+    // The bytes cross once, as the image
+    assert.deepStrictEqual((shown as McpSchema.CallToolResult).structuredContent, {
+      outcome: { mediaType: "image/png" },
+      sinceLast: ["navigated"]
+    })
+    // A failure is as it was
+    const failed = new McpSchema.CallToolResult({ isError: true, content: [{ type: "text", text: "{}" }] })
+    assert.strictEqual(Mcp.asImage(failed), failed)
+  })
+
+  const parse = (argv: ReadonlyArray<string>, env: Readonly<Record<string, string>>) =>
+    Mcp.parse(argv, 7, env).pipe(Effect.provide(NodeServices.layer))
+
+  it.effect("uses explicit session flags before environment defaults, and takes nothing after --", () =>
+    Effect.gen(function*() {
+      for (const flag of [["-s", "shop"], ["--session", "shop"], ["--session=shop"]]) {
+        for (const argv of [[...flag, "mcp"], ["mcp", ...flag]]) {
+          assert.deepStrictEqual(yield* parse(argv, { STRIDER_SESSION: "env" }), { _tag: "Serve", session: "shop" })
+        }
+        assert.deepStrictEqual(yield* parse(["mcp", ...flag, "--start"], {}), {
+          _tag: "Start",
+          session: "shop",
+          start: ["start", "--name", "shop", "--owner-pid", "7"]
+        })
+      }
+      // What follows -- is an operand, which mcp takes none of, never a session flag
+      const literal = yield* Effect.exit(parse(["mcp", "--", "--session=other"], { STRIDER_SESSION: "env" }))
+      assert.isTrue(literal._tag === "Failure")
+    }))
+
+  it.effect("serves a session it is named, or one it starts, which ends with it unless kept", () =>
+    Effect.gen(function*() {
+      assert.deepStrictEqual(yield* parse(["mcp", "-s", "shop"], {}), { _tag: "Serve", session: "shop" })
+      assert.deepStrictEqual(yield* parse(["-s", "shop", "mcp"], {}), { _tag: "Serve", session: "shop" })
+      assert.deepStrictEqual(yield* parse(["mcp"], { STRIDER_SESSION: "env" }), { _tag: "Serve", session: "env" })
+      assert.strictEqual((yield* parse(["mcp"], {}))?._tag, "Invalid")
+      assert.deepStrictEqual(yield* parse(["mcp", "--start", "--chromium", "/bin/chromium"], {}), {
+        _tag: "Start",
+        session: "mcp-7",
+        start: ["start", "--name", "mcp-7", "--chromium", "/bin/chromium", "--owner-pid", "7"]
+      })
+      assert.deepStrictEqual(
+        yield* parse(["mcp", "--start", "--keep", "--name", "kept", "--firefox", "/bin/firefox"], {}),
+        {
+          _tag: "Start",
+          session: "kept",
+          start: ["start", "--name", "kept", "--firefox", "/bin/firefox"]
+        }
+      )
+      assert.deepStrictEqual(
+        yield* parse(
+          [
+            "mcp",
+            "--start",
+            "--chromium",
+            "/bin/chromium",
+            "--idle",
+            "5 minutes",
+            "--capture",
+            "strict",
+            "--secret",
+            "pw=PW"
+          ],
+          {}
+        ),
+        {
+          _tag: "Start",
+          session: "mcp-7",
+          start: [
+            "start",
+            "--name",
+            "mcp-7",
+            "--chromium",
+            "/bin/chromium",
+            "--idle",
+            "5 minutes",
+            "--capture",
+            "strict",
+            "--secret",
+            "pw=PW",
+            "--owner-pid",
+            "7"
+          ]
+        }
+      )
+    }))
 })
 
 describe("strider export test", () => {
   const launched = { _tag: "Launch", backend: "chromium", executablePath: "/usr/bin/chromium" } as const
-  const tool = (name: string, params: Record<string, unknown>, result?: string): ExportTest.Step => ({
-    _tag: "Tool",
-    tool: name,
-    params,
-    target: undefined,
-    result
-  })
+  const tool = <K extends Tools.ToolName>(name: K, params: Tools.Params<K>, result?: string): ExportTest.Step => {
+    const call: Tools.Call = Tools.call(name, params)
+    return { _tag: "Tool", ...call, target: undefined, result }
+  }
 
   it("marks a tab the session took with control, until its release, which a test takes itself", () => {
     const { placeholders, text } = ExportTest.render({
@@ -153,8 +303,14 @@ describe("strider export test", () => {
     const exported = (steps: ReadonlyArray<ExportTest.Step>) =>
       ExportTest.render({ name: "shop", browser: launched, secrets: {}, state: undefined, steps }).text
     const opened: ExportTest.Step = { _tag: "NewPage", page: "main", url: undefined }
-    for (const name of Object.keys(BrowserToolkit.toolkit.tools)) {
-      const step: ExportTest.Step = { _tag: "Tool", tool: name, params, target: `locator("#field")`, result: "w1" }
+    for (const name of Tools.ToolName.literals) {
+      // One set of parameters that every tool's statement finds what it needs in
+      const step: ExportTest.Step = {
+        _tag: "Tool",
+        ...Tools.call(name, params as Tools.Params<typeof name> & typeof params),
+        target: `locator("#field")`,
+        result: "w1"
+      }
       const text = exported([opened, step])
       if (reads.includes(name)) assert.strictEqual(text, exported([opened]), `${name} is a read`)
       else assert.notStrictEqual(text, exported([opened]), `${name} has no statement`)

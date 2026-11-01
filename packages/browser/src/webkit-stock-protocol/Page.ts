@@ -83,7 +83,7 @@ export const Cookie = /*#__PURE__*/ Schema.suspend(() =>
     sameSite: CookieSameSitePolicy,
     partitionKey: Schema.optional(Schema.String)
   }).annotate({ identifier: "Page.Cookie" })
-) as any as Schema.Codec<Cookie>
+) as any as Schema.Codec<Cookie, unknown>
 
 /**
  * Same-Site policy of a cookie.
@@ -277,7 +277,7 @@ export const FrameResourceTree = /*#__PURE__*/ Schema.suspend(() =>
     childFrames: Schema.optional(Schema.Array(FrameResourceTree)),
     resources: Schema.Array(FrameResource)
   }).annotate({ identifier: "Page.FrameResourceTree" })
-) as any as Schema.Codec<FrameResourceTree>
+) as any as Schema.Codec<FrameResourceTree, unknown>
 
 /**
  * Resource type as it was perceived by the rendering engine.
@@ -657,7 +657,7 @@ export const GetCookiesResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     cookies: Schema.Array(Cookie)
   }).annotate({ identifier: "Page.GetCookiesResult" })
-) as any as Schema.Codec<GetCookiesResult>
+) as any as Schema.Codec<GetCookiesResult, unknown>
 
 /**
  * Returns content of the given resource.
@@ -748,7 +748,7 @@ export const GetResourceTreeResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     frameTree: FrameResourceTree
   }).annotate({ identifier: "Page.GetResourceTreeResult" })
-) as any as Schema.Codec<GetResourceTreeResult>
+) as any as Schema.Codec<GetResourceTreeResult, unknown>
 
 /**
  * `loadEventFired.Params`.
@@ -1088,7 +1088,7 @@ export const SetCookieParams = /*#__PURE__*/ Schema.suspend(() =>
     cookie: Cookie,
     shouldPartition: Schema.optional(Schema.Boolean)
   }).annotate({ identifier: "Page.SetCookieParams" })
-) as any as Schema.Codec<SetCookieParams>
+) as any as Schema.Codec<SetCookieParams, unknown>
 
 /**
  * Emulates the given media for CSS media queries.

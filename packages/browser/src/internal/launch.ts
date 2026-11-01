@@ -3,7 +3,6 @@
  * directory that lives as long as the browser, a child process whose stderr is kept for errors, and the `BrowserError`s a launch fails
  * with (API.md, Modules and backends).
  */
-import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
@@ -26,7 +25,11 @@ export interface Launched {
   readonly handle: ChildProcessSpawner.ChildProcessHandle
   /** The last 8 KiB the browser wrote to stderr. */
   readonly stderrTail: Effect.Effect<string>
-  /** Waits for a line of stderr that matches, and returns its match; `None` if stderr ends first. */
+  /**
+   * Waits for a line of stderr that matches, and returns its match; `None` if stderr ends first. Made once, as
+   * the browser starts: the first call also sees the lines before it (the newest 64 KiB of them), and a later one
+   * only the lines that arrive while it waits.
+   */
   readonly stderrLine: (pattern: RegExp) => Effect.Effect<Option.Option<RegExpMatchArray>>
 }
 
@@ -40,9 +43,21 @@ export const diagnostics = (step: string): Diagnostics.Diagnostics =>
     cleanup: { _tag: "NotNeeded" }
   })
 
+/** What a launch fails with. */
+export type LaunchError = Browser.BrowserError
+
 /** Fails a launch with a reason. */
 export const fail = (reason: Browser.BrowserErrorReason, step: string) =>
   Effect.fail(new Browser.BrowserError({ reason, diagnostics: diagnostics(step) }))
+
+/** Fails a launch whose browser refused the connection. */
+export const refused = (hint: string) => fail(new Browser.ConnectionFailed({ stage: "refused", hint }), "connect")
+
+/** Fails a launch given what it can't take. */
+export const invalidInput = (
+  input: { readonly input: string; readonly expected: string; readonly hint: string },
+  step: string
+) => fail(new Reason.InvalidInput(input), step)
 
 /** A launch's span: the executable it named and, where the backend has them, the launch profile it used. */
 export const span = (
@@ -120,9 +135,31 @@ export const profileDirectory = Effect.fnUntraced(function*(userDataDir: string 
 
 const tailBytes = 8 * 1024
 
+/** The most text of stderr's lines kept for a launcher before it first looks. */
+const keptLimit = 64 * 1024
+
+/**
+ * The command that starts a browser, and its arguments. Core dumps are off unless asked for: a browser that
+ * crashes would otherwise not exit until the host has written its core, which takes tens of seconds, so Strider
+ * wouldn't report the crash until then. A child process can't set its own resource limits from Node, so the
+ * browser starts through `sh`, which lowers the limit and becomes the browser (`exec`): the process started is the
+ * browser, with the same pid, file descriptors and signals. The executable and its arguments are the shell's
+ * positional parameters, never part of its script. Windows has no limit to lower and no `sh`, so the browser
+ * starts as it is.
+ */
+export const command = (
+  executable: string,
+  args: ReadonlyArray<string>,
+  coreDumps: boolean,
+  platform: string = process.platform
+): readonly [string, ReadonlyArray<string>] =>
+  coreDumps || platform === "win32"
+    ? [executable, args]
+    : ["/bin/sh", ["-c", "ulimit -c 0; exec \"$@\"", "sh", executable, ...args]]
+
 /**
  * Starts the browser in the scope. Closing the scope terminates it, killing it after `forceKillAfter` if it
- * hasn't exited.
+ * hasn't exited. Core dumps are off unless `coreDumps` is true (see `command`).
  */
 export const spawn = Effect.fnUntraced(function*(
   executable: string,
@@ -131,13 +168,15 @@ export const spawn = Effect.fnUntraced(function*(
   options: {
     readonly additionalFds?: ChildProcess.CommandOptions["additionalFds"]
     readonly env?: Readonly<Record<string, string>> | undefined
+    readonly coreDumps?: boolean | undefined
   }
 ) {
   // In the ledger while it runs, known by the profile its command line names
   const ledger = yield* Ledger.CurrentLedger
   let launched: Ledger.Item | undefined
   yield* Effect.addFinalizer(() => launched === undefined ? Effect.void : ledger.remove(launched))
-  const handle = yield* ChildProcess.make(executable, args, {
+  const [file, fileArgs] = command(executable, args, options.coreDumps ?? false)
+  const handle = yield* ChildProcess.make(file, fileArgs, {
     additionalFds: options.additionalFds ?? {},
     stdin: "ignore",
     stdout: "ignore",
@@ -159,42 +198,53 @@ export const spawn = Effect.fnUntraced(function*(
   launched = { _tag: "Browser", pid: Number(handle.pid), executable, profile: userDataDir }
   yield* ledger.add(launched)
   let tail = ""
-  let partial = ""
-  const lines: Array<string> = []
-  const waiters = new Set<() => void>()
-  const ended = yield* Deferred.make<void>()
+  // Lines are kept for the first `stderrLine`, which a launcher makes as the browser starts: the newest of them
+  // until it is made, and none after, so a browser that runs for hours doesn't fill memory with its stderr.
+  let kept: Array<string> | undefined = []
+  let keptBytes = 0
+  let finished = false
+  /** Each hears every line from when it is added, and `undefined` once stderr ends. */
+  const waiters = new Set<(line: string | undefined) => void>()
   yield* handle.stderr.pipe(
     Stream.decodeText,
-    Stream.runForEach((text) =>
+    Stream.tap((text) => Effect.sync(() => (tail = (tail + text).slice(-tailBytes)))),
+    Stream.splitLines,
+    Stream.runForEach((line) =>
       Effect.sync(() => {
-        tail = (tail + text).slice(-tailBytes)
-        const split = (partial + text).split("\n")
-        partial = split.pop()!
-        lines.push(...split)
-        for (const waiter of Array.from(waiters)) waiter()
+        if (kept !== undefined) {
+          kept.push(line)
+          keptBytes += line.length
+          while (keptBytes > keptLimit) keptBytes -= kept.shift()!.length
+        }
+        for (const waiter of waiters) waiter(line)
       })
     ),
     Effect.ignore,
-    Effect.ensuring(Deferred.succeed(ended, undefined)),
+    Effect.ensuring(Effect.sync(() => {
+      finished = true
+      for (const waiter of waiters) waiter(undefined)
+    })),
     Effect.forkScoped
   )
   const stderrLine = (pattern: RegExp) =>
     Effect.callback<Option.Option<RegExpMatchArray>>((resume) => {
-      let seen = 0
-      const check = () => {
-        for (; seen < lines.length; seen++) {
-          const match = lines[seen]!.match(pattern)
-          if (match !== null) {
-            waiters.delete(check)
-            resume(Effect.succeed(Option.some(match)))
-            return
-          }
-        }
+      const earlier = kept ?? []
+      kept = undefined
+      keptBytes = 0
+      for (const line of earlier) {
+        const match = line.match(pattern)
+        if (match !== null) return resume(Effect.succeed(Option.some(match)))
+      }
+      if (finished) return resume(Effect.succeed(Option.none()))
+      const check = (line: string | undefined) => {
+        const match = line === undefined ? null : line.match(pattern)
+        if (line !== undefined && match === null) return
+        waiters.delete(check)
+        resume(Effect.succeed(Option.fromNullishOr(match)))
       }
       waiters.add(check)
-      check()
       return Effect.sync(() => waiters.delete(check))
-    }).pipe(Effect.raceFirst(Deferred.await(ended).pipe(Effect.as(Option.none<RegExpMatchArray>()))))
+    })
   return {
     executable,
     args,

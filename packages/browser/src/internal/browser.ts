@@ -25,7 +25,7 @@ import * as Path from "effect/Path"
 import { pipeArguments } from "effect/Pipeable"
 import type * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
-import * as Browser from "../Browser.ts"
+import type * as Browser from "../Browser.ts"
 import * as CookieJar from "../CookieJar.ts"
 import * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
@@ -41,6 +41,7 @@ import * as Url from "../Url.ts"
 import * as UserContext from "../UserContext.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BrowserService from "./browserService.ts"
 import * as Clock from "./clock.ts"
 import * as ConnectionImpl from "./connection.ts"
 import * as DownloadImpl from "./download.ts"
@@ -75,7 +76,7 @@ const asContextReason = (
   reason._tag === "InvalidInput" || reason._tag === "NotPermitted" || reason._tag === "Unsupported" ||
     reason._tag === "BackendFailure"
     ? reason
-    : new Reason.BackendFailure({ kind: "Rejected", method: "Browser.newContext", metadata: {}, hint: reason.message })
+    : new Reason.BackendFailure({ kind: "Rejected", method: "Browser.newContext", hint: reason.message })
 
 const objectMembers = (name: string, id: string) => ({
   pipe() {
@@ -116,19 +117,14 @@ const makeContext = (
     id: entry.id,
     pages: Watchable.make({
       ref: entry.state,
-      project: (state) =>
-        Option.some(
-          state.pages.flatMap((id) =>
-            Option.toArray(Option.map(Option.fromNullishOr(runtime.model.pages.get(id)), access.page))
-          )
-        ),
+      project: (state) => Option.some(state.pages.map(access.page)),
       ended: (state) => state.closed,
       target: { _tag: "UserContext" },
       operation: "UserContext.pages.waitFor"
     }),
     workers: Watchable.make({
-      ref: entry.workers,
-      project: (workers) => Option.some(workers.map(runtime.worker)),
+      ref: entry.state,
+      project: (state) => Option.some(state.workers.map(runtime.worker)),
       ended: () => Option.none(),
       target: { _tag: "UserContext" },
       operation: "UserContext.workers.waitFor"
@@ -158,22 +154,22 @@ const makeContext = (
         // Owned teardown: no beforeunload; a page that already closed, or was transferred, needs nothing
         (page) => runtime.model.release(page, scope)
       )
-      const pageEntry = runtime.model.pages.get(created)
-      if (pageEntry === undefined) return yield* Effect.die(new Error(`${created} was created but never added`))
+      const pageEntry = runtime.model.page(created)
+      if (Option.isNone(pageEntry)) return yield* Effect.die(new Error(`${created} was created but never added`))
       // Owned by the caller's scope, which releases its popups too (CONCEPTS.md §3)
-      pageEntry.owner = Option.some(scope)
-      return Option.getOrThrow(runtime.page(pageEntry))
+      yield* runtime.model.own(pageEntry.value, scope)
+      return Option.getOrThrow(runtime.page(pageEntry.value))
     }).pipe(Operation.named("UserContext.newPage", { attributes: { "browser.context.id": entry.id } })),
     cookies: Storage.cookieJar(runtime, entry.id),
     exportStorageState: StorageStates.exportState(runtime, entry.id),
     clock: Clock.make({
       runtime,
       scope: declared,
-      pages: () => [...runtime.model.pages.values()].filter((page) => page.context === entry.id),
+      pages: () => entry.state.getUnsafe().pages,
       name: "UserContext.clock",
       // One timeline covers a page
       conflicting: () =>
-        [...runtime.model.pages.values()].some((page) => page.context === entry.id && Clock.isInstalled(page))
+        entry.state.getUnsafe().pages.some((page) => Clock.isInstalled(runtime.timelines, page))
           ? Option.some("Page.clock")
           : Option.none()
     }, entry),
@@ -186,7 +182,7 @@ const makeContext = (
         {
           runtime,
           scope: declared,
-          routes: entry.routes,
+          routes: entry,
           target: { _tag: "UserContext" },
           operation: "UserContext.route"
         },
@@ -197,7 +193,7 @@ const makeContext = (
     addInitScript: (script, options) =>
       InitScripts.add({ runtime, scope: declared, operation: "UserContext.addInitScript" }, entry.id, script, options),
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "UserContext.emulate" }, settings),
-    grant: (permissions, options) => Grants.grant(runtime, entry.id, "UserContext.grant", permissions, options),
+    grant: (permissions, options) => Grants.grant(runtime, entry, "UserContext.grant", permissions, options),
     [Equal.symbol](that: unknown) {
       return UserContext.isUserContext(that) && that.id === entry.id
     },
@@ -225,19 +221,14 @@ const makeObservedContext = (
     id: entry.id,
     pages: Watchable.make({
       ref: entry.state,
-      project: (state) =>
-        Option.some(
-          state.pages.flatMap((id) =>
-            Option.toArray(Option.map(Option.fromNullishOr(runtime.model.pages.get(id)), runtime.observed))
-          )
-        ),
+      project: (state) => Option.some(state.pages.map(runtime.observed)),
       ended: (state) => state.closed,
       target: { _tag: "UserContext" },
       operation: "UserContext.pages.waitFor"
     }),
     workers: Watchable.make({
-      ref: entry.workers,
-      project: (workers) => Option.some(workers.map(runtime.worker)),
+      ref: entry.state,
+      project: (state) => Option.some(state.workers.map(runtime.worker)),
       ended: () => Option.none(),
       target: { _tag: "UserContext" },
       operation: "UserContext.workers.waitFor"
@@ -266,7 +257,7 @@ const makeDeniedContext = (
   entry: Model.ContextEntry,
   control: Effect.Effect<UserContext.UserContext, UserContext.UserContextError, Scope.Scope>
 ): UserContext.UserContext => {
-  const id = () => Operation.operationId()
+  const id = () => Operation.idNow()
   const notPermitted = (member: string) =>
     new Reason.NotPermitted({
       required: "control",
@@ -370,13 +361,14 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
   const denied = new WeakMap<Model.ContextEntry, UserContext.UserContext>()
 
   /** Whether the connection controls a page for its whole life: it created the page, or the page's context. */
-  const lifelong = (entry: Model.PageEntry) => contexts.has(entry.context) || Option.isSome(entry.owner)
+  const lifelong = (entry: Model.PageEntry) =>
+    contexts.has(entry.context) || Option.isSome(entry.state.getUnsafe().owner)
 
   /** A page's context handle: the context, when the connection created it; otherwise one that refuses control. */
   const contextOf = (entry: Model.PageEntry): UserContext.UserContext => {
     const created = contexts.get(entry.context)
     if (created !== undefined) return created
-    const contextEntry = model.contexts.get(entry.context)!
+    const contextEntry = entry.contextEntry
     const known = denied.get(contextEntry)
     if (known !== undefined) return known
     const context = makeDeniedContext(runtime, contextEntry, upgradeContext(contextEntry))
@@ -395,7 +387,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       if (Option.isSome(known)) return known.value
       const grant = yield* Access.acquire(level, { _tag: "Page", id: entry.id })
       if (level === "inspect") {
-        const id = Operation.operationId()
+        const id = Operation.idNow()
         const budget = yield* Operation.budget
         yield* Evaluation.pageRealm(
           runtime,
@@ -493,6 +485,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
     // A launched browser's layer has both; one it connects to may not
     fileSystem: yield* Effect.serviceOption(FileSystem.FileSystem),
     path: yield* Effect.serviceOption(Path.Path),
+    engineRealms: yield* Runtime.makeEngineRealms(model),
+    timelines: Clock.makeTimelines(),
     settle: (operation, navigation, frame, url, at, outcome, id) =>
       Navigation.settle(model, operation, navigation, frame, url, at, outcome, id)
   }
@@ -567,7 +561,6 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
                 new Reason.BackendFailure({
                   kind: "Rejected",
                   method: "FileSystem.makeTempDirectoryScoped",
-                  metadata: {},
                   hint: `Couldn't create the context's download directory: ${error.message}`
                 }),
                 id
@@ -579,21 +572,24 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         made = downloads.value
         yield* ledger.add({ _tag: "Directory", path: downloads.value })
       }
-      const created = yield* Effect.acquireRelease(
-        adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: false }).pipe(Effect.catch(failed)),
-        (context) =>
-          adapter.removeUserContext(context).pipe(
-            Effect.ignore,
-            Effect.ensuring(Effect.sync(() => contexts.delete(context)))
-          )
+      // Removed when the scope closes, waiting for its end under a budget of its own (`Model.remove`)
+      const entry = yield* Effect.acquireRelease(
+        adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: false }).pipe(
+          Effect.catch(failed),
+          Effect.flatMap(model.context)
+        ),
+        (entry) => model.remove(entry).pipe(Effect.ensuring(Effect.sync(() => contexts.delete(entry.id))))
       )
-      const entry = yield* model.context(created)
+      const created = entry.id
       // Owned contexts decide dialogs no handler claims at once, and cancel file choosers no handler answers
       // (CONCEPTS.md §5)
-      entry.owned = true
-      entry.policy = Option.some(options?.dialogs ?? "dismiss")
-      entry.eventLog = options?.eventLog ?? entry.eventLog
-      entry.keyboardLayout = options?.keyboardLayout ?? entry.keyboardLayout
+      const settings = (yield* entry.state.get).settings
+      yield* model.configure(entry, {
+        owned: true,
+        policy: Option.some(options?.dialogs ?? "dismiss"),
+        eventLog: options?.eventLog ?? settings.eventLog,
+        keyboardLayout: options?.keyboardLayout ?? settings.keyboardLayout
+      })
       const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: created }
       // Where file choosers aren't reported, as on stock WebKit, the browser cancels them itself
       if (reports("fileChooser")) yield* adapter.declare(scope, { _tag: "FileChooser" }).pipe(Effect.catch(failed))
@@ -629,7 +625,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         ))
       }
       if (options?.permissions !== undefined) {
-        yield* Grants.grant(runtime, created, "Browser.newContext", options.permissions, undefined).pipe(
+        yield* Grants.grant(runtime, entry, "Browser.newContext", options.permissions, undefined).pipe(
           Effect.mapError((error) =>
             Deadline.isTimeout(error)
               ? error
@@ -683,11 +679,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       return yield* context.newPage
     }),
     pages: Watchable.make({
-      ref: model.pageList,
-      project: (ids) =>
-        Option.some(
-          ids.flatMap((id) => Option.toArray(Option.map(Option.fromNullishOr(model.pages.get(id)), runtime.observed)))
-        ),
+      ref: model.pages,
+      project: (pages) => Option.some(pages.map(runtime.observed)),
       ended: () => Option.none(),
       target: { _tag: "Browser" },
       operation: "Browser.pages.waitFor"
@@ -704,7 +697,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
 export const layer = <E, R>(
   connect: (sink: Adapter.Sink) => Effect.Effect<Adapter.AdapterConnection, E, R>
 ): Layer.Layer<Browser.Browser, E, Exclude<R, Scope.Scope>> =>
-  Layer.effect(Browser.Browser)(Effect.gen(function*() {
+  Layer.effect(BrowserService.Browser)(Effect.gen(function*() {
     const { sink, attach } = yield* Model.make()
     const adapter = yield* connect(sink)
     const model = yield* attach(adapter)

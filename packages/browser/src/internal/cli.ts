@@ -10,12 +10,13 @@ import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
-import * as Path from "effect/Path"
+
 import * as Schema from "effect/Schema"
 import * as Ledger from "../Ledger.ts"
 import * as Browsers from "./browsers.ts"
 import * as Client from "./cli/client.ts"
 import * as Node from "./cli/node.ts"
+import type * as Protocol from "./cli/protocol.ts"
 import * as Session from "./cli/session.ts"
 
 // The platform and environment, where the runtime has them; the package doesn't assume Node.
@@ -91,8 +92,6 @@ export const browsers = Command.make(
   )
 )
 
-const sessionRoot = Effect.map(Effect.promise(() => Node.os()), (os) => Session.root(Node.process.env, os.tmpdir()))
-
 /** The bytes a directory holds, its subdirectories included. */
 const sizeOf = (fs: FileSystem.FileSystem, dir: string): Effect.Effect<number> =>
   Effect.flatMap(
@@ -112,13 +111,10 @@ const sizeOf = (fs: FileSystem.FileSystem, dir: string): Effect.Effect<number> =
 
 const megabytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`
 
-/** Whether a session's daemon holds its lock. */
-const holder = (fs: FileSystem.FileSystem, dir: string) =>
-  Effect.map(fs.readFileString(`${dir}/lock`).pipe(Effect.option), (lock) =>
-    Option.flatMap(lock, (text) => {
-      const pid = Number.parseInt(text, 10)
-      return Number.isFinite(pid) && Node.alive(pid) ? Option.some(pid) : Option.none()
-    }))
+/** A session `strider sessions` lists: one running, as it describes itself, or one a crash left behind. */
+type Listed =
+  | Protocol.SessionInfo & { readonly running: true }
+  | { readonly name: string; readonly running: false; readonly dir: string; readonly size: number }
 
 /** `strider sessions`: every session, running or left behind by a crash. */
 export const sessions = Command.make(
@@ -126,32 +122,36 @@ export const sessions = Command.make(
   { json },
   Effect.fnUntraced(function*({ json }) {
     const fs = yield* FileSystem.FileSystem
-    const rootDir = yield* sessionRoot
+    const rootDir = yield* Client.sessionRoot
     const names = (yield* fs.readDirectory(rootDir).pipe(Effect.orElseSucceed(() => []))).filter((name) =>
       Session.nameRule.test(name)
     ).sort()
-    const found: Array<Record<string, unknown>> = []
+    const found: Array<Listed> = []
     for (const name of names) {
       const paths = Session.paths(rootDir, name)
-      const pid = yield* holder(fs, paths.dir)
-      const answer = Option.isSome(pid)
-        ? yield* Effect.promise(() => Client.ask(rootDir, name, ["info"]))
-        : { code: 1, out: "" }
-      if (answer.code === 0) found.push({ ...JSON.parse(answer.out) as Record<string, unknown>, running: true })
-      else found.push({ name, running: false, dir: paths.dir, size: yield* sizeOf(fs, paths.dir) })
+      const info = Option.isSome(yield* Session.holder(fs, paths.dir))
+        ? yield* Effect.scoped(Effect.flatMap(Client.session(rootDir, name), (client) => client.Info())).pipe(
+          Effect.option
+        )
+        : Option.none()
+      found.push(
+        Option.isSome(info)
+          ? { ...info.value, running: true }
+          : { name, running: false, dir: paths.dir, size: yield* sizeOf(fs, paths.dir) }
+      )
     }
     if (json) return yield* Console.log(JSON.stringify(found, null, 2))
     if (found.length === 0) return yield* Console.log("No sessions. strider start starts one.")
     for (const session of found) {
       yield* Console.log(
-        session.running === true
+        session.running
           ? `${session.name}  ${session.browser} · pages ${
-            (session.pages as ReadonlyArray<string>).join(", ") || "none"
+            session.pages.join(", ") || "none"
           } · idle ${session.idle} s of ${session.idleTimeout}${
             session.owner === null ? "" : ` · ends with process ${session.owner}`
           }`
           : `${session.name}  left behind by a session that didn't end cleanly · ${
-            megabytes(session.size as number)
+            megabytes(session.size)
           } at ${session.dir} · strider prune ${session.name} removes it`
       )
     }
@@ -170,30 +170,6 @@ const runningFrom = (fs: FileSystem.FileSystem, dir: string) =>
         ))
   )
 
-/** When a process started, in milliseconds since the epoch, where `/proc` says (Linux); `None` elsewhere. */
-const startedAt = Effect.fnUntraced(
-  function*(fs: FileSystem.FileSystem, pid: number) {
-    const boot = (yield* fs.readFileString("/proc/stat")).match(/^btime (\d+)$/m)?.[1]
-    // The fields after the command's name, which is in parentheses and may hold spaces
-    const stat = (yield* fs.readFileString(`/proc/${pid}/stat`)).split(") ")[1]?.split(" ")
-    const ticks = stat?.[19]
-    if (boot === undefined || ticks === undefined) return Option.none<number>()
-    // Clock ticks since boot, a hundred a second on Linux
-    return Option.some((Number(boot) + Number(ticks) / 100) * 1000)
-  },
-  Effect.orElseSucceed(() => Option.none<number>())
-)
-
-/**
- * Whether a ledger's program still runs: its process id is alive and, where `/proc` says when it started, it is
- * the same process. When that can't be told, it counts as running, so nothing of a live program is reclaimed.
- */
-const stillRunning = Effect.fnUntraced(function*(fs: FileSystem.FileSystem, owner: Ledger.Record["owner"]) {
-  if (!Node.alive(owner.pid)) return false
-  const started = yield* startedAt(fs, owner.pid)
-  return Option.isNone(started) || Math.abs(started.value - owner.startedAt) < 3000
-})
-
 /** `strider prune` with no name: what the ledger's ended programs left, reclaimed with `--yes`. */
 const pruneLedger = Effect.fnUntraced(function*(yes: boolean) {
   const fs = yield* FileSystem.FileSystem
@@ -202,7 +178,7 @@ const pruneLedger = Effect.fnUntraced(function*(yes: boolean) {
   const records = yield* Ledger.read(directory)
   let found = 0
   for (const { file, record } of records) {
-    if (yield* stillRunning(fs, record.owner)) continue
+    if (yield* Session.stillRunning(fs, record.owner)) continue
     found++
     yield* Console.log(
       `left by process ${record.owner.pid}, started ${new Date(record.owner.startedAt).toISOString()}, which has ended:`
@@ -257,12 +233,12 @@ export const prune = Command.make(
     if (Option.isNone(given)) return yield* pruneLedger(yes)
     const name = given.value
     const fs = yield* FileSystem.FileSystem
-    const rootDir = yield* sessionRoot
+    const rootDir = yield* Client.sessionRoot
     const paths = Session.paths(rootDir, name)
     if (!(yield* fs.exists(paths.dir).pipe(Effect.orElseSucceed(() => false)))) {
       return yield* Console.log(`No session named ${name} is left behind`)
     }
-    if (Option.isSome(yield* holder(fs, paths.dir))) {
+    if (Option.isSome(yield* Session.holder(fs, paths.dir))) {
       return yield* Console.error(`${name} is running; strider stop -s ${name} ends it`)
     }
     const browsers = yield* runningFrom(fs, paths.dir)
@@ -288,19 +264,44 @@ export const prune = Command.make(
   )
 )
 
-/** `strider`: the commands that need no session. A session's commands go to its daemon. */
-export const strider = Command.make("strider").pipe(
-  Command.withDescription(
-    "Strider: Effect-native browser automation. strider start --name <name> --chromium <path> starts a session; strider -s <name> -p <page> <command> drives it."
-  ),
-  Command.withSubcommands([browsers, sessions, prune])
+/** Reuses a command's parser and help metadata, with no executable session handlers. */
+const forHelp = (command: Command.Command.Any): Command.Command<any, any> =>
+  (command as Command.Command<any, any, any, any, any>).pipe(
+    Command.withHandler(() => Effect.void),
+    Command.withSubcommands(command.subcommands.flatMap((group) => group.commands.map(forHelp)))
+  )
+
+/**
+ * The complete command tree, for local help: the daemon's, loaded only for help, since a forwarded command needs
+ * none of it. Session handlers never run here.
+ */
+export const help = Effect.map(
+  Effect.promise(() => Promise.all([import("./cli/daemon.ts"), import("./cli/mcp.ts")])),
+  ([Daemon, Mcp]) => {
+    const sessionCommands = Daemon.commands(() => {
+      throw new Error("Help must not access a session")
+    })
+    return Command.make("strider").pipe(
+      Command.withSharedFlags(Daemon.selectors),
+      Command.withSubcommands([
+        forHelp(Daemon.start),
+        forHelp(Mcp.command(() => Effect.void)),
+        forHelp(browsers),
+        forHelp(sessions),
+        forHelp(prune),
+        ...sessionCommands.subcommands
+          .flatMap((group) =>
+            group.commands.map((command) => forHelp(command).pipe(Command.withSharedFlags(Daemon.output)))
+          )
+      ]),
+      Command.withDescription(
+        "Strider: Effect-native browser automation. strider start --name <name> --chromium <path> starts a session; strider -s <name> -p <page> <command> drives it."
+      )
+    )
+  }
 )
 
-/** Runs the commands that need no session, with the package's version. */
-export const run = Effect.fnUntraced(function*(argv: ReadonlyArray<string>) {
-  const fs = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  const manifest = yield* path.fromFileUrl(new URL("../../package.json", import.meta.url))
-  const { version } = JSON.parse(yield* fs.readFileString(manifest)) as { readonly version: string }
-  return yield* Command.runWith(strider, { version })(argv)
-})
+/** The commands that execute locally without a session. */
+export const strider = Command.make("strider").pipe(
+  Command.withSubcommands([browsers, sessions, prune])
+)
