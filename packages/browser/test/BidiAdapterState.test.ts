@@ -144,6 +144,67 @@ describe("BidiAdapter state", () => {
       assert.strictEqual(nextEnded!.outcome._tag, "Committed")
     }))
 
+  it.effect("keeps a late failed-navigation commit from taking the id of a retry to the same URL", () =>
+    Effect.gen(function*() {
+      const facts: Array<Adapter.Fact> = []
+      const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
+      buffer.connect(control)
+      const state = State.make({
+        connect: { sink: () => Effect.void, ownership: "launched" },
+        ids: Kit.makeIds(),
+        buffer,
+        control,
+        root: () => ({ drainObserved: Effect.void }) as ProtocolClient.Session
+      })
+      const page = Tree.addNavigable(state, {
+        context: "C1" as BrowsingContext.BrowsingContext,
+        userContext: "default",
+        originalOpener: null,
+        url: "about:blank"
+      }, false)!
+      const handlers = Navigation.register(Kit.handlers<State.Event>())
+      const refusedUrl = "http://127.0.0.1:9/refused"
+      const refused = Kit.expect(state.ids, page.expected, refusedUrl)
+      // The command has rejected; no navigation event has arrived yet.
+      yield* Kit.neverStarted(buffer, {
+        drained: Effect.void,
+        expectations: page.expected,
+        navigable: page.id,
+        navigation: refused,
+        url: refusedUrl,
+        error: "browsingContext.navigate rejected: Unrecognized (Error: deniedPortAccess)",
+        evidence: "bidi:browsingContext.navigate"
+      })
+      // The retry goes to the same URL, which the server now accepts.
+      const nextUrl = refusedUrl
+      const next = Kit.expect(state.ids, page.expected, nextUrl)
+      // ROOK-130: synthesized ordering inferred from the live failure, not captured protocol traffic.
+      // A late error-page commit arrives after the next command reserved its id.
+      handlers.apply("browsingContext.navigationCommitted", {
+        context: "C1",
+        navigation: "browser-refused",
+        timestamp: 1,
+        url: "about:neterror?e=deniedPortAccess&u=http%3A//127.0.0.1%3A9/refused"
+      }, { state })
+      handlers.apply("browsingContext.navigationStarted", {
+        context: "C1",
+        navigation: "browser-retry",
+        timestamp: 2,
+        url: nextUrl
+      }, { state })
+      handlers.apply("browsingContext.navigationCommitted", {
+        context: "C1",
+        navigation: "browser-retry",
+        timestamp: 3,
+        url: nextUrl
+      }, { state })
+      yield* buffer.flush
+      const ended = facts.filter((fact) => fact._tag === "NavigationEnded")
+      const nextEnded = ended.find((fact) => fact.navigation === next)
+      assert.isDefined(nextEnded)
+      assert.strictEqual(nextEnded!.outcome._tag, "Committed")
+    }))
+
   for (
     const scenario of [
       { name: "matches an ordinary error-page commit to its intended URL", started: false, matches: true },
