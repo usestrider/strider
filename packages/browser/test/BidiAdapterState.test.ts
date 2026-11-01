@@ -37,7 +37,9 @@ const session = (
       Effect.suspend(() => {
         sent.push(command.method)
         const failure = failures[command.method]
-        return failure === undefined ? Effect.succeed(replies[command.method]) : Effect.fail(failure())
+        return failure === undefined
+          ? Effect.isEffect(replies[command.method]) ? replies[command.method] : Effect.succeed(replies[command.method])
+          : Effect.fail(failure())
       }),
     drainObserved: Effect.void
   } as unknown as ProtocolClient.Session
@@ -251,6 +253,39 @@ describe("BidiAdapter state", () => {
           navigation: reserved
         })
       }))
+  }
+
+  for (const beforeReply of [true, false]) {
+    for (const late of [true, false]) {
+      it.effect(`correlates ${late ? "a same-URL retry" : "an ordinary error page"} with events ${beforeReply ? "before" : "after"} its reply`, () =>
+        Effect.gen(function*() {
+          const url = "http://example.com/"
+          const errorUrl = "about:neterror?e=dnsNotFound&u=" + encodeURIComponent(url)
+          let deliver = () => {}
+          const { facts, page, state } = yield* withPage({
+            "browsingContext.navigate": Effect.sync(() => {
+              if (beforeReply) deliver()
+              return { navigation: "own", url }
+            })
+          })
+          const handlers = Navigation.register(Kit.handlers<State.Event>())
+          const event = (method: string, navigation: string, url: string) =>
+            handlers.apply(method, { context: "C1", navigation, url, timestamp: 1 }, { state })
+          deliver = () => {
+            if (late) event("browsingContext.navigationCommitted", "old", errorUrl)
+            if (late) event("browsingContext.navigationStarted", "own", url)
+            event("browsingContext.navigationCommitted", "own", late ? url : errorUrl)
+          }
+          const reserved = yield* Navigation.navigate(state, page.id, url, { referrer: Option.none() })
+          if (!beforeReply) deliver()
+          yield* state.buffer.flush
+          const ended = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === reserved)
+          assert.lengthOf(ended, 1)
+          assert.strictEqual(ended[0].outcome._tag, late ? "Committed" : "Failed")
+          assert.strictEqual(page.document!.url, late ? url : errorUrl)
+          assert.isEmpty(page.expected.list)
+        }))
+    }
   }
 
   it.effect("fails an operation on a page that ended as Gone, with why it ended", () =>
