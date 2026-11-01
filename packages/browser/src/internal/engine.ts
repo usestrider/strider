@@ -1505,6 +1505,13 @@ export function engine(render: (root: SnapNode) => string) {
         element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
         return answer
       case "Fill": {
+        if (
+          element instanceof HTMLInputElement && element.type === "number" && action.value !== "" &&
+          (!/^-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(action.value) ||
+            !Number.isFinite(Number(action.value)))
+        ) {
+          return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
+        }
         if (settable(element)) {
           element.focus()
           element.value = action.value

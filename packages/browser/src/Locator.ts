@@ -1002,6 +1002,12 @@ export interface Locator extends ReadonlyLocator {
    *   world, with `input` and `change` dispatched; a value it refuses fails with `InvalidInput`.
    * - An element that can't be edited fails at once with `NotEditable`. A read-only one is waited for, and a
    *   timeout reports it as `ReadOnly`.
+   * - The value must be a string, including inside `Redacted`; other runtime values fail with `InvalidInput`
+   *   before contacting the browser.
+   * - A number input takes an empty string to clear, or a finite HTML floating-point string: an optional minus,
+   *   digits with an optional fractional part (or a leading decimal point and digits), and an optional exponent
+   *   such as `1e2`. Whitespace, a leading plus, a trailing decimal point, hexadecimal and non-finite values fail
+   *   with `InvalidInput` before focus, selection or mutation. The input's min, max and step don't restrict fill.
    * - A `Redacted` value is typed into the page but never shown in spans, traces or errors.
    *
    * **Example** (Choosing a delivery date)

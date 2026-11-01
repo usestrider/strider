@@ -5,6 +5,7 @@
  */
 import { assert, describe, layer } from "@effect/vitest"
 import { Browser, Condition, Deadline, Expect, FileInput, Keyboard, Locator, Mouse } from "@usestrider/browser"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -93,6 +94,96 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             assert.strictEqual(yield* keys.readValue, "héllo")
             const unknown = yield* keys.press("NotAKey").pipe(Effect.flip)
             assert(Locator.isLocatorError(unknown) && unknown.reason._tag === "InvalidInput", String(unknown))
+          }))
+        }), timeout)
+
+      // ROOK-121: JavaScript callers bypass the string type, including inside Redacted.
+      for (
+        const [label, value] of [
+          ["number", 123],
+          ["null", null],
+          ["undefined", undefined],
+          ["boolean", true],
+          ["object", {}],
+          ["Redacted number", Redacted.make(123)],
+          ["nonnumeric text", "abc"],
+          ["whitespace", " "],
+          ["hexadecimal", "0x10"],
+          ["infinity", "Infinity"],
+          ["overflow", "1e309"],
+          ["leading plus", "+1"],
+          ["trailing decimal point", "1."],
+          ["incomplete exponent", "1e"],
+          ["Redacted nonnumeric text", Redacted.make("abc")]
+        ] as const
+      ) {
+        it.effect(`fill rejects ${label} without mutation or events`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" type="number" value="42" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const field = page.locator("#field")
+              const result = yield* field.fill(value as unknown as string).pipe(Effect.exit)
+              const error = result._tag === "Failure" ? Cause.findErrorOption(result.cause) : Option.none()
+              assert.deepStrictEqual({
+                value: yield* field.readValue,
+                events: yield* page.locator("#events").readText,
+                reason: Option.isSome(error) && Locator.isLocatorError(error.value)
+                  ? error.value.reason._tag
+                  : result._tag
+              }, { value: "42", events: "", reason: "InvalidInput" })
+            }))
+          }), timeout)
+      }
+
+      it.effect(
+        "fill preserves valid numeric strings, Redacted strings and empty clearing",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<input id="field" type="number" value="42">`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const field = page.locator("#field")
+              for (const value of ["123", "-12.5", ".5", "1e2", "-0", Redacted.make("7"), "", Redacted.make("")]) {
+                yield* field.fill(value)
+                assert.strictEqual(yield* field.readValue, Redacted.isRedacted(value) ? Redacted.value(value) : value)
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect("fill rejects number-input text without focusing the input", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="other"><input id="field" type="number" value="42" onfocus="events.textContent += 'focus;'" onselect="events.textContent += 'select;'"><p id="events"></p>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.locator("#other").focus()
+            yield* page.locator("#field").fill("abc").pipe(Effect.exit)
+            assert.strictEqual(yield* page.locator("#events").readText, "")
+            yield* page.keyboard.press("z")
+            assert.strictEqual(yield* page.locator("#other").readValue, "z")
+          }))
+        }), timeout)
+
+      it.effect("fill ignores a number input's min, max and step", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() => `<input id="field" type="number" min="10" max="20" step="3" value="13">`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const field = page.locator("#field")
+            for (const value of ["5", "25", "14.5"]) {
+              yield* field.fill(value)
+              assert.strictEqual(yield* field.readValue, value)
+            }
           }))
         }), timeout)
 
