@@ -32,7 +32,8 @@
     "reference": "pnpm jsdocs && pnpm examples && pnpm index && pnpm api-reference",
     "codegen:protocol": "strider-codegen generate cdp && strider-codegen generate bidi && strider-codegen generate webkit-stock && strider-codegen generate webkit-automation",
     "codegen:keyboards": "strider-codegen keyboards",
-    "codegen:audit": "strider-codegen audit cdp && strider-codegen audit bidi && strider-codegen audit webkit-stock && strider-codegen audit webkit-automation"
+    "codegen:audit": "strider-codegen audit cdp && strider-codegen audit bidi && strider-codegen audit webkit-stock && strider-codegen audit webkit-automation",
+    "profile:click": "nix develop .#integration --ignore-environment --keep TERM --command node packages/scenarios/benchmark/click-profile.ts"
   },
   "devDependencies": {
     "@babel/cli": "^8.0.6",

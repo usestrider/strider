@@ -267,6 +267,28 @@ world and document. Removing a script affects future documents only, and nothing
 from the parent's engine works only for same-origin frames, and a cross-site frame needs the per-document route
 anyway. One path for both keeps locating independent of what a page's script can reach.
 
+**Stability measures from the current rectangle across the requested rendering updates.** The first rectangle is
+sampled immediately; the following samples still require native rendering. Checks run again after acquiring the
+input permit, so a queued action never uses the preliminary check's stale geometry or element.
+
+- **Why.** Waiting for rendering before taking the baseline adds one frame to each of the two checks without
+  adding a rendering update between samples. A changed rectangle or replacement element still resets stability.
+- **Rejected:** removing the rendering wait entirely when stability is disabled, since a browser may drop input
+  before rendering; and skipping the check under the input permit, since another action may change the target
+  while this one waits for the permit.
+
+**An unqueued click may reuse stability within the same rendering frame.** Its preliminary check returns a
+single-use token. Under the input permit, the engine resolves the locator again and checks every condition; only
+the stability wait can be reused, and only for the same element, rectangle and requested frame count. The next
+rendering update or another action attempt invalidates the token. The engine retains at most one such record.
+
+- **Why.** Repeating the observation window for a target just observed to be stable adds two frames to an ordinary
+  click. Immediate revalidation retains that observation while checking the conditions that could have changed.
+  A queued click always takes new samples; an expired token, moved target or replacement also takes new samples.
+- **Rejected:** dropping the second check, sharing evidence across rendering updates, or treating matching
+  rectangles on different elements as the same observation. Each can dispatch input using stale readiness.
+  Moving the entire wait under the input permit would also block other actions while a target isn't ready.
+
 **A value means the same on every backend.** Where backends measure differently, Strider measures once itself. HAR
 timings are an example. Chromium, Firefox and WebKit each time a response on their own base, so `wait` and `receive`
 are measured on the library's monotonic clock. Recording each backend's own timings would make one HAR mean three
