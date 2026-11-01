@@ -56,12 +56,31 @@ export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
     .on(Fetch.requestPaused, (params, { state, target }) => {
       if (target === undefined) return
-      const request = params.networkId === undefined
+      const known = params.networkId === undefined
         ? undefined
         : state.requests.get(requestKey(target, params.networkId))
+      // Fetch ids identify requests, while a Network id spans a redirect chain. A matching Fetch id
+      // survives a URL override and both pause phases. Otherwise a different observed id or URL belongs
+      // to a later hop, whose Network event can still be waiting (ROOK-136). An initial Network hop
+      // cannot own a pause naming a predecessor. Beyond that hop, an unobserved Fetch identity on a
+      // repeated URL still cannot distinguish an early pause from a late one (ROOK-139).
+      const request = known !== undefined &&
+          (known.attribution.fetchId === params.requestId ||
+            (known.attribution.fetchId === undefined && known.url === params.request.url &&
+              (known.redirects > 0 || params.redirectedRequestId === undefined)))
+        ? known
+        : undefined
       const phase = params.responseStatusCode !== undefined || params.responseErrorReason !== undefined
         ? "response"
         : "request"
+      const key = params.networkId === undefined ? undefined : requestKey(target, params.networkId)
+      const attribution = request?.attribution ?? (key === undefined ?
+        undefined :
+        state.pendingAttribution.get(key) ?? { target, fulfilled: false })
+      if (request === undefined && key !== undefined && attribution !== undefined) {
+        state.pendingAttribution.set(key, attribution)
+      }
+      if (attribution !== undefined) attribution.fetchId = params.requestId
       // Authentication intercepts every request so the browser asks about its challenges; a request no intercept
       // of this phase wants goes on at once
       const intercepts = target.page === undefined ? undefined : state.registry.intercepts(placement(target.page))
@@ -85,7 +104,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         target,
         requestId: params.requestId,
         phase,
-        request,
+        attribution,
         body: postData(params.request),
         networkId: params.networkId,
         hasBody: params.request.hasPostData === true
@@ -127,7 +146,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         target,
         requestId: params.requestId,
         phase: "auth",
-        request: undefined,
+        attribution: undefined,
         body: postData(params.request),
         networkId: undefined,
         hasBody: params.request.hasPostData === true
@@ -258,7 +277,7 @@ const decide = (
       }).pipe(on)
     case "Fulfill":
       // The browser reports what a route made as an ordinary response
-      if (obligation.request !== undefined) obligation.request.fulfilled = true
+      if (obligation.attribution !== undefined) obligation.attribution.fulfilled = true
       return Fetch.fulfillRequest({
         requestId,
         responseCode: decision.status,
@@ -300,6 +319,9 @@ export const resolve = Effect.fnUntraced(
     switch (obligation._tag) {
       case "PausedRequest": {
         yield* Kit.protocol(decide(state, obligation, decision))
+        if (decision._tag === "Fail" && obligation.networkId !== undefined) {
+          state.pendingAttribution.delete(requestKey(obligation.target, obligation.networkId))
+        }
         state.obligations.delete(id)
         yield* state.buffer.run(() =>
           state.buffer.emit({ _tag: "ObligationEnded", obligation: id, reason: "resolved", evidence: "cdp:Fetch" })

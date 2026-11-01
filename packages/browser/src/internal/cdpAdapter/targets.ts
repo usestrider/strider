@@ -135,6 +135,9 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
   const target = state.targets.get(session)
   if (target === undefined || target.ended) return
   target.ended = true
+  for (const [key, pending] of state.pendingAttribution) {
+    if (pending.target === target) state.pendingAttribution.delete(key)
+  }
   state.targets.delete(session)
   if (state.targetsById.get(target.targetId) === target) state.targetsById.delete(target.targetId)
   state.workerContexts.delete(target)
