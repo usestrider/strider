@@ -15,6 +15,7 @@ describe("CDP adapter redirect headers", () => {
       "captured",
       "early ExtraInfo",
       "all early",
+      "ambiguous prefix",
       "all late",
       "failed last hop",
       "first without ExtraInfo",
@@ -27,6 +28,7 @@ describe("CDP adapter redirect headers", () => {
           const browser = yield* makeBrowser
           const ready = yield* Deferred.make<void>()
           const finished = yield* Deferred.make<void>()
+          const settled = yield* Deferred.make<void>()
           const facts: Array<Adapter.Fact> = []
           // Answer only the handshake and target configuration; request events below are captured payloads.
           yield* Effect.gen(function*() {
@@ -62,6 +64,7 @@ describe("CDP adapter redirect headers", () => {
             ownership: "attached",
             sink: Effect.fnUntraced(function*(fact) {
               facts.push(fact)
+              if (fact._tag === "ConnectionOpened") yield* Deferred.succeed(settled, undefined)
               if (fact._tag === "PageReady") {
                 yield* Deferred.succeed(ready, undefined)
               }
@@ -89,7 +92,7 @@ describe("CDP adapter redirect headers", () => {
           })
           // ROOK-104 #10: Chromium 155 capture lines 63, 65–70, 72, 80, unchanged payloads.
           // The vendored CDP requestWillBeSentExtraInfo contract permits either event to arrive first.
-          // Preserve ExtraInfo order, moving only the second request ExtraInfo before its main event.
+          // Synthetic variants preserve each ExtraInfo stream's hop order and exercise the absence flags.
           const events = structuredClone(captured)
           // Give response headers distinct values so attribution cannot pass by matching identical headers.
           Object.assign(events[2]!.params.headers!, { "x-hop": "first" })
@@ -125,6 +128,24 @@ describe("CDP adapter redirect headers", () => {
           if (ordering === "failed last hop") {
             reordered = events.slice(0, 6)
           }
+          if (ordering === "ambiguous prefix") {
+            // Exactly the prefix used by the outstanding-response test below. Only later events reveal
+            // that this ExtraInfo belongs to the next hop, rather than the visible request.
+            for (const event of captured.slice(0, 2)) {
+              yield* browser.receive({ method: event.method, params: event.params, sessionId: "S1" })
+            }
+            yield* browser.receive({
+              method: "Network.webSocketCreated",
+              sessionId: "S1",
+              params: { requestId: "sentinel", url: "ws://127.0.0.1/" }
+            })
+            yield* Deferred.await(settled)
+            assert.deepStrictEqual(facts.filter((fact) => fact._tag === "HopHeaders"), [])
+            Object.assign(events[3]!.params, { redirectHasExtraInfo: false })
+            Object.assign(events[3]!.params.redirectResponse!, { fromDiskCache: true, timing: undefined })
+            reordered = [events[3]!, events[5]!, ...events.slice(6)]
+          }
+
           for (const event of reordered) {
             yield* browser.receive({ method: event.method, params: event.params, sessionId: "S1" })
           }
@@ -146,13 +167,19 @@ describe("CDP adapter redirect headers", () => {
             fact._tag === "HopHeaders" && fact.phase === "request"
           )
           assert.strictEqual(requests.length, 2)
+          if (ordering === "ambiguous prefix") {
+            assert.deepStrictEqual(headers.map((fact) => ({ hop: fact.hop, cookie: fact.headers.cookie })), [
+              { hop: requests[0]!.request.hop, cookie: undefined },
+              { hop: requests[1]!.request.hop, cookie: "flavor=oat" }
+            ])
+          }
           if (assertion === "per-hop headers") {
             const received = facts.filter((fact): fact is Extract<Adapter.Fact, { _tag: "HopHeaders" }> =>
               fact._tag === "HopHeaders" && fact.phase === "response"
             )
             assert.deepStrictEqual(
               received.map((fact) => ({ hop: fact.hop, value: fact.headers["x-hop"] })),
-              ordering === "first without ExtraInfo" ?
+              (ordering === "first without ExtraInfo" || ordering === "ambiguous prefix") ?
                 [{ hop: requests[1]!.request.hop, value: "last" }]
                 : ordering === "last without ExtraInfo" ?
                 [{ hop: requests[0]!.request.hop, value: "first" }]
