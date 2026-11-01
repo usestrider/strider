@@ -201,6 +201,7 @@ export const SnapNode: Schema.Codec<SnapNode> = Schema.Struct({
     Schema.TaggedStruct("None", {})
   ]),
   states: Schema.Array(Schema.String),
+  validationMessage: Schema.NullOr(Schema.String),
   children: Schema.Array(Schema.suspend((): Schema.Codec<SnapNode> => SnapNode)),
   frame: Schema.Boolean
 })
