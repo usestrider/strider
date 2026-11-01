@@ -382,6 +382,16 @@ describe("BrowserToolkit", () => {
     assert.include(redacted, "[invalid]")
     assert.include(redacted, "[ref=e1]")
   })
+  it("masks whole custom validation messages including JSON escapes", () => {
+    const message = "private \"quoted\" ] [ref=fake] \\ trailing\nprivate tail"
+    for (const role of ["textbox", "combobox", "button"]) {
+      const text = `- ${role} "Field" [invalid] [validationMessage=${JSON.stringify(message)}] [ref=e1]`
+      assert.strictEqual(
+        ToolkitImpl.masked(text),
+        `- ${role} "Field" [invalid] [validationMessage="•••"] [ref=e1]`
+      )
+    }
+  })
 })
 
 describe("strider", () => {

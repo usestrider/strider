@@ -221,6 +221,42 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         timeout
       )
 
+      it.effect(
+        "redacts custom validation messages through the snapshot tool and keeps full capture",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const html = "<label>Mail <input id=\"mail\" type=\"email\"></label>"
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              const message = "private \"quoted\" ] [ref=fake] \\ trailing\nprivate tail"
+              yield* page.getByRole("textbox", { name: "Mail" }).fill("private-value")
+              yield* page.evaluate((message) => {
+                ;(document.getElementById("mail") as HTMLInputElement).setCustomValidity(message)
+              }, message)
+              const full = yield* page.snapshot()
+              assert.include(full.text, `[validationMessage=${JSON.stringify(message)}]`)
+              for (const capture of [CapturePolicy.strict, CapturePolicy.local]) {
+                const tools = yield* BrowserToolkit.make({ context: page.context, secrets: {}, capture })
+                const result = yield* call(tools, "snapshot", { page: "p1" })
+                assert.isFalse(result.failed)
+                const text = result.value.outcome as string
+                assert.include(text, "[invalid]")
+                assert.include(text, "[ref=e1]")
+                if (capture.snapshotText === "redacted") {
+                  assert.include(text, "[validationMessage=\"•••\"]")
+                  assert.notInclude(text, "private")
+                  assert.notInclude(text, "ref=fake")
+                } else {
+                  assert.include(text, `[validationMessage=${JSON.stringify(message)}]`)
+                }
+              }
+            }))
+          }),
+        timeout
+      )
+
       it.effect("sends what the capture policy allows", () =>
         Effect.gen(function*() {
           const served = yield* site
