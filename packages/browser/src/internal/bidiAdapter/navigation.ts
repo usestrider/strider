@@ -37,8 +37,14 @@ const sameDocument = (
   const document = navigable?.document
   if (navigable === undefined || document === undefined) return
   const known = bidi === null ? undefined : state.navigations.get(bidi)
-  const index = navigable.expected.list.findIndex((expected) => Kit.normalize(expected.url) === Kit.normalize(url))
-  const expected = known === undefined && index >= 0 ? navigable.expected.list.splice(index, 1)[0] : null
+  const bound = bidi === null ? undefined : navigable.commandNavigations.get(bidi)
+  let expected: Kit.Expected | null = null
+  // startNavigation consumes an exact reply binding itself. Only claim by URL when neither
+  // live nor reply identity owns this event, so one observation cannot take two reservations.
+  if (known === undefined && bound === undefined) {
+    const index = navigable.expected.list.findIndex((expected) => Kit.normalize(expected.url) === Kit.normalize(url))
+    if (index >= 0) expected = navigable.expected.list.splice(index, 1)[0]!
+  }
   const navigation = known ??
     startNavigation(
       state,
