@@ -131,7 +131,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         it.effect(`rejects invalid ${type} value ${invalid} without mutation or events`, () =>
           Effect.gen(function*() {
             const { url } = yield* fixture(() =>
-              `<input id="field" type="${type}" min="0" max="100" value="${initial}" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+              `<input id="field" type="${type}" min="0" max="100" value="${initial}" onfocus="events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* Browser.newPage()
@@ -177,7 +177,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         it.effect(`rejects a date fill after a focus handler changes type to ${type}`, () =>
           Effect.gen(function*() {
             const { url } = yield* fixture(() =>
-              `<input id="field" type="date" value="2020-03-02" onfocus="this.type = '${type}'; before.textContent = this.value; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="before"></p><p id="events"></p>`
+              `<input id="field" type="date" tabindex="0" value="2020-03-02" onfocus="this.type = '${type}'; before.textContent = this.value; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="before"></p><p id="events"></p>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* Browser.newPage()
@@ -193,6 +193,19 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }))
           }), timeout)
       }
+
+      it.effect("fills as text after a focus handler changes a date input to text", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="field" type="date" tabindex="0" value="2020-03-02" onfocus="this.type = 'text'">`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.locator("#field").fill("2020-03-03")
+            assert.strictEqual(yield* page.locator("#field").readValue, "2020-03-03")
+          }))
+        }), timeout)
 
       it.effect("chooses options, checks boxes and sets files", () =>
         Effect.gen(function*() {
