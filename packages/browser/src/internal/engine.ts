@@ -129,7 +129,7 @@ export type Read =
   | { readonly _tag: "Html" }
   | { readonly _tag: "Attribute"; readonly name: string }
   | { readonly _tag: "Enabled" }
-  | { readonly _tag: "Checked" }
+  | { readonly _tag: "Checked"; readonly followLabel?: boolean }
 
 /** What an expectation waits for. */
 export type Expectation =
@@ -1170,11 +1170,11 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /** Text inputs whose value is typed; the other input types have it set. */
-  const TYPED = new Set(["", "text", "search", "email", "password", "tel", "url", "number"])
+  const TYPED = new Set(["text", "search", "email", "password", "tel", "url", "number"])
 
   const typed = (element: Element): element is HTMLInputElement | HTMLTextAreaElement =>
     element instanceof HTMLTextAreaElement ||
-    (element instanceof HTMLInputElement && TYPED.has(element.getAttribute("type")?.toLowerCase() ?? ""))
+    (element instanceof HTMLInputElement && TYPED.has(element.type))
 
   const SET = new Set(["date", "datetime-local", "month", "week", "time", "color", "range"])
 
@@ -1505,6 +1505,13 @@ export function engine(render: (root: SnapNode) => string) {
         element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
         return answer
       case "Fill": {
+        if (
+          element instanceof HTMLInputElement && element.type === "number" && action.value !== "" &&
+          (!/^-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(action.value) ||
+            !Number.isFinite(Number(action.value)))
+        ) {
+          return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
+        }
         if (settable(element)) {
           element.focus()
           element.value = action.value
@@ -1559,7 +1566,11 @@ export function engine(render: (root: SnapNode) => string) {
       case "Enabled":
         return { _tag: "Read", value: enabled(element) }
       case "Checked": {
-        const checked = checkedOf(element)
+        let checked = checkedOf(element)
+        if (checked === null && request.read.followLabel && element instanceof HTMLLabelElement) {
+          const control = element.control
+          checked = control === null ? null : checkedOf(control)
+        }
         return checked === null ? wrong("a checkbox, a radio or an ARIA checkable") : { _tag: "Read", value: checked }
       }
     }
