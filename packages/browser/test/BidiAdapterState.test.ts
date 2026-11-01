@@ -455,6 +455,44 @@ describe("BidiAdapter state", () => {
     }
   }
 
+  it.effect("does not consume an overlapping same-URL reservation when a fragment already has reply identity", () =>
+    Effect.gen(function*() {
+      const url = "about:blank#same"
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      let calls = 0
+      const { facts, page, state } = yield* withPage({
+        "browsingContext.navigate": Effect.suspend(() =>
+          ++calls === 1
+            ? Effect.gen(function*() {
+              yield* Deferred.succeed(entered, undefined)
+              yield* Deferred.await(release)
+              return { navigation: "first", url }
+            })
+            : Effect.succeed({ navigation: "second", url })
+        )
+      })
+      const handlers = Navigation.register(Kit.handlers<State.Event>())
+      const event = (method: string, navigation: string) =>
+        handlers.apply(method, { context: "C1", navigation, url, timestamp: 1 }, { state })
+      const running = yield* Effect.forkChild(Navigation.navigate(state, page.id, url, { referrer: Option.none() }))
+      yield* Deferred.await(entered)
+      const first = page.expected.list[0]!.id
+      const second = yield* Navigation.navigate(state, page.id, url, { referrer: Option.none() })
+      event("browsingContext.fragmentNavigated", "second")
+      yield* Deferred.succeed(release, undefined)
+      assert.strictEqual(yield* Fiber.join(running), first)
+      event("browsingContext.fragmentNavigated", "first")
+      yield* state.buffer.flush
+      const outcomes = (id: PageNavigation.Id) =>
+        facts.flatMap((fact) => fact._tag === "NavigationEnded" && fact.navigation === id ? [fact.outcome._tag] : [])
+      assert.deepStrictEqual(outcomes(second), ["SameDocument"])
+      assert.deepStrictEqual(outcomes(first), ["SameDocument"])
+      assert.isEmpty(page.expected.list)
+      assert.isEmpty(page.commandNavigations)
+      assert.isEmpty(page.navigationCommands)
+    }))
+
   it.effect("keeps a late failed-navigation commit from taking the next navigation id", () =>
     Effect.gen(function*() {
       const facts: Array<Adapter.Fact> = []
