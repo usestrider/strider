@@ -372,6 +372,16 @@ describe("BrowserToolkit", () => {
       `- form:\n  - textbox "Card" [ref=e1]:\n    - text: "•••"\n  - text: "Total"`
     )
   })
+
+  it("masks an editable field's text that its validation message repeats", () => {
+    // Chromium 155's own message for this field, with hunter2secret typed in it
+    const text =
+      `- textbox "Mail" [invalid] [validationMessage="Please include an '@' in the email address. 'hunter2secret' is missing an '@'."] [ref=e1]`
+    const redacted = ToolkitImpl.masked(text)
+    assert.notInclude(redacted, "hunter2secret")
+    assert.include(redacted, "[invalid]")
+    assert.include(redacted, "[ref=e1]")
+  })
 })
 
 describe("strider", () => {
