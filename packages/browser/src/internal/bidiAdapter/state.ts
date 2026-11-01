@@ -15,6 +15,7 @@ import type * as Script from "../../bidi-protocol/Script.ts"
 import type * as Dialog from "../../Dialog.ts"
 import type * as Download from "../../Download.ts"
 import type * as NetworkRequest from "../../NetworkRequest.ts"
+import type * as PageNavigation from "../../PageNavigation.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as L1Target from "../../Target.ts"
 import type * as UserContext from "../../UserContext.ts"
@@ -49,6 +50,15 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
   restoring: ((realm: RealmEntry) => void) | undefined
   /** Navigations started by a command that the browser hasn't announced yet, oldest first. */
   readonly expected: Kit.Expectations
+  /** Commands awaiting replies; unknown error commits wait for their navigation identities. */
+  readonly navigationCommands: Set<PageNavigation.Id>
+  readonly commandNavigations: Map<string, Kit.Expected>
+  readonly pendingNavigationEvents: Array<{
+    readonly kind: "commit" | "failure" | "abort"
+    readonly params: BrowsingContext.NavigationInfo
+  }>
+  /** The last failure can still install its error document. */
+  failedNavigation: (Kit.Expected & { readonly bidi?: string | undefined }) | undefined
   readonly navigations: Map<string, NavigationEntry>
   /** The documents it had, by URL: what a restore from the back/forward cache restores. */
   readonly past: Map<string, L1Target.DocumentId>

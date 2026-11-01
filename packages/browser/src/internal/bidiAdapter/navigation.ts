@@ -68,73 +68,125 @@ const readiness = (state: State, context: string, bidi: string | null, readiness
   state.buffer.emit({ _tag: "DocumentReadiness", document: document.id, readiness })
 }
 
+const committed = (state: State, navigable: NavigableEntry, params: BrowsingContext.NavigationInfo) => {
+  const url = params.url ?? ""
+  const bidi = params.navigation ?? `committed:${navigable.bidi}:${url}`
+  const failed = errorPage(url)
+  const rejected = navigable.failedNavigation
+  if (
+    failed && rejected !== undefined && (rejected.bidi === undefined
+      ? Kit.normalize(rejected.url) === Kit.normalize(intended(url))
+      : rejected.bidi === bidi) &&
+    !state.navigations.has(bidi) && !navigable.commandNavigations.has(bidi)
+  ) {
+    commit(
+      state,
+      navigable,
+      url,
+      originOf(url),
+      { _tag: "ErrorPage", navigation: rejected.id },
+      bidi,
+      "bidi:browsingContext.navigationCommitted"
+    )
+    navigable.failedNavigation = undefined
+    return
+  }
+  if (!failed) navigable.failedNavigation = undefined
+  // Unannounced error pages need command reply identity, never URL equality (ROOK-130).
+  const navigation = state.navigations.get(bidi) ??
+    startNavigation(
+      state,
+      navigable,
+      bidi,
+      intended(url),
+      "crossDocument",
+      false,
+      failed ? null : undefined
+    )
+  const document = commit(
+    state,
+    navigable,
+    url,
+    originOf(url),
+    failed ? { _tag: "ErrorPage", navigation: navigation.id } : { _tag: "Navigation", navigation: navigation.id },
+    bidi,
+    "bidi:browsingContext.navigationCommitted"
+  )
+  endNavigation(
+    state,
+    navigation,
+    failed
+      ? { _tag: "Failed", error: errorText(url), errorDocument: Option.some(document.id) }
+      : { _tag: "Committed", document: document.id, response: Option.fromUndefinedOr(navigation.documentHop) },
+    "bidi:browsingContext.navigationCommitted"
+  )
+}
+
+const failed = (state: State, navigable: NavigableEntry, params: BrowsingContext.NavigationInfo, aborted: boolean) => {
+  const navigation = params.navigation === null ? undefined : state.navigations.get(params.navigation) ??
+    (navigable.commandNavigations.has(params.navigation)
+      ? startNavigation(state, navigable, params.navigation, intended(params.url ?? ""), "crossDocument", false, null)
+      : undefined)
+  if (navigation === undefined) return
+  endNavigation(
+    state,
+    navigation,
+    !aborted && (navigation.status === 204 || navigation.status === 205)
+      ? { _tag: "NoContent", status: navigation.status, response: Option.fromUndefinedOr(navigation.documentHop) }
+      : { _tag: "Failed", error: aborted ? "navigation aborted" : "navigation failed", errorDocument: Option.none() },
+    `bidi:browsingContext.${aborted ? "navigationAborted" : "navigationFailed"}`
+  )
+}
+
+const terminal = (state: State, params: BrowsingContext.NavigationInfo, aborted: boolean) => {
+  const navigable = navigableOf(state, params.context)
+  if (navigable === undefined) return
+  if (
+    params.navigation !== null && !state.navigations.has(params.navigation) &&
+    !navigable.commandNavigations.has(params.navigation) && navigable.navigationCommands.size > 0
+  ) {
+    navigable.pendingNavigationEvents.push({ kind: aborted ? "abort" : "failure", params })
+    return
+  }
+  flushNavigationEvents(state, navigable)
+  failed(state, navigable, params, aborted)
+}
+
+const flushNavigationEvents = (state: State, navigable: NavigableEntry) => {
+  for (const event of navigable.pendingNavigationEvents.splice(0)) {
+    if (navigable.removed) continue
+    if (event.kind === "commit") committed(state, navigable, event.params)
+    else failed(state, navigable, event.params, event.kind === "abort")
+  }
+}
+
 export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
     .on(BrowsingContext.navigationStarted, (params, { state }) => {
       const navigable = navigableOf(state, params.context)
       if (navigable === undefined || params.navigation === null) return
       // Firefox leaves out the URL of the navigation that closing with promptUnload starts
-      startNavigation(state, navigable, params.navigation, intended(params.url ?? ""), "crossDocument", false)
+      if (!state.navigations.has(params.navigation)) {
+        startNavigation(state, navigable, params.navigation, intended(params.url ?? ""), "crossDocument", false)
+      }
+      flushNavigationEvents(state, navigable)
     })
     .on(BrowsingContext.navigationCommitted, (params, { state }) => {
       const navigable = navigableOf(state, params.context)
       if (navigable === undefined) return
-      const url = params.url ?? ""
-      const bidi = params.navigation ?? `committed:${navigable.bidi}:${url}`
-      const failed = errorPage(url)
-      // ROOK-130: an unannounced error page may belong to an already rejected command.
-      // Its intended URL can match an expectation, but it must not take another command's id.
-      // A known navigation keeps its id through redirects, regardless of the error page's URL.
-      const navigation = state.navigations.get(bidi) ??
-        startNavigation(
-          state,
-          navigable,
-          bidi,
-          intended(url),
-          "crossDocument",
-          false,
-          failed ? Kit.take(navigable.expected, intended(url), { fallback: false }) ?? null : undefined
-        )
-      const document = commit(
-        state,
-        navigable,
-        url,
-        originOf(url),
-        failed ? { _tag: "ErrorPage", navigation: navigation.id } : { _tag: "Navigation", navigation: navigation.id },
-        bidi,
-        "bidi:browsingContext.navigationCommitted"
-      )
-      endNavigation(
-        state,
-        navigation,
-        failed
-          ? { _tag: "Failed", error: errorText(url), errorDocument: Option.some(document.id) }
-          : { _tag: "Committed", document: document.id, response: Option.fromUndefinedOr(navigation.documentHop) },
-        "bidi:browsingContext.navigationCommitted"
-      )
+      const bidi = params.navigation
+      if (
+        errorPage(params.url ?? "") && (bidi === null || !state.navigations.has(bidi)) &&
+        (bidi === null || !navigable.commandNavigations.has(bidi)) && navigable.navigationCommands.size > 0
+      ) {
+        navigable.pendingNavigationEvents.push({ kind: "commit", params })
+        return
+      }
+      flushNavigationEvents(state, navigable)
+      committed(state, navigable, params)
     })
-    .on(BrowsingContext.navigationFailed, (params, { state }) => {
-      const navigation = params.navigation === null ? undefined : state.navigations.get(params.navigation)
-      if (navigation === undefined) return
-      endNavigation(
-        state,
-        navigation,
-        navigation.status === 204 || navigation.status === 205
-          ? { _tag: "NoContent", status: navigation.status, response: Option.fromUndefinedOr(navigation.documentHop) }
-          : { _tag: "Failed", error: "navigation failed", errorDocument: Option.none() },
-        "bidi:browsingContext.navigationFailed"
-      )
-    })
-    .on(BrowsingContext.navigationAborted, (params, { state }) => {
-      const navigation = params.navigation === null ? undefined : state.navigations.get(params.navigation)
-      if (navigation === undefined) return
-      endNavigation(
-        state,
-        navigation,
-        { _tag: "Failed", error: "navigation aborted", errorDocument: Option.none() },
-        "bidi:browsingContext.navigationAborted"
-      )
-    })
+    .on(BrowsingContext.navigationFailed, (params, { state }) => terminal(state, params, false))
+    .on(BrowsingContext.navigationAborted, (params, { state }) => terminal(state, params, true))
     .on(
       BrowsingContext.fragmentNavigated,
       (params, { state }) => sameDocument(state, params.context, params.navigation, params.url ?? "", "fragment")
@@ -160,30 +212,57 @@ const sendNavigation = (
   navigable: NavigableEntry,
   id: PageNavigation.Id,
   url: string,
-  command: Effect.Effect<unknown, Protocol.ProtocolError>
+  command: Effect.Effect<BrowsingContext.NavigateResult, Protocol.ProtocolError>
 ) =>
-  command.pipe(
-    Effect.as(id),
-    Effect.catch((error) =>
-      error.reason._tag === "Unsupported"
-        ? Effect.andThen(
-          Effect.sync(() => Kit.unexpect(navigable.expected, id)),
-          Effect.fail(Kit.protocolError(error))
-        )
-        : Effect.as(
-          Kit.neverStarted(state.buffer, {
-            drained: state.root().drainObserved,
-            expectations: navigable.expected,
-            navigable: navigable.id,
-            navigation: id,
-            url,
-            error: error.message,
-            evidence: "bidi:browsingContext.navigate"
-          }),
-          id
-        )
+  Effect.suspend(() => {
+    navigable.navigationCommands.add(id)
+    return command.pipe(
+      Effect.tap((reply) =>
+        state.buffer.run(() => {
+          if (navigable.removed || reply.navigation === null) return
+          const index = navigable.expected.list.findIndex((expected) => expected.id === id)
+          if (index < 0) return
+          const [expected] = navigable.expected.list.splice(index, 1)
+          navigable.commandNavigations.set(reply.navigation, expected!)
+        })
+      ),
+      Effect.as(id),
+      Effect.catch((error) =>
+        error.reason._tag === "Unsupported"
+          ? Effect.andThen(
+            Effect.sync(() => Kit.unexpect(navigable.expected, id)),
+            Effect.fail(Kit.protocolError(error))
+          )
+          : Effect.as(
+            Effect.andThen(
+              state.buffer.run(() => {
+                const expected = navigable.expected.list.find((expected) => expected.id === id)
+                if (expected !== undefined) navigable.failedNavigation = expected
+              }),
+              Kit.neverStarted(state.buffer, {
+                drained: state.root().drainObserved,
+                expectations: navigable.expected,
+                navigable: navigable.id,
+                navigation: id,
+                url,
+                error: error.message,
+                evidence: "bidi:browsingContext.navigate"
+              })
+            ),
+            id
+          )
+      ),
+      Effect.onInterrupt(() =>
+        state.buffer.run(() => {
+          Kit.unexpect(navigable.expected, id)
+        })
+      ),
+      Effect.ensuring(state.buffer.run(() => {
+        navigable.navigationCommands.delete(id)
+        if (navigable.navigationCommands.size === 0) flushNavigationEvents(state, navigable)
+      }))
     )
-  )
+  })
 
 export const navigate = Effect.fnUntraced(function*(
   state: State,

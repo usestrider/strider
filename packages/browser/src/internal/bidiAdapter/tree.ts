@@ -32,6 +32,14 @@ export const endNavigation = (
   evidence: string
 ) =>
   Kit.endNavigation(state.buffer, navigation, outcome, evidence, (navigation) => {
+    if (outcome._tag === "Failed" && Option.isNone(outcome.errorDocument)) {
+      navigation.navigable.failedNavigation = {
+        id: navigation.id,
+        url: navigation.url,
+        initiatedAs: "crossDocument",
+        bidi: navigation.bidi
+      }
+    }
     navigation.navigable.navigations.delete(navigation.bidi)
     if (state.navigations.get(navigation.bidi) === navigation) state.navigations.delete(navigation.bidi)
   })
@@ -47,6 +55,11 @@ export const removeNavigable = (
   evidence: string
 ) =>
   Kit.removeNavigable(state.buffer, navigable, reason, evidence, (navigable, reason) => {
+    navigable.navigationCommands.clear()
+    navigable.commandNavigations.clear()
+    navigable.pendingNavigationEvents.length = 0
+    navigable.failedNavigation = undefined
+    navigable.expected.list.length = 0
     state.navigables.delete(navigable.bidi)
     state.navigablesById.delete(navigable.id)
     if (navigable.document !== undefined) {
@@ -140,7 +153,9 @@ export const startNavigation = (
   /** A command's expectation, already taken; null means no match, undefined takes one here. */
   taken?: { readonly id: PageNavigation.Id; readonly initiatedAs: Adapter.InitiatedAs } | null
 ): NavigationEntry => {
-  const expected = taken === undefined ? Kit.take(navigable.expected, url) : taken
+  const bound = navigable.commandNavigations.get(bidi)
+  navigable.commandNavigations.delete(bidi)
+  const expected = bound ?? (taken === undefined ? Kit.take(navigable.expected, url) : taken)
   const initiatedAs = expected?.initiatedAs ?? type
   const navigation: NavigationEntry = {
     id: expected?.id ?? state.ids.navigation(),
@@ -153,7 +168,8 @@ export const startNavigation = (
     status: undefined,
     ended: false
   }
-  if (!sameDocument) {
+  // An uncorrelated error commit can be late; it cannot replace a navigation already in flight.
+  if (!sameDocument && (taken !== null || bound !== undefined)) {
     // A navigable has one cross-document navigation at a time: a new one replaces the one in flight
     for (const pending of Array.from(navigable.navigations.values())) {
       if (!pending.sameDocument) {
@@ -223,6 +239,10 @@ export const addNavigable = (state: State, info: {
     pendingRealms: [],
     restoring: undefined,
     expected: Kit.makeExpectations(),
+    navigationCommands: new Set(),
+    commandNavigations: new Map(),
+    pendingNavigationEvents: [],
+    failedNavigation: undefined,
     past: new Map(),
     navigations: new Map(),
     removed: false

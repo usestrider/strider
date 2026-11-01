@@ -4,7 +4,9 @@
  * base64 the browser sent that doesn't decode fails rather than giving empty bytes.
  */
 import { assert, describe, it } from "@effect/vitest"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import type * as BrowsingContext from "../src/bidi-protocol/BrowsingContext.ts"
 import type * as Script from "../src/bidi-protocol/Script.ts"
@@ -37,8 +39,9 @@ const session = (
       Effect.suspend(() => {
         sent.push(command.method)
         const failure = failures[command.method]
+        const reply = replies[command.method]
         return failure === undefined
-          ? Effect.isEffect(replies[command.method]) ? replies[command.method] : Effect.succeed(replies[command.method])
+          ? Effect.isEffect(reply) ? reply : Effect.succeed(reply)
           : Effect.fail(failure())
       }),
     drainObserved: Effect.void
@@ -209,17 +212,21 @@ describe("BidiAdapter state", () => {
 
   for (
     const scenario of [
-      { name: "matches an ordinary error-page commit to its intended URL", started: false, matches: true },
+      { name: "matches an ordinary error-page commit to its command reply id", started: false, matches: true },
       { name: "keeps a started navigation correlated through a redirected error page", started: true, matches: false },
       { name: "keeps redirect URL fallback on navigationStarted", started: true, matches: true }
     ]
   ) {
     it.effect(scenario.name, () =>
       Effect.gen(function*() {
-        const { facts, page, state } = yield* withPage()
+        const { facts, page, state } = yield* withPage({
+          "browsingContext.navigate": { navigation: "N1", url: "http://example.com/" }
+        })
         const handlers = Navigation.register(Kit.handlers<State.Event>())
         const url = "http://example.com/"
-        const reserved = Kit.expect(state.ids, page.expected, url)
+        const reserved = scenario.started
+          ? Kit.expect(state.ids, page.expected, url)
+          : yield* Navigation.navigate(state, page.id, url, { referrer: Option.none() })
         const next = Kit.expect(state.ids, page.expected, "http://next.example/")
         const errorUrl = "about:neterror?e=dnsNotFound&u=" +
           encodeURIComponent(scenario.matches ? url : "http://redirect.example/")
@@ -262,10 +269,24 @@ describe("BidiAdapter state", () => {
           const url = "http://example.com/"
           const errorUrl = "about:neterror?e=dnsNotFound&u=" + encodeURIComponent(url)
           let deliver = () => {}
+          let reject = late
           const { facts, page, state } = yield* withPage({
-            "browsingContext.navigate": Effect.sync(() => {
+            "browsingContext.navigate": Effect.suspend(() => {
+              if (reject) {
+                reject = false
+                return Effect.fail(
+                  new Protocol.ProtocolError({
+                    reason: new Protocol.Rejected({
+                      method: "browsingContext.navigate",
+                      reason: "Unrecognized",
+                      code: "unknown error",
+                      description: "connection refused"
+                    })
+                  })
+                )
+              }
               if (beforeReply) deliver()
-              return { navigation: "own", url }
+              return Effect.succeed({ navigation: "own", url })
             })
           })
           const handlers = Navigation.register(Kit.handlers<State.Event>())
@@ -276,17 +297,198 @@ describe("BidiAdapter state", () => {
             if (late) event("browsingContext.navigationStarted", "own", url)
             event("browsingContext.navigationCommitted", "own", late ? url : errorUrl)
           }
+          const refused = late
+            ? yield* Navigation.navigate(state, page.id, url, { referrer: Option.none() })
+            : undefined
           const reserved = yield* Navigation.navigate(state, page.id, url, { referrer: Option.none() })
           if (!beforeReply) deliver()
           yield* state.buffer.flush
-          const ended = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === reserved)
+          const ended = facts.filter((fact) => fact._tag === "NavigationEnded").filter((fact) =>
+            fact.navigation === reserved
+          )
           assert.lengthOf(ended, 1)
-          assert.strictEqual(ended[0].outcome._tag, late ? "Committed" : "Failed")
+          assert.strictEqual(ended[0]!.outcome._tag, late ? "Committed" : "Failed")
           assert.strictEqual(page.document!.url, late ? url : errorUrl)
+          if (late) {
+            assert.deepStrictEqual(
+              facts.filter((fact) => fact._tag === "NavigationStarted").map((fact) => fact.navigation),
+              [refused, reserved]
+            )
+            const errorDocument = facts.find((fact) =>
+              fact._tag === "DocumentCommitted" && fact.createdBy._tag === "ErrorPage"
+            )
+            assert.isDefined(errorDocument)
+            assert.deepStrictEqual(errorDocument!._tag === "DocumentCommitted" && errorDocument!.createdBy, {
+              _tag: "ErrorPage",
+              navigation: refused!
+            })
+          }
           assert.isEmpty(page.expected.list)
+          assert.isEmpty(page.commandNavigations)
+          assert.isEmpty(page.navigationCommands)
+          assert.isEmpty(page.pendingNavigationEvents)
+          assert.isUndefined(page.failedNavigation)
         }))
     }
   }
+
+  for (const mode of ["rejected", "unsupported", "interrupted", "removed"] as const) {
+    it.effect(`cleans up navigation correlation when the command is ${mode}`, () =>
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        let deliver = () => {}
+        const url = "http://example.com/"
+        const { facts, page, state } = yield* withPage({
+          "browsingContext.navigate": Effect.gen(function*() {
+            deliver()
+            yield* Deferred.succeed(entered, undefined)
+            if (mode === "interrupted" || mode === "removed") yield* Deferred.await(release)
+            if (mode === "rejected") {
+              return yield* Effect.fail(
+                new Protocol.ProtocolError({
+                  reason: new Protocol.Rejected({
+                    method: "browsingContext.navigate",
+                    reason: "Unrecognized",
+                    code: "unknown error",
+                    description: "refused"
+                  })
+                })
+              )
+            }
+            if (mode === "unsupported") {
+              return yield* Effect.fail(
+                new Protocol.ProtocolError({
+                  reason: new Protocol.Unsupported({ method: "browsingContext.navigate" })
+                })
+              )
+            }
+            return { navigation: "own", url }
+          })
+        })
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        deliver = () =>
+          handlers.apply("browsingContext.navigationCommitted", {
+            context: "C1",
+            navigation: "own",
+            timestamp: 1,
+            url: "about:neterror?e=dnsNotFound&u=" + encodeURIComponent(url)
+          }, { state })
+        const running = yield* Effect.forkChild(Effect.exit(
+          Navigation.navigate(state, page.id, url, { referrer: Option.none() })
+        ))
+        yield* Deferred.await(entered)
+        if (mode === "interrupted") yield* Fiber.interrupt(running)
+        else {
+          if (mode === "removed") {
+            Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
+            yield* Deferred.succeed(release, undefined)
+          }
+          const exit = yield* Fiber.join(running)
+          assert.strictEqual(exit._tag, mode === "unsupported" ? "Failure" : "Success")
+        }
+        yield* state.buffer.flush
+        assert.isEmpty(page.expected.list)
+        assert.isEmpty(page.navigationCommands)
+        assert.isEmpty(page.commandNavigations)
+        assert.isEmpty(page.pendingNavigationEvents)
+        assert.isUndefined(page.failedNavigation)
+        if (mode === "rejected") {
+          const ended = facts.filter((fact) => fact._tag === "NavigationEnded")
+          assert.lengthOf(ended, 1)
+          assert.strictEqual(ended[0]!.outcome._tag, "Failed")
+          const errorDocument = facts.find((fact) =>
+            fact._tag === "DocumentCommitted" && fact.createdBy._tag === "ErrorPage"
+          )
+          assert.isDefined(errorDocument)
+          assert.deepStrictEqual(errorDocument!._tag === "DocumentCommitted" && errorDocument!.createdBy, {
+            _tag: "ErrorPage",
+            navigation: ended[0]!.navigation
+          })
+        }
+      }))
+  }
+
+  for (const beforeReply of [true, false]) {
+    it.effect(`keeps a failed navigation's late document with events ${beforeReply ? "before" : "after"} its reply`, () =>
+      Effect.gen(function*() {
+        let deliver = () => {}
+        const url = "http://example.com/"
+        const { facts, page, state } = yield* withPage({
+          "browsingContext.navigate": Effect.sync(() => {
+            if (beforeReply) deliver()
+            return { navigation: "own", url }
+          })
+        })
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        const event = (method: string, url: string) =>
+          handlers.apply(method, { context: "C1", navigation: "own", timestamp: 1, url }, { state })
+        deliver = () => {
+          event("browsingContext.navigationFailed", url)
+          event("browsingContext.navigationCommitted", "about:neterror?e=dnsNotFound&u=" + encodeURIComponent(url))
+        }
+        const reserved = yield* Navigation.navigate(state, page.id, url, { referrer: Option.none() })
+        if (!beforeReply) deliver()
+        yield* state.buffer.flush
+        const ended = facts.filter((fact) => fact._tag === "NavigationEnded")
+        assert.lengthOf(ended, 1)
+        assert.strictEqual(ended[0]!.navigation, reserved)
+        assert.strictEqual(ended[0]!.outcome._tag, "Failed")
+        const document = facts.filter((fact) => fact._tag === "DocumentCommitted").at(-1)!
+        assert.deepStrictEqual(document.createdBy, { _tag: "ErrorPage", navigation: reserved })
+        assert.isEmpty(page.commandNavigations)
+        assert.isEmpty(page.pendingNavigationEvents)
+        assert.isUndefined(page.failedNavigation)
+      }))
+  }
+
+  for (const beforeReply of [true, false]) {
+    it.effect(`correlates a reload's unannounced error commit ${beforeReply ? "before" : "after"} its reply`, () =>
+      Effect.gen(function*() {
+        let deliver = () => {}
+        const url = "http://example.com/"
+        const { facts, page, state } = yield* withPage({
+          "browsingContext.reload": Effect.sync(() => {
+            if (beforeReply) deliver()
+            return { navigation: "reload", url }
+          })
+        })
+        page.document!.url = url
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        deliver = () =>
+          handlers.apply("browsingContext.navigationCommitted", {
+            context: "C1",
+            navigation: "reload",
+            timestamp: 1,
+            url: "about:neterror?e=dnsNotFound&u=" + encodeURIComponent(url)
+          }, { state })
+        const reserved = yield* Navigation.reload(state, page.id, { ignoreCache: false })
+        if (!beforeReply) deliver()
+        yield* state.buffer.flush
+        const ended = facts.filter((fact) => fact._tag === "NavigationEnded")
+        assert.lengthOf(ended, 1)
+        assert.strictEqual(ended[0]!.navigation, reserved)
+        assert.strictEqual(ended[0]!.outcome._tag, "Failed")
+        const started = facts.filter((fact) => fact._tag === "NavigationStarted")
+        assert.lengthOf(started, 1)
+        assert.strictEqual(started[0]!.initiatedAs, "reload")
+        assert.isEmpty(page.expected.list)
+        assert.isEmpty(page.commandNavigations)
+        assert.isEmpty(page.pendingNavigationEvents)
+      }))
+  }
+
+  it.effect("drops a reply binding when its page closes before the event", () =>
+    Effect.gen(function*() {
+      const { page, state } = yield* withPage({
+        "browsingContext.navigate": { navigation: "own", url: "http://example.com/" }
+      })
+      yield* Navigation.navigate(state, page.id, "http://example.com/", { referrer: Option.none() })
+      assert.strictEqual(page.commandNavigations.size, 1)
+      Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
+      assert.isEmpty(page.commandNavigations)
+      assert.isEmpty(page.expected.list)
+    }))
 
   it.effect("fails an operation on a page that ended as Gone, with why it ended", () =>
     Effect.gen(function*() {

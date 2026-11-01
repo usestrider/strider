@@ -182,17 +182,6 @@ describe("AdapterKit", () => {
       assert.isUndefined(Kit.take(expectations, "http://a/"))
     })
 
-    it("leaves unmatched expectations available when URL fallback is disabled", () => {
-      const ids = Kit.makeIds()
-      const expectations = Kit.makeExpectations()
-      const a = Kit.expect(ids, expectations, "http://a")
-      const b = Kit.expect(ids, expectations, "http://b/")
-      assert.isUndefined(Kit.take(expectations, "http://elsewhere/", { fallback: false }))
-      assert.deepStrictEqual(expectations.list.map((entry) => entry.id), [a, b])
-      assert.strictEqual(Kit.take(expectations, "http://b", { fallback: false })?.id, b)
-      assert.strictEqual(Kit.take(expectations, "http://redirect/")?.id, a)
-    })
-
     it.effect("reports a navigation that never started once, even when its event slips in before the report", () =>
       Effect.gen(function*() {
         const ids = Kit.makeIds()
