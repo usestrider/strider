@@ -200,6 +200,35 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
+      // ROOK-119: a focus handler that makes the input read-only leaves nothing for fill to write.
+      it.effect(
+        "leaves a date input a focus handler makes read-only unchanged, without events",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" type="date" tabindex="0" value="2020-03-02" onfocus="this.readOnly = true; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const result = yield* page.locator("#field").fill("2020-03-03").pipe(Effect.result)
+              const state = {
+                refused: result._tag === "Failure" && Locator.isLocatorError(result.failure),
+                value: yield* page.locator("#field").readValue,
+                events: yield* page.locator("#events").readText
+              }
+              // As above, stock WebKit may leave this input unfocused; then the handler never runs.
+              assert.deepStrictEqual(
+                state,
+                state.events.startsWith("focus;")
+                  ? { refused: true, value: "2020-03-02", events: "focus;" }
+                  : { refused: false, value: "2020-03-03", events: "input;change;" }
+              )
+            }))
+          }),
+        timeout
+      )
+
       it.effect("fills as text after a focus handler changes a date input to text", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
