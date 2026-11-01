@@ -540,6 +540,15 @@ export interface ReadonlyLocator
   /**
    * Whether the one match is checked now.
    *
+   * **Details**
+   *
+   * Native checkbox and radio inputs use their checked property. ARIA roles `checkbox`, `radio`, `switch`,
+   * `menuitemcheckbox`, `menuitemradio`, `option` and `treeitem` use `aria-checked`. For `option` and `treeitem`,
+   * absent or empty `aria-checked`, or the literal value `"undefined"`, means checking is unsupported and fails with
+   * `WrongElement` before input; `"false"` means checkable but unchecked. For the other roles, absent or
+   * `"undefined"` reads false. Selection through `aria-selected` is independent. Other elements fail with
+   * `WrongElement`. See the [WAI-ARIA checked state](https://www.w3.org/TR/wai-aria-1.2/#aria-checked).
+   *
    * **Example** (Reading a preference)
    *
    * ```ts import.meta.vitest
@@ -906,6 +915,7 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
+   * Checked state follows `isChecked`, including its supported ARIA roles and optional checkability.
    * If it's already checked, nothing is sent. Otherwise it clicks, then reads the state again: a click that didn't
    * check it fails with `StateUnchanged{expected: "checked"}`. A label uses its own checked state when it is an
    * ARIA checkable; otherwise it reads its associated control's state. The click and any position remain on the
@@ -926,9 +936,9 @@ export interface Locator extends ReadonlyLocator {
   check(options?: PointerOptions | undefined): ActionEffect
   /**
    * Unchecks a checkbox or an ARIA checkable, and confirms it became unchecked. Checks: the same as `click`. It
-   * works as `check` does: a label's own checked state takes precedence over its associated control's state, while
-   * the click stays at the requested label-relative position. It fails with `StateUnchanged{expected: "unchecked"}`
-   * if the state stays checked.
+   * works as `check` does, using the checked state and optional checkability described by `isChecked`. A label's
+   * own checked state takes precedence over its associated control's state, while the click stays at the requested
+   * label-relative position. It fails with `StateUnchanged{expected: "unchecked"}` if the state stays checked.
    *
    * **Example** (Opting out of offers)
    *
