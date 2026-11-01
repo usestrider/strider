@@ -13,7 +13,7 @@ import type { NavigationEntry, RequestEntry, State } from "./state.ts"
 
 /** What answered, from the response's flags and what came before it. */
 export const servedBy = (request: RequestEntry, response: Network.Response): NetworkResponse.ServedBy =>
-  request.fulfilled
+  request.attribution.fulfilled
     ? "route"
     : response.fromServiceWorker === true
     ? "serviceWorker"

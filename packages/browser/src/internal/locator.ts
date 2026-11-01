@@ -826,7 +826,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           new Reason.InvalidInput({
             input: "value",
             expected: `a value ${final.element} takes`,
-            hint: "The input refused the value; a date input takes a date such as 2026-10-23"
+            hint: "Use a value the input accepts, such as a finite number for number inputs or 2026-10-23 for dates"
           }),
           id
         )
@@ -1007,7 +1007,8 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   private setChecked(operation: string, checked: boolean, options: Locator.PointerOptions | undefined) {
     const expected = checked ? "checked" : "unchecked"
     return Effect.gen({ self: this }, function*() {
-      const now = yield* this.isChecked.pipe(
+      const read = this.readOne(operation, { _tag: "Checked", followLabel: true }, (value) => value as boolean)
+      const now = yield* read.pipe(
         Effect.catchIf(
           (error): error is Locator.LocatorError => Locator.isLocatorError(error) && error.reason._tag === "NoMatch",
           () => Effect.succeed(undefined)
@@ -1020,7 +1021,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         (state, point) => Input.click(state, point, "left", 1, options?.modifiers ?? [])
       )
       if (options?.trial === true) return
-      const after = yield* this.isChecked
+      const after = yield* read
       if (after !== checked) {
         return yield* Effect.fail(this.error(
           operation,
@@ -1044,6 +1045,17 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     options: Locator.ActionOptions | undefined
   ) {
     const text = Redacted.isRedacted(value) ? Redacted.value(value) : value
+    if (typeof text !== "string") {
+      return Effect.fail(this.error(
+        operation,
+        new Reason.InvalidInput({
+          input: "value",
+          expected: "a string or Redacted string",
+          hint: "Fill requires text"
+        }),
+        Operation.idNow()
+      ))
+    }
     return this.act(
       operation,
       options,

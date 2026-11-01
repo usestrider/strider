@@ -119,6 +119,7 @@ export type PageOrigin =
 export type DocumentCreatedBy =
   | { readonly _tag: "InitialBlank" }
   | { readonly _tag: "Navigation"; readonly navigation: PageNavigation.Id }
+  | { readonly _tag: "UnattributedErrorPage" }
   | { readonly _tag: "ErrorPage"; readonly navigation: PageNavigation.Id }
   | { readonly _tag: "Restored"; readonly navigation: PageNavigation.Id; readonly from: Target.DocumentId }
   | { readonly _tag: "Adopted" }
@@ -286,6 +287,12 @@ export type Fact =
     readonly navigation: PageNavigation.Id
     readonly outcome: NavigationOutcome
     readonly evidence: string
+  }
+  /** Associates an already observed error document with an already ended navigation; never commits it again. */
+  | {
+    readonly _tag: "ErrorDocumentAttributed"
+    readonly document: Target.DocumentId
+    readonly navigation: PageNavigation.Id
   }
   | { readonly _tag: "RequestSent"; readonly request: NetworkRequest.NetworkRequest }
   | { readonly _tag: "ResponseReceived"; readonly response: NetworkResponse.NetworkResponse }
