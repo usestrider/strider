@@ -359,3 +359,26 @@ didn't pay for two protocols.
 
 **`Browser.layerTest` emulates no DOM.** A fake browser with a DOM would be a second engine to keep honest, and real
 browsers are cheap to launch.
+
+
+## Document observation and delayed attribution
+
+A browser can report an error document before a navigation command reply supplies its identity (ROOK-130).
+Document observation is immediate, with explicit `UnattributedErrorPage` provenance when ownership is unknown.
+Only unresolved terminal correlation waits for command replies; later starts, commits, readiness, requests and
+downloads proceed in receive order. Their handlers must see the same current navigation and document state.
+
+Use `NavigationEnded`'s `Failed.errorDocument` to associate the original document when its outcome is still pending.
+That relationship cannot add a document to a `Failed(None)` already published: another `NavigationEnded` would
+produce a second outcome, and mutating the first would change a fact its consumers already saw. Only that case
+uses `ErrorDocumentAttributed`, an immutable relationship naming the original document and the ended navigation.
+The L1 fold does not derive document lifecycle state from that relationship. Its document and readiness state
+already came from observation; the relationship must not reopen or replace anything.
+
+Rejected: guessing ownership from a matching live reservation, because identical event prefixes can have different
+command replies; holding every navigation event, because downloads and network consumers must observe starts at
+once; delaying or replaying a document commit until attribution, because it would restore an old document after a
+newer commit and reset readiness; and mutating published provenance or publishing a second outcome. Command-scoped
+correlation is released on completion or interruption, and all correlation state is cleared on navigable removal.
+The one retained completed failure is not a live reservation and is cleared when its document arrives or a normal
+commit supersedes it after outstanding correlation finishes. No public operation or policy is added.
