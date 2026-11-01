@@ -11,8 +11,9 @@
  * - **Secrets.** A `%name%` in a parameter, for a name among the secrets, is the secret's value at dispatch, and
  *   every result and digest line has the values put back as `%name%`. Other text between `%` signs, such as a
  *   URL's `%C3%`, is sent as written.
- * - **Capture.** The policy decides whether screenshots are sent, whether an editable field's text is masked in
- *   snapshots, and how much console text the digest carries.
+ * - **Capture.** The policy decides whether screenshots are sent and how much console text the digest carries.
+ *   Redacted snapshots mask editable fields' text and all validation messages, keeping invalid state and refs;
+ *   full snapshots retain that text and those messages. `CapturePolicy.strict` uses redacted snapshots.
  */
 import type * as Toolkit from "effect/ai/Toolkit"
 import * as Context from "effect/Context"
@@ -107,12 +108,15 @@ export const toFailure = (error: unknown): Tools.ToolFailure => {
 
 const editable = new Set(["textbox", "searchbox", "combobox", "spinbutton"])
 
-// A rendered message is a JSON string; consume escaped quotes and brackets as part of its value.
-const validationMessage = /\[validationMessage="(?:[^"\\]|\\.)*"\]/g
+// Consume quoted names and text too, so only tokens outside JSON strings are masked.
+const snapshotToken = /\[validationMessage=("(?:[^"\\]|\\.)*")\]|"(?:[^"\\]|\\.)*"/g
 
-/** Snapshot text with validation messages and editable fields' own text masked. */
+/** Redacted snapshots mask every validation message and editable fields' own text; full capture keeps both. */
 export const masked = (text: string): string => {
-  const lines = text.replace(validationMessage, "[validationMessage=\"•••\"]").split("\n")
+  const lines = text.replace(
+    snapshotToken,
+    (token, message: string | undefined) => message === undefined ? token : "[validationMessage=\"•••\"]"
+  ).split("\n")
   let inside: number | undefined = undefined
   return lines.map((line) => {
     const indent = line.length - line.trimStart().length

@@ -383,14 +383,14 @@ describe("BrowserToolkit", () => {
     assert.include(redacted, "[ref=e1]")
   })
   it("keeps quoted names separate from validation-message tokens", () => {
-    for (const name of ['x [validationMessage=', 'x "quoted" \\ [validationMessage=']) {
-      const message = '] private "tail" \\ remaining\nsecret'
+    for (const name of ["x [validationMessage=", "x \"quoted\" \\ [validationMessage="]) {
+      const message = "] private \"tail\" \\ remaining\nsecret"
       const text = `- textbox ${JSON.stringify(name)} [invalid] [validationMessage=${JSON.stringify(message)}] [ref=e1]`
       assert.strictEqual(
         ToolkitImpl.masked(text),
         `- textbox ${JSON.stringify(name)} [invalid] [validationMessage="•••"] [ref=e1]`
       )
-      const ordinary = `- text: ${JSON.stringify('[validationMessage="ordinary text"]')}`
+      const ordinary = `- text: ${JSON.stringify("[validationMessage=\"ordinary text\"]")}`
       assert.strictEqual(ToolkitImpl.masked(ordinary), ordinary)
     }
   })
