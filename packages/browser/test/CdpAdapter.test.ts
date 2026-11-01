@@ -204,3 +204,77 @@ describe("CDP adapter redirect headers", () => {
     }
   }
 })
+
+describe("CDP adapter sent headers before a response", () => {
+  it.effect("reports a request's ExtraInfo headers while its response is outstanding", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const ready = yield* Deferred.make<void>()
+      const settled = yield* Deferred.make<void>()
+      const facts: Array<Adapter.Fact> = []
+      yield* Effect.gen(function*() {
+        while (true) {
+          const command = yield* browser.next
+          const result = command.method === "Browser.getVersion"
+            ? {
+              protocolVersion: "1.3",
+              product: "Chrome/155.0.8059.79",
+              revision: "test",
+              userAgent: "HeadlessChrome",
+              jsVersion: "test"
+            }
+            : command.method === "Target.getBrowserContexts"
+            ? { browserContextIds: [] }
+            : command.method === "Page.getFrameTree"
+            ? {
+              frameTree: {
+                frame: {
+                  id: "76F3487A52CF4F79FE4AD28961E44D32",
+                  loaderId: "initial",
+                  url: "about:blank",
+                  securityOrigin: "://",
+                  mimeType: "text/html"
+                }
+              }
+            }
+            : {}
+          yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
+        }
+      }).pipe(Effect.forkScoped)
+      yield* CdpAdapter.connect(browser.transport, {
+        ownership: "attached",
+        sink: Effect.fnUntraced(function*(fact) {
+          facts.push(fact)
+          if (fact._tag === "PageReady") yield* Deferred.succeed(ready, undefined)
+          if (fact._tag === "ConnectionOpened") yield* Deferred.succeed(settled, undefined)
+        })
+      })
+      yield* browser.receive({
+        method: "Target.attachedToTarget",
+        params: {
+          sessionId: "S1",
+          targetInfo: { targetId: "T1", type: "page", title: "", url: "about:blank", attached: true },
+          waitingForDebugger: false
+        }
+      })
+      yield* Deferred.await(ready)
+      // The server hasn't answered: only the request event and its ExtraInfo have come, in the captured order.
+      for (const event of captured.slice(0, 2)) {
+        yield* browser.receive({ method: event.method, params: event.params, sessionId: "S1" })
+      }
+      // A later event marks that the adapter has handled both.
+      yield* browser.receive({
+        method: "Network.webSocketCreated",
+        sessionId: "S1",
+        params: { requestId: "sentinel", url: "ws://127.0.0.1/" }
+      })
+      yield* Deferred.await(settled)
+      const request = facts.find((fact) => fact._tag === "RequestSent")!
+      assert.deepStrictEqual(
+        facts.flatMap((fact) =>
+          fact._tag === "HopHeaders" ? [{ hop: fact.hop, phase: fact.phase, type: fact.headers["content-type"] }] : []
+        ),
+        [{ hop: request.request.hop, phase: "request", type: "application/json" }]
+      )
+    }))
+})
