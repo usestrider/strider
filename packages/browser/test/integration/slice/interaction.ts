@@ -173,6 +173,27 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      for (const type of ["range", "file", "checkbox"] as const) {
+        it.effect(`rejects a date fill after a focus handler changes type to ${type}`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" type="date" value="2020-03-02" onfocus="this.type = '${type}'; before.textContent = this.value; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="before"></p><p id="events"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const result = yield* page.locator("#field").fill("2020-03-03").pipe(Effect.result)
+              assert(
+                result._tag === "Failure" && Locator.isLocatorError(result.failure) &&
+                  result.failure.reason._tag === "InvalidInput",
+                String(result)
+              )
+              assert.strictEqual(yield* page.locator("#field").readValue, yield* page.locator("#before").readText)
+              assert.strictEqual(yield* page.locator("#events").readText, "focus;")
+            }))
+          }), timeout)
+      }
+
       it.effect("chooses options, checks boxes and sets files", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
