@@ -493,6 +493,84 @@ describe("BidiAdapter state", () => {
       assert.isEmpty(page.navigationCommands)
     }))
 
+  for (const source of ["live", "history", "interrupted"] as const) {
+    it.effect(`claims one same-document identity with ${source} correlation and overlapping URL reservations`, () =>
+      Effect.gen(function*() {
+        const url = "about:blank#same"
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        let calls = 0
+        const { facts, page, state } = yield* withPage({
+          "browsingContext.navigate": Effect.suspend(() => {
+            calls++
+            const held = source === "live" ? calls === 2 : calls === 1
+            return held ?
+              Effect.gen(function*() {
+                yield* Deferred.succeed(entered, undefined)
+                yield* Deferred.await(release)
+                return { navigation: source === "live" ? "second" : "first", url }
+              }) :
+              Effect.succeed({ navigation: source === "live" ? "first" : "second", url })
+          })
+        })
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        const event = (method: string, navigation: string | null) =>
+          handlers.apply(method, {
+            context: "C1",
+            navigation,
+            url,
+            timestamp: 1
+          }, { state })
+        const live = source === "live"
+          ? yield* Navigation.navigate(state, page.id, url, { referrer: Option.none() }) :
+          undefined
+        if (source === "live") event("browsingContext.navigationStarted", "first")
+        const running = yield* Effect.forkChild(Navigation.navigate(state, page.id, url, { referrer: Option.none() }))
+        yield* Deferred.await(entered)
+        const held = page.expected.list[0]!.id
+        const bound = source === "live" ?
+          undefined
+          : yield* Navigation.navigate(state, page.id, url, { referrer: Option.none() })
+        if (source === "history") {
+          // History carries no protocol navigation identity: it can claim one matching expectation,
+          // while the exact reply binding for the other command remains its own.
+          event("browsingContext.historyUpdated", null)
+          event("browsingContext.fragmentNavigated", "second")
+        } else {
+          event("browsingContext.fragmentNavigated", source === "live" ? "first" : "second")
+          assert.deepStrictEqual(page.expected.list.map((expected) => expected.id), [held])
+        }
+        if (source === "interrupted") yield* Fiber.interrupt(running)
+        else {
+          yield* Deferred.succeed(release, undefined)
+          assert.strictEqual(yield* Fiber.join(running), held)
+          if (source === "live") event("browsingContext.fragmentNavigated", "second")
+        }
+        yield* state.buffer.flush
+        const outcomes = (id: PageNavigation.Id) =>
+          facts.flatMap((fact) => fact._tag === "NavigationEnded" && fact.navigation === id ? [fact.outcome] : [])
+        const heldOutcomes = outcomes(held)
+        assert.lengthOf(heldOutcomes, source === "interrupted" ? 0 : 1)
+        if (source !== "interrupted") {
+          assert.deepStrictEqual(heldOutcomes[0], {
+            _tag: "SameDocument",
+            document: page.document!.id,
+            via: source === "history" ? "historyApi" : "fragment"
+          })
+        }
+        const other = outcomes((live ?? bound)!)
+        assert.lengthOf(other, 1)
+        assert.deepStrictEqual(other[0], { _tag: "SameDocument", document: page.document!.id, via: "fragment" })
+        assert.strictEqual(page.document!.url, url)
+        assert.isEmpty(page.expected.list)
+        assert.isEmpty(page.commandNavigations)
+        assert.isEmpty(page.navigationCommands)
+        assert.isEmpty(page.pendingTerminals)
+        assert.isEmpty(page.navigations)
+        assert.isEmpty(state.navigations)
+      }))
+  }
+
   it.effect("keeps a late failed-navigation commit from taking the next navigation id", () =>
     Effect.gen(function*() {
       const facts: Array<Adapter.Fact> = []
