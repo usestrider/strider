@@ -845,7 +845,6 @@ An entry with no marker is open.
 - **Reported**: drafted in `upstream/firefox-window-user-context-null.md`, not sent.
 
 **Q180. A page another client crashed went unreported under load** (Browser, or ours: not traced). The CDP-only test where a second client attaches to a page and sends `Page.crash` waits for the page's end, `PageCrashed`; under synthetic load (eight processes at once beside a dozen busy loops), none came within 10 s in 24 runs of 40, with and without `fa0a3a9`. It passed alone, and failed once in a normal full run.
-- *Seen again:* ROOK-87’s normal full integration run on 2026-10-29: the second-client crash test timed out after 10 s with no `NavigableRemoved` fact; the recorded facts ended in `RequestSent, HopHeaders, HopHeaders`. This run did not record protocol traffic, so it does not settle whether the crash command or its notification was lost.
 - *We:* nothing yet.
 - *Reconsider:* whether `Page.crash` was refused or ignored (the test ignores its failure), or whether `Inspector.targetCrashed` or `Target.targetCrashed` came and the adapter missed it; trace it as Q149 was.
 

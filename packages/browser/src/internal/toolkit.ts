@@ -107,9 +107,12 @@ export const toFailure = (error: unknown): Tools.ToolFailure => {
 
 const editable = new Set(["textbox", "searchbox", "combobox", "spinbutton"])
 
-/** Snapshot text with an editable field's own text masked: its lines under an editable role's line. */
+// A rendered message is a JSON string; consume escaped quotes and brackets as part of its value.
+const validationMessage = /\[validationMessage="(?:[^"\\]|\\.)*"\]/g
+
+/** Snapshot text with validation messages and editable fields' own text masked. */
 export const masked = (text: string): string => {
-  const lines = text.split("\n")
+  const lines = text.replace(validationMessage, "[validationMessage=\"•••\"]").split("\n")
   let inside: number | undefined = undefined
   return lines.map((line) => {
     const indent = line.length - line.trimStart().length

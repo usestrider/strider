@@ -232,7 +232,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
               const message = "private \"quoted\" ] [ref=fake] \\ trailing\nprivate tail"
               yield* page.getByRole("textbox", { name: "Mail" }).fill("private-value")
-              yield* page.evaluate((message) => {
+              yield* page.evaluateInMainWorld((message) => {
                 ;(document.getElementById("mail") as HTMLInputElement).setCustomValidity(message)
               }, message)
               const full = yield* page.snapshot()
