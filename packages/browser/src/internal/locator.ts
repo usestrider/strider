@@ -1003,7 +1003,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     })
   }
 
-  /** `check` and `uncheck`: nothing when it is already so; else a click, and the state read again. */
+  /** `check` and `uncheck`: nothing when it is already so; else a pointer action, checking the result unless trial. */
   private setChecked(operation: string, checked: boolean, options: Locator.PointerOptions | undefined) {
     const expected = checked ? "checked" : "unchecked"
     return Effect.gen({ self: this }, function*() {
@@ -1020,6 +1020,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         options,
         (state, point) => Input.click(state, point, "left", 1, options?.modifiers ?? [])
       )
+      if (options?.trial === true) return
       const after = yield* read
       if (after !== checked) {
         return yield* Effect.fail(this.error(
