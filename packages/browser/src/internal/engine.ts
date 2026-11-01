@@ -1181,6 +1181,26 @@ export function engine(render: (root: SnapNode) => string) {
   const settable = (element: Element): element is HTMLInputElement =>
     element instanceof HTMLInputElement && SET.has(element.type)
 
+  const invalidNumberFill = (element: Element, value: string): boolean =>
+    element instanceof HTMLInputElement && element.type === "number" && value !== "" &&
+    (!/^-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(value) ||
+      !Number.isFinite(Number(value)))
+
+  // Validate on a detached copy so refusal never writes the live input. Keep constraints and the
+  // value attribute, which can supply a range's step base. Both sides of focus use this same rule.
+  const fillCandidate = (element: HTMLInputElement, value: string): HTMLInputElement | undefined => {
+    if (!settable(element)) return undefined
+    const candidate = element.cloneNode(false) as HTMLInputElement
+    candidate.value = value
+    const accepted = element.type === "range"
+      ? /^-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(value) &&
+        Number.isFinite(Number(value)) && candidate.valueAsNumber === Number(value)
+      : element.type === "color"
+      ? candidate.value === value.toLowerCase()
+      : candidate.value !== "" || value === ""
+    return accepted ? candidate : undefined
+  }
+
   const contentEditable = (element: Element): element is HTMLElement =>
     element instanceof HTMLElement && element.isContentEditable
 
@@ -1209,8 +1229,11 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const role = roleOf(element)
     if (role === null || !CHECKABLE_ROLES.has(role)) return null
-    const state = element.getAttribute(role === "option" || role === "treeitem" ? "aria-selected" : "aria-checked")
-    return state === null ? (role === "option" || role === "treeitem" ? null : false) : state === "true"
+    const state = element.getAttribute("aria-checked")
+    if ((role === "option" || role === "treeitem") && (state === null || state === "" || state === "undefined")) {
+      return null
+    }
+    return state === "true"
   }
 
   /** The element with focus, through open shadow roots. */
@@ -1286,10 +1309,17 @@ export function engine(render: (root: SnapNode) => string) {
 
   /** Focuses an element and selects its contents, so text inserted next replaces them. */
   const selectContents = (element: HTMLElement) => {
-    element.focus()
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      element.focus()
       element.select()
       return
+    }
+    if (document.designMode === "on") {
+      window.focus()
+    } else {
+      let host = element
+      while (host.parentElement?.isContentEditable) host = host.parentElement
+      host.focus()
     }
     const selection = getSelection()
     if (selection === null) return
@@ -1505,20 +1535,27 @@ export function engine(render: (root: SnapNode) => string) {
         element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
         return answer
       case "Fill": {
-        if (
-          element instanceof HTMLInputElement && element.type === "number" && action.value !== "" &&
-          (!/^-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(action.value) ||
-            !Number.isFinite(Number(action.value)))
-        ) {
+        if (invalidNumberFill(element, action.value)) {
           return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
         }
         if (settable(element)) {
-          element.focus()
-          element.value = action.value
-          // A value the input refuses, such as "soon" for a date, leaves it otherwise
-          if (element.value !== action.value) {
+          if (fillCandidate(element, action.value) === undefined) {
             return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
           }
+          element.focus()
+          // Focus handlers can change the type or its constraints. Use the current state before writing.
+          if (TYPED.has(element.type)) {
+            if (invalidNumberFill(element, action.value)) {
+              return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
+            }
+            selectContents(element)
+            return { ...answer, fill: "type" }
+          }
+          const candidate = fillCandidate(element, action.value)
+          if (candidate === undefined) {
+            return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
+          }
+          element.value = candidate.value
           fire(element, "input")
           fire(element, "change")
           return { ...answer, fill: "set" }
@@ -1756,9 +1793,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   const statesOf = (element: Element, role: string | null): Array<string> => {
     const states: Array<string> = []
-    const selectable = role === "option" || role === "treeitem" || role === "tab" || role === "gridcell" ||
-      role === "row"
-    if (!selectable && checkedOf(element) === true) states.push("checked")
+    if (checkedOf(element) === true) states.push("checked")
     if (element.getAttribute("aria-expanded") === "true") states.push("expanded")
     if (
       element.getAttribute("aria-selected") === "true" ||

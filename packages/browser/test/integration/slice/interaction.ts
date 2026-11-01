@@ -82,6 +82,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             assert.strictEqual(yield* page.locator("#rich").readText, "new text")
             yield* page.locator("#day").fill("2026-10-23")
             assert.strictEqual(yield* page.locator("#day").readValue, "2026-10-23")
+            yield* page.locator("#day").clear()
+            assert.strictEqual(yield* page.locator("#day").readValue, "")
             const refused = yield* page.locator("#day").fill("soon").pipe(Effect.flip)
             assert(Locator.isLocatorError(refused) && refused.reason._tag === "InvalidInput", String(refused))
             const plain = yield* page.locator("#plain").fill("x").pipe(Effect.flip)
@@ -94,6 +96,172 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             assert.strictEqual(yield* keys.readValue, "héllo")
             const unknown = yield* keys.press("NotAKey").pipe(Effect.flip)
             assert(Locator.isLocatorError(unknown) && unknown.reason._tag === "InvalidInput", String(unknown))
+          }))
+        }), timeout)
+
+      // ROOK-119: browsers serialize valid values differently from their source spelling.
+      for (
+        const [type, value, expected] of [
+          ["range", "42.0", "42"],
+          ["range", "1e1", "10"],
+          ["range", "0", "0"],
+          ["range", "100", "100"],
+          ["color", "#AbCd00", "#abcd00"],
+          ["datetime-local", "2020-03-02T06:20:00", "2020-03-02T06:20"],
+          ["datetime-local", "2020-03-02T06:20:01.123", "2020-03-02T06:20:01.123"],
+          ["datetime-local", "", ""]
+        ] as const
+      ) {
+        it.effect(`fills normalized ${type} value ${value}`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" type="${type}" min="0" max="100" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#field").fill(value)
+              const actual = yield* page.locator("#field").readValue
+              assert.strictEqual(
+                type === "range" ? Number(actual) : actual,
+                type === "range" ? Number(expected) : expected
+              )
+              assert.strictEqual(yield* page.locator("#events").readText, "input;change;")
+            }))
+          }), timeout)
+      }
+
+      for (
+        const [type, initial, invalid] of [
+          ["range", "25", "soon"],
+          ["range", "25", "101"],
+          ["range", "25", "-1"],
+          ["range", "25", "42.5"],
+          ["range", "25", ""],
+          ["range", "25", "0x19"],
+          ["range", "25", "Infinity"],
+          ["color", "#123456", ""],
+          ["color", "#123456", "#gggggg"],
+          ["datetime-local", "2020-03-02T05:15", "2020-02-30T06:20"]
+        ] as const
+      ) {
+        it.effect(`rejects invalid ${type} value ${invalid} without mutation or events`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" type="${type}" min="0" max="100" value="${initial}" onfocus="events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const refused = yield* page.locator("#field").fill(invalid).pipe(Effect.flip)
+              assert(Locator.isLocatorError(refused) && refused.reason._tag === "InvalidInput", String(refused))
+              const state = {
+                value: yield* page.locator("#field").readValue,
+                events: yield* page.locator("#events").readText
+              }
+              assert.deepStrictEqual(state, { value: initial, events: "" })
+            }))
+          }), timeout)
+      }
+
+      // ROOK-119: a focus handler runs between validation and assignment, and may change the constraints.
+      it.effect("rejects a range value a focus handler's new max clamps, without events", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="field" type="range" min="0" max="100" value="25" onfocus="this.max = '10'; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const result = yield* page.locator("#field").fill("42").pipe(Effect.result)
+            const state = {
+              refused: result._tag === "Failure" && Locator.isLocatorError(result.failure) &&
+                result.failure.reason._tag === "InvalidInput",
+              value: yield* page.locator("#field").readValue,
+              events: yield* page.locator("#events").readText
+            }
+            // Stock WebKit doesn't focus a range here, so its handler never runs and the fill stands.
+            assert.deepStrictEqual(
+              state,
+              state.events.startsWith("focus;")
+                ? { refused: true, value: "10", events: "focus;" }
+                : { refused: false, value: "42", events: "input;change;" }
+            )
+          }))
+        }), timeout)
+
+      for (const type of ["range", "file", "checkbox"] as const) {
+        it.effect(`rejects a date fill after a focus handler changes type to ${type}`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" type="date" tabindex="0" value="2020-03-02" onfocus="this.type = '${type}'; before.textContent = this.value; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="before"></p><p id="events"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const result = yield* page.locator("#field").fill("2020-03-03").pipe(Effect.result)
+              const state = {
+                refused: result._tag === "Failure" && Locator.isLocatorError(result.failure) &&
+                  result.failure.reason._tag === "InvalidInput",
+                value: yield* page.locator("#field").readValue,
+                events: yield* page.locator("#events").readText
+              }
+              // As with range, stock WebKit may leave this input unfocused; then its type stays date.
+              assert.deepStrictEqual(
+                state,
+                state.events.startsWith("focus;")
+                  ? { refused: true, value: yield* page.locator("#before").readText, events: "focus;" }
+                  : { refused: false, value: "2020-03-03", events: "input;change;" }
+              )
+            }))
+          }), timeout)
+      }
+
+      for (
+        const [type, initial, value] of [["date", "2020-03-02", "2020-03-03"], ["time", "12:30", "12:34"]] as const
+      ) {
+        it.effect(
+          `rejects invalid numeric text after a focus handler changes ${type} to number`,
+          () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<input id="field" type="${type}" tabindex="0" value="${initial}" onfocus="this.type = 'number'; this.value = '7'; before.textContent = this.value; events.textContent += 'focus;'" onkeydown="events.textContent += 'keydown;'" onbeforeinput="events.textContent += 'beforeinput;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="before"></p><p id="events"></p>`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const result = yield* page.locator("#field").fill(value).pipe(Effect.result)
+                const state = {
+                  refused: result._tag === "Failure" && Locator.isLocatorError(result.failure) &&
+                    result.failure.reason._tag === "InvalidInput",
+                  value: yield* page.locator("#field").readValue,
+                  events: yield* page.locator("#events").readText
+                }
+                assert.deepStrictEqual(
+                  state,
+                  state.events.startsWith("focus;")
+                    ? { refused: true, value: "7", events: "focus;" }
+                    : { refused: false, value, events: "input;change;" }
+                )
+                if (state.events.startsWith("focus;")) {
+                  assert.strictEqual(yield* page.locator("#before").readText, "7")
+                }
+              }))
+            }),
+          timeout
+        )
+      }
+
+      it.effect("fills as text after a focus handler changes a date input to text", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="field" type="date" tabindex="0" value="2020-03-02" onfocus="this.type = 'text'">`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.locator("#field").fill("2020-03-03")
+            assert.strictEqual(yield* page.locator("#field").readValue, "2020-03-03")
           }))
         }), timeout)
 
@@ -186,6 +354,222 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }
           }))
         }), timeout)
+
+      it.effect(
+        "fills an inherited editable descendant across frames without replacing surrounding content",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture((origin) =>
+              `<div id="parent" contenteditable>old parent</div><iframe src="${
+                fixtureUrl(
+                  origin,
+                  `<body contenteditable onfocus="getSelection().selectAllChildren(this)"><p id="before">before</p><section><p id="target">old</p></section><p id="after">after</p></body>`
+                )
+              }"></iframe>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#parent").fill("parent")
+              const frame = page.frame(page.locator("iframe"))
+              yield* frame.locator("#target").fill("new")
+              assert.strictEqual(yield* frame.locator("#target").readText, "new")
+              assert.strictEqual(yield* frame.locator("#before").readText, "before")
+              assert.strictEqual(yield* frame.locator("#after").readText, "after")
+              assert.strictEqual(yield* page.locator("#parent").readText, "parent")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect("fills a paragraph of a design-mode frame after filling the parent", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture((origin) =>
+            `<div id="parent" contenteditable>old parent</div><iframe src="${
+              fixtureUrl(origin, `<body><p id="target">old</p><script>document.designMode = "on"</script></body>`)
+            }"></iframe>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.locator("#parent").fill("parent")
+            const frame = page.frame(page.locator("iframe"))
+            yield* frame.locator("#target").fill("new")
+            assert.strictEqual(yield* frame.locator("#target").readText, "new")
+            assert.strictEqual(yield* page.locator("#parent").readText, "parent")
+          }))
+        }), timeout)
+
+      // ROOK-117: selection and checked state are independent on these ARIA roles.
+      for (const role of ["option", "treeitem"] as const) {
+        for (
+          const [state, attributes, expected] of [
+            ["checked", "aria-checked=\"true\" aria-selected=\"false\"", true],
+            ["unchecked", "aria-checked=\"false\" aria-selected=\"true\"", false]
+          ] as const
+        ) {
+          it.effect(`reads ${role} checked state from aria-checked when ${state}`, () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() => `<div id="target" role="${role}" ${attributes}>Item</div>`)
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const target = page.locator("#target")
+                assert.strictEqual(yield* target.isChecked, expected)
+              }))
+            }), timeout)
+        }
+
+        it.effect(`expects ${role} checked state independently of selection`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="target" role="${role}" aria-checked="true" aria-selected="false">Item</div>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#target").pipe(Expect.toBeChecked, Deadline.within("1 second"))
+            }))
+          }), timeout)
+
+        for (const initial of [false, true] as const) {
+          const checked = initial !== true
+          it.effect(
+            `${checked ? "checks" : "unchecks"} ${role} with aria-checked ${String(initial)}`,
+            () =>
+              Effect.gen(function*() {
+                const { url } = yield* fixture(() =>
+                  `<div id="target" role="${role}" aria-checked="${initial}" aria-selected="${!initial}" onclick="this.setAttribute('aria-checked', '${checked}')">Item</div>`
+                )
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const target = page.locator("#target")
+                  yield* checked ? target.check() : target.uncheck()
+                  assert.deepStrictEqual(yield* target.readAttribute("aria-checked"), Option.some(String(checked)))
+                }))
+              }),
+            timeout
+          )
+        }
+
+        it.effect(`snapshots ${role} checked and selected independently`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div role="${role}" aria-label="Checked" aria-checked="true" aria-selected="false">Checked</div><div role="${role}" aria-label="Selected" aria-checked="false" aria-selected="true">Selected</div><div role="${role}" aria-label="Both" aria-checked="true" aria-selected="true">Both</div>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const snapshot = yield* page.snapshot()
+              const nodes = [...snapshot.refs.values()]
+              const checked = nodes.find((node) => node.name._tag === "Accessible" && node.name.value === "Checked")!
+              const selected = nodes.find((node) => node.name._tag === "Accessible" && node.name.value === "Selected")!
+              assert.isTrue(checked.states.has("checked"))
+              assert.isFalse(checked.states.has("selected"))
+              assert.isFalse(selected.states.has("checked"))
+              assert.isTrue(selected.states.has("selected"))
+              const both = nodes.find((node) => node.name._tag === "Accessible" && node.name.value === "Both")!
+              assert.isTrue(both.states.has("checked"))
+              assert.isTrue(both.states.has("selected"))
+            }))
+          }), timeout)
+      }
+
+      // ROOK-117: optional checkability must be established before dispatching input.
+      for (const kind of ["option", "treeitem", "native option"] as const) {
+        for (const state of ["absent", "undefined", "empty"] as const) {
+          for (const operation of ["read", "check", "uncheck"] as const) {
+            it.effect(
+              `rejects ${kind} checked ${operation} before input when aria-checked is ${state}`,
+              () =>
+                Effect.gen(function*() {
+                  const attribute = state === "absent"
+                    ? ""
+                    : state === "empty"
+                    ? "aria-checked=\"\""
+                    : "aria-checked=\"undefined\""
+                  const { url } = yield* fixture(() =>
+                    `${
+                      kind === "native option"
+                        ? `<select id="selection" size="2"><option value="a" selected>First</option><option id="target" value="b" ${attribute}>Second</option></select>`
+                        : `<div id="target" role="${kind}" aria-selected="true" ${attribute}>Item</div>`
+                    }<script>document.body.dataset.events = '0';
+                  for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'input', 'change', 'focusin', 'keydown']) {
+                    document.addEventListener(type, () => { document.body.dataset.events = String(Number(document.body.dataset.events) + 1) }, true)
+                  }</script>`
+                  )
+                  yield* Effect.scoped(Effect.gen(function*() {
+                    const page = yield* Browser.newPage()
+                    yield* page.goto(url)
+                    const target = page.locator("#target")
+                    const failure = yield* (operation === "read"
+                      ? target.isChecked
+                      : operation === "check"
+                      ? target.check()
+                      : target.uncheck()).pipe(
+                        Deadline.within("1 second"),
+                        Effect.match({
+                          onFailure: (error) => error,
+                          onSuccess: () => undefined
+                        })
+                      )
+                    assert.deepStrictEqual(yield* page.locator("body").readAttribute("data-events"), Option.some("0"))
+                    if (kind === "native option") {
+                      assert.strictEqual(yield* page.locator("#selection").readValue, "a")
+                    }
+                    assert(Locator.isLocatorError(failure) && failure.reason._tag === "WrongElement", String(failure))
+                  }))
+                }),
+              timeout
+            )
+          }
+        }
+      }
+
+      for (const role of ["checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"] as const) {
+        it.effect(`preserves ${role} checked defaults and actions`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="target" role="${role}" onclick="this.setAttribute('aria-checked', this.getAttribute('aria-checked') === 'true' ? 'false' : 'true')">Item</div><div id="undefined" role="${role}" aria-checked="undefined">Undefined</div>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const target = page.locator("#target")
+              assert.isFalse(yield* target.isChecked)
+              assert.isFalse(yield* page.locator("#undefined").isChecked)
+              yield* target.check()
+              assert.isTrue(yield* target.isChecked)
+              yield* target.uncheck()
+              assert.isFalse(yield* target.isChecked)
+            }))
+          }), timeout)
+      }
+
+      it.effect(
+        "preserves native checkbox and radio checked properties over ARIA states",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="checkbox" type="checkbox" role="option" aria-checked="undefined"><input id="radio" type="radio" role="treeitem" aria-checked="false"><input id="checked" type="checkbox" checked aria-checked="false">`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              for (const id of ["checkbox", "radio"]) {
+                const target = page.locator(`#${id}`)
+                assert.isFalse(yield* target.isChecked)
+                yield* target.check()
+                assert.isTrue(yield* target.isChecked)
+              }
+              yield* page.locator("#checkbox").uncheck()
+              assert.isFalse(yield* page.locator("#checkbox").isChecked)
+              assert.isTrue(yield* page.locator("#checked").isChecked)
+            }))
+          }),
+        timeout
+      )
 
       it.effect("chooses options, checks boxes and sets files", () =>
         Effect.gen(function*() {

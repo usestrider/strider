@@ -540,6 +540,15 @@ export interface ReadonlyLocator
   /**
    * Whether the one match is checked now.
    *
+   * **Details**
+   *
+   * Native checkbox and radio inputs use their checked property. ARIA roles `checkbox`, `radio`, `switch`,
+   * `menuitemcheckbox`, `menuitemradio`, `option` and `treeitem` use `aria-checked`. For `option` and `treeitem`,
+   * absent or empty `aria-checked`, or the literal value `"undefined"`, means checking is unsupported and fails with
+   * `WrongElement` before input; `"false"` means checkable but unchecked. For the other roles, absent or
+   * `"undefined"` reads false. Selection through `aria-selected` is independent. Other elements fail with
+   * `WrongElement`. See the [WAI-ARIA checked state](https://www.w3.org/TR/wai-aria-1.2/#aria-checked).
+   *
    * **Example** (Reading a preference)
    *
    * ```ts import.meta.vitest
@@ -906,6 +915,7 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
+   * Checked state follows `isChecked`, including its supported ARIA roles and optional checkability.
    * If it's already checked, nothing is sent. Otherwise it clicks, then reads the state again: a click that didn't
    * check it fails with `StateUnchanged{expected: "checked"}`. A label uses its own checked state when it is an
    * ARIA checkable; otherwise it reads its associated control's state. The click and any position remain on the
@@ -926,9 +936,9 @@ export interface Locator extends ReadonlyLocator {
   check(options?: PointerOptions | undefined): ActionEffect
   /**
    * Unchecks a checkbox or an ARIA checkable, and confirms it became unchecked. Checks: the same as `click`. It
-   * works as `check` does: a label's own checked state takes precedence over its associated control's state, while
-   * the click stays at the requested label-relative position. It fails with `StateUnchanged{expected: "unchecked"}`
-   * if the state stays checked.
+   * works as `check` does, using the checked state and optional checkability described by `isChecked`. A label's
+   * own checked state takes precedence over its associated control's state, while the click stays at the requested
+   * label-relative position. It fails with `StateUnchanged{expected: "unchecked"}` if the state stays checked.
    *
    * **Example** (Opting out of offers)
    *
@@ -999,7 +1009,10 @@ export interface Locator extends ReadonlyLocator {
    * - A text input, a textarea or a `contenteditable` element is focused and its contents selected from an
    *   isolated world of Strider's, then the value is inserted as text, as an input method would.
    * - An input whose value isn't typed (`date`, `time`, `color`, `range` and their kin) has it set from that
-   *   world, with `input` and `change` dispatched; a value it refuses fails with `InvalidInput`.
+   *   world, with `input` then `change` dispatched. Equivalent browser serialization is accepted, such as
+   *   lowercase color hex or omitted zero seconds. A malformed value, or a range value changed by clamping
+   *   or rounding, fails with `InvalidInput` without changing the value or dispatching those events.
+   *   Validation runs before and after focus; changes made by a focus handler remain on refusal.
    * - An element that can't be edited fails at once with `NotEditable`. A read-only one is waited for, and a
    *   timeout reports it as `ReadOnly`.
    * - The value must be a string, including inside `Redacted`; other runtime values fail with `InvalidInput`
