@@ -217,6 +217,41 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
+      for (
+        const [type, initial, value] of [["date", "2020-03-02", "2020-03-03"], ["time", "12:30", "12:34"]] as const
+      ) {
+        it.effect(
+          `rejects invalid numeric text after a focus handler changes ${type} to number`,
+          () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<input id="field" type="${type}" tabindex="0" value="${initial}" onfocus="this.type = 'number'; this.value = '7'; before.textContent = this.value; events.textContent += 'focus;'" onkeydown="events.textContent += 'keydown;'" onbeforeinput="events.textContent += 'beforeinput;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="before"></p><p id="events"></p>`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const result = yield* page.locator("#field").fill(value).pipe(Effect.result)
+                const state = {
+                  refused: result._tag === "Failure" && Locator.isLocatorError(result.failure) &&
+                    result.failure.reason._tag === "InvalidInput",
+                  value: yield* page.locator("#field").readValue,
+                  events: yield* page.locator("#events").readText
+                }
+                assert.deepStrictEqual(
+                  state,
+                  state.events.startsWith("focus;")
+                    ? { refused: true, value: "7", events: "focus;" }
+                    : { refused: false, value, events: "input;change;" }
+                )
+                if (state.events.startsWith("focus;")) {
+                  assert.strictEqual(yield* page.locator("#before").readText, "7")
+                }
+              }))
+            }),
+          timeout
+        )
+      }
+
       it.effect("fills as text after a focus handler changes a date input to text", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
