@@ -13,6 +13,7 @@ import type * as Script from "../src/bidi-protocol/Script.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
 import * as Capture from "../src/internal/bidiAdapter/capture.ts"
+import * as Contexts from "../src/internal/bidiAdapter/contexts.ts"
 import * as Evaluation from "../src/internal/bidiAdapter/evaluation.ts"
 import * as Navigation from "../src/internal/bidiAdapter/navigation.ts"
 import * as State from "../src/internal/bidiAdapter/state.ts"
@@ -332,6 +333,59 @@ describe("BidiAdapter state", () => {
         }))
     }
   }
+
+  it.effect("ends a download navigation whose start waits behind a late failure of the download before it", () =>
+    Effect.gen(function*() {
+      const noContent = "http://example.com/first-download"
+      const download = "http://example.com/download"
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      let calls = 0
+      const { facts, page, state } = yield* withPage({
+        "browsingContext.navigate": Effect.suspend(() =>
+          ++calls === 1
+            ? Effect.succeed({ navigation: "n1", url: noContent })
+            : Effect.andThen(
+              Effect.andThen(Deferred.succeed(entered, undefined), Deferred.await(release)),
+              Effect.succeed({ navigation: "n2", url: download })
+            )
+        )
+      })
+      const handlers = Contexts.register(Navigation.register(Kit.handlers<State.Event>()))
+      const event = (method: string, params: Record<string, unknown>) =>
+        handlers.apply(method, { context: "C1", timestamp: 1, ...params }, { state })
+      // ROOK-130: synthesized ordering, not captured protocol traffic.
+      // The first navigation becomes a download, which ends it before the next command is sent.
+      const first = yield* Navigation.navigate(state, page.id, noContent, { referrer: Option.none() })
+      event("browsingContext.navigationStarted", { navigation: "n1", url: noContent })
+      event("browsingContext.downloadWillBegin", {
+        navigation: "n1",
+        url: noContent,
+        download: "D0",
+        suggestedFilename: "first.bin"
+      })
+      // The next command's reply is held. A late terminal event for the ended first navigation arrives,
+      // then the download navigation starts, and its download begins.
+      const running = yield* Effect.forkChild(
+        Navigation.navigate(state, page.id, download, { referrer: Option.none() })
+      )
+      yield* Deferred.await(entered)
+      event("browsingContext.navigationFailed", { navigation: "n1", url: noContent })
+      event("browsingContext.navigationStarted", { navigation: "n2", url: download })
+      event("browsingContext.downloadWillBegin", {
+        navigation: "n2",
+        url: download,
+        download: "D1",
+        suggestedFilename: "file.bin"
+      })
+      yield* Deferred.succeed(release, undefined)
+      const reserved = yield* Fiber.join(running)
+      yield* state.buffer.flush
+      const outcomes = (id: unknown) =>
+        facts.flatMap((fact) => fact._tag === "NavigationEnded" && fact.navigation === id ? [fact.outcome._tag] : [])
+      assert.deepStrictEqual(outcomes(first), ["Download"])
+      assert.deepStrictEqual(outcomes(reserved), ["Download"])
+    }))
 
   it.effect("keeps a navigation whose commit waits behind a held error page from being superseded by a later start", () =>
     Effect.gen(function*() {
