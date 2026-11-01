@@ -166,6 +166,43 @@ describe("BidiAdapter state", () => {
       }))
   }
 
+  it.effect("associates an observed error document with an already published failure without another outcome", () =>
+    Effect.gen(function*() {
+      const url = "http://example.com/"
+      const errorUrl = "about:neterror?e=dnsNotFound&u=" + encodeURIComponent(url)
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      let calls = 0
+      const { facts, page, state } = yield* withPage({
+        "browsingContext.navigate": Effect.suspend(() => ++calls === 1
+          ? Effect.fail(new Protocol.ProtocolError({ reason: new Protocol.Unrecognized({ description: "refused" }) }))
+          : Effect.gen(function*() {
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(release)
+            return { navigation: "retry", url }
+          }))
+      })
+      const handlers = Navigation.register(Kit.handlers<State.Event>())
+      const prior = yield* Navigation.navigate(state, page.id, url, { referrer: Option.none() })
+      yield* state.buffer.flush
+      const published = JSON.stringify(facts)
+      const count = facts.length
+      const running = yield* Effect.forkChild(Navigation.navigate(state, page.id, url, { referrer: Option.none() }))
+      yield* Deferred.await(entered)
+      handlers.apply("browsingContext.navigationCommitted", {
+        context: "C1", navigation: "old", url: errorUrl, timestamp: 1
+      }, { state })
+      assert.strictEqual(page.document!.url, errorUrl)
+      const document = page.document!.id
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(running)
+      yield* state.buffer.flush
+      assert.strictEqual(JSON.stringify(facts.slice(0, count)), published)
+      assert.lengthOf(facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === prior), 1)
+      assert.include(facts.map((fact) => fact._tag as string), "ErrorDocumentAttributed")
+      assert.deepInclude(facts, { _tag: "ErrorDocumentAttributed", document, navigation: prior })
+    }))
+
   it.effect("keeps a late failed-navigation commit from taking the next navigation id", () =>
     Effect.gen(function*() {
       const facts: Array<Adapter.Fact> = []
