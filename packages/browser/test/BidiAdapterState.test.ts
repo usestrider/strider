@@ -332,6 +332,48 @@ describe("BidiAdapter state", () => {
     }
   }
 
+  it.effect("keeps an overlapping command's early error commit for that command when another navigation starts", () =>
+    Effect.gen(function*() {
+      const first = "http://first.example/"
+      const second = "http://second.example/"
+      const errorUrl = "about:neterror?e=dnsNotFound&u=" + encodeURIComponent(first)
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      let calls = 0
+      const { facts, page, state } = yield* withPage({
+        "browsingContext.navigate": Effect.suspend(() =>
+          ++calls === 1
+            ? Effect.andThen(
+              Effect.andThen(Deferred.succeed(entered, undefined), Deferred.await(release)),
+              Effect.succeed({ navigation: "na", url: first })
+            )
+            : Effect.succeed({ navigation: "nb", url: second })
+        )
+      })
+      const handlers = Navigation.register(Kit.handlers<State.Event>())
+      const event = (method: string, navigation: string, url: string) =>
+        handlers.apply(method, { context: "C1", navigation, url, timestamp: 1 }, { state })
+      // ROOK-130: synthesized ordering, not captured protocol traffic.
+      // The first command's error page commits, unannounced, before the first command's reply.
+      const running = yield* Effect.forkChild(Navigation.navigate(state, page.id, first, { referrer: Option.none() }))
+      yield* Deferred.await(entered)
+      event("browsingContext.navigationCommitted", "na", errorUrl)
+      // A second command overlaps it; its navigation starts before the first command's reply.
+      const reserved = yield* Navigation.navigate(state, page.id, second, { referrer: Option.none() })
+      event("browsingContext.navigationStarted", "nb", second)
+      yield* Deferred.succeed(release, undefined)
+      const refused = yield* Fiber.join(running)
+      event("browsingContext.navigationCommitted", "nb", second)
+      yield* state.buffer.flush
+      const ended = (id: unknown) => facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === id)
+      assert.lengthOf(ended(reserved), 1)
+      // The first command's error page belongs to it: its navigation ends Failed, with that error document.
+      assert.lengthOf(ended(refused), 1)
+      const outcome = ended(refused)[0]!
+      assert.strictEqual(outcome._tag === "NavigationEnded" && outcome.outcome._tag, "Failed")
+      assert.isEmpty(page.commandNavigations)
+    }))
+
   for (const mode of ["rejected", "unsupported", "interrupted", "removed"] as const) {
     it.effect(`cleans up navigation correlation when the command is ${mode}`, () =>
       Effect.gen(function*() {
