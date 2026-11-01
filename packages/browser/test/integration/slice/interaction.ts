@@ -106,6 +106,22 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
+      // On stock WebKit the page sees only the press (ROOK-149)
+      if (name !== "WebKit") {
+        it.effect("finishes a click whose mousedown opens a dialog", () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<button id="go" onmousedown="confirm('Go?'); out.textContent += 'down '" onmouseup="out.textContent += 'up '" onclick="out.textContent += 'click'">Go</button><p id="out"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#go").click()
+              assert.strictEqual(yield* page.locator("#out").readText, "down up click")
+            }))
+          }), timeout)
+      }
+
       it.effect("serializes competing clicks and delivers each gesture once", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>

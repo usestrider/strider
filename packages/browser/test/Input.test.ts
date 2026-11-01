@@ -52,3 +52,24 @@ describe("Input.recover", () => {
       assert.isTrue(Option.isSome(state.broken))
     }))
 })
+
+describe("Input.singleClick", () => {
+  const click = () => Input.click(Input.make(), { x: 10, y: 20 }, "left", 1)
+
+  it("recognizes one move, press and release at the same point", () => {
+    assert.isDefined(Input.singleClick(click()))
+  })
+
+  it("leaves held buttons, modifier transitions, double clicks and moved releases to the sequential path", () => {
+    const held = Input.make()
+    held.buttons.add("right")
+    for (
+      const gesture of [
+        Input.click(held, { x: 10, y: 20 }, "left", 1),
+        Input.click(Input.make(), { x: 10, y: 20 }, "left", 1, ["Shift"]),
+        Input.click(Input.make(), { x: 10, y: 20 }, "left", 2),
+        click().map((event, index) => index === 2 && event._tag === "Mouse" ? { ...event, x: 50 } : event)
+      ]
+    ) assert.isUndefined(Input.singleClick(gesture))
+  })
+})

@@ -139,6 +139,22 @@ that need the ids, and can't see which command a reply answers.
 
 ## The browser model (L1)
 
+**A plain click's commands go out as one step, and only their replies overlap.** The move's reply waits a rendering
+frame the click has no use for. So `sendOrdered` writes the move, press and release to the transport in order, in a
+step interruption doesn't split, then waits for all three replies together. A deadline or interruption stops only
+the waiting, so it can't leave the button pressed, and no cleanup has to run: a failed click needs no release, and the
+failure is reported on time. A transport send that never finishes holds the click until it does, which the built-in
+transports don't do. CDP uses this only for one unheld move/press/release click at the same point, on a page without
+child frames and before the page has enabled HTML drag interception; late drag announcements still need sequential
+cancellation. Frame routing stays sequential after an acknowledged cross-site click failed to reach its target in a
+full integration run (ROOK-123), and checking the whole page also covers coordinate clicks, whose target frame is
+unknown before dispatch. Playwright's `mouse.click` also sends these commands without waiting for each reply.
+Rejected: starting the sends concurrently, which can reorder them when a transport send suspends; awaiting every
+reply before the next send, which adds the measured wait; letting interruption stop the sends and releasing the button
+afterwards, which sends a stray `mouseup` in the usual case where all three were already written, overruns the deadline,
+and on Firefox, whose release repeats the click's move, can leave an off-viewport click's page blocked for good; and
+applying this to drags or modifier transitions without establishing their semantics.
+
 **The fold is the model's one writer, and a caller's setting is a command in its stream.** Every write goes through
 the fold: entity state, and the caller's settings (handlers, routes, a context's options, a page's owner, grants, a
 `beforeunload` stay). The adapter's facts and the caller's commands are one inbox, applied one at a time in arrival
