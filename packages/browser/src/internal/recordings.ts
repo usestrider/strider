@@ -7,6 +7,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
+import * as Mime from "effect/http/Mime"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import type * as FilePath from "../FilePath.ts"
@@ -79,35 +80,9 @@ export const zip = (
     })
   )).pipe(
     Stream.pipeThroughChannel(Zip.encode()),
-    Stream.runCollect,
-    Effect.map((chunks) => {
-      const all = Array.from(chunks)
-      const bytes = new Uint8Array(all.reduce((size, chunk) => size + chunk.length, 0))
-      let at = 0
-      for (const chunk of all) {
-        bytes.set(chunk, at)
-        at += chunk.length
-      }
-      return bytes
-    }),
+    Stream.mkUint8Array,
     Effect.mapError((error): WriteFailure => ({ path: "", hint: `The zip couldn't be encoded: ${error.message}` }))
   )
 
-const extensions: Readonly<Record<string, string>> = {
-  "text/html": "html",
-  "text/css": "css",
-  "text/plain": "txt",
-  "text/javascript": "js",
-  "application/javascript": "js",
-  "application/json": "json",
-  "image/png": "png",
-  "image/jpeg": "jpeg",
-  "image/gif": "gif",
-  "image/svg+xml": "svg",
-  "image/webp": "webp",
-  "font/woff2": "woff2",
-  "font/woff": "woff"
-}
-
-/** A file extension for a MIME type; `bin` for one not listed. */
-export const extension = (mimeType: string): string => extensions[mimeType.split(";")[0]!.trim().toLowerCase()] ?? "bin"
+/** A file extension for a MIME type, as Effect's `Mime` gives it; `bin` for one it doesn't know. */
+export const extension = (mimeType: string): string => Option.getOrElse(Mime.getExtension(mimeType), () => "bin")

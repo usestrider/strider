@@ -56,7 +56,6 @@ const sending = <E>(
           new Reason.BackendFailure({
             kind: "Rejected",
             method: "input",
-            metadata: {},
             hint: `A held input's release failed (${unknown.value}), and failed again when sent before this ` +
               "gesture, so the page's input state is unknown"
           }),
@@ -143,8 +142,8 @@ const unknownKey = (key: string) =>
   })
 
 /** The layout a page's context types with. */
-export const layoutOf = (runtime: Runtime.Runtime, page: Model.PageEntry): Keyboard.Layout =>
-  runtime.model.contexts.get(page.context)?.keyboardLayout ?? "us"
+export const layoutOf = (_runtime: Runtime.Runtime, page: Model.PageEntry): Keyboard.Layout =>
+  page.contextEntry.state.getUnsafe().settings.keyboardLayout
 
 export const keyboard = (owner: Owner): Keyboard.Keyboard => ({
   press: (key, options) =>
@@ -184,7 +183,7 @@ export const keyboard = (owner: Owner): Keyboard.Keyboard => ({
   hold: Effect.fnUntraced(function*(key: Keyboard.Key | string) {
     const definition = Keys.definition(key, layoutOf(owner.runtime, owner.page))
     if (definition === undefined) {
-      return yield* Effect.fail(keyboardError("Keyboard.hold")(unknownKey(key), Operation.operationId()))
+      return yield* Effect.fail(keyboardError("Keyboard.hold")(unknownKey(key), Operation.idNow()))
     }
     yield* sending(
       owner,
@@ -219,7 +218,7 @@ export const mouse = (owner: Owner): Mouse.Mouse => ({
     if (Input.anyModifier(owner.page.inputState, modifiers)) {
       const missing = yield* unsupported(owner, "input.pointerModifiers")
       if (Option.isSome(missing)) {
-        return yield* Effect.fail(mouseError("Mouse.click")(missing.value, Operation.operationId()))
+        return yield* Effect.fail(mouseError("Mouse.click")(missing.value, Operation.idNow()))
       }
     }
     yield* sending(

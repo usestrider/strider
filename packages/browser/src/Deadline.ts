@@ -61,8 +61,9 @@ export const within: {
   2,
   <A, E, R>(self: Effect.Effect<A, E, R>, duration: Duration.Input): Effect.Effect<A, E, R> =>
     Effect.flatMap(Effect.all([CurrentDeadlineEffect, BrowserClockEffect]), ([enclosing, clock]) => {
-      const own =
-        (clock.now() + Duration.toMillis(Duration.fromInputUnsafe(duration)) * 1e6) as MonotonicInstant.MonotonicInstant
+      // A duration without end has no nanoseconds: its deadline never comes
+      const nanos = Option.match(Duration.toNanos(duration), { onNone: () => Infinity, onSome: Number })
+      const own = (clock.now() + nanos) as MonotonicInstant.MonotonicInstant
       const deadline = Option.match(enclosing, { onNone: () => own, onSome: (at) => Math.min(at, own) })
       return Effect.provideService(self, CurrentDeadline, Option.some(deadline as MonotonicInstant.MonotonicInstant))
     })
@@ -155,6 +156,15 @@ const BrowserClockEffect = Effect.service(BrowserClock.CurrentClock)
 
 /**
  * Reference to the budget an operation gets when no deadline encloses it; 30 seconds unless set.
+ *
+ * **Details**
+ *
+ * It also bounds closing a page you own, and removing a context Strider created, when its scope closes, whatever
+ * deadline encloses the scope: the close waits up to this long for the browser to report the page or the context
+ * ended, then stops waiting and leaves it as it is, though the command it sent goes on. Halfway through, a close
+ * still waiting logs a warning naming the page or the context and what it waits on: the browser's answer to the
+ * command, or the end, or for a context the pages that haven't ended. It warns again if it stops waiting with the
+ * page or the context still open.
  *
  * @stability unstable
  * @category references

@@ -116,7 +116,7 @@ export const AuthChallengeResponse = /*#__PURE__*/ Schema.suspend(() =>
     username: Schema.optional(Schema.String),
     password: Schema.optional(Schema.RedactedFromValue(Schema.String))
   }).annotate({ identifier: "Fetch.AuthChallengeResponse" })
-) as any as Schema.Codec<AuthChallengeResponse>
+) as any as Schema.Codec<AuthChallengeResponse, unknown>
 
 /**
  * The decision on what to do in response to the authorization challenge.  Default means
@@ -438,7 +438,7 @@ export const ContinueWithAuthParams = /*#__PURE__*/ Schema.suspend(() =>
     requestId: RequestId,
     authChallengeResponse: AuthChallengeResponse
   }).annotate({ identifier: "Fetch.ContinueWithAuthParams" })
-) as any as Schema.Codec<ContinueWithAuthParams>
+) as any as Schema.Codec<ContinueWithAuthParams, unknown>
 
 /**
  * Enables issuing of requestPaused events. A request will be paused until client

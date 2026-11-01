@@ -80,7 +80,7 @@ export const Cookie = /*#__PURE__*/ Schema.suspend(() =>
     sameSite: CookieSameSitePolicy,
     partitionKey: Schema.optional(Schema.String)
   }).annotate({ identifier: "Storage.Cookie" })
-) as any as Schema.Codec<Cookie>
+) as any as Schema.Codec<Cookie, unknown>
 
 /**
  * Filter parameters for cookie retrieval and deletion. Every provided field narrows the result set.
@@ -132,7 +132,7 @@ export const CookieFilter = /*#__PURE__*/ Schema.suspend(() =>
     httpOnly: Schema.optional(Schema.Boolean),
     secure: Schema.optional(Schema.Boolean)
   }).annotate({ identifier: "Storage.CookieFilter" })
-) as any as Schema.Codec<CookieFilter>
+) as any as Schema.Codec<CookieFilter, unknown>
 
 /**
  * Same-Site policy of a cookie.
@@ -265,7 +265,7 @@ export const DeleteCookiesParams = /*#__PURE__*/ Schema.suspend(() =>
     filter: Schema.optional(CookieFilter),
     partition: Schema.optional(PartitionDescriptor)
   }).annotate({ identifier: "Storage.DeleteCookiesParams" })
-) as any as Schema.Codec<DeleteCookiesParams>
+) as any as Schema.Codec<DeleteCookiesParams, unknown>
 
 /**
  * Removes zero or more cookies which match the provided filter, within the given partition. A filter is required; omitting it fails rather than deleting every cookie.
@@ -324,7 +324,7 @@ export const GetCookiesParams = /*#__PURE__*/ Schema.suspend(() =>
     filter: Schema.optional(CookieFilter),
     partition: Schema.optional(PartitionDescriptor)
   }).annotate({ identifier: "Storage.GetCookiesParams" })
-) as any as Schema.Codec<GetCookiesParams>
+) as any as Schema.Codec<GetCookiesParams, unknown>
 
 /**
  * Retrieves zero or more cookies which match the provided filter, within the given partition.
@@ -356,7 +356,7 @@ export const GetCookiesResult = /*#__PURE__*/ Schema.suspend(() =>
     cookies: Schema.Array(Cookie),
     partitionKey: PartitionKey
   }).annotate({ identifier: "Storage.GetCookiesResult" })
-) as any as Schema.Codec<GetCookiesResult>
+) as any as Schema.Codec<GetCookiesResult, unknown>
 
 /**
  * Creates a new cookie, replacing any cookie in the partition which matches.
@@ -388,7 +388,7 @@ export const SetCookieParams = /*#__PURE__*/ Schema.suspend(() =>
     cookie: Cookie,
     partition: Schema.optional(PartitionDescriptor)
   }).annotate({ identifier: "Storage.SetCookieParams" })
-) as any as Schema.Codec<SetCookieParams>
+) as any as Schema.Codec<SetCookieParams, unknown>
 
 /**
  * Creates a new cookie, replacing any cookie in the partition which matches.

@@ -26,7 +26,6 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
@@ -453,10 +452,10 @@ export const capturePage = (
   failed: Set<Target.DocumentId>
 ): Effect.Effect<ReadonlyArray<FrameCapture>> =>
   Effect.gen(function*() {
-    const state = yield* SubscriptionRef.get(page.state)
+    const { frames, status: state } = yield* page.state.get
     // A prompt open blocks evaluation on Chromium and WebKit: nothing is captured, so nothing is numbered
     if (state._tag !== "Open" || Option.isSome(state.prompt)) return []
-    const tree = yield* SubscriptionRef.get(page.tree)
+    const tree = { frames }
     const documents: Array<
       { readonly frame: Target.NavigableId; readonly main: boolean; readonly document: Target.DocumentId }
     > = []

@@ -5,6 +5,7 @@
 import * as path from "node:path"
 import { defineConfig } from "vitest/config"
 import { resolve } from "./vitest.config.ts"
+import { upstreamTest } from "./vitest.upstream.config.ts"
 
 export default defineConfig({
   resolve,
@@ -19,6 +20,13 @@ export default defineConfig({
           path.join(import.meta.dirname, "vitest.setup.ts"),
           path.join(import.meta.dirname, "packages/browser/test/integration/environment.ts")
         ]
+      }
+    }, {
+      extends: true,
+      test: {
+        ...upstreamTest,
+        // The diagnostic suites have known failures, tracked on Rookery; run them with test:upstream.
+        include: ["test/upstream/Astro.test.ts", "test/upstream/Vite.test.ts"]
       }
     }]
   }

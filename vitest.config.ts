@@ -33,6 +33,13 @@ export default defineConfig({
     }, {
       extends: true,
       test: {
+        name: "benchmark-tools",
+        root: "packages/scenarios",
+        include: ["test/Benchmark.test.ts"]
+      }
+    }, {
+      extends: true,
+      test: {
         name: "vitest",
         root: "packages/vitest",
         include: ["test/**/*.test.ts"],

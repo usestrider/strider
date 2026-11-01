@@ -7,7 +7,6 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
-import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import type * as Target from "../Target.ts"
@@ -21,17 +20,16 @@ export const succeeded = (
   model: Model.Model,
   navigation: PageNavigation.Id,
   frame: Target.NavigableId,
-  at: string,
+  at: Url.Url,
   outcome: Adapter.NavigationOutcome
 ): Option.Option<PageNavigation.PageNavigation> => {
-  const url = at as Url.Url
   switch (outcome._tag) {
     case "Committed":
       return Option.some({
         _tag: "Committed",
         id: navigation,
         frame,
-        url,
+        url: at,
         document: outcome.document,
         response: Option.flatMap(outcome.response, model.response)
       })
@@ -40,14 +38,14 @@ export const succeeded = (
         _tag: "SameDocument",
         id: navigation,
         frame,
-        url,
+        url: at,
         document: outcome.document,
         via: outcome.via
       })
     case "Restored":
-      return Option.some({ _tag: "Restored", id: navigation, frame, url, document: outcome.document })
+      return Option.some({ _tag: "Restored", id: navigation, frame, url: at, document: outcome.document })
     case "Activated":
-      return Option.some({ _tag: "Activated", id: navigation, frame, url, document: outcome.document })
+      return Option.some({ _tag: "Activated", id: navigation, frame, url: at, document: outcome.document })
     default:
       return Option.none()
   }
@@ -64,14 +62,15 @@ export const reached = (
   deadline: Option.Option<MonotonicInstant.MonotonicInstant>
 ): Effect.Effect<boolean> => {
   if (waitUntil === "commit" || result._tag !== "Committed") return Effect.succeed(true)
-  const document = model.documents.get(result.document)
-  if (document === undefined) return Effect.succeed(true)
+  const found = model.document(result.document)
+  if (Option.isNone(found)) return Effect.succeed(true)
+  const document = found.value
   const ready = (readiness: string) =>
     waitUntil === "load" ? readiness === "complete" : readiness === "interactive" || readiness === "complete"
-  const wait = SubscriptionRef.changes(document.readiness).pipe(
-    Stream.filter(ready),
+  const wait = document.state.changes.pipe(
+    Stream.filter((state) => ready(state.readiness)),
     Stream.runHead,
-    Effect.raceFirst(Effect.map(Deferred.await(document.ended), () => Option.none<string>())),
+    Effect.raceFirst(Effect.map(Deferred.await(document.ended), () => Option.none<Model.DocumentState>())),
     Effect.as(true)
   )
   return Option.match(deadline, {

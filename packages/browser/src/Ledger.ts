@@ -15,7 +15,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
-import * as Semaphore from "effect/Semaphore"
+import * as SynchronizedRef from "effect/SynchronizedRef"
 
 /**
  * Schema for one thing a program owns: a browser it launched, with the profile directory its command line names,
@@ -121,6 +121,9 @@ export const CurrentLedger: Context.Reference<Ledger> = Context.Reference<Ledger
   { defaultValue: () => ({ add: () => Effect.void, remove: () => Effect.void }) }
 )
 
+/** A record as its file holds it: JSON, read and written by one codec. */
+const RecordFile = Schema.fromJsonString(Schema.toCodecJson(Record), { space: 2 })
+
 const host = globalThis as {
   readonly process?: { readonly pid: number }
   readonly performance?: { readonly timeOrigin: number }
@@ -169,32 +172,32 @@ export const layer = (directory: string): Layer.Layer<never, never, FileSystem.F
       startedAt: Math.round(host.performance?.timeOrigin ?? Date.now())
     }
     const file = path.join(directory, `${owner.pid}-${owner.startedAt}.json`)
-    const items: Array<Item> = []
-    const lock = yield* Semaphore.make(1)
-    const write = lock.withPermit(Effect.suspend(() => {
-      const record = new Record({ owner, items: [...items] })
-      return Effect.flatMap(
-        Schema.encodeEffect(Schema.toCodecJson(Record))(record),
-        (encoded) =>
-          Effect.andThen(
-            fs.makeDirectory(directory, { recursive: true }),
-            fs.writeFileString(file, JSON.stringify(encoded, null, 2))
-          )
-      ).pipe(Effect.catchCause((cause) => Effect.logWarning("Ledger: couldn't write the record", cause)))
-    }))
+    // The record's lines, written under the ref's own lock: a write sees the list its change made, in order
+    const items = yield* SynchronizedRef.make<ReadonlyArray<Item>>([])
+    const write = (current: ReadonlyArray<Item>) =>
+      Schema.encodeEffect(RecordFile)(new Record({ owner, items: [...current] })).pipe(
+        Effect.flatMap((text) =>
+          Effect.andThen(fs.makeDirectory(directory, { recursive: true }), fs.writeFileString(file, text))
+        ),
+        Effect.catchCause((cause) => Effect.logWarning("Ledger: couldn't write the record", cause))
+      )
     yield* Effect.addFinalizer(() => fs.remove(file).pipe(Effect.ignore))
     const same = (a: Item, b: Item) =>
       a._tag === "Browser" && b._tag === "Browser"
         ? a.pid === b.pid && a.profile === b.profile
         : a._tag === "Directory" && b._tag === "Directory" && a.path === b.path
     const ledger: Ledger = {
-      add: (item) => Effect.suspend(() => (items.push(item), write)),
+      add: (item) =>
+        SynchronizedRef.updateEffect(items, (current) => {
+          const next = [...current, item]
+          return Effect.as(write(next), next)
+        }),
       remove: (item) =>
-        Effect.suspend(() => {
-          const index = items.findIndex((each) => same(each, item))
-          if (index < 0) return Effect.void
-          items.splice(index, 1)
-          return write
+        SynchronizedRef.updateEffect(items, (current) => {
+          const index = current.findIndex((each) => same(each, item))
+          if (index < 0) return Effect.succeed(current)
+          const next = current.filter((_, at) => at !== index)
+          return Effect.as(write(next), next)
         })
     }
     return Context.make(CurrentLedger, ledger)
@@ -236,7 +239,7 @@ export const read = (
     for (const name of names.filter((each) => each.endsWith(".json")).sort()) {
       const file = path.join(directory, name)
       const decoded = yield* fs.readFileString(file).pipe(
-        Effect.flatMap((text) => Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.toCodecJson(Record)))(text)),
+        Effect.flatMap(Schema.decodeUnknownEffect(RecordFile)),
         Effect.option
       )
       if (decoded._tag === "Some") records.push({ file, record: decoded.value })

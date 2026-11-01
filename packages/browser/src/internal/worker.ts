@@ -11,7 +11,6 @@ import { pipeArguments } from "effect/Pipeable"
 import * as BrowserWorker from "../BrowserWorker.ts"
 import type * as JSHandle from "../JSHandle.ts"
 import * as Reason from "../Reason.ts"
-import type * as Url from "../Url.ts"
 import type * as Adapter from "./adapter.ts"
 import { exception } from "./evaluation.ts"
 import * as Filters from "./filters.ts"
@@ -23,7 +22,7 @@ import * as Serialization from "./serialization.ts"
 const TypeId = "~@usestrider/browser/BrowserWorker"
 
 export const make = (runtime: Runtime.Runtime, entry: Model.WorkerEntry): BrowserWorker.BrowserWorker => {
-  const failure = (reason: BrowserWorker.BrowserWorkerErrorReason, id = Operation.operationId()) =>
+  const failure = (reason: BrowserWorker.BrowserWorkerErrorReason, id = Operation.idNow()) =>
     new BrowserWorker.BrowserWorkerError({ reason, diagnostics: Operation.diagnostics(id) })
 
   const evaluate = Operation.fn("BrowserWorker.evaluate", { attributes: { "browser.realm.id": entry.realm } })(
@@ -84,7 +83,7 @@ export const make = (runtime: Runtime.Runtime, entry: Model.WorkerEntry): Browse
     [TypeId]: TypeId,
     realm: entry.realm,
     kind: entry.kind,
-    url: entry.url as Url.Url,
+    url: entry.url,
     closed: Deferred.await(entry.closed),
     evaluate,
     pipe() {

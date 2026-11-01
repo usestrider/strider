@@ -110,18 +110,24 @@ describe("The inspector socket's frames", () => {
       const connection = yield* InspectorSocket.connect(
         yield* SocketConnector.fromSocket(yield* NodeSocket.makeNet({ host: "127.0.0.1", port }))
       )
-      const collected = yield* connection.messages.pipe(Stream.take(2), Stream.runCollect, Effect.forkScoped)
+      const collected: Array<InspectorSocket.Incoming> = []
+      const drained = yield* connection.messages.pipe(
+        Stream.runForEach((message) => Effect.sync(() => collected.push(message))),
+        Effect.flip,
+        Effect.forkScoped
+      )
       yield* connection.send({
         _tag: "StartAutomationSession",
         sessionId: "e0b6d0b0-0000-4000-8000-000000000001",
         capabilities: []
       })
-      const [first, second] = yield* Fiber.join(collected)
-      assert.strictEqual(first?._tag, "DidStartAutomationSession")
-      assert.strictEqual(second?._tag, "SetTargetList")
+      // What the server sent before it closed, then why
+      const failure = yield* Fiber.join(drained)
+      assert.deepStrictEqual(collected.map((message) => message._tag), ["DidStartAutomationSession", "SetTargetList"])
       assert.strictEqual(toHex(received[0]!), started)
       const lost = yield* connection.closed
       assert.strictEqual(lost.initiator, "remote")
+      assert.strictEqual(failure.reason, lost)
       const refused = yield* Effect.flip(connection.send({ _tag: "Setup", connection: 1n, target: 2n }))
       assert.strictEqual(refused.reason._tag, "ConnectionLost")
     }).pipe(Effect.scoped))

@@ -36,6 +36,8 @@ export interface Settings {
   readonly args?: ReadonlyArray<string> | undefined
   /** A profile directory the caller owns, never deleted; otherwise a temporary one. */
   readonly userDataDir?: string | undefined
+  /** @default false */
+  readonly coreDumps?: boolean | undefined
   /**
    * How long to wait for Firefox to report its WebDriver BiDi endpoint.
    *
@@ -104,7 +106,7 @@ export const launch = Effect.fnUntraced(function*(options: Options) {
       )
     )
   )
-  const launched = yield* Launch.spawn(path, argsFor(options, profile), profile, {})
+  const launched = yield* Launch.spawn(path, argsFor(options, profile), profile, { coreDumps: options.coreDumps })
   const timeout = options.timeout ?? "30 seconds"
   const listening = yield* launched.stderrLine(/WebDriver BiDi listening on (ws:\/\/\S+)/).pipe(
     Effect.timeoutOption(timeout),

@@ -58,7 +58,7 @@ export const InspectParams = /*#__PURE__*/ Schema.suspend(() =>
     object: Runtime.RemoteObject,
     hints: Schema.Record(Schema.String, Schema.Unknown)
   }).annotate({ identifier: "Inspector.InspectParams" })
-) as any as Schema.Codec<InspectParams>
+) as any as Schema.Codec<InspectParams, unknown>
 
 /**
  * Disables inspector domain notifications.

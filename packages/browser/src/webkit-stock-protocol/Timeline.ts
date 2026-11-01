@@ -115,7 +115,7 @@ export const TimelineEvent = /*#__PURE__*/ Schema.suspend(() =>
     data: Schema.Record(Schema.String, Schema.Unknown),
     children: Schema.optional(Schema.Array(TimelineEvent))
   }).annotate({ identifier: "Timeline.TimelineEvent" })
-) as any as Schema.Codec<TimelineEvent>
+) as any as Schema.Codec<TimelineEvent, unknown>
 
 /**
  * Fired for every instrumentation event while timeline is started.
@@ -142,7 +142,7 @@ export const EventRecordedParams = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     record: TimelineEvent
   }).annotate({ identifier: "Timeline.EventRecordedParams" })
-) as any as Schema.Codec<EventRecordedParams>
+) as any as Schema.Codec<EventRecordedParams, unknown>
 
 /**
  * Fired when recording has started.

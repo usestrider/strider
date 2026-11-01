@@ -20,13 +20,8 @@ import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
-import * as Events from "./internal/events.ts"
-import * as Filters from "./internal/filters.ts"
-import * as Handles from "./internal/handles.ts"
-import type * as Model from "./internal/model.ts"
-import * as Operation from "./internal/operation.ts"
+import * as BrowserWorkerImpl from "./internal/browserWorker.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
-import type * as Runtime from "./internal/runtime.ts"
 import type * as JSHandle from "./JSHandle.ts"
 import type * as Page from "./Page.ts"
 import * as Reason from "./Reason.ts"
@@ -159,44 +154,6 @@ export interface Filter {
   readonly kind?: Kind | undefined
 }
 
-// ── Implementation ──
-
-const kind = (runtime: Runtime.Runtime, operation: string): Events.Kind<Model.WorkerEntry, BrowserWorker> => ({
-  operation,
-  noun: "a worker",
-  deliver: (entry) => runtime.worker(entry)
-})
-
-const subscription = (
-  target: Page.ObservedPage | UserContext.ObservedUserContext,
-  filter: Filter | undefined,
-  operation: string
-) =>
-  Effect.suspend(() => {
-    const found = Handles.target(target)
-    const runtime = found.behind.runtime
-    const wanted = filter?.kind
-    const checked = wanted === undefined || wanted === "dedicated"
-      ? Effect.void
-      : found._tag === "Page"
-      ? Effect.fail(Filters.invalid(
-        operation,
-        "filter.kind",
-        `"dedicated", or none`,
-        `A page's workers are dedicated; ${wanted} workers belong to its context, so subscribe to the context`
-      ))
-      : Filters.requires(runtime, operation, `workers.${wanted}`)
-    return checked.pipe(
-      Effect.andThen(Filters.url(operation, filter?.url)),
-      Effect.map((matches) => ({
-        kind: kind(runtime, operation),
-        channel: found.behind.entry.events.worker,
-        accepts: (entry: Events.Entry<Model.WorkerEntry>) =>
-          Filters.urlMatches(matches, entry.value.url) && (wanted === undefined || entry.value.kind === wanted)
-      }))
-    )
-  })
-
 /**
  * Subscribes to workers and returns the wait: an effect that gives the first match, with its owner's access, and
  * gives the same worker each time it runs.
@@ -239,15 +196,7 @@ export const next: {
     Subscription.SubscriptionError,
     Scope.Scope | PR
   >
-} = (<PE, PR>(
-  target: Page.ObservedPage | UserContext.ObservedUserContext,
-  filter?: Filter,
-  where?: Subscription.Where<BrowserWorker, PE, PR>
-) =>
-  Effect.flatMap(
-    subscription(target, filter, "BrowserWorker.next"),
-    ({ accepts, channel, kind }) => Events.next(kind, channel, accepts, where)
-  ).pipe(Operation.named("BrowserWorker.next"))) as typeof next
+} = BrowserWorkerImpl.next as typeof next
 
 /**
  * Subscribes to workers and returns a stream of every match from now on, with their owner's access.
@@ -292,15 +241,7 @@ export const stream: {
     Subscription.SubscriptionError,
     Scope.Scope | PR
   >
-} = (<PE, PR>(
-  target: Page.ObservedPage | UserContext.ObservedUserContext,
-  filter?: Filter,
-  where?: Subscription.Where<BrowserWorker, PE, PR>
-) =>
-  Effect.flatMap(
-    subscription(target, filter, "BrowserWorker.stream"),
-    ({ accepts, channel, kind }) => Events.stream(kind, channel, accepts, where)
-  )) as typeof stream
+} = BrowserWorkerImpl.stream as typeof stream
 
 /**
  * Reads the workers already reported, from the page's or context's event log; never waits.
@@ -330,11 +271,7 @@ export const history: {
     target: Page.ObservedPage | UserContext.ObservedUserContext,
     filter?: Filter | undefined
   ): Effect.Effect<Subscription.History<ObservedBrowserWorker>, Subscription.SubscriptionError>
-} = ((target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter) =>
-  Effect.flatMap(
-    subscription(target, filter, "BrowserWorker.history"),
-    ({ accepts, channel, kind }) => Events.history(kind, channel, accepts)
-  )) as typeof history
+} = BrowserWorkerImpl.history as typeof history
 
 /**
  * Schema for the reasons evaluating in a worker can fail.

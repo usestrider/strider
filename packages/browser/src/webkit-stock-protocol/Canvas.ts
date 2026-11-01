@@ -79,7 +79,7 @@ export const Canvas = /*#__PURE__*/ Schema.suspend(() =>
     memoryCost: Schema.optional(Schema.Number),
     stackTrace: Schema.optional(Console.StackTrace)
   }).annotate({ identifier: "Canvas.Canvas" })
-) as any as Schema.Codec<Canvas>
+) as any as Schema.Codec<Canvas, unknown>
 
 /**
  * Unique canvas identifier.
@@ -344,7 +344,7 @@ export const CanvasAddedParams = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     canvas: Canvas
   }).annotate({ identifier: "Canvas.CanvasAddedParams" })
-) as any as Schema.Codec<CanvasAddedParams>
+) as any as Schema.Codec<CanvasAddedParams, unknown>
 
 /**
  * `canvasMemoryChanged.Params`.
@@ -892,7 +892,7 @@ export const ResolveContextResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     object: Runtime.RemoteObject
   }).annotate({ identifier: "Canvas.ResolveContextResult" })
-) as any as Schema.Codec<ResolveContextResult>
+) as any as Schema.Codec<ResolveContextResult, unknown>
 
 /**
  * Tells the backend to record `count` frames whenever a new context is created.

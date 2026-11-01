@@ -44,6 +44,11 @@ and stock WebKit, and every member the API declares is built. One declared befor
   environment's Chromium. `pnpm scenarios` writes its `RESULTS.md`; `pnpm scenarios --record` visits
   the public demo sites once, live, into `.data/scenarios/`. Playwright (`playwright-core`) is this package's
   dependency alone: never import it elsewhere.
+  `test/upstream/` ports selected public Playwright suites using pinned fixtures and notices in `upstream/`.
+  `pnpm test:upstream` runs their Playwright baselines and Strider ports; `pnpm benchmark:upstream` records repeated
+  per-case timings in `.data/upstream/runs/`; `pnpm benchmark:compare <before> <after>` compares saved generations.
+  `--output` keeps a run outside the worktree. The larger diagnostic suites expose known failures; only the validated Vite
+  and Astro cases also run in `pnpm test:integration`. Keep failures visible, and track findings on Rookery.
 - `packages/tools/docs`: the JSDoc checker (vendored from Effect; don't edit it), the example check, which checks
   the guides' TypeScript too, `INDEX.md` and the API reference dataset, with what TypeScript reads in every example
   and guide block (`code.json`).

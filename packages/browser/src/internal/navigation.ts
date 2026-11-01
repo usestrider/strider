@@ -30,7 +30,7 @@ export const settle = (
   navigation: PageNavigation.Id,
   frame: Target.NavigableId,
   url: Option.Option<Url.Url>,
-  at: string,
+  at: Url.Url,
   outcome: Adapter.NavigationOutcome,
   id: Diagnostics.OperationId,
   accept: ReadonlyArray<"download" | "noContent"> = []
@@ -44,7 +44,7 @@ export const settle = (
     case "Download":
       // `goto({ accept })`: the outcomes the caller asked for are navigations
       if (accept.includes("download")) {
-        return Effect.succeed({ _tag: "BecameDownload", id: navigation, frame, url: at as Url.Url })
+        return Effect.succeed({ _tag: "BecameDownload", id: navigation, frame, url: at })
       }
       return Effect.fail(pageError(
         operation,
@@ -60,7 +60,7 @@ export const settle = (
           _tag: "NoContent",
           id: navigation,
           frame,
-          url: at as Url.Url,
+          url: at,
           response: Option.flatMap(outcome.response, model.response)
         })
       }

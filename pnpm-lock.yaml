@@ -241,12 +241,21 @@ importers:
       '@usestrider/browser':
         specifier: workspace:^
         version: link:../browser
+      astro:
+        specifier: 7.4.2
+        version: 7.4.2(@astrojs/markdown-remark@7.3.4)(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.1)
       effect:
         specifier: ^4.0.6
         version: 4.0.6
       playwright-core:
         specifier: 1.64.1
         version: 1.64.1
+      vite:
+        specifier: 8.3.4
+        version: 8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.1)
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.1))
 
   packages/tools/codegen:
     dependencies:

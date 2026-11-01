@@ -1,224 +1,200 @@
 /**
- * The `strider` client (CLI.md): it forwards a command to its session's daemon over the
- * session's Unix socket, without loading Effect, and prints what the daemon answers. Ctrl-C interrupts the
- * command, never the session. The commands that need no session (`browsers`, `sessions`, `prune`, and `start`,
- * which starts one) run in this process, with Effect.
+ * The `strider` client (CLI.md): it forwards a command to its session's daemon over the session's Unix socket, as
+ * `protocol.ts`'s `Command` call, and prints what the daemon answers. Ctrl-C interrupts the call, which interrupts
+ * the command, never the session. `start` starts a daemon, detached, and prints its spec once it serves.
  */
+import * as NodeSocket from "@effect/platform-node/NodeSocket"
+import * as NodeSocketServer from "@effect/platform-node/NodeSocketServer"
+import * as Console from "effect/Console"
+import * as Data from "effect/Data"
+import * as Deferred from "effect/Deferred"
+import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as RpcClient from "effect/rpc/RpcClient"
+import type * as RpcClientError from "effect/rpc/RpcClientError"
+import * as RpcSerialization from "effect/rpc/RpcSerialization"
+import * as Runtime from "effect/Runtime"
+import * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
+import * as Socket from "effect/socket/Socket"
+import * as Stream from "effect/Stream"
 import * as Node from "./node.ts"
+import * as Protocol from "./protocol.ts"
 import * as Session from "./session.ts"
 
-/** The commands this process runs itself. */
-export const local = new Set(["browsers", "sessions", "prune", "mcp", "__daemon"])
-
-/** The sessions whose sockets exist. */
-export const running = async (rootDir: string): Promise<Array<string>> => {
-  const fs = await Node.fs()
-  try {
-    return fs.readdirSync(rootDir).filter((name) => fs.existsSync(Session.paths(rootDir, name).socket)).sort()
-  } catch {
-    return []
+/**
+ * The exit code a command ends the `strider` process with, once it has printed why: `NodeRuntime.runMain` exits
+ * with it, and reports nothing more.
+ */
+export class Exit extends Data.TaggedError("Exit")<{ readonly code: number }> {
+  override get [Runtime.errorExitCode](): number {
+    return this.code
+  }
+  override get [Runtime.errorReported](): boolean {
+    return false
   }
 }
 
-/** Forwards the command to its session's daemon; the exit code is the daemon's. */
-export const forward = async (argv: ReadonlyArray<string>): Promise<number> => {
-  const process = Node.process
-  const rootDir = Session.root(process.env, (await Node.os()).tmpdir())
+/** The directory every session's directory is in, from this process's environment. */
+export const sessionRoot = Effect.map(
+  Effect.promise(() => Node.os()),
+  (os) => Session.root(Node.process.env, os.tmpdir())
+)
+
+/** The sessions whose sockets exist. */
+export const running = Effect.fnUntraced(function*(rootDir: string) {
+  const fs = yield* FileSystem.FileSystem
+  const names = yield* fs.readDirectory(rootDir).pipe(Effect.orElseSucceed(() => []))
+  return (yield* Effect.filter(
+    names,
+    (name) => fs.exists(Session.paths(rootDir, name).socket).pipe(Effect.orElseSucceed(() => false))
+  )).sort()
+})
+
+/** A client of the daemon serving a socket, for the scope. It connects as its first call is made. */
+export const connect = Effect.fnUntraced(function*(socket: string) {
+  const protocol = yield* Layer.build(
+    RpcClient.layerProtocolSocket().pipe(
+      Layer.provide([Layer.effect(Socket.Socket)(NodeSocket.makeNet({ path: socket })), RpcSerialization.layerNdjson])
+    )
+  )
+  return yield* RpcClient.make(Protocol.Rpcs, { disableTracing: true }).pipe(Effect.provideContext(protocol))
+})
+
+export type Client = Effect.Success<ReturnType<typeof connect>>
+
+/** A session's client, for the scope. */
+export const session = (rootDir: string, name: string): Effect.Effect<Client, never, Scope.Scope> =>
+  connect(Session.paths(rootDir, name).socket)
+
+/** Whether a call failed because no daemon serves the socket: it's gone, or it never started. */
+export const unreachable = (error: RpcClientError.RpcClientError): boolean => error.reason._tag === "SocketOpenError"
+
+/** Forwards the command to its session's daemon, which parses it; the exit code is the command's. */
+export const forward = Effect.fnUntraced(function*(argv: ReadonlyArray<string>) {
+  const rootDir = yield* sessionRoot
   const named = Session.scan(argv).session
-  const name = named ?? process.env.STRIDER_SESSION
+  const name = named ?? Node.process.env.STRIDER_SESSION
   if (name === undefined || name === "") {
-    const sessions = await running(rootDir)
-    process.stderr.write(
+    const sessions = yield* running(rootDir)
+    yield* Console.error(
       `Every command names its session, with -s or STRIDER_SESSION. ${
         sessions.length === 0 ? "No session is running; strider start starts one." : `Running: ${sessions.join(", ")}.`
-      }\n`
+      }`
     )
-    return Session.exitCodes.NoSession!
+    return yield* new Exit({ code: Session.exitCodes.NoSession! })
   }
-  // Supply the environment default as a shared flag when no explicit session was given.
+  // The environment's session is the shared flag when no explicit one was given
   const args = named === undefined ? ["-s", name, ...argv] : [...argv]
-  const sessions = await running(rootDir)
-  const net = await Node.net()
-  return new Promise((resolve) => {
-    const socket = net.createConnection(Session.paths(rootDir, name).socket)
-    let buffered = ""
-    let code: number | undefined
-    const interrupt = () => socket.write(`${JSON.stringify({ _tag: "Interrupt" } satisfies Session.Request)}\n`)
-    process.on("SIGINT", interrupt)
-    socket.on("connect", () => {
-      const request: Session.Request = { _tag: "Command", argv: args, cwd: process.cwd() }
-      socket.write(`${JSON.stringify(request)}\n`)
-    })
-    socket.on("data", (data) => {
-      buffered += new TextDecoder().decode(data)
-      let end: number
-      while ((end = buffered.indexOf("\n")) >= 0) {
-        const line = buffered.slice(0, end)
-        buffered = buffered.slice(end + 1)
-        if (line === "") continue
-        const response = JSON.parse(line) as Session.Response
-        if (response._tag === "Out") process.stdout.write(`${response.text}\n`)
-        else if (response._tag === "Err") process.stderr.write(`${response.text}\n`)
-        else if (response._tag === "Exit") {
-          code = response.code
-          socket.end()
+  yield* Effect.scoped(Effect.gen(function*() {
+    const client = yield* session(rootDir, name)
+    yield* client.Command({ argv: args, cwd: Node.process.cwd() }).pipe(
+      Stream.runForEach((line) => line._tag === "Out" ? Console.log(line.text) : Console.error(line.text)),
+      Effect.catchTag("CommandExit", ({ code }) => Effect.fail(new Exit({ code })))
+    )
+  })).pipe(
+    Effect.catchTag("RpcClientError", (error) =>
+      Effect.gen(function*() {
+        if (!unreachable(error)) {
+          yield* Console.error(`The session ${name} didn't answer: ${error.message}`)
+          return yield* new Exit({ code: 1 })
         }
-      }
-    })
-    socket.on("error", (error) => {
-      if (error.code === "ENOENT" || error.code === "ECONNREFUSED") {
-        process.stderr.write(
+        const sessions = yield* running(rootDir)
+        yield* Console.error(
           `No session named ${name} is running${
             sessions.length === 0 ? "" : `; running: ${sessions.join(", ")}`
-          }. strider sessions lists them, with any a crash left behind.\n`
+          }. strider sessions lists them, with any a crash left behind.`
         )
-        code = Session.exitCodes.NoSession
-      } else {
-        process.stderr.write(`The session ${name} didn't answer: ${error.message}\n`)
-        code = 1
-      }
-    })
-    socket.on("close", () => {
-      process.off("SIGINT", interrupt)
-      resolve(code ?? 1)
-    })
-  })
+        return yield* new Exit({ code: Session.exitCodes.NoSession! })
+      })),
+    // Ctrl-C interrupts the call, and so the command, alone
+    Effect.onInterrupt(() => Console.error("interrupted; the session goes on"))
+  )
+})
+
+/** The last lines of a daemon's standard error, as many as read well in a terminal. */
+const tail = (text: string): string => {
+  const lines = text.split("\n")
+  return (lines.length > 20 ? ["…", ...lines.slice(-20)] : lines).join("\n")
 }
 
 /**
  * `strider start`: starts the session's daemon, detached, with this command's arguments, and prints what it
- * answers once it serves, or why it couldn't start.
+ * answers once it serves, or why it couldn't start. `say` prints the spec: on standard output, unless that is
+ * someone else's, as `strider mcp`'s is.
+ *
+ * The daemon answers over a socket this process listens on for the start alone, whose path is its first argument,
+ * not over a pipe: a pipe it kept open would keep this process waiting for as long as the session runs. It has no
+ * standard input or output of its own, but its standard error goes to a file beside the socket until it has started,
+ * so a daemon that dies before it answers, such as at import time, before it has a log, has its last words shown.
  */
-export const start = async (
+export const start = Effect.fnUntraced(function*(
   argv: ReadonlyArray<string>,
   bin: string,
-  // Where the daemon's spec goes: standard output, unless that is someone else's, as strider mcp's is
-  say: (text: string) => void = (text) => void Node.process.stdout.write(`${text}\n`)
-): Promise<number> => {
+  say: (text: string) => Effect.Effect<void> = Console.log
+) {
   const process = Node.process
-  const childProcess = await Node.childProcess()
-  const child = childProcess.spawn(process.execPath, [...process.execArgv, bin, "__daemon", ...argv], {
-    detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
-    env: process.env,
-    cwd: process.cwd()
-  })
-  return new Promise((resolve) => {
-    let buffered = ""
-    let errors = ""
-    let done = false
-    const finish = (code: number) => {
-      if (done) return
-      done = true
-      child.stdout?.destroy()
-      child.stderr?.destroy()
-      child.unref()
-      resolve(code)
-    }
-    child.stdout?.on("data", (data) => {
-      buffered += new TextDecoder().decode(data)
-      const end = buffered.indexOf("\n")
-      if (end < 0) return
-      const started = JSON.parse(buffered.slice(0, end)) as Session.Started
-      if (started._tag === "Ready") {
-        say(started.text)
-        finish(0)
-      } else {
-        process.stderr.write(`${started.text}\n`)
-        finish(started.code)
-      }
-    })
-    child.stderr?.on("data", (data) => void (errors += new TextDecoder().decode(data)))
-    child.on("exit", (code) => {
-      if (done) return
-      process.stderr.write(
-        `The session's daemon exited before it served${code === null ? "" : ` (${code})`}${
-          errors === "" ? "" : `:\n${errors}`
-        }`
+  const fs = yield* FileSystem.FileSystem
+  const rootDir = yield* sessionRoot
+  yield* Effect.scoped(Effect.gen(function*() {
+    yield* fs.makeDirectory(rootDir, { recursive: true, mode: 0o700 }).pipe(Effect.orDie)
+    const path = `${rootDir}/.start-${process.pid}.sock`
+    yield* fs.remove(path).pipe(Effect.ignore)
+    const server = yield* NodeSocketServer.make({ path }).pipe(Effect.orDie)
+    const said = yield* Deferred.make<string>()
+    yield* server.run((socket) =>
+      Socket.toStream(socket).pipe(
+        Stream.decodeText(),
+        Stream.splitLines,
+        Stream.runHead,
+        Effect.flatMap((line) => Deferred.succeed(said, Option.getOrElse(line, () => ""))),
+        Effect.ignore
       )
-      finish(code === null || code === 0 ? 1 : code)
-    })
-  })
-}
-
-/** A command's answer from a session's daemon, collected rather than printed. */
-export const ask = async (
-  rootDir: string,
-  name: string,
-  argv: ReadonlyArray<string>
-): Promise<{ readonly code: number; readonly out: string }> => {
-  const net = await Node.net()
-  return new Promise((resolve) => {
-    const socket = net.createConnection(Session.paths(rootDir, name).socket)
-    let buffered = ""
-    let out = ""
-    let code = 1
-    socket.on(
-      "connect",
-      () =>
-        socket.write(
-          `${JSON.stringify({ _tag: "Command", argv: ["-s", name, ...argv], cwd: "/" } satisfies Session.Request)}\n`
-        )
+    ).pipe(Effect.forkScoped)
+    const errors = `${rootDir}/.start-${process.pid}.log`
+    yield* Effect.addFinalizer(() => fs.remove(errors).pipe(Effect.ignore))
+    const daemonArgs = [...process.execArgv, bin, "__daemon", path, ...argv]
+    // The shell opens the file for the daemon's standard error and becomes it; the daemon needs no code for this,
+    // and fails before any of it runs just as well
+    const [command, commandArgs] = process.platform === "win32"
+      ? [process.execPath, daemonArgs] as const
+      : ["sh", ["-c", "log=$1; shift; exec \"$@\" 2>>\"$log\"", "sh", errors, process.execPath, ...daemonArgs]] as const
+    const daemon = yield* ChildProcess.make(
+      command,
+      commandArgs,
+      { detached: true, cwd: process.cwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" }
     )
-    socket.on("data", (data) => {
-      buffered += new TextDecoder().decode(data)
-      let end: number
-      while ((end = buffered.indexOf("\n")) >= 0) {
-        const line = JSON.parse(buffered.slice(0, end)) as Session.Response
-        buffered = buffered.slice(end + 1)
-        if (line._tag === "Out") out += `${line.text}\n`
-        if (line._tag === "Exit") {
-          code = line.code
-          socket.end()
-        }
-      }
-    })
-    socket.on("error", () => resolve({ code: Session.exitCodes.NoSession!, out: "" }))
-    socket.on("close", () => resolve({ code, out }))
-  })
-}
-
-/**
- * One of the toolkit's tools, called on a session's daemon as a model calls it (`strider mcp`): its
- * result encoded by the tool's Schema, or why there is none.
- */
-export const callTool = async (
-  rootDir: string,
-  name: string,
-  tool: string,
-  params: unknown
-): Promise<
-  | { readonly _tag: "Result"; readonly failure: boolean; readonly value: unknown }
-  | { readonly _tag: "NoResult"; readonly message: string }
-> => {
-  const net = await Node.net()
-  return new Promise((resolve) => {
-    const socket = net.createConnection(Session.paths(rootDir, name).socket)
-    let buffered = ""
-    let result: { readonly _tag: "Result"; readonly failure: boolean; readonly value: unknown } | undefined
-    let errors = ""
-    socket.on(
-      "connect",
-      () => socket.write(`${JSON.stringify({ _tag: "Tool", tool, params } satisfies Session.Request)}\n`)
+    const answer = yield* Effect.raceFirst(
+      Effect.map(Deferred.await(said), Option.some),
+      Effect.as(Effect.ignore(daemon.exitCode), Option.none<string>())
     )
-    socket.on("data", (data) => {
-      buffered += new TextDecoder().decode(data)
-      let end: number
-      while ((end = buffered.indexOf("\n")) >= 0) {
-        const line = JSON.parse(buffered.slice(0, end)) as Session.Response
-        buffered = buffered.slice(end + 1)
-        if (line._tag === "ToolResult") result = { _tag: "Result", failure: line.failure, value: line.value }
-        if (line._tag === "Err") errors += line.text
-        if (line._tag === "Exit") socket.end()
-      }
-    })
-    socket.on(
-      "error",
-      (error) => resolve({ _tag: "NoResult", message: `The session ${name} isn't running: ${error.message}` })
+    if (Option.isNone(answer)) {
+      const code = yield* daemon.exitCode.pipe(Effect.orElseSucceed(() => 1))
+      yield* Console.error(`The session's daemon exited before it served${code === 0 ? "" : ` (${code})`}`)
+      const last = yield* fs.readFileString(errors).pipe(
+        Effect.map((text) => text.trim()),
+        Effect.orElseSucceed(() => "")
+      )
+      if (last !== "") yield* Console.error(`Its standard error ended:\n${tail(last)}`)
+      return yield* new Exit({ code: code === 0 ? 1 : code })
+    }
+    const started = yield* Schema.decodeEffect(Protocol.StartedJson)(answer.value).pipe(
+      Effect.catchTag("SchemaError", (error) =>
+        Effect.succeed<Protocol.Started>({
+          _tag: "Failed",
+          text: `The session's daemon answered what isn't a start: ${error.message}`,
+          code: 1
+        }))
     )
-    socket.on(
-      "close",
-      () => resolve(result ?? { _tag: "NoResult", message: errors || `The session ${name} gave no result` })
-    )
-  })
-}
+    if (started._tag === "Failed") {
+      yield* Console.error(started.text)
+      return yield* new Exit({ code: started.code })
+    }
+    // It serves: it runs on after this process ends
+    yield* Effect.asVoid(daemon.unref)
+    yield* say(started.text)
+  }))
+})

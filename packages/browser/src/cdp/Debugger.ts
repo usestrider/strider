@@ -809,7 +809,7 @@ export const EvaluateOnCallFrameResult = /*#__PURE__*/ Schema.suspend(() =>
     result: Runtime.RemoteObject,
     exceptionDetails: Schema.optional(Runtime.ExceptionDetails)
   }).annotate({ identifier: "Debugger.EvaluateOnCallFrameResult" })
-) as any as Schema.Codec<EvaluateOnCallFrameResult>
+) as any as Schema.Codec<EvaluateOnCallFrameResult, unknown>
 
 /**
  * Returns possible locations for breakpoint. scriptId in start and end range locations should be
@@ -983,7 +983,7 @@ export const GetStackTraceResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     stackTrace: Runtime.StackTrace
   }).annotate({ identifier: "Debugger.GetStackTraceResult" })
-) as any as Schema.Codec<GetStackTraceResult>
+) as any as Schema.Codec<GetStackTraceResult, unknown>
 
 /**
  * Disassemble the next chunk of lines for the module corresponding to the
@@ -1092,7 +1092,7 @@ export const PausedParams = /*#__PURE__*/ Schema.suspend(() =>
     asyncStackTrace: Schema.optional(Runtime.StackTrace),
     asyncStackTraceId: Schema.optional(Runtime.StackTraceId)
   }).annotate({ identifier: "Debugger.PausedParams" })
-) as any as Schema.Codec<PausedParams>
+) as any as Schema.Codec<PausedParams, unknown>
 
 /**
  * Pause reason.
@@ -1390,7 +1390,7 @@ export const ScriptFailedToParseParams = /*#__PURE__*/ Schema.suspend(() =>
     scriptLanguage: Schema.optional(ScriptLanguage),
     embedderName: Schema.optional(Schema.String)
   }).annotate({ identifier: "Debugger.ScriptFailedToParseParams" })
-) as any as Schema.Codec<ScriptFailedToParseParams>
+) as any as Schema.Codec<ScriptFailedToParseParams, unknown>
 
 /**
  * Fired when virtual machine parses script. This event is also fired for all known and uncollected
@@ -1520,7 +1520,7 @@ export const ScriptParsedParams = /*#__PURE__*/ Schema.suspend(() =>
     embedderName: Schema.optional(Schema.String),
     resolvedBreakpoints: Schema.optional(Schema.Array(ResolvedBreakpoint))
   }).annotate({ identifier: "Debugger.ScriptParsedParams" })
-) as any as Schema.Codec<ScriptParsedParams>
+) as any as Schema.Codec<ScriptParsedParams, unknown>
 
 /**
  * Searches for given string in script content.
