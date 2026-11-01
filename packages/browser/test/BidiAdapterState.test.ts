@@ -427,13 +427,21 @@ describe("BidiAdapter state", () => {
             const secondReserved = yield* Navigation.navigate(state, page.id, second, { referrer: Option.none() })
             event("browsingContext.navigationStarted", "nb", second)
             assert.isNotEmpty(page.pendingNavigationEvents)
-            if (newerCommitsFirst) event("browsingContext.navigationCommitted", "nb", second)
+            if (newerCommitsFirst) {
+              event("browsingContext.navigationCommitted", "nb", second)
+              event("browsingContext.load", "nb", second)
+              event("browsingContext.fragmentNavigated", "fragment", second + "#new")
+            }
             if (completion === "interrupted") yield* Fiber.interrupt(running)
             else {
               yield* Deferred.succeed(release, undefined)
               assert.strictEqual(yield* Fiber.join(running), firstReserved)
             }
-            if (!newerCommitsFirst) event("browsingContext.navigationCommitted", "nb", second)
+            if (!newerCommitsFirst) {
+              event("browsingContext.navigationCommitted", "nb", second)
+              event("browsingContext.load", "nb", second)
+              event("browsingContext.fragmentNavigated", "fragment", second + "#new")
+            }
             yield* state.buffer.flush
             const ended = facts.filter((fact) => fact._tag === "NavigationEnded")
             const firstEnded = ended.filter((fact) => fact.navigation === firstReserved)
@@ -455,7 +463,8 @@ describe("BidiAdapter state", () => {
               } else assert.strictEqual(errorDocument.createdBy.navigation, firstReserved)
             }
             assert.strictEqual(documents.at(-1)!.url, second)
-            assert.strictEqual(page.document!.url, second)
+            assert.strictEqual(page.document!.url, second + "#new")
+            assert.isTrue(page.document!.complete)
             assert.deepStrictEqual(documents.at(-1)!.createdBy, { _tag: "Navigation", navigation: secondReserved })
             assert.isEmpty(page.expected.list)
             assert.isEmpty(page.commandNavigations)

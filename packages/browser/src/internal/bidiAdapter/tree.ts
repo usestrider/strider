@@ -168,8 +168,9 @@ export const startNavigation = (
     status: undefined,
     ended: false
   }
-  // An uncorrelated error commit can be late; it cannot replace a navigation already in flight.
-  if (!sameDocument && (taken !== null || bound !== undefined)) {
+  // An unannounced terminal event can be older than a navigation already in flight,
+  // even when its command reply supplied an identity. Only a start supersedes that navigation.
+  if (!sameDocument && taken !== null) {
     // A navigable has one cross-document navigation at a time: a new one replaces the one in flight
     for (const pending of Array.from(navigable.navigations.values())) {
       if (!pending.sameDocument) {
