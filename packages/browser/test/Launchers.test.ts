@@ -5,11 +5,16 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, it, layer } from "@effect/vitest"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Schedule from "effect/Schedule"
+import * as Sink from "effect/Sink"
+import * as Socket from "effect/socket/Socket"
+import * as Stream from "effect/Stream"
 import { readFile } from "node:fs/promises"
 import * as ChromiumLauncher from "../src/internal/chromiumLauncher.ts"
 import * as FirefoxLauncher from "../src/internal/firefoxLauncher.ts"
@@ -139,6 +144,69 @@ describe("WebKit launcher", () => {
     SocketConnector.layer(() => Effect.die(new Error("no socket in these tests")))
   )
   layer(services, { excludeTestServices: true })((it) => {
+    it.effect("does not start a session on an occupied inspector port before its child reports the collision", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-test-" })
+        const executablePath = `${directory}/MiniBrowser`
+        yield* fs.writeFileString(executablePath, "")
+        yield* fs.chmod(executablePath, 0o755)
+        const connections = new Map<number, Deferred.Deferred<void>>()
+        let writes = 0
+        const spawner = ChildProcessSpawner.make((command) =>
+          Effect.gen(function*() {
+            assert(command._tag === "StandardCommand")
+            const endpoint = command.options.env?.["WEBKIT_INSPECTOR_SERVER"]
+            assert.isString(endpoint)
+            const connected = yield* Deferred.make<void>()
+            connections.set(Number(endpoint!.split(":")[1]), connected)
+            // ROOK-140: the existing server accepts before the new child reports EADDRINUSE.
+            const stderr = Stream.fromEffect(Deferred.await(connected)).pipe(
+              Stream.map(() => new TextEncoder().encode(`Failed to start remote inspector server on ${endpoint}\n`)),
+              Stream.concat(Stream.never)
+            )
+            return ChildProcessSpawner.makeHandle({
+              pid: ChildProcessSpawner.ProcessId(1),
+              exitCode: Effect.never,
+              isRunning: Effect.succeed(true),
+              kill: () => Effect.void,
+              stdin: Sink.drain,
+              stdout: Stream.empty,
+              stderr,
+              all: stderr,
+              getInputFd: () => Sink.drain,
+              getOutputFd: () => Stream.empty,
+              unref: Effect.succeed(Effect.void)
+            })
+          })
+        )
+        const write = () =>
+          Effect.andThen(
+            Effect.sync(() => writes++),
+            Effect.fail(
+              new Socket.SocketError({
+                reason: new Socket.SocketWriteError({ cause: "The occupied server is not this child's inspector" })
+              })
+            )
+          )
+        const connector: SocketConnector.SocketConnector = {
+          connect: ({ port }) =>
+            Effect.sync(() => {
+              const connected = connections.get(port)
+              assert.isDefined(connected)
+              Deferred.doneUnsafe(connected!, Effect.void)
+              return { pull: Effect.never, upgrade: () => Effect.void, write, writeAll: write, close: Effect.void }
+            })
+        }
+        yield* WebKitAutomation.start({ executablePath }).pipe(
+          Effect.scoped,
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(SocketConnector.SocketConnector, connector),
+          Effect.flip
+        )
+        assert.strictEqual(writes, 0, "must not send StartAutomationSession to another browser's inspector")
+      }))
+
     it.effect("launches the MiniBrowser in automation mode, and nothing else", () =>
       Effect.sync(() => {
         assert.deepStrictEqual(
