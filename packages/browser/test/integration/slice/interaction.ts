@@ -147,6 +147,32 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
+      // ROOK-119: a focus handler runs between validation and assignment, and may change the constraints.
+      it.effect("rejects a range value a focus handler's new max clamps, without events", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="field" type="range" min="0" max="100" value="25" onfocus="this.max = '10'; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const result = yield* page.locator("#field").fill("42").pipe(Effect.result)
+            const state = {
+              refused: result._tag === "Failure" && Locator.isLocatorError(result.failure) &&
+                result.failure.reason._tag === "InvalidInput",
+              value: yield* page.locator("#field").readValue,
+              events: yield* page.locator("#events").readText
+            }
+            // Stock WebKit doesn't focus a range here, so its handler never runs and the fill stands.
+            assert.deepStrictEqual(
+              state,
+              state.events.startsWith("focus;")
+                ? { refused: true, value: "10", events: "focus;" }
+                : { refused: false, value: "42", events: "input;change;" }
+            )
+          }))
+        }), timeout)
+
       it.effect("chooses options, checks boxes and sets files", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
