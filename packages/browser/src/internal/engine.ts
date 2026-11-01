@@ -1181,6 +1181,11 @@ export function engine(render: (root: SnapNode) => string) {
   const settable = (element: Element): element is HTMLInputElement =>
     element instanceof HTMLInputElement && SET.has(element.type)
 
+  const invalidNumberFill = (element: Element, value: string): boolean =>
+    element instanceof HTMLInputElement && element.type === "number" && value !== "" &&
+    (!/^-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(value) ||
+      !Number.isFinite(Number(value)))
+
   // Validate on a detached copy so refusal never writes the live input. Keep constraints and the
   // value attribute, which can supply a range's step base. Both sides of focus use this same rule.
   const fillCandidate = (element: HTMLInputElement, value: string): HTMLInputElement | undefined => {
@@ -1530,11 +1535,7 @@ export function engine(render: (root: SnapNode) => string) {
         element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
         return answer
       case "Fill": {
-        if (
-          element instanceof HTMLInputElement && element.type === "number" && action.value !== "" &&
-          (!/^-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(action.value) ||
-            !Number.isFinite(Number(action.value)))
-        ) {
+        if (invalidNumberFill(element, action.value)) {
           return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
         }
         if (settable(element)) {
@@ -1544,6 +1545,9 @@ export function engine(render: (root: SnapNode) => string) {
           element.focus()
           // Focus handlers can change the type or its constraints. Use the current state before writing.
           if (TYPED.has(element.type)) {
+            if (invalidNumberFill(element, action.value)) {
+              return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
+            }
             selectContents(element)
             return { ...answer, fill: "type" }
           }
