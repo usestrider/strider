@@ -327,6 +327,17 @@ along with negative indexing, which removes a useful selection.
 index. Rejected: canonicalizing `nth(0)` to `first` and `nth(-1)` to `last`, which hides the call a user
 needs to find and, for a negative index, would name a different selection.
 
+**Checking a label prefers its own checked state and clicks the label.** `check` and `uncheck` read the
+selected element's own checked state first, preserving ARIA checkable labels even when an associated control has
+a conflicting state. Only when the label has no checked state of its own do the before and after reads use the
+browser's native label association. Pointer targeting, actionability and
+positions still belong to the selected label, so native activation decides whether the control changes; a prevented
+activation yields `StateUnchanged`. Public `isChecked` and checked expectations keep reading the selected element.
+Rejected: always preferring the associated control, which changes existing ARIA label behavior; refusing labels,
+which prevents normal label activation; redirecting the pointer to the control, which
+changes the requested target and coordinates; and teaching all checked reads to follow labels, which changes the
+meaning of read and expectation APIs beyond these actions. (ROOK-118.)
+
 ## Agents
 
 **Page-provided tools (WebMCP) are designed, and built once a browser ships the API.** A page registers tools with
