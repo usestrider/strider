@@ -377,6 +377,25 @@ for (const { library, sample } of runs) {
       }
     )
 
+    scenario(
+      "ROOK-122 filling an inherited editable descendant focuses its frame",
+      `<div contenteditable></div><iframe srcdoc="<body contenteditable><p>old</p></body>"></iframe>`,
+      Effect.fn("ROOK-122")(function*(page) {
+        yield* page.locator("div").fill("parent")
+        const paragraph = page.frame(page.locator("iframe")).locator("p")
+        yield* paragraph.fill("new")
+        expect(yield* paragraph.evaluate((el) => el.textContent)).toBe("new")
+        expect(yield* page.locator("div").evaluate((el) => el.textContent)).toBe("parent")
+      }),
+      async (page) => {
+        await page.fill("div", "parent")
+        const paragraph = page.frameLocator("iframe").locator("p")
+        await paragraph.fill("new")
+        expect(await paragraph.textContent()).toBe("new")
+        expect(await page.locator("div").textContent()).toBe("parent")
+      }
+    )
+
     for (
       const [id, name, value] of [["FI-026", "number", "42"], ["FI-027", "exponent", "-10e5"], [
         "FI-028",
