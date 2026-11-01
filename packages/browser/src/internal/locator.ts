@@ -1218,7 +1218,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         /** Sends input to the page, into the frame the element is in. */
         readonly send: (
           events: ReadonlyArray<Adapter.InputEvent>
-        ) => Effect.Effect<void, Locator.LocatorError | Target.TargetGone>
+        ) => Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
         /** Removes the guard the round armed: what stopped the gesture, if anything did. */
         readonly disarm: Effect.Effect<Option.Option<string>>
       },
@@ -1373,12 +1373,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
                     id,
                     failure.reason._tag === "Unsupported" ? { _tag: "NotSent" } : { _tag: "MayHaveBeenSent" }
                   )
-                  : this.error(
-                    operation,
-                    new Reason.BackendFailure({ kind: "Rejected", method: "input", hint: "deadline" }),
-                    id,
-                    { _tag: "MayHaveBeenSent" }
-                  )
+                  : timedOut()
               )
             )
           }
