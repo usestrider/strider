@@ -91,6 +91,81 @@ const withPage = Effect.fnUntraced(function*(
 })
 
 describe("BidiAdapter state", () => {
+  for (const ownsError of [true, false]) {
+    it.effect(`preserves an immediately current error document and immutable provenance when the reply ${ownsError ? "owns" : "does not own"} it`, () =>
+      Effect.gen(function*() {
+        const first = "http://first.example/"
+        const second = "http://second.example/"
+        const errorUrl = "about:neterror?e=dnsNotFound&u=" + encodeURIComponent(first)
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        let calls = 0
+        const { facts, page, state } = yield* withPage({
+          "browsingContext.navigate": Effect.suspend(() =>
+            ++calls === 1
+              ? Effect.gen(function*() {
+                yield* Deferred.succeed(entered, undefined)
+                yield* Deferred.await(release)
+                return { navigation: ownsError ? "error" : "other", url: first }
+              })
+              : Effect.succeed({ navigation: "newer", url: second })
+          )
+        })
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        const event = (method: string, navigation: string, url: string) =>
+          handlers.apply(method, { context: "C1", navigation, url, timestamp: 1 }, { state })
+        // Identical wire prefix in both cases: the reply has not yet established ownership.
+        const running = yield* Effect.forkChild(Navigation.navigate(state, page.id, first, { referrer: Option.none() }))
+        yield* Deferred.await(entered)
+        const reserved = page.expected.list[0]!.id
+        event("browsingContext.navigationCommitted", "error", errorUrl)
+        // Unknown identity alone must not hide the actual current error document.
+        assert.strictEqual(page.document!.url, errorUrl)
+        const newer = yield* Navigation.navigate(state, page.id, second, { referrer: Option.none() })
+        event("browsingContext.navigationStarted", "newer", second)
+        event("browsingContext.navigationCommitted", "newer", second)
+        yield* state.buffer.flush
+        assert.strictEqual(page.document!.url, second)
+        const publishedCount = facts.length
+        const published = JSON.stringify(facts)
+        const newerBeforeReply = facts.filter((fact) => fact._tag === "DocumentCommitted" && fact.url === second)
+        assert.lengthOf(newerBeforeReply, 1)
+        yield* Deferred.succeed(release, undefined)
+        assert.strictEqual(yield* Fiber.join(running), reserved)
+        yield* state.buffer.flush
+        // Already delivered facts cannot be changed retrospectively to supply provenance.
+        assert.strictEqual(JSON.stringify(facts.slice(0, publishedCount)), published)
+        const documents = facts.filter((fact) => fact._tag === "DocumentCommitted")
+        const errorDocument = documents.find((fact) => fact.url === errorUrl)!
+        assert.isDefined(errorDocument)
+        assert.strictEqual(errorDocument.createdBy._tag, "ErrorPage")
+        if (errorDocument.createdBy._tag === "ErrorPage") {
+          if (ownsError) assert.strictEqual(errorDocument.createdBy.navigation, reserved)
+          else assert.notStrictEqual(errorDocument.createdBy.navigation, reserved)
+        }
+        assert.lengthOf(documents.filter((fact) => fact.url === second), 1)
+        assert.strictEqual(documents.at(-1)!.url, second)
+        assert.deepStrictEqual(documents.at(-1)!.createdBy, { _tag: "Navigation", navigation: newer })
+        assert.strictEqual(page.document!.url, second)
+        const ended = facts.filter((fact) => fact._tag === "NavigationEnded")
+        assert.deepStrictEqual(ended.filter((fact) => fact.navigation === newer).map((fact) => fact.outcome._tag), [
+          "Committed"
+        ])
+        if (ownsError) {
+          assert.deepStrictEqual(
+            ended.filter((fact) => fact.navigation === reserved).map((fact) => fact.outcome._tag),
+            ["Failed"]
+          )
+        } else assert.isEmpty(ended.filter((fact) => fact.navigation === reserved))
+        Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
+        assert.isEmpty(page.expected.list)
+        assert.isEmpty(page.commandNavigations)
+        assert.isEmpty(page.navigationCommands)
+        assert.isEmpty(page.navigations)
+        assert.isEmpty(state.navigations)
+      }))
+  }
+
   it.effect("keeps a late failed-navigation commit from taking the next navigation id", () =>
     Effect.gen(function*() {
       const facts: Array<Adapter.Fact> = []
