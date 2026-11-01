@@ -54,7 +54,7 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
   readonly navigationCommands: Set<PageNavigation.Id>
   readonly commandNavigations: Map<string, Kit.Expected>
   readonly pendingNavigationEvents: Array<{
-    readonly kind: "commit" | "failure" | "abort" | "interactive" | "complete" | "fragment" | "historyApi"
+    readonly kind: "start" | "commit" | "failure" | "abort" | "interactive" | "complete" | "fragment" | "historyApi"
     readonly params: BrowsingContext.NavigationInfo
   }>
   /** The last failure can still install its error document. */

@@ -500,6 +500,54 @@ describe("BidiAdapter state", () => {
     }
   }
 
+  it.effect("clears queued starts and their retained command identities when the page closes", () =>
+    Effect.gen(function*() {
+      const first = "http://first.example/"
+      const second = "http://second.example/"
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      let calls = 0
+      const { facts, page, state } = yield* withPage({
+        "browsingContext.navigate": Effect.suspend(() =>
+          ++calls === 1
+            ? Effect.gen(function*() {
+              yield* Deferred.succeed(entered, undefined)
+              yield* Deferred.await(release)
+              return { navigation: "na", url: first }
+            })
+            : Effect.succeed({ navigation: "nb", url: second })
+        )
+      })
+      const handlers = Navigation.register(Kit.handlers<State.Event>())
+      const event = (method: string, navigation: string, url: string) =>
+        handlers.apply(method, { context: "C1", navigation, url, timestamp: 1 }, { state })
+      const running = yield* Effect.forkChild(Navigation.navigate(state, page.id, first, { referrer: Option.none() }))
+      yield* Deferred.await(entered)
+      const firstReserved = page.expected.list[0]!.id
+      event("browsingContext.navigationStarted", "na", first)
+      event("browsingContext.navigationCommitted", "older", "about:neterror?e=dnsNotFound&u=http://older.example/")
+      const secondReserved = yield* Navigation.navigate(state, page.id, second, { referrer: Option.none() })
+      event("browsingContext.navigationStarted", "nb", second)
+      assert.strictEqual(page.commandNavigations.get("nb")?.id, secondReserved)
+      assert.isTrue(page.pendingNavigationEvents.some((event) => event.kind === "start"))
+      const firstEntry = state.navigations.get("na")!
+      Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
+      assert.isTrue(firstEntry.ended)
+      yield* Deferred.succeed(release, undefined)
+      assert.strictEqual(yield* Fiber.join(running), firstReserved)
+      yield* state.buffer.flush
+      assert.deepStrictEqual(facts.filter((fact) => fact._tag === "NavigationStarted").map((fact) => fact.navigation), [
+        firstReserved
+      ])
+      assert.lengthOf(facts.filter((fact) => fact._tag === "DocumentCommitted"), 1)
+      assert.isEmpty(page.expected.list)
+      assert.isEmpty(page.commandNavigations)
+      assert.isEmpty(page.navigationCommands)
+      assert.isEmpty(page.pendingNavigationEvents)
+      assert.isEmpty(page.navigations)
+      assert.isEmpty(state.navigations)
+    }))
+
   it.effect("keeps an overlapping command's early error commit for that command when another navigation starts", () =>
     Effect.gen(function*() {
       const first = "http://first.example/"

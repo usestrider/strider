@@ -120,6 +120,7 @@ const committed = (state: State, navigable: NavigableEntry, params: BrowsingCont
       : { _tag: "Committed", document: document.id, response: Option.fromUndefinedOr(navigation.documentHop) },
     "bidi:browsingContext.navigationCommitted"
   )
+  if (failed && navigable.failedNavigation?.id === navigation.id) navigable.failedNavigation = undefined
 }
 
 const failed = (state: State, navigable: NavigableEntry, params: BrowsingContext.NavigationInfo, aborted: boolean) => {
@@ -138,11 +139,10 @@ const failed = (state: State, navigable: NavigableEntry, params: BrowsingContext
   )
 }
 
-const terminal = (state: State, params: BrowsingContext.NavigationInfo, aborted: boolean) => {
-  const navigable = navigableOf(state, params.context)
-  if (navigable === undefined) return
-  navigable.pendingNavigationEvents.push({ kind: aborted ? "abort" : "failure", params })
-  flushNavigationEvents(state, navigable)
+const started = (state: State, navigable: NavigableEntry, params: BrowsingContext.NavigationInfo) => {
+  if (params.navigation === null || state.navigations.has(params.navigation)) return
+  // Firefox leaves out the URL of the navigation that closing with promptUnload starts.
+  startNavigation(state, navigable, params.navigation, intended(params.url ?? ""), "crossDocument", false)
 }
 
 const flushNavigationEvents = (state: State, navigable: NavigableEntry) => {
@@ -161,7 +161,8 @@ const flushNavigationEvents = (state: State, navigable: NavigableEntry) => {
         (event.kind === "commit" && errorPage(event.params.url ?? "")))
     ) return
     navigable.pendingNavigationEvents.shift()
-    if (event.kind === "commit") committed(state, navigable, event.params)
+    if (event.kind === "start") started(state, navigable, event.params)
+    else if (event.kind === "commit") committed(state, navigable, event.params)
     else if (event.kind === "failure" || event.kind === "abort") {
       failed(state, navigable, event.params, event.kind === "abort")
     } else if (event.kind === "fragment" || event.kind === "historyApi") {
@@ -174,58 +175,45 @@ const flushNavigationEvents = (state: State, navigable: NavigableEntry) => {
       )
     } else readiness(state, event.params.context, event.params.navigation, event.kind)
   }
+  for (const [bidi, navigation] of navigable.navigations) {
+    if (!navigation.ended) continue
+    navigable.navigations.delete(bidi)
+    if (state.navigations.get(bidi) === navigation) state.navigations.delete(bidi)
+  }
 }
 
-const ready = (state: State, params: BrowsingContext.NavigationInfo, phase: "interactive" | "complete") => {
+const enqueue = (
+  state: State,
+  params: BrowsingContext.NavigationInfo,
+  kind: NavigableEntry["pendingNavigationEvents"][number]["kind"]
+) => {
   const navigable = navigableOf(state, params.context)
   if (navigable === undefined) return
-  if (navigable.pendingNavigationEvents.length > 0) {
-    navigable.pendingNavigationEvents.push({ kind: phase, params })
-    flushNavigationEvents(state, navigable)
-  } else readiness(state, params.context, params.navigation, phase)
-}
-
-const updated = (state: State, params: BrowsingContext.NavigationInfo, via: "fragment" | "historyApi") => {
-  const navigable = navigableOf(state, params.context)
-  if (navigable === undefined) return
-  if (navigable.pendingNavigationEvents.length > 0) {
-    navigable.pendingNavigationEvents.push({ kind: via, params })
-    flushNavigationEvents(state, navigable)
-  } else sameDocument(state, params.context, params.navigation, params.url ?? "", via)
+  if (
+    kind === "start" && params.navigation !== null && !state.navigations.has(params.navigation) &&
+    !navigable.commandNavigations.has(params.navigation)
+  ) {
+    // Reserve identity at observation, before a command reply/rejection can remove its expectation.
+    // Starting, superseding and committing still happen only when this event reaches the queue head.
+    const expected = Kit.take(navigable.expected, intended(params.url ?? ""))
+    if (expected !== undefined) navigable.commandNavigations.set(params.navigation, expected)
+  }
+  navigable.pendingNavigationEvents.push({ kind, params })
+  flushNavigationEvents(state, navigable)
 }
 
 export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
-    .on(BrowsingContext.navigationStarted, (params, { state }) => {
-      const navigable = navigableOf(state, params.context)
-      if (navigable === undefined || params.navigation === null) return
-      // Firefox leaves out the URL of the navigation that closing with promptUnload starts
-      if (!state.navigations.has(params.navigation)) {
-        startNavigation(state, navigable, params.navigation, intended(params.url ?? ""), "crossDocument", false)
-      }
-      flushNavigationEvents(state, navigable)
-    })
-    .on(BrowsingContext.navigationCommitted, (params, { state }) => {
-      const navigable = navigableOf(state, params.context)
-      if (navigable === undefined) return
-      navigable.pendingNavigationEvents.push({ kind: "commit", params })
-      flushNavigationEvents(state, navigable)
-    })
-    .on(BrowsingContext.navigationFailed, (params, { state }) => terminal(state, params, false))
-    .on(BrowsingContext.navigationAborted, (params, { state }) => terminal(state, params, true))
-    .on(
-      BrowsingContext.fragmentNavigated,
-      (params, { state }) => updated(state, params, "fragment")
-    )
-    .on(
-      BrowsingContext.historyUpdated,
-      (params, { state }) => updated(state, { ...params, navigation: null }, "historyApi")
-    )
-    .on(
-      BrowsingContext.domContentLoaded,
-      (params, { state }) => ready(state, params, "interactive")
-    )
-    .on(BrowsingContext.load, (params, { state }) => ready(state, params, "complete"))
+    .on(BrowsingContext.navigationStarted, (params, { state }) => enqueue(state, params, "start"))
+    .on(BrowsingContext.navigationCommitted, (params, { state }) => enqueue(state, params, "commit"))
+    .on(BrowsingContext.navigationFailed, (params, { state }) => enqueue(state, params, "failure"))
+    .on(BrowsingContext.navigationAborted, (params, { state }) => enqueue(state, params, "abort"))
+    .on(BrowsingContext.fragmentNavigated, (params, { state }) => enqueue(state, params, "fragment"))
+    .on(BrowsingContext.historyUpdated, (params, { state }) =>
+      enqueue(state, { ...params, navigation: null }, "historyApi"))
+    .on(BrowsingContext.domContentLoaded, (params, { state }) =>
+      enqueue(state, params, "interactive"))
+    .on(BrowsingContext.load, (params, { state }) => enqueue(state, params, "complete"))
 
 // ── Operations ────────────────────────────────────────────────────────────────────────────────────────────
 

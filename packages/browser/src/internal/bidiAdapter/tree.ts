@@ -40,6 +40,8 @@ export const endNavigation = (
         bidi: navigation.bidi
       }
     }
+    // Later events in the same ordered batch may still need this identity, even after supersession.
+    if (navigation.navigable.pendingNavigationEvents.length > 0) return
     navigation.navigable.navigations.delete(navigation.bidi)
     if (state.navigations.get(navigation.bidi) === navigation) state.navigations.delete(navigation.bidi)
   })
@@ -60,6 +62,11 @@ export const removeNavigable = (
     navigable.pendingNavigationEvents.length = 0
     navigable.failedNavigation = undefined
     navigable.expected.list.length = 0
+    for (const [bidi, navigation] of navigable.navigations) {
+      navigation.ended = true
+      if (state.navigations.get(bidi) === navigation) state.navigations.delete(bidi)
+    }
+    navigable.navigations.clear()
     state.navigables.delete(navigable.bidi)
     state.navigablesById.delete(navigable.id)
     if (navigable.document !== undefined) {
