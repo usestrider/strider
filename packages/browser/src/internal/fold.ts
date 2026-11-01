@@ -665,6 +665,11 @@ export const make = Effect.fnUntraced(function*(options: {
           else realmOwners.delete(fact.realm)
           return
         }
+        case "ErrorDocumentAttributed": {
+          // Provenance only: the original observation already changed the document tree. In particular,
+          // late attribution of an ended document must not revive it or reset the current page's readiness.
+          return
+        }
         case "NavigationEnded": {
           // The event first, then the outcome: `goto` returns once the outcome is latched, and a `next` its caller
           // subscribes then must not see the navigation `goto` made

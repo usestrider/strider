@@ -82,6 +82,7 @@ Realms are siblings of documents, not children. The one exception that forces th
 | `FrameAdded`, `NavigableRemoved` for a frame | which page each frame belongs to, so its requests and console reach the page |
 | `DocumentCommitted`, `DocumentUrlChanged`, `DocumentOpened`, `DocumentReadiness` | the page's active document: its id, URL and readiness; the document it replaced ends with `DocumentReplaced` |
 | `RealmAdded`, `RealmRemoved` | which document each window realm belongs to; which page and context each realm belongs to; a worker, its `BrowserWorker` event on its page and context, the page's and context's `workers`, and its end |
+| `ErrorDocumentAttributed` | associates a previously observed error document with an already ended navigation; changes no current-document, readiness or outcome state |
 | `NavigationEnded` | a navigation's outcome, latched once; for a page's own navigation, a `PageNavigation` event with where it ended, and for a frame's too, naming the frame, which a subscription asks for with `frames: "all"` |
 | `RequestSent`, `ResponseReceived`, `RequestFinished`, `RequestFailed` | the responses of navigation requests, so a committed navigation carries its response; each hop, bounded, with its request, response and end, and `NetworkRequest` and `NetworkResponse` events on the initiator's page and context |
 | `ConsoleMessage`, `UncaughtException` | events on the realm's page and context |
@@ -153,6 +154,7 @@ interface DocumentModel {
   readonly createdBy:                                   // fixed: replaces optional navigation/restoredFrom and the error flag
     | { _tag: "InitialBlank" }
     | { _tag: "Navigation"; navigation: NavigationId }
+    | { _tag: "UnattributedErrorPage" }                // observed before its navigation identity is known
     | { _tag: "ErrorPage"; navigation: NavigationId }   // H10: a failed navigation that still committed
     | { _tag: "Restored"; navigation: NavigationId; from: DocumentId }   // only with correlating evidence
     | { _tag: "Adopted" }                               // existed before we attached
@@ -341,7 +343,9 @@ Cleanup groups can span sibling pages, independently of this graph.
   - A `historyUpdated` event with no attribution does not finish a pending navigation.
   - Silence never means `Canceled` or `NoOp`.
   - A failure after a successful commit is a loading result of the document; the commit outcome is not revised. No backend reports one yet, so a document's `loading` isn't observed.
-  - An error page that commits after its navigation was reported `Failed` is that navigation's document, `createdBy: ErrorPage{navigation}`, never a navigation of its own, which would supersede one started since. Chromium commits its error pages that way (PROTOCOL.md; found by the first slice).
+  - An error page belongs to its failed navigation, never a new navigation that supersedes one started since. When ownership is known at observation, its commit says `createdBy: ErrorPage{navigation}`. When an outstanding command reply could still establish ownership, its document is observed immediately with `createdBy: UnattributedErrorPage`; identified lifecycle events, requests and downloads continue in receive order. Unknown attribution does not make a real error document stale, and it never consumes a live reservation by URL.
+  - Eventual attribution names the original document. A pending navigation ends once with `Failed.errorDocument: Some(document)` when its command reply identifies that error. If its `Failed` outcome was already published without a document, `ErrorDocumentAttributed{document, navigation}` supplies the relationship separately. Facts remain immutable. Neither relationship commits the document again, revives an ended document, changes the current document, resets readiness, or changes prompts, frames or realm membership. If no reply establishes identity, attribution can remain unknown; intended-URL matching is restricted to the retained completed failure, never a live reservation.
+  - Deferred correlation lasts only while outstanding commands can establish identity. Completion, rejection and interruption resolve or release it; page removal clears it and reply bindings. Ended identities needed by those commands are released after correlation completes. The last failure without an error document is retained until its error arrives, a normal commit with no outstanding correlation supersedes it, or the navigable closes.
   - Navigations observed during an action are correlated, not proven caused by it.
   - Browsing-context-group switches are reported as `Confirmed | Suspected | Unknown`.
 - **Projection for callers** (API.md):
