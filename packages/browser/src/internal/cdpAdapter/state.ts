@@ -115,6 +115,13 @@ export interface ExtraInfo {
   readonly headers: Network.Headers
 }
 
+/** Shared by a Fetch pause and its Network hop, even when the pause comes first. */
+export interface Attribution {
+  readonly target: TargetEntry
+  fulfilled: boolean
+  fetchId?: string | undefined
+}
+
 export interface RequestEntry {
   readonly id: NetworkRequest.Id
   readonly target: TargetEntry
@@ -128,8 +135,8 @@ export interface RequestEntry {
   readonly finished: Deferred.Deferred<void, string>
   /** `Network.requestServedFromCache` came for the current hop: `responseReceived` doesn't say so. */
   servedFromCache: boolean
-  /** A route fulfilled it, which the browser reports as an ordinary response. */
-  fulfilled: boolean
+  /** The current hop's route attribution, shared with its Fetch pauses. */
+  attribution: Attribution
   /** What the `Network` domain calls it: `Fetch` calls a `fetch()` an `XHR`. */
   readonly resourceType: NetworkRequest.ResourceType
   /** The current hop's headers as received, from `responseReceivedExtraInfo` (QUIRKS.md, Q158). */
@@ -166,8 +173,8 @@ export type ObligationEntry =
     readonly target: TargetEntry
     readonly requestId: string
     readonly phase: "request" | "response" | "auth"
-    /** The request the `Network` domain knows it as, when `Fetch` names it. */
-    readonly request: RequestEntry | undefined
+    /** The hop's attribution, shared with Network even if its request has not arrived yet. */
+    readonly attribution: Attribution | undefined
     /** The request's body, as `Fetch.requestPaused` carried it. */
     readonly body: Option.Option<Uint8Array>
     /** The `Network` domain's id for it, which a body too large to carry is read by. */
@@ -243,6 +250,8 @@ export interface State {
   readonly hops: Map<NetworkRequest.HopId, RequestEntry>
   /** Retires a finished request by its key: finished requests stay answerable while there is room (Q177). */
   readonly retire: (key: string) => void
+  /** A Fetch pause preceding its Network request shares this hop record until the request arrives or ends. */
+  readonly pendingAttribution: Map<string, Attribution>
   /** ExtraInfo that came before its request, by request key; a few hundred at most. */
   readonly earlyHeaders: Map<string, Array<ExtraInfo>>
   /** Requests a route failed, by their `Network` key: an abort a route made has nothing after it to end it. */
@@ -308,6 +317,7 @@ export const make = (options: {
       requests.delete(key)
       for (let hop = 0; hop <= request.redirects; hop++) hops.delete(state.ids.hop(request.id, hop))
     }),
+    pendingAttribution: new Map(),
     earlyHeaders: new Map(),
     routeFailed: new Set(),
     obligations: new Map(),
