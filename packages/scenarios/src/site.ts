@@ -63,6 +63,12 @@ const routes: Record<
     request: http.IncomingMessage
   ) => { status?: number; type?: string; headers?: Record<string, string>; body: string | Buffer; delay?: number }
 > = {
+  "/benchmark": () => ({
+    body: page(
+      "Benchmark",
+      `<h1>Benchmark</h1><label>Name <input></label><button onclick="document.querySelector('#count').textContent = String(Number(document.querySelector('#count').textContent) + 1)">Increment</button><p id="count">0</p>`
+    )
+  }),
   // The README's program: a heading, and a button that shows a message
   "/": () => ({
     body: page(
