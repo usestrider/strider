@@ -53,6 +53,11 @@ visible in the results and are not treated as Strider-only failures. Chromium is
 
 ## Timing
 
+The same runner also includes four original Strider click workloads in
+[`Click.test.ts`](../test/upstream/Click.test.ts): a single ready click, twenty consecutive clicks, a role lookup
+in a large document, and an iframe click. These are additional workloads, not ports counted in the 91 cases above.
+Each checks the resulting click count. Select them with `pnpm benchmark:upstream --name clicks --samples 10 Click`.
+
 Each test run writes `.data/upstream/results.json` with raw samples and errors, and `.data/upstream/results.md` with
 Playwright and Strider side by side for every case. These two convenience files are replaced by the next run.
 
