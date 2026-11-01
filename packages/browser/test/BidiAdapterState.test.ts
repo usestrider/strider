@@ -332,6 +332,67 @@ describe("BidiAdapter state", () => {
     }
   }
 
+  it.effect("keeps a navigation whose commit waits behind a held error page from being superseded by a later start", () =>
+    Effect.gen(function*() {
+      const refusedUrl = "http://127.0.0.1:9/refused"
+      const first = "http://first.example/"
+      const second = "http://second.example/"
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      let calls = 0
+      const { facts, page, state } = yield* withPage({
+        "browsingContext.navigate": Effect.suspend(() => {
+          calls++
+          if (calls === 1) {
+            return Effect.fail(
+              new Protocol.ProtocolError({
+                reason: new Protocol.Rejected({
+                  method: "browsingContext.navigate",
+                  reason: "Unrecognized",
+                  code: "unknown error",
+                  description: "connection refused"
+                })
+              })
+            )
+          }
+          return calls === 2
+            ? Effect.andThen(
+              Effect.andThen(Deferred.succeed(entered, undefined), Deferred.await(release)),
+              Effect.succeed({ navigation: "na", url: first })
+            )
+            : Effect.succeed({ navigation: "nb", url: second })
+        })
+      })
+      const handlers = Navigation.register(Kit.handlers<State.Event>())
+      const event = (method: string, navigation: string, url: string) =>
+        handlers.apply(method, { context: "C1", navigation, url, timestamp: 1 }, { state })
+      yield* Navigation.navigate(state, page.id, refusedUrl, { referrer: Option.none() })
+      // ROOK-130: synthesized ordering, not captured protocol traffic.
+      // The first command's reply is held. Its navigation starts, the refused navigation's late error page
+      // arrives and is held, and the first navigation commits behind it.
+      const running = yield* Effect.forkChild(Navigation.navigate(state, page.id, first, { referrer: Option.none() }))
+      yield* Deferred.await(entered)
+      event("browsingContext.navigationStarted", "na", first)
+      event(
+        "browsingContext.navigationCommitted",
+        "browser-refused",
+        "about:neterror?e=connectionFailure&u=" + encodeURIComponent(refusedUrl)
+      )
+      event("browsingContext.navigationCommitted", "na", first)
+      // On the wire the first navigation has committed when the second starts.
+      const reserved = yield* Navigation.navigate(state, page.id, second, { referrer: Option.none() })
+      event("browsingContext.navigationStarted", "nb", second)
+      yield* Deferred.succeed(release, undefined)
+      const firstId = yield* Fiber.join(running)
+      event("browsingContext.navigationCommitted", "nb", second)
+      yield* state.buffer.flush
+      const outcomes = (id: unknown) =>
+        facts.flatMap((fact) => fact._tag === "NavigationEnded" && fact.navigation === id ? [fact.outcome._tag] : [])
+      assert.deepStrictEqual(outcomes(firstId), ["Committed"])
+      assert.deepStrictEqual(outcomes(reserved), ["Committed"])
+      assert.strictEqual(page.document!.url, second)
+    }))
+
   it.effect("keeps an overlapping command's early error commit for that command when another navigation starts", () =>
     Effect.gen(function*() {
       const first = "http://first.example/"
