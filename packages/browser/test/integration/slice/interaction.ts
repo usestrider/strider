@@ -82,6 +82,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             assert.strictEqual(yield* page.locator("#rich").readText, "new text")
             yield* page.locator("#day").fill("2026-10-23")
             assert.strictEqual(yield* page.locator("#day").readValue, "2026-10-23")
+            yield* page.locator("#day").clear()
+            assert.strictEqual(yield* page.locator("#day").readValue, "")
             const refused = yield* page.locator("#day").fill("soon").pipe(Effect.flip)
             assert(Locator.isLocatorError(refused) && refused.reason._tag === "InvalidInput", String(refused))
             const plain = yield* page.locator("#plain").fill("x").pipe(Effect.flip)
@@ -94,6 +96,172 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             assert.strictEqual(yield* keys.readValue, "héllo")
             const unknown = yield* keys.press("NotAKey").pipe(Effect.flip)
             assert(Locator.isLocatorError(unknown) && unknown.reason._tag === "InvalidInput", String(unknown))
+          }))
+        }), timeout)
+
+      // ROOK-119: browsers serialize valid values differently from their source spelling.
+      for (
+        const [type, value, expected] of [
+          ["range", "42.0", "42"],
+          ["range", "1e1", "10"],
+          ["range", "0", "0"],
+          ["range", "100", "100"],
+          ["color", "#AbCd00", "#abcd00"],
+          ["datetime-local", "2020-03-02T06:20:00", "2020-03-02T06:20"],
+          ["datetime-local", "2020-03-02T06:20:01.123", "2020-03-02T06:20:01.123"],
+          ["datetime-local", "", ""]
+        ] as const
+      ) {
+        it.effect(`fills normalized ${type} value ${value}`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" type="${type}" min="0" max="100" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#field").fill(value)
+              const actual = yield* page.locator("#field").readValue
+              assert.strictEqual(
+                type === "range" ? Number(actual) : actual,
+                type === "range" ? Number(expected) : expected
+              )
+              assert.strictEqual(yield* page.locator("#events").readText, "input;change;")
+            }))
+          }), timeout)
+      }
+
+      for (
+        const [type, initial, invalid] of [
+          ["range", "25", "soon"],
+          ["range", "25", "101"],
+          ["range", "25", "-1"],
+          ["range", "25", "42.5"],
+          ["range", "25", ""],
+          ["range", "25", "0x19"],
+          ["range", "25", "Infinity"],
+          ["color", "#123456", ""],
+          ["color", "#123456", "#gggggg"],
+          ["datetime-local", "2020-03-02T05:15", "2020-02-30T06:20"]
+        ] as const
+      ) {
+        it.effect(`rejects invalid ${type} value ${invalid} without mutation or events`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" type="${type}" min="0" max="100" value="${initial}" onfocus="events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const refused = yield* page.locator("#field").fill(invalid).pipe(Effect.flip)
+              assert(Locator.isLocatorError(refused) && refused.reason._tag === "InvalidInput", String(refused))
+              const state = {
+                value: yield* page.locator("#field").readValue,
+                events: yield* page.locator("#events").readText
+              }
+              assert.deepStrictEqual(state, { value: initial, events: "" })
+            }))
+          }), timeout)
+      }
+
+      // ROOK-119: a focus handler runs between validation and assignment, and may change the constraints.
+      it.effect("rejects a range value a focus handler's new max clamps, without events", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="field" type="range" min="0" max="100" value="25" onfocus="this.max = '10'; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const result = yield* page.locator("#field").fill("42").pipe(Effect.result)
+            const state = {
+              refused: result._tag === "Failure" && Locator.isLocatorError(result.failure) &&
+                result.failure.reason._tag === "InvalidInput",
+              value: yield* page.locator("#field").readValue,
+              events: yield* page.locator("#events").readText
+            }
+            // Stock WebKit doesn't focus a range here, so its handler never runs and the fill stands.
+            assert.deepStrictEqual(
+              state,
+              state.events.startsWith("focus;")
+                ? { refused: true, value: "10", events: "focus;" }
+                : { refused: false, value: "42", events: "input;change;" }
+            )
+          }))
+        }), timeout)
+
+      for (const type of ["range", "file", "checkbox"] as const) {
+        it.effect(`rejects a date fill after a focus handler changes type to ${type}`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" type="date" tabindex="0" value="2020-03-02" onfocus="this.type = '${type}'; before.textContent = this.value; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="before"></p><p id="events"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const result = yield* page.locator("#field").fill("2020-03-03").pipe(Effect.result)
+              const state = {
+                refused: result._tag === "Failure" && Locator.isLocatorError(result.failure) &&
+                  result.failure.reason._tag === "InvalidInput",
+                value: yield* page.locator("#field").readValue,
+                events: yield* page.locator("#events").readText
+              }
+              // As with range, stock WebKit may leave this input unfocused; then its type stays date.
+              assert.deepStrictEqual(
+                state,
+                state.events.startsWith("focus;")
+                  ? { refused: true, value: yield* page.locator("#before").readText, events: "focus;" }
+                  : { refused: false, value: "2020-03-03", events: "input;change;" }
+              )
+            }))
+          }), timeout)
+      }
+
+      for (
+        const [type, initial, value] of [["date", "2020-03-02", "2020-03-03"], ["time", "12:30", "12:34"]] as const
+      ) {
+        it.effect(
+          `rejects invalid numeric text after a focus handler changes ${type} to number`,
+          () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<input id="field" type="${type}" tabindex="0" value="${initial}" onfocus="this.type = 'number'; this.value = '7'; before.textContent = this.value; events.textContent += 'focus;'" onkeydown="events.textContent += 'keydown;'" onbeforeinput="events.textContent += 'beforeinput;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="before"></p><p id="events"></p>`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const result = yield* page.locator("#field").fill(value).pipe(Effect.result)
+                const state = {
+                  refused: result._tag === "Failure" && Locator.isLocatorError(result.failure) &&
+                    result.failure.reason._tag === "InvalidInput",
+                  value: yield* page.locator("#field").readValue,
+                  events: yield* page.locator("#events").readText
+                }
+                assert.deepStrictEqual(
+                  state,
+                  state.events.startsWith("focus;")
+                    ? { refused: true, value: "7", events: "focus;" }
+                    : { refused: false, value, events: "input;change;" }
+                )
+                if (state.events.startsWith("focus;")) {
+                  assert.strictEqual(yield* page.locator("#before").readText, "7")
+                }
+              }))
+            }),
+          timeout
+        )
+      }
+
+      it.effect("fills as text after a focus handler changes a date input to text", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="field" type="date" tabindex="0" value="2020-03-02" onfocus="this.type = 'text'">`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.locator("#field").fill("2020-03-03")
+            assert.strictEqual(yield* page.locator("#field").readValue, "2020-03-03")
           }))
         }), timeout)
 
