@@ -175,7 +175,7 @@ describe("BidiAdapter state", () => {
       let calls = 0
       const { facts, page, state } = yield* withPage({
         "browsingContext.navigate": Effect.suspend(() => ++calls === 1
-          ? Effect.fail(new Protocol.ProtocolError({ reason: new Protocol.Unrecognized({ description: "refused" }) }))
+          ? Effect.fail(new Protocol.ProtocolError({ reason: new Protocol.Rejected({ method: "browsingContext.navigate", reason: "Unrecognized", code: "unknown error", description: "refused" }) }))
           : Effect.gen(function*() {
             yield* Deferred.succeed(entered, undefined)
             yield* Deferred.await(release)
