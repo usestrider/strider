@@ -5,6 +5,7 @@
  */
 import { assert, describe, layer } from "@effect/vitest"
 import { Browser, Condition, Deadline, Expect, FileInput, Keyboard, Locator, Mouse } from "@usestrider/browser"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -43,6 +44,22 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* page.getByRole("button", { name: "Sign in" }).click()
             yield* page.getByText("Welcome me@example.com (7)").pipe(Expect.toBeVisible)
             assert.strictEqual(yield* page.getByLabel("Email").readValue, "me@example.com")
+          }))
+        }), timeout)
+
+      it.effect("fills an unknown input type as text", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() => `<input id="field" type="invalid-type" value="old">`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const field = page.locator("#field")
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => (document.querySelector("#field") as HTMLInputElement).type),
+              "text"
+            )
+            yield* field.fill("new text")
+            assert.strictEqual(yield* field.readValue, "new text")
           }))
         }), timeout)
 
@@ -213,6 +230,312 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      // ROOK-121: JavaScript callers bypass the string type, including inside Redacted.
+      for (
+        const [label, value] of [
+          ["number", 123],
+          ["null", null],
+          ["undefined", undefined],
+          ["boolean", true],
+          ["object", {}],
+          ["Redacted number", Redacted.make(123)],
+          ["nonnumeric text", "abc"],
+          ["whitespace", " "],
+          ["hexadecimal", "0x10"],
+          ["infinity", "Infinity"],
+          ["overflow", "1e309"],
+          ["leading plus", "+1"],
+          ["trailing decimal point", "1."],
+          ["incomplete exponent", "1e"],
+          ["Redacted nonnumeric text", Redacted.make("abc")]
+        ] as const
+      ) {
+        it.effect(`fill rejects ${label} without mutation or events`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" type="number" value="42" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const field = page.locator("#field")
+              const result = yield* field.fill(value as unknown as string).pipe(Effect.exit)
+              const error = result._tag === "Failure" ? Cause.findErrorOption(result.cause) : Option.none()
+              assert.deepStrictEqual({
+                value: yield* field.readValue,
+                events: yield* page.locator("#events").readText,
+                reason: Option.isSome(error) && Locator.isLocatorError(error.value)
+                  ? error.value.reason._tag
+                  : result._tag
+              }, { value: "42", events: "", reason: "InvalidInput" })
+            }))
+          }), timeout)
+      }
+
+      it.effect(
+        "fill preserves valid numeric strings, Redacted strings and empty clearing",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<input id="field" type="number" value="42">`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const field = page.locator("#field")
+              for (const value of ["123", "-12.5", ".5", "1e2", "-0", Redacted.make("7"), "", Redacted.make("")]) {
+                yield* field.fill(value)
+                assert.strictEqual(yield* field.readValue, Redacted.isRedacted(value) ? Redacted.value(value) : value)
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect("fill rejects number-input text without focusing the input", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="other"><input id="field" type="number" value="42" onfocus="events.textContent += 'focus;'" onselect="events.textContent += 'select;'"><p id="events"></p>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.locator("#other").focus()
+            yield* page.locator("#field").fill("abc").pipe(Effect.exit)
+            assert.strictEqual(yield* page.locator("#events").readText, "")
+            yield* page.keyboard.press("z")
+            assert.strictEqual(yield* page.locator("#other").readValue, "z")
+          }))
+        }), timeout)
+
+      it.effect("fill ignores a number input's min, max and step", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() => `<input id="field" type="number" min="10" max="20" step="3" value="13">`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const field = page.locator("#field")
+            for (const value of ["5", "25", "14.5"]) {
+              yield* field.fill(value)
+              assert.strictEqual(yield* field.readValue, value)
+            }
+          }))
+        }), timeout)
+
+      it.effect(
+        "fills an inherited editable descendant across frames without replacing surrounding content",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture((origin) =>
+              `<div id="parent" contenteditable>old parent</div><iframe src="${
+                fixtureUrl(
+                  origin,
+                  `<body contenteditable onfocus="getSelection().selectAllChildren(this)"><p id="before">before</p><section><p id="target">old</p></section><p id="after">after</p></body>`
+                )
+              }"></iframe>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#parent").fill("parent")
+              const frame = page.frame(page.locator("iframe"))
+              yield* frame.locator("#target").fill("new")
+              assert.strictEqual(yield* frame.locator("#target").readText, "new")
+              assert.strictEqual(yield* frame.locator("#before").readText, "before")
+              assert.strictEqual(yield* frame.locator("#after").readText, "after")
+              assert.strictEqual(yield* page.locator("#parent").readText, "parent")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect("fills a paragraph of a design-mode frame after filling the parent", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture((origin) =>
+            `<div id="parent" contenteditable>old parent</div><iframe src="${
+              fixtureUrl(origin, `<body><p id="target">old</p><script>document.designMode = "on"</script></body>`)
+            }"></iframe>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.locator("#parent").fill("parent")
+            const frame = page.frame(page.locator("iframe"))
+            yield* frame.locator("#target").fill("new")
+            assert.strictEqual(yield* frame.locator("#target").readText, "new")
+            assert.strictEqual(yield* page.locator("#parent").readText, "parent")
+          }))
+        }), timeout)
+
+      // ROOK-117: selection and checked state are independent on these ARIA roles.
+      for (const role of ["option", "treeitem"] as const) {
+        for (
+          const [state, attributes, expected] of [
+            ["checked", "aria-checked=\"true\" aria-selected=\"false\"", true],
+            ["unchecked", "aria-checked=\"false\" aria-selected=\"true\"", false]
+          ] as const
+        ) {
+          it.effect(`reads ${role} checked state from aria-checked when ${state}`, () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() => `<div id="target" role="${role}" ${attributes}>Item</div>`)
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const target = page.locator("#target")
+                assert.strictEqual(yield* target.isChecked, expected)
+              }))
+            }), timeout)
+        }
+
+        it.effect(`expects ${role} checked state independently of selection`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="target" role="${role}" aria-checked="true" aria-selected="false">Item</div>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#target").pipe(Expect.toBeChecked, Deadline.within("1 second"))
+            }))
+          }), timeout)
+
+        for (const initial of [false, true] as const) {
+          const checked = initial !== true
+          it.effect(
+            `${checked ? "checks" : "unchecks"} ${role} with aria-checked ${String(initial)}`,
+            () =>
+              Effect.gen(function*() {
+                const { url } = yield* fixture(() =>
+                  `<div id="target" role="${role}" aria-checked="${initial}" aria-selected="${!initial}" onclick="this.setAttribute('aria-checked', '${checked}')">Item</div>`
+                )
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const target = page.locator("#target")
+                  yield* checked ? target.check() : target.uncheck()
+                  assert.deepStrictEqual(yield* target.readAttribute("aria-checked"), Option.some(String(checked)))
+                }))
+              }),
+            timeout
+          )
+        }
+
+        it.effect(`snapshots ${role} checked and selected independently`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div role="${role}" aria-label="Checked" aria-checked="true" aria-selected="false">Checked</div><div role="${role}" aria-label="Selected" aria-checked="false" aria-selected="true">Selected</div><div role="${role}" aria-label="Both" aria-checked="true" aria-selected="true">Both</div>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const snapshot = yield* page.snapshot()
+              const nodes = [...snapshot.refs.values()]
+              const checked = nodes.find((node) => node.name._tag === "Accessible" && node.name.value === "Checked")!
+              const selected = nodes.find((node) => node.name._tag === "Accessible" && node.name.value === "Selected")!
+              assert.isTrue(checked.states.has("checked"))
+              assert.isFalse(checked.states.has("selected"))
+              assert.isFalse(selected.states.has("checked"))
+              assert.isTrue(selected.states.has("selected"))
+              const both = nodes.find((node) => node.name._tag === "Accessible" && node.name.value === "Both")!
+              assert.isTrue(both.states.has("checked"))
+              assert.isTrue(both.states.has("selected"))
+            }))
+          }), timeout)
+      }
+
+      // ROOK-117: optional checkability must be established before dispatching input.
+      for (const kind of ["option", "treeitem", "native option"] as const) {
+        for (const state of ["absent", "undefined", "empty"] as const) {
+          for (const operation of ["read", "check", "uncheck"] as const) {
+            it.effect(
+              `rejects ${kind} checked ${operation} before input when aria-checked is ${state}`,
+              () =>
+                Effect.gen(function*() {
+                  const attribute = state === "absent"
+                    ? ""
+                    : state === "empty"
+                    ? "aria-checked=\"\""
+                    : "aria-checked=\"undefined\""
+                  const { url } = yield* fixture(() =>
+                    `${
+                      kind === "native option"
+                        ? `<select id="selection" size="2"><option value="a" selected>First</option><option id="target" value="b" ${attribute}>Second</option></select>`
+                        : `<div id="target" role="${kind}" aria-selected="true" ${attribute}>Item</div>`
+                    }<script>document.body.dataset.events = '0';
+                  for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'input', 'change', 'focusin', 'keydown']) {
+                    document.addEventListener(type, () => { document.body.dataset.events = String(Number(document.body.dataset.events) + 1) }, true)
+                  }</script>`
+                  )
+                  yield* Effect.scoped(Effect.gen(function*() {
+                    const page = yield* Browser.newPage()
+                    yield* page.goto(url)
+                    const target = page.locator("#target")
+                    const failure = yield* (operation === "read"
+                      ? target.isChecked
+                      : operation === "check"
+                      ? target.check()
+                      : target.uncheck()).pipe(
+                        Deadline.within("1 second"),
+                        Effect.match({
+                          onFailure: (error) => error,
+                          onSuccess: () => undefined
+                        })
+                      )
+                    assert.deepStrictEqual(yield* page.locator("body").readAttribute("data-events"), Option.some("0"))
+                    if (kind === "native option") {
+                      assert.strictEqual(yield* page.locator("#selection").readValue, "a")
+                    }
+                    assert(Locator.isLocatorError(failure) && failure.reason._tag === "WrongElement", String(failure))
+                  }))
+                }),
+              timeout
+            )
+          }
+        }
+      }
+
+      for (const role of ["checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"] as const) {
+        it.effect(`preserves ${role} checked defaults and actions`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="target" role="${role}" onclick="this.setAttribute('aria-checked', this.getAttribute('aria-checked') === 'true' ? 'false' : 'true')">Item</div><div id="undefined" role="${role}" aria-checked="undefined">Undefined</div>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const target = page.locator("#target")
+              assert.isFalse(yield* target.isChecked)
+              assert.isFalse(yield* page.locator("#undefined").isChecked)
+              yield* target.check()
+              assert.isTrue(yield* target.isChecked)
+              yield* target.uncheck()
+              assert.isFalse(yield* target.isChecked)
+            }))
+          }), timeout)
+      }
+
+      it.effect(
+        "preserves native checkbox and radio checked properties over ARIA states",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="checkbox" type="checkbox" role="option" aria-checked="undefined"><input id="radio" type="radio" role="treeitem" aria-checked="false"><input id="checked" type="checkbox" checked aria-checked="false">`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              for (const id of ["checkbox", "radio"]) {
+                const target = page.locator(`#${id}`)
+                assert.isFalse(yield* target.isChecked)
+                yield* target.check()
+                assert.isTrue(yield* target.isChecked)
+              }
+              yield* page.locator("#checkbox").uncheck()
+              assert.isFalse(yield* page.locator("#checkbox").isChecked)
+              assert.isTrue(yield* page.locator("#checked").isChecked)
+            }))
+          }),
+        timeout
+      )
+
       it.effect("chooses options, checks boxes and sets files", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
@@ -255,6 +578,152 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             assert(Locator.isLocatorError(notFile) && notFile.reason._tag === "WrongElement", String(notFile))
           }))
         }), timeout)
+
+      // ROOK-118: state belongs to the control; pointer input still belongs to the label.
+      for (const association of ["explicit", "wrapping"] as const) {
+        for (const checked of [true, false]) {
+          it.effect(
+            `${checked ? "checks" : "unchecks"} a ${association} label beside its link`,
+            () =>
+              Effect.gen(function*() {
+                const input = `<input id="box" type="checkbox" ${
+                  checked ? "" : "checked"
+                } style="position:absolute;left:10px;top:10px">`
+                const { url } = yield* fixture(() =>
+                  `${association === "explicit" ? input : ""}<label id="label" ${
+                    association === "explicit" ? "for=\"box\"" : ""
+                  } style="position:absolute;left:200px;top:100px;width:300px;height:40px" onpointerdown="${
+                    say(
+                      "event.target.id + ':' + (event.clientX - 200) + ':' + (event.clientY - 100) + ':' + event.isTrusted"
+                    )
+                  }">${
+                    association === "wrapping" ? input : ""
+                  }<a href="#wrong" style="display:inline-block;width:240px">A long link</a> Toggle</label>${out}`
+                )
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const initialUrl = yield* page.url
+                  const label = page.locator("#label")
+                  const options = { position: { x: 280, y: 20 } }
+                  yield* checked ? label.check(options) : label.uncheck(options)
+                  assert.strictEqual(yield* page.locator("#box").isChecked, checked)
+                  assert.strictEqual(yield* page.locator("#out").readText, "label:280:20:true")
+                  // An already-correct state sends no pointer input, even over the embedded link.
+                  yield* checked
+                    ? label.check({ position: { x: 20, y: 20 } })
+                    : label.uncheck({ position: { x: 20, y: 20 } })
+                  assert.strictEqual(yield* page.locator("#box").isChecked, checked)
+                  assert.strictEqual(yield* page.locator("#out").readText, "label:280:20:true")
+                  yield* page.pipe(Expect.toHaveURL(initialUrl))
+                }))
+              }),
+            timeout
+          )
+        }
+      }
+
+      for (const checked of [true, false]) {
+        it.effect(
+          `reports StateUnchanged when a label activation is prevented while ${checked ? "checking" : "unchecking"}`,
+          () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<input id="box" type="checkbox" ${
+                  checked ? "" : "checked"
+                }><label id="label" for="box" onclick="event.preventDefault(); ${
+                  say("'prevented ' + event.isTrusted")
+                }">Toggle</label>${out}`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const label = page.locator("#label")
+                const error = yield* (checked ? label.check() : label.uncheck()).pipe(Effect.flip)
+                assert(Locator.isLocatorError(error) && error.reason._tag === "StateUnchanged", String(error))
+                if (Locator.isLocatorError(error) && error.reason._tag === "StateUnchanged") {
+                  assert.strictEqual(error.reason.expected, checked ? "checked" : "unchecked")
+                }
+                assert.strictEqual(yield* page.locator("#box").isChecked, !checked)
+                assert.strictEqual(yield* page.locator("#out").readText, "prevented true")
+                const read = yield* label.isChecked.pipe(Effect.flip)
+                assert(Locator.isLocatorError(read) && read.reason._tag === "WrongElement", String(read))
+              }))
+            }),
+          timeout
+        )
+      }
+
+      it.effect("rejects labels without an associated checkable control", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<label id="missing" for="absent">Missing</label><label id="text" for="field">Text</label><input id="field"><label id="plain">Plain</label>${out}<script>document.addEventListener('pointerdown', () => { ${
+              say("'pointer sent'")
+            } })</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            for (const id of ["missing", "text", "plain"]) {
+              const label = page.locator(`#${id}`)
+              for (const action of [label.check(), label.uncheck()]) {
+                const error = yield* action.pipe(Effect.flip)
+                assert(Locator.isLocatorError(error) && error.reason._tag === "WrongElement", String(error))
+              }
+            }
+            assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+          }))
+        }), timeout)
+
+      // ROOK-118: a label that is itself an ARIA checkable keeps its own state, as it did before labels were followed.
+      it.effect("checks and unchecks a label that is itself an ARIA checkbox", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<label id="switch" role="checkbox" aria-checked="false" onclick="this.setAttribute('aria-checked', String(this.getAttribute('aria-checked') !== 'true'))">Toggle</label>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const label = page.locator("#switch")
+            yield* label.check()
+            assert.strictEqual(yield* label.isChecked, true)
+            yield* label.uncheck()
+            assert.strictEqual(yield* label.isChecked, false)
+          }))
+        }), timeout)
+
+      for (const checked of [true, false]) {
+        it.effect(
+          `prefers a label's own state over its conflicting control while ${checked ? "checking" : "unchecking"}`,
+          () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<input id="box" type="checkbox" ${
+                  checked ? "checked" : ""
+                }><label id="label" for="box" role="checkbox" aria-checked="${!checked}" onclick="event.preventDefault(); const next = this.getAttribute('aria-checked') !== 'true'; this.setAttribute('aria-checked', String(next)); document.getElementById('box').checked = !next; ${
+                  say("'clicked ' + event.isTrusted")
+                }">Toggle</label>${out}`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const label = page.locator("#label")
+                // The associated control disagrees even when the requested state already holds.
+                yield* checked ? label.uncheck() : label.check()
+                assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+                yield* checked ? label.check() : label.uncheck()
+                assert.strictEqual(yield* label.isChecked, checked)
+                assert.strictEqual(yield* page.locator("#box").isChecked, !checked)
+                assert.strictEqual(yield* page.locator("#out").readText, "clicked true")
+                yield* checked ? label.check() : label.uncheck()
+                assert.strictEqual(yield* label.isChecked, checked)
+                assert.strictEqual(yield* page.locator("#box").isChecked, !checked)
+                assert.strictEqual(yield* page.locator("#out").readText, "clicked true")
+              }))
+            }),
+          timeout
+        )
+      }
 
       it.effect("double-clicks, hovers, taps, and holds modifiers where the backend can", () =>
         Effect.gen(function*() {
