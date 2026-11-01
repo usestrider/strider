@@ -1181,6 +1181,21 @@ export function engine(render: (root: SnapNode) => string) {
   const settable = (element: Element): element is HTMLInputElement =>
     element instanceof HTMLInputElement && SET.has(element.type)
 
+  // Validate on a detached copy so refusal never writes the live input. Keep constraints and the
+  // value attribute, which can supply a range's step base. Both sides of focus use this same rule.
+  const fillCandidate = (element: HTMLInputElement, value: string): HTMLInputElement | undefined => {
+    if (!settable(element)) return undefined
+    const candidate = element.cloneNode(false) as HTMLInputElement
+    candidate.value = value
+    const accepted = element.type === "range"
+      ? /^-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(value) &&
+        Number.isFinite(Number(value)) && candidate.valueAsNumber === Number(value)
+      : element.type === "color"
+      ? candidate.value === value.toLowerCase()
+      : candidate.value !== "" || value === ""
+    return accepted ? candidate : undefined
+  }
+
   const contentEditable = (element: Element): element is HTMLElement =>
     element instanceof HTMLElement && element.isContentEditable
 
@@ -1506,20 +1521,19 @@ export function engine(render: (root: SnapNode) => string) {
         return answer
       case "Fill": {
         if (settable(element)) {
-          // Validate on a detached copy: sanitization must not change the live input on refusal.
-          // Keep attributes such as min, max, step and value (the range step base).
-          const candidate = element.cloneNode(false) as HTMLInputElement
-          candidate.value = action.value
-          const accepted = element.type === "range"
-            ? /^-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(action.value) &&
-              Number.isFinite(Number(action.value)) && candidate.valueAsNumber === Number(action.value)
-            : element.type === "color"
-            ? candidate.value === action.value.toLowerCase()
-            : candidate.value !== "" || action.value === ""
-          if (!accepted) {
+          if (fillCandidate(element, action.value) === undefined) {
             return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
           }
           element.focus()
+          // Focus handlers can change the type or its constraints. Use the current state before writing.
+          if (TYPED.has(element.type)) {
+            selectContents(element)
+            return { ...answer, fill: "type" }
+          }
+          const candidate = fillCandidate(element, action.value)
+          if (candidate === undefined) {
+            return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
+          }
           element.value = candidate.value
           fire(element, "input")
           fire(element, "change")

@@ -183,13 +183,19 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const page = yield* Browser.newPage()
               yield* page.goto(url)
               const result = yield* page.locator("#field").fill("2020-03-03").pipe(Effect.result)
-              assert(
-                result._tag === "Failure" && Locator.isLocatorError(result.failure) &&
+              const state = {
+                refused: result._tag === "Failure" && Locator.isLocatorError(result.failure) &&
                   result.failure.reason._tag === "InvalidInput",
-                String(result)
+                value: yield* page.locator("#field").readValue,
+                events: yield* page.locator("#events").readText
+              }
+              // As with range, stock WebKit may leave this input unfocused; then its type stays date.
+              assert.deepStrictEqual(
+                state,
+                state.events.startsWith("focus;")
+                  ? { refused: true, value: yield* page.locator("#before").readText, events: "focus;" }
+                  : { refused: false, value: "2020-03-03", events: "input;change;" }
               )
-              assert.strictEqual(yield* page.locator("#field").readValue, yield* page.locator("#before").readText)
-              assert.strictEqual(yield* page.locator("#events").readText, "focus;")
             }))
           }), timeout)
       }

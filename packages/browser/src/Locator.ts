@@ -997,6 +997,7 @@ export interface Locator extends ReadonlyLocator {
    *   world, with `input` then `change` dispatched. Equivalent browser serialization is accepted, such as
    *   lowercase color hex or omitted zero seconds. A malformed value, or a range value changed by clamping
    *   or rounding, fails with `InvalidInput` without changing the value or dispatching those events.
+   *   Validation runs before and after focus; changes made by a focus handler remain on refusal.
    * - An element that can't be edited fails at once with `NotEditable`. A read-only one is waited for, and a
    *   timeout reports it as `ReadOnly`.
    * - A `Redacted` value is typed into the page but never shown in spans, traces or errors.
