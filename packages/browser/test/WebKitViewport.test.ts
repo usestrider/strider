@@ -280,6 +280,28 @@ describe("WebKit viewport confirmation", () => {
       yield* Fiber.join(fiber)
     }))
 
+  it.effect("doesn't wait for a popup another page opened while a failed creation closes", () =>
+    Effect.gen(function*() {
+      const context = { browserContextId: "context" } as State.ContextEntry
+      // A popup pairs only when something first uses it, so it can stay unpaired for as long as it lives
+      const popup = { id: "popup", context, ended: false, popup: true } as State.PageEntry
+      let answer: unknown
+      const state = {
+        pages: new Map([[popup.id, popup]]),
+        pageHandles: new Map(),
+        creating: new Map(),
+        root: () => ({ drainObserved: Effect.void }),
+        buffer: {
+          waitFor: (check: () => unknown) =>
+            Effect.sync(() => {
+              answer = check()
+            })
+        }
+      } as unknown as Parameters<typeof WebKitAutomation.closeFailedPage>[0]
+      yield* WebKitAutomation.closeFailedPage(state, context, processFor(() => measure()), handle, new Set())
+      assert.strictEqual(answer, true)
+    }))
+
   it.effect("does not add a defect when failed creation cleanup finds a vanished window", () =>
     Effect.gen(function*() {
       const gone = new Protocol.ProtocolError({
