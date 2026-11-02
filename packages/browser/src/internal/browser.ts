@@ -46,6 +46,7 @@ import * as BrowserService from "./browserService.ts"
 import * as ClaimHooks from "./claimHooks.ts"
 import * as Clock from "./clock.ts"
 import * as ConnectionImpl from "./connection.ts"
+import * as Cleanup from "./declarationCleanup.ts"
 import * as DownloadImpl from "./download.ts"
 import * as Emulation from "./emulation.ts"
 import * as Evaluation from "./evaluation.ts"
@@ -700,7 +701,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         const context = yield* restore(
           setupContext(options, { context: mode.context, ownership }).pipe(Scope.provide(scope))
         ).pipe(
-          Effect.onError(() => Scope.close(scope, Exit.void))
+          Effect.onError(() => Scope.close(scope, Exit.void).pipe(Effect.provideService(Cleanup.Confirm, true)))
         )
         ownership.committed = true
         Handoff.allow(scope)

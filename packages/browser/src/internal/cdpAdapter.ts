@@ -199,6 +199,7 @@ export const connect: (
   options: Adapter.ConnectOptions
 ) => Effect.Effect<Adapter.AdapterConnection, Browser.BrowserError, Scope.Scope> = Effect.fnUntraced(
   function*(transport: Transport.Transport, options: Adapter.ConnectOptions) {
+    const cleanupScope = yield* Effect.scope
     const buffer = yield* Kit.makeFactBuffer(options.sink)
     let state!: State.State
     let root!: ProtocolClient.Session
@@ -206,6 +207,7 @@ export const connect: (
       fold: (control) => {
         buffer.connect(control)
         state = State.make({
+          cleanupScope,
           connect: options,
           ids: Kit.makeIds(),
           buffer,

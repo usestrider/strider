@@ -3,7 +3,9 @@
  * its scripts run and again to every target in scope when a registration comes or goes.
  */
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
 import * as BrowserCdp from "../../cdp/Browser.ts"
@@ -16,6 +18,7 @@ import type * as Deadline from "../../Deadline.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Cleanup from "../declarationCleanup.ts"
 import * as Declarations from "../declarations.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
@@ -399,23 +402,36 @@ export const declare = Effect.fnUntraced(function*(
 ) {
   const id = state.ids.registration()
   state.registry.add(scope, declaration, id)
-  yield* Effect.addFinalizer(() =>
-    Effect.suspend(() => {
+  const registrationContext = yield* Effect.context<never>()
+  yield* Scope.addFinalizer(
+    yield* Effect.scope,
+    Effect.gen(function*() {
+      const caller = yield* Operation.current
+      const confirm = yield* Cleanup.Confirm
+      // Registry removal is synchronous, before any caller stops waiting or prior settings are restored.
       state.registry.remove(id)
-      return declaration._tag === "Downloads"
+      const release = declaration._tag === "Downloads"
         ? Effect.forEach(
           [...state.contexts.values()],
           (context) => applyDownloads(state, context).pipe(releaseErrors),
-          {
-            discard: true
-          }
+          { discard: true }
         )
         : releaseDeclaration(state, declaration, scope)
-    }).pipe(
-      Operation.detached,
-      // Registration may have captured the operation's expired protocol deadline. Release has its own budget.
-      Effect.provideService(ProtocolClient.CommandDeadline, Option.none())
-    )
+      const work = release.pipe(
+        Operation.detached,
+        Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
+        Effect.provideContext(registrationContext),
+        Effect.interruptible
+      )
+      // A connection already tearing down cannot own a new fiber; finish before its transport is released.
+      if (state.cleanupScope.state._tag === "Closed") return yield* work
+      const cleanup = yield* work.pipe(Effect.forkIn(state.cleanupScope))
+      if (confirm || Option.isNone(caller)) return yield* Fiber.join(cleanup)
+      // The browser work survives this wait; expiration does not interrupt its connection-owned lifetime.
+      yield* caller.value.bound(Fiber.join(cleanup).pipe(Effect.interruptible)).pipe(
+        Effect.catchTag("Timeout", () => Effect.void)
+      )
+    })
   )
   if (declaration._tag === "Downloads") {
     const affected = scope._tag === "UserContext"
