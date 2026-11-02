@@ -39,6 +39,12 @@ const strider = (env: Record<string, string>, ...args: ReadonlyArray<string>) =>
       { env: { ...process.env, ...env }, timeout: 90_000 },
       (error, out, err) => {
         const code = error === null ? 0 : typeof error.code === "number" ? error.code : 1
+        if (env["STRIDER_VIEWPORT_DIAGNOSTIC"]) {
+          fs.appendFileSync(
+            path.join(env["STRIDER_VIEWPORT_DIAGNOSTIC"], "children.ndjson"),
+            JSON.stringify({ args, code, out: String(out), err: String(err) }) + "\n"
+          )
+        }
         resume(Effect.succeed({ code, out: String(out), err: String(err) }))
       }
     )
@@ -169,7 +175,14 @@ describe("strider", () => {
       Effect.scoped(
         Effect.gen(function*() {
           if (backend === "webkit") yield* useXvfb()
-          const env = environment()
+          const diagnostic = backend === "webkit" ? process.env["STRIDER_RECORD"] : undefined
+          const env = {
+            ...environment(),
+            ...(diagnostic === undefined ? {} : {
+              STRIDER_VIEWPORT_DIAGNOSTIC: diagnostic,
+              NODE_OPTIONS: `--import=${new URL("../fixtures/segments/viewport-wire.mjs", import.meta.url).pathname}`
+            })
+          }
           const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "sized", ...args)
           const started = yield* strider(
             env,
@@ -199,10 +212,15 @@ describe("strider", () => {
             const url = `${served.origin}/fixture?html=${encodeURIComponent(html)}`
             for (const name of ["first", "second"]) {
               assert.strictEqual((yield* run("page", "new", "--name", name, url)).code, 0)
-              assert.strictEqual(
-                (yield* run("-p", name, "expect", "css=#size", "visible", "--text", "1440x1000")).code,
-                0
-              )
+              const checked = yield* run("-p", name, "expect", "css=#size", "visible", "--text", "1440x1000")
+              if (diagnostic !== undefined) {
+                const measured = yield* run("run", path.join(fixtures, "viewport-dimensions.ts"))
+                fs.appendFileSync(
+                  path.join(diagnostic, "measurements.ndjson"),
+                  JSON.stringify({ name, measured, listing: yield* run("pages") }) + "\n"
+                )
+              }
+              assert.strictEqual(checked.code, 0, JSON.stringify({ name, ...checked }))
             }
             for (const size of ["800x600", "1200x900", "640x480"]) {
               const resized = yield* run("-p", "first", "page", "viewport", size)
@@ -227,7 +245,32 @@ describe("strider", () => {
             assert.include(exported, "width: 640, height: 480")
             assert.notInclude(exported, "9007199254740992")
           } finally {
-            assert.strictEqual((yield* run("stop")).code, 0)
+            if (diagnostic !== undefined) {
+              fs.cpSync(env.XDG_RUNTIME_DIR, path.join(diagnostic, "runtime"), {
+                recursive: true,
+                filter: (file) => !fs.lstatSync(file).isSocket()
+              })
+              fs.cpSync(env.XDG_STATE_HOME, path.join(diagnostic, "state"), { recursive: true })
+            }
+            const stopped = yield* run("stop")
+            if (diagnostic !== undefined) {
+              fs.writeFileSync(
+                path.join(diagnostic, "cleanup.json"),
+                JSON.stringify({
+                  stopped,
+                  browserPids,
+                  alive: browserPids.filter((pid) => {
+                    try {
+                      process.kill(pid, 0)
+                      return true
+                    } catch {
+                      return false
+                    }
+                  })
+                })
+              )
+            }
+            assert.strictEqual(stopped.code, 0, stopped.err)
           }
           const deadline = Date.now() + 5000
           const alive = (browserPid: number) => {
