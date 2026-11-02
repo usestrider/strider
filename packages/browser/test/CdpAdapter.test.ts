@@ -254,9 +254,6 @@ const sentHeaders = Effect.gen(function*() {
   const ready = yield* Deferred.make<void>()
   const settled = yield* Queue.unbounded<void>()
   const facts: Array<Adapter.Fact> = []
-  const foldEntered = yield* Deferred.make<void>()
-  const foldRelease = yield* Deferred.make<void>()
-  let holdFold = false
   const captures = yield* Queue.unbounded<Sent>()
   const preparation = yield* Queue.unbounded<Sent>()
   yield* Effect.gen(function*() {
@@ -266,7 +263,10 @@ const sentHeaders = Effect.gen(function*() {
         yield* Queue.offer(captures, command)
         continue
       }
-      if (command.method === "Page.getLayoutMetrics" || command.method === "Page.createIsolatedWorld") {
+      if (
+        command.method === "Page.getLayoutMetrics" || command.method === "Page.createIsolatedWorld" ||
+        (command.method === "Emulation.setDefaultBackgroundColorOverride" && command.params?.color === undefined)
+      ) {
         yield* Queue.offer(preparation, command)
         continue
       }
@@ -302,11 +302,6 @@ const sentHeaders = Effect.gen(function*() {
       sink: Effect.fnUntraced(function*(fact) {
         yield* sink(fact)
         facts.push(fact)
-        if (holdFold && fact._tag === "ConnectionOpened") {
-          holdFold = false
-          yield* Deferred.succeed(foldEntered, undefined)
-          yield* Deferred.await(foldRelease)
-        }
         if (fact._tag === "PageReady") yield* Deferred.succeed(ready, undefined)
         if (fact._tag === "ConnectionOpened") yield* Queue.offer(settled, undefined)
       })
@@ -345,15 +340,6 @@ const sentHeaders = Effect.gen(function*() {
   yield* send(captured[0]!)
   yield* barrier
   const request = yield* next
-  const pauseFold = Effect.gen(function*() {
-    holdFold = true
-    yield* browser.receive({
-      method: "Network.webSocketCreated",
-      sessionId: "S1",
-      params: { requestId: "hold-fold", url: "ws://127.0.0.1/hold" }
-    })
-    yield* Deferred.await(foldEntered)
-  })
   return {
     browser,
     page,
@@ -362,9 +348,7 @@ const sentHeaders = Effect.gen(function*() {
     barrier,
     captures,
     preparation,
-    facts,
-    pauseFold,
-    releaseFold: Deferred.succeed(foldRelease, undefined)
+    facts
   }
 })
 
@@ -515,22 +499,21 @@ describe("Chromium capture document replacement", () => {
     }).pipe(onTestClock))
 
   for (const errorReply of [false, true]) {
-    it.effect(`keeps an earlier native ${errorReply ? "error" : "success"} receipt while the commit fold is suspended`, () =>
+    it.effect(`keeps an earlier native ${errorReply ? "error" : "success"} receipt while background cleanup is pending`, () =>
       Effect.gen(function*() {
         const h = yield* sentHeaders
         const page = yield* h.page.control
-        const pending = yield* Effect.forkScoped(Effect.exit(page.screenshot()))
+        const pending = yield* Effect.forkScoped(Effect.exit(page.screenshot({ omitBackground: true })))
         const command = yield* Queue.take(h.captures)
-        yield* h.pauseFold
         yield* h.browser.receive({
           id: command.id,
           sessionId: command.sessionId,
           ...(errorReply ? { error: { code: -32000, message: "capture failed" } } : { result: { data: "AA==" } })
         })
+        const cleanup = yield* Queue.take(h.preparation)
         yield* h.browser.receive(replacementEvent())
-        yield* h.browser.delivered
-        yield* h.releaseFold
         yield* h.barrier
+        yield* h.browser.receive({ id: cleanup.id, sessionId: cleanup.sessionId, result: {} })
         const exit = yield* Fiber.join(pending)
         if (errorReply) {
           assert(Exit.isFailure(exit))
