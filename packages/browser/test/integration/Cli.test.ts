@@ -886,6 +886,51 @@ describe("strider", () => {
       ), timeout)
   }
 
+  // ROOK-4: an inspector's tab, taken with control, stays listed and works until it is released
+  it.live("controls and releases a tab of an attached stock WebKit", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const served = yield* site
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const tab = `${served.origin}/fixture?html=${encodeURIComponent("<title>remote</title>")}`
+        const { endpoint } = yield* startMiniBrowser(tab)
+        try {
+          assert.strictEqual((yield* run("start", "--name", "remote", "--attach", endpoint)).code, 0)
+          const tabs = yield* run("-s", "remote", "tabs")
+          const id = tabs.out.split("\n")[0]!.split("  ")[0]!
+          const taken = yield* run("-s", "remote", "control", id, "--name", "own")
+          assert.strictEqual(taken.code, 0, taken.err)
+          assert.include((yield* run("-s", "remote", "pages")).out, "own")
+          assert.strictEqual((yield* run("-s", "remote", "-p", "own", "snapshot")).code, 0)
+          assert.strictEqual((yield* run("-s", "remote", "release", "-p", "own")).code, 0)
+          assert.include((yield* run("-s", "remote", "tabs")).out, tab)
+        } finally {
+          yield* run("-s", "remote", "stop")
+        }
+      }).pipe(Effect.provide(NodeServices.layer))
+    ), timeout)
+
+  // ROOK-4: the browser WebSocket's id dies with that browser; the endpoint given outlives it
+  it.live("exports a Chromium HTTP attachment by the endpoint it was given", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const served = yield* site
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const tab = `${served.origin}/fixture?html=${encodeURIComponent("<title>remote</title>")}`
+        const { endpoint } = yield* chromiumAttachable(Chromium.layerConnect).start(tab, tab)
+        const file = path.join(env.XDG_STATE_HOME, "attached.test.ts")
+        try {
+          assert.strictEqual((yield* run("start", "--name", "remote", "--attach", endpoint)).code, 0)
+          assert.strictEqual((yield* run("-s", "remote", "export", "test", file)).code, 0)
+          assert.include(fs.readFileSync(file, "utf8"), `Chromium.layerConnect(${JSON.stringify(endpoint)})`)
+        } finally {
+          yield* run("-s", "remote", "stop")
+        }
+      }).pipe(Effect.provide(NodeServices.layer))
+    ), timeout)
+
   it.live("attaches to Firefox's remote agent by an endpoint with no path", () =>
     Effect.scoped(
       Effect.gen(function*() {

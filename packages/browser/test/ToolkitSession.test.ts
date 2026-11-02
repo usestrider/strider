@@ -40,6 +40,31 @@ describe("Session with explicit tab control", () => {
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 })
 
+describe("Session with explicit tab control, after control", () => {
+  // ROOK-4: refresh answers [] when context pages aren't discovered, so a page taken with control goes unlisted
+  it.effect("lists a tab taken with control in pages and in session.pages", () =>
+    Effect.gen(function*() {
+      const browser = yield* Browser.Browser
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({
+        context,
+        browser,
+        secrets: {},
+        capture: CapturePolicy.local,
+        discoverContextPages: false
+      })
+      yield* session.toolkit.handle("control", { tab: String(page.id), name: "remote" }).pipe(
+        Effect.flatMap(Stream.runDrain)
+      )
+      const listed = yield* session.toolkit.handle("pages", {}).pipe(Effect.flatMap(Stream.runLast))
+      const result = Option.getOrThrow(listed).result
+      if (!("outcome" in result)) return assert.fail("pages did not return an outcome")
+      assert.deepStrictEqual(result.outcome.map((each) => each.page), ["remote"])
+      assert.deepStrictEqual((yield* session.pages).map((each) => each.name), ["remote"])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
+
 describe("Session.page", () => {
   it.effect("fails PageNotFound for a generated handle no one kept", () =>
     Effect.gen(function*() {
