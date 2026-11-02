@@ -65,7 +65,7 @@ A wrapper must exec MiniBrowser rather than only fork it. Other operating system
 refuse launch with `ConnectionFailed`. A procfs read failure stops ownership attempts and closes any rejected
 connection, then waits for a child exit event within the remaining launch deadline. If no exit is observed,
 refusal retains the original access error. A child exit observed during startup reports `ProcessExited`, with
-an exit code when available and stderr collected within that same deadline. An ordinary readiness timeout uses
+an exit code when available and stderr collected within that same deadline. If an exited wrapper leaves descendants holding stderr open, reporting `ProcessExited` can consume the remaining launch budget. An ordinary readiness timeout uses
 the `handshake` stage; explicit ownership and access refusals use `refused`. Both errors explain the applicable
 launch requirements and the attach alternative; use [`WebKit.layerAttach`](#attaching) with an externally managed
 inspector HTTP endpoint instead.
