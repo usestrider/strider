@@ -259,6 +259,8 @@ export interface FrameEntry {
 
 /** Everything about a page that changes: what the browser says of it, and the caller's settings for it. */
 export interface PageState {
+  /** Active dialog details, independent of the bounded event history. */
+  readonly dialog: Option.Option<PromptEvent>
   readonly status: PageStatus
   /** Its frames, in the order they were added, as `page.frames` shows them under the page. */
   readonly frames: ReadonlyArray<FrameEntry>

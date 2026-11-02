@@ -5,7 +5,9 @@
  * @since 0.1.0
  */
 import * as Schema from "effect/Schema"
+import * as Reports from "../internal/claimReports.ts"
 import * as Claims from "../internal/claims.ts"
+import * as Target from "../Target.ts"
 import type * as Base from "../UserContext.ts"
 
 /**
@@ -17,8 +19,8 @@ import type * as Base from "../UserContext.ts"
  * import { UserContext } from "@usestrider/browser/experimental"
  * import { Schema } from "effect"
  *
- * const decode = Schema.decodeUnknownSync(UserContext.Claim)
- * void decode
+ * const read = (json: string): UserContext.Claim =>
+ *   Schema.decodeUnknownSync(UserContext.Claim)(JSON.parse(json))
  * ```
  *
  * @stability experimental
@@ -36,8 +38,8 @@ export const Claim = Schema.String.pipe(Schema.brand("~@usestrider/browser/exper
  * import { UserContext } from "@usestrider/browser/experimental"
  * import { Schema } from "effect"
  *
- * const decode = Schema.decodeUnknownSync(UserContext.Claim)
- * void decode
+ * const read = (json: string): UserContext.Claim =>
+ *   Schema.decodeUnknownSync(UserContext.Claim)(JSON.parse(json))
  * ```
  *
  * @stability experimental
@@ -55,8 +57,12 @@ export type Claim = typeof Claim.Type
  * import type { UserContext as Base } from "@usestrider/browser"
  * import { UserContext } from "@usestrider/browser/experimental"
  *
- * const save = (value: Base.UserContext) => UserContext.claim(value)
- * void save
+ * import { Effect, Schema } from "effect"
+ *
+ * const save = Effect.fn("save")(function*(value: Base.UserContext) {
+ *   const claim = yield* UserContext.claim(value)
+ *   return JSON.stringify(Schema.encodeSync(UserContext.Claim)(claim))
+ * })
  * ```
  *
  * @stability experimental
@@ -78,8 +84,13 @@ export const claim = (value: Base.UserContext) => Claims.claimUserContext(value)
  * ```ts import.meta.vitest
  * import { UserContext } from "@usestrider/browser/experimental"
  *
- * const create = UserContext.create({ reclaimable: true })
- * void create
+ * import { Effect } from "effect"
+ *
+ * const create = Effect.gen(function*() {
+ *   const context = yield* UserContext.create({ reclaimable: true })
+ *   const claim = yield* UserContext.claim(context)
+ *   return { context, claim }
+ * })
  * ```
  *
  * @stability experimental
@@ -93,20 +104,100 @@ export const create = (options: Base.Options & { readonly reclaimable: true }) =
  *
  * **Details**
  *
- * Redeclare routes and init scripts in the new scope. The default context cannot be reclaimed for removal.
+ * Returns the context and per-page observations from before setup. Redeclare routes and init scripts in the new
+ * scope. The default context cannot be reclaimed for removal. Observation defaults to 1000 milliseconds per page,
+ * all charged to the caller's deadline; settings application also remains within that deadline. Setup that cannot
+ * complete fails without acquiring destruction ownership or deleting surviving targets.
  *
  * **Example** (Using claims)
  *
  * ```ts import.meta.vitest
  * import { UserContext } from "@usestrider/browser/experimental"
  *
- * const restore = (saved: UserContext.Claim) =>
- *   UserContext.reclaim(saved, { emulation: { locale: "en-US" } })
- * void restore
+ * import { Effect } from "effect"
+ *
+ * const restore = Effect.fn("restore")(function*(saved: UserContext.Claim) {
+ *   const { context, found } = yield* UserContext.reclaim(saved, {
+ *     emulation: { locale: "en-US" }
+ *   })
+ *   for (const page of found.pages) console.log(page.page, page.found._tag)
+ *   return context
+ * })
  * ```
  *
  * @stability experimental
  * @category claims
  * @since 0.1.0
  */
-export const reclaim = (claim: Claim, options?: Base.Options | undefined) => Claims.reclaimContext(claim, options)
+export const reclaim = (
+  claim: Claim,
+  options?:
+    | Base.Options & {
+      /** Milliseconds for each page observation, within the caller deadline. @default 1000 */
+      readonly observationTimeout?: number | undefined
+    }
+    | undefined
+) => Claims.reclaimContext(claim, options)
+
+/**
+ * The pages found in a reclaimed context, each with an observed or unknown state.
+ *
+ * **Example** (Read context observations)
+ *
+ * ```ts import.meta.vitest
+ * import { UserContext } from "@usestrider/browser/experimental"
+ * import { Schema } from "effect"
+ *
+ * const empty = Schema.decodeUnknownSync(UserContext.Found)({ pages: [] })
+ * ```
+ *
+ * @stability experimental
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Found = Schema.Struct({
+  pages: Schema.Array(Schema.Struct({ page: Target.NavigableId, found: Reports.Found }))
+})
+
+/**
+ * Per-page observations from context recovery.
+ *
+ * **Example** (Inspect page states)
+ *
+ * ```ts import.meta.vitest
+ * import { UserContext } from "@usestrider/browser/experimental"
+ *
+ * const unknownPages = (found: UserContext.Found) =>
+ *   found.pages.filter((page) => page.found._tag === "Unknown")
+ * ```
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export type Found = typeof Found.Type
+
+/**
+ * A scope-owned context and the per-page observations made before applying its settings.
+ *
+ * **Example** (Recover a context)
+ *
+ * ```ts import.meta.vitest
+ * import { UserContext } from "@usestrider/browser/experimental"
+ * import { Effect } from "effect"
+ *
+ * const restore = Effect.fn("restore")(function*(saved: UserContext.Claim) {
+ *   const { context, found } = yield* UserContext.reclaim(saved)
+ *   console.log(found.pages)
+ *   return context
+ * })
+ * ```
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export interface Reclaimed {
+  readonly context: Base.UserContext
+  readonly found: Found
+}

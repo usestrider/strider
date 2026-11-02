@@ -2,6 +2,7 @@
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
 import * as Browser from "../Browser.ts"
 import type * as Deadline from "../Deadline.ts"
 import type * as Reclaimed from "../experimental/Browser.ts"
@@ -13,9 +14,11 @@ import * as Reason from "../Reason.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Hooks from "./claimHooks.ts"
 import * as Handles from "./handles.ts"
 import * as Handoff from "./handoff.ts"
+import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 
 const identity = { backend: Schema.Literal("chromium"), browser: Schema.String, context: Schema.String }
@@ -84,7 +87,9 @@ export const claimPage = Operation.fn("Page.claim")(function*(page: Page.Page) {
   if (Option.isNone(state.owner)) return yield* Effect.fail(notOwned("Page.claim"))
   const identity = yield* claims.page(entry.id).pipe(Effect.mapError(mapAdapter("Page.claim", runtime.backend)))
   Handoff.allow(state.owner.value)
-  return PageClaim.Claim.make(JSON.stringify({ backend: "chromium", kind: "page", ...identity }))
+  const claim = PageClaim.Claim.make(JSON.stringify({ backend: "chromium", kind: "page", ...identity }))
+  yield* track(state.owner.value, claim, entry)
+  return claim
 })
 
 export const claimUserContext = Operation.fn("UserContext.claim")(function*(context: UserContext.UserContext) {
@@ -117,41 +122,116 @@ export const createContext = Operation.fn("UserContext.createReclaimable")(
   }
 )
 
-export const reclaimPage = Operation.fn("Browser.reclaim")(function*(claim: PageClaim.Claim) {
-  const { runtime } = Hooks.get(yield* Browser.Browser)
-  const claims = runtime.model.adapter.claims
-  if (claims === undefined) return yield* Effect.fail(unsupported("Browser.reclaim", runtime.backend))
-  const payload = yield* decode("Browser.reclaim", claim, PagePayload)
-  yield* checkBrowser("Browser.reclaim", claims, payload)
-  const id = yield* claims.findPage({ ...payload, tab: payload.tab }).pipe(
-    Effect.mapError(mapAdapter("Browser.reclaim", runtime.backend))
-  )
-  if (id === undefined) return yield* Effect.fail(gone("Browser.reclaim"))
-  const entry = runtime.model.page(id)
-  if (Option.isNone(entry)) return yield* Effect.fail(gone("Browser.reclaim"))
-  // Observe first: a failed observation must not acquire close-on-exit ownership of somebody else's tab.
-  const found: Reclaimed.Found = {
-    dialogs: yield* claims.dialogs(id).pipe(Effect.mapError(mapAdapter("Browser.reclaim", runtime.backend)))
+export const reclaimPage = Operation.fn("Browser.reclaim")(
+  function*(
+    claim: PageClaim.Claim,
+    options?: { readonly observationTimeout?: number | undefined; readonly lastKnown?: Reclaimed.LastKnown | undefined }
+  ) {
+    const { runtime } = Hooks.get(yield* Browser.Browser)
+    const claims = runtime.model.adapter.claims
+    if (claims === undefined) return yield* Effect.fail(unsupported("Browser.reclaim", runtime.backend))
+    const milliseconds = yield* observationBound("Browser.reclaim", options?.observationTimeout)
+    const payload = yield* decode("Browser.reclaim", claim, PagePayload)
+    yield* checkBrowser("Browser.reclaim", claims, payload)
+    const id = yield* claims.findPage({ ...payload, tab: payload.tab }).pipe(
+      Effect.mapError(mapAdapter("Browser.reclaim", runtime.backend))
+    )
+    if (id === undefined) return yield* Effect.fail(gone("Browser.reclaim"))
+    const entry = runtime.model.page(id)
+    if (Option.isNone(entry)) return yield* Effect.fail(gone("Browser.reclaim"))
+    if (options?.lastKnown !== undefined && options.lastKnown.claim !== claim) {
+      return yield* Effect.fail(error(
+        "Browser.reclaim",
+        new Reason.InvalidInput({
+          input: "lastKnown",
+          expected: "a handoff snapshot for this claim",
+          hint: "The snapshot belongs to another claim"
+        })
+      ))
+    }
+    const found = yield* observe(claims, id, "Browser.reclaim", runtime.backend, milliseconds)
+    const scope = yield* Effect.scope
+    yield* runtime.model.transfer(id, scope).pipe(Effect.uninterruptible)
+    Handoff.allow(scope)
+    yield* track(scope, claim, entry.value)
+    const page = Option.getOrThrow(runtime.page(entry.value))
+    return {
+      page,
+      found,
+      ...(options?.lastKnown === undefined
+        ? {}
+        : { lastKnown: options.lastKnown })
+    } satisfies Reclaimed.Reclaimed
   }
-  const scope = yield* Effect.scope
-  yield* runtime.model.transfer(id, scope).pipe(Effect.uninterruptible)
-  Handoff.allow(scope)
-  const page = Option.getOrThrow(runtime.page(entry.value))
-  return { page, found } satisfies Reclaimed.Reclaimed
-})
+)
 
 export const reclaimContext = Operation.fn("UserContext.reclaim")(
-  function*(claim: ContextClaim.Claim, options?: UserContext.Options) {
+  function*(
+    claim: ContextClaim.Claim,
+    options?: UserContext.Options & { readonly observationTimeout?: number | undefined }
+  ) {
     const hooks = Hooks.get(yield* Browser.Browser)
     const { runtime } = hooks
     const claims = runtime.model.adapter.claims
     if (claims === undefined) return yield* Effect.fail(unsupported("UserContext.reclaim", runtime.backend))
+    const milliseconds = yield* observationBound("UserContext.reclaim", options?.observationTimeout)
     const payload = yield* decode("UserContext.reclaim", claim, ContextPayload)
     yield* checkBrowser("UserContext.reclaim", claims, payload)
     const context = yield* claims.findContext(payload.context).pipe(
       Effect.mapError(mapAdapter("UserContext.reclaim", runtime.backend))
     )
     if (context === undefined) return yield* Effect.fail(gone("UserContext.reclaim"))
-    return yield* hooks.context(options, { context })
+    const entry = yield* runtime.model.context(context)
+    const pages = yield* Effect.forEach(
+      (yield* entry.state.get).pages,
+      (page) =>
+        Effect.map(
+          observe(claims, page.id, "UserContext.reclaim", runtime.backend, milliseconds),
+          (found) => ({ page: page.id, found })
+        )
+    )
+    const recovered = yield* hooks.context(options, { context })
+    return { context: recovered, found: { pages } } satisfies ContextClaim.Reclaimed
   }
 )
+
+const observe = Effect.fnUntraced(function*(
+  claims: NonNullable<ReturnType<typeof Hooks.get>["runtime"]["model"]["adapter"]["claims"]>,
+  id: import("../Target.ts").NavigableId,
+  operation: string,
+  backend: string,
+  milliseconds = 1000
+) {
+  const record = yield* Operation.record
+  const observed = yield* record.bound(
+    claims.dialogs(id).pipe(
+      Effect.mapError(mapAdapter(operation, backend)),
+      BrowserClock.timeoutOn(record.clock, milliseconds)
+    )
+  )
+  if (record.left() <= 0) return yield* Effect.fail(record.timeout(Option.none()))
+  return Option.isSome(observed)
+    ? { _tag: "Observed" as const, dialogs: observed.value }
+    : { _tag: "Unknown" as const }
+})
+
+const track = (scope: Scope.Scope, claim: PageClaim.Claim, entry: Model.PageEntry) =>
+  Handoff.observe(scope, claim, () => {
+    const state = entry.state.getUnsafe()
+    const last = state.status._tag === "Closed" ? undefined : Option.getOrUndefined(state.dialog)
+    return { _tag: "LastKnown", claim, dialogs: last === undefined ? [] : [{ kind: last.kind, message: last.message }] }
+  })
+
+const observationBound = (operation: string, milliseconds = 1000) => {
+  if (!Number.isFinite(milliseconds) || milliseconds <= 0) {
+    return Effect.fail(error(
+      operation,
+      new Reason.InvalidInput({
+        input: "observationTimeout",
+        expected: "a positive finite number of milliseconds",
+        hint: "Observation must have a finite bound"
+      })
+    ))
+  }
+  return Effect.succeed(milliseconds)
+}

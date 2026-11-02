@@ -16,8 +16,8 @@ import * as Reason from "../Reason.ts"
  * ```ts import.meta.vitest
  * import { Claim } from "@usestrider/browser/experimental"
  *
- * const ErrorSchema = Claim.ClaimError
- * void ErrorSchema
+ * const gone = new Claim.Gone({ hint: "The saved tab has closed" })
+ * console.log(gone._tag, gone.message)
  * ```
  *
  * @stability experimental
@@ -41,8 +41,10 @@ export class Gone extends Schema.Error<Gone>("@usestrider/browser/experimental/G
  * ```ts import.meta.vitest
  * import { Claim } from "@usestrider/browser/experimental"
  *
- * const ErrorSchema = Claim.ClaimError
- * void ErrorSchema
+ * const other = new Claim.OtherBrowser({
+ *   hint: "Connect to the browser that issued this claim"
+ * })
+ * console.log(other._tag, other.message)
  * ```
  *
  * @stability experimental
@@ -64,10 +66,13 @@ export class OtherBrowser extends Schema.Error<OtherBrowser>("@usestrider/browse
  * **Example** (Using claims)
  *
  * ```ts import.meta.vitest
- * import { Claim } from "@usestrider/browser/experimental"
+ * import { Browser, Page } from "@usestrider/browser/experimental"
+ * import { Effect } from "effect"
  *
- * const ErrorSchema = Claim.ClaimError
- * void ErrorSchema
+ * const restore = (saved: Page.Claim) =>
+ *   Browser.reclaim(saved).pipe(
+ *     Effect.catchTag("ClaimError", (error) => Effect.succeed(error.reason._tag))
+ *   )
  * ```
  *
  * @stability experimental

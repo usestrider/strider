@@ -448,7 +448,7 @@ describe("Chromium claims (ROOK-95)", () => {
                 const pending = yield* api.Browser.reclaim(claim).pipe(Effect.forkChild)
                 yield* BrowserClock.sleep(100)
                 yield* Fiber.interrupt(pending)
-              assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(pending)))
+                assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(pending)))
                 assert.isTrue((yield* browser.targets).some((info) => info.targetId === target.targetId))
                 const started = performance.now()
                 const { page, found } = yield* api.Browser.reclaim(claim).pipe(Deadline.within("3 seconds"))
@@ -456,7 +456,7 @@ describe("Chromium claims (ROOK-95)", () => {
                   _tag: "Unknown"
                 })
                 assert.isAtLeast(performance.now() - started, 900)
-              assert.isBelow(performance.now() - started, 2500)
+                assert.isBelow(performance.now() - started, 2500)
                 const actionAt = performance.now()
                 const action = yield* page.evaluateInMainWorld(() => 42).pipe(
                   Deadline.within("150 millis"),

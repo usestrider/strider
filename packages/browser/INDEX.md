@@ -2056,14 +2056,17 @@ Experimental recovery of Chromium pages for session hosts.
 - `interface Reclaimed` (experimental)
   - `readonly page: Page.Page`
   - `readonly found: Found`
+  - `readonly lastKnown?: LastKnown | undefined`
+- `type LastKnown = typeof LastKnown.Type` (experimental)
 
 *schemas*
 
-- `const Found = Schema.Struct({ dialogs: Schema.Array(Schema.Struct({ kind: Schema.String, message: Schema.String })) })` (experimental)
+- `const Found = Reports.Found` (experimental)
+- `const LastKnown = Reports.LastKnown` (experimental)
 
 *claims*
 
-- `const reclaim = (claim: ClaimedPage.Claim) => Claims.reclaimPage(claim)` (experimental)
+- `const reclaim = (claim: ClaimedPage.Claim, options?: { readonly observationTimeout?: number | undefined readonly lastKnown?: LastKnown | undefined } | undefined) => Claims.reclaimPage(claim, options)` (experimental)
 
 ### Claim
 
@@ -2101,16 +2104,21 @@ Experimental context persistence and recovery for session hosts.
 *models*
 
 - `type Claim = typeof Claim.Type` (experimental)
+- `type Found = typeof Found.Type` (experimental)
+- `interface Reclaimed` (experimental)
+  - `readonly context: Base.UserContext`
+  - `readonly found: Found`
 
 *schemas*
 
 - `const Claim = Schema.String.pipe(Schema.brand("~@usestrider/browser/experimental/UserContext/Claim"))` (experimental)
+- `const Found = Schema.Struct({ pages: Schema.Array(Schema.Struct({ page: Target.NavigableId, found: Reports.Found })) })` (experimental)
 
 *claims*
 
 - `const claim = (value: Base.UserContext) => Claims.claimUserContext(value)` (experimental)
 - `const create = (options: Base.Options & { readonly reclaimable: true }) => Claims.createContext(options)` (experimental)
-- `const reclaim = (claim: Claim, options?: Base.Options | undefined) => Claims.reclaimContext(claim, options)` (experimental)
+- `const reclaim = (claim: Claim, options?: | Base.Options & { readonly observationTimeout?: number | undefined } | undefined) => Claims.reclaimContext(claim, options)` (experimental)
 
 ## `@usestrider/browser/firefox`
 

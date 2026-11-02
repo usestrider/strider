@@ -835,7 +835,7 @@ export interface ClaimIdentity {
 export interface Claims {
   readonly dialogs: (
     page: Target.NavigableId
-  ) => Effect.Effect<ReadonlyArray<{ readonly kind: string; readonly message: string }>, AdapterError>
+  ) => Effect.Effect<ReadonlyArray<{ readonly kind: Page.Prompt["kind"]; readonly message: string }>, AdapterError>
   readonly browser: string
   readonly page: (page: Target.NavigableId) => Effect.Effect<ClaimIdentity, AdapterError>
   readonly context: (context: UserContext.Id) => Effect.Effect<string, AdapterError>

@@ -17,8 +17,8 @@ import type * as Base from "../Page.ts"
  * import { Page } from "@usestrider/browser/experimental"
  * import { Schema } from "effect"
  *
- * const decode = Schema.decodeUnknownSync(Page.Claim)
- * void decode
+ * const read = (json: string): Page.Claim =>
+ *   Schema.decodeUnknownSync(Page.Claim)(JSON.parse(json))
  * ```
  *
  * @stability experimental
@@ -36,8 +36,8 @@ export const Claim = Schema.String.pipe(Schema.brand("~@usestrider/browser/exper
  * import { Page } from "@usestrider/browser/experimental"
  * import { Schema } from "effect"
  *
- * const decode = Schema.decodeUnknownSync(Page.Claim)
- * void decode
+ * const read = (json: string): Page.Claim =>
+ *   Schema.decodeUnknownSync(Page.Claim)(JSON.parse(json))
  * ```
  *
  * @stability experimental
@@ -60,8 +60,12 @@ export type Claim = typeof Claim.Type
  * import type { Page as Base } from "@usestrider/browser"
  * import { Page } from "@usestrider/browser/experimental"
  *
- * const save = (value: Base.Page) => Page.claim(value)
- * void save
+ * import { Effect, Schema } from "effect"
+ *
+ * const save = Effect.fn("save")(function*(value: Base.Page) {
+ *   const claim = yield* Page.claim(value)
+ *   return JSON.stringify(Schema.encodeSync(Page.Claim)(claim))
+ * })
  * ```
  *
  * @stability experimental

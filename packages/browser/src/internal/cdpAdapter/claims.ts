@@ -13,6 +13,9 @@ import * as Kit from "../adapterKit.ts"
 import { contextOf, pageOf, type State } from "./state.ts"
 import { contextFor } from "./tree.ts"
 
+const dialogKind = (value: string): import("../../Page.ts").Prompt["kind"] =>
+  value === "alert" || value === "confirm" || value === "prompt" || value === "beforeunload" ? value : "unknown"
+
 export const make = (
   state: State,
   browser: string,
@@ -63,11 +66,14 @@ export const make = (
           flatten: true
         }).pipe(Protocol.on(identity.browser))
         const session = yield* identity.session(sessionId)
-        const found: Array<{ readonly kind: string; readonly message: string }> = []
+        const found: Array<{ readonly kind: import("../../Page.ts").Prompt["kind"]; readonly message: string }> = []
         const opened = yield* session.subscribe(Page.javascriptDialogOpening)
         yield* Stream.runForEach(opened, (event) =>
           Effect.sync(() => {
-            found.push({ kind: event.type, message: event.message })
+            found.push({
+              kind: dialogKind(event.type),
+              message: event.message
+            })
           })).pipe(Effect.forkChild)
         yield* Page.enable().pipe(Protocol.on(session))
         yield* session.drainObserved
