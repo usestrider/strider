@@ -872,11 +872,15 @@ describe("strider", () => {
           try {
             const started = yield* run("start", "--name", "remote", "--attach", endpoint)
             assert.strictEqual(started.code, 0, started.err)
+            const sessions = yield* run("sessions")
+            assert.include(sessions.out, `attached ${backend === "Chromium" ? "chromium" : "webkit"}`)
             const tabs = yield* run("-s", "remote", "tabs")
             assert.strictEqual(tabs.code, 0, tabs.err)
             assert.include(tabs.out, tab)
           } finally {
             yield* run("-s", "remote", "stop")
+            const response = yield* Effect.promise(() => fetch(new URL("/", endpoint)))
+            assert.strictEqual(response.status, 200, "attached browser survives stop")
           }
         }).pipe(Effect.provide(NodeServices.layer))
       ), timeout)
