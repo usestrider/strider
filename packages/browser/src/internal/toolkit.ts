@@ -61,6 +61,12 @@ export interface Options {
   readonly capture: CapturePolicy.CapturePolicy
   /** The browser, for `tabs` and `control`; without it, they fail with `NotPermitted`. */
   readonly browser?: Browser.Browser | undefined
+  /**
+   * Whether the context's pages enter the session automatically. An attached inspector shares the browser's
+   * default context, so its tabs are acquired through explicit control instead.
+   * @default true
+   */
+  readonly discoverContextPages?: boolean | undefined
   /** Told of each page the toolkit comes to know that no tool opened, as the CLI's exported test declares it. */
   readonly seen?: ((seen: Seen) => void) | undefined
 }
@@ -290,7 +296,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
 
   /** The context's pages, each named, the new ones `p1`, `p2`… */
   const refresh = Effect.gen(function*() {
-    const pages = yield* context.pages
+    const pages = options.discoverContextPages === false ? [] : yield* context.pages
     for (const [index, page] of pages.entries()) {
       if (nameById.has(page.id)) continue
       const name = yield* nameOf(page)

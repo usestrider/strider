@@ -1273,6 +1273,8 @@ const serve = Effect.fnUntraced(
       context,
       secrets,
       capture: flags.capture === "strict" ? CapturePolicy.strict : CapturePolicy.local,
+      // The inspector shares the default context; its tabs still require explicit control.
+      discoverContextPages: !inspector,
       // The session can take the browser's own tabs with control
       browser: instance,
       // A page no command opened, for the exported test to declare

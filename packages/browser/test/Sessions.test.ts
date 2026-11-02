@@ -279,6 +279,7 @@ describe("strider export test", () => {
     })
     assert.include(text, "WebKit.layerAttach(\"http://localhost:9222/\")")
     assert.include(text, "@usestrider/browser/webkit")
+    assert.include(text, "const context = yield* (yield* Browser.Browser).defaultContext.control")
   })
   const tool = <K extends Tools.ToolName>(name: K, params: Tools.Params<K>, result?: string): ExportTest.Step => {
     const call: Tools.Call = Tools.call(name, params)

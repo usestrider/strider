@@ -11,6 +11,35 @@ import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
 import * as ToolkitImpl from "../src/internal/toolkit.ts"
 
+describe("Session with explicit tab control", () => {
+  it.effect("keeps shared-context pages in tabs until control names one", () =>
+    Effect.gen(function*() {
+      const browser = yield* Browser.Browser
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({
+        context,
+        browser,
+        secrets: {},
+        capture: CapturePolicy.local,
+        discoverContextPages: false
+      })
+      assert.deepStrictEqual(yield* session.pages, [])
+      const listed = yield* session.toolkit.handle("tabs", {}).pipe(Effect.flatMap(Stream.runLast))
+      const listedResult = Option.getOrThrow(listed).result
+      if (!("outcome" in listedResult)) return assert.fail("tabs did not return an outcome")
+      assert.deepStrictEqual(listedResult.outcome, [{ tab: String(page.id), url: "about:blank" }])
+      yield* session.toolkit.handle("control", { tab: String(page.id), name: "remote" }).pipe(
+        Effect.flatMap(Stream.runDrain)
+      )
+      assert.deepStrictEqual((yield* session.pages).map((each) => each.name), ["remote"])
+      const remaining = yield* session.toolkit.handle("tabs", {}).pipe(Effect.flatMap(Stream.runLast))
+      const remainingResult = Option.getOrThrow(remaining).result
+      if (!("outcome" in remainingResult)) return assert.fail("tabs did not return an outcome")
+      assert.deepStrictEqual(remainingResult.outcome, [])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
+
 describe("Session.page", () => {
   it.effect("fails PageNotFound for a generated handle no one kept", () =>
     Effect.gen(function*() {
