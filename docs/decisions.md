@@ -424,18 +424,32 @@ The one retained completed failure is not a live reservation and is cleared when
 commit supersedes it after outstanding correlation finishes. No public operation or policy is added.
 
 
-## Viewport restoration without resizing Chromium's native view
+## Chromium viewport restoration as bounded cleanup
 
-A CDP viewport override sets `dontSetVisibleSize: true` (ROOK-145). Chromium can acknowledge clearing device
-metrics before its native-view resize reaches the renderer: an immediate release reproduced a successful clear
-followed by the overridden width. Keeping the native view unchanged removes that separate resize path; disabling
-emulation restores the renderer's original metrics. The viewport remains emulated, including when larger than the
-native view. Capture checks cover viewport and full-page dimensions and colored content beyond the native edges.
+CDP viewport release explicitly waits for the original renderer dimensions after clearing emulation (ROOK-145).
+Chromium can acknowledge clearing device metrics before its native-view resize reaches the renderer: immediate
+release reproduced a successful clear followed by the overridden width. A clear reply alone cannot implement the
+restoration contract. Each target records its original width and height before its first viewport override; nested
+and replacement registrations retain those dimensions until the last override has been cleared and restored.
+While an override remains, release reapplies the current effective override. Per-target serialization recomputes
+that effective override when the command runs, including when registrations are released out of order.
 
-Rejected: waiting after clearing until the original width returns. That adds a restoration wait dependent on frame
-production, including for hidden pages, when avoiding the native resize removes the ordering gap. The experimental
-CDP flag requires capture coverage because the native compositor surface no longer follows the emulated viewport.
-This closes the reproduced ordering gap; it does not establish the cause of the earlier unrecorded failure.
+Subscribe to resize events before clearing, measure immediately after its reply, and remeasure on resize until the
+original dimensions return. There is no sleep, polling timer or command retry. Cleanup runs detached from the
+expired operation with its own `Deadline.DefaultBudget` (30 seconds by default), measured on the browser clock.
+The bound includes acquiring the target's viewport lock, the clear reply and the restoration observation. A hidden
+page or absent compositor frame cannot hold cleanup indefinitely: at the deadline the subscription and pending
+reply wait are released, a warning records the incomplete restoration, and scope cleanup continues. Session end
+also closes the wait and is quiet. The original dimensions remain recorded after incomplete restoration so a
+later override does not mistake stale dimensions for the native viewport.
 
-Declaration release remains best-effort: a closed session is quiet; other protocol failures log a warning without
-failing scope cleanup. Silent rejection would leave a failed restoration indistinguishable from a successful clear.
+Rejected: `dontSetVisibleSize: true`. It passed restoration and viewport/full-page capture checks, but Chromium
+screencast frames remained at the native 780x493 instead of an overridden 640x480. Keeping native resizing preserves
+that existing rendering behavior. The bounded wait accepts that a hidden page might not complete restoration;
+that exception is explicit and warns, rather than silently changing the surface size or waiting indefinitely.
+
+Release errors are handled per target and per download context. A quiet ended session cannot cancel another
+target's restore or hide its rejection. Other protocol failures and restoration deadlines warn without failing
+scope cleanup. Capture checks cover dimensions and pixels beyond the native view and at the full page's far edge;
+screencast coverage checks overridden frame dimensions. This closes the reproduced ordering gap; it does not
+establish the cause of the earlier unrecorded failure.

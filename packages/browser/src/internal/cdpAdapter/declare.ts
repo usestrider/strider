@@ -4,15 +4,20 @@
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Semaphore from "effect/Semaphore"
+import * as Stream from "effect/Stream"
 import * as BrowserCdp from "../../cdp/Browser.ts"
 import * as Emulation from "../../cdp/Emulation.ts"
 import * as Fetch from "../../cdp/Fetch.ts"
 import * as Network from "../../cdp/Network.ts"
 import * as Page from "../../cdp/Page.ts"
+import * as Runtime from "../../cdp/Runtime.ts"
+import type * as Deadline from "../../Deadline.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Declarations from "../declarations.ts"
+import * as Operation from "../operation.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
 import { type ContextEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
 
@@ -40,12 +45,75 @@ const network = (
   ], { discard: true })
 }
 
+const dimensions = Effect.fnUntraced(function*(session: ProtocolClient.Session) {
+  const { result } = yield* Runtime.evaluate({ expression: "[innerWidth, innerHeight]", returnByValue: true }).pipe(
+    Protocol.on(session)
+  )
+  const value = result.value
+  if (!Array.isArray(value) || typeof value[0] !== "number" || typeof value[1] !== "number") {
+    return yield* Effect.fail(
+      new Protocol.ProtocolError({
+        reason: new Protocol.Decode({ method: "Runtime.evaluate", issue: "Expected viewport dimensions" })
+      })
+    )
+  }
+  return { width: value[0], height: value[1] }
+})
+
+const viewport = (
+  state: State,
+  target: TargetEntry,
+  effective: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
+) => {
+  const lock = target.viewportLock ??= Semaphore.makeUnsafe(1)
+  return lock.withPermits(1)(Effect.suspend(() => {
+    const override = (target.page === undefined ? effective : state.registry.overrides(placement(target.page))).get(
+      "Viewport"
+    )
+    if (override?._tag === "Viewport") {
+      return Effect.gen(function*() {
+        target.viewport ??= yield* dimensions(target.session)
+        yield* Emulation.setDeviceMetricsOverride({
+          width: override.width,
+          height: override.height,
+          deviceScaleFactor: override.deviceScaleFactor,
+          mobile: override.mobile
+        }).pipe(Protocol.on(target.session))
+      })
+    }
+    return Effect.gen(function*() {
+      // Subscribe before clearing: a resize can precede the command's reply (ROOK-145).
+      const resized = yield* target.session.subscribe(Page.frameResized)
+      const operation = yield* Operation.current
+      if (Option.isSome(operation)) operation.value.markSent()
+      yield* Emulation.clearDeviceMetricsOverride().pipe(Protocol.on(target.session))
+      if (Option.isSome(operation)) operation.value.markConfirmed()
+      const original = target.viewport
+      if (original === undefined) return
+      yield* Stream.concat(Stream.succeed(undefined), resized).pipe(
+        Stream.mapEffect(() =>
+          dimensions(target.session).pipe(Effect.tap((value) =>
+            Effect.sync(() => {
+              if (Option.isSome(operation)) operation.value.observe(value)
+            })
+          ))
+        ),
+        Stream.filter((value) => value.width === original.width && value.height === original.height),
+        Stream.take(1),
+        Stream.runDrain
+      )
+      target.viewport = undefined
+    }).pipe(Effect.scoped)
+  }))
+}
+
 const applyOverride = (
   state: State,
-  session: ProtocolClient.Session,
+  target: TargetEntry,
   kind: Adapter.Override["_tag"],
   effective: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
 ): Effect.Effect<void, Protocol.ProtocolError> => {
+  const session = target.session
   const on = Protocol.on(session)
   const override = effective.get(kind)
   if (kind === "Offline" || kind === "NetworkConditions") {
@@ -60,7 +128,7 @@ const applyOverride = (
   if (override === undefined) {
     switch (kind) {
       case "Viewport":
-        return Emulation.clearDeviceMetricsOverride().pipe(on)
+        return viewport(state, target, effective)
       case "UserAgent":
       case "Locale":
         return Emulation.setUserAgentOverride({ userAgent: state.defaultUserAgent }).pipe(
@@ -91,14 +159,7 @@ const applyOverride = (
   }
   switch (override._tag) {
     case "Viewport":
-      return Emulation.setDeviceMetricsOverride({
-        width: override.width,
-        height: override.height,
-        deviceScaleFactor: override.deviceScaleFactor,
-        mobile: override.mobile,
-        // Keep the native view unchanged so clearing restores the renderer synchronously (ROOK-145).
-        dontSetVisibleSize: true
-      }).pipe(on)
+      return viewport(state, target, effective)
     case "UserAgent":
       return Emulation.setUserAgentOverride({
         userAgent: override.userAgent,
@@ -215,7 +276,7 @@ const keepBodies = (state: State, target: TargetEntry, page: PageEntry) => {
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
 export const configureTarget = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
   const overrides = state.registry.overrides(placement(page))
-  yield* Effect.forEach(overrides, ([kind]) => applyOverride(state, target.session, kind, overrides), {
+  yield* Effect.forEach(overrides, ([kind]) => applyOverride(state, target, kind, overrides), {
     concurrency: "unbounded",
     discard: true
   })
@@ -233,33 +294,50 @@ const targetsInScope = (state: State, scope: Adapter.DeclarationScope) =>
     Declarations.covers(scope, placement(target.page))
   )
 
+const applyToTarget = (state: State, declaration: Adapter.Declaration, target: TargetEntry) => {
+  const page = target.page!
+  switch (declaration._tag) {
+    case "InitScript":
+      return applyScripts(state, target, page)
+    case "Intercept":
+    case "Challenges":
+      return applyIntercepts(state, target, page)
+    case "Override":
+      return applyOverride(state, target, declaration.override._tag, state.registry.overrides(placement(page)))
+    case "FileChooser":
+      return target.kind === "page"
+        ? Page.setInterceptFileChooserDialog({ enabled: state.registry.fileChooser(placement(page)) }).pipe(
+          Protocol.on(target.session)
+        ) :
+        Effect.void
+    case "BodyCollection":
+      return keepBodies(state, target, page)
+    case "Downloads":
+      return Effect.void
+  }
+}
+
 const applyDeclaration = (state: State, declaration: Adapter.Declaration, scope: Adapter.DeclarationScope) =>
+  Effect.forEach(targetsInScope(state, scope), (target) => applyToTarget(state, declaration, target), {
+    concurrency: "unbounded",
+    discard: true
+  })
+
+const releaseDeclaration = (state: State, declaration: Adapter.Declaration, scope: Adapter.DeclarationScope) =>
   Effect.forEach(targetsInScope(state, scope), (target) => {
-    const page = target.page!
-    switch (declaration._tag) {
-      case "InitScript":
-        return applyScripts(state, target, page)
-      case "Intercept":
-      case "Challenges":
-        return applyIntercepts(state, target, page)
-      case "Override":
-        return applyOverride(
-          state,
-          target.session,
-          declaration.override._tag,
-          state.registry.overrides(placement(page))
+    const applied = applyToTarget(state, declaration, target)
+    return (declaration._tag === "Override" && declaration.override._tag === "Viewport"
+      ? Effect.gen(function*() {
+        const record = yield* Operation.record
+        return yield* record.bound(
+          applied.pipe(Effect.interruptible),
+          () => Option.some("The renderer did not restore the viewport dimensions")
         )
-      case "FileChooser":
-        return target.kind === "page"
-          ? Page.setInterceptFileChooserDialog({ enabled: state.registry.fileChooser(placement(page)) }).pipe(
-            Protocol.on(target.session)
-          )
-          : Effect.void
-      case "BodyCollection":
-        return keepBodies(state, target, page)
-      case "Downloads":
-        return Effect.void
-    }
+      }).pipe(
+        Operation.named("Adapter.restoreViewport", { attributes: { "browser.page.id": target.page!.id } }),
+        Operation.detached
+      )
+      : applied).pipe(releaseErrors)
   }, { concurrency: "unbounded", discard: true })
 
 /** A context's download behavior, as the declarations in force say. */
@@ -275,9 +353,12 @@ export const applyDownloads = (state: State, context: ContextEntry) => {
   }).pipe(Protocol.on(state.root()))
 }
 
-const releaseErrors = <A>(effect: Effect.Effect<A, Protocol.ProtocolError>) =>
+const releaseErrors = <A>(effect: Effect.Effect<A, Protocol.ProtocolError | Deadline.Timeout>) =>
   effect.pipe(
-    Effect.catchIf((error) => error.reason._tag === "SessionEnded", () => Effect.void),
+    Effect.catchIf(
+      (error) => error._tag === "ProtocolError" && error.reason._tag === "SessionEnded",
+      () => Effect.void
+    ),
     Effect.ignore({ log: "Warn", message: "Failed to release CDP declaration" })
   )
 
@@ -299,7 +380,7 @@ export const declare = Effect.fnUntraced(function*(
             discard: true
           }
         )
-        : applyDeclaration(state, declaration, scope).pipe(releaseErrors)
+        : releaseDeclaration(state, declaration, scope)
     })
   )
   if (declaration._tag === "Downloads") {
