@@ -958,6 +958,22 @@ export const conformance = (backend: Backend) =>
             assert.strictEqual(thrown.exception.name, "Error")
           }), timeout)
 
+        it.effect("restores the viewport when released immediately after applying it", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { context, page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/hello`)
+            const width = yield* evaluate(world, page, "() => innerWidth")
+            yield* Effect.scoped(world.adapter.declare(
+              { _tag: "UserContext", context },
+              {
+                _tag: "Override",
+                override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+              }
+            ))
+            assert.strictEqual(yield* evaluate(world, page, "() => innerWidth"), width, "the viewport it had before")
+          }), timeout)
+
         it.effect("applies overrides to pages in scope, and restores them when released", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
