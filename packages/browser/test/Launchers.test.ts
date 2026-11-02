@@ -465,7 +465,8 @@ describe("WebKit launcher", () => {
                     yield* Deferred.await(progress.failed)
                     if (mode === "unreadable-after") yield* Deferred.await(progress.connectionClosed)
                     yield* Deferred.await(armed)
-                    const finished = yield* Fiber.await(fiber).pipe(Effect.timeoutOption("20 millis"))
+                    // Longer than the 100 ms readiness poll, so a resumed ownership attempt would show in `reads`.
+                    const finished = yield* Fiber.await(fiber).pipe(Effect.timeoutOption("250 millis"))
                     assert.isTrue(Option.isNone(finished), "the controlled launch deadline has not expired")
                     assert.strictEqual(
                       progress.stops(),
