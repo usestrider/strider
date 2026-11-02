@@ -95,7 +95,9 @@ const applyOverride = (
         width: override.width,
         height: override.height,
         deviceScaleFactor: override.deviceScaleFactor,
-        mobile: override.mobile
+        mobile: override.mobile,
+        // Keep the native view unchanged so clearing restores the renderer synchronously (ROOK-145).
+        dontSetVisibleSize: true
       }).pipe(on)
     case "UserAgent":
       return Emulation.setUserAgentOverride({
@@ -273,6 +275,12 @@ export const applyDownloads = (state: State, context: ContextEntry) => {
   }).pipe(Protocol.on(state.root()))
 }
 
+const releaseErrors = <A>(effect: Effect.Effect<A, Protocol.ProtocolError>) =>
+  effect.pipe(
+    Effect.catchIf((error) => error.reason._tag === "SessionEnded", () => Effect.void),
+    Effect.ignore({ log: "Warn", message: "Failed to release CDP declaration" })
+  )
+
 export const declare = Effect.fnUntraced(function*(
   state: State,
   scope: Adapter.DeclarationScope,
@@ -286,12 +294,12 @@ export const declare = Effect.fnUntraced(function*(
       return declaration._tag === "Downloads"
         ? Effect.forEach(
           [...state.contexts.values()],
-          (context) => applyDownloads(state, context).pipe(Effect.ignore),
+          (context) => applyDownloads(state, context).pipe(releaseErrors),
           {
             discard: true
           }
         )
-        : applyDeclaration(state, declaration, scope).pipe(Effect.ignore)
+        : applyDeclaration(state, declaration, scope).pipe(releaseErrors)
     })
   )
   if (declaration._tag === "Downloads") {

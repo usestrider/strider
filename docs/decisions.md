@@ -422,3 +422,20 @@ newer commit and reset readiness; and mutating published provenance or publishin
 correlation is released on completion or interruption, and all correlation state is cleared on navigable removal.
 The one retained completed failure is not a live reservation and is cleared when its document arrives or a normal
 commit supersedes it after outstanding correlation finishes. No public operation or policy is added.
+
+
+## Viewport restoration without resizing Chromium's native view
+
+A CDP viewport override sets `dontSetVisibleSize: true` (ROOK-145). Chromium can acknowledge clearing device
+metrics before its native-view resize reaches the renderer: an immediate release reproduced a successful clear
+followed by the overridden width. Keeping the native view unchanged removes that separate resize path; disabling
+emulation restores the renderer's original metrics. The viewport remains emulated, including when larger than the
+native view. Capture checks cover viewport and full-page dimensions and colored content beyond the native edges.
+
+Rejected: waiting after clearing until the original width returns. That adds a restoration wait dependent on frame
+production, including for hidden pages, when avoiding the native resize removes the ordering gap. The experimental
+CDP flag requires capture coverage because the native compositor surface no longer follows the emulated viewport.
+This closes the reproduced ordering gap; it does not establish the cause of the earlier unrecorded failure.
+
+Declaration release remains best-effort: a closed session is quiet; other protocol failures log a warning without
+failing scope cleanup. Silent rejection would leave a failed restoration indistinguishable from a successful clear.
