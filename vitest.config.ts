@@ -35,7 +35,7 @@ export default defineConfig({
       test: {
         name: "benchmark-tools",
         root: "packages/scenarios",
-        include: ["test/Benchmark.test.ts"]
+        include: ["test/*.test.ts"]
       }
     }, {
       extends: true,

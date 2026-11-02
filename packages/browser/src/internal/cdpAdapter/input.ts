@@ -12,6 +12,7 @@ import * as Protocol from "../../protocol/Protocol.ts"
 import type * as L1Target from "../../Target.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Gestures from "../input.ts"
 import { heldButton, keyCode, modifierBits } from "./mapping.ts"
 import { documentOf, type Event, frameOf, pageOf, type State } from "./state.ts"
 
@@ -24,11 +25,36 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     }
   })
 
-/** Page coordinates reach every frame, out of process too, so a frame changes nothing here. */
+const mouseCommand = (event: Extract<Adapter.InputEvent, { _tag: "Mouse" }>) =>
+  Input.dispatchMouseEvent({
+    type: event.type === "move" ? "mouseMoved" : event.type === "down" ? "mousePressed" : "mouseReleased",
+    x: event.x,
+    y: event.y,
+    // Chromium starts an HTML drag only when the move names the button held.
+    button: event.type === "move" ? heldButton(event.buttons) : event.button,
+    buttons: event.buttons,
+    clickCount: event.clickCount,
+    modifiers: modifierBits(event.modifiers)
+  })
+
+/** Page coordinates reach every frame; pages with child frames keep sequential acknowledgments. */
 export const dispatchInput = Effect.fnUntraced(
   function*(state: State, id: L1Target.NavigableId, events: ReadonlyArray<Adapter.InputEvent>) {
     const page = yield* pageOf(state, id)
     const on = Protocol.on(page.target.session)
+    const click = Gestures.singleClick(events)
+    if (
+      click !== undefined && state.navigables.get(page.id)?.children.size === 0 &&
+      !state.interceptingDrags.has(page.id) && !state.drags.has(page.id) &&
+      (state.heldButtons.get(page.id) ?? 0) === 0
+    ) {
+      // ROOK-123: the move's reply waits a rendering frame, which a complete unheld click needn't spend. Its commands
+      // go out as one step, so an interruption can't leave the button pressed, and only the replies overlap.
+      // Drags, held buttons, double clicks and modifier transitions stay sequential, and so does frame routing,
+      // coordinate clicks included. With drag interception on, a late drag needs the sequential path's cancellation.
+      yield* Kit.protocol(page.target.session.sendOrdered(click.map(mouseCommand)))
+      return
+    }
     for (const event of events) {
       switch (event._tag) {
         case "Mouse": {
@@ -74,19 +100,7 @@ export const dispatchInput = Effect.fnUntraced(
             state.interceptingDrags.add(page.id)
             yield* Kit.protocol(Input.setInterceptDrags({ enabled: true }).pipe(on))
           }
-          yield* Kit.protocol(
-            Input.dispatchMouseEvent({
-              type: event.type === "move" ? "mouseMoved" : event.type === "down" ? "mousePressed" : "mouseReleased",
-              x: event.x,
-              y: event.y,
-              // A move names the button held, as a platform's drag does: Chromium starts an HTML drag only then
-              button: event.type === "move" ? heldButton(event.buttons) : event.button,
-              // What L1 says is held: Chromium reports none on a move otherwise
-              buttons: event.buttons,
-              clickCount: event.clickCount,
-              modifiers: modifierBits(event.modifiers)
-            }).pipe(on)
-          )
+          yield* Kit.protocol(mouseCommand(event).pipe(on))
           break
         }
         case "Wheel":

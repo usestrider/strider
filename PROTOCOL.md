@@ -87,6 +87,13 @@ interface ErrorMatcher {
 ## Protocol client
 
 - **Commands are yieldable values.** `yield* Page.navigate({ url })` runs on the session in `R`, and `.pipe(Protocol.on(session))` picks a session explicitly.
+- **Ordered sends with overlapping replies.** The internal session's `sendOrdered` writes its commands to the
+  transport in order as one step, which interruption doesn't split, then waits for every reply, regardless of reply
+  order. A failure or interruption then stops waiting; what was written can't be taken back.
+  CDP uses this for a single move/press/release click at one point, without held buttons or modifier transitions.
+  Pages with child frames or HTML drag interception enabled, drags, multiple clicks, and other input sequences
+  keep their sequential dispatch. The frame restriction also applies to coordinate clicks, whose target frame
+  is unknown before dispatch. Generated commands and the public protocol session API are unchanged.
 - **Pending map.** Pending commands sit in a map from id to resumer. Interrupting the caller removes its entry and tombstones the id, so a late reply is dropped. Replies to commands that create resources are still routed to their owner for adoption or cleanup.
 - **No remote cancel.** No protocol can cancel a command; interruption only abandons the reply. Compensation metadata on generated commands tells L1 what to undo, for example releasing input or resolving a paused request.
 - **Timeouts** come from the operation deadline (L1), with a protocol-level fallback default for raw L0 use.

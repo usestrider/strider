@@ -3,9 +3,10 @@
  * resynchronization and overload. The fold here stands in for an adapter's model.
  */
 import { assert, describe, it } from "@effect/vitest"
+import * as Input from "@usestrider/browser/cdp/Input"
 import * as Page from "@usestrider/browser/cdp/Page"
 import * as Target from "@usestrider/browser/cdp/Target"
-import { Protocol } from "@usestrider/browser/protocol"
+import { Protocol, Transport } from "@usestrider/browser/protocol"
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -94,6 +95,165 @@ const reasonOf = <A>(exit: Exit.Exit<A, Protocol.ProtocolError>) => {
 }
 
 describe("ProtocolClient", () => {
+  const click = () =>
+    ["mouseMoved", "mousePressed", "mouseReleased"].map((type) =>
+      Input.dispatchMouseEvent({ type: type as "mouseMoved" | "mousePressed" | "mouseReleased", x: 10, y: 20 })
+    )
+
+  it.effect("orders transport sends even when one suspends, and waits for every out-of-order reply", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const entered = yield* Deferred.make<void>()
+      const proceed = yield* Deferred.make<void>()
+      const attempts: Array<string> = []
+      const client = yield* ProtocolClient.make({
+        ...browser.transport,
+        send: Effect.fnUntraced(function*(message: string) {
+          const type = JSON.parse(message).params.type
+          attempts.push(type)
+          if (type === "mouseMoved") {
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(proceed)
+          }
+          yield* browser.transport.send(message)
+        })
+      }, CdpWire.wire)
+      const fiber = yield* client.root.sendOrdered(click()).pipe(Effect.forkChild)
+      yield* Deferred.await(entered)
+      yield* Effect.yieldNow
+      assert.deepStrictEqual(attempts, ["mouseMoved"])
+      yield* Deferred.succeed(proceed, undefined)
+      const sent = [yield* browser.next, yield* browser.next, yield* browser.next]
+      assert.deepStrictEqual(sent.map((message) => message.params?.type), [
+        "mouseMoved",
+        "mousePressed",
+        "mouseReleased"
+      ])
+      for (const message of sent.slice(1).reverse()) yield* browser.receive({ id: message.id, result: {} })
+      yield* browser.delivered
+      assert.isUndefined(fiber.pollUnsafe())
+      yield* browser.receive({ id: sent[0]!.id, result: {} })
+      yield* Fiber.join(fiber)
+    }))
+
+  it.effect("a rejected reply still lets every send finish, so a press never goes without its release", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const entered = yield* Deferred.make<void>()
+      const proceed = yield* Deferred.make<void>()
+      const attempts: Array<string> = []
+      const client = yield* ProtocolClient.make({
+        ...browser.transport,
+        send: Effect.fnUntraced(function*(message: string) {
+          const type = JSON.parse(message).params.type
+          attempts.push(type)
+          if (type === "mousePressed") {
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(proceed)
+          }
+          yield* browser.transport.send(message)
+        })
+      }, CdpWire.wire)
+      const fiber = yield* client.root.sendOrdered(click()).pipe(Effect.forkChild)
+      const first = yield* browser.next
+      yield* Deferred.await(entered)
+      yield* browser.receive({ id: first.id, error: { code: -32000, message: "rejected" } })
+      yield* browser.delivered
+      assert.isUndefined(fiber.pollUnsafe())
+      yield* Deferred.succeed(proceed, undefined)
+      assert.strictEqual(reasonOf(yield* Fiber.await(fiber))._tag, "Rejected")
+      assert.deepStrictEqual(attempts, ["mouseMoved", "mousePressed", "mouseReleased"])
+    }))
+
+  it.effect("a partial transport failure stops unsent commands and abandons earlier replies", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const attempts: Array<string> = []
+      const client = yield* ProtocolClient.make({
+        ...browser.transport,
+        send: Effect.fnUntraced(function*(message: string) {
+          const type = JSON.parse(message).params.type
+          attempts.push(type)
+          if (type === "mousePressed") {
+            return yield* Effect.fail(
+              new Transport.TransportError({
+                reason: new Transport.ConnectionLost({ initiator: "remote", description: "send failed" })
+              })
+            )
+          }
+          yield* browser.transport.send(message)
+        })
+      }, CdpWire.wire)
+      const fiber = yield* client.root.sendOrdered(click()).pipe(Effect.forkChild)
+      const first = yield* browser.next
+      assert.strictEqual(reasonOf(yield* Fiber.await(fiber))._tag, "SessionEnded")
+      assert.deepStrictEqual(attempts, ["mouseMoved", "mousePressed"])
+      yield* browser.receive({ id: first.id, result: {} })
+      yield* browser.delivered
+      assert.strictEqual(yield* browser.pending, 0)
+    }))
+
+  it.effect("interruption during a suspended send finishes every send, then stops waiting", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const entered = yield* Deferred.make<void>()
+      const proceed = yield* Deferred.make<void>()
+      const attempts: Array<string> = []
+      const client = yield* ProtocolClient.make({
+        ...browser.transport,
+        send: Effect.fnUntraced(function*(message: string) {
+          const type = JSON.parse(message).params.type
+          attempts.push(type)
+          if (type === "mousePressed") {
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(proceed)
+          }
+          yield* browser.transport.send(message)
+        })
+      }, CdpWire.wire)
+      const fiber = yield* client.root.sendOrdered(click()).pipe(Effect.forkChild)
+      yield* Deferred.await(entered)
+      const interrupted = yield* Fiber.interrupt(fiber).pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      assert.isUndefined(interrupted.pollUnsafe())
+      assert.deepStrictEqual(attempts, ["mouseMoved", "mousePressed"])
+      yield* Deferred.succeed(proceed, undefined)
+      yield* Fiber.join(interrupted)
+      assert.deepStrictEqual(attempts, ["mouseMoved", "mousePressed", "mouseReleased"])
+    }))
+
+  it.effect("interruption while waiting for replies abandons them all without poisoning the next command", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+      const fiber = yield* client.root.sendOrdered(click()).pipe(Effect.forkChild)
+      const sent = [yield* browser.next, yield* browser.next, yield* browser.next]
+      yield* Fiber.interrupt(fiber)
+      for (const message of sent) yield* browser.receive({ id: message.id, result: {} })
+      const next = yield* client.root.send(Page.enable()).pipe(Effect.forkChild)
+      const command = yield* browser.next
+      yield* browser.receive({ id: command.id, result: {} })
+      yield* Fiber.join(next)
+    }))
+
+  it.effect("an ordered batch timeout abandons all replies without poisoning the next command", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+      const fiber = yield* client.root.sendOrdered(click()).pipe(
+        Protocol.withCommandTimeout("200 millis"),
+        Effect.forkChild
+      )
+      const sent = [yield* browser.next, yield* browser.next, yield* browser.next]
+      assert.strictEqual(reasonOf(yield* Fiber.await(fiber))._tag, "NoReply")
+      for (const message of sent) yield* browser.receive({ id: message.id, result: {} })
+      const next = yield* client.root.send(Page.enable()).pipe(Effect.forkChild)
+      const command = yield* browser.next
+      yield* browser.receive({ id: command.id, result: {} })
+      yield* Fiber.join(next)
+      assert.strictEqual(yield* browser.pending, 0)
+    }))
+
   it.effect("folds an event before publishing it", () =>
     Effect.gen(function*() {
       const browser = yield* makeBrowser

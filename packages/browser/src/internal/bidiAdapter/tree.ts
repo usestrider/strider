@@ -32,6 +32,16 @@ export const endNavigation = (
   evidence: string
 ) =>
   Kit.endNavigation(state.buffer, navigation, outcome, evidence, (navigation) => {
+    if (outcome._tag === "Failed" && Option.isNone(outcome.errorDocument)) {
+      navigation.navigable.failedNavigation = {
+        id: navigation.id,
+        url: navigation.url,
+        initiatedAs: "crossDocument",
+        bidi: navigation.bidi
+      }
+    }
+    // Outstanding commands and their unresolved terminal correlations still need this identity.
+    if (navigation.navigable.navigationCommands.size > 0 || navigation.navigable.pendingTerminals.length > 0) return
     navigation.navigable.navigations.delete(navigation.bidi)
     if (state.navigations.get(navigation.bidi) === navigation) state.navigations.delete(navigation.bidi)
   })
@@ -47,6 +57,16 @@ export const removeNavigable = (
   evidence: string
 ) =>
   Kit.removeNavigable(state.buffer, navigable, reason, evidence, (navigable, reason) => {
+    navigable.navigationCommands.clear()
+    navigable.commandNavigations.clear()
+    navigable.pendingTerminals.length = 0
+    navigable.failedNavigation = undefined
+    navigable.expected.list.length = 0
+    for (const [bidi, navigation] of navigable.navigations) {
+      navigation.ended = true
+      if (state.navigations.get(bidi) === navigation) state.navigations.delete(bidi)
+    }
+    navigable.navigations.clear()
     state.navigables.delete(navigable.bidi)
     state.navigablesById.delete(navigable.id)
     if (navigable.document !== undefined) {
@@ -137,10 +157,12 @@ export const startNavigation = (
   url: string,
   type: Adapter.InitiatedAs,
   sameDocument: boolean,
-  /** A command's expectation, already taken; otherwise the first that matches is. */
-  taken?: { readonly id: PageNavigation.Id; readonly initiatedAs: Adapter.InitiatedAs }
+  /** A command's expectation, already taken; null means no match, undefined takes one here. */
+  taken?: { readonly id: PageNavigation.Id; readonly initiatedAs: Adapter.InitiatedAs } | null
 ): NavigationEntry => {
-  const expected = taken ?? Kit.take(navigable.expected, url)
+  const bound = navigable.commandNavigations.get(bidi)
+  navigable.commandNavigations.delete(bidi)
+  const expected = bound ?? (taken === undefined ? Kit.take(navigable.expected, url) : taken)
   const initiatedAs = expected?.initiatedAs ?? type
   const navigation: NavigationEntry = {
     id: expected?.id ?? state.ids.navigation(),
@@ -153,7 +175,9 @@ export const startNavigation = (
     status: undefined,
     ended: false
   }
-  if (!sameDocument) {
+  // An unannounced terminal event can be older than a navigation already in flight,
+  // even when its command reply supplied an identity. Only a start supersedes that navigation.
+  if (!sameDocument && taken !== null) {
     // A navigable has one cross-document navigation at a time: a new one replaces the one in flight
     for (const pending of Array.from(navigable.navigations.values())) {
       if (!pending.sameDocument) {
@@ -223,6 +247,10 @@ export const addNavigable = (state: State, info: {
     pendingRealms: [],
     restoring: undefined,
     expected: Kit.makeExpectations(),
+    navigationCommands: new Set(),
+    commandNavigations: new Map(),
+    pendingTerminals: [],
+    failedNavigation: undefined,
     past: new Map(),
     navigations: new Map(),
     removed: false

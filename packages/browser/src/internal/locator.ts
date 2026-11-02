@@ -826,7 +826,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           new Reason.InvalidInput({
             input: "value",
             expected: `a value ${final.element} takes`,
-            hint: "The input refused the value; a date input takes a date such as 2026-10-23"
+            hint: "Use a value the input accepts, such as a finite number for number inputs or 2026-10-23 for dates"
           }),
           id
         )
@@ -1003,11 +1003,12 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     })
   }
 
-  /** `check` and `uncheck`: nothing when it is already so; else a click, and the state read again. */
+  /** `check` and `uncheck`: nothing when it is already so; else a pointer action, checking the result unless trial. */
   private setChecked(operation: string, checked: boolean, options: Locator.PointerOptions | undefined) {
     const expected = checked ? "checked" : "unchecked"
     return Effect.gen({ self: this }, function*() {
-      const now = yield* this.isChecked.pipe(
+      const read = this.readOne(operation, { _tag: "Checked", followLabel: true }, (value) => value as boolean)
+      const now = yield* read.pipe(
         Effect.catchIf(
           (error): error is Locator.LocatorError => Locator.isLocatorError(error) && error.reason._tag === "NoMatch",
           () => Effect.succeed(undefined)
@@ -1019,7 +1020,8 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         options,
         (state, point) => Input.click(state, point, "left", 1, options?.modifiers ?? [])
       )
-      const after = yield* this.isChecked
+      if (options?.trial === true) return
+      const after = yield* read
       if (after !== checked) {
         return yield* Effect.fail(this.error(
           operation,
@@ -1043,6 +1045,17 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     options: Locator.ActionOptions | undefined
   ) {
     const text = Redacted.isRedacted(value) ? Redacted.value(value) : value
+    if (typeof text !== "string") {
+      return Effect.fail(this.error(
+        operation,
+        new Reason.InvalidInput({
+          input: "value",
+          expected: "a string or Redacted string",
+          hint: "Fill requires text"
+        }),
+        Operation.idNow()
+      ))
+    }
     return this.act(
       operation,
       options,
@@ -1205,7 +1218,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         /** Sends input to the page, into the frame the element is in. */
         readonly send: (
           events: ReadonlyArray<Adapter.InputEvent>
-        ) => Effect.Effect<void, Locator.LocatorError | Target.TargetGone>
+        ) => Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
         /** Removes the guard the round armed: what stopped the gesture, if anything did. */
         readonly disarm: Effect.Effect<Option.Option<string>>
       },
@@ -1223,18 +1236,27 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       const id = record.id
       const budget = record.budget
       const checks = checksFor(defaults, options?.checks)
+      const reuseStability = operation === "Locator.click" && checks.stable > 0
       const emulatesFocus = yield* Filters.supported(owner.runtime, "emulation.focus")
       // These actions happen in the round that applies them: once it is sent, the action may have happened, and
       // its answer says whether it did
       const inRound = action._tag === "Focus" || action._tag === "Scroll" || action._tag === "Fill" ||
         action._tag === "Select"
-      const round = (cap: number, apply: boolean) =>
+      const round = (cap: number, apply: boolean, stability?: string) =>
         Effect.suspend(() => {
           if (apply && inRound) record.markSent()
           return Runtime.sendRouted(
             owner.runtime,
             owner.page,
-            { op: "act", steps: this.steps, checks, cap, action, apply },
+            {
+              op: "act",
+              steps: this.steps,
+              checks,
+              cap,
+              action,
+              apply,
+              ...(stability === undefined ? {} : { stability })
+            },
             id,
             budget.at
           )
@@ -1351,12 +1373,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
                     id,
                     failure.reason._tag === "Unsupported" ? { _tag: "NotSent" } : { _tag: "MayHaveBeenSent" }
                   )
-                  : this.error(
-                    operation,
-                    new Reason.BackendFailure({ kind: "Rejected", method: "input", hint: "deadline" }),
-                    id,
-                    { _tag: "MayHaveBeenSent" }
-                  )
+                  : timedOut()
               )
             )
           }
@@ -1366,17 +1383,21 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         while (true) {
           const left = record.left()
           if (left <= 0) return yield* Effect.fail(timedOut())
-          const first = yield* round(Runtime.roundCap(left), false).pipe(Effect.flatMap(settle))
+          const first = yield* round(Runtime.roundCap(left), false, reuseStability ? "capture" : undefined).pipe(
+            Effect.flatMap(settle)
+          )
           if (Option.isNone(first)) continue
           // Input to a page is serialized; acquiring the permit takes from the deadline, and the checks run again
-          const outcome = yield* owner.page.input.withPermit(Effect.gen({ self: this }, function*() {
+          const underPermit = Effect.fnUntraced(function*(this: LocatorImpl, stability?: string) {
             const apply = options?.trial !== true
-            const answer = yield* round(Runtime.roundCap(record.left()), apply)
+            const answer = yield* round(Runtime.roundCap(record.left()), apply, stability)
             const disarm = this.disarm(answer.routed.document, id)
             const again = yield* settle(answer).pipe(
               // A guard the round armed comes off when the point outside its frame wasn't ready
               Effect.tap((ready) =>
-                Option.isNone(ready) && apply && answer.response._tag === "Ready" ? Effect.ignore(disarm) : Effect.void
+                Option.isNone(ready) && apply && answer.response._tag === "Ready"
+                  ? Effect.ignore(disarm)
+                  : Effect.void
               )
             )
             if (Option.isNone(again)) return "again" as const
@@ -1388,7 +1409,18 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             record.markNotSent()
             record.observe(done.retry)
             return "again" as const
-          })).pipe((permitted) => record.bound(permitted, () => hint()))
+          }).bind(this)
+          const permitted = Effect.gen(function*() {
+            if (reuseStability) {
+              const immediate = yield* owner.page.input.withPermitsIfAvailable(1)(
+                underPermit(first.value.response.stability)
+              )
+              if (Option.isSome(immediate)) return immediate.value
+            }
+            // Queued input always takes new stability samples, even if the page hasn't rendered while waiting.
+            return yield* owner.page.input.withPermit(underPermit())
+          })
+          const outcome = yield* record.bound(permitted, () => hint())
           if (outcome === "done") return
         }
       })

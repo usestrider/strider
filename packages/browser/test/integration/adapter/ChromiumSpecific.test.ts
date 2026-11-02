@@ -5,17 +5,22 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
+import { Browser, Deadline, Expect } from "@usestrider/browser"
 import * as Page from "@usestrider/browser/cdp/Page"
 import * as Target from "@usestrider/browser/cdp/Target"
 import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Adapter from "../../../src/internal/adapter.ts"
+import * as BrowserImpl from "../../../src/internal/browser.ts"
 import * as CdpAdapter from "../../../src/internal/cdpAdapter.ts"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
+import { LocatorImpl } from "../../../src/internal/locator.ts"
 import * as L1Target from "../../../src/Target.ts"
 import { assertPinned, chromium } from "../browsers.ts"
 import { makeRecorder, site } from "./harness.ts"
@@ -26,6 +31,265 @@ const timeout = 60_000
 describe("Chromium adapter, CDP only", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
+      it.effect(
+        "click sends stay ordered across a suspended transport and do not wait for earlier acknowledgments",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const entered = yield* Deferred.make<void>()
+            const proceed = yield* Deferred.make<void>()
+            const allSent = yield* Deferred.make<void>()
+            const sent: Array<string> = []
+            const ids = new Set<number>()
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+              return yield* CdpAdapter.connect({
+                ...transport,
+                send: Effect.fnUntraced(function*(message: string) {
+                  const wire = JSON.parse(message)
+                  if (wire.method === "Input.dispatchMouseEvent") {
+                    if (sent.length === 0) {
+                      yield* Deferred.succeed(entered, undefined)
+                      yield* Deferred.await(proceed)
+                    }
+                    ids.add(wire.id)
+                    sent.push(wire.params.type)
+                  }
+                  yield* transport.send(message)
+                  if (sent.length === 3) yield* Deferred.succeed(allSent, undefined)
+                }),
+                messages: transport.messages.pipe(Stream.mapEffect((message) =>
+                  ids.has(JSON.parse(message).id)
+                    ? Effect.as(Deferred.await(allSent), message)
+                    : Effect.succeed(message)
+                ))
+              }, { sink, ownership: "launched" })
+            }))
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const html =
+                `<button id="go">Go</button><script>window.log=[];for(const type of ['mousemove','mousedown','mouseup','click'])document.getElementById('go').addEventListener(type,e=>log.push([e.type,e.isTrusted,e.buttons]));</script>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              const click = yield* page.locator("#go").click().pipe(Deadline.within("5 seconds"), Effect.forkChild)
+              yield* Deferred.await(entered)
+              assert.deepStrictEqual(sent, [])
+              yield* Deferred.succeed(proceed, undefined)
+              yield* Fiber.join(click)
+              assert.deepStrictEqual(sent, ["mouseMoved", "mousePressed", "mouseReleased"])
+              assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), [
+                ["mousemove", true, 0],
+                ["mousedown", true, 1],
+                ["mouseup", true, 0],
+                ["click", true, 0]
+              ])
+            }).pipe(Effect.provide(backend))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "keeps click acknowledgments sequential after enabling HTML drag interception",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const pending = new Set<number>()
+            let interceptionEnabled = false
+            let check = false
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+              return yield* CdpAdapter.connect({
+                ...transport,
+                send: (message) =>
+                  Effect.suspend(() => {
+                    const wire = JSON.parse(message)
+                    if (wire.method === "Input.setInterceptDrags") interceptionEnabled = wire.params.enabled
+                    if (check && wire.method === "Input.dispatchMouseEvent") {
+                      assert.strictEqual(pending.size, 0)
+                      pending.add(wire.id)
+                    }
+                    return transport.send(message)
+                  }),
+                messages: transport.messages.pipe(Stream.map((message) => {
+                  pending.delete(JSON.parse(message).id)
+                  return message
+                }))
+              }, { sink, ownership: "launched" })
+            }))
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const html =
+                `<button id="go" onclick="this.textContent='Clicked'">Go</button><div id="card" draggable="true" style="position:absolute;left:0;top:100px;width:40px;height:40px">Card</div><div id="bin" style="position:absolute;left:300px;top:100px;width:40px;height:40px" ondragover="event.preventDefault()" ondrop="event.preventDefault()">Bin</div>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.locator("#card").dragTo(page.locator("#bin"), { steps: 5 })
+              assert.isTrue(interceptionEnabled)
+              check = true
+              yield* page.locator("#go").click()
+              assert.strictEqual(yield* page.locator("#go").readText, "Clicked")
+              assert.strictEqual(pending.size, 0)
+            }).pipe(Effect.provide(backend))
+          }),
+        timeout
+      )
+
+      for (const crossSite of [false, true]) {
+        it.effect(
+          `keeps click acknowledgments sequential on a page with a ${crossSite ? "cross-site" : "same-site"} frame`,
+          () =>
+            Effect.gen(function*() {
+              const served = yield* site
+              const pending = new Set<number>()
+              const sent: Array<string> = []
+              const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+                const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+                return yield* CdpAdapter.connect({
+                  ...transport,
+                  send: (message) =>
+                    Effect.suspend(() => {
+                      const wire = JSON.parse(message)
+                      if (wire.method === "Input.dispatchMouseEvent") {
+                        assert.strictEqual(
+                          pending.size,
+                          0,
+                          "the preceding input must be acknowledged before the next send"
+                        )
+                        pending.add(wire.id)
+                        sent.push(wire.params.type)
+                      }
+                      return transport.send(message)
+                    }),
+                  messages: transport.messages.pipe(Stream.map((message) => {
+                    pending.delete(JSON.parse(message).id)
+                    return message
+                  }))
+                }, { sink, ownership: "launched" })
+              }))
+              yield* Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                const child =
+                  `<body style="margin:0"><button style="width:100px;height:100px" onclick="this.textContent=String(Number(this.textContent)+1)">0</button><script>for(const type of ['mousemove','mousedown','mouseup','click'])document.addEventListener(type,e=>document.body.setAttribute('data-events',(document.body.getAttribute('data-events')||'')+e.type+','),true)</script>`
+                const childUrl = `${crossSite ? served.crossSite : served.origin}/fixture?html=${
+                  encodeURIComponent(child)
+                }`
+                const parent = `<body style="margin:0"><iframe style="border:0" src="${childUrl}"></iframe>`
+                yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(parent)}`)
+                const frame = page.frame(page.locator("iframe"))
+                yield* frame.getByRole("button").pipe(Expect.toHaveText("0"))
+                const snapshot = yield* page.snapshot()
+                const button = [...snapshot.refs].find(([ref, node]) =>
+                  ref.startsWith("f1") && node.role.role === "button"
+                )!
+                yield* snapshot.ref(button[0]).click()
+                yield* frame.getByRole("button").pipe(Expect.toHaveText("1"))
+                // Coordinate input has no frame argument: the page's frame tree must protect it too.
+                yield* page.mouse.click({ x: 50, y: 50 })
+                yield* frame.getByRole("button").pipe(Expect.toHaveText("2"))
+                assert.strictEqual(
+                  yield* frame.locator("body").evaluate((el) => el.getAttribute("data-events")),
+                  "mousemove,mousedown,mouseup,click,mousemove,mousedown,mouseup,click,"
+                )
+                assert.deepStrictEqual(sent, [
+                  "mouseMoved",
+                  "mousePressed",
+                  "mouseReleased",
+                  "mouseMoved",
+                  "mousePressed",
+                  "mouseReleased"
+                ])
+                assert.strictEqual(pending.size, 0)
+              }).pipe(Effect.provide(backend))
+            }),
+          timeout
+        )
+      }
+
+      for (const stop of ["interrupted", "mouse interrupted", "rejected", "deadline"] as const) {
+        it.effect(
+          `a click ${stop} with its replies outstanding has sent its release, and the next gesture works`,
+          () =>
+            Effect.gen(function*() {
+              const served = yield* site
+              const released = yield* Deferred.make<void>()
+              let pressId: number | undefined
+              const sent: Array<string> = []
+              const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+                const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+                return yield* CdpAdapter.connect({
+                  ...transport,
+                  send: Effect.fnUntraced(function*(message: string) {
+                    const wire = JSON.parse(message)
+                    if (wire.method === "Input.dispatchMouseEvent") {
+                      if (wire.params.type === "mousePressed" && pressId === undefined) pressId = wire.id
+                      sent.push(wire.params.type)
+                    }
+                    yield* transport.send(message)
+                    if (wire.method === "Input.dispatchMouseEvent" && wire.params.type === "mouseReleased") {
+                      yield* Deferred.succeed(released, undefined)
+                    }
+                  }),
+                  // The first press's reply: rejected, or never answered, so its click can't finish on its own
+                  messages: transport.messages.pipe(
+                    Stream.filter((message) =>
+                      stop === "rejected" || pressId === undefined || JSON.parse(message).id !== pressId
+                    ),
+                    Stream.map((message) => {
+                      const wire = JSON.parse(message)
+                      return wire.id === pressId && pressId !== undefined
+                        ? JSON.stringify({
+                          id: wire.id,
+                          sessionId: wire.sessionId,
+                          error: { code: -32000, message: "test rejection after press" }
+                        })
+                        : message
+                    })
+                  )
+                }, { sink, ownership: "launched" })
+              }))
+              yield* Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                const html =
+                  `<button id="go">Go</button><script>window.log=[];for(const type of ['mousedown','mouseup','click'])document.getElementById('go').addEventListener(type,e=>log.push(e.type));</script>`
+                yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+                const target = page.locator("#go")
+                assert(target instanceof LocatorImpl)
+                const click = yield* Effect.gen(function*() {
+                  if (stop === "mouse interrupted") yield* page.mouse.click({ x: 20, y: 20 })
+                  else yield* target.click()
+                }).pipe(
+                  Deadline.within(stop === "deadline" ? "2 seconds" : "10 seconds"),
+                  Effect.forkChild
+                )
+                yield* Deferred.await(released)
+                if (stop === "interrupted" || stop === "mouse interrupted") {
+                  yield* Fiber.interrupt(click)
+                } else {
+                  const error = yield* Fiber.join(click).pipe(Effect.flip)
+                  if (stop === "deadline") assert.isTrue(Deadline.isTimeout(error), String(error))
+                  else assert.strictEqual(error._tag, "LocatorError")
+                }
+                assert.isTrue(Option.isNone(target.owner.page.inputState.broken))
+                yield* target.click()
+                assert.deepStrictEqual(sent, [
+                  "mouseMoved",
+                  "mousePressed",
+                  "mouseReleased",
+                  "mouseMoved",
+                  "mousePressed",
+                  "mouseReleased"
+                ])
+                assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), [
+                  "mousedown",
+                  "mouseup",
+                  "click",
+                  "mousedown",
+                  "mouseup",
+                  "click"
+                ])
+              }).pipe(Effect.provide(backend))
+            }),
+          timeout
+        )
+      }
+
       it.effect(
         "ends a crashed page with PageCrashed; a second client on the same browser crashes it",
         () =>
