@@ -331,9 +331,14 @@ answers is canceled.
 **Chromium sent headers wait for attribution, not merely arrival.** CDP reuses a request id across redirects,
 allows ExtraInfo before the corresponding main event, and does not emit ExtraInfo for every hop. A main request
 followed by request ExtraInfo therefore cannot tell us whether those headers belong to that hop or to its
-unannounced successor. The redirect and response flags identify the hops that consume each ordered ExtraInfo
-stream. We wait for that information before publishing definitive sent headers, even though this changes the
-timing of `NetworkRequest.headersSent` for slow or outstanding Chromium requests (ROOK-104).
+unannounced successor. Early headers wait in `ahead`; outstanding expectations in `owed` retain the hop and
+phase, so a late report satisfies the earliest expectation for its phase without changing another hop's headers.
+The redirect flag determines whether the preceding hop expects both phases; for a final network response,
+`hasExtraInfo: true` registers both expectations and holds the response for its headers. A final response from
+a cache, service worker or route does not wait even if that flag is true, and uses the request event's headers
+when sent headers have not already been reported. A failure assigns only already-queued headers to the last hop.
+Correct attribution takes precedence over prompt publication for slow or outstanding Chromium requests
+(ROOK-104).
 
 The wait uses the operation's deadline. A hop's end, including failure or cancellation, or its page's removal
 settles it promptly with the available sent headers, otherwise the request snapshot's headers. Page removal
