@@ -1,5 +1,6 @@
 /** Controlled CDP ordering for races that need not rely on browser timing. */
 import { assert, describe, it } from "@effect/vitest"
+import { Url } from "@usestrider/browser"
 import { CdpConnection } from "@usestrider/browser/protocol"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -122,7 +123,7 @@ describe("CDP claim discovery", () => {
           context: h.state.ids.userContext(),
           kind: "tab",
           origin: { _tag: "Created" },
-          url: "https://same.example/" as never
+          url: Url.Url.make("https://same.example/")
         })
       })
       assert.strictEqual(yield* Fiber.join(result), h.id)

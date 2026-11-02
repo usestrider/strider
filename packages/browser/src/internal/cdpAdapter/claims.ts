@@ -1,4 +1,4 @@
-/** Chromium claims use native tab parentage, never URL matching or a connection-local public id. */
+/** Chromium claims discover active page identity through tab attachment, never URL matching. */
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
@@ -83,23 +83,31 @@ export const make = (
       if (info?.browserContextId === undefined) {
         return yield* Effect.fail(Kit.unsupported("claims.contextIdentity", "Chromium did not report the page context"))
       }
-      let tab: Target.TargetInfo | undefined
-      for (
-        const candidate of targetInfos.filter((target) =>
-          target.type === "tab" && target.browserContextId === info.browserContextId
-        )
-      ) {
-        const child = yield* childOf(candidate)
-        if (child?.targetId === page.targetId) {
-          tab = candidate
-          break
-        }
-      }
-      if (tab === undefined) {
+      const candidates = targetInfos.filter((target) =>
+        target.type === "tab" && target.browserContextId === info.browserContextId
+      )
+      if (candidates.length === 0) {
         return yield* Effect.fail(
-          Kit.unsupported("claims.tabIdentity", "Chromium did not report a tab owning this page")
+          Kit.unsupported("claims.tabIdentity", "Chromium did not report any tab in the page's context")
         )
       }
+      // Only a match can win. A sibling with no active child must not block discovery of this page.
+      // A sibling that vanished is irrelevant; other protocol failures keep their normal error contract.
+      const probes = candidates.map((candidate) =>
+        childOf(candidate).pipe(
+          Effect.flatMap((child) => child?.targetId === page.targetId ? Effect.succeed(candidate) : Effect.never),
+          Effect.catch((error) => {
+            const reason = error.reason
+            const gone = reason._tag === "Gone" || (reason._tag === "Protocol" && (
+              (reason.error.reason._tag === "Rejected" && reason.error.reason.reason === "NoSuchTarget") ||
+              (reason.error.reason._tag === "SessionEnded" &&
+                ["detached", "targetDestroyed", "swapped"].includes(reason.error.reason.why))
+            ))
+            return gone ? Effect.never : Effect.fail(error)
+          })
+        )
+      )
+      const tab = yield* probes.slice(1).reduce((first, next) => Effect.raceFirst(first, next), probes[0]!)
       return { browser, tab: tab.targetId, context: info.browserContextId }
     }),
     context: Effect.fnUntraced(function*(id) {
@@ -117,9 +125,12 @@ export const make = (
       if (tab === undefined) return undefined
       const info = yield* childOf(tab)
       if (info === undefined) return undefined
-      // An open dialog may hold the initialization gate; leftover-state observation runs separately.
-      const page = Array.from(state.pages.values()).find((page) => page.targetId === info.targetId && !page.ended)
-      if (page === undefined) return undefined
+      // The native target may precede its PageAdded fact on the other connection. Flush already queued
+      // facts, then use the adapter's gap-free waiter for later ones. A live tab is not evidence of Gone.
+      yield* state.buffer.run(() => {})
+      const page = yield* state.buffer.waitFor(() =>
+        Array.from(state.pages.values()).find((page) => page.targetId === info.targetId && !page.ended)
+      )
       return page.id
     }),
     findContext: Effect.fnUntraced(function*(id) {
