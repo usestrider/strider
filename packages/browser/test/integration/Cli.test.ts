@@ -22,10 +22,21 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import * as Daemon from "../../src/internal/cli/daemon.ts"
+import * as WebKitStockTransport from "../../src/internal/webkitStockTransport.ts"
 import { site } from "./adapter/harness.ts"
 import { chromium, firefox, webkitgtk } from "./browsers.ts"
 import { chromiumAttachable, firefoxAttachable } from "./slice/attaching.ts"
 import { startMiniBrowser, useXvfb } from "./stockWebKit.ts"
+
+/** Browser-reported target identities, independent of whether its HTTP server still answers. */
+const inspectorTargetIds = (endpoint: string, backend: "Chromium" | "stock WebKit") =>
+  Effect.promise(async () => {
+    const response = await fetch(new URL(backend === "Chromium" ? "/json/list" : "/", endpoint))
+    assert.strictEqual(response.status, 200)
+    return backend === "Chromium"
+      ? ((await response.json()) as ReadonlyArray<{ readonly id: string }>).map((target) => target.id)
+      : WebKitStockTransport.pagesOf(await response.text())
+  })
 
 const timeout = 120_000
 const bin = new URL("../../src/bin/strider.ts", import.meta.url).pathname
@@ -869,6 +880,8 @@ describe("strider", () => {
           const { endpoint } = backend === "Chromium"
             ? yield* chromiumAttachable(Chromium.layerConnect).start(tab, tab)
             : yield* startMiniBrowser(tab)
+          const before = yield* inspectorTargetIds(endpoint, backend)
+          assert.isNotEmpty(before, "the external browser has tabs before attachment")
           try {
             const started = yield* run("start", "--name", "remote", "--attach", endpoint)
             assert.strictEqual(started.code, 0, started.err)
@@ -881,6 +894,11 @@ describe("strider", () => {
             yield* run("-s", "remote", "stop")
             const response = yield* Effect.promise(() => fetch(new URL("/", endpoint)))
             assert.strictEqual(response.status, 200, "attached browser survives stop")
+            assert.includeMembers(
+              yield* inspectorTargetIds(endpoint, backend),
+              before,
+              "the original tabs survive stop"
+            )
           }
         }).pipe(Effect.provide(NodeServices.layer))
       ), timeout)
@@ -895,6 +913,8 @@ describe("strider", () => {
         const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
         const tab = `${served.origin}/fixture?html=${encodeURIComponent("<title>remote</title>")}`
         const { endpoint } = yield* startMiniBrowser(tab)
+        const before = yield* inspectorTargetIds(endpoint, "stock WebKit")
+        assert.isNotEmpty(before)
         try {
           assert.strictEqual((yield* run("start", "--name", "remote", "--attach", endpoint)).code, 0)
           const tabs = yield* run("-s", "remote", "tabs")
@@ -905,8 +925,18 @@ describe("strider", () => {
           assert.strictEqual((yield* run("-s", "remote", "-p", "own", "snapshot")).code, 0)
           assert.strictEqual((yield* run("-s", "remote", "release", "-p", "own")).code, 0)
           assert.include((yield* run("-s", "remote", "tabs")).out, tab)
+          assert.includeMembers(
+            yield* inspectorTargetIds(endpoint, "stock WebKit"),
+            before,
+            "release keeps the original tab"
+          )
         } finally {
           yield* run("-s", "remote", "stop")
+          assert.includeMembers(
+            yield* inspectorTargetIds(endpoint, "stock WebKit"),
+            before,
+            "stop keeps the original tab"
+          )
         }
       }).pipe(Effect.provide(NodeServices.layer))
     ), timeout)

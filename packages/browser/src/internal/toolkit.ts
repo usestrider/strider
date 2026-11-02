@@ -296,7 +296,8 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
 
   /** The context's pages, each named, the new ones `p1`, `p2`… */
   const refresh = Effect.gen(function*() {
-    const pages = options.discoverContextPages === false ? [] : yield* context.pages
+    if (options.discoverContextPages === false) return [...byName.values()]
+    const pages = yield* context.pages
     for (const [index, page] of pages.entries()) {
       if (nameById.has(page.id)) continue
       const name = yield* nameOf(page)
@@ -353,6 +354,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   const watchPage = (page: Page.Page, first: string, within: Scope.Scope): Effect.Effect<void> =>
     Effect.gen(function*() {
       const pageEntry = Handles.page(page).entry
+      if (options.discoverContextPages === false) yield* watchDigest(pageEntry.events, within)
       const name = () => nameNow(page, first)
       yield* drain(pageEntry.events.navigation, (navigation) => {
         if (
@@ -394,54 +396,61 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       )
     })
 
-  yield* drain(entry.events.autoResolution, (resolution) => {
-    switch (resolution._tag) {
-      case "Dialog":
-        note(
-          `dialog ${resolution.prompt.kind} on ${
-            nameOfEntry(resolution.prompt.page)
-          } ${resolution.decision}ed by policy`
-        )
-        return
-      case "FileChooser":
-        note(`file chooser on ${nameOfEntry(resolution.chooser.navigable)} canceled by policy`)
-        return
-      default:
-        return
-    }
+  const watchDigest = Effect.fnUntraced(function*(events: Model.ContextEvents, within: Scope.Scope) {
+    yield* drain(events.autoResolution, (resolution) => {
+      switch (resolution._tag) {
+        case "Dialog":
+          note(
+            `dialog ${resolution.prompt.kind} on ${
+              nameOfEntry(resolution.prompt.page)
+            } ${resolution.decision}ed by policy`
+          )
+          return
+        case "FileChooser":
+          note(`file chooser on ${nameOfEntry(resolution.chooser.navigable)} canceled by policy`)
+          return
+        default:
+          return
+      }
+    }, within)
+    yield* drain(events.response, ({ response, hop }) => {
+      if (response.status >= 400) note(`${hop.request.method} ${response.url} answered ${response.status}`)
+    }, within)
+    // A request that failed: no response, for a reason other than its cancellation (CLI.md, the digest)
+    yield* drainEffect(events.request, (request) =>
+      Option.match(runtime.model.hop(request.hop), {
+        onNone: () => Effect.void,
+        onSome: (hop) =>
+          Deferred.await(hop.end).pipe(
+            Effect.flatMap((end) =>
+              Effect.sync(() => {
+                if (end._tag === "Failed" && !end.canceled) {
+                  note(`${request.method} ${request.url} failed: ${end.error}`)
+                }
+              })
+            ),
+            Effect.forkIn(within),
+            Effect.asVoid
+          )
+      }), within)
+    yield* drain(events.console, (message) => {
+      if (message.level === "error" && capture.consoleText !== "omitted") {
+        note(consoleLine(message, originName(message.origin)))
+      }
+    }, within)
+    yield* drain(
+      events.exception,
+      (exception) => note(`uncaught ${exception.name}: ${exception.message} on ${originName(exception.origin)}`),
+      within
+    )
+    yield* drain(
+      events.download,
+      (download) =>
+        note(`download "${download.suggestedFilename}" on ${nameOfEntry(download.page.id)} from ${download.url}`),
+      within
+    )
   })
-  yield* drain(entry.events.response, ({ response, hop }) => {
-    if (response.status >= 400) note(`${hop.request.method} ${response.url} answered ${response.status}`)
-  })
-  // A request that failed: no response, for a reason other than its cancellation (CLI.md, the digest)
-  yield* drainEffect(entry.events.request, (request) =>
-    Option.match(runtime.model.hop(request.hop), {
-      onNone: () => Effect.void,
-      onSome: (hop) =>
-        Deferred.await(hop.end).pipe(
-          Effect.flatMap((end) =>
-            Effect.sync(() => {
-              if (end._tag === "Failed" && !end.canceled) note(`${request.method} ${request.url} failed: ${end.error}`)
-            })
-          ),
-          Effect.forkIn(scope),
-          Effect.asVoid
-        )
-    }))
-  yield* drain(entry.events.console, (message) => {
-    if (message.level === "error" && capture.consoleText !== "omitted") {
-      note(consoleLine(message, originName(message.origin)))
-    }
-  })
-  yield* drain(
-    entry.events.exception,
-    (exception) => note(`uncaught ${exception.name}: ${exception.message} on ${originName(exception.origin)}`)
-  )
-  yield* drain(
-    entry.events.download,
-    (download) =>
-      note(`download "${download.suggestedFilename}" on ${nameOfEntry(download.page.id)} from ${download.url}`)
-  )
+  if (options.discoverContextPages !== false) yield* watchDigest(entry.events, scope)
   yield* refresh.pipe(Effect.orDie)
 
   // ── Results ──
