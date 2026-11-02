@@ -50,6 +50,7 @@ import type * as UserContext from "../UserContext.ts"
 import * as Events from "./events.ts"
 import * as Handles from "./handles.ts"
 import type * as Model from "./model.ts"
+import * as Operation from "./operation.ts"
 import * as Secrets from "./secrets.ts"
 import * as Tools from "./tools.ts"
 import * as UrlPattern from "./urlPattern.ts"
@@ -263,6 +264,9 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   const digest: Array<string> = []
   // Each named page's digest lines are recorded in a scope of its own, which forgetting the page closes
   const watching = new Map<Target.NavigableId, Scope.Closeable>()
+  // Key grants by identity so renaming or reusing a name cannot release another page.
+  const controlled = new Map<Target.NavigableId, Scope.Closeable>()
+  const closed = (page: Page.Page) => Handles.page(page).entry.state.getUnsafe().status._tag === "Closed"
 
   const nameOf = (page: Page.Page, given?: string): Effect.Effect<string> =>
     Effect.suspend(() => {
@@ -278,24 +282,34 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
         return Effect.as(watchPage(page, name, watcher), name)
       })
     })
-  /** Forgets a page the session no longer holds: its name, its snapshot and its digest lines. */
+  /** Atomically retires bookkeeping, then finishes both resource closures even if its caller is interrupted. */
   const forget = (page: Page.Page): Effect.Effect<void> =>
     Effect.suspend(() => {
       const name = nameById.get(page.id)
       if (name !== undefined) {
+        const status = Handles.page(page).entry.state.getUnsafe().status
+        if (status._tag === "Closed") digest.push(`${name} closed: ${status.reason._tag}`)
         byName.delete(name)
         kept.delete(name)
         snapshots.delete(name)
       }
       nameById.delete(page.id)
       const watcher = watching.get(page.id)
+      const grant = controlled.get(page.id)
       watching.delete(page.id)
-      return watcher === undefined ? Effect.void : Scope.close(watcher, Exit.void)
-    })
+      controlled.delete(page.id)
+      return (watcher === undefined ? Effect.void : Scope.close(watcher, Exit.void)).pipe(
+        Effect.ensuring(grant === undefined ? Effect.void : Scope.close(grant, Exit.void))
+      )
+    }).pipe(Operation.detached, Effect.uninterruptible)
+  const pruneClosed = Effect.suspend(() =>
+    Effect.forEach([...byName.values()].filter(closed), forget, { discard: true })
+  )
   const nameOfEntry = (id: Target.NavigableId): string => nameById.get(id) ?? id
 
   /** The context's pages, each named, the new ones `p1`, `p2`… */
   const refresh = Effect.gen(function*() {
+    yield* pruneClosed
     if (options.discoverContextPages === false) return [...byName.values()]
     const pages = yield* context.pages
     for (const [index, page] of pages.entries()) {
@@ -391,7 +405,8 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
         within
       )
       yield* Effect.forkIn(
-        Effect.flatMap(page.closed, (reason) => Effect.sync(() => note(`${name()} closed: ${reason._tag}`))),
+        // Cleanup must be a sibling: closing this watcher from its own fiber would interrupt cleanup itself.
+        Effect.flatMap(page.closed, () => Effect.forkIn(forget(page), scope).pipe(Effect.uninterruptible)),
         within
       )
     })
@@ -500,7 +515,6 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
 
   // ── The browser's other pages, taken with control ──
   // Each controlled page's grant lives in a scope of its own, which release closes
-  const controlled = new Map<string, Scope.Closeable>()
   const browserPages = Effect.suspend(() =>
     options.browser === undefined
       ? Effect.fail(
@@ -515,6 +529,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   const taken = (name: string) => failed("InvalidInput", `A page is already named ${name}`)
   const open: Session["open"] = Effect.fnUntraced(
     function*({ name, url }) {
+      yield* pruneClosed
       // Checked first, so a name that's taken opens nothing
       if (name !== undefined && byName.has(name)) return yield* Effect.fail(taken(name))
       const page = yield* context.newPage.pipe(Scope.provide(scope), Effect.mapError(toFailure))
@@ -546,6 +561,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       ),
     control: ({ name, tab, url }) =>
       run(Effect.gen(function*() {
+        yield* pruneClosed
         if ((tab === undefined) === (url === undefined)) {
           return yield* Effect.fail(failed("InvalidInput", "Name the tab one way: by its id from tabs, or by a URL"))
         }
@@ -566,19 +582,25 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
             )
           )
         }
-        const grant = yield* Scope.fork(scope)
-        const page = yield* found[0]!.page.control.pipe(
-          Scope.provide(grant),
-          Effect.onError(() => Scope.close(grant, Exit.void))
+        return yield* Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function*() {
+            const grant = yield* Scope.fork(scope)
+            const page = yield* restore(found[0]!.page.control).pipe(
+              Scope.provide(grant),
+              Effect.onError(() => Scope.close(grant, Exit.void))
+            )
+            controlled.set(page.id, grant)
+            return yield* Effect.gen(function*() {
+              const named = yield* nameOf(page, name)
+              return { page: named, url: String(yield* restore(page.url)) }
+            }).pipe(Effect.onError(() => forget(page)))
+          })
         )
-        const named = yield* nameOf(page, name)
-        controlled.set(named, grant)
-        return { page: named, url: String(yield* page.url) }
       })),
     release: ({ page: name }) =>
       run(Effect.gen(function*() {
-        const grant = controlled.get(name)
-        if (grant === undefined) {
+        const page = byName.get(name)
+        if (page === undefined || !controlled.has(page.id)) {
           return yield* Effect.fail(
             failed(
               "InvalidInput",
@@ -586,11 +608,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
             )
           )
         }
-        controlled.delete(name)
-        // The tab is no longer the session's: its name is free, and the digest says no more of it
-        const page = byName.get(name)
-        if (page !== undefined) yield* forget(page)
-        yield* Scope.close(grant, Exit.void)
+        yield* forget(page)
         return `released ${name}; the tab stays open`
       })),
     pages: () =>
@@ -624,7 +642,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
     snapshot: ({ page: name }) =>
       onPage(name, (page) =>
         Effect.map(page.snapshot(), (snapshot) => {
-          snapshots.set(name, snapshot)
+          if (byName.get(name) === page && !closed(page)) snapshots.set(name, snapshot)
           return capture.snapshotText === "full" ? snapshot.text : masked(snapshot.text)
         })),
     find: ({ page: name, query, role, exact }) =>
@@ -633,7 +651,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
           let snapshot = snapshots.get(name)
           if (snapshot === undefined) {
             snapshot = yield* page.snapshot()
-            snapshots.set(name, snapshot)
+            if (byName.get(name) === page && !closed(page)) snapshots.set(name, snapshot)
           }
           const wanted = exact === true ? query : query.toLowerCase()
           const matches = (text: string) => exact === true ? text === wanted : text.toLowerCase().includes(wanted)
@@ -897,20 +915,23 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   const session: Session = {
     toolkit: yield* Effect.provideContext(Tools.toolkit, handlerContext),
     name: (page, given) =>
-      Effect.suspend(() => {
-        const known = nameById.get(page.id)
-        // A page named already, such as one listed as p3 before a segment kept it, takes the name it's given
-        if (known !== undefined) {
-          if (given === known) kept.add(known)
-          return given === undefined || given === known
-            ? Effect.succeed(known)
-            : Effect.as(session.rename(known, given), given)
-        }
-        if (given !== undefined && byName.has(given)) {
-          return Effect.fail(failed("InvalidInput", `A page is already named ${given}`))
-        }
-        return nameOf(page, given)
-      }),
+      Effect.andThen(
+        pruneClosed,
+        Effect.suspend(() => {
+          const known = nameById.get(page.id)
+          // A page named already, such as one listed as p3 before a segment kept it, takes the name it's given
+          if (known !== undefined) {
+            if (given === known) kept.add(known)
+            return given === undefined || given === known
+              ? Effect.succeed(known)
+              : Effect.as(session.rename(known, given), given)
+          }
+          if (given !== undefined && byName.has(given)) {
+            return Effect.fail(failed("InvalidInput", `A page is already named ${given}`))
+          }
+          return nameOf(page, given)
+        })
+      ),
     open,
     rename: (from, to) =>
       Effect.flatMap(pageNamed(from), (page) =>
@@ -933,8 +954,11 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
         })),
     page: keptNamed,
     pages: Effect.map(Effect.orDie(refresh), (pages) => pages.map((page) => ({ name: nameById.get(page.id)!, page }))),
-    named: (name) => Option.fromNullishOr(byName.get(name)),
-    latest: (name) => Option.fromNullishOr(snapshots.get(name)),
+    named: (name) => Option.fromNullishOr(byName.get(name)).pipe(Option.filter((page) => !closed(page))),
+    latest: (name) =>
+      byName.has(name) && !closed(byName.get(name)!)
+        ? Option.fromNullishOr(snapshots.get(name))
+        : Option.none(),
     remove: (id) =>
       Effect.suspend(() => {
         const registration = registrations.get(id)
