@@ -9,6 +9,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, it } from "@effect/vitest"
 import { Browser } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
 import { Firefox } from "@usestrider/browser/firefox"
 import { WebKit } from "@usestrider/browser/webkit"
 import * as Deferred from "effect/Deferred"
@@ -18,13 +19,25 @@ import * as Layer from "effect/Layer"
 import * as Scope from "effect/Scope"
 import { execFile, spawn } from "node:child_process"
 import * as fs from "node:fs"
+import * as http from "node:http"
 import * as os from "node:os"
 import * as path from "node:path"
 import * as Daemon from "../../src/internal/cli/daemon.ts"
+import * as WebKitStockTransport from "../../src/internal/webkitStockTransport.ts"
 import { site } from "./adapter/harness.ts"
 import { chromium, firefox, webkitgtk } from "./browsers.ts"
-import { firefoxAttachable } from "./slice/attaching.ts"
+import { chromiumAttachable, firefoxAttachable } from "./slice/attaching.ts"
 import { startMiniBrowser, useXvfb } from "./stockWebKit.ts"
+
+/** Browser-reported target identities, independent of whether its HTTP server still answers. */
+const inspectorTargetIds = (endpoint: string, backend: "Chromium" | "stock WebKit") =>
+  Effect.promise(async () => {
+    const response = await fetch(new URL(backend === "Chromium" ? "/json/list" : "/", endpoint))
+    assert.strictEqual(response.status, 200)
+    return backend === "Chromium"
+      ? ((await response.json()) as ReadonlyArray<{ readonly id: string }>).map((target) => target.id)
+      : [...WebKitStockTransport.pagesOf(await response.text())]
+  })
 
 const timeout = 120_000
 const bin = new URL("../../src/bin/strider.ts", import.meta.url).pathname
@@ -611,7 +624,7 @@ describe("strider", () => {
           ].join("\n")
         )
         // The route the session removed ends where it did, through its handle; the dialog handler it kept doesn't
-        assert.include(exported, `const r1 = yield* shop.route("**/api/status", () => Effect.succeed(Route.fulfill(`)
+        assert.include(exported, `const r1 = yield* shop.route("**/api/status", () => Route.fulfill(`)
         assert.include(exported, `yield* r1.remove\n`)
         assert.include(exported, `        yield* Dialog.handle(shop, Dialog.dismissAll)\n`)
         // The page the segment returned is its placeholder's to declare
@@ -856,6 +869,154 @@ describe("strider", () => {
       for (const message of handshake) child.stdin.write(`${JSON.stringify(message)}\n`)
       child.stdin.end()
     }).pipe(Effect.map((code) => assert.strictEqual(code, 0))), timeout)
+
+  for (const backend of ["Chromium", "stock WebKit"] as const) {
+    it.live(`attaches to ${backend} by an HTTP endpoint`, () =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          const served = yield* site
+          const env = environment()
+          const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+          const tab = `${served.origin}/fixture?html=${encodeURIComponent("<title>remote</title>")}`
+          const { endpoint } = backend === "Chromium"
+            ? yield* chromiumAttachable(Chromium.layerConnect).start(tab, tab)
+            : yield* startMiniBrowser(tab)
+          const before = yield* inspectorTargetIds(endpoint, backend)
+          assert.isNotEmpty(before, "the external browser has tabs before attachment")
+          try {
+            const started = yield* run("start", "--name", "remote", "--attach", endpoint)
+            assert.strictEqual(started.code, 0, started.err)
+            const sessions = yield* run("sessions")
+            assert.include(sessions.out, `attached ${backend === "Chromium" ? "chromium" : "webkit"}`)
+            const tabs = yield* run("-s", "remote", "tabs")
+            assert.strictEqual(tabs.code, 0, tabs.err)
+            assert.include(tabs.out, tab)
+          } finally {
+            yield* run("-s", "remote", "stop")
+            const response = yield* Effect.promise(() => fetch(new URL("/", endpoint)))
+            assert.strictEqual(response.status, 200, "attached browser survives stop")
+            assert.includeMembers(
+              yield* inspectorTargetIds(endpoint, backend),
+              before,
+              "the original tabs survive stop"
+            )
+          }
+        }).pipe(Effect.provide(NodeServices.layer))
+      ), timeout)
+  }
+
+  // ROOK-4: an endpoint that is neither backend fails the start, with the reason
+  it.live("refuses an HTTP endpoint that is neither Chromium nor stock WebKit", () =>
+    Effect.gen(function*() {
+      const server = http.createServer((_, response) => {
+        response.writeHead(404)
+        response.end("<title>WebKitInspectorHTTPServer</title>")
+      })
+      yield* Effect.callback<void>((resume) => void server.listen(0, "127.0.0.1", () => resume(Effect.void)))
+      const { port } = server.address() as { readonly port: number }
+      const started = yield* strider(environment(), "start", "--name", "remote", "--attach", `http://127.0.0.1:${port}`)
+      server.close()
+      assert.notStrictEqual(started.code, 0)
+      assert.include(started.err, "Cannot detect attachment backend")
+      assert.include(started.err, "WebKitInspectorHTTPServer Server token")
+    }).pipe(Effect.provide(NodeServices.layer)), timeout)
+
+  // ROOK-4: an inspector's tab, taken with control, stays listed and works until it is released
+  it.live("controls and releases a tab of an attached stock WebKit", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const served = yield* site
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const tab = `${served.origin}/fixture?html=${encodeURIComponent("<title>remote</title>")}`
+        const { endpoint } = yield* startMiniBrowser(tab)
+        const before = yield* inspectorTargetIds(endpoint, "stock WebKit")
+        assert.isNotEmpty(before)
+        try {
+          assert.strictEqual((yield* run("start", "--name", "remote", "--attach", endpoint)).code, 0)
+          const tabs = yield* run("-s", "remote", "tabs")
+          const id = tabs.out.split("\n")[0]!.split("  ")[0]!
+          const taken = yield* run("-s", "remote", "control", id, "--name", "own")
+          assert.strictEqual(taken.code, 0, taken.err)
+          assert.include((yield* run("-s", "remote", "pages")).out, "own")
+          assert.strictEqual((yield* run("-s", "remote", "-p", "own", "snapshot")).code, 0)
+          assert.strictEqual((yield* run("-s", "remote", "release", "-p", "own")).code, 0)
+          assert.include((yield* run("-s", "remote", "tabs")).out, tab)
+          assert.includeMembers(
+            yield* inspectorTargetIds(endpoint, "stock WebKit"),
+            before,
+            "release keeps the original tab"
+          )
+        } finally {
+          yield* run("-s", "remote", "stop")
+          assert.includeMembers(
+            yield* inspectorTargetIds(endpoint, "stock WebKit"),
+            before,
+            "stop keeps the original tab"
+          )
+        }
+      }).pipe(Effect.provide(NodeServices.layer))
+    ), timeout)
+
+  // ROOK-4: a tab closed outside the session leaves it, on a real browser's control grant
+  it.live("retires a controlled tab closed outside the session", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const served = yield* site
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const closes = `${served.origin}/fixture?html=${encodeURIComponent("<title>closes</title>")}`
+        const stays = `${served.origin}/fixture?html=${encodeURIComponent("<title>stays</title>")}`
+        const { endpoint } = yield* chromiumAttachable(Chromium.layerConnect).start(closes, stays)
+        try {
+          assert.strictEqual((yield* run("start", "--name", "remote", "--attach", endpoint)).code, 0)
+          const lines = (yield* run("-s", "remote", "tabs")).out.split("\n")
+          const idOf = (url: string) => lines.find((line) => line.includes(url))!.split("  ")[0]!
+          assert.strictEqual((yield* run("-s", "remote", "control", idOf(closes), "--name", "own")).code, 0)
+          assert.strictEqual((yield* run("-s", "remote", "-p", "own", "snapshot")).code, 0)
+          const targets = yield* Effect.promise(() =>
+            fetch(new URL("/json/list", endpoint)).then((response) =>
+              response.json() as Promise<ReadonlyArray<{ readonly id: string; readonly url: string }>>
+            )
+          )
+          const target = targets.find((each) => each.url === closes)!
+          const closing = yield* Effect.promise(() => fetch(new URL(`/json/close/${target.id}`, endpoint)))
+          assert.strictEqual(closing.status, 200)
+          let code = 0
+          for (let attempt = 0; attempt < 50 && code === 0; attempt++) {
+            yield* Effect.sleep("100 millis")
+            code = (yield* run("-s", "remote", "-p", "own", "snapshot")).code
+          }
+          assert.strictEqual(code, 16, "a closed tab has no name")
+          const taken = yield* run("-s", "remote", "control", idOf(stays), "--name", "own")
+          assert.strictEqual(taken.code, 0, taken.err)
+          assert.strictEqual((yield* run("-s", "remote", "-p", "own", "snapshot")).code, 0)
+          assert.strictEqual((yield* run("-s", "remote", "release", "-p", "own")).code, 0)
+        } finally {
+          assert.strictEqual((yield* run("-s", "remote", "stop")).code, 0)
+        }
+      }).pipe(Effect.provide(NodeServices.layer))
+    ), timeout)
+
+  // ROOK-4: the browser WebSocket's id dies with that browser; the endpoint given outlives it
+  it.live("exports a Chromium HTTP attachment by the endpoint it was given", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const served = yield* site
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const tab = `${served.origin}/fixture?html=${encodeURIComponent("<title>remote</title>")}`
+        const { endpoint } = yield* chromiumAttachable(Chromium.layerConnect).start(tab, tab)
+        const file = path.join(env.XDG_STATE_HOME, "attached.test.ts")
+        try {
+          assert.strictEqual((yield* run("start", "--name", "remote", "--attach", endpoint)).code, 0)
+          assert.strictEqual((yield* run("-s", "remote", "export", "test", file)).code, 0)
+          assert.include(fs.readFileSync(file, "utf8"), `Chromium.layerConnect(${JSON.stringify(endpoint)})`)
+        } finally {
+          yield* run("-s", "remote", "stop")
+        }
+      }).pipe(Effect.provide(NodeServices.layer))
+    ), timeout)
 
   it.live("attaches to Firefox's remote agent by an endpoint with no path", () =>
     Effect.scoped(

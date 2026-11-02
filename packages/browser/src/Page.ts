@@ -878,7 +878,7 @@ export interface Page extends ReadonlyPage {
    * const blockAnalytics = Effect.fn("blockAnalytics")(function*(page: Page.Page) {
    *   yield* page.route(
    *     "https://analytics.example.com/**",
-   *     () => Effect.succeed(Route.abort())
+   *     () => Route.abort()
    *   )
    *   yield* page.goto("https://shop.example.com")
    * })

@@ -149,9 +149,7 @@ const mockPrices = Effect.fn("mockPrices")(function*(page: Page.Page) {
   yield* page.route(
     "https://api.example.com/prices",
     ({ request }) =>
-      Effect.succeed(
-        request.method === "OPTIONS" ? Route.continue : Route.fulfill(noPrices)
-      )
+      request.method === "OPTIONS" ? Route.continue : Route.fulfill(noPrices)
   )
 })
 ```

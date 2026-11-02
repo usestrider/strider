@@ -95,7 +95,7 @@ export const attach = Effect.gen(function*() {
     const reader = yield* first.inspect
     yield* reader.getByRole("heading").readText
     const tab = yield* second.control
-    const blocked = yield* tab.route("https://*.example.com/analytics/**", () => Effect.succeed(Route.abort()))
+    const blocked = yield* tab.route("https://*.example.com/analytics/**", () => Route.abort())
     yield* tab.getByRole("button", { name: "Refresh" }).click()
     yield* Console.log(`blocked ${yield* blocked.hits} analytics calls`)
   })) // route and access released; both tabs stay open
@@ -114,17 +114,17 @@ export const logRequests = Effect.fn("logRequests")(function*(page: Page.Observe
 export const routes = Effect.fn("routes")(function*(page: Page.Page) {
   yield* page.route(
     "https://app.example.com/api/user",
-    () => Effect.succeed(Route.fulfill(HttpServerResponse.jsonUnsafe({ name: "Ada" })))
+    () => Route.fulfill(HttpServerResponse.jsonUnsafe({ name: "Ada" }))
   )
   yield* page.route(
     "https://app.example.com/api/**",
-    () => Effect.succeed(Route.continueWith(HttpClientRequest.setHeader("x-test", "1")))
+    () => Route.continueWith(HttpClientRequest.setHeader("x-test", "1"))
   )
   // What the server sent, patched: a route at the response phase (the body is CDP's alone)
   yield* page.route("https://app.example.com/api/slow", (intercepted) =>
     Effect.gen(function*() {
       const body = yield* intercepted.responseBody
-      return Route.fulfill(
+      return yield* Route.fulfill(
         HttpServerResponse.uint8Array(body, {
           status: intercepted.response.status,
           headers: intercepted.response.headers

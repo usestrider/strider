@@ -62,7 +62,7 @@ export const declarations = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            const blocked = yield* page.route(`${origin}/analytics/**`, () => Effect.succeed(Route.abort()))
+            const blocked = yield* page.route(`${origin}/analytics/**`, () => Route.abort())
             const result = yield* run(
               page,
               origin,
@@ -79,17 +79,19 @@ export const declarations = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.context.route(`${origin}/api/**`, () =>
-              Effect.succeed(Route.fulfill(json({ from: "context" }))))
-            yield* page.route(`${origin}/api/user`, (intercepted) =>
-              Effect.succeed(
+              Route.fulfill(json({ from: "context" })))
+            yield* page.route(
+              `${origin}/api/user`,
+              (intercepted) =>
                 intercepted.request.method === "POST" ? Route.fulfill(json({ from: "page" })) : Route.fallthrough
-              ))
-            yield* page.route(`${origin}/echo*`, () =>
-              Effect.succeed(
+            )
+            yield* page.route(
+              `${origin}/echo*`,
+              () =>
                 Route.continueWith((request) =>
                   request.pipe(HttpClientRequest.setHeader("x-test", "1"), HttpClientRequest.bodyText("changed"))
                 )
-              ))
+            )
             const result = yield* run(
               page,
               origin,
@@ -108,7 +110,7 @@ export const declarations = (
             const page = yield* Browser.newPage()
             const bodies: Array<string> = []
             yield* page.route(`${origin}/echo*`, (intercepted) =>
-              Effect.map(intercepted.requestBody, (body) => {
+              Effect.flatMap(intercepted.requestBody, (body) => {
                 bodies.push(Option.match(body, {
                   onNone: () =>
                     "none",
@@ -132,8 +134,7 @@ export const declarations = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(`${origin}/hello`)
-            yield* page.route(`${origin}/json*`, () =>
-              Effect.fail("no answer"))
+            yield* page.route(`${origin}/json*`, () => Effect.fail("no answer"))
             const decided = yield* AutoResolution.next(page)
             const result = yield* run(page, origin, `return fetch('/json').then((r) => r.json())`)
             assert.deepStrictEqual(result, { hello: "world" })
@@ -154,7 +155,7 @@ export const declarations = (
                 seen.push(`${intercepted.response.status} ${intercepted.response.headers["x-test"]}`)
                 const body = yield* intercepted.responseBody
                 const original = JSON.parse(new TextDecoder().decode(body)) as Record<string, unknown>
-                return Route.fulfill(json({ ...original, patched: true }))
+                return yield* Route.fulfill(json({ ...original, patched: true }))
               }), { phase: "response" })
             const result = yield* run(page, origin, `return fetch('/json').then((r) => r.json())`)
             assert.deepStrictEqual(seen, ["200 yes"])
@@ -171,9 +172,7 @@ export const declarations = (
             yield* page.route(
               `${origin}/json*`,
               ({ response }) =>
-                Effect.succeed(
-                  Route.continueWith({ status: 203, headers: Headers.set(response.headers, "x-route", "1") })
-                ),
+                Route.continueWith({ status: 203, headers: Headers.set(response.headers, "x-route", "1") }),
               { phase: "response" }
             )
             const result = yield* run(
@@ -195,7 +194,7 @@ export const declarations = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.route(`${origin}/:name(json)`, () =>
-              Effect.succeed(Route.fulfill(json({ routed: true }))))
+              Route.fulfill(json({ routed: true })))
             const result = yield* run(page, origin, `return fetch('/json').then((r) => r.json())`)
             assert.deepStrictEqual(result, { routed: true })
           }))
@@ -207,7 +206,7 @@ export const declarations = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             const registered = page.route(`${origin}/auth`, () =>
-              Effect.succeed(Route.provideCredentials({ username: "strider", password: Redacted.make("secret") })), {
+              Route.provideCredentials({ username: "strider", password: Redacted.make("secret") }), {
               phase: "auth"
             })
             if (name === "WebKit") {
@@ -230,7 +229,7 @@ export const declarations = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.route(`${origin}/auth`, () =>
-              Effect.succeed(Route.continue), { phase: "auth" })
+              Route.continue, { phase: "auth" })
             yield* page.goto(`${origin}/auth`)
             yield* page.getByText("who are you?").pipe(Expect.toBeVisible)
           }))
@@ -269,11 +268,11 @@ export const declarations = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.route(`${origin}/blocked*`, () =>
-              Effect.succeed(Route.abort()))
+              Route.abort())
             const failed = yield* Effect.flip(page.goto(`${origin}/blocked`))
             assert(Page.isPageError(failed) && failed.reason._tag === "NavigationFailed", String(failed))
             yield* page.route(`${origin}/timed-out*`, () =>
-              Effect.succeed(Route.abort("timedOut")))
+              Route.abort("timedOut"))
             if (name === "Chromium") {
               const timedOut = yield* Effect.flip(page.goto(`${origin}/timed-out`))
               assert(Page.isPageError(timedOut) && timedOut.reason._tag === "NavigationFailed", String(timedOut))
@@ -293,7 +292,7 @@ export const declarations = (
             const page = yield* Browser.newPage()
             const error = yield* Effect.flip(
               page.route("https://example.com/:id(", () =>
-                Effect.succeed(Route.continue))
+                Route.continue)
             )
             assert(Route.isRouteError(error) && error.reason._tag === "InvalidInput", String(error))
           }))

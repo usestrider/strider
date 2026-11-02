@@ -25,9 +25,9 @@ interface DecisionImpl extends Dialog.Decision {
   readonly decision: Adapter.Decision
 }
 
-const decision = (decision: Adapter.Decision): Dialog.Decision => {
+const decision = (decision: Adapter.Decision): Effect.Effect<Dialog.Decision> => {
   const made: DecisionImpl = { [DecisionTypeId]: DecisionTypeId, decision }
-  return made
+  return Effect.succeed(made)
 }
 
 const accepted = decision({ _tag: "Accept", promptText: Option.none() })

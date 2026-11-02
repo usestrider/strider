@@ -119,7 +119,7 @@ const listed = (names: ReadonlyArray<string>) =>
 /** Where the session's browser came from, as the test's layer names it. */
 export type Browser =
   | { readonly _tag: "Launch"; readonly backend: "chromium" | "firefox" | "webkit"; readonly executablePath: string }
-  | { readonly _tag: "Attach"; readonly backend: "chromium" | "bidi"; readonly endpoint: string }
+  | { readonly _tag: "Attach"; readonly backend: "chromium" | "bidi" | "webkit"; readonly endpoint: string }
 
 const quote = (text: string) => JSON.stringify(text)
 
@@ -265,7 +265,9 @@ export const render = (options: {
       `// The session's browser ran on the profile at ${options.userDataDir} (start --user-data-dir), which that browser keeps locked: this test's starts with an empty one`
     ])
   ]
-  const body: Array<string> = options.state === undefined
+  const body: Array<string> = options.browser._tag === "Attach" && options.browser.backend === "webkit"
+    ? [...started, "const context = yield* (yield* Browser.Browser).defaultContext.control"]
+    : options.state === undefined
     ? [...started, `const context = yield* Browser.newContext(${settings === undefined ? "" : `{ ${settings} }`})`]
     : [
       ...started,
@@ -563,7 +565,7 @@ export const render = (options: {
           : `Route.fulfill(HttpServerResponse.text(${quote(text ?? "")}, { status: ${status ?? 200}${
             contentType === undefined ? "" : `, contentType: ${quote(contentType)}`
           } }))`
-        body.push(`${handle(step)}yield* ${page}.route(${quote(pattern)}, () => Effect.succeed(${decision}))`)
+        body.push(`${handle(step)}yield* ${page}.route(${quote(pattern)}, () => ${decision})`)
         break
       }
       case "dialog": {
@@ -572,9 +574,9 @@ export const render = (options: {
         body.push(
           handle(step) + (decision === "accept" && text !== undefined
             // As in the session, a dialog of unknown kind, as every dialog on WebKit is, gets the text too
-            ? `yield* Dialog.handle(${page}, (dialog) => Effect.succeed(dialog._tag === "Prompt" || dialog._tag === "Unknown" ? dialog.respond(${
+            ? `yield* Dialog.handle(${page}, (dialog) => dialog._tag === "Prompt" || dialog._tag === "Unknown" ? dialog.respond(${
               quote(text)
-            }) : dialog._tag === "BeforeUnload" ? dialog.leave : dialog.accept))`
+            }) : dialog._tag === "BeforeUnload" ? dialog.leave : dialog.accept)`
             : `yield* Dialog.handle(${page}, Dialog.${decision === "accept" ? "acceptAll" : "dismissAll"})`)
         )
         break
@@ -590,10 +592,14 @@ export const render = (options: {
     }[options.browser.backend]
     : options.browser.backend === "chromium"
     ? { module: "chromium", name: "Chromium" }
+    : options.browser.backend === "webkit"
+    ? { module: "webkit", name: "WebKit" }
     : { module: "bidi", name: "Bidi" }
   const browserLayer = options.browser._tag === "Launch"
     ? `${layer.name}.layer({ executablePath: ${quote(options.browser.executablePath)} })`
-    : `${layer.name}.layerConnect(${quote(options.browser.endpoint)})`
+    : `${layer.name}.${options.browser.backend === "webkit" ? "layerAttach" : "layerConnect"}(${
+      quote(options.browser.endpoint)
+    })`
   const library = [...used].filter((each) => each !== "Config" && each !== "Redacted").map((each) =>
     imports[each] ?? each
   ).sort()
@@ -617,15 +623,17 @@ export const render = (options: {
       ].join(", ")
     } } from "effect"`,
     ...(needsResponse ? [`import { HttpServerResponse } from "effect/http"`] : []),
+    ...(options.browser._tag === "Attach" || launchesWebKit(options.browser)
+      ? [`import * as NodeSocket from "@effect/platform-node/NodeSocket"`]
+      : []),
     ...(launchesWebKit(options.browser)
-      ? [
-        `import * as NodeSocket from "@effect/platform-node/NodeSocket"`,
-        `import { SocketConnector } from "@usestrider/browser/protocol"`
-      ]
+      ? [`import { SocketConnector } from "@usestrider/browser/protocol"`]
       : []),
     ``,
     launchesWebKit(options.browser)
       ? `const browser = ${browserLayer}.pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, SocketConnector.layer((endpoint) => NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port })))))`
+      : options.browser._tag === "Attach"
+      ? `const browser = ${browserLayer}.pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)))`
       : `const browser = ${browserLayer}.pipe(Layer.provide(NodeServices.layer))`,
     ``,
     `describe(${quote(options.name)}, () => {`,

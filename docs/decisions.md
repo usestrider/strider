@@ -354,10 +354,21 @@ could remove the wait; current CDP does not supply one.
 
 ## The public API (L2)
 
-**A decision that doesn't apply is a type error.** A dialog handler gets `Dialog.Pending`, whose shapes carry only
-the decisions valid for that dialog: an alert can't be dismissed. A route's decisions are module-level values typed
-by phase, `Decision<in P>`. Contravariance gives the same guarantee while keeping `Route.continue` and
-`Route.fulfill` plain values a handler returns.
+**Decision types describe where they apply.** A dialog handler gets `Dialog.Pending`, whose shapes carry only
+the decisions valid for that dialog: an alert can't be dismissed. A route decision's type, `Decision<in P>`, carries
+the phases where it is valid. Contravariance allows a decision valid at more phases where fewer are required:
+`Decision<Phase>` is assignable to `Decision<"request">`, while `Decision<"auth">` is not. With an explicit `phase`
+option, a route handler must produce a decision compatible with that phase.
+
+**Handlers produce decisions through Effects.** Route's constructors and the decisions on `Dialog.Pending` and
+`FileChooser.Pending` provide `Effect<Decision<…>>`, so a handler can return `Route.abort()` or `dialog.accept`
+directly. A generator that does other work ends with `return yield* Route.abort()` to produce the decision rather
+than another Effect. This keeps handlers consistent with Effect's own callbacks and removes the
+`Effect.succeed(…)` wrapper from one-line handlers (ISSUES.md, I34).
+
+Rejected: allowing a handler to return either a plain decision or an Effect of one, because the union return is
+unlike Effect's own callbacks; and making a decision itself an Effect, as `Exit` is, because that requires Effect's
+internals. The decision remains a plain value produced by the Effect; `isDecision` checks that produced value.
 
 **A wait is an `Effect`, not a `Deferred`.** See [conventions.md](conventions.md#a-wait-is-an-effect-not-a-deferred).
 
@@ -556,6 +567,28 @@ failure or release warning does not claim that every sibling was restored.
 Rejected: treating the resize reply or an arbitrary number of frames as completion; polling or resending the
 resize; using screen dimensions as a universal preflight limit across window managers; reporting `Unsupported`
 for a bounded observation; and enlarging the test display without retaining the constrained-display regression.
+
+**CLI HTTP attachment identifies the server before choosing a layer.** One `/json/version` response supplies
+validated Chromium discovery or the exact `WebKitInspectorHTTPServer` Server-header product token, which the
+pinned inspector sends even on a 404 and with no targets. The discovered Chromium WebSocket is reused, avoiding
+a second discovery request. Startup bounds this probe to five seconds and Chromium's body to 64 KiB, rejects
+redirects and reports unsupported responses or failures. The selected backend remains in the session and its
+exported tests. A new protocol flag would duplicate information these servers already provide; HTML matching
+would trust page titles controlled by a site, and treating any 404 as WebKit would misclassify unrelated servers.
+Proxies removing the inspector identity are rejected rather than guessed. This detects compatibility, not server
+authenticity (ROOK-4). An attached inspector uses scoped control of its existing default context, rather than
+creating a context the inspector cannot supply. Startup state and viewport defaults are rejected in this mode;
+existing tabs remain available for explicit control, and stopping releases control without closing them. The
+supplied endpoint stays in the spec and export; the discovered socket is connection state for this startup alone,
+since Chromium's browser socket identity changes when the browser restarts. Every exported attachment supplies
+its required WebSocket constructor.
+
+Shared-context tabs are listed as held pages only while explicitly controlled. Digest subscriptions in this mode
+belong to each controlled page's scope, including waits for failed requests, instead of the shared context: the
+fold publishes context events for uncontrolled tabs too. Subscriptions start at control without replaying history
+and stop at release, covering page events and workers attributable to that page. Context-wide digest subscriptions
+remain appropriate for sessions with their own context. Filtering the context stream only when draining it could
+admit events queued before control or after release; page scopes enforce the same lifetime as control.
 
 ## Chromium capture invalidation on document replacement (ROOK-13)
 

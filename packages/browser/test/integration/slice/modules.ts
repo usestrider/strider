@@ -179,7 +179,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             // Nor is a handler registered that nothing would ask
             yield* refused(
               "fileChooser",
-              (page) => FileChooser.handle(page, (chooser) => Effect.succeed(chooser.cancel))
+              (page) => FileChooser.handle(page, (chooser) => chooser.cancel)
             )
             return
           }

@@ -256,7 +256,7 @@ export interface UserContext extends ObservedUserContext {
    * const blockAnalytics = Effect.fn("blockAnalytics")(function*(page: Page.Page) {
    *   yield* page.context.route(
    *     "https://analytics.example.com/**",
-   *     () => Effect.succeed(Route.abort())
+   *     () => Route.abort()
    *   )
    * })
    * ```

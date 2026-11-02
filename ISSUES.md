@@ -54,7 +54,7 @@ preferences over `${userDataDir}/user.js`, so the user's own preferences there a
 **I10. `strider start --attach` picks the wrong layer for two endpoints.** `daemon.ts:807` sends every WebSocket to
 `Bidi.layerConnect`, which adds no `/session`, so Firefox needs the full URL that `Firefox.layerConnect` would
 complete. Every HTTP endpoint goes to Chromium, so stock WebKit's inspector can't be attached (known: CLI.md, Q168).
-- Firefox's half **fixed** in `6ef787f`. Open: telling stock WebKit's HTTP endpoint from Chromium's, which needs a flag or a probe.
+- **Fixed** (ROOK-4): Firefox in `6ef787f`; HTTP detection in `ac37f6e` and WebKit default-context setup in `e50e2bc`. HTTP attachment probes `/json/version` once, validates and reuses Chromium's browser WebSocket, or recognizes stock WebKit's exact Server-header token. Unknown servers fail rather than being guessed.
 
 **I11. `and`, `or` and `frame` throw.** Given a locator from another page or frame, they throw at once
 (`internal/locator.ts:299`, `304`, `969`) instead of failing as an Effect. Locator builders return values, so either
@@ -167,3 +167,5 @@ is a handler, and one that decides after work of its own ends with `return yield
 decisions, `Dialog.Pending`'s and `FileChooser`'s, `Dialog.acceptAll` and `dismissAll`, API.md, the guides, the
 scenarios and the JSDoc examples. Rejected: a handler that may return a decision or an Effect of one, a union return
 unlike Effect's own callbacks; and a decision that is itself an Effect, as `Exit` is, which needs Effect's internals.
+
+- **Fixed** in `b7a7f60` (ROOK-15): every decision constructor returns an Effect, handlers keep Effect-only returns and Route phase restrictions, and callers use direct Effects or `return yield*`.

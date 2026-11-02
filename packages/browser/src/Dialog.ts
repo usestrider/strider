@@ -43,7 +43,12 @@ export type PromptId = typeof PromptId.Type
 const DecisionTypeId = "~@usestrider/browser/Dialog/Decision"
 
 /**
- * How a dialog is answered: one of a `Pending` dialog's decisions, which a handler returns.
+ * How a dialog is answered: the value produced by the Effect a handler returns.
+ *
+ * **Details**
+ *
+ * A `Pending` dialog offers Effects that produce these decisions. Return one directly from a handler,
+ * or use `return yield*` after other work in a generator.
  *
  * @stability unstable
  * @category models
@@ -104,23 +109,32 @@ export type Dialog = typeof Dialog.Type
  *   prompt with `text`; any other dialog refuses it, and the context's `dialogs` policy decides, as when a handler
  *   fails.
  *
+ * Each decision is an Effect: return it directly from a handler, or use `return yield*` after other work in a
+ * generator. Its result is the decision the handler machinery sends to the browser.
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
 export type Pending =
-  | Extract<Dialog, { readonly _tag: "Alert" }> & { readonly accept: Decision }
-  | Extract<Dialog, { readonly _tag: "Confirm" }> & { readonly accept: Decision; readonly dismiss: Decision }
-  | Extract<Dialog, { readonly _tag: "Prompt" }> & {
-    readonly accept: Decision
-    respond(text: string): Decision
-    readonly dismiss: Decision
+  | Extract<Dialog, { readonly _tag: "Alert" }> & { readonly accept: Effect.Effect<Decision> }
+  | Extract<Dialog, { readonly _tag: "Confirm" }> & {
+    readonly accept: Effect.Effect<Decision>
+    readonly dismiss: Effect.Effect<Decision>
   }
-  | Extract<Dialog, { readonly _tag: "BeforeUnload" }> & { readonly leave: Decision; readonly stay: Decision }
+  | Extract<Dialog, { readonly _tag: "Prompt" }> & {
+    readonly accept: Effect.Effect<Decision>
+    respond(text: string): Effect.Effect<Decision>
+    readonly dismiss: Effect.Effect<Decision>
+  }
+  | Extract<Dialog, { readonly _tag: "BeforeUnload" }> & {
+    readonly leave: Effect.Effect<Decision>
+    readonly stay: Effect.Effect<Decision>
+  }
   | Extract<Dialog, { readonly _tag: "Unknown" }> & {
-    readonly accept: Decision
-    respond(text: string): Decision
-    readonly dismiss: Decision
+    readonly accept: Effect.Effect<Decision>
+    respond(text: string): Effect.Effect<Decision>
+    readonly dismiss: Effect.Effect<Decision>
   }
 
 /**
@@ -281,7 +295,7 @@ export const history = (
  *     page,
  *     (dialog) =>
  *       dialog._tag === "Confirm"
- *         ? Effect.succeed(dialog.accept)
+ *         ? dialog.accept
  *         : Dialog.dismissAll(dialog)
  *   )
  *   yield* page.getByRole("button", { name: "Delete account" }).click()
@@ -322,7 +336,7 @@ export const handle = <E, R>(
  * @since 0.1.0
  */
 export const acceptAll = (dialog: Pending): Effect.Effect<Decision> =>
-  Effect.succeed(dialog._tag === "BeforeUnload" ? dialog.leave : dialog.accept)
+  dialog._tag === "BeforeUnload" ? dialog.leave : dialog.accept
 
 /**
  * A handler that declines every dialog: dismiss for `Confirm`, `Prompt` and `Unknown`, accept for `Alert` (its
@@ -346,6 +360,4 @@ export const acceptAll = (dialog: Pending): Effect.Effect<Decision> =>
  * @since 0.1.0
  */
 export const dismissAll = (dialog: Pending): Effect.Effect<Decision> =>
-  Effect.succeed(
-    dialog._tag === "BeforeUnload" ? dialog.stay : dialog._tag === "Alert" ? dialog.accept : dialog.dismiss
-  )
+  dialog._tag === "BeforeUnload" ? dialog.stay : dialog._tag === "Alert" ? dialog.accept : dialog.dismiss

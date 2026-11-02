@@ -269,6 +269,29 @@ describe("strider export test", () => {
       "const shopViewport = yield* shop.emulate({ viewport: { width: 640, height: 480 } })\n        yield* mainViewport.remove"
     )
   })
+  it("exports the detected WebKit attachment layer", () => {
+    const { text } = ExportTest.render({
+      name: "remote",
+      browser: { _tag: "Attach", backend: "webkit", endpoint: "http://localhost:9222/" },
+      secrets: {},
+      state: undefined,
+      steps: []
+    })
+    assert.include(text, "WebKit.layerAttach(\"http://localhost:9222/\")")
+    assert.include(text, "@usestrider/browser/webkit")
+    assert.include(text, "const context = yield* (yield* Browser.Browser).defaultContext.control")
+  })
+  // ROOK-4: WebKit.layerAttach requires a WebSocketConstructor, which NodeServices.layer doesn't provide
+  it("exports a WebKit attachment that provides its WebSocket constructor", () => {
+    const { text } = ExportTest.render({
+      name: "remote",
+      browser: { _tag: "Attach", backend: "webkit", endpoint: "http://localhost:9222/" },
+      secrets: {},
+      state: undefined,
+      steps: []
+    })
+    assert.include(text, "NodeSocket.layerWebSocketConstructor")
+  })
   const tool = <K extends Tools.ToolName>(name: K, params: Tools.Params<K>, result?: string): ExportTest.Step => {
     const call: Tools.Call = Tools.call(name, params)
     return { _tag: "Tool", ...call, target: undefined, result }
@@ -415,11 +438,11 @@ describe("strider export test", () => {
     })
     assert.include(
       text,
-      `const r1 = yield* main.route("**/analytics/**", () => Effect.succeed(Route.abort()))\n`
+      `const r1 = yield* main.route("**/analytics/**", () => Route.abort())\n`
     )
     assert.include(text, `const r2 = yield* Dialog.handle(main, Dialog.dismissAll)\n`)
     // One the session kept on ends with the test's scope, so it needs no name
-    assert.include(text, `        yield* main.route("**/ads/**", () => Effect.succeed(Route.abort()))\n`)
+    assert.include(text, `        yield* main.route("**/ads/**", () => Route.abort())\n`)
     assert.include(text, `        yield* r1.remove\n        yield* r2.remove\n`)
   })
 
