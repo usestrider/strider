@@ -1,0 +1,90 @@
+{
+  "archive": "/nix/store/i9djwg6kjq72sjf44j75gmn1p6740gwz-firefox-158.0/lib/firefox/omni.ja",
+  "archiveSha256": "49c92d40a46364f235b7559defc14e3eb04d2605a44153e6ad63679ff91a6a7e",
+  "method": "unzip -p ARCHIVE MEMBER; this optimized omni.ja produces central-directory offset warnings and status 2, but yields source text. SHA256 and numbered excerpts recorded below.",
+  "files": [
+    {
+      "member": "chrome/remote/content/webdriver-bidi/WebDriverBiDiConnection.sys.mjs",
+      "sha256": "005cb65ead5be23a5009b21ecae3e70064f07825f9935e8e4cef64490804b52a",
+      "extractExit": 2,
+      "excerpts": [
+        {
+          "firstLine": 74,
+          "lastLine": 85,
+          "text": "  /**\n   * Unregister the already set WebDriver session.\n   */\n  unregisterSession() {\n    if (!this.session) {\n      return;\n    }\n\n    this.session.removeConnection(this);\n    this.session = null;\n  }\n"
+        },
+        {
+          "firstLine": 172,
+          "lastLine": 179,
+          "text": "   * a particular method on a given module.\n   *\n   * @param {object} packet\n   *     JSON-serializable object sent by the client\n   */\n  async onPacket(packet) {\n    super.onPacket(packet);\n"
+        },
+        {
+          "firstLine": 225,
+          "lastLine": 232,
+          "text": "          delete result.capabilities.unhandledPromptBehavior;\n        }\n      } else if (module === \"session\" && command === \"status\") {\n        result = lazy.RemoteAgent.webDriverBiDi.getSessionReadinessStatus();\n      } else {\n        lazy.assert.session(this.session);\n\n        // Bug 1741854 - Workaround to deny internal methods to be called"
+        }
+      ]
+    },
+    {
+      "member": "chrome/remote/content/shared/webdriver/Session.sys.mjs",
+      "sha256": "e882f6c11f9a4fecaf4171acd2841176b0feb7e167cbb1e278dd77d462f4b1fc",
+      "extractExit": 2,
+      "excerpts": [
+        {
+          "firstLine": 327,
+          "lastLine": 362,
+          "text": "  destroy() {\n    webDriverSessions.delete(this.#id);\n\n    // Stop the tracking of browsing contexts when no WebDriver\n    // session exists anymore.\n    lazy.NavigableManager.stopTracking();\n    lazy.windowManager.stopTracking();\n\n    lazy.unregisterProcessDataActor();\n\n    this.#navigableSeenNodes = null;\n\n    if (this.acceptInsecureCerts) {\n      lazy.Certificates.enableSecurityChecks();\n    }\n\n    // Close all open connections which unregister themselves.\n    this.#connections.forEach(connection => connection.close());\n    if (this.#connections.size > 0) {\n      lazy.logger.warn(\n        `Failed to close ${this.#connections.size} WebSocket connections`\n      );\n    }\n\n    // For the WebDriver BiDi session cleanup, the root network module is\n    // responsible for resuming requests in the blocked request map.\n    // See root NetworkModule.destroy().\n\n    // Destroy the dedicated MessageHandler instance if we created one.\n    if (this.#messageHandler) {\n      this.#messageHandler.off(\n        \"message-handler-protocol-event\",\n        this._onMessageHandlerProtocolEvent\n      );\n      this.#messageHandler.destroy();\n"
+        },
+        {
+          "firstLine": 408,
+          "lastLine": 422,
+          "text": "  get messageHandler() {\n    if (!this.#messageHandler) {\n      this.#messageHandler =\n        lazy.RootMessageHandlerRegistry.getOrCreateMessageHandler(this.#id);\n      this._onMessageHandlerProtocolEvent =\n        this._onMessageHandlerProtocolEvent.bind(this);\n      this.#messageHandler.on(\n        \"message-handler-protocol-event\",\n        this._onMessageHandlerProtocolEvent\n      );\n    }\n\n    return this.#messageHandler;\n  }\n"
+        },
+        {
+          "firstLine": 570,
+          "lastLine": 580,
+          "text": "   * Remove the specified WebDriver BiDi connection.\n   *\n   * @param {WebDriverBiDiConnection} connection\n   */\n  removeConnection(connection) {\n    if (this.#connections.has(connection)) {\n      this.#connections.delete(connection);\n    } else {\n      lazy.logger.warn(\"Trying to remove a connection that doesn't exist.\");\n    }\n  }"
+        },
+        {
+          "firstLine": 610,
+          "lastLine": 614,
+          "text": "  _onMessageHandlerProtocolEvent(eventName, messageHandlerEvent) {\n    const { name, data } = messageHandlerEvent;\n    this.#connections.forEach(connection => connection.sendEvent(name, data));\n  }\n"
+        }
+      ]
+    },
+    {
+      "member": "chrome/remote/content/webdriver-bidi/modules/root/session.sys.mjs",
+      "sha256": "0a4d83b449639ce37f9799a29200bead193525e86082ff3007fd6b6b71cf1bc2",
+      "extractExit": 2,
+      "excerpts": [
+        {
+          "firstLine": 48,
+          "lastLine": 69,
+          "text": "\n  constructor(messageHandler) {\n    super(messageHandler);\n\n    // Set of subscription ids.\n    this.#knownSubscriptionIds = new Set();\n    // List of subscription objects type Subscription.\n    this.#subscriptions = [];\n\n    // Listen for internal context destructions independent of client subscriptions\n    this.#contextListener = new lazy.BrowsingContextListener();\n    this.#contextListener.on(\"discarded\", this.#onContextDiscarded);\n    this.#contextListener.startListening();\n  }\n\n  destroy() {\n    this.#contextListener.off(\"discarded\", this.#onContextDiscarded);\n    this.#contextListener.destroy();\n\n    this.#knownSubscriptionIds = null;\n    this.#subscriptions = null;\n  }"
+        },
+        {
+          "firstLine": 182,
+          "lastLine": 218,
+          "text": "    const subscription = {\n      eventNames,\n      subscriptionId: lazy.generateUUID(),\n      topLevelTraversableIds: topLevelTraversableContextIds,\n      userContextIds,\n    };\n\n    const subscribeStepEvents = new Map();\n\n    for (const eventName of eventNames) {\n      const existingNavigables =\n        this.#getEnabledTopLevelTraversables(eventName);\n\n      subscribeStepEvents.set(\n        eventName,\n        subscriptionNavigables.difference(existingNavigables)\n      );\n    }\n\n    this.#subscriptions.push(subscription);\n    this.#knownSubscriptionIds.add(subscription.subscriptionId);\n\n    // TODO: Bug 1801284. Add subscribe priority sorting of subscribeStepEvents (step 4 to 6, and 8).\n\n    const includeGlobal = this.#isSubscriptionGlobal(subscription);\n\n    const listeners = this.#getListenersToSubscribe(\n      eventNames,\n      includeGlobal,\n      subscribeStepEvents,\n      userContextIds\n    );\n\n    // Subscribe to the relevant engine-internal events.\n    await this.messageHandler.eventsDispatcher.update(listeners);\n\n    return { subscription: subscription.subscriptionId };"
+        },
+        {
+          "firstLine": 927,
+          "lastLine": 965,
+          "text": "  #unsubscribeById(subscriptionIds) {\n    this.#assertNonEmptyArrayWithStrings(subscriptionIds, \"subscriptions\");\n\n    const subscriptions = new Set(subscriptionIds);\n    const unknownSubscriptionIds = subscriptions.difference(\n      this.#knownSubscriptionIds\n    );\n\n    if (unknownSubscriptionIds.size !== 0) {\n      throw new lazy.error.InvalidArgumentError(\n        `Failed to unsubscribe from subscriptions with ids: ${Array.from(subscriptionIds).join(\", \")} ` +\n          `(unknown ids: ${Array.from(unknownSubscriptionIds).join(\", \")})`\n      );\n    }\n\n    const listeners = [];\n    const subscriptionIdsToRemove = new Set();\n    const subscriptionsToRemove = new Set();\n\n    for (const subscription of this.#subscriptions) {\n      const { subscriptionId } = subscription;\n\n      if (!subscriptions.has(subscriptionId)) {\n        continue;\n      }\n\n      subscriptionIdsToRemove.add(subscriptionId);\n      subscriptionsToRemove.add(subscription);\n    }\n\n    this.#knownSubscriptionIds =\n      this.#knownSubscriptionIds.difference(subscriptions);\n    this.#subscriptions = this.#subscriptions.filter(\n      ({ subscriptionId }) => !subscriptionIdsToRemove.has(subscriptionId)\n    );\n\n    for (const subscription of subscriptionsToRemove) {\n      listeners.push(...this.#getListenersToUnsubscribe(subscription));\n    }"
+        }
+      ]
+    },
+    {
+      "member": "chrome/remote/content/webdriver-bidi/WebDriverBiDi.sys.mjs",
+      "sha256": "9a4be3acdafc899c7cbe0201fd14b984471cf8a8cf1640b4d4a241f5923b8ee1",
+      "extractExit": 2,
+      "excerpts": [
+        {
+          "firstLine": 77,
+          "lastLine": 104,
+          "text": "    if (!this.#agent.running) {\n      // With the Remote Agent not running WebDriver BiDi is not supported.\n      return;\n    }\n\n    if (flags.has(lazy.WebDriverSession.SESSION_FLAG_BIDI)) {\n      // It's already a WebDriver BiDi session.\n      return;\n    }\n\n    const webSocketUrl = session.capabilities.get(\"webSocketUrl\");\n    if (webSocketUrl === undefined) {\n      return;\n    }\n\n    // Start listening for BiDi connections.\n    this.#agent.server.registerPathHandler(session.path, session);\n    lazy.logger.debug(`Registered session handler: ${session.path}`);\n\n    session.capabilities.set(\"webSocketUrl\", `${this.address}${session.path}`);\n\n    session.bidi = true;\n    flags.add(\"bidi\");\n  }\n\n  /**\n   * Add a new connection that is not yet attached to a WebDriver session.\n   *"
+        }
+      ]
+    }
+  ]
+}
