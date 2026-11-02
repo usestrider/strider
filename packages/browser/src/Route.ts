@@ -51,12 +51,14 @@ const DecisionTypeId = RouteDecision.TypeId
 export type Phase = "request" | "response" | "auth"
 
 /**
- * What happens to an intercepted request: a decision valid at the phases `P`.
+ * What happens to an intercepted request: the value produced by a handler's Effect, valid at the phases `P`.
  *
  * **Details**
  *
- * A decision valid at more phases fits where fewer are asked for: `Route.continue`, valid at every phase, fits
- * any handler, while `Route.provideCredentials` fits only an `auth` route's.
+ * A decision valid at more phases is assignable where fewer are required: `Decision<Phase>` is assignable to
+ * `Decision<"request">`, while `Decision<"auth">` is not. `Route.continue` produces a decision valid at every
+ * phase; `Route.provideCredentials` returns an Effect producing a decision valid at `auth`. With an explicit
+ * `phase` option, a route handler must produce a decision compatible with that phase.
  *
  * @stability unstable
  * @category models

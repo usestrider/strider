@@ -35,7 +35,12 @@ import type * as Target from "./Target.ts"
 const DecisionTypeId = "~@usestrider/browser/FileChooser/Decision"
 
 /**
- * How a file chooser is answered: one of a `Pending` chooser's decisions, which a handler returns.
+ * How a file chooser is answered: the value produced by the Effect a handler returns.
+ *
+ * **Details**
+ *
+ * A `Pending` chooser offers Effects that produce these decisions. Return one directly from a handler,
+ * or use `return yield*` after other work in a generator.
  *
  * @stability unstable
  * @category models

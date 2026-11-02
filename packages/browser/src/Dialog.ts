@@ -43,7 +43,12 @@ export type PromptId = typeof PromptId.Type
 const DecisionTypeId = "~@usestrider/browser/Dialog/Decision"
 
 /**
- * How a dialog is answered: one of a `Pending` dialog's decisions, which a handler returns.
+ * How a dialog is answered: the value produced by the Effect a handler returns.
+ *
+ * **Details**
+ *
+ * A `Pending` dialog offers Effects that produce these decisions. Return one directly from a handler,
+ * or use `return yield*` after other work in a generator.
  *
  * @stability unstable
  * @category models
