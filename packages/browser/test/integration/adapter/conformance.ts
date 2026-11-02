@@ -1439,32 +1439,36 @@ export const conformance = (backend: Backend) =>
 
 export type { Backend }
 
-/** CDP's restoration barrier, including overrides with different scopes and release order. */
-export const viewportRestoration = (backend: Backend) =>
+/** Restoration across different scopes and release order. */
+export const viewportRestoration = (backend: Backend, options: { readonly nested?: boolean } = {}) =>
   describe(`${backend.name} viewport restoration`, () => {
     layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
       (it) => {
-        it.effect("restores nested viewport overrides", () =>
-          Effect.gen(function*() {
-            const world = yield* setup(backend)
-            const { context, page } = yield* newPage(world)
-            yield* goto(world, page, `${world.site.origin}/hello`)
-            const original = yield* evaluate(world, page, "() => [innerWidth, innerHeight]")
-            yield* Effect.scoped(Effect.gen(function*() {
-              yield* world.adapter.declare({ _tag: "UserContext", context }, {
-                _tag: "Override",
-                override: { _tag: "Viewport", width: 1000, height: 700, deviceScaleFactor: 1, mobile: false }
-              })
-              yield* Effect.scoped(
-                world.adapter.declare({ _tag: "Page", page }, {
+        ;(options.nested === false ? it.effect.skip : it.effect)(
+          "restores nested viewport overrides",
+          () =>
+            Effect.gen(function*() {
+              const world = yield* setup(backend)
+              const { context, page } = yield* newPage(world)
+              yield* goto(world, page, `${world.site.origin}/hello`)
+              const original = yield* evaluate(world, page, "() => [innerWidth, innerHeight]")
+              yield* Effect.scoped(Effect.gen(function*() {
+                yield* world.adapter.declare({ _tag: "UserContext", context }, {
                   _tag: "Override",
-                  override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+                  override: { _tag: "Viewport", width: 1000, height: 700, deviceScaleFactor: 1, mobile: false }
                 })
-              )
-              assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), [1000, 700])
-            }))
-            assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), original)
-          }), timeout)
+                yield* Effect.scoped(
+                  world.adapter.declare({ _tag: "Page", page }, {
+                    _tag: "Override",
+                    override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+                  })
+                )
+                assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), [1000, 700])
+              }))
+              assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), original)
+            }),
+          timeout
+        )
 
         it.effect("restores replaced viewport overrides released out of order", () =>
           Effect.gen(function*() {
@@ -1486,6 +1490,72 @@ export const viewportRestoration = (backend: Backend) =>
             yield* Scope.close(first, Exit.void)
             assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), [1000, 700])
             yield* Scope.close(second, Exit.void)
+            assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), original)
+          }), timeout)
+      }
+    )
+  })
+
+/** CDP measurement is isolated from author globals and also works during target setup. */
+export const viewportMeasurement = (backend: Backend) =>
+  describe(`${backend.name} viewport measurement`, () => {
+    layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
+      (it) => {
+        for (const enabled of [true, false]) {
+          it.effect(`restores a page created under a context viewport with JavaScript ${enabled ? "on" : "off"}`, () =>
+            Effect.gen(function*() {
+              const world = yield* setup(backend)
+              const { context, page: control } = yield* newPage(world)
+              yield* goto(world, control, `${world.site.origin}/hello`)
+              const original = yield* evaluate(world, control, "() => [innerWidth, innerHeight]")
+              yield* world.adapter.declare({ _tag: "UserContext", context }, {
+                _tag: "Override",
+                override: { _tag: "JavaScriptEnabled", enabled }
+              })
+              const page = yield* Effect.scoped(Effect.gen(function*() {
+                yield* world.adapter.declare({ _tag: "UserContext", context }, {
+                  _tag: "Override",
+                  override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+                })
+                const page = yield* world.adapter.createPage(context)
+                yield* goto(world, page, `${world.site.origin}/hello`)
+                assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), [640, 480])
+                return page
+              }))
+              assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), original)
+            }), timeout)
+        }
+        for (const shadow of ["\"wide\"", "123"]) {
+          it.effect(`restores despite author dimension shadows ${shadow}`, () =>
+            Effect.gen(function*() {
+              const world = yield* setup(backend)
+              const { page } = yield* newPage(world)
+              const html = `<script>let innerWidth = ${shadow}; let innerHeight = 456;</script>`
+              yield* goto(world, page, `${world.site.origin}/fixture?html=${encodeURIComponent(html)}`)
+              const original = yield* evaluate(world, page, "() => [window.innerWidth, window.innerHeight]")
+              yield* Effect.scoped(world.adapter.declare({ _tag: "Page", page }, {
+                _tag: "Override",
+                override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+              }))
+              assert.deepStrictEqual(
+                yield* evaluate(world, page, "() => [window.innerWidth, window.innerHeight]"),
+                original
+              )
+            }), timeout)
+        }
+        it.effect("restores a mobile viewport", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/hello`)
+            const original = yield* evaluate(world, page, "() => [innerWidth, innerHeight]")
+            yield* Effect.scoped(Effect.gen(function*() {
+              yield* world.adapter.declare({ _tag: "Page", page }, {
+                _tag: "Override",
+                override: { _tag: "Viewport", width: 375, height: 667, deviceScaleFactor: 2, mobile: true }
+              })
+              assert.strictEqual(yield* evaluate(world, page, "() => devicePixelRatio"), 2)
+            }))
             assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), original)
           }), timeout)
       }
