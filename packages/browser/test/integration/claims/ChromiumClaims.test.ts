@@ -27,6 +27,7 @@ import { readFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
 import * as Kit from "../../../src/internal/adapterKit.ts"
+import * as BrowserClock from "../../../src/internal/browserClock.ts"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
 import * as ClaimHooks from "../../../src/internal/claimHooks.ts"
 import { handoff } from "../../../src/internal/handoff.ts"
@@ -163,7 +164,11 @@ const assertOwned = Effect.fnUntraced(
   function*(browser: Effect.Success<typeof launch>, claim: api.Page.Claim, url: string) {
     yield* Effect.scoped(
       Effect.gen(function*() {
-        const { page } = yield* api.Browser.reclaim(claim)
+        const { page, found } = yield* api.Browser.reclaim(claim)
+        assert.deepStrictEqual(Schema.decodeUnknownSync(api.Browser.Found)(found) as unknown, {
+          _tag: "Observed",
+          dialogs: []
+        })
         assert.strictEqual(yield* page.url, url)
         yield* page.getByText("Control").click()
         assert.strictEqual(yield* page.title, "controlled")
@@ -380,7 +385,13 @@ describe("Chromium claims (ROOK-95)", () => {
             assert.isDefined(before)
             yield* Effect.scoped(
               Effect.gen(function*() {
-                const context = yield* api.UserContext.reclaim(saved.contextClaim, { emulation: { locale: "fr-FR" } })
+                const recovered = yield* api.UserContext.reclaim(saved.contextClaim, { emulation: { locale: "fr-FR" } })
+                assert.isTrue("context" in recovered)
+                const { context, found } = recovered as unknown as {
+                  context: import("../../../src/UserContext.ts").UserContext
+                  found: { pages: ReadonlyArray<{ found: unknown }> }
+                }
+                assert.deepStrictEqual(found.pages.map((page) => page.found), [{ _tag: "Observed", dialogs: [] }])
                 const { page } = yield* api.Browser.reclaim(saved.pageClaim)
                 assert.strictEqual(page.context.id, context.id)
                 assert.strictEqual(yield* page.evaluateInMainWorld(() => navigator.language), "fr-FR")
@@ -400,44 +411,70 @@ describe("Chromium claims (ROOK-95)", () => {
         60_000
       )
 
-      it.effect("reports a dialog opened after internal handoff", () =>
-        Effect.gen(function*() {
-          const browser = yield* launch
-          const { origin } = yield* serve
-          const old = yield* Scope.make()
-          yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
-          const services = yield* Layer.buildWithScope(browser.connect, old)
-          const claim = yield* Effect.gen(function*() {
-            const context = yield* api.UserContext.create({ reclaimable: true })
-            const page = yield* context.newPage
-            yield* page.goto(`${origin}/dialog`)
-            return yield* api.Page.claim(page)
-          }).pipe(Scope.provide(old), Effect.provide(services))
-          yield* handoff(old)
-          const target = (yield* browser.targets).find((info) =>
-            info.type === "page" && info.url === `${origin}/dialog`
-          )!
-          const { sessionId } = yield* Target.attachToTarget({ targetId: target.targetId, flatten: true }).pipe(
-            Protocol.on(browser.observer.browser)
-          )
-          const session = yield* browser.observer.session(sessionId)
-          // Subscribe before opening the dialog; the command deliberately doesn't wait for alert to return.
-          const CdpPage = yield* Effect.promise(() => import("@usestrider/browser/cdp/Page"))
-          yield* CdpPage.enable().pipe(Protocol.on(session))
-          const dialogs = yield* session.subscribe(CdpPage.javascriptDialogOpening)
-          const opened = yield* Stream.runHead(dialogs).pipe(Effect.forkChild)
-          yield* Runtime.evaluate({ expression: "setTimeout(() => alert('left open'), 0); undefined" }).pipe(
-            Protocol.on(session)
-          )
-          assert.strictEqual(Option.getOrThrow(yield* Fiber.join(opened)).message, "left open")
-          yield* Effect.scoped(
-            Effect.gen(function*() {
-              const { found } = yield* api.Browser.reclaim(claim)
-              assert.deepStrictEqual(found.dialogs.map((dialog) => dialog.message), ["left open"])
-              yield* CdpPage.handleJavaScriptDialog({ accept: false }).pipe(Protocol.on(session))
-            })
-          ).pipe(Effect.provide(browser.connect))
-        }), 60_000)
+      it.effect(
+        "owns unknown state after handoff without dismissing, and explicitly closes while initialization is blocked",
+        () =>
+          Effect.gen(function*() {
+            const browser = yield* launch
+            const { origin } = yield* serve
+            const old = yield* Scope.make()
+            yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
+            const services = yield* Layer.buildWithScope(browser.connect, old)
+            const claim = yield* Effect.gen(function*() {
+              const context = yield* api.UserContext.create({ reclaimable: true })
+              const page = yield* context.newPage
+              yield* page.goto(`${origin}/dialog`)
+              return yield* api.Page.claim(page)
+            }).pipe(Scope.provide(old), Effect.provide(services))
+            yield* handoff(old)
+            const target = (yield* browser.targets).find((info) =>
+              info.type === "page" && info.url === `${origin}/dialog`
+            )!
+            const { sessionId } = yield* Target.attachToTarget({ targetId: target.targetId, flatten: true }).pipe(
+              Protocol.on(browser.observer.browser)
+            )
+            const session = yield* browser.observer.session(sessionId)
+            // Subscribe before opening the dialog; the command deliberately doesn't wait for alert to return.
+            const CdpPage = yield* Effect.promise(() => import("@usestrider/browser/cdp/Page"))
+            yield* CdpPage.enable().pipe(Protocol.on(session))
+            const dialogs = yield* session.subscribe(CdpPage.javascriptDialogOpening)
+            const opened = yield* Stream.runHead(dialogs).pipe(Effect.forkChild)
+            yield* Runtime.evaluate({ expression: "setTimeout(() => alert('left open'), 0); undefined" }).pipe(
+              Protocol.on(session)
+            )
+            assert.strictEqual(Option.getOrThrow(yield* Fiber.join(opened)).message, "left open")
+            yield* Effect.scoped(
+              Effect.gen(function*() {
+                const short = yield* api.Browser.reclaim(claim).pipe(Deadline.within("100 millis"), Effect.exit)
+                assert.isTrue(Exit.isFailure(short))
+                assert.strictEqual(Option.getOrThrow(Exit.findErrorOption(short))._tag, "Timeout")
+                assert.isTrue((yield* browser.targets).some((info) => info.targetId === target.targetId))
+                const started = performance.now()
+                const { page, found } = yield* api.Browser.reclaim(claim).pipe(Deadline.within("3 seconds"))
+                assert.deepStrictEqual(Schema.decodeUnknownSync(api.Browser.Found)(found) as unknown, {
+                  _tag: "Unknown"
+                })
+                assert.isBelow(performance.now() - started, 2500)
+                const actionAt = performance.now()
+                const action = yield* page.evaluateInMainWorld(() => 42).pipe(
+                  Deadline.within("150 millis"),
+                  Effect.exit
+                )
+                assert.strictEqual(Option.getOrThrow(Exit.findErrorOption(action))._tag, "Timeout")
+                assert.isBelow(performance.now() - actionAt, 1500)
+                // The original observer can still see the pending dialog: reclaim did not dismiss it.
+                const blocked = yield* Runtime.evaluate({ expression: "42" }).pipe(
+                  Protocol.on(session),
+                  BrowserClock.timeoutOption(100)
+                )
+                assert.isTrue(Option.isNone(blocked))
+                yield* page.close()
+                assert.isFalse((yield* browser.targets).some((info) => info.targetId === target.targetId))
+              })
+            ).pipe(Effect.provide(browser.connect))
+          }),
+        60_000
+      )
       it.effect("refuses claims for discovered control handles and the default context", () =>
         Effect.gen(function*() {
           const browser = yield* launch
@@ -530,42 +567,50 @@ describe("Chromium claims (ROOK-95)", () => {
         60_000
       )
 
-      it.effect("reports a dialog proved open before handoff", () =>
-        Effect.gen(function*() {
-          const browser = yield* launch
-          const { origin } = yield* serve
-          const old = yield* Scope.make()
-          yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
-          const services = yield* Layer.buildWithScope(browser.connect, old)
-          const claim = yield* Effect.gen(function*() {
-            const connected = yield* Browser.Browser
-            const context = yield* connected.defaultContext.control
-            const page = yield* context.newPage
-            yield* page.goto(`${origin}/before-handoff-dialog`)
-            const claim = yield* api.Page.claim(page)
-            const opened = yield* Dialog.next(page)
-            yield* page.evaluateInMainWorld(() => {
-              setTimeout(() => alert("before handoff"), 0)
-            })
-            yield* opened
-            return claim
-          }).pipe(Scope.provide(old), Effect.provide(services))
-          yield* handoff(old)
-          yield* Effect.scoped(Effect.gen(function*() {
-            const { page, found } = yield* api.Browser.reclaim(claim)
-            assert.deepStrictEqual(found.dialogs.map((dialog) => dialog.message), ["before handoff"])
-            const target = (yield* browser.targets).find((info) =>
-              info.type === "page" && info.url === `${origin}/before-handoff-dialog`
-            )!
-            const { sessionId } = yield* Target.attachToTarget({ targetId: target.targetId, flatten: true }).pipe(
-              Protocol.on(browser.observer.browser)
-            )
-            const session = yield* browser.observer.session(sessionId)
-            const CdpPage = yield* Effect.promise(() => import("@usestrider/browser/cdp/Page"))
-            yield* CdpPage.handleJavaScriptDialog({ accept: false }).pipe(Protocol.on(session))
-            void page
-          })).pipe(Effect.provide(browser.connect))
-        }), 60_000)
+      it.effect(
+        "carries a pre-handoff dialog only as last-known and scope-cleans an unknown page",
+        () =>
+          Effect.gen(function*() {
+            const browser = yield* launch
+            const { origin } = yield* serve
+            const old = yield* Scope.make()
+            yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
+            const services = yield* Layer.buildWithScope(browser.connect, old)
+            const claim = yield* Effect.gen(function*() {
+              const connected = yield* Browser.Browser
+              const context = yield* connected.defaultContext.control
+              const page = yield* context.newPage
+              yield* page.goto(`${origin}/before-handoff-dialog`)
+              const claim = yield* api.Page.claim(page)
+              const opened = yield* Dialog.next(page)
+              yield* page.evaluateInMainWorld(() => {
+                setTimeout(() => alert("before handoff"), 0)
+              })
+              yield* opened
+              return claim
+            }).pipe(Scope.provide(old), Effect.provide(services))
+            const snapshots = yield* handoff(old)
+            const lastKnown = (snapshots as unknown as ReadonlyArray<
+              { claim: string; dialogs: ReadonlyArray<{ kind: string; message: string }> }
+            >).find((entry) => entry.claim === claim)
+            assert.isDefined(lastKnown)
+            const before = (yield* browser.targets).find((info) => info.url === `${origin}/before-handoff-dialog`)!
+            yield* Effect.scoped(Effect.gen(function*() {
+              const reclaim = api.Browser.reclaim as (
+                claim: api.Page.Claim,
+                options: { lastKnown: unknown }
+              ) => ReturnType<typeof api.Browser.reclaim>
+              const recovered = yield* reclaim(claim, { lastKnown })
+              assert.deepStrictEqual(recovered.found as unknown, { _tag: "Unknown" })
+              assert.deepStrictEqual((recovered as unknown as { lastKnown: unknown }).lastKnown, {
+                _tag: "LastKnown",
+                dialogs: [{ kind: "alert", message: "before handoff" }]
+              })
+            })).pipe(Effect.provide(browser.connect))
+            yield* until(browser.targets, (infos) => !infos.some((info) => info.targetId === before.targetId))
+          }),
+        60_000
+      )
 
       it.effect(
         "a failed context reclaim leaves the surviving context and its tabs open",
