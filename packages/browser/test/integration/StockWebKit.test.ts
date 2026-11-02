@@ -92,7 +92,7 @@ describe("Stock WebKit, attached through its remote inspector", () => {
             const png = yield* reader.screenshot()
             assert.deepStrictEqual([...png.subarray(1, 4)], [0x50, 0x4e, 0x47])
             const tab = yield* second.control
-            const blocked = yield* tab.route(`${origin}/analytics/**`, () => Effect.succeed(Route.abort()))
+            const blocked = yield* tab.route(`${origin}/analytics/**`, () => Route.abort())
             // No input: the button is clicked by the page's own script
             yield* tab.evaluateInMainWorld(() => document.querySelector("button")!.click())
             yield* tab.locator("#out").pipe(Expect.toHaveText("blocked"))
@@ -173,9 +173,9 @@ describe("Stock WebKit, attached through its remote inspector", () => {
             yield* tab.route(
               `${origin}/made-up`,
               () =>
-                Effect.succeed(Route.fulfill(
+                Route.fulfill(
                   HttpServerResponse.text("<title>made</title><h1>Made</h1>", { status: 201, contentType: "text/html" })
-                ))
+                )
             )
             const made = yield* tab.goto(`${origin}/made-up`)
             assert(made._tag === "Committed" && Option.isSome(made.response))

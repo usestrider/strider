@@ -28,9 +28,9 @@ interface DecisionImpl extends FileChooser.Decision {
   readonly files: ReadonlyArray<FileInput.FileInput> | undefined
 }
 
-const decision = (files: ReadonlyArray<FileInput.FileInput> | undefined): FileChooser.Decision => {
+const decision = (files: ReadonlyArray<FileInput.FileInput> | undefined): Effect.Effect<FileChooser.Decision> => {
   const made: DecisionImpl = { [DecisionTypeId]: DecisionTypeId, files }
-  return made
+  return Effect.succeed(made)
 }
 
 const canceled = decision(undefined)
@@ -147,8 +147,8 @@ export const choose = (
 ) =>
 (chooser: FileChooser.Pending): Effect.Effect<FileChooser.Decision, FileChooser.FileChooserError> => {
   const list: ReadonlyArray<FileInput.FileInput> = Array.isArray(files) ? files : [files as FileInput.FileInput]
-  if (chooser._tag === "Multiple") return Effect.succeed(chooser.select(list))
-  if (list.length === 1) return Effect.succeed(chooser.select(list[0]!))
+  if (chooser._tag === "Multiple") return chooser.select(list)
+  if (list.length === 1) return chooser.select(list[0]!)
   return Effect.fail(
     new FileChooser.FileChooserError({
       reason: new Reason.InvalidInput({

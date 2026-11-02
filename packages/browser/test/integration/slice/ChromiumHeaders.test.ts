@@ -31,7 +31,7 @@ describe("Chromium sent-header waiting", () => {
               Effect.match({ onFailure: Option.some, onSuccess: () => Option.none() })
             )
             yield* Deferred.succeed(observed, timeout)
-            return Route.continue
+            return yield* Route.continue
           }), { phase: "response" })
         const response = yield* page.evaluateInMainWorld(async () => (await fetch("/json")).status)
         assert.strictEqual(response, 200)
@@ -55,7 +55,7 @@ describe("Chromium sent-header waiting", () => {
           Effect.gen(function*() {
             yield* Deferred.succeed(paused, undefined)
             yield* Deferred.await(release)
-            return Route.continue
+            return yield* Route.continue
           }), { phase: "response" })
         yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
         yield* page.evaluateInMainWorld(() => {

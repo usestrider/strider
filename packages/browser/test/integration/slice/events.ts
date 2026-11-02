@@ -281,8 +281,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
               yield* page.goto(url)
               yield* Dialog.handle(
                 page,
-                (dialog) =>
-                  dialog._tag === "Unknown" ? Effect.succeed(dialog.respond("typed")) : Dialog.acceptAll(dialog)
+                (dialog) => dialog._tag === "Unknown" ? dialog.respond("typed") : Dialog.acceptAll(dialog)
               )
               const decisions = yield* AutoResolution.next(page)
               yield* page.getByText("Ask").click()

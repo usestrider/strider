@@ -404,7 +404,7 @@ describe("Stock WebKit, launched in automation mode", () => {
             ))
             const seen: Array<Dialog.Dialog> = []
             yield* Dialog.handle(page, (dialog) =>
-              Effect.sync(() => {
+              Effect.suspend(() => {
                 seen.push(dialog)
                 return dialog._tag === "Unknown" && dialog.message === "name?"
                   ? dialog.respond("Grace")
@@ -461,9 +461,9 @@ describe("Stock WebKit, launched in automation mode", () => {
           yield* page.route(
             `${origin}/made-up`,
             () =>
-              Effect.succeed(Route.fulfill(
+              Route.fulfill(
                 HttpServerResponse.text("<title>made</title><h1>Made</h1>", { status: 201, contentType: "text/html" })
-              ))
+              )
           )
           const made = yield* page.goto(`${origin}/made-up`)
           assert(made._tag === "Committed" && Option.isSome(made.response))

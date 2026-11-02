@@ -35,16 +35,38 @@ describe("decision Effects", () => {
       }
     }))
 
-  for (const kind of ["alert", "confirm", "prompt", "beforeunload"] as const) {
-    it.effect(`resolves every pending ${kind} decision and convenience handler`, () =>
-      Effect.scoped(Effect.gen(function*() {
+  for (const kind of ["alert", "confirm", "prompt", "beforeunload", "unknown"] as const) {
+    it.effect(`resolves every pending ${kind} decision and convenience handler`, () => {
+      let send!: Adapter.Sink
+      const connection = BrowserImpl.layer((sink) => {
+        send = sink
+        return Fake.connect([], {
+          info: new Browser.Info(Fake.info),
+          capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+        })(sink)
+      })
+      return Effect.scoped(Effect.gen(function*() {
         const page = yield* Browser.newPage()
         const captured = yield* Deferred.make<Dialog.Pending>()
         const handler = yield* Dialog.handle(
           page,
           (pending) => Deferred.succeed(captured, pending).pipe(Effect.andThen(Dialog.dismissAll(pending)))
         )
-        yield* TestClock.adjust("10 millis")
+        if (kind === "unknown") {
+          yield* send({
+            _tag: "ObligationOpened",
+            obligation: "dialog-contract" as Adapter.ObligationId,
+            subject: {
+              _tag: "Prompt",
+              prompt: "prompt-contract" as Dialog.PromptId,
+              page: Handles.page(page).entry.id,
+              kind,
+              message: "question",
+              defaultValue: "default"
+            }
+          })
+          yield* Effect.yieldNow
+        } else yield* TestClock.adjust("10 millis")
         const pending = yield* Deferred.await(captured)
         const effects = pending._tag === "BeforeUnload" ?
           [pending.leave, pending.stay]
@@ -59,8 +81,9 @@ describe("decision Effects", () => {
         }
         assert.isTrue(Dialog.isDecision(yield* Dialog.acceptAll(pending)))
         assert.isTrue(Dialog.isDecision(yield* Dialog.dismissAll(pending)))
-        assert.strictEqual(yield* handler.handled, 1)
-      })).pipe(Effect.provide(Browser.layerTest(`-dialog(${kind})`))))
+        if (kind !== "unknown") assert.strictEqual(yield* handler.handled, 1)
+      })).pipe(Effect.provide(kind === "unknown" ? connection : Browser.layerTest(`-dialog(${kind})`)))
+    })
   }
 
   for (const multiple of [false, true]) {

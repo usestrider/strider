@@ -75,16 +75,25 @@ export type FileChooser = typeof FileChooser.Type
 /**
  * A file chooser as a handler receives it, with the decisions it offers: `select` and `cancel`.
  *
+ * **Details**
+ *
+ * `select` and `cancel` are Effects: return one directly from a handler, or use `return yield*` after other
+ * work in a generator. Its result is the decision the handler machinery sends to the browser.
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
 export type Pending =
-  | { readonly _tag: "Single"; select(file: FileInput.FileInput): Decision; readonly cancel: Decision }
+  | {
+    readonly _tag: "Single"
+    select(file: FileInput.FileInput): Effect.Effect<Decision>
+    readonly cancel: Effect.Effect<Decision>
+  }
   | {
     readonly _tag: "Multiple"
-    select(files: ReadonlyArray<FileInput.FileInput>): Decision
-    readonly cancel: Decision
+    select(files: ReadonlyArray<FileInput.FileInput>): Effect.Effect<Decision>
+    readonly cancel: Effect.Effect<Decision>
   }
 
 /**

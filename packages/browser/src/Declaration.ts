@@ -36,7 +36,7 @@ export interface Registration {
    * const offlineFirstLoad = Effect.fn("offlineFirstLoad")(function*(page: Page.Page) {
    *   const offline = yield* page.route(
    *     "https://shop.example.com/api/**",
-   *     () => Effect.succeed(Route.abort())
+   *     () => Route.abort()
    *   )
    *   yield* page.goto("https://shop.example.com")
    *   yield* offline.remove

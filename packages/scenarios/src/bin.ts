@@ -219,7 +219,7 @@ if (measured) {
   const never = `${origin}/never/**`
   const striderLoad = Effect.fnUntraced(function*(route: boolean) {
     const page = yield* Browser.newPage()
-    if (route) yield* page.route(never, () => Effect.succeed(Route.abort()))
+    if (route) yield* page.route(never, () => Route.abort())
     const started = performance.now()
     yield* page.goto(many, { waitUntil: "load" })
     return performance.now() - started

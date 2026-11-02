@@ -451,7 +451,7 @@ The dialogs a page opens: `alert`, `confirm`, `prompt` and `beforeunload`.
 - `interface Decision`
   - `readonly [DecisionTypeId]: typeof DecisionTypeId`
 - `type Dialog = typeof Dialog.Type`
-- `type Pending = | Extract<Dialog, { readonly _tag: "Alert" }> & { readonly accept: Decision } | Extract<Dialog, { readonly _tag: "Confirm" }> & { readonly accept: Decision; readonly dismiss: Decision } | Extract<Dia…`
+- `type Pending = | Extract<Dialog, { readonly _tag: "Alert" }> & { readonly accept: Effect.Effect<Decision> } | Extract<Dialog, { readonly _tag: "Confirm" }> & { readonly accept: Effect.Effect<Decision> readonly dism…`
 - `type Kind = Dialog["_tag"]`
 - `interface Filter`
   - `readonly kind?: Kind | ReadonlyArray<Kind> | undefined`
@@ -633,7 +633,7 @@ File choosers: the file picker a page opens when a file input is clicked.
 - `interface Decision`
   - `readonly [DecisionTypeId]: typeof DecisionTypeId`
 - `type FileChooser = typeof FileChooser.Type`
-- `type Pending = | { readonly _tag: "Single"; select(file: FileInput.FileInput): Decision; readonly cancel: Decision } | { readonly _tag: "Multiple" select(files: ReadonlyArray<FileInput.FileInput>): Decision readonl…`
+- `type Pending = | { readonly _tag: "Single" select(file: FileInput.FileInput): Effect.Effect<Decision> readonly cancel: Effect.Effect<Decision> } | { readonly _tag: "Multiple" select(files: ReadonlyArray<FileInput.F…`
 - `interface Filter`
   - `readonly multiple?: boolean | undefined`
 - `type FileChooserErrorReason = typeof FileChooserErrorReason.Type`
@@ -1594,15 +1594,15 @@ Routes intercept a page's or context's requests, and a route's handler decides w
 
 *constructors*
 
-- `const continue: Decision<Phase>`
+- `const continue: Effect.Effect<Decision<Phase>>`
 - `const continueWith`
-  - `(change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest): Decision<"request">`
-  - `(change: ResponseChange): Decision<"response">`
-- `const fulfill: (response: HttpServerResponse.HttpServerResponse) => Decision<"request" | "response">`
-- `const abort: (reason?: AbortReason | undefined) => Decision<"request" | "response">`
-- `const fallthrough: Decision<Phase>`
+  - `(change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest): Effect.Effect<Decision<"request">>`
+  - `(change: ResponseChange): Effect.Effect<Decision<"response">>`
+- `const fulfill: (response: HttpServerResponse.HttpServerResponse) => Effect.Effect<Decision<"request" | "response">>`
+- `const abort: (reason?: AbortReason | undefined) => Effect.Effect<Decision<"request" | "response">>`
+- `const fallthrough: Effect.Effect<Decision<Phase>>`
 - `const fromHar: (path: FilePath.Local | string, options?: FromHarOptions | undefined) => Effect.Effect<Handler<never, never, "request">, Har.HarError, FileSystem.FileSystem>`
-- `const provideCredentials: (credentials: { readonly username: string readonly password: Redacted.Redacted<string> }) => Decision<"auth">`
+- `const provideCredentials: (credentials: { readonly username: string readonly password: Redacted.Redacted<string> }) => Effect.Effect<Decision<"auth">>`
 
 *guards*
 

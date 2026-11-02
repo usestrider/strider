@@ -415,11 +415,11 @@ describe("strider export test", () => {
     })
     assert.include(
       text,
-      `const r1 = yield* main.route("**/analytics/**", () => Effect.succeed(Route.abort()))\n`
+      `const r1 = yield* main.route("**/analytics/**", () => Route.abort())\n`
     )
     assert.include(text, `const r2 = yield* Dialog.handle(main, Dialog.dismissAll)\n`)
     // One the session kept on ends with the test's scope, so it needs no name
-    assert.include(text, `        yield* main.route("**/ads/**", () => Effect.succeed(Route.abort()))\n`)
+    assert.include(text, `        yield* main.route("**/ads/**", () => Route.abort())\n`)
     assert.include(text, `        yield* r1.remove\n        yield* r2.remove\n`)
   })
 

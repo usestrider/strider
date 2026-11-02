@@ -88,7 +88,7 @@ const blockAnalytics = Effect.fn("blockAnalytics")(function*() {
   const tab = yield* found.value.control
   const blocked = yield* tab.route(
     "**/analytics/**",
-    () => Effect.succeed(Route.abort())
+    () => Route.abort()
   )
   yield* tab.getByRole("button", { name: "Refresh" }).click()
   yield* blocked.hits.waitFor((count) => count > 0)

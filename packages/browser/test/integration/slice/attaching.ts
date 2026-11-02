@@ -142,7 +142,7 @@ export const attaching = (
               // A tab in the background renders about a frame a second on Firefox, too seldom to act on (Q71)
               yield* tab.activate
               yield* tab.goto(tabUrl(origin, "Initial"))
-              const blocked = yield* tab.route(`${origin}/analytics/**`, () => Effect.succeed(Route.abort()))
+              const blocked = yield* tab.route(`${origin}/analytics/**`, () => Route.abort())
               yield* tab.getByRole("button", { name: "Refresh" }).click()
               yield* tab.locator("#out").pipe(Expect.toHaveText("blocked"))
               assert.strictEqual(yield* blocked.hits, 1)
@@ -155,7 +155,7 @@ export const attaching = (
             const navigated = reasonOf(yield* Effect.exit(kept!.reload()))
             assert.deepStrictEqual((navigated as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             const routed = reasonOf(
-              yield* Effect.exit(Effect.scoped(kept!.route("**", () => Effect.succeed(Route.abort()))))
+              yield* Effect.exit(Effect.scoped(kept!.route("**", () => Route.abort())))
             )
             // A declaration too: every member declares TargetGone (QUIRKS.md, Q143)
             assert.deepStrictEqual((routed as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
@@ -235,7 +235,7 @@ export const attaching = (
                 // Firefox renders a tab in the background too seldom to act on (Q71)
                 yield* tab.activate
                 const blocked = yield* tab.route(`${origin}/analytics/**`, () =>
-                  Effect.succeed(Route.abort()))
+                  Route.abort())
                 yield* tab.getByRole("button", { name: "Refresh" }).click()
                 yield* tab.locator("#out").pipe(Expect.toHaveText("blocked"))
                 assert.strictEqual(yield* blocked.hits, 1)
