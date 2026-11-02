@@ -604,7 +604,9 @@ Rejected: retaining a 30-second wait for this observed race; retrying or returni
 
 Keep durable tab identity separate from connection-local public ids. The experimental subpath issues opaque,
 serializable branded claims only for targets the connection owns: a control grant on a discovered page is not
-ownership, and control of the default context never grants its removal. Chromium claims bind the browser
+ownership, and control of the default context never grants its removal. Disposable contexts and their pages
+cannot issue claims; default-context pages are exempt from disposal on disconnect. Page and context claims
+carry distinct kinds, checked on use before target lookup. Chromium claims bind the browser
 WebSocket GUID, the native tab target and its native context. Tab-level attachment identifies the active page;
 URLs cannot distinguish two tabs and page targets can change during prerender activation. Identity lookup uses
 a separate short-lived CDP client so it does not change the model's attachment hierarchy. A pipe connection
@@ -614,14 +616,15 @@ Persistence is explicit, through the experimental context constructor; ordinary 
 `disposeOnDetach: true`. A reclaimable context uses false but still closes on ordinary scope exit. The internal
 Chromium handoff suppresses only owned target destruction while closing the old scope: registrations, paused
 request handlers and access grants still run their finalizers. Reclaim acquires close-on-scope-exit ownership
-again. Context reclaim reapplies its options through the same setup as context creation, including existing and
-future pages; routes and init scripts are redeclared by the host. The default context is never owned for removal.
+again. Context reclaim borrows the surviving context during setup, acquiring destruction ownership only after
+setup succeeds. Failure or interruption immediately unwinds setup registrations and restores prior model
+settings without deleting existing tabs or the context, including when storage application fails. Data already
+written by storage application is not transactional. Context options apply to existing and future pages; routes and init scripts are redeclared by the host. The default context is never owned for removal.
 Reclaim observes before acquiring ownership, so failed observation does not close somebody else's tab. On pinned
 Chromium 155.0.8059.79, both a dialog proved open before handoff and one opened after it blocked a new inspector's
 `Page.enable`; the existing model's initialization gate also could not complete. This prevents reliable dialog
-rediscovery with the implemented protocol path. Reclaim fails at its deadline rather than silently dismissing
-the dialog or claiming an empty list means a fresh page. This limitation is part of the experimental
-contract; identity recovery alone does not imply that an open dialog can be rediscovered.
+rediscovery with the implemented protocol path. These observations do not identify a surviving tab's current
+dialog state from a later connection.
 
 Rejected: matching by URL; storing connection-local public ids or page-target ids; accepting control as proof of
 ownership; changing ordinary context cleanup; a public handoff option; silently dismissing leftover dialogs; and
