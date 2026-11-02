@@ -181,6 +181,7 @@ export interface SnapNode {
     | { readonly _tag: "Inferred"; readonly value: string; readonly from: string }
     | { readonly _tag: "None" }
   readonly states: ReadonlyArray<string>
+  readonly validationMessage: string | null
   readonly children: ReadonlyArray<SnapNode>
   /** An iframe, whose frame's tree L1 stitches in. */
   readonly frame: boolean
@@ -201,6 +202,7 @@ export const SnapNode: Schema.Codec<SnapNode> = Schema.Struct({
     Schema.TaggedStruct("None", {})
   ]),
   states: Schema.Array(Schema.String),
+  validationMessage: Schema.NullOr(Schema.String),
   children: Schema.Array(Schema.suspend((): Schema.Codec<SnapNode> => SnapNode)),
   frame: Schema.Boolean
 })
@@ -373,6 +375,7 @@ export function renderText(root: SnapNode): string {
     let out = `${indent}- ${node.role.role}`
     if (node.name._tag !== "None") out += ` ${JSON.stringify(node.name.value)}`
     for (const state of node.states) out += ` [${state}]`
+    if (node.validationMessage != null) out += ` [validationMessage=${JSON.stringify(node.validationMessage)}]`
     if (node.ref !== null) out += ` [ref=${node.ref}]`
     if (node.role._tag === "Inferred") out += ` [inferred: ${node.role.evidence.join(", ")}]`
     if (node.name._tag === "Inferred") out += ` [name from: ${node.name.from}]`
@@ -1847,7 +1850,18 @@ export function engine(render: (root: SnapNode) => string) {
     if ((INTERACTIVE.has(role ?? "") || element.matches(":disabled")) && !enabled(element)) states.push("disabled")
     if (deepActive() === element) states.push("focused")
     if (element.getAttribute("aria-pressed") === "true") states.push("pressed")
+    if (validationMessageOf(element) !== null) states.push("invalid")
     return states
+  }
+
+  const validationMessageOf = (element: Element): string | null => {
+    if (
+      (element instanceof HTMLInputElement || element instanceof HTMLSelectElement ||
+        element instanceof HTMLTextAreaElement || element instanceof HTMLButtonElement ||
+        element instanceof HTMLFieldSetElement || element instanceof HTMLOutputElement) &&
+      element.willValidate && !element.validity.valid
+    ) return element.validationMessage
+    return null
   }
 
   /** What makes an element with no role look interactive. */
@@ -1897,6 +1911,7 @@ export function engine(render: (root: SnapNode) => string) {
     role: { _tag: "Aria", role: "text" },
     name: { _tag: "Accessible", value },
     states: [],
+    validationMessage: null,
     children: [],
     frame: false
   })
@@ -1982,6 +1997,7 @@ export function engine(render: (root: SnapNode) => string) {
       role,
       name,
       states: statesOf(element, role._tag === "Aria" ? role.role : null),
+      validationMessage: validationMessageOf(element),
       children,
       frame
     }
@@ -1999,6 +2015,7 @@ export function engine(render: (root: SnapNode) => string) {
       role: { _tag: "Aria", role: "document" },
       name: title === "" ? { _tag: "None" } : { _tag: "Accessible", value: title },
       states: [],
+      validationMessage: null,
       children: document.documentElement === null || (walk.depth !== null && walk.depth < 1)
         ? []
         : childrenOf(document.documentElement, 1, walk),

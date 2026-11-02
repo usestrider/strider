@@ -372,6 +372,39 @@ describe("BrowserToolkit", () => {
       `- form:\n  - textbox "Card" [ref=e1]:\n    - text: "•••"\n  - text: "Total"`
     )
   })
+
+  it("masks an editable field's text that its validation message repeats", () => {
+    // Chromium 155's own message for this field, with hunter2secret typed in it
+    const text =
+      `- textbox "Mail" [invalid] [validationMessage="Please include an '@' in the email address. 'hunter2secret' is missing an '@'."] [ref=e1]`
+    const redacted = ToolkitImpl.masked(text)
+    assert.notInclude(redacted, "hunter2secret")
+    assert.include(redacted, "[invalid]")
+    assert.include(redacted, "[ref=e1]")
+  })
+  it("keeps quoted names separate from validation-message tokens", () => {
+    for (const name of ["x [validationMessage=", "x \"quoted\" \\ [validationMessage="]) {
+      const message = "] private \"tail\" \\ remaining\nsecret"
+      const text = `- textbox ${JSON.stringify(name)} [invalid] [validationMessage=${JSON.stringify(message)}] [ref=e1]`
+      assert.strictEqual(
+        ToolkitImpl.masked(text),
+        `- textbox ${JSON.stringify(name)} [invalid] [validationMessage="•••"] [ref=e1]`
+      )
+      const ordinary = `- text: ${JSON.stringify("[validationMessage=\"ordinary text\"]")}`
+      assert.strictEqual(ToolkitImpl.masked(ordinary), ordinary)
+    }
+  })
+
+  it("masks whole custom validation messages including JSON escapes", () => {
+    const message = "private \"quoted\" ] [ref=fake] \\ trailing\nprivate tail"
+    for (const role of ["textbox", "combobox", "button"]) {
+      const text = `- ${role} "Field" [invalid] [validationMessage=${JSON.stringify(message)}] [ref=e1]`
+      assert.strictEqual(
+        ToolkitImpl.masked(text),
+        `- ${role} "Field" [invalid] [validationMessage="•••"] [ref=e1]`
+      )
+    }
+  })
 })
 
 describe("strider", () => {
