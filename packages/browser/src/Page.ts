@@ -1150,6 +1150,7 @@ export const PageErrorReason = Schema.Union([
   Reason.NotPermitted,
   Reason.Unsupported,
   Reason.BackendFailure,
+  Reason.ViewportMismatch,
   Reason.PromptBlocking
 ])
 

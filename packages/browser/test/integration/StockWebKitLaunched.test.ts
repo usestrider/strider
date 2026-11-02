@@ -7,12 +7,18 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, layer } from "@effect/vitest"
 import { Browser, Dialog, Expect, FileInput, Route } from "@usestrider/browser"
 import { WebKit } from "@usestrider/browser/webkit"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
+import { createServer } from "node:net"
+import * as Launch from "../../src/internal/launch.ts"
+import * as WebKitAutomation from "../../src/internal/webkitAutomation.ts"
 import { site } from "./adapter/harness.ts"
 import { webkitgtk } from "./browsers.ts"
 import { socketConnector } from "./sockets.ts"
@@ -26,7 +32,15 @@ const fixtureUrl = (origin: string, html: string) => `${origin}/fixture?html=${e
 const reasonOf = <A, E>(exit: Exit.Exit<A, E>) => {
   assert.isTrue(Exit.isFailure(exit), "expected a failure")
   return (Exit.isFailure(exit) ? Option.getOrUndefined(Exit.findErrorOption(exit)) : undefined) as
-    | { readonly _tag: string; readonly reason?: { readonly _tag: string; readonly capability?: string } }
+    | {
+      readonly _tag: string
+      readonly reason?: {
+        readonly _tag: string
+        readonly capability?: string
+        readonly requested?: { readonly width: number; readonly height: number }
+        readonly actual?: { readonly width: number; readonly height: number }
+      }
+    }
     | undefined
 }
 
@@ -44,6 +58,310 @@ const launched = Effect.fnUntraced(function*<A, E, R>(effect: Effect.Effect<A, E
 
 describe("Stock WebKit, launched in automation mode", () => {
   layer(NodeServices.layer, { excludeTestServices: true, timeout })((it) => {
+    it.effect(
+      "sends a real silent listener nothing, and starts the real MiniBrowser owned on another port",
+      () =>
+        Effect.gen(function*() {
+          yield* useXvfb()
+          const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+          const received: Array<number> = []
+          let accepted = 0
+          const ports: Array<number> = []
+          const server = createServer((socket) => {
+            accepted++
+            socket.on("data", (data) => received.push(data.length))
+            socket.on("error", () => {})
+          })
+          yield* Effect.addFinalizer(() => Effect.sync(() => server.close()))
+          const observing = ChildProcessSpawner.make(Effect.fnUntraced(function*(command) {
+            if (command._tag === "StandardCommand") {
+              const endpoint = command.options.env?.["WEBKIT_INSPECTOR_SERVER"]
+              if (endpoint !== undefined) {
+                const port = Number(endpoint.split(":")[1])
+                ports.push(port)
+                // The first port is taken, by something that accepts and never answers, before the child binds it.
+                if (ports.length === 1) {
+                  yield* Effect.callback<void>((resume) => {
+                    server.listen(port, "127.0.0.1", () => resume(Effect.void))
+                  })
+                }
+              }
+            }
+            return yield* spawner.spawn(command)
+          }))
+          yield* WebKitAutomation.start({ executablePath: webkitgtk.executable }).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, observing),
+            Effect.provide(socketConnector)
+          )
+          assert.strictEqual(ports.length, 2, "the child's collision moves the launch to one other port")
+          assert.notStrictEqual(ports[0], ports[1])
+          assert.deepStrictEqual(received, [], "nothing is written to the foreign listener")
+          assert.strictEqual(accepted, 0, "nor is it connected to")
+        }).pipe(Effect.scoped),
+      timeout
+    )
+
+    it.effect(
+      "refuses a real wrapper that forks the MiniBrowser rather than execing it",
+      () =>
+        Effect.gen(function*() {
+          yield* useXvfb()
+          const fs = yield* FileSystem.FileSystem
+          const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-fork-wrapper-" })
+          const executablePath = `${directory}/MiniBrowser`
+          // No `exec`: the shell stays the spawned PID, and the browser, its child, holds the listener.
+          yield* fs.writeFileString(executablePath, `#!/bin/sh\n"${webkitgtk.executable}" "$@"\nexit $?\n`)
+          yield* fs.chmod(executablePath, 0o755)
+          const exit = yield* WebKitAutomation.start({ executablePath, timeout: "3 seconds" }).pipe(
+            Effect.provide(socketConnector),
+            Effect.exit
+          )
+          const reason = reasonOf(exit)?.reason as { readonly _tag: string; readonly hint: string }
+          assert.strictEqual(reason._tag, "ConnectionFailed")
+          assert.include(reason.hint, "fork-only wrappers")
+          assert.include(reason.hint, "WebKit.layerAttach")
+        }).pipe(Effect.scoped),
+      timeout
+    )
+
+    it.effect(
+      "verifies the real Launch.spawn PID holds the pinned MiniBrowser inspector listener",
+      () =>
+        Effect.gen(function*() {
+          yield* useXvfb()
+          const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+          const children: Array<
+            {
+              readonly pid: number
+              readonly port: number
+              readonly executable: string
+              readonly args: ReadonlyArray<string>
+            }
+          > = []
+          const observing = ChildProcessSpawner.make(Effect.fnUntraced(function*(command) {
+            const handle = yield* spawner.spawn(command)
+            if (command._tag === "StandardCommand") {
+              const endpoint = command.options.env?.["WEBKIT_INSPECTOR_SERVER"]
+              if (endpoint !== undefined) {
+                children.push({
+                  pid: Number(handle.pid),
+                  port: Number(endpoint.split(":")[1]),
+                  executable: command.command,
+                  args: command.args
+                })
+              }
+            }
+            return handle
+          }))
+          yield* WebKitAutomation.start({ executablePath: webkitgtk.executable }).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, observing),
+            Effect.provide(socketConnector)
+          )
+          assert.strictEqual(children.length, 1)
+          const child = children[0]!
+          const [executable, args] = Launch.command(webkitgtk.executable, ["--automation"], false)
+          assert.strictEqual(child.executable, executable)
+          assert.deepStrictEqual(child.args, args)
+          const inode = yield* WebKitAutomation.inspectorListener(child.pid, child.port)
+          assert.isDefined(inode, "the exact spawned PID, including the exec wrapper, must hold the listener")
+          yield* Effect.logInfo({ webkitOwnership: { ...child, inode, version: webkitgtk.version } })
+        }).pipe(Effect.scoped),
+      timeout
+    )
+
+    it.effect(
+      "refuses a screen-constrained initial viewport without leaving a page",
+      () =>
+        launched(Effect.gen(function*() {
+          const browser = yield* Browser.Browser
+          const context = yield* browser.newContext({ emulation: { viewport: { width: 1440, height: 1000 } } })
+          const before = yield* context.pages
+          const result = yield* Effect.exit(context.newPage)
+          const error = reasonOf(result)
+          // Pinned MiniBrowser has 38 pixels of chrome on the fixed 1280x800 screen (ROOK-91).
+          assert.deepInclude(error?.reason, {
+            _tag: "ViewportMismatch",
+            requested: { width: 1440, height: 1000 },
+            actual: { width: 1280, height: 762 }
+          })
+          assert.deepStrictEqual(yield* context.pages, before)
+        })),
+      timeout
+    )
+
+    it.effect(
+      "refuses a screen-constrained replacement and restores the previous effective viewport",
+      () =>
+        launched(Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          yield* page.emulate({ viewport: { width: 640, height: 480 } })
+          assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), [640, 480])
+          const result = yield* Effect.scoped(page.emulate({ viewport: { width: 1440, height: 1000 } })).pipe(
+            Effect.exit
+          )
+          const error = reasonOf(result)
+          // Pinned MiniBrowser has 38 pixels of chrome on the fixed 1280x800 screen (ROOK-91).
+          assert.deepInclude(error?.reason, {
+            _tag: "ViewportMismatch",
+            requested: { width: 1440, height: 1000 },
+            actual: { width: 1280, height: 762 }
+          })
+          assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), [640, 480])
+        })),
+      timeout
+    )
+
+    it.effect("confirms an unchanged viewport immediately", () =>
+      launched(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        yield* page.emulate({ viewport: { width: 640, height: 480 } })
+        yield* page.emulate({ viewport: { width: 640, height: 480 } })
+        assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), [640, 480])
+      })), timeout)
+
+    it.effect(
+      "restores the prior viewport and disposes confirmation when interrupted",
+      () =>
+        launched(Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(fixtureUrl(origin, "<title>before</title>"))
+          yield* page.emulate({ viewport: { width: 640, height: 480 } })
+          yield* page.evaluateInMainWorld(() => {
+            Object.defineProperty(globalThis, "innerWidth", {
+              configurable: true,
+              get: () => {
+                document.title = "confirming"
+                return document.documentElement.clientWidth
+              }
+            })
+          })
+          const fiber = yield* Effect.scoped(page.emulate({ viewport: { width: 1440, height: 1000 } })).pipe(
+            Effect.forkChild
+          )
+          yield* page.pipe(Expect.toHaveTitle("confirming"))
+          yield* Fiber.interrupt(fiber)
+          assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), [640, 480])
+          assert.deepStrictEqual(
+            yield* page.evaluateInMainWorld(() =>
+              Object.getOwnPropertyNames(globalThis).filter((name) => name.startsWith("__striderViewport"))
+            ),
+            []
+          )
+        })),
+      timeout
+    )
+
+    it.effect(
+      "does not relabel navigation during confirmation as a viewport mismatch",
+      () =>
+        launched(Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(fixtureUrl(origin, "<title>before</title>"))
+          yield* page.emulate({ viewport: { width: 640, height: 480 } })
+          yield* page.evaluateInMainWorld((url) => {
+            Object.defineProperty(globalThis, "innerWidth", {
+              configurable: true,
+              get: () => {
+                queueMicrotask(() => {
+                  location.href = url
+                })
+                return 0
+              }
+            })
+          }, fixtureUrl(origin, "<title>after</title>"))
+          const result = yield* Effect.scoped(page.emulate({ viewport: { width: 800, height: 600 } })).pipe(Effect.exit)
+          assert.deepInclude(reasonOf(result)?.reason, { _tag: "BackendFailure" })
+          yield* page.pipe(Expect.toHaveTitle("after"))
+        })),
+      timeout
+    )
+
+    it.effect("keeps a failed restoration visible", () =>
+      launched(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        yield* page.emulate({ viewport: { width: 640, height: 480 } })
+        yield* page.evaluateInMainWorld(() => {
+          const host = globalThis as unknown as Record<string, unknown>
+          host["__originalInnerWidth"] = Object.getOwnPropertyDescriptor(globalThis, "innerWidth")
+          Object.defineProperty(globalThis, "innerWidth", { configurable: true, get: () => 0 })
+        })
+        const result = yield* Effect.scoped(page.emulate({ viewport: { width: 800, height: 600 } })).pipe(Effect.exit)
+        assert.isTrue(Exit.isFailure(result))
+        if (Exit.isFailure(result)) {
+          assert.include(Cause.pretty(result.cause), "WebKit viewport restoration failed")
+          assert.isTrue(result.cause.reasons.some((reason) => reason._tag === "Die"))
+        }
+        // Remove the artificial measurement failure before the prior registration's finalizer.
+        yield* page.evaluateInMainWorld(() => {
+          const host = globalThis as unknown as Record<string, unknown>
+          Object.defineProperty(globalThis, "innerWidth", host["__originalInnerWidth"] as PropertyDescriptor)
+          delete host["__originalInnerWidth"]
+        })
+      })), timeout)
+
+    it.effect(
+      "warns without failing ordinary viewport release when restoration cannot be confirmed",
+      () =>
+        launched(Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          const registration = yield* page.emulate({ viewport: { width: 640, height: 480 } })
+          yield* page.evaluateInMainWorld(() => {
+            const host = globalThis as unknown as Record<string, unknown>
+            host["__originalInnerWidth"] = Object.getOwnPropertyDescriptor(globalThis, "innerWidth")
+            Object.defineProperty(globalThis, "innerWidth", { configurable: true, get: () => 0 })
+          })
+          const result = yield* registration.remove.pipe(Effect.exit)
+          assert.strictEqual(result._tag, "Success")
+          yield* page.evaluateInMainWorld(() => {
+            const host = globalThis as unknown as Record<string, unknown>
+            Object.defineProperty(globalThis, "innerWidth", host["__originalInnerWidth"] as PropertyDescriptor)
+            delete host["__originalInnerWidth"]
+          })
+        })),
+      timeout
+    )
+
+    it.effect("releases a viewport registration after its page has closed", () =>
+      launched(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const registration = yield* page.emulate({ viewport: { width: 640, height: 480 } })
+        yield* page.close()
+        assert.strictEqual((yield* registration.remove.pipe(Effect.exit))._tag, "Success")
+      })), timeout)
+
+    it.effect(
+      "restores a natural viewport when the first explicit override fails",
+      () =>
+        launched(Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          const natural = yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight])
+          const result = yield* Effect.scoped(page.emulate({ viewport: { width: 1440, height: 1000 } })).pipe(
+            Effect.exit
+          )
+          assert.deepInclude(reasonOf(result)?.reason, { _tag: "ViewportMismatch" })
+          assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), natural)
+        })),
+      timeout
+    )
+
+    it.effect("restores every page after a context viewport override fails", () =>
+      launched(Effect.gen(function*() {
+        const browser = yield* Browser.Browser
+        const context = yield* browser.newContext()
+        yield* context.emulate({ viewport: { width: 640, height: 480 } })
+        const first = yield* context.newPage
+        const second = yield* context.newPage
+        const result = yield* Effect.scoped(context.emulate({ viewport: { width: 1440, height: 1000 } })).pipe(
+          Effect.exit
+        )
+        assert.deepInclude(reasonOf(result)?.reason, { _tag: "ViewportMismatch" })
+        for (const page of [first, second]) {
+          assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), [640, 480])
+        }
+      })), timeout)
+
     it.effect(
       "names itself, has its first tab, and drives a page with input the page trusts",
       () =>

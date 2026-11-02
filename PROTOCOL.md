@@ -907,6 +907,7 @@ Adapter responsibilities:
 **Built** (2026-10-26): stock WebKit, launched in automation mode.
 
 - **`WebKit.layer` with the MiniBrowser** (`internal/webkitAutomation.ts`). An executable named `MiniBrowser` is launched with `--automation` and `WEBKIT_INSPECTOR_SERVER` on a random port, tried again on another while its stderr says the port is taken (Q216), with the XDG directories in a temporary one; the program's `SocketConnector` connects, and the session starts. `headless: true` is `InvalidInput`.
+- **Inspector endpoint ownership.** Launch requires Linux procfs access. For the selected IPv4 loopback endpoint, Strider reads the LISTEN socket inode in `/proc/<spawned-pid>/net/tcp` and requires that inode in the spawned PID's `/proc/<pid>/fd` links. The same listener must be present before connecting and after connection establishment, with the child still running, before any inspector write. This relies on the stock inspector's exclusive listening bind; a TCP connection alone does not establish ownership. No descendants are searched: wrappers must exec MiniBrowser. Unsupported operating systems, unreadable procfs for a live child and live-child ownership that cannot be verified refuse launch with `ConnectionFailed` and `WebKit.layerAttach` guidance. Startup races ownership readiness against the actual child exit event, within the existing launch deadline. Any procfs read failure, including missing entries and permission errors, stops ownership attempts and closes any rejected connection before waiting for that event or the deadline. If no exit is observed, refusal retains the original access error and uses `ConnectionFailed{stage: "refused"}`; a later bind-error report does not restart ownership attempts. An ordinary readiness timeout retains `stage: "handshake"`. Stderr ending alone does not mean exit and does not stop a live child from starting. An observed child exit preserves `ProcessExited` with its exit code when available (the code may be absent, such as for a signal); stderr contains only what was collected within the launch deadline, including when descendants keep it open. Exits before ownership include the exec-wrapper requirement and attach alternative without assuming the exit was caused by a fork; attach to an externally managed inspector HTTP endpoint remains available. Readiness retains the launch deadline and 100 ms polling, and a reported port collision retains the five-attempt limit. Failed or interrupted connection attempts close their scopes; each rejected child attempt closes its process scope before returning or trying another port.
 - **`SocketConnector`** (`@usestrider/browser/protocol`; `SocketConnector.layer`, `fromSocket`). The shape of Effect-TS/effect#8735's `effect/socket/SocketConnector`, provisional. The CLI's daemon provides it from `NodeSocket.makeNet`, and an exported test does for stock WebKit.
 - **A process per context** (`Group`). The default context's process announces its first window, as every backend's first tab (Q141), and opens one more, minimized, as its anchor; a context's process keeps its first window as its anchor. A process claims its first window before anything else, since the first page asked for takes it (Q213). A context's removal ends its process; the default context's end loses the connection.
 - **Every process's pages, one transport.** Each `WebPage` target is a page proxy in Playwright's envelope, `<process>-<target>`, in its process's context, with ids qualified as when attached (Q195); `Playwright.enable` announces the pages open.
@@ -1095,3 +1096,22 @@ None. Decided:
   - AOT compilation is an explicit build choice with the same semantics.
 - **Effect `Socket`:** ship our own small fail-fast transport now, and propose upstream a fail-fast writer mode, switching over once it's released.
 - **`ws` constructor** (2026-10-19, replacing 5.15's "our own `ws` constructor"): we don't ship one. `ws` runs only on Node and Bun, so `@usestrider/browser/protocol` can't import it, and a platform subpath of our own would bend API.md's "no platform packages of our own". Instead we propose upstream that `NodeSocket.layerWebSocketConstructor` pass `ws` options (`maxPayload`, `perMessageDeflate`) through, and document the 128 MiB limit of Node's built-in WebSocket until it ships.
+
+### Stock WebKit viewport confirmation
+
+A native-window resize reply does not prove that the renderer has applied the requested size. After resizing,
+Strider uses an Automation callback to check `innerWidth` and `innerHeight` immediately and on `resize`.
+The browser enforces a default five-second callback limit, capped by the operation deadline. Only that callback
+timeout permits one final measurement; ordinary protocol, navigation and operation-deadline failures keep their
+meaning. A final mismatch carries the requested and actual numeric sizes through `Reason.ViewportMismatch`.
+
+The check confirms an observation, not permanent sizing support. Listeners and callbacks are disposed on match,
+timeout, navigation and interruption. Failed page creation closes the Automation handle and waits for removal.
+Failed declarations remove their new registration, then restore and confirm the previous effective setting under
+a separate detached five-second cleanup budget. Cleanup failure is visible as a defect alongside the original
+failure; it is never described as a successful restoration. Ordinary scope release stays non-failing: a confirmed
+gone page requires no restoration, and other failures are logged without claiming success. Callback disposal
+preserves the primary outcome, ignoring confirmed vanished windows and warning on other failures. Restoration
+reserves its last second for a final measurement inside the same shared five-second budget. Nested cleanup
+inherits that deadline rather than extending it; genuine operation deadlines remain timeouts. Popup defaults are attempted without confirmation,
+since there is no creation operation to receive that failure; an explicit page declaration confirms them.

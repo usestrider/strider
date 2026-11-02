@@ -446,3 +446,68 @@ newer commit and reset readiness; and mutating published provenance or publishin
 correlation is released on completion or interruption, and all correlation state is cleared on navigable removal.
 The one retained completed failure is not a live reservation and is cleared when its document arrives or a normal
 commit supersedes it after outstanding correlation finishes. No public operation or policy is added.
+
+## Launched WebKit verifies its inspector listener through Linux procfs
+
+A connection to a selected port is not evidence that the child started its inspector. In the traced ROOK-140
+failure another MiniBrowser accepted the connection before the child reported its failed bind. Starting an
+Automation session on that connection could interfere with someone else's browser.
+
+Launched WebKit therefore requires Linux with readable child procfs. Before connecting, the exact spawned PID must
+hold the loopback LISTEN socket inode; after connecting, it must still hold the same listener and be running before
+any inspector write. The stock inspector binds exclusively, so retaining the same listener across connection
+establishment excludes a different server accepting that connection. A wrapper must exec MiniBrowser, not merely
+fork it. We do not search descendants or fall back when the proof is unavailable. Refusal explains why and directs
+the caller to attach to an externally managed inspector HTTP endpoint. A procfs read failure, including permission
+errors, can precede the child exit event, so it stops ownership attempts and closes any rejected connection before
+waiting for the actual event within the remaining launch deadline. No later collision report restarts ownership
+attempts. If no exit is observed, `ConnectionFailed` retains the original access error and uses `stage: "refused"`.
+This deliberately allows a genuine access refusal to take the rest of the launch budget; it does not use a fixed
+grace period or guess the child's state from another kernel file. An ordinary readiness timeout keeps its prior
+`stage: "handshake"`.
+
+Stderr ending alone is not an exit; a live child may still start successfully. An observed exit retains
+`ProcessExited` with its exit code when available; the code can be absent, such as for a signal. Stderr contains
+only what was collected within the same launch deadline, since descendants may hold it open. Exits before ownership
+also explain that wrappers must exec MiniBrowser and name attach, without assuming every exit was caused by a fork.
+Attach keeps its existing requirements. The existing deadline, 100 ms polling and five reported-collision attempts
+remain the policy.
+
+Rejected: checking port availability then releasing it (another process can bind in the gap), a launch mutex
+(other processes do not participate), delaying for stderr (there is no bounded time that proves success), and
+checking ownership only after connecting (a replacement listener could then be mistaken for the connected server).
+Pinned WebKitGTK's launch interface accepts only a fixed nonzero IP port, with no success acknowledgement or
+inherited listener, so a private Unix socket and socket activation are not available. A portable ownership service
+or native helper would need another design and dependency; the owner approved the narrower Linux procfs requirement
+for launched WebKit. Procfs inaccessible under a sandbox is a refusal, not permission to write to an unknown server.
+
+## Confirm stock WebKit viewport requests against the renderer (ROOK-91)
+
+Stock WebKit sizes a native window. Its reply can follow a native target-size wait that expired, and renderer
+geometry updates are asynchronous. A successful command therefore needs an observed match, not an assumption
+that the reply is a completion fence. Confirm immediately and on resize events through Automation, with a
+browser-enforced default limit of five seconds capped by the operation deadline, and one final measurement at
+that confirmation limit. Report `Reason.ViewportMismatch` with numeric requested and actual dimensions if the
+target was not observed. This does not assert permanent inability or prevent a later window-manager change.
+
+Pair a page before applying its explicit override. Confirm defaults on pages created by an operation; close a
+failed page before returning the failure. Popup defaults have no creation operation to fail and remain attempted
+but unconfirmed until an explicit declaration. Restore failed overrides under a detached five-second cleanup
+budget, and expose failed rollback alongside the initiating failure rather than claiming the old size was restored.
+Reserve the last second of this shared budget for a final measurement, including when multiple pages restore at
+once. Nested cleanup cannot extend it. Ordinary release retains non-failing teardown: confirmed gone resources need
+nothing, and other release errors are warnings rather than restoration claims. Callback disposal likewise preserves
+the primary result, ignoring vanished windows and logging other failures. Failed-creation cleanup prefers the page
+paired to its Automation handle and waits only for that page, independent of popup labels, unrelated popups or
+other pending creations. Without a pairing it waits for newly observed non-popup candidates within the same bound.
+Popup labels come from the pending creation count: a popup arriving first can consume that count and leave the
+actual created page labelled as a popup. If an unpaired popup-labelled candidate remains, cleanup reports identity
+ambiguity rather than waiting for that popup or claiming the failed page was removed. An unrelated page wrongly
+labelled as a creation can still exhaust the bounded wait when no pairing exists. Concurrent unpaired creations
+and a creation count whose announcement never arrives remain ambiguous; no identity is guessed from those labels.
+Context-wide restoration is fail-fast: a non-gone failure can interrupt sibling restoration, and the rollback
+failure or release warning does not claim that every sibling was restored.
+
+Rejected: treating the resize reply or an arbitrary number of frames as completion; polling or resending the
+resize; using screen dimensions as a universal preflight limit across window managers; reporting `Unsupported`
+for a bounded observation; and enlarging the test display without retaining the constrained-display regression.

@@ -112,6 +112,19 @@ export type TimeZoneId = typeof TimeZoneId.Type
 /**
  * The viewport, in CSS pixels.
  *
+ * **Details**
+ *
+ * Launched stock WebKit sizes a native window and confirms the page dimensions immediately and on resize
+ * events for up to five seconds, capped by the operation deadline. A final measurement at that limit can still
+ * succeed; otherwise `Reason.ViewportMismatch` records requested and measured sizes. A confirmation is an
+ * observation, and later window-manager or user changes can change the size again.
+ *
+ * Failed changes attempt confirmed restoration under a separate five-second cleanup budget; restoration
+ * failure remains visible as a defect alongside the original failure. Ordinary scope release is non-failing:
+ * confirmed gone pages need no restoration, and other release failures produce warnings. Cleanup reserves its
+ * final second for measurement within the same five-second budget. Creation defaults are confirmed when a
+ * page is created by an operation. Popup defaults are attempted but unconfirmed until explicitly emulated.
+ *
  * **Example** (A phone-sized page)
  *
  * ```ts import.meta.vitest
