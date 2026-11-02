@@ -34,7 +34,7 @@ import type * as Url from "../Url.ts"
  *
  * An executable not named `MiniBrowser` fails with `InvalidInput`. The layer starts it with the platform's
  * `ChildProcessSpawner` and `FileSystem`, which `NodeServices.layer` from `@effect/platform-node` provides. The
- * browser's inspector server listens on a free local port, which Strider reaches through the `SocketConnector` in
+ * browser's inspector server listens on a local port, which Strider reaches through the `SocketConnector` in
  * context: provide one with `SocketConnector.layer` (`@usestrider/browser/protocol`). Each context is a browser
  * process of its own, with an ephemeral profile; the default context's process holds the browser's first tab. The
  * window opens on the display that `DISPLAY` or `WAYLAND_DISPLAY` names. The browser exits when the layer's scope
@@ -42,6 +42,17 @@ import type * as Url from "../Url.ts"
  *
  * The browser starts with core dumps off, so a process that crashes exits at once and the page is reported as
  * crashed without waiting for the host to write a core. `coreDumps: true` leaves the limit as the host sets it.
+ *
+ * Launch requires Linux with readable child procfs (`/proc/<pid>/net/tcp` and `/proc/<pid>/fd`). Before and after
+ * connecting, the spawned PID itself must hold the same inspector listener. A wrapper must exec MiniBrowser rather
+ * than only fork it. Unsupported operating systems and unverifiable ownership fail with `ConnectionFailed`.
+ * A procfs read failure stops ownership attempts and closes any rejected connection, then waits for the child's
+ * exit event within the remaining launch deadline. If no exit is observed, refusal retains the access error.
+ * A child exit observed during startup fails with `ProcessExited`, with an exit code when available and stderr
+ * collected within that same deadline. An ordinary readiness timeout uses `ConnectionFailed`'s `handshake` stage;
+ * explicit ownership and access refusals use `refused`. Both errors explain the applicable launch requirements
+ * and the attach alternative. Use `layerAttach` with an externally managed inspector HTTP endpoint when launch
+ * ownership cannot be verified.
  *
  * **Gotchas**
  *
@@ -122,7 +133,8 @@ export const layer = (
   )
 
 /**
- * Launches the MiniBrowser as `layer` does, with options read from configuration, such as the executable path from
+ * Launches the MiniBrowser as `layer` does, requiring Linux and readable child procfs, with options read from
+ * configuration, such as the executable path from
  * each machine's environment.
  *
  * **Example** (Reading the executable's path from the environment)

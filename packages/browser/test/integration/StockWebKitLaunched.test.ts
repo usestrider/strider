@@ -15,6 +15,10 @@ import * as FileSystem from "effect/FileSystem"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
+import { createServer } from "node:net"
+import * as Launch from "../../src/internal/launch.ts"
+import * as WebKitAutomation from "../../src/internal/webkitAutomation.ts"
 import { site } from "./adapter/harness.ts"
 import { webkitgtk } from "./browsers.ts"
 import { socketConnector } from "./sockets.ts"
@@ -54,6 +58,117 @@ const launched = Effect.fnUntraced(function*<A, E, R>(effect: Effect.Effect<A, E
 
 describe("Stock WebKit, launched in automation mode", () => {
   layer(NodeServices.layer, { excludeTestServices: true, timeout })((it) => {
+    it.effect(
+      "sends a real silent listener nothing, and starts the real MiniBrowser owned on another port",
+      () =>
+        Effect.gen(function*() {
+          yield* useXvfb()
+          const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+          const received: Array<number> = []
+          let accepted = 0
+          const ports: Array<number> = []
+          const server = createServer((socket) => {
+            accepted++
+            socket.on("data", (data) => received.push(data.length))
+            socket.on("error", () => {})
+          })
+          yield* Effect.addFinalizer(() => Effect.sync(() => server.close()))
+          const observing = ChildProcessSpawner.make(Effect.fnUntraced(function*(command) {
+            if (command._tag === "StandardCommand") {
+              const endpoint = command.options.env?.["WEBKIT_INSPECTOR_SERVER"]
+              if (endpoint !== undefined) {
+                const port = Number(endpoint.split(":")[1])
+                ports.push(port)
+                // The first port is taken, by something that accepts and never answers, before the child binds it.
+                if (ports.length === 1) {
+                  yield* Effect.callback<void>((resume) => {
+                    server.listen(port, "127.0.0.1", () => resume(Effect.void))
+                  })
+                }
+              }
+            }
+            return yield* spawner.spawn(command)
+          }))
+          yield* WebKitAutomation.start({ executablePath: webkitgtk.executable }).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, observing),
+            Effect.provide(socketConnector)
+          )
+          assert.strictEqual(ports.length, 2, "the child's collision moves the launch to one other port")
+          assert.notStrictEqual(ports[0], ports[1])
+          assert.deepStrictEqual(received, [], "nothing is written to the foreign listener")
+          assert.strictEqual(accepted, 0, "nor is it connected to")
+        }).pipe(Effect.scoped),
+      timeout
+    )
+
+    it.effect(
+      "refuses a real wrapper that forks the MiniBrowser rather than execing it",
+      () =>
+        Effect.gen(function*() {
+          yield* useXvfb()
+          const fs = yield* FileSystem.FileSystem
+          const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-fork-wrapper-" })
+          const executablePath = `${directory}/MiniBrowser`
+          // No `exec`: the shell stays the spawned PID, and the browser, its child, holds the listener.
+          yield* fs.writeFileString(executablePath, `#!/bin/sh\n"${webkitgtk.executable}" "$@"\nexit $?\n`)
+          yield* fs.chmod(executablePath, 0o755)
+          const exit = yield* WebKitAutomation.start({ executablePath, timeout: "3 seconds" }).pipe(
+            Effect.provide(socketConnector),
+            Effect.exit
+          )
+          const reason = reasonOf(exit)?.reason as { readonly _tag: string; readonly hint: string }
+          assert.strictEqual(reason._tag, "ConnectionFailed")
+          assert.include(reason.hint, "fork-only wrappers")
+          assert.include(reason.hint, "WebKit.layerAttach")
+        }).pipe(Effect.scoped),
+      timeout
+    )
+
+    it.effect(
+      "verifies the real Launch.spawn PID holds the pinned MiniBrowser inspector listener",
+      () =>
+        Effect.gen(function*() {
+          yield* useXvfb()
+          const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+          const children: Array<
+            {
+              readonly pid: number
+              readonly port: number
+              readonly executable: string
+              readonly args: ReadonlyArray<string>
+            }
+          > = []
+          const observing = ChildProcessSpawner.make(Effect.fnUntraced(function*(command) {
+            const handle = yield* spawner.spawn(command)
+            if (command._tag === "StandardCommand") {
+              const endpoint = command.options.env?.["WEBKIT_INSPECTOR_SERVER"]
+              if (endpoint !== undefined) {
+                children.push({
+                  pid: Number(handle.pid),
+                  port: Number(endpoint.split(":")[1]),
+                  executable: command.command,
+                  args: command.args
+                })
+              }
+            }
+            return handle
+          }))
+          yield* WebKitAutomation.start({ executablePath: webkitgtk.executable }).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, observing),
+            Effect.provide(socketConnector)
+          )
+          assert.strictEqual(children.length, 1)
+          const child = children[0]!
+          const [executable, args] = Launch.command(webkitgtk.executable, ["--automation"], false)
+          assert.strictEqual(child.executable, executable)
+          assert.deepStrictEqual(child.args, args)
+          const inode = yield* WebKitAutomation.inspectorListener(child.pid, child.port)
+          assert.isDefined(inode, "the exact spawned PID, including the exec wrapper, must hold the listener")
+          yield* Effect.logInfo({ webkitOwnership: { ...child, inode, version: webkitgtk.version } })
+        }).pipe(Effect.scoped),
+      timeout
+    )
+
     it.effect(
       "refuses a screen-constrained initial viewport without leaving a page",
       () =>
