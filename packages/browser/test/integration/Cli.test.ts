@@ -35,7 +35,7 @@ const inspectorTargetIds = (endpoint: string, backend: "Chromium" | "stock WebKi
     assert.strictEqual(response.status, 200)
     return backend === "Chromium"
       ? ((await response.json()) as ReadonlyArray<{ readonly id: string }>).map((target) => target.id)
-      : WebKitStockTransport.pagesOf(await response.text())
+      : [...WebKitStockTransport.pagesOf(await response.text())]
   })
 
 const timeout = 120_000
