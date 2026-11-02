@@ -331,10 +331,21 @@ contexts keep their existing disconnect and scope cleanup. Internal Chromium han
 its declarations, settling paused handlers, while leaving owned pages and reclaimable contexts open. Reclaim
 acquires ownership for the new scope, which closes the page or removes the context on ordinary exit. Default
 context control never gives removal ownership. Context settings are supplied again because they belong to the
-old protocol sessions; routes and init scripts are declared again by the host. Reclaim reports observed leftover
-state without resetting the page. An open Chromium dialog can block inspector initialization, so the current
-reclaim path fails at its deadline rather than return an unproved empty dialog report. Leases (ROOK-96), expiry (ROOK-97) and host adoption are
-separate; persistent contexts must not be enabled by a host until expiry cleanup is available.
+old protocol sessions; routes and init scripts are declared again by the host. Page reclaim returns a scope-owned
+page and a Schema report discriminated as `Observed` (with the dialogs actually observed) or `Unknown` (without
+current dialog data or an inferred cause). Observation defaults to 1000 milliseconds, within the caller's deadline.
+Only expiry of that observation bound permits Unknown success; caller deadline expiry stays `Timeout`, and
+interruption stays interruption, without acquiring ownership. Unknown pages remain explicitly closeable and are
+closed on scope exit, even while their protocol initialization is blocked. Ordinary actions retain their deadlines.
+Context reclaim returns the context and per-page reports made before setup; its options are then applied within
+the same caller deadline, and setup failure preserves the surviving targets.
+
+Internal planned handoff captures the current model's dialog details before teardown as serializable `LastKnown`
+snapshots bound to the exact page claim. The host explicitly supplies a snapshot on reclaim; it remains separate
+from the current observation report, never evidence that a dialog is still open. Empty last-known details do not
+confirm a healthy current page. Current prompt data is retained independently of the configurable event log.
+Reclaim never dismisses a dialog to make observation succeed. Leases (ROOK-96), expiry (ROOK-97) and host adoption
+are separate; persistent contexts must not be enabled by a host until expiry cleanup is available.
 
 ## 4. Documents, realms and navigation
 

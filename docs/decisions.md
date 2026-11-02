@@ -626,8 +626,25 @@ Chromium 155.0.8059.79, both a dialog proved open before handoff and one opened 
 rediscovery with the implemented protocol path. These observations do not identify a surviving tab's current
 dialog state from a later connection.
 
+The approved fallback acquires ownership after an explicit bounded observation and returns a Schema union:
+`Observed` carries dialog observations with a closed kind union; `Unknown` carries no current dialog data and
+names no inferred cause. Observation defaults to 1000 milliseconds and counts against the caller deadline.
+An earlier caller deadline remains `Timeout`, and interruption remains interruption; neither is converted into
+Unknown success or ownership. Browser-level close and ordinary scope cleanup work independently of the blocked
+initialization gate; ordinary actions remain bounded by their own operation deadlines. Context recovery returns
+its context plus per-page observations from before settings application; failure during settings application
+still preserves the borrowed context rather than returning partial setup as successful recovery.
+
+Planned handoff captures the model's current prompt before finalizers run and returns serializable snapshots
+bound to the exact page claim. The caller explicitly carries them to reclaim. Their Schema tag is `LastKnown`,
+and they remain separate from the current report even when the current state is Unknown. Active prompt data
+is independent of the event-log cap. A killed client cannot supply such a snapshot. Neither empty historical
+details nor an observed empty dialog list promises that the page is generally healthy.
+
 Rejected: matching by URL; storing connection-local public ids or page-target ids; accepting control as proof of
 ownership; changing ordinary context cleanup; a public handoff option; silently dismissing leftover dialogs; and
-adding a lease or expiry implementation here. ROOK-96 owns claim leases, ROOK-97 owns expiry, and no host may
+refusing all ownership when bounded observation cannot complete; calling an observation timeout a confirmed
+dialog; returning fresh-looking empty current state; treating historical details as current; and adding a lease
+or expiry implementation here. ROOK-96 owns claim leases, ROOK-97 owns expiry, and no host may
 enable persistent contexts before expiry cleanup ships. Claims are identity tokens, not authentication or a
 mutual-exclusion mechanism. A browser debugging endpoint remains the trust boundary.
