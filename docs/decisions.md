@@ -423,6 +423,51 @@ correlation is released on completion or interruption, and all correlation state
 The one retained completed failure is not a live reservation and is cleared when its document arrives or a normal
 commit supersedes it after outstanding correlation finishes. No public operation or policy is added.
 
+
+## Chromium viewport restoration as bounded cleanup
+
+CDP viewport release explicitly waits for the original renderer dimensions after clearing emulation (ROOK-145).
+Chromium can acknowledge clearing device metrics before its native-view resize reaches the renderer: immediate
+release reproduced a successful clear followed by the overridden width. A clear reply alone cannot implement the
+restoration contract. Each target attempts to record its original width and height before its first viewport override; nested
+and replacement registrations retain those dimensions until the last override has been cleared and restored.
+While an override remains, release reapplies the current effective override. Per-target serialization recomputes
+that effective override when the command runs, including when registrations are released out of order.
+
+Measure in the named `__strider_viewport` isolated world for the target's main frame (or its own frame for an iframe),
+passing the returned execution context id explicitly to `Runtime.evaluate`. Create or retrieve that world for each
+measurement rather than caching an execution context across navigation. Main-world lexical bindings and numeric
+or nonnumeric shadows must not supply the baseline. Missing, rejected or nonfinite measurements do not prevent
+sending the viewport command. Record an explicit unknown baseline on the first unsuccessful attempt; do not
+recapture after emulation has started, even across nested/replaced overrides or an unverifiable clear. Final release
+still sends clear, then warns if the original size is unknown, without claiming verification. A clear that fails
+because the session ended stays quiet. A successfully verified clear releases the saved known baseline.
+
+A native window resize during emulation can make the saved original size stale. Navigation can reject a measurement
+or replace a renderer without the resize event the wait needs. Such cases warn or reach the cleanup deadline;
+there is no retry or promise to track external window resizing, and an unknown baseline persists for the target's
+remaining lifetime. This policy preserves viewport application when verification is unavailable.
+
+Subscribe to resize events before clearing, measure immediately after its reply, and remeasure on resize until the
+original dimensions return. There is no sleep, polling timer or command retry. Cleanup runs detached from the
+expired operation with its own `Deadline.DefaultBudget` (30 seconds by default), measured on the browser clock.
+The bound includes acquiring the target's viewport lock, the clear reply and the restoration observation. A hidden
+page or absent compositor frame cannot hold cleanup indefinitely: at the deadline the subscription and pending
+reply wait are released, a warning records the incomplete restoration, and scope cleanup continues. Session end
+also closes the wait and is quiet. The original dimensions remain recorded after incomplete restoration so a
+later override does not mistake stale dimensions for the native viewport.
+
+Rejected: `dontSetVisibleSize: true`. It passed restoration and viewport/full-page capture checks, but Chromium
+screencast frames remained at the native 780x493 instead of an overridden 640x480. Keeping native resizing preserves
+that existing rendering behavior. The bounded wait accepts that a hidden page might not complete restoration;
+that exception is explicit and warns, rather than silently changing the surface size or waiting indefinitely.
+
+Release errors are handled per target and per download context. A quiet ended session cannot cancel another
+target's restore or hide its rejection. Other protocol failures and restoration deadlines warn without failing
+scope cleanup. Capture checks cover dimensions and pixels beyond the native view and at the full page's far edge;
+screencast coverage checks overridden frame dimensions. This closes the reproduced ordering gap; it does not
+establish the cause of the earlier unrecorded failure.
+
 ## Launched WebKit verifies its inspector listener through Linux procfs
 
 A connection to a selected port is not evidence that the child started its inspector. In the traced ROOK-140

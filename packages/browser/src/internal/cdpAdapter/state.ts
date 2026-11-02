@@ -8,6 +8,7 @@
 import type * as Deferred from "effect/Deferred"
 import type * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import type * as Semaphore from "effect/Semaphore"
 import type * as Input from "../../cdp/Input.ts"
 import type * as Network from "../../cdp/Network.ts"
 import type * as Dialog from "../../Dialog.ts"
@@ -49,6 +50,9 @@ export interface TargetEntry {
   intercepts: string
   readonly scripts: Map<string, string>
   ended: boolean
+  /** Original renderer dimensions, retained until restoration completes; null means the original is unknown. */
+  viewport?: { readonly width: number; readonly height: number } | null | undefined
+  viewportLock?: Semaphore.Semaphore | undefined
 }
 
 export interface PageEntry {

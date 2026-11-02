@@ -4,11 +4,22 @@
  * the network received for them, in whatever order the browser's events come; a realm that ended takes its handles.
  */
 import { assert, describe, it } from "@effect/vitest"
+import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
+import { TestClock } from "effect/testing"
+import * as Deadline from "../src/Deadline.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
+import * as BrowserClock from "../src/internal/browserClock.ts"
+import * as Declare from "../src/internal/cdpAdapter/declare.ts"
 import * as Network from "../src/internal/cdpAdapter/network.ts"
 import * as Obligations from "../src/internal/cdpAdapter/obligations.ts"
 import * as Responses from "../src/internal/cdpAdapter/responses.ts"
@@ -702,4 +713,366 @@ describe("CdpAdapter routed response source", () => {
         assert.strictEqual(last.response.servedBy, "network")
       }))
   }
+})
+
+describe("CDP declaration release", () => {
+  for (
+    const reason of [
+      new Protocol.SessionEnded({ why: "targetDestroyed" }),
+      new Protocol.Rejected({
+        method: "Emulation.clearDeviceMetricsOverride",
+        reason: "Unrecognized",
+        code: -1,
+        description: "restore failed"
+      })
+    ]
+  ) {
+    it.effect(`releases without failing and ${reason._tag === "SessionEnded" ? "stays silent for SessionEnded" : "warns for Rejected"}`, () =>
+      Effect.gen(function*() {
+        const { state, target, page } = yield* withPage()
+        const warnings: Array<unknown> = []
+        const logger = Logger.make((entry) => {
+          if (entry.logLevel === "Warn") warnings.push(entry.message)
+        })
+        const failingSession = {
+          ...session,
+          subscribe: () => Effect.succeed(Stream.never),
+          send: (command: { readonly method: string }) =>
+            command.method === "Emulation.clearDeviceMetricsOverride"
+              ? Effect.fail(new Protocol.ProtocolError({ reason })) :
+              Effect.succeed({ executionContextId: 1, result: { value: [780, 493] } })
+        } as unknown as ProtocolClient.Session
+        state.targets.set(failingSession, { ...target, session: failingSession, page })
+        yield* Effect.scoped(Declare.declare(state, { _tag: "Page", page: page.id }, {
+          _tag: "Override",
+          override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+        })).pipe(Effect.provideService(Logger.CurrentLoggers, new Set([logger])))
+        assert.strictEqual(warnings.length, reason._tag === "SessionEnded" ? 0 : 1)
+      }))
+  }
+})
+
+describe("CDP restoration cleanup", () => {
+  for (const end of ["deadline", "session"] as const) {
+    it.effect(`bounds absent-frame restoration after an expired operation and cleans up on ${end}`, () =>
+      Effect.gen(function*() {
+        const { state, page, target } = yield* withPage()
+        const clock = BrowserClock.fromClock(yield* Clock.Clock)
+        const measured = yield* Deferred.make<void>()
+        const ended = yield* Deferred.make<void, Protocol.ProtocolError>()
+        let subscriptions = 0
+        let reads = 0
+        let restored = false
+        let clears = 0
+        const warnings: Array<unknown> = []
+        const logger = Logger.make((entry) => {
+          if (entry.logLevel === "Warn") warnings.push(entry.message)
+        })
+        const mock = {
+          ...session,
+          subscribe: () =>
+            Effect.acquireRelease(
+              Effect.sync(() => {
+                subscriptions++
+                return Stream.fromEffect(Deferred.await(ended))
+              }),
+              () =>
+                Effect.sync(() => {
+                  subscriptions--
+                })
+            ),
+          send: Effect.fnUntraced(function*(command: { readonly method: string }) {
+            if (command.method === "Page.createIsolatedWorld") return { executionContextId: 1 }
+            if (command.method === "Runtime.evaluate") {
+              reads++
+              if (reads > 1) yield* Deferred.succeed(measured, undefined)
+              return { result: { value: reads === 1 || restored ? [780, 493] : [640, 480] } }
+            }
+            if (command.method === "Emulation.clearDeviceMetricsOverride") clears++
+            return {}
+          })
+        } as unknown as ProtocolClient.Session
+        const entry = { ...target, session: mock, page }
+        state.targets.set(mock, entry)
+        const release = yield* Effect.scoped(Declare.declare(state, { _tag: "Page", page: page.id }, {
+          _tag: "Override",
+          override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+        })).pipe(
+          Effect.provideService(BrowserClock.CurrentClock, clock),
+          Effect.provideService(Deadline.DefaultBudget, Duration.seconds(1)),
+          Effect.provideService(Deadline.CurrentDeadline, Option.some(clock.now())),
+          Effect.provideService(Logger.CurrentLoggers, new Set([logger])),
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* Deferred.await(measured)
+        assert.strictEqual(subscriptions, 1)
+        if (end === "deadline") yield* TestClock.adjust("1 second")
+        else {yield* Deferred.fail(
+            ended,
+            new Protocol.ProtocolError({ reason: new Protocol.SessionEnded({ why: "targetDestroyed" }) })
+          )}
+        yield* Fiber.join(release)
+        assert.strictEqual(clears, 1, "cleanup still clears after the enclosing deadline")
+        assert.strictEqual(subscriptions, 0)
+        assert.strictEqual(warnings.length, end === "deadline" ? 1 : 0)
+        assert.isTrue(yield* entry.viewportLock!.withPermits(1)(Effect.succeed(true)), "cleanup releases its lock")
+        assert.deepStrictEqual(
+          entry.viewport,
+          { width: 780, height: 493 },
+          "incomplete restoration keeps the original dimensions"
+        )
+        if (end === "deadline") {
+          restored = true
+          yield* Effect.scoped(Declare.declare(state, { _tag: "Page", page: page.id }, {
+            _tag: "Override",
+            override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+          }))
+          assert.isUndefined(entry.viewport, "a later successful restoration releases the saved dimensions")
+          assert.strictEqual(reads, 3, "a later override must not capture stale dimensions as its original")
+          assert.strictEqual(subscriptions, 0)
+        }
+      }))
+  }
+
+  it.effect("does not let one target's ended session hide another target's rejection", () =>
+    Effect.gen(function*() {
+      const { state, page, target } = yield* withPage()
+      const warnings: Array<unknown> = []
+      const released: Array<string> = []
+      const rejected = new Protocol.ProtocolError({
+        reason: new Protocol.Rejected({
+          method: "Emulation.setTimezoneOverride",
+          reason: "Unrecognized",
+          code: -1,
+          description: "restore failed"
+        })
+      })
+      for (const key of ["ended", "rejected"]) {
+        const mock = {
+          ...session,
+          key,
+          send: (command: { readonly params?: { readonly timezoneId?: string } }) =>
+            command.params?.timezoneId === "" ?
+              Effect.suspend(() => {
+                released.push(key)
+                return Effect.fail(
+                  key === "ended"
+                    ? new Protocol.ProtocolError({ reason: new Protocol.SessionEnded({ why: "targetDestroyed" }) })
+                    : rejected
+                )
+              }) :
+              Effect.succeed({})
+        } as unknown as ProtocolClient.Session
+        state.targets.set(mock, { ...target, session: mock, page })
+      }
+      yield* Effect.scoped(Declare.declare(state, { _tag: "UserContext", context: page.context.id }, {
+        _tag: "Override",
+        override: { _tag: "TimeZone", timeZone: "Asia/Tokyo" }
+      })).pipe(Effect.provideService(
+        Logger.CurrentLoggers,
+        new Set([Logger.make((entry) => {
+          if (entry.logLevel === "Warn") warnings.push(entry.message)
+        })])
+      ))
+      assert.deepStrictEqual(released.sort(), ["ended", "rejected"])
+      assert.strictEqual(warnings.length, 1)
+    }))
+
+  it.effect("continues download cleanup after an ended context and warns for a rejected one", () =>
+    Effect.gen(function*() {
+      const { state, page } = yield* withPage()
+      const warnings: Array<unknown> = []
+      const released: Array<string> = []
+      page.context.browserContextId = "ended"
+      const other = { ...page.context, id: state.ids.userContext(), browserContextId: "rejected" }
+      state.contexts.set(other.id, other)
+      const mock = {
+        ...session,
+        send: (command: { readonly params: { readonly behavior: string; readonly browserContextId: string } }) =>
+          command.params.behavior === "default" ?
+            Effect.suspend(() => {
+              released.push(command.params.browserContextId)
+              return Effect.fail(
+                new Protocol.ProtocolError({
+                  reason: command.params.browserContextId === "ended"
+                    ? new Protocol.SessionEnded({ why: "targetDestroyed" }) :
+                    new Protocol.Rejected({
+                      method: "Browser.setDownloadBehavior",
+                      reason: "Unrecognized",
+                      code: -1,
+                      description: "restore failed"
+                    })
+                })
+              )
+            }) :
+            Effect.succeed({})
+      } as unknown as ProtocolClient.Session
+      yield* Effect.scoped(
+        Declare.declare({ ...state, root: () => mock }, { _tag: "UserContext", context: page.context.id }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Deny" }
+        })
+      ).pipe(Effect.provideService(
+        Logger.CurrentLoggers,
+        new Set([Logger.make((entry) => {
+          if (entry.logLevel === "Warn") warnings.push(entry.message)
+        })])
+      ))
+      assert.deepStrictEqual(released, ["ended", "rejected"])
+      assert.strictEqual(warnings.length, 1)
+    }))
+})
+
+describe("CDP viewport override and its baseline", () => {
+  const override = {
+    _tag: "Override",
+    override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+  } as const
+
+  // Chromium ends a `Runtime.evaluate` in flight across a cross-process navigation, and answers none where a page has
+  // no default context yet: neither stopped the override before it needed a read
+  it.effect("applies the override when reading the page's dimensions is rejected", () =>
+    Effect.gen(function*() {
+      const { state, page, target } = yield* withPage()
+      const methods: Array<string> = []
+      const mock = {
+        ...session,
+        subscribe: () => Effect.succeed(Stream.never),
+        send: (command: { readonly method: string }) => {
+          methods.push(command.method)
+          if (command.method === "Page.createIsolatedWorld") return Effect.succeed({ executionContextId: 1 })
+          return command.method === "Runtime.evaluate"
+            ? Effect.fail(
+              new Protocol.ProtocolError({
+                reason: new Protocol.Rejected({
+                  method: command.method,
+                  reason: "Unrecognized",
+                  code: -32000,
+                  description: "Inspected target navigated or closed"
+                })
+              })
+            )
+            : Effect.succeed({})
+        }
+      } as unknown as ProtocolClient.Session
+      state.targets.set(mock, { ...target, session: mock, page })
+      const result = yield* Effect.scoped(Declare.declare(state, { _tag: "Page", page: page.id }, override)).pipe(
+        Effect.exit
+      )
+      assert.include(methods, "Emulation.setDeviceMetricsOverride")
+      assert.strictEqual(result._tag, "Success")
+    }))
+
+  // `let innerWidth = "wide"` in a page's script: the read runs in the page's own world, where its names win
+  it.effect("applies the override when the page has an innerWidth of its own", () =>
+    Effect.gen(function*() {
+      const { state, page, target } = yield* withPage()
+      const methods: Array<string> = []
+      const mock = {
+        ...session,
+        subscribe: () => Effect.succeed(Stream.never),
+        send: (command: { readonly method: string }) => {
+          methods.push(command.method)
+          return Effect.succeed({ executionContextId: 1, result: { value: ["wide", 493] } })
+        }
+      } as unknown as ProtocolClient.Session
+      state.targets.set(mock, { ...target, session: mock, page })
+      const result = yield* Effect.scoped(Declare.declare(state, { _tag: "Page", page: page.id }, override)).pipe(
+        Effect.exit
+      )
+      assert.include(methods, "Emulation.setDeviceMetricsOverride")
+      assert.strictEqual(result._tag, "Success")
+    }))
+})
+
+describe("CDP unknown viewport baseline lifecycle", () => {
+  for (const value of [undefined, ["wide", 493], [NaN, 493], [Infinity, 493]]) {
+    it.effect(`applies nested and replaced overrides with an unknown ${String(value)} baseline`, () =>
+      Effect.gen(function*() {
+        const { state, page, target } = yield* withPage()
+        let reads = 0
+        let applied = 0
+        let cleared = 0
+        const warnings: Array<unknown> = []
+        const mock = {
+          ...session,
+          subscribe: () => Effect.succeed(Stream.never),
+          send: (command: { readonly method: string; readonly params?: { readonly contextId?: number } }) =>
+            Effect.sync(() => {
+              if (command.method === "Page.createIsolatedWorld") return { executionContextId: 7 }
+              if (command.method === "Runtime.evaluate") {
+                assert.strictEqual(command.params?.contextId, 7)
+                reads++
+                return { result: { value: reads === 1 ? value : [640, 480] } }
+              }
+              if (command.method === "Emulation.setDeviceMetricsOverride") applied++
+              if (command.method === "Emulation.clearDeviceMetricsOverride") cleared++
+              return {}
+            })
+        } as unknown as ProtocolClient.Session
+        const entry = { ...target, page, session: mock }
+        state.targets.set(mock, entry)
+        const first = yield* Scope.make()
+        const second = yield* Scope.make()
+        const third = yield* Scope.make()
+        const declare = (width: number, context: boolean) =>
+          Declare.declare(
+            state,
+            context ? { _tag: "UserContext", context: page.context.id } : { _tag: "Page", page: page.id },
+            {
+              _tag: "Override",
+              override: { _tag: "Viewport", width, height: 480, deviceScaleFactor: 1, mobile: false }
+            }
+          )
+        yield* Effect.gen(function*() {
+          yield* declare(640, true).pipe(Effect.provideService(Scope.Scope, first))
+          yield* declare(800, false).pipe(Effect.provideService(Scope.Scope, second))
+          yield* declare(1000, false).pipe(Effect.provideService(Scope.Scope, third))
+          yield* Scope.close(second, Exit.void)
+          yield* Scope.close(third, Exit.void)
+          assert.strictEqual(warnings.length, 0)
+          yield* Scope.close(first, Exit.void)
+          assert.strictEqual(entry.viewport, null)
+          assert.strictEqual(reads, 1, "never recapture an emulated baseline")
+          assert.strictEqual(applied, 5)
+          assert.strictEqual(cleared, 1)
+          assert.strictEqual(warnings.length, 1)
+          yield* Effect.scoped(declare(640, false))
+          assert.strictEqual(reads, 1, "unknown persists after an unverifiable clear")
+          assert.strictEqual(warnings.length, 2)
+        }).pipe(Effect.provideService(
+          Logger.CurrentLoggers,
+          new Set([Logger.make((entry) => {
+            if (entry.logLevel === "Warn") warnings.push(entry.message)
+          })])
+        ))
+      }))
+  }
+
+  it.effect("uses an isolated numeric baseline instead of numeric main-world shadows", () =>
+    Effect.gen(function*() {
+      const { state, page, target } = yield* withPage()
+      const contexts: Array<number | undefined> = []
+      const mock = {
+        ...session,
+        subscribe: () => Effect.succeed(Stream.never),
+        send: (command: { readonly method: string; readonly params?: { readonly contextId?: number } }) =>
+          Effect.sync(() => {
+            if (command.method === "Page.createIsolatedWorld") return { executionContextId: 8 }
+            if (command.method === "Runtime.evaluate") {
+              contexts.push(command.params?.contextId)
+              return { result: { value: command.params?.contextId === 8 ? [780, 493] : [123, 456] } }
+            }
+            return {}
+          })
+      } as unknown as ProtocolClient.Session
+      const entry = { ...target, session: mock, page }
+      state.targets.set(mock, entry)
+      yield* Effect.scoped(Declare.declare(state, { _tag: "Page", page: page.id }, {
+        _tag: "Override",
+        override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+      }))
+      assert.deepStrictEqual(contexts, [8, 8])
+      assert.isUndefined(entry.viewport)
+    }))
 })
