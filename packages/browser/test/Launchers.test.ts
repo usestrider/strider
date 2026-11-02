@@ -24,6 +24,21 @@ import * as Launch from "../src/internal/launch.ts"
 import * as WebKitAutomation from "../src/internal/webkitAutomation.ts"
 import * as SocketConnector from "../src/protocol/SocketConnector.ts"
 
+/** A scoped process-platform stub for fake launchers; no production override or public bypass. */
+const onPlatform = (platform: NodeJS.Platform) => <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!
+      Object.defineProperty(process, "platform", { ...descriptor, value: platform })
+      return descriptor
+    }),
+    () => effect,
+    (descriptor) =>
+      Effect.sync(() => {
+        Object.defineProperty(process, "platform", descriptor)
+      })
+  )
+
 describe("Chromium launcher", () => {
   layer(NodeServices.layer, { excludeTestServices: true })((it) => {
     it.effect("fails with ExecutableNotFound for a path where nothing is, pointing to strider browsers", () =>
@@ -211,7 +226,7 @@ describe("WebKit launcher", () => {
               : fs.readFileString(path, options),
           readDirectory: (path, options) => path === "/proc/1/fd" ? Effect.succeed([]) : fs.readDirectory(path, options)
         }
-        yield* WebKitAutomation.start({ executablePath, timeout: "50 millis" }).pipe(
+        yield* WebKitAutomation.start({ executablePath, timeout: "50 millis" }).pipe(onPlatform("linux")).pipe(
           Effect.provideService(FileSystem.FileSystem, procfs),
           Effect.scoped,
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -313,13 +328,14 @@ describe("WebKit launcher", () => {
             return { pull: Effect.never, upgrade: () => Effect.void, write, writeAll: write, close }
           })
         }
-        const error = yield* WebKitAutomation.start({ executablePath, timeout: "50 millis" }).pipe(
-          Effect.scoped,
-          Effect.provideService(FileSystem.FileSystem, procfs),
-          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          Effect.provideService(SocketConnector.SocketConnector, connector),
-          Effect.flip
-        )
+        const error = yield* WebKitAutomation.start({ executablePath, timeout: "50 millis" }).pipe(onPlatform("linux"))
+          .pipe(
+            Effect.scoped,
+            Effect.provideService(FileSystem.FileSystem, procfs),
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+            Effect.provideService(SocketConnector.SocketConnector, connector),
+            Effect.flip
+          )
         return { error, spawned, stopped, connected, closed, writes }
       }
     )
@@ -394,6 +410,8 @@ describe("WebKit launcher", () => {
         readonly foreign?: boolean | undefined
         readonly collides?: boolean | undefined
         readonly vanishes?: boolean | undefined
+        readonly vanishesAfterConnect?: boolean | undefined
+        readonly exitsBeforePolling?: boolean | undefined
       },
       connect: Effect.Effect<void> = Effect.void,
       timeout = "200 millis"
@@ -408,6 +426,7 @@ describe("WebKit launcher", () => {
       const closed: Array<number> = []
       const written: Array<number> = []
       const base = 9100000
+      const gone = new Set<number>()
       const spawner = ChildProcessSpawner.make((command) =>
         Effect.gen(function*() {
           assert(command._tag === "StandardCommand")
@@ -415,16 +434,20 @@ describe("WebKit launcher", () => {
           const spawn = ports.push(port) - 1
           yield* Effect.addFinalizer(() => Effect.sync(() => stopped.push(spawn)))
           const line = new TextEncoder().encode(`Failed to start remote inspector server on 127.0.0.1:${port}\n`)
+          const exits = behavior(spawn).vanishes === true || behavior(spawn).vanishesAfterConnect === true ||
+            behavior(spawn).exitsBeforePolling === true
+          if (behavior(spawn).exitsBeforePolling === true) gone.add(spawn)
           const stderr = behavior(spawn).collides === true
             ? Stream.concat(Stream.make(line), Stream.never)
+            : exits
+            ? Stream.concat(Stream.make(new TextEncoder().encode("MiniBrowser startup failed\n")), Stream.never)
             : Stream.never
-          let polls = 0
           return ChildProcessSpawner.makeHandle({
             pid: ChildProcessSpawner.ProcessId(base + spawn),
-            exitCode: behavior(spawn).vanishes === true
+            exitCode: exits
               ? Effect.succeed(ChildProcessSpawner.ExitCode(1))
               : Effect.never,
-            isRunning: Effect.sync(() => behavior(spawn).vanishes !== true || polls++ === 0),
+            isRunning: Effect.sync(() => !gone.has(spawn)),
             kill: () => Effect.void,
             stdin: Sink.drain,
             stdout: Stream.empty,
@@ -447,7 +470,13 @@ describe("WebKit launcher", () => {
         readFileString: (path, options) => {
           const spawn = spawnOf(path)
           if (spawn === undefined) return fs.readFileString(path, options)
-          if (behavior(spawn).vanishes === true) return fs.readFileString(`${directory}/gone`)
+          if (
+            behavior(spawn).vanishes === true ||
+            (behavior(spawn).vanishesAfterConnect === true && connected.includes(ports[spawn]!))
+          ) {
+            gone.add(spawn)
+            return fs.readFileString(`${directory}/gone`)
+          }
           const { foreign, held } = behavior(spawn)
           return Effect.succeed(
             "sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
@@ -479,7 +508,7 @@ describe("WebKit launcher", () => {
           return { pull: Effect.never, upgrade: () => Effect.void, write, writeAll: write, close: Effect.void }
         })
       }
-      const exit = yield* WebKitAutomation.start({ executablePath, timeout }).pipe(
+      const exit = yield* WebKitAutomation.start({ executablePath, timeout }).pipe(onPlatform("linux")).pipe(
         Effect.scoped,
         Effect.provideService(FileSystem.FileSystem, procfs),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -516,6 +545,42 @@ describe("WebKit launcher", () => {
         assert(result.exit._tag === "Failure")
         const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
         assert.strictEqual(error.reason._tag, "ProcessExited", "the child is gone: procfs isn't what's wrong")
+        assert(error.reason._tag === "ProcessExited")
+        assert.deepStrictEqual(error.reason.code, Option.some(1))
+        assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+        assert.include(error.reason.hint, "exec MiniBrowser")
+        assert.include(error.reason.hint, "WebKit.layerAttach")
+        assert.deepStrictEqual(result.connected, [])
+        assert.deepStrictEqual(result.stopped, [0])
+      }))
+
+    it.effect("preserves exit code and stderr when the child disappears during the second ownership check", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(() => ({ held: true, vanishesAfterConnect: true }))
+        assert(result.exit._tag === "Failure")
+        const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
+        assert(error.reason._tag === "ProcessExited")
+        assert.deepStrictEqual(error.reason.code, Option.some(1))
+        assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+        assert.include(error.reason.hint, "exec MiniBrowser")
+        assert.include(error.reason.hint, "WebKit.layerAttach")
+        assert.strictEqual(result.connected.length, 1)
+        assert.deepStrictEqual(result.closed, result.connected)
+        assert.deepStrictEqual(result.written, [])
+        assert.deepStrictEqual(result.stopped, [0])
+      }))
+
+    it.effect("explains exec and attach for exits before ownership without diagnosing a fork", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(() => ({ held: false, exitsBeforePolling: true }))
+        assert(result.exit._tag === "Failure")
+        const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
+        assert(error.reason._tag === "ProcessExited")
+        assert.deepStrictEqual(error.reason.code, Option.some(1))
+        assert.include(error.reason.hint, "exec MiniBrowser")
+        assert.include(error.reason.hint, "WebKit.layerAttach")
+        assert.notInclude(error.reason.hint, "Cannot read Linux procfs")
+        assert.deepStrictEqual(result.connected, [])
       }))
 
     it.effect("distinguishes simultaneous children sharing the namespace TCP table", () =>
@@ -541,14 +606,28 @@ describe("WebKit launcher", () => {
         const [owner, other] = yield* Effect.all([
           WebKitAutomation.inspectorListener(10, 49152),
           WebKitAutomation.inspectorListener(20, 49152)
-        ], { concurrency: 2 }).pipe(Effect.provideService(FileSystem.FileSystem, procfs))
+        ], { concurrency: 2 }).pipe(Effect.provideService(FileSystem.FileSystem, procfs), onPlatform("linux"))
         assert.strictEqual(owner, "111")
         assert.isUndefined(other)
       }))
 
+    it.effect("runs fake ownership checks on a non-Linux host and restores its platform after failure", () =>
+      Effect.gen(function*() {
+        assert.strictEqual(process.platform, "darwin")
+        const result = yield* ownershipAttempt("owned")
+        assert.strictEqual(result.writes, 1)
+        assert.strictEqual(process.platform, "darwin")
+        yield* Effect.fail("expected failure").pipe(onPlatform("linux"), Effect.flip)
+        assert.strictEqual(process.platform, "darwin")
+      }).pipe(onPlatform("darwin")))
+
     it.effect("refuses ownership verification on unsupported operating systems with attach guidance", () =>
       Effect.gen(function*() {
-        const error = yield* WebKitAutomation.inspectorListener(123, 1234, "darwin").pipe(Effect.flip)
+        const error = yield* WebKitAutomation.start({ executablePath: "/unused/MiniBrowser" }).pipe(
+          Effect.scoped,
+          Effect.flip,
+          onPlatform("darwin")
+        )
         assert(error.reason._tag === "ConnectionFailed")
         assert.include(error.reason.hint, "requires Linux procfs")
         assert.include(error.reason.hint, "WebKit.layerAttach")
@@ -565,7 +644,9 @@ describe("WebKit launcher", () => {
 
     it.effect("fails with ExecutableNotFound for a path that doesn't exist", () =>
       Effect.gen(function*() {
-        const error = yield* Effect.scoped(WebKitAutomation.start({ executablePath: "/nowhere/MiniBrowser" })).pipe(
+        const error = yield* Effect.scoped(
+          WebKitAutomation.start({ executablePath: "/nowhere/MiniBrowser" }).pipe(onPlatform("linux"))
+        ).pipe(
           Effect.flip
         )
         assert(error.reason._tag === "ExecutableNotFound")
@@ -578,12 +659,16 @@ describe("WebKit launcher", () => {
         const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-test-" })
         yield* fs.writeFileString(`${directory}/epiphany`, "#!/bin/sh\nexit 1\n")
         yield* fs.chmod(`${directory}/epiphany`, 0o755)
-        const other = yield* Effect.scoped(WebKitAutomation.start({ executablePath: `${directory}/epiphany` })).pipe(
+        const other = yield* Effect.scoped(
+          WebKitAutomation.start({ executablePath: `${directory}/epiphany` }).pipe(onPlatform("linux"))
+        ).pipe(
           Effect.flip
         )
         assert.deepInclude(other.reason, { _tag: "InvalidInput", input: "executablePath" })
         const headless = yield* Effect.scoped(
-          WebKitAutomation.start({ executablePath: `${directory}/MiniBrowser`, headless: true })
+          WebKitAutomation.start({ executablePath: `${directory}/MiniBrowser`, headless: true }).pipe(
+            onPlatform("linux")
+          )
         ).pipe(Effect.flip)
         assert.deepInclude(headless.reason, { _tag: "InvalidInput", input: "headless" })
       }))
@@ -607,7 +692,10 @@ describe("WebKit launcher", () => {
           const error = yield* Effect.scoped(
             WebKitAutomation.start({ executablePath: `${directory}/MiniBrowser`, timeout: "500 millis" })
           ).pipe(Effect.flip)
-          assert.include(JSON.stringify(error.reason), "never answered")
+          assert.include(
+            JSON.stringify(error.reason),
+            process.platform === "linux" ? "never answered" : "requires Linux procfs"
+          )
           assert.isBelow(performance.now() - started, 5000)
         })
     )
