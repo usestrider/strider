@@ -42,6 +42,7 @@ import * as UserContext from "../UserContext.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserService from "./browserService.ts"
+import * as ClaimHooks from "./claimHooks.ts"
 import * as Clock from "./clock.ts"
 import * as ConnectionImpl from "./connection.ts"
 import * as DownloadImpl from "./download.ts"
@@ -50,6 +51,7 @@ import * as Evaluation from "./evaluation.ts"
 import * as Grants from "./grants.ts"
 import * as Guarded from "./guarded.ts"
 import * as Handles from "./handles.ts"
+import * as Handoff from "./handoff.ts"
 import * as InitScripts from "./initScripts.ts"
 import * as Model from "./model.ts"
 import * as Navigation from "./navigation.ts"
@@ -492,10 +494,14 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
   }
 
   const newContext = (
-    options?: UserContext.Options
+    options?: UserContext.Options,
+    mode?: { readonly reclaimable: true } | { readonly context: UserContext.Id }
   ): Effect.Effect<UserContext.UserContext, UserContext.UserContextError | Deadline.Timeout, Scope.Scope> =>
     Effect.gen(function*() {
       const { id } = yield* Operation.record
+      const ownerScope = yield* Effect.scope
+      const reclaimable = mode !== undefined
+      if (reclaimable) Handoff.allow(ownerScope)
       // A partition the backend can't set fails the context before it exists: nothing is applied partly
       if (options?.storageState !== undefined) {
         const partitions = yield* StorageStates.unsupportedPartitions(runtime, options.storageState)
@@ -574,11 +580,16 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       }
       // Removed when the scope closes, waiting for its end under a budget of its own (`Model.remove`)
       const entry = yield* Effect.acquireRelease(
-        adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: false }).pipe(
-          Effect.catch(failed),
-          Effect.flatMap(model.context)
-        ),
-        (entry) => model.remove(entry).pipe(Effect.ensuring(Effect.sync(() => contexts.delete(entry.id))))
+        (mode !== undefined && "context" in mode
+          ? Effect.succeed(mode.context)
+          : adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: false, reclaimable })).pipe(
+            Effect.catch(failed),
+            Effect.flatMap(model.context)
+          ),
+        (entry) =>
+          (reclaimable && Handoff.leavesOpen(ownerScope) ? Effect.void : model.remove(entry)).pipe(
+            Effect.ensuring(Effect.sync(() => contexts.delete(entry.id)))
+          )
       )
       const created = entry.id
       // Owned contexts decide dialogs no handler claims at once, and cancel file choosers no handler answers
@@ -687,6 +698,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
     }),
     defaultContext: makeObservedContext(runtime, defaultEntry, upgradeContext(defaultEntry))
   }
+  ClaimHooks.register(browser, { runtime, context: newContext })
   return browser
 })
 

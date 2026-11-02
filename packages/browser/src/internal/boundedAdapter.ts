@@ -91,11 +91,17 @@ const closes = {
 
 /** The adapter as L1 calls it: every method but a release can fail with the operation's `Timeout` too. */
 export type Bounded = {
-  readonly [K in keyof Connection]: K extends Release ? Connection[K]
-    : Connection[K] extends (...args: infer P) => infer Call ? (
-        ...args: P
-      ) => Effect.Effect<Effect.Success<Call>, Effect.Error<Call> | Deadline.Timeout, Effect.Services<Call>>
-    : Connection[K]
+  readonly [K in keyof Connection]: K extends "claims" ? BoundedClaims | undefined : K extends Release ? Connection[K]
+  : Connection[K] extends (...args: infer P) => infer Call ? (
+      ...args: P
+    ) => Effect.Effect<Effect.Success<Call>, Effect.Error<Call> | Deadline.Timeout, Effect.Services<Call>>
+  : Connection[K]
+}
+
+type BoundedClaims = {
+  readonly [K in keyof Adapter.Claims]: Adapter.Claims[K] extends (...args: infer P) => infer Call
+    ? (...args: P) => Effect.Effect<Effect.Success<Call>, Effect.Error<Call> | Deadline.Timeout>
+    : Adapter.Claims[K]
 }
 
 /** Whether a call failed because a command got no reply: inside an operation, because its deadline passed. */
@@ -165,6 +171,30 @@ export const make = (adapter: Connection): Bounded => {
             return creating(record, kind, unbounded, (made) => close!(adapter, made as never))
         }
       })
+  }
+  if (adapter.claims !== undefined) {
+    // The claim seam only reads identities and current targets; ownership changes happen in the model.
+    const claims = adapter.claims
+    const bound = <A>(call: Effect.Effect<A, Adapter.AdapterError>) =>
+      Effect.flatMap(Operation.current, (current) => {
+        if (Option.isNone(current)) return call
+        const record = current.value
+        return record.bound(
+          call.pipe(
+            Effect.provideService(ProtocolClient.CommandDeadline, Option.some(record.budget.at)),
+            Effect.mapError((error) => noReply(error) ? record.timeout(hint(read("the claim identity"))()) : error)
+          ),
+          hint(read("the claim identity"))
+        )
+      })
+    bounded.claims = {
+      browser: claims.browser,
+      dialogs: (id: Target.NavigableId) => bound(claims.dialogs(id)),
+      page: (id: Target.NavigableId) => bound(claims.page(id)),
+      context: (id: UserContext.Id) => bound(claims.context(id)),
+      findPage: (identity: Adapter.ClaimIdentity) => bound(claims.findPage(identity)),
+      findContext: (id: string) => bound(claims.findContext(id))
+    }
   }
   return bounded as Bounded
 }

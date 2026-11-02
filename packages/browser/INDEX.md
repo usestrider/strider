@@ -2044,6 +2044,74 @@ What `strider run` gives a segment: the live CLI session, and its pages by name.
 - `class PageNotFound: Schema.TaggedError "PageNotFound" { name, hint }` (experimental)
 - `class NameTaken: Schema.TaggedError "NameTaken" { name, hint }` (experimental)
 
+## `@usestrider/browser/experimental`
+
+### Browser
+
+Experimental recovery of Chromium pages for session hosts.
+
+*models*
+
+- `type Found = typeof Found.Type` (experimental)
+- `interface Reclaimed` (experimental)
+  - `readonly page: Page.Page`
+  - `readonly found: Found`
+
+*schemas*
+
+- `const Found = Schema.Struct({ dialogs: Schema.Array(Schema.Struct({ kind: Schema.String, message: Schema.String })) })` (experimental)
+
+*claims*
+
+- `const reclaim = (claim: ClaimedPage.Claim) => Claims.reclaimPage(claim)` (experimental)
+
+### Claim
+
+Errors and leftover state reported by experimental browser claims.
+
+*errors*
+
+- `class ClaimError: Schema.TaggedError "ClaimError" { operation, reason, diagnostics }` (experimental)
+
+*reasons*
+
+- `class Gone: Schema.Error { hint }` (experimental)
+- `class OtherBrowser: Schema.Error { hint }` (experimental)
+
+### Page
+
+Experimental page claims issued only for owned pages.
+
+*models*
+
+- `type Claim = typeof Claim.Type` (experimental)
+
+*schemas*
+
+- `const Claim = Schema.String.pipe(Schema.brand("~@usestrider/browser/experimental/Page/Claim"))` (experimental)
+
+*claims*
+
+- `const claim = (value: Base.Page) => Claims.claimPage(value)` (experimental)
+
+### UserContext
+
+Experimental context persistence and recovery for session hosts.
+
+*models*
+
+- `type Claim = typeof Claim.Type` (experimental)
+
+*schemas*
+
+- `const Claim = Schema.String.pipe(Schema.brand("~@usestrider/browser/experimental/UserContext/Claim"))` (experimental)
+
+*claims*
+
+- `const claim = (value: Base.UserContext) => Claims.claimUserContext(value)` (experimental)
+- `const create = (options: Base.Options & { readonly reclaimable: true }) => Claims.createContext(options)` (experimental)
+- `const reclaim = (claim: Claim, options?: Base.Options | undefined) => Claims.reclaimContext(claim, options)` (experimental)
+
 ## `@usestrider/browser/firefox`
 
 ### Firefox

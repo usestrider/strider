@@ -14,13 +14,16 @@ import type * as FileSystem from "effect/FileSystem"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import type * as Layer from "effect/Layer"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
-import type * as Socket from "effect/socket/Socket"
+import * as Socket from "effect/socket/Socket"
 import type * as Browser from "../Browser.ts"
+import * as Adapter from "../internal/adapter.ts"
 import * as BrowserImpl from "../internal/browser.ts"
 import * as CdpAdapter from "../internal/cdpAdapter.ts"
 import * as ChromiumLauncher from "../internal/chromiumLauncher.ts"
 import * as Connect from "../internal/connect.ts"
 import * as LaunchOptions from "../internal/launchOptions.ts"
+import * as CdpConnection from "../protocol/CdpConnection.ts"
+import * as Protocol from "../protocol/Protocol.ts"
 import type * as Url from "../Url.ts"
 
 /**
@@ -165,6 +168,28 @@ export const layerConnect = (
     Effect.gen(function*() {
       const url = yield* Connect.chromiumWebSocket(endpoint, options).pipe(Effect.provide(FetchHttpClient.layer))
       const transport = yield* Connect.webSocket(url, options)
-      return yield* CdpAdapter.connect(transport, { sink, ownership: "attached" })
+      const sockets = yield* Socket.WebSocketConstructor
+      const claimClient = Connect.webSocket(url, options).pipe(
+        Effect.flatMap(CdpConnection.make),
+        Effect.provideService(Socket.WebSocketConstructor, sockets),
+        Effect.mapError((error) =>
+          Adapter.protocolError(
+            new Protocol.ProtocolError({
+              reason: new Protocol.Rejected({
+                method: "claims.connect",
+                reason: "Unrecognized",
+                code: "connection",
+                description: error.message
+              })
+            })
+          )
+        )
+      )
+      return yield* CdpAdapter.connect(transport, {
+        claimClient,
+        sink,
+        ownership: "attached",
+        browserIdentity: new URL(url).pathname.split("/").at(-1)
+      })
     })
   )

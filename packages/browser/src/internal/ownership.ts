@@ -26,6 +26,7 @@ import type * as Scope from "effect/Scope"
 import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
+import * as Handoff from "./handoff.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 
@@ -154,6 +155,7 @@ export const make = Effect.fnUntraced(function*() {
       function*(page: Model.PageEntry, by?: Scope.Scope) {
         const state = yield* page.state.get
         if (state.status._tag === "Closed") return
+        if (Option.exists(state.owner, Handoff.leavesOpen)) return
         if (by !== undefined && !Option.exists(state.owner, (owner) => owner === by)) return
         const adapter = yield* Deferred.await(connected)
         yield* awaitEnd(modelScope, adapter.closePage(page.id, { runBeforeUnload: false }), page.closed, {

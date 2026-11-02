@@ -102,7 +102,7 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
   }
   const { browserContextId } = yield* Kit.protocol(
     Target.createBrowserContext({
-      disposeOnDetach: true,
+      disposeOnDetach: !options.reclaimable,
       ...(Option.isSome(options.proxy)
         ? { proxyServer: options.proxy.value.server, proxyBypassList: options.proxy.value.bypass.join(",") }
         : {})

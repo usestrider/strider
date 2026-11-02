@@ -32,6 +32,7 @@ import type * as NetworkRequest from "../NetworkRequest.ts"
 import type * as NetworkResponse from "../NetworkResponse.ts"
 import type * as Page from "../Page.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
+import type * as CdpConnection from "../protocol/CdpConnection.ts"
 import type * as Protocol from "../protocol/Protocol.ts"
 import type * as Transport from "../protocol/Transport.ts"
 import type * as Route from "../Route.ts"
@@ -714,6 +715,7 @@ export interface Cookie {
 
 /** Settings for a new user context. */
 export interface UserContextOptions {
+  readonly reclaimable?: boolean | undefined
   readonly proxy: Option.Option<{ readonly server: string; readonly bypass: ReadonlyArray<string> }>
   readonly acceptInsecureCerts: boolean
 }
@@ -818,11 +820,31 @@ export interface ConnectOptions {
    * Whether this connection owns the whole browser, as when it launched it. An owned browser pauses every new
    * page before its scripts run; an attached one pauses only frames and workers of pages it controls.
    */
+  readonly claimClient?: Effect.Effect<CdpConnection.CdpConnection, AdapterError, Scope.Scope> | undefined
+  readonly browserIdentity?: string | undefined
   readonly ownership: "launched" | "attached"
 }
 
 /** One connected backend: what L1 asks of it. */
+export interface ClaimIdentity {
+  readonly browser: string
+  readonly context: string
+  readonly tab: string
+}
+
+export interface Claims {
+  readonly dialogs: (
+    page: Target.NavigableId
+  ) => Effect.Effect<ReadonlyArray<{ readonly kind: string; readonly message: string }>, AdapterError>
+  readonly browser: string
+  readonly page: (page: Target.NavigableId) => Effect.Effect<ClaimIdentity, AdapterError>
+  readonly context: (context: UserContext.Id) => Effect.Effect<string, AdapterError>
+  readonly findPage: (identity: ClaimIdentity) => Effect.Effect<Target.NavigableId | undefined, AdapterError>
+  readonly findContext: (context: string) => Effect.Effect<UserContext.Id | undefined, AdapterError>
+}
+
 export interface AdapterConnection {
+  readonly claims?: Claims | undefined
   readonly info: Browser.Info
   readonly capabilities: SubscriptionRef.SubscriptionRef<Browser.CapabilitySet>
   /**
