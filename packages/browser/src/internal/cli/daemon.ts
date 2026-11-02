@@ -26,6 +26,7 @@ import * as Effect from "effect/Effect"
 import * as Encoding from "effect/encoding/Base64"
 import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
@@ -56,6 +57,7 @@ import * as WebKit from "../../webkit/WebKit.ts"
 import * as Handles from "../handles.ts"
 import * as ToolkitImpl from "../toolkit.ts"
 import * as Tools from "../tools.ts"
+import * as Attach from "./attach.ts"
 import * as Client from "./client.ts"
 import * as ExportTest from "./exportTest.ts"
 import * as Node from "./node.ts"
@@ -982,7 +984,7 @@ const browserOf = (flags: {
   readonly firefox: Option.Option<string>
   readonly webkit: Option.Option<string>
   readonly attach: Option.Option<string>
-}): Effect.Effect<ExportTest.Browser, CommandFailed> => {
+}): Effect.Effect<Pick<Prepared, "browser" | "connectionEndpoint">, CommandFailed> => {
   const given = [
     ...Option.toArray(
       Option.map(flags.chromium, (path) => ({ _tag: "Launch", backend: "chromium", executablePath: path }) as const)
@@ -993,14 +995,20 @@ const browserOf = (flags: {
     ...Option.toArray(
       Option.map(flags.webkit, (path) => ({ _tag: "Launch", backend: "webkit", executablePath: path }) as const)
     ),
-    // An HTTP endpoint, or a WebSocket to /devtools/, is Chromium's; any other WebSocket WebDriver BiDi's
+    // HTTP is detected below; WebSocket classification preserves the existing BiDi handling.
     ...Option.toArray(Option.map(flags.attach, (endpoint) =>
       /^https?:|\/devtools\//.test(endpoint)
         ? { _tag: "Attach", backend: "chromium", endpoint } as const
         : { _tag: "Attach", backend: "bidi", endpoint: bidiEndpoint(endpoint) } as const))
   ]
   return given.length === 1
-    ? Effect.succeed(given[0]!)
+    ? given[0]!._tag === "Attach" && /^https?:/.test(given[0]!.endpoint)
+      ? Attach.detect(given[0]!.endpoint).pipe(
+        Effect.provide(FetchHttpClient.layer),
+        Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+        Effect.mapError((error) => new CommandFailed({ error: "InvalidInput", message: error.message }))
+      )
+      : Effect.succeed({ browser: given[0]!, connectionEndpoint: undefined })
     : Effect.fail(
       new CommandFailed({
         error: "InvalidInput",
@@ -1012,7 +1020,8 @@ const browserOf = (flags: {
 
 const layerOf = (
   browser: ExportTest.Browser,
-  userDataDir: string
+  userDataDir: string,
+  connectionEndpoint: string | undefined
 ): Layer.Layer<
   Browser.Browser,
   Browser.BrowserError,
@@ -1023,7 +1032,9 @@ const layerOf = (
 > => {
   if (browser._tag === "Attach") {
     return browser.backend === "chromium"
-      ? Chromium.layerConnect(browser.endpoint)
+      ? Chromium.layerConnect(connectionEndpoint ?? browser.endpoint)
+      : browser.backend === "webkit"
+      ? WebKit.layerAttach(browser.endpoint)
       : Bidi.layerConnect(browser.endpoint)
   }
   const options = { executablePath: browser.executablePath, userDataDir }
@@ -1131,7 +1142,7 @@ export const start = Command.make(
         )
       }
       const viewport = Option.isSome(flags.viewport) ? yield* parseViewport(flags.viewport.value) : undefined
-      const browser = yield* browserOf(flags)
+      const { browser, connectionEndpoint } = yield* browserOf(flags)
       // What Duration.fromInput reads, as a Schema decodes it from text
       const parsed = Schema.decodeUnknownOption(Schema.DurationFromString)(flags.idle)
       if (Option.isNone(parsed)) {
@@ -1194,7 +1205,18 @@ export const start = Command.make(
       )
       // What the daemon logs goes to the session's log, as it has no output of its own
       const log = yield* Logger.toFile(Logger.formatSimple, paths.log).pipe(Effect.mapError(failedWith))
-      keep = yield* serve(flags, { browser, idle, paths, initial, stateFile, forkOf, secrets, version, viewport }).pipe(
+      keep = yield* serve(flags, {
+        browser,
+        connectionEndpoint,
+        idle,
+        paths,
+        initial,
+        stateFile,
+        forkOf,
+        secrets,
+        version,
+        viewport
+      }).pipe(
         Effect.provide(Logger.layer([log]))
       )
     }).pipe(Effect.scoped)
@@ -1204,6 +1226,8 @@ export const start = Command.make(
 interface Prepared {
   readonly viewport: Viewport | undefined
   readonly browser: ExportTest.Browser
+  /** The probed socket for this startup only; the spec and exports keep the supplied endpoint. */
+  readonly connectionEndpoint: string | undefined
   readonly idle: Duration.Duration
   readonly paths: ReturnType<typeof Session.paths>
   readonly initial: Option.Option<StorageState.StorageState>
@@ -1218,7 +1242,8 @@ const serve = Effect.fnUntraced(
   function*(flags: Command.Command.Config.Infer<typeof startFlags>, prepared: Prepared) {
     const fs = yield* FileSystem.FileSystem
     const process = Node.process
-    const { browser, forkOf, idle, initial, paths, secrets, stateFile, version, viewport } = prepared
+    const { browser, connectionEndpoint, forkOf, idle, initial, paths, secrets, stateFile, version, viewport } =
+      prepared
     for (const dir of [paths.downloads, paths.artifacts]) {
       yield* fs.makeDirectory(dir).pipe(Effect.mapError(failedWith))
     }
@@ -1228,7 +1253,7 @@ const serve = Effect.fnUntraced(
     // What the session launches and makes is in the CLI's ledger, which strider prune reads if it dies
     const os = yield* Effect.promise(() => Node.os())
     const ledger = yield* Layer.build(Ledger.layer(Session.ledgerRoot(process.env, os.homedir())))
-    const services = yield* Layer.build(layerOf(browser, userDataDir)).pipe(
+    const services = yield* Layer.build(layerOf(browser, userDataDir, connectionEndpoint)).pipe(
       Effect.provideContext(ledger),
       Effect.mapError(failedWith)
     )
@@ -1241,20 +1266,30 @@ const serve = Effect.fnUntraced(
     const reportsDownloads = capabilities.entries.every((entry) =>
       entry.name !== "downloads" || entry.status !== "unsupported"
     )
-    const context = yield* instance.newContext({
+    const inspector = browser._tag === "Attach" && browser.backend === "webkit"
+    if (inspector && (Option.isSome(initial) || viewport !== undefined)) {
+      return yield* Effect.fail(
+        new CommandFailed({
+          error: "InvalidInput",
+          message:
+            "An attached WebKit inspector uses its existing default context; --state, --fork and --viewport require a browser that can create contexts"
+        })
+      )
+    }
+    const context = yield* (inspector ? instance.defaultContext.control : instance.newContext({
       ...Option.match(initial, { onNone: () => ({}), onSome: (storageState) => ({ storageState }) }),
       focus,
       ...(viewport === undefined ? {} : { emulation: { viewport } }),
       // The session's own directory, which strider stop --keep keeps
       downloads: reportsDownloads ? { directory: paths.downloads } : undefined
-    }).pipe(
-      Effect.mapError(failedWith)
-    )
+    })).pipe(Effect.mapError(failedWith))
     const recorder = Recorder.make()
     const session = yield* ToolkitImpl.makeSession({
       context,
       secrets,
       capture: flags.capture === "strict" ? CapturePolicy.strict : CapturePolicy.local,
+      // The inspector shares the default context; its tabs still require explicit control.
+      discoverContextPages: !inspector,
       // The session can take the browser's own tabs with control
       browser: instance,
       // A page no command opened, for the exported test to declare
@@ -1314,7 +1349,7 @@ const serve = Effect.fnUntraced(
     const where = browser._tag === "Launch" ? `at ${browser.executablePath}` : `attached to ${browser.endpoint}`
     yield* ready(
       yield* Announce,
-      `session ${flags.name} · ${instance.info.product} ${where} · focus ${focus} · idle timeout ${daemon.idleTimeout}${
+      `session ${flags.name} · ${browser.backend} · ${instance.info.product} ${where} · focus ${focus} · idle timeout ${daemon.idleTimeout}${
         Option.isSome(flags.ownerPid) ? ` · ends with process ${flags.ownerPid.value}` : ""
       }${flags.capture === "strict" ? " · capture strict" : ""}${
         Option.isSome(flags.state)

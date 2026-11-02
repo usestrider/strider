@@ -269,6 +269,29 @@ describe("strider export test", () => {
       "const shopViewport = yield* shop.emulate({ viewport: { width: 640, height: 480 } })\n        yield* mainViewport.remove"
     )
   })
+  it("exports the detected WebKit attachment layer", () => {
+    const { text } = ExportTest.render({
+      name: "remote",
+      browser: { _tag: "Attach", backend: "webkit", endpoint: "http://localhost:9222/" },
+      secrets: {},
+      state: undefined,
+      steps: []
+    })
+    assert.include(text, "WebKit.layerAttach(\"http://localhost:9222/\")")
+    assert.include(text, "@usestrider/browser/webkit")
+    assert.include(text, "const context = yield* (yield* Browser.Browser).defaultContext.control")
+  })
+  // ROOK-4: WebKit.layerAttach requires a WebSocketConstructor, which NodeServices.layer doesn't provide
+  it("exports a WebKit attachment that provides its WebSocket constructor", () => {
+    const { text } = ExportTest.render({
+      name: "remote",
+      browser: { _tag: "Attach", backend: "webkit", endpoint: "http://localhost:9222/" },
+      secrets: {},
+      state: undefined,
+      steps: []
+    })
+    assert.include(text, "NodeSocket.layerWebSocketConstructor")
+  })
   const tool = <K extends Tools.ToolName>(name: K, params: Tools.Params<K>, result?: string): ExportTest.Step => {
     const call: Tools.Call = Tools.call(name, params)
     return { _tag: "Tool", ...call, target: undefined, result }

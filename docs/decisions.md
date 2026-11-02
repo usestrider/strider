@@ -567,3 +567,25 @@ failure or release warning does not claim that every sibling was restored.
 Rejected: treating the resize reply or an arbitrary number of frames as completion; polling or resending the
 resize; using screen dimensions as a universal preflight limit across window managers; reporting `Unsupported`
 for a bounded observation; and enlarging the test display without retaining the constrained-display regression.
+
+**CLI HTTP attachment identifies the server before choosing a layer.** One `/json/version` response supplies
+validated Chromium discovery or the exact `WebKitInspectorHTTPServer` Server-header product token, which the
+pinned inspector sends even on a 404 and with no targets. The discovered Chromium WebSocket is reused, avoiding
+a second discovery request. Startup bounds this probe to five seconds and Chromium's body to 64 KiB, rejects
+redirects and reports unsupported responses or failures. The selected backend remains in the session and its
+exported tests. A new protocol flag would duplicate information these servers already provide; HTML matching
+would trust page titles controlled by a site, and treating any 404 as WebKit would misclassify unrelated servers.
+Proxies removing the inspector identity are rejected rather than guessed. This detects compatibility, not server
+authenticity (ROOK-4). An attached inspector uses scoped control of its existing default context, rather than
+creating a context the inspector cannot supply. Startup state and viewport defaults are rejected in this mode;
+existing tabs remain available for explicit control, and stopping releases control without closing them. The
+supplied endpoint stays in the spec and export; the discovered socket is connection state for this startup alone,
+since Chromium's browser socket identity changes when the browser restarts. Every exported attachment supplies
+its required WebSocket constructor.
+
+Shared-context tabs are listed as held pages only while explicitly controlled. Digest subscriptions in this mode
+belong to each controlled page's scope, including waits for failed requests, instead of the shared context: the
+fold publishes context events for uncontrolled tabs too. Subscriptions start at control without replaying history
+and stop at release, covering page events and workers attributable to that page. Context-wide digest subscriptions
+remain appropriate for sessions with their own context. Filtering the context stream only when draining it could
+admit events queued before control or after release; page scopes enforce the same lifetime as control.
