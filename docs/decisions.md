@@ -434,13 +434,20 @@ hold the loopback LISTEN socket inode; after connecting, it must still hold the 
 any inspector write. The stock inspector binds exclusively, so retaining the same listener across connection
 establishment excludes a different server accepting that connection. A wrapper must exec MiniBrowser, not merely
 fork it. We do not search descendants or fall back when the proof is unavailable. Refusal explains why and directs
-the caller to attach to an externally managed inspector HTTP endpoint. A live child whose procfs cannot be read
-is refused with `ConnectionFailed`. Missing procfs can precede delivery of the exit event, so startup races readiness
-against that event within its existing deadline instead of trusting an immediate liveness snapshot. Stderr ending
-alone is not an exit; a live child may still start successfully. An observed exit retains `ProcessExited` with its
-exit code, and remaining stderr is collected only within the same deadline, since descendants may hold it open. Exits before ownership also explain that wrappers must exec MiniBrowser and name
-attach, without assuming every exit was caused by a fork. Attach keeps its existing requirements.
-The existing deadline, 100 ms polling and five reported-collision attempts remain the policy.
+the caller to attach to an externally managed inspector HTTP endpoint. A procfs read failure, including permission
+errors, can precede the child exit event, so it stops ownership attempts and closes any rejected connection before
+waiting for the actual event within the remaining launch deadline. No later collision report restarts ownership
+attempts. If no exit is observed, `ConnectionFailed` retains the original access error and uses `stage: "refused"`.
+This deliberately allows a genuine access refusal to take the rest of the launch budget; it does not use a fixed
+grace period or guess the child's state from another kernel file. An ordinary readiness timeout keeps its prior
+`stage: "handshake"`.
+
+Stderr ending alone is not an exit; a live child may still start successfully. An observed exit retains
+`ProcessExited` with its exit code when available; the code can be absent, such as for a signal. Stderr contains
+only what was collected within the same launch deadline, since descendants may hold it open. Exits before ownership
+also explain that wrappers must exec MiniBrowser and name attach, without assuming every exit was caused by a fork.
+Attach keeps its existing requirements. The existing deadline, 100 ms polling and five reported-collision attempts
+remain the policy.
 
 Rejected: checking port availability then releasing it (another process can bind in the gap), a launch mutex
 (other processes do not participate), delaying for stderr (there is no bounded time that proves success), and

@@ -61,11 +61,14 @@ is the first tab's. [Launch profiles](/docs/browsers/chromium#launching) don't a
 
 Launching requires Linux with readable `/proc/<pid>/net/tcp` and `/proc/<pid>/fd` for the spawned process. Strider
 checks that this PID holds the same inspector listener before and after connecting, before sending any command.
-A wrapper must exec MiniBrowser rather than only fork it. Other operating systems, inaccessible procfs for a live
-child and unverifiable live-child ownership refuse launch with `ConnectionFailed` and an explanation. A child
-that exits before ownership is verified reports `ProcessExited` with its exit code and stderr. Both errors name
-the applicable launch requirements and the attach alternative; use [`WebKit.layerAttach`](#attaching) with an externally
-managed inspector HTTP endpoint instead.
+A wrapper must exec MiniBrowser rather than only fork it. Other operating systems and unverifiable ownership
+refuse launch with `ConnectionFailed`. A procfs read failure stops ownership attempts and closes any rejected
+connection, then waits for a child exit event within the remaining launch deadline. If no exit is observed,
+refusal retains the original access error. A child exit observed during startup reports `ProcessExited`, with
+an exit code when available and stderr collected within that same deadline. An ordinary readiness timeout uses
+the `handshake` stage; explicit ownership and access refusals use `refused`. Both errors explain the applicable
+launch requirements and the attach alternative; use [`WebKit.layerAttach`](#attaching) with an externally managed
+inspector HTTP endpoint instead.
 
 ## Attaching
 

@@ -24,6 +24,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
+import type * as PlatformError from "effect/PlatformError"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Random from "effect/Random"
 import * as Schedule from "effect/Schedule"
@@ -122,8 +123,8 @@ class PortTaken extends Data.TaggedError("PortTaken") {}
 /** Readiness polling shares the launcher's existing connection polling policy. */
 class ListenerPending extends Data.TaggedError("ListenerPending") {}
 
-/** A missing procfs entry can precede delivery of the child exit event. */
-class ProcfsMissing extends Data.TaggedError("ProcfsMissing")<{ readonly description: string }> {}
+/** A procfs access failure can precede delivery of the child exit event. */
+class ProcfsReadFailed extends Data.TaggedError("ProcfsReadFailed")<{ readonly cause: PlatformError.PlatformError }> {}
 
 const attachGuidance = "Use WebKit.layerAttach with an externally managed inspector HTTP endpoint instead."
 const ownershipGuidance = `Wrappers must exec MiniBrowser; fork-only wrappers are not supported. ${attachGuidance}`
@@ -167,13 +168,7 @@ export const inspectorListener = Effect.fnUntraced(function*(pid: number, port: 
     }
     return undefined
   }).pipe(
-    Effect.catch((error): Effect.Effect<never, Launch.LaunchError | ProcfsMissing> =>
-      error.reason._tag === "NotFound"
-        ? Effect.fail(new ProcfsMissing({ description: error.message }))
-        : Launch.refused(
-          `Cannot read Linux procfs to verify WebKit child PID ${pid}: ${error.message}. ${attachGuidance}`
-        )
-    )
+    Effect.mapError((cause) => new ProcfsReadFailed({ cause }))
   )
 })
 
@@ -233,7 +228,16 @@ const spawnProcess = Effect.fnUntraced(function*(
         }
       }).pipe(Scope.provide(own))
       let unavailable: string | undefined
-      const listener = inspectorListener(Number(launched.handle.pid), port)
+      const listener = inspectorListener(Number(launched.handle.pid), port).pipe(
+        Effect.tapError((error) =>
+          Effect.sync(() => {
+            if (error._tag === "ProcfsReadFailed") {
+              unavailable =
+                `Cannot read Linux procfs to verify WebKit child PID ${launched.handle.pid}: ${error.cause.message}.`
+            }
+          })
+        )
+      )
       const outcome = yield* Effect.raceAllFirst([
         Effect.gen(function*() {
           const inode = yield* listener
@@ -256,12 +260,8 @@ const spawnProcess = Effect.fnUntraced(function*(
             return connection
           }).pipe(Effect.onExit((exit) => Exit.isFailure(exit) ? Scope.close(connecting, exit) : Effect.void))
         }).pipe(
-          // A missing procfs entry can beat Node's exit event. The connection scope has already closed on failure.
-          Effect.catchTag("ProcfsMissing", (error) => {
-            unavailable =
-              `Cannot read Linux procfs to verify WebKit child PID ${launched.handle.pid}: ${error.description}.`
-            return Effect.never
-          }),
+          // Close a rejected connection before waiting for exit; no ownership attempt resumes after a read failure.
+          Effect.catchTag("ProcfsReadFailed", () => Effect.never),
           Effect.retry({
             while: (error) => error._tag === "ListenerPending" || error._tag === "SocketError",
             schedule: Schedule.spaced("100 millis")
@@ -279,7 +279,9 @@ const spawnProcess = Effect.fnUntraced(function*(
           BrowserClock.onLive
         ),
         launched.stderrLine(new RegExp(`Failed to start remote inspector server on 127\\.0\\.0\\.1:${port}`)).pipe(
-          Effect.flatMap((line) => Option.isSome(line) ? Effect.succeed({ _tag: "Taken" as const }) : Effect.never)
+          Effect.flatMap((line) =>
+            Option.isSome(line) && unavailable === undefined ? Effect.succeed({ _tag: "Taken" as const }) : Effect.never
+          )
         ),
         launched.handle.exitCode.pipe(Effect.exit, Effect.map((exit) => ({ _tag: "Exited" as const, exit })))
       ])
@@ -302,13 +304,18 @@ const spawnProcess = Effect.fnUntraced(function*(
             "connect"
           )
         }
-        default:
-          return yield* Launch.refused(
-            `${
-              unavailable ??
-                `Its inspector server on port ${port} never answered with verifiable ownership by spawned PID ${launched.handle.pid}.`
-            } No child exit was observed before the launch deadline. ${ownershipGuidance}`
-          )
+        default: {
+          const description = `${
+            unavailable ??
+              `Its inspector server on port ${port} never answered with verifiable ownership by spawned PID ${launched.handle.pid}.`
+          } No child exit was observed before the launch deadline. ${ownershipGuidance}`
+          return yield* unavailable !== undefined
+            ? Launch.refused(description)
+            : Launch.fail(
+              new Browser.ConnectionFailed({ stage: "handshake", hint: `The browser didn't answer: ${description}` }),
+              "connect"
+            )
+        }
       }
     }).pipe(Effect.onExit((exit) => Exit.isFailure(exit) ? Scope.close(own, exit) : Effect.void))
   })
