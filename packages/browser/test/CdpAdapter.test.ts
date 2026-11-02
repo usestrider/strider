@@ -503,6 +503,24 @@ describe("Chromium capture document replacement", () => {
       if (error._tag === "PageError") assert.strictEqual(error.reason._tag, "BackendFailure")
     }).pipe(onTestClock))
 
+  it.effect("invalidates when replacement was received before a native error reply", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders
+      const page = yield* h.page.control
+      const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+      const command = yield* Queue.take(h.captures)
+      yield* h.browser.receive(replacementEvent())
+      yield* h.browser.receive({
+        id: command.id,
+        sessionId: command.sessionId,
+        error: { code: -32000, message: "capture failed" }
+      })
+      yield* h.barrier
+      const error = yield* Fiber.join(pending)
+      assert.strictEqual(error._tag, "PageError")
+      if (error._tag === "PageError") assert.strictEqual(error.reason._tag, "CaptureInvalidated")
+    }).pipe(onTestClock))
+
   it.effect("keeps a page crash as TargetGone instead of capture invalidation", () =>
     Effect.gen(function*() {
       const h = yield* sentHeaders
