@@ -14,6 +14,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Adapter from "../../../src/internal/adapter.ts"
@@ -1437,3 +1438,56 @@ export const conformance = (backend: Backend) =>
   })
 
 export type { Backend }
+
+/** CDP's restoration barrier, including overrides with different scopes and release order. */
+export const viewportRestoration = (backend: Backend) =>
+  describe(`${backend.name} viewport restoration`, () => {
+    layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
+      (it) => {
+        it.effect("restores nested viewport overrides", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { context, page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/hello`)
+            const original = yield* evaluate(world, page, "() => [innerWidth, innerHeight]")
+            yield* Effect.scoped(Effect.gen(function*() {
+              yield* world.adapter.declare({ _tag: "UserContext", context }, {
+                _tag: "Override",
+                override: { _tag: "Viewport", width: 1000, height: 700, deviceScaleFactor: 1, mobile: false }
+              })
+              yield* Effect.scoped(
+                world.adapter.declare({ _tag: "Page", page }, {
+                  _tag: "Override",
+                  override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+                })
+              )
+              assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), [1000, 700])
+            }))
+            assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), original)
+          }), timeout)
+
+        it.effect("restores replaced viewport overrides released out of order", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/hello`)
+            const original = yield* evaluate(world, page, "() => [innerWidth, innerHeight]")
+            const first = yield* Scope.make()
+            const second = yield* Scope.make()
+            yield* Effect.addFinalizer(() => Scope.close(first, Exit.void))
+            yield* Effect.addFinalizer(() => Scope.close(second, Exit.void))
+            const declare = (width: number, height: number) =>
+              world.adapter.declare({ _tag: "Page", page }, {
+                _tag: "Override",
+                override: { _tag: "Viewport", width, height, deviceScaleFactor: 1, mobile: false }
+              })
+            yield* declare(640, 480).pipe(Effect.provideService(Scope.Scope, first))
+            yield* declare(1000, 700).pipe(Effect.provideService(Scope.Scope, second))
+            yield* Scope.close(first, Exit.void)
+            assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), [1000, 700])
+            yield* Scope.close(second, Exit.void)
+            assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), original)
+          }), timeout)
+      }
+    )
+  })

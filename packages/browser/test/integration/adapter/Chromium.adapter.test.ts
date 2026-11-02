@@ -8,7 +8,7 @@ import * as CdpWire from "../../../src/internal/cdpWire.ts"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
 import { assertPinned, chromium } from "../browsers.ts"
 import { fixtures, record } from "../record.ts"
-import { conformance } from "./conformance.ts"
+import { conformance, viewportRestoration } from "./conformance.ts"
 import { engine } from "./engine.ts"
 import type { Backend } from "./harness.ts"
 
@@ -28,4 +28,5 @@ const backend: Backend = {
 }
 
 conformance(backend)
+viewportRestoration(backend)
 engine(backend)
