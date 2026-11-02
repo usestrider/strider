@@ -556,3 +556,13 @@ failure or release warning does not claim that every sibling was restored.
 Rejected: treating the resize reply or an arbitrary number of frames as completion; polling or resending the
 resize; using screen dimensions as a universal preflight limit across window managers; reporting `Unsupported`
 for a bounded observation; and enlarging the test display without retaining the constrained-display regression.
+
+**CLI HTTP attachment identifies the server before choosing a layer.** One `/json/version` response supplies
+validated Chromium discovery or the exact `WebKitInspectorHTTPServer` Server-header product token, which the
+pinned inspector sends even on a 404 and with no targets. The discovered Chromium WebSocket is reused, avoiding
+a second discovery request. Startup bounds this probe to five seconds and Chromium's body to 64 KiB, rejects
+redirects and reports unsupported responses or failures. The selected backend remains in the session and its
+exported tests. A new protocol flag would duplicate information these servers already provide; HTML matching
+would trust page titles controlled by a site, and treating any 404 as WebKit would misclassify unrelated servers.
+Proxies removing the inspector identity are rejected rather than guessed. This detects compatibility, not server
+authenticity (ROOK-4).

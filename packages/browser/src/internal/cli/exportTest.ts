@@ -119,7 +119,7 @@ const listed = (names: ReadonlyArray<string>) =>
 /** Where the session's browser came from, as the test's layer names it. */
 export type Browser =
   | { readonly _tag: "Launch"; readonly backend: "chromium" | "firefox" | "webkit"; readonly executablePath: string }
-  | { readonly _tag: "Attach"; readonly backend: "chromium" | "bidi"; readonly endpoint: string }
+  | { readonly _tag: "Attach"; readonly backend: "chromium" | "bidi" | "webkit"; readonly endpoint: string }
 
 const quote = (text: string) => JSON.stringify(text)
 
@@ -590,10 +590,14 @@ export const render = (options: {
     }[options.browser.backend]
     : options.browser.backend === "chromium"
     ? { module: "chromium", name: "Chromium" }
+    : options.browser.backend === "webkit"
+    ? { module: "webkit", name: "WebKit" }
     : { module: "bidi", name: "Bidi" }
   const browserLayer = options.browser._tag === "Launch"
     ? `${layer.name}.layer({ executablePath: ${quote(options.browser.executablePath)} })`
-    : `${layer.name}.layerConnect(${quote(options.browser.endpoint)})`
+    : `${layer.name}.${options.browser.backend === "webkit" ? "layerAttach" : "layerConnect"}(${
+      quote(options.browser.endpoint)
+    })`
   const library = [...used].filter((each) => each !== "Config" && each !== "Redacted").map((each) =>
     imports[each] ?? each
   ).sort()

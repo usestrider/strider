@@ -26,6 +26,7 @@ import * as Effect from "effect/Effect"
 import * as Encoding from "effect/encoding/Base64"
 import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
@@ -56,6 +57,7 @@ import * as WebKit from "../../webkit/WebKit.ts"
 import * as Handles from "../handles.ts"
 import * as ToolkitImpl from "../toolkit.ts"
 import * as Tools from "../tools.ts"
+import * as Attach from "./attach.ts"
 import * as Client from "./client.ts"
 import * as ExportTest from "./exportTest.ts"
 import * as Node from "./node.ts"
@@ -993,14 +995,20 @@ const browserOf = (flags: {
     ...Option.toArray(
       Option.map(flags.webkit, (path) => ({ _tag: "Launch", backend: "webkit", executablePath: path }) as const)
     ),
-    // An HTTP endpoint, or a WebSocket to /devtools/, is Chromium's; any other WebSocket WebDriver BiDi's
+    // HTTP is detected below; WebSocket classification preserves the existing BiDi handling.
     ...Option.toArray(Option.map(flags.attach, (endpoint) =>
       /^https?:|\/devtools\//.test(endpoint)
         ? { _tag: "Attach", backend: "chromium", endpoint } as const
         : { _tag: "Attach", backend: "bidi", endpoint: bidiEndpoint(endpoint) } as const))
   ]
   return given.length === 1
-    ? Effect.succeed(given[0]!)
+    ? given[0]!._tag === "Attach" && /^https?:/.test(given[0]!.endpoint)
+      ? Attach.detect(given[0]!.endpoint).pipe(
+        Effect.provide(FetchHttpClient.layer),
+        Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+        Effect.mapError((error) => new CommandFailed({ error: "InvalidInput", message: error.message }))
+      )
+      : Effect.succeed(given[0]!)
     : Effect.fail(
       new CommandFailed({
         error: "InvalidInput",
@@ -1024,6 +1032,8 @@ const layerOf = (
   if (browser._tag === "Attach") {
     return browser.backend === "chromium"
       ? Chromium.layerConnect(browser.endpoint)
+      : browser.backend === "webkit"
+      ? WebKit.layerAttach(browser.endpoint)
       : Bidi.layerConnect(browser.endpoint)
   }
   const options = { executablePath: browser.executablePath, userDataDir }
@@ -1314,7 +1324,7 @@ const serve = Effect.fnUntraced(
     const where = browser._tag === "Launch" ? `at ${browser.executablePath}` : `attached to ${browser.endpoint}`
     yield* ready(
       yield* Announce,
-      `session ${flags.name} · ${instance.info.product} ${where} · focus ${focus} · idle timeout ${daemon.idleTimeout}${
+      `session ${flags.name} · ${browser.backend} · ${instance.info.product} ${where} · focus ${focus} · idle timeout ${daemon.idleTimeout}${
         Option.isSome(flags.ownerPid) ? ` · ends with process ${flags.ownerPid.value}` : ""
       }${flags.capture === "strict" ? " · capture strict" : ""}${
         Option.isSome(flags.state)
