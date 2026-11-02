@@ -984,7 +984,7 @@ const browserOf = (flags: {
   readonly firefox: Option.Option<string>
   readonly webkit: Option.Option<string>
   readonly attach: Option.Option<string>
-}): Effect.Effect<ExportTest.Browser, CommandFailed> => {
+}): Effect.Effect<Pick<Prepared, "browser" | "connectionEndpoint">, CommandFailed> => {
   const given = [
     ...Option.toArray(
       Option.map(flags.chromium, (path) => ({ _tag: "Launch", backend: "chromium", executablePath: path }) as const)
@@ -1008,7 +1008,7 @@ const browserOf = (flags: {
         Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
         Effect.mapError((error) => new CommandFailed({ error: "InvalidInput", message: error.message }))
       )
-      : Effect.succeed(given[0]!)
+      : Effect.succeed({ browser: given[0]!, connectionEndpoint: undefined })
     : Effect.fail(
       new CommandFailed({
         error: "InvalidInput",
@@ -1020,7 +1020,8 @@ const browserOf = (flags: {
 
 const layerOf = (
   browser: ExportTest.Browser,
-  userDataDir: string
+  userDataDir: string,
+  connectionEndpoint: string | undefined
 ): Layer.Layer<
   Browser.Browser,
   Browser.BrowserError,
@@ -1031,7 +1032,7 @@ const layerOf = (
 > => {
   if (browser._tag === "Attach") {
     return browser.backend === "chromium"
-      ? Chromium.layerConnect(browser.endpoint)
+      ? Chromium.layerConnect(connectionEndpoint ?? browser.endpoint)
       : browser.backend === "webkit"
       ? WebKit.layerAttach(browser.endpoint)
       : Bidi.layerConnect(browser.endpoint)
@@ -1141,7 +1142,7 @@ export const start = Command.make(
         )
       }
       const viewport = Option.isSome(flags.viewport) ? yield* parseViewport(flags.viewport.value) : undefined
-      const browser = yield* browserOf(flags)
+      const { browser, connectionEndpoint } = yield* browserOf(flags)
       // What Duration.fromInput reads, as a Schema decodes it from text
       const parsed = Schema.decodeUnknownOption(Schema.DurationFromString)(flags.idle)
       if (Option.isNone(parsed)) {
@@ -1204,7 +1205,18 @@ export const start = Command.make(
       )
       // What the daemon logs goes to the session's log, as it has no output of its own
       const log = yield* Logger.toFile(Logger.formatSimple, paths.log).pipe(Effect.mapError(failedWith))
-      keep = yield* serve(flags, { browser, idle, paths, initial, stateFile, forkOf, secrets, version, viewport }).pipe(
+      keep = yield* serve(flags, {
+        browser,
+        connectionEndpoint,
+        idle,
+        paths,
+        initial,
+        stateFile,
+        forkOf,
+        secrets,
+        version,
+        viewport
+      }).pipe(
         Effect.provide(Logger.layer([log]))
       )
     }).pipe(Effect.scoped)
@@ -1214,6 +1226,8 @@ export const start = Command.make(
 interface Prepared {
   readonly viewport: Viewport | undefined
   readonly browser: ExportTest.Browser
+  /** The probed socket for this startup only; the spec and exports keep the supplied endpoint. */
+  readonly connectionEndpoint: string | undefined
   readonly idle: Duration.Duration
   readonly paths: ReturnType<typeof Session.paths>
   readonly initial: Option.Option<StorageState.StorageState>
@@ -1228,7 +1242,8 @@ const serve = Effect.fnUntraced(
   function*(flags: Command.Command.Config.Infer<typeof startFlags>, prepared: Prepared) {
     const fs = yield* FileSystem.FileSystem
     const process = Node.process
-    const { browser, forkOf, idle, initial, paths, secrets, stateFile, version, viewport } = prepared
+    const { browser, connectionEndpoint, forkOf, idle, initial, paths, secrets, stateFile, version, viewport } =
+      prepared
     for (const dir of [paths.downloads, paths.artifacts]) {
       yield* fs.makeDirectory(dir).pipe(Effect.mapError(failedWith))
     }
@@ -1238,7 +1253,7 @@ const serve = Effect.fnUntraced(
     // What the session launches and makes is in the CLI's ledger, which strider prune reads if it dies
     const os = yield* Effect.promise(() => Node.os())
     const ledger = yield* Layer.build(Ledger.layer(Session.ledgerRoot(process.env, os.homedir())))
-    const services = yield* Layer.build(layerOf(browser, userDataDir)).pipe(
+    const services = yield* Layer.build(layerOf(browser, userDataDir, connectionEndpoint)).pipe(
       Effect.provideContext(ledger),
       Effect.mapError(failedWith)
     )

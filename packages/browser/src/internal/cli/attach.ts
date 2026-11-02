@@ -29,7 +29,7 @@ export const detect = Effect.fnUntraced(
     )
     // The exact product token is sent even on WebKit's 404 and when there are no targets.
     if (/(?:^|\s)WebKitInspectorHTTPServer(?:\s|$)/.test(response.headers.server ?? "")) {
-      return { _tag: "Attach", backend: "webkit", endpoint: url.href } as const
+      return { browser: { _tag: "Attach", backend: "webkit", endpoint }, connectionEndpoint: undefined } as const
     }
     if (response.status < 200 || response.status >= 300) {
       return yield* Effect.fail(
@@ -63,7 +63,7 @@ export const detect = Effect.fnUntraced(
         )
       )
     }
-    return { _tag: "Attach", backend: "chromium", endpoint: socket.href } as const
+    return { browser: { _tag: "Attach", backend: "chromium", endpoint }, connectionEndpoint: socket.href } as const
   },
   Effect.scoped,
   Effect.timeoutOrElse({

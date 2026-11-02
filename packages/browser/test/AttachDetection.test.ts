@@ -27,9 +27,8 @@ describe("CLI HTTP attachment detection", () => {
     Effect.gen(function*() {
       const { requests, run } = probe(new Response(discovery()))
       assert.deepStrictEqual(yield* run, {
-        _tag: "Attach",
-        backend: "chromium",
-        endpoint: "ws://localhost:9222/devtools/browser/one"
+        browser: { _tag: "Attach", backend: "chromium", endpoint: "http://localhost:9222/" },
+        connectionEndpoint: "ws://localhost:9222/devtools/browser/one"
       })
       assert.deepStrictEqual(requests, ["http://localhost:9222/json/version"])
     }))
@@ -38,7 +37,10 @@ describe("CLI HTTP attachment detection", () => {
       const { run } = probe(
         new Response("", { status: 404, headers: { server: "WebKitInspectorHTTPServer libsoup/3.6.6" } })
       )
-      assert.deepStrictEqual(yield* run, { _tag: "Attach", backend: "webkit", endpoint: "http://localhost:9222/" })
+      assert.deepStrictEqual(yield* run, {
+        browser: { _tag: "Attach", backend: "webkit", endpoint: "http://localhost:9222/" },
+        connectionEndpoint: undefined
+      })
     }))
   it.effect("reports a connection failure without response content", () =>
     Effect.gen(function*() {
