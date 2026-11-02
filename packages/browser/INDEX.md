@@ -1630,12 +1630,14 @@ Accessibility snapshots of a page, for agents and for checking a page's structur
   - `readonly role: Role`
   - `readonly name: Name`
   - `readonly states: ReadonlySet<State>`
+  - `readonly validationMessage: Option.Option<string>`
   - `readonly children: ReadonlyArray<Node>`
 - `interface NodeEncoded`
   - `readonly ref: Option.Option<string>`
   - `readonly role: Node["role"]`
   - `readonly name: Node["name"]`
   - `readonly states: Node["states"]`
+  - `readonly validationMessage: Option.Option<string>`
   - `readonly children: ReadonlyArray<NodeEncoded>`
 - `class Data: Schema.Class { document, generation, root, text }`
 - `class Diff: Schema.Class { added, removed, changed, text }`
@@ -1656,7 +1658,7 @@ Accessibility snapshots of a page, for agents and for checking a page's structur
 - `const InteractivityEvidence = Schema.Literals(["clickListener", "cursorPointer", "tabindex", "contentEditable", "onclickAttribute"])`
 - `const Role: Schema.Codec<Role>`
 - `const Name = Schema.Union([Schema.TaggedStruct("Accessible", { value: Schema.String }), Schema.TaggedStruct("Inferred", { value: Schema.String, from: Schema.Literals(["text", "title", "placeholder", "alt", "nearb…`
-- `const State = Schema.Literals(["checked", "expanded", "selected", "disabled", "focused", "pressed"])`
+- `const State = Schema.Literals(["checked", "expanded", "selected", "disabled", "focused", "pressed", "invalid"])`
 - `const Node: Schema.Codec<Node, NodeEncoded>`
 
 *guards*

@@ -1182,11 +1182,15 @@ const serve = Effect.fnUntraced(
     // Every page of the session keeps rendering while another is in front, as a person's would: focus is
     // emulated where the backend can, and Firefox opens new pages as windows (QUIRKS.md, Q19 and Q71)
     const focus = ExportTest.focusFor(browser)
+    const capabilities = yield* instance.capabilities
+    const reportsDownloads = capabilities.entries.every((entry) =>
+      entry.name !== "downloads" || entry.status !== "unsupported"
+    )
     const context = yield* instance.newContext({
       ...Option.match(initial, { onNone: () => ({}), onSome: (storageState) => ({ storageState }) }),
       focus,
       // The session's own directory, which strider stop --keep keeps
-      downloads: { directory: paths.downloads }
+      downloads: reportsDownloads ? { directory: paths.downloads } : undefined
     }).pipe(
       Effect.mapError(failedWith)
     )

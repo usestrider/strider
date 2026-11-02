@@ -8,14 +8,17 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Firefox } from "@usestrider/browser/firefox"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import { execFile, spawn } from "node:child_process"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { site } from "./adapter/harness.ts"
-import { chromium, firefox } from "./browsers.ts"
+import { chromium, firefox, webkitgtk } from "./browsers.ts"
 import { firefoxAttachable } from "./slice/attaching.ts"
+import { useXvfb } from "./stockWebKit.ts"
 
 const timeout = 120_000
 const bin = new URL("../../src/bin/strider.ts", import.meta.url).pathname
@@ -112,6 +115,50 @@ const app = `<title>shop</title>
 </script>`
 
 describe("strider", () => {
+  it.live("starts a stock WebKit session, drives a page, refuses download waits, and stops", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        yield* useXvfb()
+        const served = yield* site
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const session = (...args: ReadonlyArray<string>) => run("-s", "webkit", ...args)
+        const removed = yield* Deferred.make<void>()
+        const directory = path.join(env.XDG_RUNTIME_DIR, "strider", "webkit")
+        try {
+          const started = yield* run("start", "--name", "webkit", "--webkit", webkitgtk.executable)
+          assert.strictEqual(started.code, 0, started.err)
+          yield* Effect.acquireRelease(
+            Effect.sync(() =>
+              fs.watch(path.dirname(directory), () => {
+                if (!fs.existsSync(directory)) Deferred.doneUnsafe(removed, Exit.void)
+              })
+            ),
+            (watcher) => Effect.sync(() => watcher.close())
+          )
+          assert.include(started.out, "focus system")
+          const url = `${served.origin}/fixture?html=${
+            encodeURIComponent(`<button onclick="this.textContent = 'Done'">Go</button>`)
+          }`
+          const opened = yield* session("page", "new", "--name", "home", url)
+          assert.strictEqual(opened.code, 0, opened.err)
+          const clicked = yield* session("-p", "home", "click", "role=button[name=\"Go\"]")
+          assert.strictEqual(clicked.code, 0, clicked.err)
+          const checked = yield* session("-p", "home", "expect", "css=button", "visible", "--text", "Done")
+          assert.strictEqual(checked.code, 0, checked.err)
+          const download = yield* session("-p", "home", "next", "download")
+          assert.notStrictEqual(download.code, 0, download.out)
+          assert.include(download.err, "SubscriptionError")
+          assert.include(download.err, "downloads is unsupported")
+        } finally {
+          yield* session("stop")
+        }
+        // Stop acknowledges the request before the daemon finishes releasing its resources.
+        yield* Deferred.await(removed).pipe(Effect.timeout("10 seconds"))
+        assert.isFalse(fs.existsSync(directory))
+        assert.strictEqual((yield* session("pages")).code, 20)
+      }).pipe(Effect.provide(NodeServices.layer))
+    ), timeout)
   for (const idle of ["15 minutes", "90.125 seconds", "Infinity"]) {
     it.live(`accepts the idle duration printed by start and sessions (${idle})`, () =>
       Effect.gen(function*() {
