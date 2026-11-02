@@ -11,6 +11,7 @@ import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as PlatformError from "effect/PlatformError"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Random from "effect/Random"
 import * as Schedule from "effect/Schedule"
@@ -289,7 +290,14 @@ describe("WebKit launcher", () => {
           readFileString: (path, options) =>
             path === "/proc/9000001/net/tcp"
               ? (mode === "unreadable" || (mode === "unreadable-after" && connected > 0)) ?
-                fs.readFileString(`${directory}/missing-procfs`) :
+                Effect.fail(
+                  PlatformError.systemError({
+                    _tag: "PermissionDenied",
+                    module: "FileSystem",
+                    method: "readFileString",
+                    pathOrDescriptor: path
+                  })
+                ) :
                 Effect.sync(() => {
                   Deferred.doneUnsafe(inspected, Effect.void)
                   return `sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n 0: 0100007F:${
@@ -416,6 +424,9 @@ describe("WebKit launcher", () => {
         readonly vanishesBeforeExitEvent?: boolean | undefined
         /** Its stderr ended, as a child's does when it exits, but Node hasn't reported its exit yet. */
         readonly stderrEndsBeforeExitEvent?: boolean | undefined
+        readonly stderrClosesAlive?: boolean | undefined
+        readonly missingProcfsAlive?: boolean | undefined
+        readonly vanishesAfterConnectBeforeExitEvent?: boolean | undefined
       },
       connect: Effect.Effect<void> = Effect.void,
       timeout = "200 millis"
@@ -431,6 +442,7 @@ describe("WebKit launcher", () => {
       const written: Array<number> = []
       const base = 9100000
       const gone = new Set<number>()
+      const stderrClosed = yield* Deferred.make<void>()
       const exitEvents = new Map<number, Deferred.Deferred<ChildProcessSpawner.ExitCode>>()
       const reportExitSoon = (spawn: number) => {
         setTimeout(() => {
@@ -454,9 +466,14 @@ describe("WebKit launcher", () => {
           if (behavior(spawn).stderrEndsBeforeExitEvent === true) reportExitSoon(spawn)
           const stderr = behavior(spawn).collides === true
             ? Stream.concat(Stream.make(line), Stream.never)
+            : behavior(spawn).stderrClosesAlive === true
+            ? Stream.make(new TextEncoder().encode("stderr is closing, but the child is alive\n")).pipe(
+              Stream.ensuring(Deferred.succeed(stderrClosed, undefined))
+            )
             : behavior(spawn).stderrEndsBeforeExitEvent === true
             ? Stream.make(failed)
-            : behavior(spawn).vanishesBeforeExitEvent === true
+            : behavior(spawn).vanishesBeforeExitEvent === true ||
+                behavior(spawn).vanishesAfterConnectBeforeExitEvent === true
             ? Stream.concat(Stream.make(failed), Stream.never)
             : exits
             ? Stream.concat(Stream.make(new TextEncoder().encode("MiniBrowser startup failed\n")), Stream.never)
@@ -489,6 +506,7 @@ describe("WebKit launcher", () => {
         readFileString: (path, options) => {
           const spawn = spawnOf(path)
           if (spawn === undefined) return fs.readFileString(path, options)
+          if (behavior(spawn).missingProcfsAlive === true) return fs.readFileString(`${directory}/missing-procfs`)
           if (
             behavior(spawn).vanishes === true ||
             (behavior(spawn).vanishesAfterConnect === true && connected.includes(ports[spawn]!))
@@ -496,16 +514,20 @@ describe("WebKit launcher", () => {
             gone.add(spawn)
             return fs.readFileString(`${directory}/gone`)
           }
-          if (behavior(spawn).vanishesBeforeExitEvent === true) {
+          if (
+            behavior(spawn).vanishesBeforeExitEvent === true ||
+            (behavior(spawn).vanishesAfterConnectBeforeExitEvent === true && connected.includes(ports[spawn]!))
+          ) {
             return fs.readFileString(`${directory}/gone`).pipe(
               Effect.tapError(() => Effect.sync(() => reportExitSoon(spawn)))
             )
           }
           const { foreign, held } = behavior(spawn)
-          return Effect.succeed(
-            "sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
-              + (held ? row(ports[spawn]!, `${1000 + spawn}`) : foreign === true ? row(ports[spawn]!, "777") : "")
-          )
+          const table = "sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
+            + (held ? row(ports[spawn]!, `${1000 + spawn}`) : foreign === true ? row(ports[spawn]!, "777") : "")
+          return behavior(spawn).stderrClosesAlive === true
+            ? Deferred.await(stderrClosed).pipe(Effect.andThen(Effect.yieldNow), Effect.as(table))
+            : Effect.succeed(table)
         },
         readDirectory: (path, options) =>
           spawnOf(path) === undefined ? fs.readDirectory(path, options) : Effect.succeed(["7"]),
@@ -615,6 +637,57 @@ describe("WebKit launcher", () => {
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(1))
         assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+      }))
+
+    it.effect("keeps the exit and closes the connection when procfs disappears before the post-connect exit event", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(() => ({ held: true, vanishesAfterConnectBeforeExitEvent: true }))
+        assert(result.exit._tag === "Failure")
+        const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
+        assert(error.reason._tag === "ProcessExited")
+        assert.deepStrictEqual(error.reason.code, Option.some(1))
+        assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+        assert.strictEqual(result.connected.length, 1)
+        assert.deepStrictEqual(result.closed, result.connected)
+        assert.deepStrictEqual(result.written, [])
+        assert.deepStrictEqual(result.stopped, [0])
+      }))
+
+    it.effect("continues successful owned startup when a live child closes stderr first", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(() => ({ held: true, stderrClosesAlive: true }))
+        assert.deepStrictEqual(result.written, result.ports)
+        assert.strictEqual(result.written.length, 1)
+        assert.deepStrictEqual(result.closed, result.connected)
+        assert.deepStrictEqual(result.stopped, [0])
+      }))
+
+    it.effect("keeps the deadline when a live child closes stderr without starting an owned listener", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(() => ({ held: false, stderrClosesAlive: true }), Effect.void, "50 millis")
+        assert(result.exit._tag === "Failure")
+        const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
+        assert(error.reason._tag === "ConnectionFailed")
+        assert.include(error.reason.hint, "No child exit was observed")
+        assert.deepStrictEqual(result.connected, [])
+        assert.deepStrictEqual(result.stopped, [0])
+      }))
+
+    it.effect("bounds missing procfs by the existing deadline when no exit event arrives", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(
+          () => ({ held: false, missingProcfsAlive: true }),
+          Effect.void,
+          "50 millis"
+        )
+        assert(result.exit._tag === "Failure")
+        const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
+        assert(error.reason._tag === "ConnectionFailed")
+        assert.include(error.reason.hint, "Cannot read Linux procfs")
+        assert.include(error.reason.hint, "No child exit was observed")
+        assert.include(error.reason.hint, "WebKit.layerAttach")
+        assert.deepStrictEqual(result.connected, [])
+        assert.deepStrictEqual(result.stopped, [0])
       }))
 
     it.effect("explains exec and attach for exits before ownership without diagnosing a fork", () =>
