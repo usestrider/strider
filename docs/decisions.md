@@ -565,4 +565,6 @@ redirects and reports unsupported responses or failures. The selected backend re
 exported tests. A new protocol flag would duplicate information these servers already provide; HTML matching
 would trust page titles controlled by a site, and treating any 404 as WebKit would misclassify unrelated servers.
 Proxies removing the inspector identity are rejected rather than guessed. This detects compatibility, not server
-authenticity (ROOK-4).
+authenticity (ROOK-4). An attached inspector uses scoped control of its existing default context, rather than
+creating a context the inspector cannot supply. Startup state and viewport defaults are rejected in this mode;
+existing tabs remain available for explicit control, and stopping releases control without closing them.

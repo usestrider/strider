@@ -1251,15 +1251,23 @@ const serve = Effect.fnUntraced(
     const reportsDownloads = capabilities.entries.every((entry) =>
       entry.name !== "downloads" || entry.status !== "unsupported"
     )
-    const context = yield* instance.newContext({
+    const inspector = browser._tag === "Attach" && browser.backend === "webkit"
+    if (inspector && (Option.isSome(initial) || viewport !== undefined)) {
+      return yield* Effect.fail(
+        new CommandFailed({
+          error: "InvalidInput",
+          message:
+            "An attached WebKit inspector uses its existing default context; --state, --fork and --viewport require a browser that can create contexts"
+        })
+      )
+    }
+    const context = yield* (inspector ? instance.defaultContext.control : instance.newContext({
       ...Option.match(initial, { onNone: () => ({}), onSome: (storageState) => ({ storageState }) }),
       focus,
       ...(viewport === undefined ? {} : { emulation: { viewport } }),
       // The session's own directory, which strider stop --keep keeps
       downloads: reportsDownloads ? { directory: paths.downloads } : undefined
-    }).pipe(
-      Effect.mapError(failedWith)
-    )
+    })).pipe(Effect.mapError(failedWith))
     const recorder = Recorder.make()
     const session = yield* ToolkitImpl.makeSession({
       context,

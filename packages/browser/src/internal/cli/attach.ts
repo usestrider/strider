@@ -24,7 +24,9 @@ export const detect = Effect.fnUntraced(
       return yield* Effect.fail(failure("Attachment requires an HTTP inspector endpoint"))
     }
     const client = yield* HttpClient.HttpClient
-    const response = yield* client.execute(HttpClientRequest.get(new URL("/json/version", url).href))
+    const response = yield* HttpClient.withScope(client).execute(
+      HttpClientRequest.get(new URL("/json/version", url).href)
+    )
     // The exact product token is sent even on WebKit's 404 and when there are no targets.
     if (/(?:^|\s)WebKitInspectorHTTPServer(?:\s|$)/.test(response.headers.server ?? "")) {
       return { _tag: "Attach", backend: "webkit", endpoint: url.href } as const
@@ -44,11 +46,12 @@ export const detect = Effect.fnUntraced(
         ? Effect.fail(failure("Chromium discovery exceeds 65536 bytes"))
         : Effect.succeed(body + decoder.decode(chunk, { stream: true }))
     }))
-    const discovery = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Discovery))(chunks).pipe(
-      Effect.mapError(() =>
-        failure("Malformed Chromium discovery: expected Browser, Protocol-Version and webSocketDebuggerUrl")
+    const discovery = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Discovery))(chunks + decoder.decode())
+      .pipe(
+        Effect.mapError(() =>
+          failure("Malformed Chromium discovery: expected Browser, Protocol-Version and webSocketDebuggerUrl")
+        )
       )
-    )
     const socket = URL.parse(discovery.webSocketDebuggerUrl)
     if (
       socket === null || !/^wss?:$/.test(socket.protocol) || !/^\/devtools\/browser\/[^/]+$/.test(socket.pathname) ||
@@ -62,6 +65,7 @@ export const detect = Effect.fnUntraced(
     }
     return { _tag: "Attach", backend: "chromium", endpoint: socket.href } as const
   },
+  Effect.scoped,
   Effect.timeoutOrElse({
     duration: "5 seconds",
     orElse: () => Effect.fail(failure("HTTP attachment detection timed out after 5 seconds"))

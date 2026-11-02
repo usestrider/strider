@@ -265,7 +265,9 @@ export const render = (options: {
       `// The session's browser ran on the profile at ${options.userDataDir} (start --user-data-dir), which that browser keeps locked: this test's starts with an empty one`
     ])
   ]
-  const body: Array<string> = options.state === undefined
+  const body: Array<string> = options.browser._tag === "Attach" && options.browser.backend === "webkit"
+    ? [...started, "const context = yield* (yield* Browser.Browser).defaultContext.control"]
+    : options.state === undefined
     ? [...started, `const context = yield* Browser.newContext(${settings === undefined ? "" : `{ ${settings} }`})`]
     : [
       ...started,
