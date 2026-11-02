@@ -1,5 +1,18 @@
 # Scenarios: Strider and Playwright, side by side
 
+The [public upstream suites](upstream/README.md) port Vite, Astro and Playwright's regression tests to Strider, using
+their original assertions and fixtures. Run `pnpm test:upstream` for correctness, or `pnpm benchmark:upstream` for
+repeated per-case workflow timings and `pnpm benchmark:compare` to compare saved runs. These diagnostics report
+failures directly; the validated Vite and Astro cases also run with browser integration.
+
+For isolated operation timings, raw samples and an optional performance gate, run `pnpm bench`.
+[The operation benchmarks](BENCHMARKS.md) use local fixtures only and need no recordings. Workflow timings include
+navigation and assertions; operation timings help identify which individual action contributes to a change.
+
+Project PROJ-2's attached document DOC-2 maps the performance investigations by shared mechanism. The
+[investigation workflow](BENCHMARKS.md#investigating-an-area) covers benchmark coverage, architecture comparisons,
+experiments and the human review required for public API or contract changes. Findings and progress stay on Rookery.
+
 A private workspace package, never published. It runs the same scenarios with Strider
 and with Playwright against the same stock Chromium, the one the integration environment pins, and writes what it
 found to [RESULTS.md](RESULTS.md):

@@ -140,48 +140,12 @@ export class Unsupported extends Schema.Error<Unsupported>("@usestrider/browser/
 }
 
 /**
- * Backend-specific detail for a `BackendFailure`, keyed by backend name.
- *
- * @stability unstable
- * @category schemas
- * @since 0.1.0
- */
-export const Metadata = Schema.Record(Schema.String, Schema.NullOr(Schema.MutableJson))
-
-/**
- * Type of the backend-specific detail attached to a `BackendFailure`.
- *
- * @stability unstable
- * @category models
- * @since 0.1.0
- */
-export type Metadata = typeof Metadata.Type
-
-/**
- * The detail each backend attaches to a `BackendFailure`, extended by module augmentation.
- *
- * **Details**
- *
- * A backend declares its key with `declare module`, so CDP error codes are typed where the Chromium backend
- * is imported, and the modules every backend shares never have to know them. Its keys are optional, and its index
- * admits `undefined`, so the declarations type-check with `exactOptionalPropertyTypes` on or off. No backend fills
- * its key in: the browser's code and message are on the failure's `cause`.
- *
- * @stability unstable
- * @category configuration
- * @since 0.1.0
- */
-export interface BackendMetadata {
-  readonly [key: string]: Metadata[string] | undefined
-}
-
-/**
  * Reason for a protocol command the browser rejected, or answered in a shape the backend didn't expect.
  *
  * **Details**
  *
  * `method` is the protocol command, such as `Input.dispatchMouseEvent`. A failure the browser reported carries
- * its `ProtocolError` as `cause`, with the browser's own code and message. `metadata` is empty.
+ * its `ProtocolError` as `cause`, with the browser's own code and message.
  *
  * **Example** (Logging the browser's own message)
  *
@@ -214,7 +178,6 @@ export class BackendFailure extends Schema.Error<BackendFailure>("@usestrider/br
   _tag: Schema.tag("BackendFailure"),
   kind: Schema.Literals(["Rejected", "IncompatibleResponse"]),
   method: Schema.String,
-  metadata: Metadata as unknown as Schema.Codec<BackendMetadata, Metadata>,
   hint: Schema.String,
   cause: Schema.optional(Schema.Defect())
 }) {

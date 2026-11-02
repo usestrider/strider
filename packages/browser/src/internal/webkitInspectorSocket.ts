@@ -12,14 +12,13 @@
  *   `SendMessageToBackend` and `SendMessageToFrontend` carry the protocol's JSON to and from it.
  * - **The connection** is one socket, which the program's `SocketConnector` opened, for as long as the scope.
  */
-import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
-import * as Queue from "effect/Queue"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type * as SocketConnector from "../protocol/SocketConnector.ts"
 import * as Transport from "../protocol/Transport.ts"
 import * as GVariant from "./gvariant.ts"
+import * as Link from "./link.ts"
 
 /** A target the server lists. */
 export interface Target {
@@ -173,21 +172,18 @@ export const makeFrameReader = () => {
 export interface Connection {
   /** Sends a message. Fails once the connection is lost. */
   readonly send: (message: Outgoing) => Effect.Effect<void, Transport.TransportError>
-  /** The server's messages, in order, until the connection is lost. Exactly one consumer. */
-  readonly messages: Stream.Stream<Incoming>
+  /** The server's messages, in order, then the loss, once what came before it is delivered. Exactly one consumer. */
+  readonly messages: Stream.Stream<Incoming, Transport.TransportError>
   /** Why the connection ended, once it has. */
   readonly closed: Effect.Effect<Transport.ConnectionLost>
 }
-
-const lostError = (lost: Transport.ConnectionLost) => new Transport.TransportError({ reason: lost })
 
 /** A connection over `socket`, which its connector opened, for as long as the scope. */
 export const connect: (socket: SocketConnector.Connection) => Effect.Effect<Connection, never, Scope.Scope> = Effect
   .fnUntraced(function*(socket: SocketConnector.Connection) {
     const pull = socket.pull
     const writer = socket
-    const incoming = yield* Queue.unbounded<Incoming>()
-    const lost = Deferred.makeUnsafe<Transport.ConnectionLost>()
+    const link = yield* Link.make<Incoming>()
     const read = makeFrameReader()
 
     yield* pull.pipe(
@@ -196,46 +192,51 @@ export const connect: (socket: SocketConnector.Connection) => Effect.Effect<Conn
           try: () => {
             for (const chunk of chunks) {
               for (const message of read(typeof chunk === "string" ? encoder.encode(chunk) : chunk)) {
-                Queue.offerUnsafe(incoming, message)
+                link.receive(message)
               }
             }
           },
           catch: (error) =>
             new Transport.ConnectionLost({
               initiator: "remote",
-              description: `The server sent a message that doesn't parse: ${(error as Error).message}`
+              description: `The server sent a message that doesn't parse: ${
+                error instanceof Error ? error.message : String(error)
+              }`
             })
         })
       ),
       Effect.forever,
       Effect.catch((error) =>
-        Deferred.succeed(
-          lost,
-          error instanceof Transport.ConnectionLost
-            ? error
-            : new Transport.ConnectionLost({ initiator: "remote", description: error.message })
+        Effect.sync(() =>
+          link.lose(
+            error instanceof Transport.ConnectionLost
+              ? error
+              : new Transport.ConnectionLost({ initiator: "remote", description: error.message })
+          )
         )
       ),
       Effect.forkScoped
     )
     yield* Effect.addFinalizer(() =>
-      Deferred.succeed(lost, new Transport.ConnectionLost({ initiator: "local", description: "The scope closed" }))
+      Effect.sync(() =>
+        link.lose(new Transport.ConnectionLost({ initiator: "local", description: "The scope closed" }))
+      )
     )
 
     return {
       send: (message) =>
-        Effect.suspend(() =>
-          Deferred.isDoneUnsafe(lost)
-            ? Effect.flatMap(Deferred.await(lost), (reason) => Effect.fail(lostError(reason)))
-            : writer.write(frame(message)).pipe(
-              Effect.catch((error) =>
-                Effect.fail(
-                  lostError(new Transport.ConnectionLost({ initiator: "remote", description: error.message }))
-                )
+        link.whenOpen(
+          Effect.suspend(() => writer.write(frame(message))).pipe(
+            Effect.catch((error) =>
+              Effect.fail(
+                new Transport.TransportError({
+                  reason: new Transport.ConnectionLost({ initiator: "remote", description: error.message })
+                })
               )
             )
+          )
         ),
-      messages: Stream.fromQueue(incoming).pipe(Stream.interruptWhen(Deferred.await(lost))),
-      closed: Deferred.await(lost)
+      messages: link.messages,
+      closed: link.closed
     } satisfies Connection
   })

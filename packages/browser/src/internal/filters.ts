@@ -19,7 +19,7 @@ export const invalid = (operation: string, input: string, expected: string, hint
   new Subscription.SubscriptionError({
     operation,
     reason: new Reason.InvalidInput({ input, expected, hint }),
-    diagnostics: Operation.diagnostics(Operation.operationId())
+    diagnostics: Operation.diagnosticsNow()
   })
 
 /** A filter the backend can't serve. */
@@ -27,7 +27,7 @@ export const unsupported = (operation: string, capability: string, backend: stri
   new Subscription.SubscriptionError({
     operation,
     reason: new Reason.Unsupported({ capability, backend, hint }),
-    diagnostics: Operation.diagnostics(Operation.operationId())
+    diagnostics: Operation.diagnosticsNow()
   })
 
 /** A URL filter, compiled; `None` for none. */

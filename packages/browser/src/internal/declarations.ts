@@ -12,6 +12,7 @@
  *   dependency is gone, or threw, doesn't run.
  * - **Intercepts** are the union of every pattern in scope, per phase.
  */
+import * as Option from "effect/Option"
 import type * as Target from "../Target.ts"
 import type * as UserContext from "../UserContext.ts"
 import type * as Adapter from "./adapter.ts"
@@ -45,9 +46,16 @@ export const covers = (scope: Adapter.DeclarationScope, placement: Placement): b
   }
 }
 
-/** A `*` glob over a whole URL, as L0's intercepts mean it: `*` matches anything, `/` included. */
-export const glob = (pattern: string): RegExp =>
-  new RegExp(`^${pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`)
+/**
+ * A `*` glob over a whole URL, as L0's intercepts mean it (`Declaration`'s `Intercept`): `*` matches anything, `/`
+ * included, and every other character itself. The source of a regular expression, for a protocol that takes one as
+ * text (WebKit's interception); every character a regular expression gives a meaning, `/` too, is escaped.
+ */
+export const globSource = (pattern: string): string =>
+  `^${pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\/]/g, "\\$&")).join(".*")}$`
+
+/** The glob as a regular expression, for an adapter that checks a URL against it itself. Every adapter uses this one. */
+export const glob = (pattern: string): RegExp => new RegExp(globSource(pattern))
 
 /** A world's key, for bundles. */
 export const worldKey = (world: Adapter.World): string => world._tag === "Main" ? "" : world.name
@@ -59,15 +67,15 @@ export interface Registry {
     declaration: Adapter.Declaration,
     id: Adapter.RegistrationId
   ) => Registered
-  readonly remove: (id: Adapter.RegistrationId) => Registered | undefined
+  readonly remove: (id: Adapter.RegistrationId) => Option.Option<Registered>
   readonly all: () => ReadonlyArray<Registered>
   /** The effective override of each kind for a placement. */
   readonly overrides: (placement: Placement) => ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
   /**
    * The init-script bundle for a dedicated worker: the main world's scripts declared for workers, in the same
-   * order, or `undefined` where there are none.
+   * order, or `None` where there are none.
    */
-  readonly workerBundle: (placement: Placement) => string | undefined
+  readonly workerBundle: (placement: Placement) => Option.Option<string>
   /** The init-script bundle for each world, by world key. */
   readonly bundles: (
     placement: Placement
@@ -81,15 +89,15 @@ export interface Registry {
   /** The download behavior of a context: the most specific, then most recent. */
   readonly downloads: (
     context: UserContext.Id
-  ) => Extract<Adapter.Declaration, { _tag: "Downloads" }>["behavior"] | undefined
+  ) => Option.Option<Extract<Adapter.Declaration, { _tag: "Downloads" }>["behavior"]>
   readonly fileChooser: (placement: Placement) => boolean
   /** Whether a placement's authentication challenges are paused, whatever its intercepts. */
   readonly challenges: (placement: Placement) => boolean
   /**
-   * The largest body of a kind, a request's or a response's, that a collection in force keeps, or `undefined`
+   * The largest body of a kind, a request's or a response's, that a collection in force keeps, or `None`
    * where none keeps that kind (QUIRKS.md, Q160 and Q164).
    */
-  readonly bodyLimit: (placement: Placement, body: "request" | "response") => number | undefined
+  readonly bodyLimit: (placement: Placement, body: "request" | "response") => Option.Option<number>
 }
 
 export const make = (): Registry => {
@@ -108,23 +116,23 @@ export const make = (): Registry => {
       )
   const byPrecedence = (a: Registered, b: Registered) =>
     specificity(a.scope) - specificity(b.scope) || a.sequence - b.sequence
-  return {
+  const registry: Registry = {
     add: (scope, declaration, id) => {
       const entry = { id, scope, declaration, sequence: sequence++ }
       registered.set(id, entry)
       return entry
     },
     remove: (id) => {
-      const entry = registered.get(id)
+      const entry = Option.fromUndefinedOr(registered.get(id))
       registered.delete(id)
       return entry
     },
     all: () => [...registered.values()],
     bodyLimit: (placement, body) => {
-      let limit: number | undefined
+      let limit = Option.none<number>()
       for (const entry of inScope(placement)) {
         if (entry.declaration._tag === "BodyCollection" && entry.declaration.bodies.includes(body)) {
-          limit = Math.max(limit ?? 0, entry.declaration.maxBytes)
+          limit = Option.some(Math.max(Option.getOrElse(limit, () => 0), entry.declaration.maxBytes))
         }
       }
       return limit
@@ -143,7 +151,7 @@ export const make = (): Registry => {
       const sources = scriptsOf(placement)
         .filter((entry) => entry.declaration.workers && entry.declaration.world._tag === "Main")
         .map((entry) => wrap(entry.id, entry.declaration.source, entry.declaration.after))
-      return sources.length === 0 ? undefined : block(sources)
+      return sources.length === 0 ? Option.none() : Option.some(block(sources))
     },
     bundles: (placement) => {
       const scripts = scriptsOf(placement)
@@ -179,11 +187,12 @@ export const make = (): Registry => {
         if (entry.scope._tag === "UserContext" && entry.scope.context !== context) continue
         if (winner === undefined || byPrecedence(winner, entry) < 0) winner = entry
       }
-      return winner?.declaration._tag === "Downloads" ? winner.declaration.behavior : undefined
+      return winner?.declaration._tag === "Downloads" ? Option.some(winner.declaration.behavior) : Option.none()
     },
     fileChooser: (placement) => inScope(placement).some((entry) => entry.declaration._tag === "FileChooser"),
     challenges: (placement) => inScope(placement).some((entry) => entry.declaration._tag === "Challenges")
   }
+  return registry
 }
 
 /** Which scripts of a bundle ran without throwing in this document; a name no script will use. */

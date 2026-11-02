@@ -70,6 +70,8 @@ interface ErrorMatcher {
 
 - **One reader per connection.** Writes fail promptly after close. Effect 4.0.5's `Socket` writer *waits* for a reconnection after a disconnect, so L0 wraps it to fail instead.
 - **No reconnect.** A new connection is a new model namespace (CONCEPTS.md §1).
+- **A link holds what every transport promises** (`internal/link.ts`): messages in order to one consumer, then a failure carrying the loss once what came before it is delivered, and sends that fail at once after it. Stock WebKit's transports and its inspector socket are built on one too.
+- **Stock WebKit's pages reach the adapter through one endpoint** (`webkitEnvelope.ts`), which both its transports share: it announces each page, puts its `pageProxyId` in the page's text and routes commands by it, and serves the `Envelope` domain. It parses no page's message; a page's ids stay its target's own, which the adapter keys by the target's session (Q195).
 
 **Built** (2026-10-19). `@usestrider/browser/protocol` exports `Transport`: `pipe(handle)` over a process spawned with `Transport.pipeFds`, and `webSocket(url, options?)` through the `Socket.WebSocketConstructor` in context. Both are our own small, fail-fast transports; neither goes through Effect's `Socket`, so there is nothing to wrap.
 
@@ -85,6 +87,13 @@ interface ErrorMatcher {
 ## Protocol client
 
 - **Commands are yieldable values.** `yield* Page.navigate({ url })` runs on the session in `R`, and `.pipe(Protocol.on(session))` picks a session explicitly.
+- **Ordered sends with overlapping replies.** The internal session's `sendOrdered` writes its commands to the
+  transport in order as one step, which interruption doesn't split, then waits for every reply, regardless of reply
+  order. A failure or interruption then stops waiting; what was written can't be taken back.
+  CDP uses this for a single move/press/release click at one point, without held buttons or modifier transitions.
+  Pages with child frames or HTML drag interception enabled, drags, multiple clicks, and other input sequences
+  keep their sequential dispatch. The frame restriction also applies to coordinate clicks, whose target frame
+  is unknown before dispatch. Generated commands and the public protocol session API are unchanged.
 - **Pending map.** Pending commands sit in a map from id to resumer. Interrupting the caller removes its entry and tombstones the id, so a late reply is dropped. Replies to commands that create resources are still routed to their owner for adoption or cleanup.
 - **No remote cancel.** No protocol can cancel a command; interruption only abandons the reply. Compensation metadata on generated commands tells L1 what to undo, for example releasing input or resolving a paused request.
 - **Timeouts** come from the operation deadline (L1), with a protocol-level fallback default for raw L0 use.
@@ -270,7 +279,7 @@ transport ─► dispatcher ─► per-session ordered fold ─► publisher ─
 6. **`drainObserved`** waits until the fold has processed every event received *up to now* on selected sessions. It is a local processing barrier, not proof that everything a command caused has arrived.
 7. **Ordering.** Order is guaranteed per session only. Handlers never run on the reader or the fold.
 
-**Built** (2026-10-20), in the client every backend shares (`src/internal/protocolClient.ts`):
+**Built** (2026-10-20), in the client every backend shares (`src/internal/protocolClient.ts`, with its worker in `ingestion.ts` and its subscriber buffers in `subscriberBuffer.ts`):
 
 - **Dispatcher and worker.** The reader numbers every message it receives, replies included, resolves replies, applies the session lifecycle, and queues events. One worker per connection takes them in that order: it decodes and folds the events the fold names, then publishes to subscribers. One worker rather than one per session, because decoding is synchronous work on one thread either way, and per-session order follows from the global order.
 - **The fold** is a backend adapter's, given when the client is made: the events it needs, `apply`, `lost`, `resync` and `ended`. Every hook runs in the worker and must not wait. `CdpConnection` has none, so its worker only publishes. A fold that fails is a bug, and ends the connection with that description rather than leaving everything waiting on a worker that's gone.
@@ -327,14 +336,20 @@ Adapter responsibilities:
 
 - **The contract** (`src/internal/adapter.ts`) is the whole of what a backend gives L1.
   - **Facts:** contexts, pages and frames, documents, realms, navigations and their outcomes, request hops, WebSocket and EventSource connections, obligations, prompts, downloads, console messages and uncaught exceptions. They are in L1's ids, carry the public data classes where those exist (`NetworkRequest`, `NetworkResponse`, `ConsoleMessage`, `UncaughtException`, `NetworkConnection.Frame`), and the ones that interpret traffic carry their evidence. The adapter calls the sink from its fold, in receive order, before the events are published.
-  - **Ids** are minted per connection behind a prefix per kind (`N3`, `D7`, `R5`, `Q12.1`). An id this connection never minted fails with `Foreign`.
+  - **Ids** are minted per connection behind a prefix per kind (`N3`, `D7`, `R5`, `Q12.1`). An id this connection minted whose target has ended fails with `Gone`, since L1 can name one between its end and hearing of it; only an id this connection never minted fails with `Foreign`, a bug in L1 that `Operation.fromAdapter` raises as a defect.
   - **Operations:** contexts and pages, navigation (whose id is minted before the command is sent), realms and evaluation, input, obligations, declarations, screenshots, PDFs, cookies, permissions, response bodies, input files and download paths. Each fails with `AdapterError`, whose reasons are `Gone`, `Unsupported`, `Foreign` and `Protocol`.
   - **Remote values** are WebDriver BiDi's `RemoteValue`. CDP produces them with `serializationOptions: { serialization: "deep" }`, and nodes carry a binding (`backendNodeId` and the document) that `setInputFiles` and file choosers use.
 - **Declarations** (`src/internal/declarations.ts`) are a registry every backend's gate reads.
   - Overrides take the most specific scope (page, then context, then browser), then the most recent, and releasing one in any order recomputes the effective value and applies it, or resets it.
   - Init scripts form one bundle per world, environment phase first, broader scopes first, each script in its own `try`.
   - Intercepts are the union of patterns per phase; `Fetch` is never disabled while a request is paused.
-- **CDP specifics** (`src/internal/cdpAdapter.ts`):
+- **The adapter kit** (`src/internal/adapterKit.ts`, 2026-10-30) holds what every adapter does alike, so an adapter keeps its state in one object its per-domain modules take, rather than one closure over every table:
+  - ids that remember what the connection minted, as ranges of each kind's counter, and lookups that fail an ended one as `Gone` and another connection's as `Foreign`;
+  - a fact buffer: facts delivered at the fold's flush, in order, a realm reported ahead of its document held with what it logs until it is announced; waits on the model (a document's main realm) checked after every flush; and commands the fold can't wait for, run after the flush in a `FiberSet` in the connection's scope, so they end with it;
+  - the navigations a command started, matched to the browser's by URL, oldest first, and one that never started reported in one step of the worker (Q233);
+  - typed event handlers, which give the fold its events and their handlers from one table;
+  - base64 that fails as an incompatible reply rather than giving empty bytes, an argument resolver that fails a handle or node it can't resolve as `Gone` rather than sending an empty reference, and a realm's failure that is `Gone` when its realm or session ended.
+- **CDP specifics** (`src/internal/cdpAdapter.ts`, and its modules in `src/internal/cdpAdapter/`):
   - **Auto-attach.** The browser session auto-attaches pages, service workers and shared workers, filtering out `browser_ui` targets and extension pages. A launched browser pauses every new page; an attached one pauses nothing browser-wide. Every page and out-of-process frame auto-attaches its own frames and workers, paused.
   - **The gate** runs while the target is paused and is the session's first sync: `Page.enable`, `Network.enable` and lifecycle events, then `Page.getFrameTree`, whose reply's receive sequence is the snapshot point, then `Runtime.enable`, whose replayed contexts arrive after it, then auto-attach and the declarations in force. `Runtime.runIfWaitingForDebugger` runs in a finalizer. A declaration that fails emits `PageInitializationFailed` and fails `createPage`; the page still runs.
   - **Correlation.** A page's main frame shares the target's id. Out-of-process frames move their frame to the new session and back. Realms are keyed by `uniqueId`, and evaluation targets `uniqueContextId`. Navigations are keyed by loader id: a command's navigation is matched to `frameStartedNavigating` by URL, first in, first out. Requests are keyed by session and request id, with one hop per redirect.
@@ -825,7 +840,7 @@ Adapter responsibilities:
 
 - **Frames' navigations** (`PageNavigation.Filter.frames`; `Model.NavigationEvent.frame`). The model follows a frame's navigations from start to end as it does a page's, and publishes them on the page's channel naming the frame; a subscription keeps the page's own unless it asks for `"all"`. Every `PageNavigation` has `frame`, the page's id for its own; `settle` takes it.
 - **Init scripts and the clock in dedicated workers** (`InitScript.Options.workers`, `PageClock.InstallOptions.workers`; `Declarations.workerBundle`; the capability entry `initScripts.workers`). A worker's bundle is the main world's scripts declared for workers, in the documents' order. The CDP adapter resumes a dedicated worker that gets one with a `beforeScriptExecution` instrumentation breakpoint set and runs the bundle where it pauses, then disables the debugger (Q187); the WebKit adapter runs it before `Worker.initialized`. BiDi refuses. The clock's shim does without animation frames where a worker has none, and its operations reach the pages' dedicated workers' realms.
-- **Iframes in the accessibility tree** (`cdpAdapter.ts`, `frameTree`). Each frame's tree is read with `getFullAXTree({ frameId })` on the session that owns the frame; an `Iframe` node's element is described (`DOM.describeNode`) for the frame it holds, whose tree goes under it.
+- **Iframes in the accessibility tree** (`cdpAdapter/capture.ts`, `frameTree`). Each frame's tree is read with `getFullAXTree({ frameId })` on the session that owns the frame; an `Iframe` node's element is described (`DOM.describeNode`) for the frame it holds, whose tree goes under it.
 - **Keyboard layouts** (`Keyboard.Layout`, `UserContext.Options.keyboardLayout`; `internal/keyboardLayouts.ts`, generated by `strider-codegen keyboards` from CLDR release 43's Windows layouts in `packages/tools/codegen/keyboards`; `keys.ts`, `Input.type`). A character's strokes are its key with the layout's Shift and AltGr, the dead key then its other key, or a key with an empty `code`; AltGr is the `AltGraph` key, never a flag. Named keys are the same on every layout. The BiDi adapter leaves out `AltGraph` and `Dead` key events (`input.keyboardLayout`, `partial`).
 - **Synthetic drag** (`Locator.DragOptions.html`). With `"synthetic"`, `dragTo` resolves both elements, requires one document, and calls a function in the isolated world that dispatches the drag's events with one `DataTransfer`, after removing the guard the checks armed; the outcome (`dropped`, `refused`, `canceled`) is on the span. `"native"`'s `Unsupported` hint names it.
 - **Handles by group** (`evaluation.ts`, `Evaluation.groupOf`; `internal/objectGroups.ts`; `EvaluationCall.group`). A scope's handles in a realm share a group named for it, released as the scope closes with one `releaseHandles` call; an adapter releases a group given whole in one `Runtime.releaseObjectGroup`, and other handles alone. WebKit's results join the group of the object a call is made on, so the adapter makes an object in the group and calls on it with its helper as an argument (Q185); BiDi disowns a realm's handles in one `script.disown`.

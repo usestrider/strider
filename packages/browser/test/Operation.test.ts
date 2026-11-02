@@ -5,6 +5,8 @@
  */
 import { assert, describe, it } from "@effect/vitest"
 import { Browser, Deadline, Dialog, Operation, Popup } from "@usestrider/browser"
+import * as Cause from "effect/Cause"
+import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -19,6 +21,8 @@ const timeoutAfter = (record: (record: Internal.Record) => void) =>
     record(current)
     return current.timeout(Option.none())
   }).pipe(Internal.named("Test.operation"))
+
+class Failed extends Data.TaggedError("Failed") {}
 
 describe("Operation", () => {
   describe("a record's phase", () => {
@@ -237,6 +241,23 @@ describe("Operation", () => {
           (effect, a) => Effect.map(effect, (sum) => sum * a)
         )
         assert.strictEqual(yield* add(2, 3), 10)
+      }))
+
+    it.effect("gives a failure the frames of the call and the definition, as Effect.fn does", () =>
+      Effect.gen(function*() {
+        const failing = Operation.fn("Test.failing")(function*() {
+          return yield* Effect.fail(new Failed())
+        })
+        const exit = yield* Effect.exit(failing())
+        assert.isTrue(Exit.isFailure(exit))
+        if (!Exit.isFailure(exit)) return
+        const lines = Cause.pretty(exit.cause).split("\n").map((line) => line.trim())
+        const call = lines.find((line) => line.startsWith("at Test.failing (") && line.includes("Operation.test.ts"))
+        const definition = lines.find((line) =>
+          line.startsWith("at Test.failing (definition) (") && line.includes("Operation.test.ts")
+        )
+        assert.isDefined(call, lines.join("\n"))
+        assert.isDefined(definition, lines.join("\n"))
       }))
 
     it.effect("dies with an operation provided by hand", () =>

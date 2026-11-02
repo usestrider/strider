@@ -16,6 +16,7 @@ import {
   Page,
   PageNavigation,
   Popup,
+  Target,
   Trace
 } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
@@ -180,7 +181,7 @@ describe("Browser.layerTest", () => {
       assert.strictEqual(committed.url, "https://example.test/")
       yield* TestClock.adjust("20 millis")
       const reason = yield* page.closed
-      assert.deepStrictEqual(reason, { _tag: "PageClosed", by: "script" })
+      assert.deepStrictEqual(reason, new Target.PageClosed({ by: "script" }))
     })).pipe(Effect.provide(Browser.layerTest("--resp(cart)--commit--load--|"))))
 
   it.effect("opens a timeline's dialogs and popups, decided and reported as a browser's are", () =>
@@ -188,6 +189,7 @@ describe("Browser.layerTest", () => {
       const page = yield* Browser.newPage()
       const handler = yield* Dialog.handle(page, Dialog.dismissAll)
       const popups = yield* Popup.next(page)
+      // The dialog opens a tick in: a handler decides what opens after it is registered
       yield* TestClock.adjust("10 millis")
       assert.strictEqual(yield* handler.handled, 1)
       assert.strictEqual((yield* Dialog.history(page)).entries[0]?._tag, "Confirm")
@@ -195,8 +197,8 @@ describe("Browser.layerTest", () => {
       const popup = yield* popups
       assert.strictEqual((yield* popup.status)._tag, "Open")
       yield* TestClock.adjust("10 millis")
-      assert.deepStrictEqual(yield* page.closed, { _tag: "PageCrashed" })
-    })).pipe(Effect.provide(Browser.layerTest("dialog(confirm)-popup-crash"))))
+      assert.deepStrictEqual(yield* page.closed, new Target.PageCrashed({}))
+    })).pipe(Effect.provide(Browser.layerTest("-dialog(confirm)-popup-crash"))))
 
   it.effect("has no DOM: the engine is unsupported", () =>
     Effect.scoped(Effect.gen(function*() {
@@ -369,6 +371,39 @@ describe("BrowserToolkit", () => {
       ToolkitImpl.masked(text),
       `- form:\n  - textbox "Card" [ref=e1]:\n    - text: "•••"\n  - text: "Total"`
     )
+  })
+
+  it("masks an editable field's text that its validation message repeats", () => {
+    // Chromium 155's own message for this field, with hunter2secret typed in it
+    const text =
+      `- textbox "Mail" [invalid] [validationMessage="Please include an '@' in the email address. 'hunter2secret' is missing an '@'."] [ref=e1]`
+    const redacted = ToolkitImpl.masked(text)
+    assert.notInclude(redacted, "hunter2secret")
+    assert.include(redacted, "[invalid]")
+    assert.include(redacted, "[ref=e1]")
+  })
+  it("keeps quoted names separate from validation-message tokens", () => {
+    for (const name of ["x [validationMessage=", "x \"quoted\" \\ [validationMessage="]) {
+      const message = "] private \"tail\" \\ remaining\nsecret"
+      const text = `- textbox ${JSON.stringify(name)} [invalid] [validationMessage=${JSON.stringify(message)}] [ref=e1]`
+      assert.strictEqual(
+        ToolkitImpl.masked(text),
+        `- textbox ${JSON.stringify(name)} [invalid] [validationMessage="•••"] [ref=e1]`
+      )
+      const ordinary = `- text: ${JSON.stringify("[validationMessage=\"ordinary text\"]")}`
+      assert.strictEqual(ToolkitImpl.masked(ordinary), ordinary)
+    }
+  })
+
+  it("masks whole custom validation messages including JSON escapes", () => {
+    const message = "private \"quoted\" ] [ref=fake] \\ trailing\nprivate tail"
+    for (const role of ["textbox", "combobox", "button"]) {
+      const text = `- ${role} "Field" [invalid] [validationMessage=${JSON.stringify(message)}] [ref=e1]`
+      assert.strictEqual(
+        ToolkitImpl.masked(text),
+        `- ${role} "Field" [invalid] [validationMessage="•••"] [ref=e1]`
+      )
+    }
   })
 })
 

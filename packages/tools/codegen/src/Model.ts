@@ -7,6 +7,7 @@
  * result, `Page#Frame.adFrameStatus` for an enum written inside a member. A member is addressed as
  * `ShapeId:member` in overlays.
  */
+import * as Order from "effect/Order"
 import * as Schema from "effect/Schema"
 
 export const Status = Schema.Literals(["stable", "experimental", "deprecated"])
@@ -118,9 +119,12 @@ export const splitId = (id: string): readonly [domain: string, name: string] => 
   return [id.slice(0, index), id.slice(index + 1)]
 }
 
+/** Entries by their keys, in code-unit order. */
+const byKey: Order.Order<readonly [string, unknown]> = Order.mapInput(Order.String, ([key]) => key)
+
 /** The same model with its shapes and domains in sorted order, so serialization is deterministic. */
 export const sorted = (model: ProtocolModel): ProtocolModel => ({
   ...model,
-  domains: Object.fromEntries(Object.entries(model.domains).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)),
-  shapes: Object.fromEntries(Object.entries(model.shapes).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))
+  domains: Object.fromEntries(Object.entries(model.domains).sort(byKey)),
+  shapes: Object.fromEntries(Object.entries(model.shapes).sort(byKey))
 })

@@ -1,0 +1,148 @@
+[
+  {
+    "name": "vite",
+    "repository": "https://github.com/vitejs/vite",
+    "revision": "90bc034a97e7eccd0f3cbc69904fffa625a4c34d",
+    "files": [
+      {
+        "source": "playground/css-dynamic-import/index.html",
+        "file": "fixture/index.html",
+        "sha256": "1dc4177546bb1398b12281d934c07f8557f071919358a9131520f416107c77ae"
+      },
+      {
+        "source": "playground/css-dynamic-import/index.js",
+        "file": "fixture/index.js",
+        "sha256": "faefbea2579c1acac1760180e926352ef1ef5070d724dd9ce8791b360753e5c1"
+      },
+      {
+        "source": "playground/css-dynamic-import/static.js",
+        "file": "fixture/static.js",
+        "sha256": "32d442203a1de053f917358d20c9b9cac47b88339d5e3064448e678303a60f7a"
+      },
+      {
+        "source": "playground/css-dynamic-import/static.css",
+        "file": "fixture/static.css",
+        "sha256": "82e805dded4bbcd58ccfc9f99d7094768e223931bcfebf37ef4f3079e5a6652c"
+      },
+      {
+        "source": "playground/css-dynamic-import/dynamic.js",
+        "file": "fixture/dynamic.js",
+        "sha256": "46ed2f052601b849de16ee3bec3b182c0258039583c06b748e26724aeee36e27"
+      },
+      {
+        "source": "playground/css-dynamic-import/dynamic.css",
+        "file": "fixture/dynamic.css",
+        "sha256": "340656b68aecd880bd6e9f1400af98242d697ec492d0c1cb82d8c2c6390faa8a"
+      },
+      {
+        "source": "playground/css-dynamic-import/package.json",
+        "file": "fixture/package.json",
+        "sha256": "5b93015ca70a38bdd5fbd6df924180118fb8ed7f7348f80798c4901448a20108"
+      },
+      {
+        "source": "playground/css-dynamic-import/__tests__/css-dynamic-import.spec.ts",
+        "file": "tests.txt",
+        "sha256": "f3c6c9519dcd8d58ac285ae694c29cc29eb96b3b4b9d71cd79f071ddc918cb6e"
+      },
+      {
+        "source": "LICENSE",
+        "file": "LICENSE",
+        "sha256": "692057af3d664cbb79ac38293eb50aa3c4987f8182e2a440136e59e08f1b4a54"
+      }
+    ]
+  },
+  {
+    "name": "astro",
+    "repository": "https://github.com/withastro/astro",
+    "revision": "10dae2f31486cc0a6a04d1f3d7f5ab7fa8889b30",
+    "files": [
+      {
+        "source": "packages/astro/e2e/fixtures/astro-component/astro.config.mjs",
+        "file": "fixture/astro-component/astro.config.mjs",
+        "sha256": "2804666d40a3a168c91636a184315f9d10eb43385c5c44ed58a7a717cb49bc6f"
+      },
+      {
+        "source": "packages/astro/e2e/fixtures/astro-component/package.json",
+        "file": "fixture/astro-component/package.json",
+        "sha256": "033c7d019a4be568a8c07823c9cf432e503abc3facffc048490da698997237b9"
+      },
+      {
+        "source": "packages/astro/e2e/fixtures/astro-component/src/components/Hero.astro",
+        "file": "fixture/astro-component/src/components/Hero.astro",
+        "sha256": "12985c8950b0b3635091a4df47e3fff1564386eb35949b10a6463617a931a661"
+      },
+      {
+        "source": "packages/astro/e2e/fixtures/astro-component/src/pages/index.astro",
+        "file": "fixture/astro-component/src/pages/index.astro",
+        "sha256": "b42b82fdba532e2034d2984ad45399d7606aa88ddb6072126279da785251fc0b"
+      },
+      {
+        "source": "packages/astro/e2e/fixtures/_deps/astro-linked-lib/Component.astro",
+        "file": "fixture/_deps/astro-linked-lib/Component.astro",
+        "sha256": "06dff30dd17e2d30f76b6b0766aaa61d355743e1bcabc86fdb1752f57266043a"
+      },
+      {
+        "source": "packages/astro/e2e/fixtures/_deps/astro-linked-lib/HoistedScript.astro",
+        "file": "fixture/_deps/astro-linked-lib/HoistedScript.astro",
+        "sha256": "d48b897204e7aabc06b2fee67648370979021319b50d52f9c6bfcd5dda1feb53"
+      },
+      {
+        "source": "packages/astro/e2e/fixtures/_deps/astro-linked-lib/package.json",
+        "file": "fixture/_deps/astro-linked-lib/package.json",
+        "sha256": "be7665fd09ddc879628dadcf66c837801f5565c69d4cf700eefdc0503cd87b0d"
+      },
+      {
+        "source": "packages/astro/e2e/astro-component.test.ts",
+        "file": "tests.txt",
+        "sha256": "79b279efedc2a3c4ee8e6c1e628da87421c6c8dab81f400d6935972ad05a88ff"
+      },
+      {
+        "source": "LICENSE",
+        "file": "LICENSE",
+        "sha256": "4aa72be797aad0e5e21827eaae6a1df9e122d7a401f07d2c308a6b9a5f0e1278"
+      }
+    ]
+  },
+  {
+    "name": "playwright",
+    "repository": "https://github.com/microsoft/playwright",
+    "revision": "deb7e86201e26cb4a8e25191fce5ef2f7a28aa87",
+    "files": [
+      {
+        "source": "tests/page/page-fill.spec.ts",
+        "file": "fill.txt",
+        "sha256": "e9ecfa1a4bcfdadae58537fc144acb3bda21473a14d04089f9b336adcd37f775"
+      },
+      {
+        "source": "tests/page/page-check.spec.ts",
+        "file": "check.txt",
+        "sha256": "0a570d92a3927ffc266d17619306c8d8824bcb8691d6e088e7a1ada4b94067b3"
+      },
+      {
+        "source": "tests/assets/input/textarea.html",
+        "file": "fixture/input/textarea.html",
+        "sha256": "70036fc18d483e80d440bb12fc94134bfd231d677e582a2d7fc7eb5623f0c65c"
+      },
+      {
+        "source": "tests/assets/empty.html",
+        "file": "fixture/empty.html",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "source": "LICENSE",
+        "file": "LICENSE",
+        "sha256": "45873d00a0dd243596deb4aa23b2493b3d1f0671921bf2538ea431d7380220eb"
+      },
+      {
+        "source": "NOTICE",
+        "file": "NOTICE",
+        "sha256": "6d602191187b35b9b01d2cffa01c8469c2c8d9de8a96f1bf868e0f264f51c81d"
+      },
+      {
+        "source": "tests/assets/input/mouse-helper.js",
+        "file": "fixture/input/mouse-helper.js",
+        "sha256": "c645dfaa04cbde6ec361fc6b7a4cbf7d70f6b653500ae56321641f0a5eda3b91"
+      }
+    ]
+  }
+]

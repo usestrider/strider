@@ -8,14 +8,17 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Firefox } from "@usestrider/browser/firefox"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import { execFile, spawn } from "node:child_process"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { site } from "./adapter/harness.ts"
-import { chromium, firefox } from "./browsers.ts"
+import { chromium, firefox, webkitgtk } from "./browsers.ts"
 import { firefoxAttachable } from "./slice/attaching.ts"
+import { useXvfb } from "./stockWebKit.ts"
 
 const timeout = 120_000
 const bin = new URL("../../src/bin/strider.ts", import.meta.url).pathname
@@ -112,6 +115,88 @@ const app = `<title>shop</title>
 </script>`
 
 describe("strider", () => {
+  it.live("starts a stock WebKit session, drives a page, refuses download waits, and stops", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        yield* useXvfb()
+        const served = yield* site
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const session = (...args: ReadonlyArray<string>) => run("-s", "webkit", ...args)
+        const removed = yield* Deferred.make<void>()
+        const directory = path.join(env.XDG_RUNTIME_DIR, "strider", "webkit")
+        try {
+          const started = yield* run("start", "--name", "webkit", "--webkit", webkitgtk.executable)
+          assert.strictEqual(started.code, 0, started.err)
+          yield* Effect.acquireRelease(
+            Effect.sync(() =>
+              fs.watch(path.dirname(directory), () => {
+                if (!fs.existsSync(directory)) Deferred.doneUnsafe(removed, Exit.void)
+              })
+            ),
+            (watcher) => Effect.sync(() => watcher.close())
+          )
+          assert.include(started.out, "focus system")
+          const url = `${served.origin}/fixture?html=${
+            encodeURIComponent(`<button onclick="this.textContent = 'Done'">Go</button>`)
+          }`
+          const opened = yield* session("page", "new", "--name", "home", url)
+          assert.strictEqual(opened.code, 0, opened.err)
+          const clicked = yield* session("-p", "home", "click", "role=button[name=\"Go\"]")
+          assert.strictEqual(clicked.code, 0, clicked.err)
+          const checked = yield* session("-p", "home", "expect", "css=button", "visible", "--text", "Done")
+          assert.strictEqual(checked.code, 0, checked.err)
+          const download = yield* session("-p", "home", "next", "download")
+          assert.notStrictEqual(download.code, 0, download.out)
+          assert.include(download.err, "SubscriptionError")
+          assert.include(download.err, "downloads is unsupported")
+        } finally {
+          yield* session("stop")
+        }
+        // Stop acknowledges the request before the daemon finishes releasing its resources.
+        yield* Deferred.await(removed).pipe(Effect.timeout("10 seconds"))
+        assert.isFalse(fs.existsSync(directory))
+        assert.strictEqual((yield* session("pages")).code, 20)
+      }).pipe(Effect.provide(NodeServices.layer))
+    ), timeout)
+  for (const idle of ["15 minutes", "90.125 seconds", "Infinity"]) {
+    it.live(`accepts the idle duration printed by start and sessions (${idle})`, () =>
+      Effect.gen(function*() {
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const started = yield* run(
+          "start",
+          "--name",
+          "original",
+          "--chromium",
+          chromium.executable,
+          "--idle",
+          idle
+        )
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          const listed = yield* run("sessions")
+          assert.strictEqual(listed.code, 0, listed.err)
+          const fromStart = /idle timeout (.+)$/m.exec(started.out)?.[1]
+          const fromSessions = /idle .+ of (.+)$/m.exec(listed.out)?.[1]
+          assert.isDefined(fromStart, started.out)
+          assert.isDefined(fromSessions, listed.out)
+          assert.strictEqual(fromStart, idle)
+          assert.strictEqual(fromSessions, idle)
+          const results = []
+          for (const [name, idle] of [["from-start", fromStart!], ["from-sessions", fromSessions!]]) {
+            const reused = yield* run("start", "--name", name!, "--chromium", chromium.executable, "--idle", idle!)
+            results.push({ source: name, idle, code: reused.code, err: reused.err })
+          }
+          assert.deepStrictEqual(results.map(({ code }) => code), [0, 0], JSON.stringify(results))
+        } finally {
+          for (const name of ["original", "from-start", "from-sessions"]) {
+            yield* run("-s", name, "stop")
+          }
+        }
+      }), timeout)
+  }
+
   for (const position of ["before", "after"] as const) {
     it.live(`stops a session with -s ${position} the subcommand`, () =>
       Effect.gen(function*() {
@@ -147,6 +232,55 @@ describe("strider", () => {
       }), timeout)
   }
 
+  it.live("prints an idle duration given with a newline on one line that can be reused", () =>
+    Effect.gen(function*() {
+      const env = environment()
+      const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+      // The duration parser accepts any whitespace between the number and the unit
+      const started = yield* run(
+        "start",
+        "--name",
+        "newline",
+        "--chromium",
+        chromium.executable,
+        "--idle",
+        "15\nminutes"
+      )
+      assert.strictEqual(started.code, 0, started.err)
+      try {
+        const listed = yield* run("sessions")
+        assert.strictEqual(listed.code, 0, listed.err)
+        const fromStart = /idle timeout (.+)$/m.exec(started.out)?.[1]
+        const fromSessions = /idle .+ of (.+)$/m.exec(listed.out)?.[1]
+        const results = []
+        for (const [name, idle] of [["from-start", fromStart], ["from-sessions", fromSessions]]) {
+          const reused = yield* run("start", "--name", name!, "--chromium", chromium.executable, "--idle", idle ?? "")
+          results.push({ source: name, idle, code: reused.code, err: reused.err })
+        }
+        assert.deepStrictEqual(results.map(({ code }) => code), [0, 0], JSON.stringify(results))
+      } finally {
+        for (const name of ["newline", "from-start", "from-sessions"]) {
+          yield* run("-s", name, "stop")
+        }
+      }
+    }), timeout)
+
+  it.live("rejects an invalid idle duration with an example", () =>
+    Effect.gen(function*() {
+      const result = yield* strider(
+        environment(),
+        "start",
+        "--name",
+        "invalid-idle",
+        "--chromium",
+        chromium.executable,
+        "--idle",
+        "15m"
+      )
+      assert.strictEqual(result.code, 15)
+      assert.strictEqual(result.err, "InvalidInput: --idle 15m isn't a duration, such as \"30 minutes\"\n")
+    }), timeout)
+
   it.live("starts a session, drives its pages by name, and ends it", () =>
     Effect.scoped(Effect.gen(function*() {
       const served = yield* site
@@ -164,7 +298,7 @@ describe("strider", () => {
         "password=SECRET_PW"
       )
       assert.strictEqual(started.code, 0, started.err)
-      assert.match(started.out, /^session shop · .* at .* · focus emulated · idle timeout 1h/)
+      assert.match(started.out, /^session shop · .* at .* · focus emulated · idle timeout 1 hour/)
       try {
         assert.strictEqual((yield* run("-s", "shop", "page", "new", "--name", "shop", url)).code, 0)
         const snapshot = yield* shop("snapshot")
@@ -384,7 +518,8 @@ describe("strider", () => {
           }
         } finally {
           // A daemon killed outright leaves its directory, listed until pruned
-          process.kill(Number.parseInt(fs.readFileSync(lock, "utf8"), 10), "SIGKILL")
+          // Its lock names it by its process id and when it started
+          process.kill(JSON.parse(fs.readFileSync(lock, "utf8")).pid, "SIGKILL")
         }
         yield* Effect.sleep("500 millis")
         assert.match((yield* run("sessions")).out, /first  left behind by a session that didn't end cleanly/)
@@ -496,10 +631,19 @@ describe("strider", () => {
           const answers = yield* mcp(env, ["-s", "tools", "mcp"], [
             ...handshake,
             { jsonrpc: "2.0", id: 2, method: "tools/list" },
-            { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "pages", arguments: {} } }
-          ], 3)
+            { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "pages", arguments: {} } },
+            { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "screenshot", arguments: { page: "shop" } } }
+          ], 4)
           const listedTools = answers.find((answer) => answer.id === 2)?.result?.tools?.map((tool: any) => tool.name)
           assert.includeMembers(listedTools ?? [], ["click", "find", "control"])
+          // A screenshot crosses once, as an image: its structured result leaves the bytes out, as its schema does
+          const shotSchema = answers.find((answer) => answer.id === 2)?.result?.tools?.find((tool: any) =>
+            tool.name === "screenshot"
+          )?.outputSchema
+          assert.notProperty(shotSchema?.properties?.outcome?.properties ?? {}, "data")
+          const shot = answers.find((answer) => answer.id === 4)?.result
+          assert.strictEqual(shot?.content?.[0]?.type, "image")
+          assert.deepStrictEqual(shot?.structuredContent?.outcome, { mediaType: "image/png" })
           const pages = JSON.stringify(answers.find((answer) => answer.id === 3)?.result)
           assert.include(pages, "shop")
           assert.include(pages, "kept")
@@ -509,6 +653,21 @@ describe("strider", () => {
       })),
     timeout
   )
+
+  it.live("exits 0 when its MCP client closes standard input", () =>
+    Effect.callback<number | null>((resume) => {
+      const child = spawn(process.execPath, [bin, "-s", "nobody", "mcp"], {
+        env: { ...process.env, ...environment() },
+        stdio: ["pipe", "pipe", "pipe"]
+      })
+      const timer = setTimeout(() => child.kill(), 30_000)
+      child.on("close", (code) => {
+        clearTimeout(timer)
+        resume(Effect.succeed(code))
+      })
+      for (const message of handshake) child.stdin.write(`${JSON.stringify(message)}\n`)
+      child.stdin.end()
+    }).pipe(Effect.map((code) => assert.strictEqual(code, 0))), timeout)
 
   it.live("attaches to Firefox's remote agent by an endpoint with no path", () =>
     Effect.scoped(
@@ -530,6 +689,30 @@ describe("strider", () => {
         }
       }).pipe(Effect.provide(NodeServices.layer))
     ), timeout)
+
+  it.live("shows what a daemon wrote to standard error when it dies before it serves", () =>
+    Effect.gen(function*() {
+      const env = environment()
+      // A module the daemon, and only the daemon, fails to load, as one that fails at import time does
+      const preload = path.join(env.XDG_RUNTIME_DIR, "boom.mjs")
+      fs.writeFileSync(
+        preload,
+        `if (process.argv.includes("__daemon")) { console.error("boom at import"); process.exit(3) }\n`
+      )
+      const started = yield* strider(
+        { ...env, NODE_OPTIONS: `--import=${preload}` },
+        "start",
+        "--name",
+        "doomed",
+        "--chromium",
+        chromium.executable
+      )
+      assert.strictEqual(started.code, 3)
+      assert.include(started.err, "exited before it served (3)")
+      assert.include(started.err, "boom at import")
+      // Nothing is left beside the sessions
+      assert.deepStrictEqual(fs.readdirSync(env.XDG_RUNTIME_DIR).filter((name) => name.startsWith(".start-")), [])
+    }), timeout)
 
   it.live("fails at once on what a command can't mean, with exit codes of its own", () =>
     Effect.gen(function*() {

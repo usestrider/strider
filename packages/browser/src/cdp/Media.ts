@@ -81,7 +81,7 @@ export const PlayerError = /*#__PURE__*/ Schema.suspend(() =>
     cause: Schema.Array(PlayerError),
     data: Schema.Record(Schema.String, Schema.Unknown)
   }).annotate({ identifier: "Media.PlayerError" })
-) as any as Schema.Codec<PlayerError>
+) as any as Schema.Codec<PlayerError, unknown>
 
 /**
  * Represents logged source line numbers reported in an error.
@@ -319,7 +319,7 @@ export const PlayerErrorsRaisedParams = /*#__PURE__*/ Schema.suspend(() =>
     playerId: PlayerId,
     errors: Schema.Array(PlayerError)
   }).annotate({ identifier: "Media.PlayerErrorsRaisedParams" })
-) as any as Schema.Codec<PlayerErrorsRaisedParams>
+) as any as Schema.Codec<PlayerErrorsRaisedParams, unknown>
 
 /**
  * Send events as a list, allowing them to be batched on the browser for less

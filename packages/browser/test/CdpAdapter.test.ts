@@ -9,12 +9,14 @@ import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
+import * as SubscriptionRef from "effect/SubscriptionRef"
 import { TestClock } from "effect/testing"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as CdpAdapter from "../src/internal/cdpAdapter.ts"
 import * as Har from "../src/internal/har.ts"
+import * as Readable from "../src/internal/readable.ts"
 import captured from "./fixtures/redirect-extra-info.ts"
 import { makeBrowser } from "./utils/FakeBrowser.ts"
 
@@ -210,9 +212,13 @@ describe("CDP adapter redirect headers", () => {
                   request,
                   hop: Option.some({
                     request,
-                    response: Option.none(),
-                    received: Option.none(),
-                    sent: Option.fromUndefinedOr(headers.findLast((fact) => fact.hop === request.hop)?.headers),
+                    state: Readable.of(
+                      yield* SubscriptionRef.make({
+                        response: Option.none(),
+                        received: Option.none(),
+                        sent: Option.fromUndefinedOr(headers.findLast((fact) => fact.hop === request.hop)?.headers)
+                      })
+                    ),
                     sentKnown: Deferred.makeUnsafe(),
                     end: Deferred.makeUnsafe(),
                     page: Option.none(),

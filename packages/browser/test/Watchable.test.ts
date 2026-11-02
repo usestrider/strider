@@ -11,7 +11,7 @@ import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Watchable from "../src/internal/watchable.ts"
-import type * as Target from "../src/Target.ts"
+import * as Target from "../src/Target.ts"
 
 /** A watchable over a number, ended once it reaches 100. */
 const counter = Effect.map(SubscriptionRef.make<number>(0), (ref) => ({
@@ -20,7 +20,7 @@ const counter = Effect.map(SubscriptionRef.make<number>(0), (ref) => ({
     ref,
     project: (state: number) => Option.some(state),
     ended: (state: number): Option.Option<Target.CloseReason> =>
-      state >= 100 ? Option.some({ _tag: "PageClosed", by: "command" }) : Option.none(),
+      state >= 100 ? Option.some(new Target.PageClosed({ by: "command" })) : Option.none(),
     target: { _tag: "Page", id: "page-1" as never },
     operation: "Test.changes"
   })

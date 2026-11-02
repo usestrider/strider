@@ -3,12 +3,11 @@
  * anything and `*` anything but `/`. A pattern that starts with a scheme and has `:name` groups is a
  * `URLPattern`, matched by the runtime's own. Anything else is the exact URL.
  */
+import * as RegExp_ from "effect/RegExp"
 import type * as Url from "../Url.ts"
 
-const escape = (text: string) => text.replace(/[.+?^${}()|[\]\\/]/g, "\\$&")
-
 const glob = (pattern: string): RegExp =>
-  new RegExp(`^${pattern.split("**").map((part) => part.split("*").map(escape).join("[^/]*")).join(".*")}$`)
+  new RegExp(`^${pattern.split("**").map((part) => part.split("*").map(RegExp_.escape).join("[^/]*")).join(".*")}$`)
 
 interface UrlPatternLike {
   test(input: string): boolean

@@ -402,7 +402,7 @@ export const DispatchKeyEventParams = /*#__PURE__*/ Schema.suspend(() =>
     location: Schema.optional(Schema.Int),
     commands: Schema.optional(Schema.Array(Schema.String))
   }).annotate({ identifier: "Input.DispatchKeyEventParams" })
-) as any as Schema.Codec<DispatchKeyEventParams>
+) as any as Schema.Codec<DispatchKeyEventParams, unknown>
 
 /**
  * Type of the key event.
@@ -813,7 +813,7 @@ export const ImeSetCompositionParams = /*#__PURE__*/ Schema.suspend(() =>
     replacementStart: Schema.optional(Schema.Int),
     replacementEnd: Schema.optional(Schema.Int)
   }).annotate({ identifier: "Input.ImeSetCompositionParams" })
-) as any as Schema.Codec<ImeSetCompositionParams>
+) as any as Schema.Codec<ImeSetCompositionParams, unknown>
 
 /**
  * This method emulates inserting text that doesn't come from a key press,
@@ -841,7 +841,7 @@ export const InsertTextParams = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     text: Schema.RedactedFromValue(Schema.String)
   }).annotate({ identifier: "Input.InsertTextParams" })
-) as any as Schema.Codec<InsertTextParams>
+) as any as Schema.Codec<InsertTextParams, unknown>
 
 /**
  * Ignores input events (useful while auditing page).

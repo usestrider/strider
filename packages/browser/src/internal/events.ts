@@ -82,7 +82,7 @@ export const make = <A>(target: Target.Description, cap: () => number): Channel<
 })
 
 const gone = (target: Target.Description, reason: Target.CloseReason) =>
-  new Target.TargetGone({ target, reason, diagnostics: Operation.diagnostics(Operation.operationId()) })
+  new Target.TargetGone({ target, reason, diagnostics: Operation.diagnosticsNow() })
 
 const offer = <A>(channel: Channel<A>, entry: Entry<A>): void => {
   for (const subscriber of channel.subscribers) {
@@ -97,7 +97,7 @@ const offer = <A>(channel: Channel<A>, entry: Entry<A>): void => {
         new Subscription.EventOverflow({
           bound: subscriber.bound,
           at: now(),
-          diagnostics: Operation.diagnostics(Operation.operationId())
+          diagnostics: Operation.diagnosticsNow()
         })
       )
     )

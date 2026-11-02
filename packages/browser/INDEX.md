@@ -112,6 +112,7 @@ The `Browser` service, which every backend provides, with its accessors and the 
   - `readonly args?: ReadonlyArray<string> | undefined`
   - `readonly profile?: LaunchProfile.LaunchProfile | undefined`
   - `readonly userDataDir?: FilePath.Local | string | undefined`
+  - `readonly coreDumps?: boolean | undefined`
 - `interface ConnectOptions`
   - `readonly headers?: Readonly<Record<string, string | Redacted.Redacted<string>>> | undefined`
 - `interface Operation extends Tracing.Operation`
@@ -572,8 +573,8 @@ Emulated settings: viewport, locale, time zone, media features, network conditio
 
 *schemas*
 
-- `const Locale = Schema.String.pipe(Schema.brand("~@usestrider/browser/Emulation/Locale"))`
-- `const TimeZoneId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Emulation/TimeZoneId"))`
+- `const Locale = Schema.String.pipe(Schema.check(Schema.makeFilter((input: string) => { try { return Intl.getCanonicalLocales(input).length === 1 } catch { return false } }, { expected: "a BCP 47 language tag, such a…`
+- `const TimeZoneId = Schema.String.pipe(Schema.check(Schema.makeFilter((input: string) => { try { new Intl.DateTimeFormat(undefined, { timeZone: input }) return true } catch { return false } }, { expected: "an IANA time …`
 
 ### Expect
 
@@ -654,7 +655,7 @@ File choosers: the file picker a page opens when a file input is clicked.
 *handlers*
 
 - `const handle: <E, R>(page: Page.Page, handler: (chooser: Pending) => Effect.Effect<Decision, E, R>) => Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope | R>`
-- `const choose = (files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>) => (chooser: Pending): Effect.Effect<Decision, FileChooserError> => { const list: ReadonlyArray<FileInput.FileInput> = Array.isArray(…`
+- `const choose = (files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>) => (chooser: Pending): Effect.Effect<Decision, FileChooserError> => FileChooserImpl.choose(files)(chooser)`
 
 *guards*
 
@@ -1225,7 +1226,7 @@ Operations of your own, kept as the library keeps its: one deadline for everythi
 
 *tags*
 
-- `class Current: Context.Service "@usestrider/browser/Operation/Current" {  }`
+- `class Current: Context.Service {  }`
 
 *models*
 
@@ -1499,8 +1500,8 @@ CSS pixels and device pixels, which differ by the device pixel ratio.
 
 *schemas*
 
-- `const Css = Schema.Number.pipe(Schema.brand("~@usestrider/browser/Pixels/Css"))`
-- `const Device = Schema.Number.pipe(Schema.brand("~@usestrider/browser/Pixels/Device"))`
+- `const Css = Schema.Number.pipe(Schema.check(Schema.isFinite()), Schema.brand("~@usestrider/browser/Pixels/Css"))`
+- `const Device = Schema.Number.pipe(Schema.check(Schema.isFinite()), Schema.brand("~@usestrider/browser/Pixels/Device"))`
 
 ### Popup
 
@@ -1536,23 +1537,13 @@ Failure reasons that more than one module's error can carry.
   - `readonly _tag: string`
   - `readonly hint: string`
   - `readonly message: string`
-- `type Metadata = typeof Metadata.Type`
-
-*schemas*
-
-- `const Metadata = Schema.Record(Schema.String, Schema.NullOr(Schema.MutableJson))`
-
-*configuration*
-
-- `interface BackendMetadata`
-  - `readonly [key: string]: Metadata[string] | undefined`
 
 *reasons*
 
 - `class InvalidInput: Schema.Error { input, expected, hint }`
 - `class NotPermitted: Schema.Error { required, hint }`
 - `class Unsupported: Schema.Error { capability, backend, hint }`
-- `class BackendFailure: Schema.Error { kind, method, metadata, hint, cause }`
+- `class BackendFailure: Schema.Error { kind, method, hint, cause }`
 - `class EvaluationThrown: Schema.Error { exception, hint }`
 - `class NotSerializable: Schema.Error { path, hint }`
 - `class PromptBlocking: Schema.Error { kind, text, hint }`
@@ -1631,17 +1622,22 @@ Accessibility snapshots of a page, for agents and for checking a page's structur
 - `type RefId = typeof RefId.Type`
 - `type Generation = typeof Generation.Type`
 - `type InteractivityEvidence = typeof InteractivityEvidence.Type`
+- `type Role = | { readonly _tag: "Aria"; readonly role: AriaRole.AriaRole } | { readonly _tag: "Inferred" readonly role: "clickable" | "editable" | "focusable" readonly evidence: readonly [InteractivityEvidence, .…`
+- `type Name = typeof Name.Type`
+- `type State = typeof State.Type`
 - `interface Node`
   - `readonly ref: Option.Option<RefId>`
-  - `readonly role: | { readonly _tag: "Aria"; readonly role: AriaRole.AriaRole } | { readonly _tag: "Inferred" readonly role: "clickable" | "editable" | "focusable…`
-  - `readonly name: | { readonly _tag: "Accessible"; readonly value: string } | { readonly _tag: "Inferred" readonly value: string readonly from: "text" | "title" |…`
-  - `readonly states: ReadonlySet<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed">`
+  - `readonly role: Role`
+  - `readonly name: Name`
+  - `readonly states: ReadonlySet<State>`
+  - `readonly validationMessage: Option.Option<string>`
   - `readonly children: ReadonlyArray<Node>`
 - `interface NodeEncoded`
   - `readonly ref: Option.Option<string>`
   - `readonly role: Node["role"]`
   - `readonly name: Node["name"]`
   - `readonly states: Node["states"]`
+  - `readonly validationMessage: Option.Option<string>`
   - `readonly children: ReadonlyArray<NodeEncoded>`
 - `class Data: Schema.Class { document, generation, root, text }`
 - `class Diff: Schema.Class { added, removed, changed, text }`
@@ -1660,6 +1656,9 @@ Accessibility snapshots of a page, for agents and for checking a page's structur
 - `const RefId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Snapshot/RefId"))`
 - `const Generation = Schema.Number.pipe(Schema.brand("~@usestrider/browser/Snapshot/Generation"))`
 - `const InteractivityEvidence = Schema.Literals(["clickListener", "cursorPointer", "tabindex", "contentEditable", "onclickAttribute"])`
+- `const Role: Schema.Codec<Role>`
+- `const Name = Schema.Union([Schema.TaggedStruct("Accessible", { value: Schema.String }), Schema.TaggedStruct("Inferred", { value: Schema.String, from: Schema.Literals(["text", "title", "placeholder", "alt", "nearb…`
+- `const State = Schema.Literals(["checked", "expanded", "selected", "disabled", "focused", "pressed", "invalid"])`
 - `const Node: Schema.Codec<Node, NodeEncoded>`
 
 *guards*
@@ -1750,7 +1749,7 @@ What operations act on, how each one is identified, and how it ends.
 - `const NavigableId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/NavigableId"))`
 - `const DocumentId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/DocumentId"))`
 - `const RealmId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/RealmId"))`
-- `const CloseReason = Schema.Union([Schema.TaggedStruct("BrowserClosed", {}), Schema.TaggedStruct("BrowserCrashed", {}), Schema.TaggedStruct("ConnectionLost", {}), Schema.TaggedStruct("ModelUnavailable", {}), Schema.Tagge…`
+- `const CloseReason = Schema.Union([BrowserClosed, BrowserCrashed, ConnectionLost, ModelUnavailable, UserContextRemoved, AccessReleased, PrerenderActivated, PageClosed, ObligationEnded, DownloadEnded, HopEnded, PageCrashe…`
 - `const Description = Schema.Union([Schema.TaggedStruct("Page", { id: NavigableId }), Schema.TaggedStruct("Frame", { id: NavigableId }), Schema.TaggedStruct("Document", { id: DocumentId }), Schema.TaggedStruct("Realm", { …`
 - `const EventOrigin = Schema.Union([Schema.TaggedStruct("Page", { page: NavigableId }), Schema.TaggedStruct("Worker", { realm: RealmId })])`
 
@@ -1761,6 +1760,29 @@ What operations act on, how each one is identified, and how it ends.
 *errors*
 
 - `class TargetGone: Schema.TaggedError "TargetGone" { target, reason, diagnostics }`
+
+*reasons*
+
+- `class BrowserClosed: Schema.Error { hint }`
+- `class BrowserCrashed: Schema.Error { hint }`
+- `class ConnectionLost: Schema.Error { hint }`
+- `class ModelUnavailable: Schema.Error { hint }`
+- `class UserContextRemoved: Schema.Error { hint }`
+- `class AccessReleased: Schema.Error { hint }`
+- `class PrerenderActivated: Schema.Error { hint }`
+- `class PageCrashed: Schema.Error { hint }`
+- `class FrameDetached: Schema.Error { hint }`
+- `class DocumentReplaced: Schema.Error { hint }`
+- `class DocumentEvicted: Schema.Error { hint }`
+- `class DocumentDestroyed: Schema.Error { hint }`
+- `class DocumentUnloaded: Schema.Error { hint }`
+- `class RealmDestroyed: Schema.Error { hint }`
+- `class NetworkConnectionClosed: Schema.Error { hint }`
+- `class PageClosed: Schema.Error { by, hint }`
+- `class ObligationEnded: Schema.Error { hint }`
+- `class DownloadEnded: Schema.Error { hint }`
+- `class HopEnded: Schema.Error { hint }`
+- `class Vanished: Schema.Error { hint }`
 
 ### Trace
 
@@ -1830,10 +1852,10 @@ URLs, URL patterns, origins and sites, as branded strings.
 
 *schemas*
 
-- `const Url = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url/Url"))`
+- `const Url = Schema.String.pipe(Schema.check(Schema.makeFilter((input: string) => URL.canParse(input), { expected: "an absolute URL" })), Schema.brand("~@usestrider/browser/Url/Url"))`
 - `const Pattern = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url/Pattern"))`
-- `const Origin = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url/Origin"))`
-- `const Site = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url/Site"))`
+- `const Origin = Schema.String.pipe(Schema.check(Schema.makeFilter(isOrigin, { expected: "a serialized origin, such as https: Schema.brand("~@usestrider/browser/Url/Origin"))`
+- `const Site = Schema.String.pipe(Schema.check(Schema.makeFilter((input: string) => isOrigin(input) && URL.parse(input)!.port === "", { expected: "a site, such as https: })), Schema.brand("~@usestrider/browser/Url/…`
 
 ### UserContext
 
@@ -1920,7 +1942,7 @@ The agent toolkit: browser tools for a model, defined once, and served in your p
 *models*
 
 - `type SecretName = typeof SecretName.Type` (experimental)
-- `type ToolName = | "pages" | "newPage" | "tabs" | "control" | "release" | "goto" | "back" | "snapshot" | "find" | "screenshot" | "click" | "fill" | "press" | "select" | "scroll" | "next" | "await" | "expect" | "histo…` (experimental)
+- `type ToolName = keyof Tools` (experimental)
 - `type Tools = ToolsImpl.Tools` (experimental)
 - `const ToolFailure = ToolsImpl.ToolFailure` (experimental)
 - `type ToolFailure = ToolsImpl.ToolFailure` (experimental)

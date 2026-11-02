@@ -317,7 +317,7 @@ export const ExceptionDetails = /*#__PURE__*/ Schema.suspend(() =>
     executionContextId: Schema.optional(ExecutionContextId),
     exceptionMetaData: Schema.optional(Schema.Record(Schema.String, Schema.Unknown))
   }).annotate({ identifier: "Runtime.ExceptionDetails" })
-) as any as Schema.Codec<ExceptionDetails>
+) as any as Schema.Codec<ExceptionDetails, unknown>
 
 /**
  * Description of an isolated world.
@@ -1055,7 +1055,7 @@ export const StackTrace = /*#__PURE__*/ Schema.suspend(() =>
     parent: Schema.optional(StackTrace),
     parentId: Schema.optional(StackTraceId)
   }).annotate({ identifier: "Runtime.StackTrace" })
-) as any as Schema.Codec<StackTrace>
+) as any as Schema.Codec<StackTrace, unknown>
 
 /**
  * If `debuggerId` is set stack trace comes from another debugger and can be resolved there. This
@@ -1264,7 +1264,7 @@ export const AwaitPromiseResult = /*#__PURE__*/ Schema.suspend(() =>
     result: RemoteObject,
     exceptionDetails: Schema.optional(ExceptionDetails)
   }).annotate({ identifier: "Runtime.AwaitPromiseResult" })
-) as any as Schema.Codec<AwaitPromiseResult>
+) as any as Schema.Codec<AwaitPromiseResult, unknown>
 
 /**
  * Notification is issued every time when binding is called.
@@ -1429,7 +1429,7 @@ export const CallFunctionOnResult = /*#__PURE__*/ Schema.suspend(() =>
     result: RemoteObject,
     exceptionDetails: Schema.optional(ExceptionDetails)
   }).annotate({ identifier: "Runtime.CallFunctionOnResult" })
-) as any as Schema.Codec<CallFunctionOnResult>
+) as any as Schema.Codec<CallFunctionOnResult, unknown>
 
 /**
  * Compiles expression.
@@ -1504,7 +1504,7 @@ export const CompileScriptResult = /*#__PURE__*/ Schema.suspend(() =>
     scriptId: Schema.optional(ScriptId),
     exceptionDetails: Schema.optional(ExceptionDetails)
   }).annotate({ identifier: "Runtime.CompileScriptResult" })
-) as any as Schema.Codec<CompileScriptResult>
+) as any as Schema.Codec<CompileScriptResult, unknown>
 
 /**
  * Issued when console API was called.
@@ -1560,7 +1560,7 @@ export const ConsoleAPICalledParams = /*#__PURE__*/ Schema.suspend(() =>
     stackTrace: Schema.optional(StackTrace),
     context: Schema.optional(Schema.String)
   }).annotate({ identifier: "Runtime.ConsoleAPICalledParams" })
-) as any as Schema.Codec<ConsoleAPICalledParams>
+) as any as Schema.Codec<ConsoleAPICalledParams, unknown>
 
 /**
  * Type of the call.
@@ -1749,7 +1749,7 @@ export const EvaluateResult = /*#__PURE__*/ Schema.suspend(() =>
     result: RemoteObject,
     exceptionDetails: Schema.optional(ExceptionDetails)
   }).annotate({ identifier: "Runtime.EvaluateResult" })
-) as any as Schema.Codec<EvaluateResult>
+) as any as Schema.Codec<EvaluateResult, unknown>
 
 /**
  * Issued when unhandled exception was revoked.
@@ -1810,7 +1810,7 @@ export const ExceptionThrownParams = /*#__PURE__*/ Schema.suspend(() =>
     timestamp: Timestamp,
     exceptionDetails: ExceptionDetails
   }).annotate({ identifier: "Runtime.ExceptionThrownParams" })
-) as any as Schema.Codec<ExceptionThrownParams>
+) as any as Schema.Codec<ExceptionThrownParams, unknown>
 
 /**
  * Issued when new execution context is created.
@@ -1923,7 +1923,7 @@ export const GetExceptionDetailsResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     exceptionDetails: Schema.optional(ExceptionDetails)
   }).annotate({ identifier: "Runtime.GetExceptionDetailsResult" })
-) as any as Schema.Codec<GetExceptionDetailsResult>
+) as any as Schema.Codec<GetExceptionDetailsResult, unknown>
 
 /**
  * Returns the JavaScript heap usage.
@@ -2086,7 +2086,7 @@ export const GetPropertiesResult = /*#__PURE__*/ Schema.suspend(() =>
     privateProperties: Schema.optional(Schema.Array(PrivatePropertyDescriptor)),
     exceptionDetails: Schema.optional(ExceptionDetails)
   }).annotate({ identifier: "Runtime.GetPropertiesResult" })
-) as any as Schema.Codec<GetPropertiesResult>
+) as any as Schema.Codec<GetPropertiesResult, unknown>
 
 /**
  * Returns all let, const and class variables from global scope.
@@ -2404,7 +2404,7 @@ export const RunScriptResult = /*#__PURE__*/ Schema.suspend(() =>
     result: RemoteObject,
     exceptionDetails: Schema.optional(ExceptionDetails)
   }).annotate({ identifier: "Runtime.RunScriptResult" })
-) as any as Schema.Codec<RunScriptResult>
+) as any as Schema.Codec<RunScriptResult, unknown>
 
 /**
  * Enables or disables async call stacks tracking.

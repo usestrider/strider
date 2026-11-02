@@ -294,7 +294,7 @@ export const CallFrame = /*#__PURE__*/ Schema.suspend(() =>
     this: Runtime.RemoteObject,
     isTailDeleted: Schema.Boolean
   }).annotate({ identifier: "Debugger.CallFrame" })
-) as any as Schema.Codec<CallFrame>
+) as any as Schema.Codec<CallFrame, unknown>
 
 /**
  * Call frame identifier.
@@ -356,7 +356,7 @@ export const FunctionDetails = /*#__PURE__*/ Schema.suspend(() =>
     displayName: Schema.optional(Schema.String),
     scopeChain: Schema.optional(Schema.Array(Scope))
   }).annotate({ identifier: "Debugger.FunctionDetails" })
-) as any as Schema.Codec<FunctionDetails>
+) as any as Schema.Codec<FunctionDetails, unknown>
 
 /**
  * Location in the source code.
@@ -440,7 +440,7 @@ export const ProbeSample = /*#__PURE__*/ Schema.suspend(() =>
     timestamp: Schema.Number,
     payload: Runtime.RemoteObject
   }).annotate({ identifier: "Debugger.ProbeSample" })
-) as any as Schema.Codec<ProbeSample>
+) as any as Schema.Codec<ProbeSample, unknown>
 
 /**
  * Scope description.
@@ -487,7 +487,7 @@ export const Scope = /*#__PURE__*/ Schema.suspend(() =>
     location: Schema.optional(Location),
     empty: Schema.optional(Schema.Boolean)
   }).annotate({ identifier: "Debugger.Scope" })
-) as any as Schema.Codec<Scope>
+) as any as Schema.Codec<Scope, unknown>
 
 /**
  * Scope type.
@@ -661,7 +661,7 @@ export const DidSampleProbeParams = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     sample: ProbeSample
   }).annotate({ identifier: "Debugger.DidSampleProbeParams" })
-) as any as Schema.Codec<DidSampleProbeParams>
+) as any as Schema.Codec<DidSampleProbeParams, unknown>
 
 /**
  * Evaluates expression on a given call frame.
@@ -765,7 +765,7 @@ export const EvaluateOnCallFrameResult = /*#__PURE__*/ Schema.suspend(() =>
     wasThrown: Schema.optional(Schema.Boolean),
     savedResultIndex: Schema.optional(Schema.Int)
   }).annotate({ identifier: "Debugger.EvaluateOnCallFrameResult" })
-) as any as Schema.Codec<EvaluateOnCallFrameResult>
+) as any as Schema.Codec<EvaluateOnCallFrameResult, unknown>
 
 /**
  * Returns a list of valid breakpoint locations within the given location range.
@@ -878,7 +878,7 @@ export const GetFunctionDetailsResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     details: FunctionDetails
   }).annotate({ identifier: "Debugger.GetFunctionDetailsResult" })
-) as any as Schema.Codec<GetFunctionDetailsResult>
+) as any as Schema.Codec<GetFunctionDetailsResult, unknown>
 
 /**
  * Returns source for the script with given id.
@@ -974,7 +974,7 @@ export const PausedParams = /*#__PURE__*/ Schema.suspend(() =>
     data: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
     asyncStackTrace: Schema.optional(Console.StackTrace)
   }).annotate({ identifier: "Debugger.PausedParams" })
-) as any as Schema.Codec<PausedParams>
+) as any as Schema.Codec<PausedParams, unknown>
 
 /**
  * Pause reason.

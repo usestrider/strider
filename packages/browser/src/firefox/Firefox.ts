@@ -22,13 +22,6 @@ import * as FirefoxLauncher from "../internal/firefoxLauncher.ts"
 import * as LaunchOptions from "../internal/launchOptions.ts"
 import type * as Url from "../Url.ts"
 
-declare module "../Reason.ts" {
-  // WebDriver BiDi detail for a BackendFailure
-  interface BackendMetadata {
-    readonly bidi?: { readonly error: string; readonly message: string; readonly stacktrace: string | null } | null
-  }
-}
-
 /**
  * Launches the Firefox executable at `executablePath` and provides it as `Browser`.
  *
@@ -38,6 +31,24 @@ declare module "../Reason.ts" {
  * `userDataDir` names one you own. It exits when the layer's scope closes. The layer starts it with the platform's
  * `ChildProcessSpawner` and `FileSystem`, which `NodeServices.layer` from `@effect/platform-node` provides, and
  * reaches it with a `WebSocketConstructor`, such as `NodeSocket.layerWebSocketConstructor`.
+ *
+ * The browser starts with core dumps off, so a process that crashes exits at once and the page is reported as
+ * crashed without waiting for the host to write a core. `coreDumps: true` leaves the limit as the host sets it.
+ *
+ * **Example** (Keeping core dumps to debug a crash)
+ *
+ * ```ts import.meta.vitest
+ * import { NodeServices, NodeSocket } from "@effect/platform-node"
+ * import { Firefox } from "@usestrider/browser/firefox"
+ * import { Layer } from "effect"
+ *
+ * const FirefoxLive = Firefox.layer({
+ *   executablePath: "/usr/bin/firefox",
+ *   coreDumps: true
+ * }).pipe(
+ *   Layer.provide([NodeServices.layer, NodeSocket.layerWebSocketConstructor])
+ * )
+ * ```
  *
  * **Example** (Launching headless Firefox)
  *

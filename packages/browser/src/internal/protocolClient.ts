@@ -8,18 +8,16 @@
  *              (envelope, receive sequence, replies, session lifecycle)
  * ```
  *
- * - **The reader** is synchronous and never waits on a consumer. It numbers every message it receives, resolves
- *   replies, applies the session lifecycle, and queues events. A message it can't parse ends the connection.
- * - **The worker** takes events in the order they were received. For each, it decodes and folds the events the
- *   fold needs, then publishes to subscribers, so the model is updated before anyone sees the event. It never
- *   waits on commands or on subscribers; a subscriber's buffer fills or slides on its own.
- * - **Syncs.** A session the lifecycle attaches is held until the fold syncs it: its events are published but
- *   not folded until a snapshot of its state is in, and then those after the snapshot are folded on top.
- * - **Integrity.** Each session's queued events are limited in count and bytes. Going past a limit, or a folded
- *   event that won't decode, makes the session's model unavailable: the fold is told, and syncs the session
- *   again. A sync that fails, or that falls behind the same limits, ends the session with `modelUnavailable`.
+ * - **The reader** (here) is synchronous and never waits on a consumer. It numbers every message it receives,
+ *   resolves replies, applies the session lifecycle, and queues events. A message it can't parse ends the
+ *   connection.
+ * - **The inbox and the worker** (`ingestion.ts`) fold each event, holding a session's events until it is synced
+ *   and watching each session's limits, then publish it to the subscriber buffers (`subscriberBuffer.ts`).
  * - **Decoding** of results and event parameters happens in the fiber that asked for them, so a payload that
  *   doesn't match its codec fails that caller or subscriber, not the connection.
+ *
+ * This module keeps what the reader needs: the pending commands it correlates replies with, and the tree of
+ * sessions the lifecycle attaches and ends.
  */
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
@@ -28,7 +26,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as FiberSet from "effect/FiberSet"
 import * as Option from "effect/Option"
-import * as Queue from "effect/Queue"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import type * as SchemaAST from "effect/SchemaAST"
 import type * as Scope from "effect/Scope"
@@ -38,6 +36,8 @@ import * as Protocol from "../protocol/Protocol.ts"
 import * as Transport from "../protocol/Transport.ts"
 import { ConnectionLost } from "../protocol/Transport.ts"
 import * as BrowserClock from "./browserClock.ts"
+import * as Ingestion from "./ingestion.ts"
+import { type Subscriber, SubscriberBuffer } from "./subscriberBuffer.ts"
 import * as Tracing from "./tracing.ts"
 
 /** An error reply, as the browser sent it. */
@@ -87,10 +87,28 @@ export interface Lifecycle {
 /** What a backend supplies. */
 export interface Wire {
   readonly encode: (id: number, method: string, params: unknown, key: Protocol.SessionKey | undefined) => string
-  /** Decodes an envelope. Throws on one that is malformed, which ends the connection. */
-  readonly decode: (message: string) => Incoming
+  /**
+   * Decodes an envelope, or fails with what is wrong with it. A malformed envelope ends the connection, since
+   * nothing after it can be trusted to be in step.
+   */
+  readonly decode: (message: string) => Result.Result<Incoming, string>
   readonly lifecycle: (event: Extract<Incoming, { _tag: "Event" }>, sessions: Lifecycle) => void
   readonly errors: ReadonlyArray<ErrorMatcher>
+}
+
+/** Whether a value is a JSON object. */
+export const isRecord = (u: unknown): u is Record<string, unknown> =>
+  typeof u === "object" && u !== null && !Array.isArray(u)
+
+/** Parses a message that must be a JSON object, as every wire's envelope is. */
+export const parseRecord = (message: string): Result.Result<Record<string, unknown>, string> => {
+  let envelope: unknown
+  try {
+    envelope = JSON.parse(message)
+  } catch (cause) {
+    return Result.fail(cause instanceof Error ? cause.message : String(cause))
+  }
+  return isRecord(envelope) ? Result.succeed(envelope) : Result.fail("the envelope isn't an object")
 }
 
 /** The most a session may have queued for the worker before its model is unavailable. */
@@ -124,6 +142,13 @@ export interface Session extends Protocol.ProtocolSession {
   readonly sendSequenced: <M extends string, P, A>(
     command: Protocol.Command<M, P, A>
   ) => Effect.Effect<{ readonly result: A; readonly received: number }, Protocol.ProtocolError>
+  /**
+   * Writes the commands to the transport in order as one step, which interruption doesn't split, then waits for every
+   * reply together. A failure or interruption then stops waiting; what was written can't be taken back.
+   */
+  readonly sendOrdered: <M extends string, P>(
+    commands: ReadonlyArray<Protocol.Command<M, P, void>>
+  ) => Effect.Effect<void, Protocol.ProtocolError>
 }
 
 /** A session's snapshot: what it installs into the model, and how far into the session's events it reaches. */
@@ -288,24 +313,6 @@ const decoder = <A>(
     decode(input).pipe(Effect.mapError((error) => failure(new Protocol.Decode({ method, issue: error.message }))))
 }
 
-const nonAscii = /[\u0080-\uffff]/
-
-/** The UTF-8 length of a string, without encoding it. */
-export const utf8Length = (text: string): number => {
-  if (!nonAscii.test(text)) return text.length
-  let bytes = 0
-  for (let i = 0; i < text.length; i++) {
-    const code = text.charCodeAt(i)
-    if (code < 0x80) bytes += 1
-    else if (code < 0x800) bytes += 2
-    else if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
-      bytes += 4
-      i++
-    } else bytes += 3
-  }
-  return bytes
-}
-
 /** The values at a JSON pointer, where `*` stands for every element of a list. */
 export const valuesAt = (value: unknown, pointer: string): ReadonlyArray<unknown> => {
   let current: ReadonlyArray<unknown> = [value]
@@ -321,118 +328,6 @@ export const valuesAt = (value: unknown, pointer: string): ReadonlyArray<unknown
     current = next
   }
   return current.filter((item) => item !== undefined)
-}
-
-/** Whether raw parameters match a prefilter: every field it names, nested as the parameters are. */
-export const matches = (prefilter: object, params: unknown): boolean => {
-  if (typeof params !== "object" || params === null) return false
-  for (const [key, expected] of Object.entries(prefilter)) {
-    if (expected === undefined) continue
-    const actual = (params as Record<string, unknown>)[key]
-    if (typeof expected === "object" && expected !== null) {
-      if (!matches(expected, actual)) return false
-    } else if (actual !== expected) return false
-  }
-  return true
-}
-
-// ── Subscriber buffers ────────────────────────────────────────────────────────────────────────────────────
-
-interface Delivery {
-  readonly params: unknown
-  /** Already decoded by the fold, with the subscriber's own codec. */
-  readonly decoded: boolean
-}
-
-type Item = Delivery | Protocol.Gap
-
-/**
- * A subscriber's buffer. Lossless buffers fail with `EventOverflow` rather than drop; sliding ones drop the
- * oldest event and leave a `Gap` where it was. Gaps take no capacity, and a terminal signal needs no space:
- * it is delivered after what is already buffered.
- */
-class SubscriberBuffer {
-  private items: Array<Item> = []
-  private head = 0
-  private events = 0
-  private waiter: Deferred.Deferred<void> | undefined
-  /** `undefined` while open; `null` once ended normally. */
-  private terminal: Protocol.ProtocolError | null | undefined
-  readonly method: string
-  readonly capacity: number
-  readonly sliding: boolean
-  constructor(method: string, capacity: number, sliding: boolean) {
-    this.method = method
-    this.capacity = capacity
-    this.sliding = sliding
-  }
-
-  offer(delivery: Delivery): void {
-    if (this.terminal !== undefined) return
-    if (this.events >= this.capacity) {
-      if (!this.sliding) return this.overflow()
-      this.dropOldest()
-    }
-    this.items.push(delivery)
-    this.events++
-    this.wake()
-  }
-
-  /** An event this subscriber would have received was discarded upstream. */
-  lose(): void {
-    if (this.terminal !== undefined) return
-    if (!this.sliding) return this.overflow()
-    const last = this.items.length > this.head ? this.items[this.items.length - 1] : undefined
-    if (last !== undefined && Protocol.isGap(last)) {
-      this.items[this.items.length - 1] = new Protocol.Gap({ dropped: last.dropped + 1 })
-    } else this.items.push(new Protocol.Gap({ dropped: 1 }))
-    this.wake()
-  }
-
-  end(error: Protocol.ProtocolError | null): void {
-    if (this.terminal !== undefined) return
-    this.terminal = error
-    this.wake()
-  }
-
-  readonly pull: Effect.Effect<readonly [Item, ...Array<Item>], Protocol.ProtocolError | Cause.Done> = Effect.suspend(
-    () => {
-      if (this.head < this.items.length) {
-        const batch = this.items.slice(this.head) as [Item, ...Array<Item>]
-        this.items = []
-        this.head = 0
-        this.events = 0
-        return Effect.succeed(batch)
-      }
-      if (this.terminal === null) return Cause.done()
-      if (this.terminal !== undefined) return Effect.fail(this.terminal)
-      this.waiter ??= Deferred.makeUnsafe<void>()
-      return Effect.andThen(Deferred.await(this.waiter), this.pull)
-    }
-  )
-
-  private overflow(): void {
-    this.end(failure(new Protocol.EventOverflow({ method: this.method, capacity: this.capacity })))
-  }
-
-  /** Drops the oldest event; a gap takes its place, merged with one already in front of it. */
-  private dropOldest(): void {
-    const first = this.items[this.head]!
-    if (Protocol.isGap(first)) {
-      this.head++
-      this.items[this.head] = new Protocol.Gap({ dropped: first.dropped + 1 })
-    } else {
-      this.items[this.head] = new Protocol.Gap({ dropped: 1 })
-    }
-    this.events--
-  }
-
-  private wake(): void {
-    if (this.waiter === undefined) return
-    const waiter = this.waiter
-    this.waiter = undefined
-    Deferred.doneUnsafe(waiter, Effect.void)
-  }
 }
 
 // ── The client ────────────────────────────────────────────────────────────────────────────────────────────
@@ -452,116 +347,51 @@ interface Pending {
   late: ((reply: Protocol.LateReply) => Effect.Effect<void>) | undefined
 }
 
-interface Subscriber {
-  readonly from: number
-  readonly prefilter: object | undefined
-  readonly Params: Schema.Codec<any, unknown> | undefined
-  readonly buffer: SubscriberBuffer
-}
-
-interface QueuedEvent {
-  readonly _tag: "Event"
-  readonly received: number
-  readonly state: SessionState
-  readonly method: string
-  readonly params: unknown
-  readonly bytes: number
-  /** The session's overload epoch when queued; an overload discards every event queued before it. */
-  readonly epoch: number
-}
-
-type Work =
-  | QueuedEvent
-  | { readonly _tag: "Overloaded"; readonly state: SessionState; readonly failure: IntegrityFailure }
-  | { readonly _tag: "Synced"; readonly state: SessionState; readonly synced: Synced }
-  | { readonly _tag: "End"; readonly state: SessionState; readonly reason: Protocol.SessionEnded }
-  | {
-    readonly _tag: "Run"
-    readonly state: SessionState
-    readonly effect: Effect.Effect<void>
-    readonly done: Deferred.Deferred<void>
-  }
-
 interface SessionState {
   readonly key: Protocol.SessionKey | undefined
   readonly parent: SessionState | undefined
   readonly children: Set<SessionState>
   readonly pending: Set<Pending>
-  readonly subscribers: Map<string, Set<Subscriber>>
-  readonly ended: Deferred.Deferred<Protocol.SessionEnded>
   /** Set when the session ends: sends fail from then on. */
   endedWith: Protocol.SessionEnded | undefined
-  /** Set once the worker has delivered the end: subscribers are done and `ended` is complete. */
-  finished: boolean
   readonly handle: Session
-  // Ingestion
-  queuedEvents: number
-  queuedBytes: number
-  epoch: number
-  /** The receive sequence of the last event queued for this session. */
-  lastQueued: number
-  /** The receive sequence of the last event the worker folded and published. */
-  processed: number
-  /** Events are held for the fold until a sync completes. */
-  holding: boolean
-  held: Array<QueuedEvent>
-  heldBytes: number
-  drains: Array<{ readonly target: number; readonly done: Deferred.Deferred<void> }>
+  readonly ingest: Ingestion.Ingest
 }
 
 /**
  * Starts a client on a transport. The reader and the worker run in the scope; closing the scope stops them
  * and ends every session.
  */
-export const make = Effect.fnUntraced(function*(transport: Transport.Transport, wire: Wire, options?: Options) {
-  const limits = options?.limits ?? defaultLimits
+export const make: (
+  transport: Transport.Transport,
+  wire: Wire,
+  options?: Options
+) => Effect.Effect<Client, never, Scope.Scope> = Effect.fnUntraced(function*(
+  transport: Transport.Transport,
+  wire: Wire,
+  options?: Options
+) {
   const validation = yield* Protocol.CurrentValidation
   const pending = new Map<number, Pending>()
   const sessions = new Map<Protocol.SessionKey, SessionState>()
-  const live = new Set<SessionState>()
-  const inbox = yield* Queue.unbounded<Work>()
-  const closed = yield* Deferred.make<ConnectionLost>()
   const run = yield* FiberSet.makeRuntime()
   const states = new WeakMap<Session, SessionState>()
-  const control: FoldControl = {
-    sync: (session, sync) => {
-      const state = states.get(session)
-      if (state === undefined || state.endedWith !== undefined) return
-      state.holding = true
-      run(
-        sync.pipe(
-          Effect.matchCause({
-            onFailure: () => end(state, "modelUnavailable"),
-            onSuccess: (synced) => Queue.offerUnsafe(inbox, { _tag: "Synced", state, synced })
-          })
-        )
-      )
-    },
-    session: (key) => sessions.get(key)?.handle,
-    run: (effect) =>
-      Effect.suspend(() => {
-        if (lost !== undefined) return Effect.void
-        const done = Deferred.makeUnsafe<void>()
-        runs.add(done)
-        Queue.offerUnsafe(inbox, { _tag: "Run", state: root, effect, done })
-        return Deferred.await(done)
-      })
-  }
-  const runs = new Set<Deferred.Deferred<void>>()
-  const fold = options?.fold?.(control)
-  const foldDecoders = new Map(
-    [...(fold?.events.values() ?? [])].map((event) =>
-      [
-        event.method,
-        event.Params === undefined
-          ? (params: unknown) => Effect.succeed(params)
-          : decoder(event.Params, event.method, validation)
-      ] as const
-    )
-  )
   let nextId = 1
   let received = 0
   let lost: ConnectionLost | undefined
+  const closed = yield* Deferred.make<ConnectionLost>()
+
+  const ingestion = yield* Ingestion.make({
+    fold: options?.fold,
+    limits: options?.limits ?? defaultLimits,
+    decoder: (codec, method) => decoder(codec, method, validation),
+    session: (key) => sessions.get(key)?.handle,
+    end: (session, why) => {
+      const state = states.get(session)
+      if (state !== undefined) end(state, why)
+    },
+    lost: () => lost !== undefined
+  })
 
   // ── Ending sessions ──
 
@@ -577,25 +407,8 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
       if (entry.late === undefined) Deferred.doneUnsafe(entry.reply, Effect.fail(failure(reason)))
     }
     state.pending.clear()
-    // Subscribers end after the events received before the end
-    state.lastQueued = received
-    Queue.offerUnsafe(inbox, { _tag: "End", state, reason })
+    ingestion.end(state.ingest, reason, received)
   }
-
-  // The fold hears of the end first, as of any event; then subscribers and waiters do.
-  const finish = Effect.fnUntraced(function*(state: SessionState, reason: Protocol.SessionEnded) {
-    if (state.finished) return
-    state.finished = true
-    live.delete(state)
-    if (fold !== undefined) yield* fold.ended(state.handle, reason)
-    for (const subscribers of state.subscribers.values()) {
-      for (const subscriber of subscribers) subscriber.buffer.end(failure(reason))
-    }
-    state.subscribers.clear()
-    for (const drain of state.drains) Deferred.doneUnsafe(drain.done, Effect.void)
-    state.drains = []
-    Deferred.doneUnsafe(state.ended, Effect.succeed(reason))
-  })
 
   const loseConnection = (reason: ConnectionLost): void => {
     if (lost !== undefined) return
@@ -603,20 +416,6 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
     end(root, "connectionLost")
     Deferred.doneUnsafe(closed, Effect.succeed(reason))
   }
-
-  // Delivers every end at once, without waiting for the worker: for when the worker is gone.
-  const finishAll = Effect.suspend(() =>
-    Effect.forEach(
-      [...live],
-      (state) => finish(state, state.endedWith ?? new Protocol.SessionEnded({ why: "connectionLost" })),
-      { discard: true }
-    ).pipe(
-      Effect.andThen(Effect.sync(() => {
-        for (const done of runs) Deferred.doneUnsafe(done, Effect.void)
-        runs.clear()
-      }))
-    )
-  )
 
   // ── Commands ──
 
@@ -678,7 +477,8 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
     run(handler({ session: state.handle, method: entry.method, params: entry.params, result: entry.raw, release }))
   }
 
-  const send = Effect.fnUntraced(function*<M extends string, P, A>(
+  /** A registered command: writing it, the wait for its reply, and giving up on that reply. */
+  const prepare = Effect.fnUntraced(function*<M extends string, P, A>(
     state: SessionState,
     command: Protocol.Command<M, P, A>
   ) {
@@ -718,28 +518,65 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
         orElse: () => Effect.andThen(abandon, Effect.fail(failure(new Protocol.NoReply({ method, timeout }))))
       }).pipe(BrowserClock.onLive)
       : Deferred.await(entry.reply)
-    const exchange = transport.send(wire.encode(entry.id, method, encoded, state.key)).pipe(
-      Effect.catch(() =>
-        Effect.andThen(
-          Effect.sync(() => unregister(entry)),
-          Effect.fail(failure(new Protocol.SessionEnded({ why: "connectionLost" })))
+    const tracing = yield* Tracing.TraceProtocolCommands
+    return {
+      write: transport.send(wire.encode(entry.id, method, encoded, state.key)).pipe(
+        Effect.catch(() =>
+          Effect.andThen(
+            Effect.sync(() => unregister(entry)),
+            Effect.fail(failure(new Protocol.SessionEnded({ why: "connectionLost" })))
+          )
         )
       ),
-      Effect.andThen(awaited),
-      Effect.flatMap((raw) => decode === undefined ? Effect.succeed(undefined as A) : decode(raw)),
-      Effect.map((result) => {
-        consumed = true
-        return { result, received: entry.received }
-      }),
-      Effect.onInterrupt(() => abandon)
-    )
-    // `Browser.TraceProtocolCommands`: each command its own span, under the operation that sent it.
-    return yield* (yield* Tracing.TraceProtocolCommands)
-      ? Effect.withSpan(exchange, method, {
-        attributes: { "browser.protocol.method": method, "browser.protocol.id": entry.id }
-      })
-      : exchange
+      reply: awaited.pipe(
+        Effect.flatMap((raw) => decode === undefined ? Effect.succeed(undefined as A) : decode(raw)),
+        Effect.map((result) => {
+          consumed = true
+          return { result, received: entry.received }
+        })
+      ),
+      abandon,
+      // `Browser.TraceProtocolCommands`: each command its own span, under the operation that sent it.
+      traced: <B, E, R>(exchange: Effect.Effect<B, E, R>) =>
+        tracing
+          ? Effect.withSpan(exchange, method, {
+            attributes: { "browser.protocol.method": method, "browser.protocol.id": entry.id }
+          })
+          : exchange
+    }
   })
+
+  const send = Effect.fnUntraced(function*<M extends string, P, A>(
+    state: SessionState,
+    command: Protocol.Command<M, P, A>
+  ) {
+    const { abandon, reply, traced, write } = yield* prepare(state, command)
+    return yield* traced(write.pipe(Effect.andThen(reply), Effect.onInterrupt(() => abandon)))
+  })
+
+  const sendOrdered = <M extends string, P>(
+    state: SessionState,
+    commands: ReadonlyArray<Protocol.Command<M, P, void>>
+  ) =>
+    Effect.uninterruptibleMask((restore) =>
+      Effect.suspend(() => {
+        const started: Array<{
+          readonly abandon: Effect.Effect<void>
+          readonly reply: Effect.Effect<unknown, Protocol.ProtocolError>
+          readonly traced: <B, E, R>(exchange: Effect.Effect<B, E, R>) => Effect.Effect<B, E, R>
+        }> = []
+        return Effect.forEach(commands, (command) =>
+          Effect.flatMap(prepare(state, command), (prepared) => {
+            started.push(prepared)
+            return prepared.write
+          }), { discard: true }).pipe(
+            Effect.andThen(restore(
+              Effect.forEach(started, ({ reply, traced }) => traced(reply), { concurrency: "unbounded", discard: true })
+            )),
+            Effect.onError(() => Effect.forEach(started, ({ abandon }) => abandon, { discard: true }))
+          )
+      })
+    )
 
   // ── Subscriptions ──
 
@@ -756,21 +593,22 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
       Params: event.Params,
       buffer: new SubscriberBuffer(event.method, sliding ? buffer.sliding : buffer?.lossless ?? 10_000, sliding)
     }
+    const all = state.ingest.subscribers
     if (state.endedWith !== undefined) {
       subscriber.buffer.end(failure(state.endedWith))
     } else {
-      let subscribers = state.subscribers.get(event.method)
+      let subscribers = all.get(event.method)
       if (subscribers === undefined) {
         subscribers = new Set()
-        state.subscribers.set(event.method, subscribers)
+        all.set(event.method, subscribers)
       }
       subscribers.add(subscriber)
     }
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
-        const subscribers = state.subscribers.get(event.method)
+        const subscribers = all.get(event.method)
         subscribers?.delete(subscriber)
-        if (subscribers?.size === 0) state.subscribers.delete(event.method)
+        if (subscribers?.size === 0) all.delete(event.method)
         subscriber.buffer.end(null)
       })
     )
@@ -788,46 +626,42 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
     )
   })
 
-  const drainObserved = (state: SessionState): Effect.Effect<void> =>
-    Effect.suspend(() => {
-      if (state.finished || state.processed >= state.lastQueued) return Effect.void
-      const done = Deferred.makeUnsafe<void>()
-      state.drains.push({ target: state.lastQueued, done })
-      return Deferred.await(done)
-    })
-
   const makeSession = (key: Protocol.SessionKey | undefined, parent: SessionState | undefined): SessionState => {
+    function subscribeTo<M extends string, A>(
+      event: Protocol.EventDef<M, A>,
+      options: Protocol.SlidingOptions<A>
+    ): Effect.Effect<Stream.Stream<A | Protocol.Gap, Protocol.ProtocolError>, never, Scope.Scope>
+    function subscribeTo<M extends string, A>(
+      event: Protocol.EventDef<M, A>,
+      options?: Protocol.SubscribeOptions<A> | undefined
+    ): Effect.Effect<Stream.Stream<A, Protocol.ProtocolError>, never, Scope.Scope>
+    function subscribeTo<M extends string, A>(
+      event: Protocol.EventDef<M, A>,
+      options?: Protocol.SubscribeOptions<A> | Protocol.SlidingOptions<A> | undefined
+    ) {
+      return subscribe(state, event, options)
+    }
+    const handle: Session = {
+      key,
+      send: (command) => Effect.map(send(state, command), ({ result }) => result),
+      sendSequenced: (command) => send(state, command),
+      sendOrdered: (commands) => sendOrdered(state, commands),
+      subscribe: subscribeTo,
+      drainObserved: Effect.suspend(() => ingestion.drained(state.ingest)),
+      ended: Effect.suspend(() => Deferred.await(state.ingest.ended))
+    }
     const state: SessionState = {
       key,
       parent,
       children: new Set(),
       pending: new Set(),
-      subscribers: new Map(),
-      ended: Deferred.makeUnsafe(),
       endedWith: undefined,
-      finished: false,
-      handle: {
-        key,
-        send: (command) => Effect.map(send(state, command), ({ result }) => result),
-        sendSequenced: (command) => send(state, command),
-        subscribe: (event: Protocol.EventDef<string, any>, options?: any) => subscribe(state, event, options),
-        drainObserved: Effect.suspend(() => drainObserved(state)),
-        ended: Effect.suspend(() => Deferred.await(state.ended))
-      } as Session,
-      queuedEvents: 0,
-      queuedBytes: 0,
-      epoch: 0,
-      lastQueued: received,
-      processed: received,
-      holding: fold !== undefined && parent !== undefined,
-      held: [],
-      heldBytes: 0,
-      drains: []
+      handle,
+      ingest: ingestion.track(handle, parent !== undefined, received)
     }
     parent?.children.add(state)
     if (key !== undefined) sessions.set(key, state)
-    live.add(state)
-    states.set(state.handle, state)
+    states.set(handle, state)
     return state
   }
 
@@ -847,39 +681,20 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
 
   // ── The reader ──
 
-  const queueEvent = (state: SessionState, method: string, params: unknown, message: string): void => {
-    const bytes = utf8Length(message)
-    state.queuedEvents++
-    state.queuedBytes += bytes
-    state.lastQueued = received
-    if (state.queuedEvents > limits.events || state.queuedBytes > limits.bytes) {
-      // Everything queued for this session so far, this event included, is discarded
-      const overloaded: IntegrityFailure = { _tag: "Overloaded", events: state.queuedEvents, bytes: state.queuedBytes }
-      Queue.offerUnsafe(inbox, { _tag: "Event", received, state, method, params, bytes, epoch: state.epoch })
-      state.epoch++
-      state.queuedEvents = 0
-      state.queuedBytes = 0
-      Queue.offerUnsafe(inbox, { _tag: "Overloaded", state, failure: overloaded })
-      return
-    }
-    Queue.offerUnsafe(inbox, { _tag: "Event", received, state, method, params, bytes, epoch: state.epoch })
-  }
-
   const dispatch = (message: string): void => {
     if (lost !== undefined) return
     received++
-    let incoming: Incoming
-    try {
-      incoming = wire.decode(message)
-    } catch (cause) {
+    const decoded = wire.decode(message)
+    if (Result.isFailure(decoded)) {
       loseConnection(
         new ConnectionLost({
           initiator: "remote",
-          description: `The browser sent a malformed message: ${cause instanceof Error ? cause.message : String(cause)}`
+          description: `The browser sent a malformed message: ${decoded.failure}`
         })
       )
       return
     }
+    const incoming = decoded.success
     switch (incoming._tag) {
       case "Reply":
       case "ErrorReply": {
@@ -905,129 +720,13 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
         wire.lifecycle(incoming, lifecycle)
         const state = incoming.key === undefined ? root : sessions.get(incoming.key)
         if (state === undefined || state.endedWith !== undefined) return
-        queueEvent(state, incoming.method, incoming.params, message)
+        ingestion.event(state.ingest, received, incoming.method, incoming.params, message)
         return
       }
     }
   }
 
-  // ── The worker ──
-
-  const advance = (state: SessionState, through: number): void => {
-    if (through > state.processed) state.processed = through
-    if (state.drains.length === 0) return
-    state.drains = state.drains.filter((drain) => {
-      if (drain.target > state.processed) return true
-      Deferred.doneUnsafe(drain.done, Effect.void)
-      return false
-    })
-  }
-
-  const subscribersOf = function*(event: QueuedEvent): Generator<Subscriber> {
-    const subscribers = event.state.subscribers.get(event.method)
-    if (subscribers === undefined) return
-    for (const subscriber of subscribers) {
-      if (event.received <= subscriber.from) continue
-      if (subscriber.prefilter !== undefined && !matches(subscriber.prefilter, event.params)) continue
-      yield subscriber
-    }
-  }
-
-  const publish = (event: QueuedEvent, decoded: { readonly value: unknown; readonly codec: unknown } | undefined) => {
-    for (const subscriber of subscribersOf(event)) {
-      subscriber.buffer.offer(
-        decoded !== undefined && decoded.codec === subscriber.Params
-          ? { params: decoded.value, decoded: true }
-          : { params: event.params, decoded: false }
-      )
-    }
-  }
-
-  const lose = Effect.fnUntraced(function*(state: SessionState, integrity: IntegrityFailure) {
-    if (fold === undefined || state.holding) return
-    state.holding = true
-    yield* fold.lost(state.handle, integrity)
-  })
-
-  // Folds one event; one that won't decode makes the session's model unavailable.
-  const foldEvent = Effect.fnUntraced(function*(event: QueuedEvent) {
-    const decode = foldDecoders.get(event.method)
-    if (decode === undefined || fold === undefined) return undefined
-    const decoded = yield* Effect.result(decode(event.params))
-    if (decoded._tag === "Failure") {
-      const reason = decoded.failure.reason
-      yield* lose(event.state, {
-        _tag: "Undecodable",
-        method: event.method,
-        issue: reason._tag === "Decode" ? reason.issue : reason.message
-      })
-      return undefined
-    }
-    yield* fold.apply(event.state.handle, event.method, decoded.success, event.received)
-    return { value: decoded.success, codec: fold.events.get(event.method)!.Params }
-  })
-
-  const process = Effect.fnUntraced(function*(work: Work) {
-    const state = work.state
-    if (work._tag === "Run") {
-      if (runs.delete(work.done)) {
-        yield* work.effect
-        Deferred.doneUnsafe(work.done, Effect.void)
-      }
-      return
-    }
-    if (state.finished) return
-    switch (work._tag) {
-      case "Event": {
-        if (work.epoch < state.epoch) {
-          for (const subscriber of subscribersOf(work)) subscriber.buffer.lose()
-          if (fold === undefined) advance(state, work.received)
-          return
-        }
-        state.queuedEvents--
-        state.queuedBytes -= work.bytes
-        if (state.holding) {
-          publish(work, undefined)
-          state.held.push(work)
-          state.heldBytes += work.bytes
-          if (state.held.length > limits.events || state.heldBytes > limits.bytes) end(state, "modelUnavailable")
-          return
-        }
-        publish(work, yield* foldEvent(work))
-        if (!state.holding) advance(state, work.received)
-        return
-      }
-      case "Overloaded":
-        return yield* lose(state, work.failure)
-      case "Synced": {
-        yield* work.synced.apply
-        state.holding = false
-        const held = state.held
-        state.held = []
-        state.heldBytes = 0
-        advance(state, work.synced.through)
-        for (let i = 0; i < held.length; i++) {
-          const event = held[i]!
-          if (event.received <= work.synced.through) continue
-          yield* foldEvent(event)
-          if (state.holding) {
-            // Lost again: what is left waits for the next sync
-            state.held = [...held.slice(i + 1), ...state.held]
-            state.heldBytes = state.held.reduce((bytes, held) => bytes + held.bytes, 0)
-            return
-          }
-          advance(state, event.received)
-        }
-        return
-      }
-      case "End":
-        return yield* finish(state, work.reason)
-    }
-  })
-
-  yield* Queue.take(inbox).pipe(
-    Effect.flatMap(process),
-    Effect.forever,
+  yield* ingestion.worker.pipe(
     // A failing fold is a bug. Rather than leave everything waiting on a worker that's gone, end the connection.
     Effect.catchCause((cause) =>
       Effect.andThen(
@@ -1036,7 +735,7 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
             new ConnectionLost({ initiator: "local", description: `The event fold failed: ${Cause.pretty(cause)}` })
           )
         ),
-        finishAll
+        ingestion.finishAll
       )
     ),
     Effect.forkScoped
@@ -1073,7 +772,7 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
         loseConnection(new ConnectionLost({ initiator: "local", description: "The connection was closed" }))
       ),
       // The worker stops with the scope, so the ends it hasn't delivered are delivered now.
-      finishAll
+      ingestion.finishAll
     )
   )
 
@@ -1083,4 +782,4 @@ export const make = Effect.fnUntraced(function*(transport: Transport.Transport, 
     children: (session) => Array.from(states.get(session)?.children ?? [], (child) => child.handle),
     closed: Deferred.await(closed)
   } satisfies Client
-}) as (transport: Transport.Transport, wire: Wire, options?: Options) => Effect.Effect<Client, never, Scope.Scope>
+})

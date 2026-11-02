@@ -266,7 +266,7 @@ describe("Stock WebKit, attached through its remote inspector", () => {
           // A browser that exits takes the inspector server with it: the connection is lost, not each page closed
           yield* process.kill()
           const ended = yield* opener.closed
-          assert.deepStrictEqual(ended, { _tag: "ConnectionLost" } satisfies Target.CloseReason)
+          assert.deepStrictEqual(ended, new Target.ConnectionLost({}) satisfies Target.CloseReason)
         }).pipe(Effect.provide(attach(endpoint)))
       }))
   })
