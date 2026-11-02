@@ -1,5 +1,6 @@
 /** The event-driven viewport wait, its narrow timeout recovery, and cleanup on every exit. */
 import { assert, describe, it } from "@effect/vitest"
+import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -131,6 +132,55 @@ describe("WebKit viewport confirmation", () => {
       yield* Deferred.await(started)
       yield* Fiber.interrupt(fiber)
       assert.strictEqual(disposed, 1)
+    }))
+
+  it.effect("keeps a page's disappearance a typed failure when its callback can't be disposed", () =>
+    Effect.gen(function*() {
+      const gone = new Protocol.ProtocolError({
+        reason: new Protocol.Rejected({
+          method: "Automation.evaluateJavaScriptFunction",
+          reason: "Unrecognized",
+          code: -32000,
+          description: "WindowNotFound"
+        })
+      })
+      const result = yield* Viewport.confirm(processFor(() => Effect.fail(gone)), handle, requested).pipe(Effect.exit)
+      assert.isTrue(Exit.isFailure(result))
+      if (Exit.isFailure(result)) assert.isFalse(Cause.hasDies(result.cause), Cause.pretty(result.cause))
+    }))
+
+  it.effect("keeps a confirmed size when the page goes before its callback is disposed", () =>
+    Effect.gen(function*() {
+      const process = processFor((params) =>
+        params.expectsImplicitCallbackArgument
+          ? Effect.succeed({ result: "\"matched\"" })
+          : Effect.fail(
+            new Protocol.ProtocolError({
+              reason: new Protocol.Rejected({
+                method: "Automation.evaluateJavaScriptFunction",
+                reason: "Unrecognized",
+                code: -32000,
+                description: "WindowNotFound"
+              })
+            })
+          )
+      )
+      const result = yield* Viewport.confirm(process, handle, requested).pipe(Effect.exit)
+      assert.strictEqual(result._tag, "Success")
+    }))
+
+  it.effect("takes the final measurement when a restoration's confirmation times out", () =>
+    Effect.gen(function*() {
+      let reads = 0
+      const process = processFor((params) => {
+        if (params.expectsImplicitCallbackArgument) return Effect.fail(timeout)
+        if (params.arguments.length > 0) return measure()
+        reads++
+        return measure()
+      })
+      const result = yield* Viewport.cleanup(Viewport.confirm(process, handle, requested)).pipe(Effect.exit)
+      assert.strictEqual(reads, 1)
+      assert.strictEqual(result._tag, "Success")
     }))
 
   it("cleans listeners on an unchanged size, resize, navigation, timeout and cancellation", () => {
