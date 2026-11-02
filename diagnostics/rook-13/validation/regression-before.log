@@ -1,0 +1,46 @@
+$ vitest --run packages/browser/test/CdpAdapter.test.ts
+
+ RUN  v5.0.5 /home/jpowers/.local/share/rookery/worktrees/strider/ROOK-13
+
+stdout | test/CdpAdapter.test.ts > Chromium capture document replacement > fails a pending capture promptly when the main document commits
+[08:39:08.342] ERROR (#791): Error [AssertionError]: capture must fail on commit without advancing its deadline: expected undefined to not equal undefined
+    at /home/jpowers/.local/share/rookery/worktrees/strider/ROOK-13/packages/browser/test/CdpAdapter.test.ts:449:14 {
+  actual: undefined,
+  expected: undefined,
+  showDiff: false,
+  operator: 'notStrictEqual',
+  [cause]: undefined
+}
+
+ ❯ |browser| test/CdpAdapter.test.ts (22 tests | 1 failed) 72ms
+   ❯ Chromium capture document replacement (1)
+     × fails a pending capture promptly when the main document commits 9ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |browser| test/CdpAdapter.test.ts > Chromium capture document replacement > fails a pending capture promptly when the main document commits
+AssertionError: capture must fail on commit without advancing its deadline: expected undefined to not equal undefined
+ ❯ test/CdpAdapter.test.ts:449:14
+    447|       yield* barrier
+    448|       yield* TestClock.adjust("0 millis")
+    449|       assert.isDefined(pending.pollUnsafe(), "capture must fail on com…
+       |              ^
+    450|       const error = yield* Fiber.join(pending)
+    451|       assert.strictEqual(error._tag, "PageError")
+ ❯ ~effect/Effect/successCont ../../node_modules/.pnpm/effect@4.0.6/node_modules/effect/src/internal/effect.ts:1462:28
+ ❯ ~effect/Effect/evaluate ../../node_modules/.pnpm/effect@4.0.6/node_modules/effect/src/internal/core.ts:585:30
+ ❯ FiberImpl.runLoop ../../node_modules/.pnpm/effect@4.0.6/node_modules/effect/src/internal/effect.ts:693:41
+ ❯ FiberImpl.evaluate ../../node_modules/.pnpm/effect@4.0.6/node_modules/effect/src/internal/effect.ts:634:23
+ ❯ FiberImpl.evaluate ../../node_modules/.pnpm/effect@4.0.6/node_modules/effect/src/internal/effect.ts:623:29
+ ❯ ../../node_modules/.pnpm/effect@4.0.6/node_modules/effect/src/internal/effect.ts:1198:17
+ ❯ Array.<anonymous> ../../node_modules/.pnpm/effect@4.0.6/node_modules/effect/src/internal/effect.ts:843:44
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 21 passed (22)
+   Start at  08:39:07
+   Duration  519ms (transform 44%, import 26%, tests 16%, setup 13%)
+
+[ELIFECYCLE] Test failed. See above for more details.

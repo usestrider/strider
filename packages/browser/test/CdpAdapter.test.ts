@@ -253,9 +253,14 @@ const sentHeaders = Effect.gen(function*() {
   const ready = yield* Deferred.make<void>()
   const settled = yield* Queue.unbounded<void>()
   const facts: Array<Adapter.Fact> = []
+  const captures = yield* Queue.unbounded<void>()
   yield* Effect.gen(function*() {
     while (true) {
       const command = yield* browser.next
+      if (command.method === "Page.captureScreenshot") {
+        yield* Queue.offer(captures, undefined)
+        continue
+      }
       const result = command.method === "Browser.getVersion"
         ? {
           protocolVersion: "1.3",
@@ -326,7 +331,7 @@ const sentHeaders = Effect.gen(function*() {
   yield* send(captured[0]!)
   yield* barrier
   const request = yield* next
-  return { browser, page, request, send, barrier }
+  return { browser, page, request, send, barrier, captures }
 })
 
 /** The synthetic browser and its deadlines advance together, without wall-clock delays. */
@@ -408,4 +413,33 @@ describe("Chromium public sent-header waiting", () => {
         else assert.deepStrictEqual(headers, request.headers)
       }).pipe(onTestClock))
   }
+})
+
+describe("Chromium capture document replacement", () => {
+  it.effect("fails a pending capture promptly when the main document commits", () =>
+    Effect.gen(function*() {
+      const { browser, page, barrier, captures } = yield* sentHeaders
+      const reader = yield* page.control
+      const pending = yield* Effect.forkScoped(reader.screenshot().pipe(Effect.flip))
+      yield* Queue.take(captures)
+      yield* browser.receive({
+        sessionId: "S1",
+        method: "Page.frameNavigated",
+        params: {
+          frame: {
+            id: "76F3487A52CF4F79FE4AD28961E44D32",
+            loaderId: "replacement",
+            url: "https://example.com/replacement",
+            securityOrigin: "https://example.com",
+            mimeType: "text/html"
+          }
+        }
+      })
+      yield* barrier
+      yield* TestClock.adjust("0 millis")
+      assert.isDefined(pending.pollUnsafe(), "capture must fail on commit without advancing its deadline")
+      const error = yield* Fiber.join(pending)
+      assert.strictEqual(error._tag, "PageError")
+      if (error._tag === "PageError") assert.strictEqual(error.reason._tag, "CaptureInvalidated")
+    }).pipe(onTestClock))
 })
