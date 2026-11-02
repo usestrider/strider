@@ -919,3 +919,64 @@ describe("CDP restoration cleanup", () => {
       assert.strictEqual(warnings.length, 1)
     }))
 })
+
+describe("CDP viewport override and its baseline", () => {
+  const override = {
+    _tag: "Override",
+    override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+  } as const
+
+  // Chromium ends a `Runtime.evaluate` in flight across a cross-process navigation, and answers none where a page has
+  // no default context yet: neither stopped the override before it needed a read
+  it.effect("applies the override when reading the page's dimensions is rejected", () =>
+    Effect.gen(function*() {
+      const { state, page, target } = yield* withPage()
+      const methods: Array<string> = []
+      const mock = {
+        ...session,
+        subscribe: () => Effect.succeed(Stream.never),
+        send: (command: { readonly method: string }) => {
+          methods.push(command.method)
+          return command.method === "Runtime.evaluate"
+            ? Effect.fail(
+              new Protocol.ProtocolError({
+                reason: new Protocol.Rejected({
+                  method: command.method,
+                  reason: "Unrecognized",
+                  code: -32000,
+                  description: "Inspected target navigated or closed"
+                })
+              })
+            )
+            : Effect.succeed({})
+        }
+      } as unknown as ProtocolClient.Session
+      state.targets.set(mock, { ...target, session: mock, page })
+      const result = yield* Effect.scoped(Declare.declare(state, { _tag: "Page", page: page.id }, override)).pipe(
+        Effect.exit
+      )
+      assert.include(methods, "Emulation.setDeviceMetricsOverride")
+      assert.strictEqual(result._tag, "Success")
+    }))
+
+  // `let innerWidth = "wide"` in a page's script: the read runs in the page's own world, where its names win
+  it.effect("applies the override when the page has an innerWidth of its own", () =>
+    Effect.gen(function*() {
+      const { state, page, target } = yield* withPage()
+      const methods: Array<string> = []
+      const mock = {
+        ...session,
+        subscribe: () => Effect.succeed(Stream.never),
+        send: (command: { readonly method: string }) => {
+          methods.push(command.method)
+          return Effect.succeed({ result: { value: ["wide", 493] } })
+        }
+      } as unknown as ProtocolClient.Session
+      state.targets.set(mock, { ...target, session: mock, page })
+      const result = yield* Effect.scoped(Declare.declare(state, { _tag: "Page", page: page.id }, override)).pipe(
+        Effect.exit
+      )
+      assert.include(methods, "Emulation.setDeviceMetricsOverride")
+      assert.strictEqual(result._tag, "Success")
+    }))
+})
