@@ -19,6 +19,7 @@ import type * as Browser from "../Browser.ts"
 import * as Adapter from "../internal/adapter.ts"
 import * as BrowserImpl from "../internal/browser.ts"
 import * as CdpAdapter from "../internal/cdpAdapter.ts"
+import * as ChromiumIdentity from "../internal/chromiumIdentity.ts"
 import * as ChromiumLauncher from "../internal/chromiumLauncher.ts"
 import * as Connect from "../internal/connect.ts"
 import * as LaunchOptions from "../internal/launchOptions.ts"
@@ -189,7 +190,7 @@ export const layerConnect = (
         claimClient,
         sink,
         ownership: "attached",
-        browserIdentity: new URL(url).pathname.split("/").at(-1)
+        browserIdentity: ChromiumIdentity.fromWebSocket(url)
       })
     })
   )

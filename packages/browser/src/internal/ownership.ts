@@ -155,9 +155,9 @@ export const make = Effect.fnUntraced(function*() {
       function*(page: Model.PageEntry, by?: Scope.Scope) {
         const state = yield* page.state.get
         if (state.status._tag === "Closed") return
-        if (Option.exists(state.owner, Handoff.leavesOpen)) return
         if (by !== undefined && !Option.exists(state.owner, (owner) => owner === by)) return
         const adapter = yield* Deferred.await(connected)
+        if (adapter.claims !== undefined && Option.exists(state.owner, Handoff.leavesOpen)) return
         yield* awaitEnd(modelScope, adapter.closePage(page.id, { runBeforeUnload: false }), page.closed, {
           target: `Page ${page.id}`,
           annotation: ["browser.page.id", page.id],

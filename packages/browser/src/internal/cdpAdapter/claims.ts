@@ -117,7 +117,7 @@ export const make = (
       if (tab === undefined) return undefined
       const info = yield* childOf(tab)
       if (info === undefined) return undefined
-      // An open dialog may hold the initialization gate. Reclaim reports it without waiting for a fresh document.
+      // An open dialog may hold the initialization gate; leftover-state observation runs separately.
       const page = Array.from(state.pages.values()).find((page) => page.targetId === info.targetId && !page.ended)
       if (page === undefined) return undefined
       return page.id

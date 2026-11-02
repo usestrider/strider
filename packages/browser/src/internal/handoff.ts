@@ -30,4 +30,4 @@ export const handoff = (scope: Scope.Closeable) =>
     }
     retained.add(scope)
     return Scope.close(scope, Exit.void)
-  })
+  }).pipe(Effect.uninterruptible)
