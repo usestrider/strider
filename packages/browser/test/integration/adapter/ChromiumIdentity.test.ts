@@ -1,4 +1,7 @@
-/** ROOK-93: the browser identities reconnect claims depend on, observed by another CDP client. */
+/**
+ * ROOK-93: identities observed by a second browser client. Prerender uses tab-level auto-attach;
+ * the other transitions use direct page attachment. Other attachment setups are tested separately.
+ */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
@@ -70,7 +73,8 @@ describe("Chromium reconnect identity probes (ROOK-93)", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
       for (const transition of cases) {
-        it.effect(transition, () =>
+        const attachment = transition === "prerender" ? "tab-level auto-attach" : "direct page attachment"
+        it.effect(`${transition} (${attachment})`, () =>
           Effect.gen(function*() {
             const { origin, crossSite } = yield* serve
             const { launched, transport } = yield* ChromiumLauncher.launchWithPort({
@@ -107,12 +111,12 @@ describe("Chromium reconnect identity probes (ROOK-93)", () => {
             if (transition === "prerender") {
               // A direct page-target attachment disables prerender in Chromium. A tab client
               // opts into following its page replacements through auto-attach instead.
-              const listed = yield* until(targets, (infos) =>
-                infos.some((info) => info.type === "tab" && info.url === `${origin}/start`))
+              const listed = yield* until(
+                targets,
+                (infos) => infos.some((info) => info.type === "tab" && info.url === `${origin}/start`)
+              )
               const tab = yield* attach(
-                listed.find((info) =>
-                  info.type === "tab" && info.url === `${origin}/start`
-                )!.targetId
+                listed.find((info) => info.type === "tab" && info.url === `${origin}/start`)!.targetId
               )
               const attached = yield* tab.subscribe(Target.attachedToTarget)
               const next = yield* Stream.runHead(attached).pipe(Effect.forkChild)
@@ -128,14 +132,15 @@ describe("Chromium reconnect identity probes (ROOK-93)", () => {
             } else {
               session = yield* attach(targetId)
             }
-            yield* until(evaluate(session, "location.href + ' ' + document.readyState"), (value) =>
-              value === `${origin}/start complete`)
+            yield* until(
+              evaluate(session, "location.href + ' ' + document.readyState"),
+              (value) => value === `${origin}/start complete`
+            )
             const navigate = Effect.fnUntraced(function*(url: string) {
               yield* Page.navigate({ url }).pipe(Protocol.on(session))
               yield* until(
                 evaluate(session, "location.href + ' ' + document.readyState"),
-                (value) =>
-                  value === `${url} complete`
+                (value) => value === `${url} complete`
               )
             })
             let opener: Protocol.ProtocolSession | undefined
@@ -159,6 +164,11 @@ describe("Chromium reconnect identity probes (ROOK-93)", () => {
             assert.isDefined(subject)
             const subjectTab = initial.find((info) => info.type === "tab" && info.url === subject.url)!
             assert.isDefined(subjectTab)
+            assert.isString(subject.browserContextId)
+            assert.isNotEmpty(subject.browserContextId)
+            assert.isString(subjectTab.browserContextId)
+            assert.isNotEmpty(subjectTab.browserContextId)
+            assert.strictEqual(subjectTab.browserContextId, subject.browserContextId)
             const beforeUrl = yield* endpoint()
             const trace: Array<Readonly<Record<string, unknown>>> = []
             const traceEvents = yield* driver.browser.subscribe(Tracing.dataCollected)
@@ -236,17 +246,32 @@ describe("Chromium reconnect identity probes (ROOK-93)", () => {
               evidence = { persisted: true, token }
             } else {
               const oldToken = yield* evaluate(session, "window.token")
+              assert.isString(oldToken, "pre-crash document must have a token")
+              assert.isNotEmpty(oldToken)
               const crashes = yield* session.subscribe(Inspector.targetCrashed)
               const crashed = yield* Stream.runHead(crashes).pipe(Effect.forkChild)
               yield* Page.crash().pipe(Protocol.on(session), Effect.ignore, Effect.forkChild)
               yield* Fiber.join(crashed)
               const during = yield* targets
               console.log("ROOK-93 crashed", JSON.stringify(during))
+              const crashedPage = during.find((info) => info.type === "page" && info.targetId === subject.targetId)
+              const crashedTab = during.find((info) => info.type === "tab" && info.targetId === subjectTab.targetId)
+              assert.isDefined(crashedPage)
+              assert.isDefined(crashedTab)
+              assert.strictEqual(crashedPage.url, subject.url)
+              assert.strictEqual(crashedTab.url, subject.url)
+              assert.strictEqual(crashedPage.browserContextId, subject.browserContextId)
+              assert.strictEqual(crashedTab.browserContextId, subject.browserContextId)
               session = yield* attach(subject.targetId)
               yield* Page.reload().pipe(Protocol.on(session))
               yield* until(evaluate(session, "document.readyState"), (value) => value === "complete")
-              assert.notStrictEqual(yield* evaluate(session, "window.token"), oldToken)
-              evidence = { targetCrashed: true, reloaded: yield* evaluate(session, "location.href") }
+              const newToken = yield* evaluate(session, "window.token")
+              assert.isString(newToken, "reloaded document must have a token")
+              assert.isNotEmpty(newToken)
+              assert.notStrictEqual(newToken, oldToken)
+              const reloaded = yield* evaluate(session, "location.href")
+              assert.strictEqual(reloaded, `${origin}/start`)
+              evidence = { targetCrashed: true, reloaded, oldToken, newToken }
             }
             if (transition === "cross-site") yield* evaluate(session, "performance.mark('ROOK-93-after'); undefined")
             if (transition === "cross-site") {
@@ -267,11 +292,29 @@ describe("Chromium reconnect identity probes (ROOK-93)", () => {
             const originalPageFound = after.some((info) => info.targetId === subject.targetId)
             assert.strictEqual(originalPageFound, transition !== "prerender")
             const currentUrl = yield* evaluate(session, "location.href")
+            const expectedUrl = transition === "cross-site" ?
+              `${crossSite}/cross-site`
+              : transition === "COOP" ?
+              `${origin}/coop`
+              : transition === "prerender" ?
+              `${origin}/prerendered`
+              : `${origin}/start`
+            assert.strictEqual(currentUrl, expectedUrl)
             const currentPage = after.find((info) => info.type === "page" && info.url === currentUrl)!
             const currentTab = after.find((info) => info.type === "tab" && info.url === currentUrl)!
             assert.isDefined(currentPage)
             assert.isDefined(currentTab)
+            if (transition === "prerender") {
+              // This replacement is specific to the tab-level auto-attach setup above.
+              assert.notStrictEqual(currentPage.targetId, subject.targetId)
+            } else {
+              assert.strictEqual(currentPage.targetId, subject.targetId)
+            }
             assert.strictEqual(currentTab.targetId, subjectTab.targetId)
+            assert.isString(currentPage.browserContextId)
+            assert.isNotEmpty(currentPage.browserContextId)
+            assert.isString(currentTab.browserContextId)
+            assert.isNotEmpty(currentTab.browserContextId)
             assert.strictEqual(currentPage.browserContextId, subject.browserContextId)
             assert.strictEqual(currentTab.browserContextId, subjectTab.browserContextId)
             console.log(

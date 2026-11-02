@@ -2,6 +2,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
+import * as Browser from "@usestrider/browser/cdp/Browser"
 import * as Runtime from "@usestrider/browser/cdp/Runtime"
 import * as Target from "@usestrider/browser/cdp/Target"
 import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol"
@@ -10,7 +11,7 @@ import * as Layer from "effect/Layer"
 import { readFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
-import { chromium } from "../browsers.ts"
+import { assertPinned, chromium } from "../browsers.ts"
 
 // The page prerenders and activates by itself, so no client needs to attach to drive it.
 const serve = Effect.acquireRelease(
@@ -47,6 +48,8 @@ const launch = Effect.gen(function*() {
     args: ["--site-per-process"]
   })
   const driver = yield* CdpConnection.make(transport)
+  const version = yield* Browser.getVersion().pipe(Protocol.on(driver.browser))
+  assertPinned("Chromium", version.product.split("/")[1]!, chromium.version)
   const targets = Target.getTargets({ filter: [{ exclude: false }] }).pipe(
     Protocol.on(driver.browser),
     Effect.map((reply) => reply.targetInfos)
@@ -91,16 +94,20 @@ const selfPrerender = Effect.fnUntraced(function*({ driver, targets }: Effect.Su
 describe("Chromium identity by attachment (ROOK-93)", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
-      it.effect("a prerender activated with no client attached keeps the page target id", () =>
-        Effect.gen(function*() {
-          const { origin } = yield* serve
-          const { activationStart, page, targetId } = yield* selfPrerender(yield* launch, origin)
-          assert.isAbove(activationStart, 0, "the page must really have activated from a prerender")
-          assert.strictEqual(page.targetId, targetId)
-        }), 60_000)
+      it.effect(
+        "a real prerender activation with no target client attached keeps the page target id",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* serve
+            const { activationStart, page, targetId } = yield* selfPrerender(yield* launch, origin)
+            assert.isAbove(activationStart, 0, "the page must really have activated from a prerender")
+            assert.strictEqual(page.targetId, targetId)
+          }),
+        60_000
+      )
 
       it.effect(
-        "browser-level auto-attach, as Strider's adapter does it, refuses the prerender",
+        "Strider's browser-level page auto-attach keeps the page id on an ordinary navigation, not prerender activation",
         () =>
           Effect.gen(function*() {
             const { origin } = yield* serve
