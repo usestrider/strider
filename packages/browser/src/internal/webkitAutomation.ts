@@ -122,13 +122,14 @@ class PortTaken extends Data.TaggedError("PortTaken") {}
 class ListenerPending extends Data.TaggedError("ListenerPending") {}
 
 const attachGuidance = "Use WebKit.layerAttach with an externally managed inspector HTTP endpoint instead."
+const ownershipGuidance = `Wrappers must exec MiniBrowser; fork-only wrappers are not supported. ${attachGuidance}`
 
 /**
  * The exact spawned PID must hold the IPv4 loopback listener. The namespace's TCP table alone includes other
  * processes, so its inode must also occur in this PID's descriptors. Never inspect descendants (ROOK-140).
  */
-export const inspectorListener = Effect.fnUntraced(function*(pid: number, port: number, platform = process.platform) {
-  if (platform !== "linux") {
+export const inspectorListener = Effect.fnUntraced(function*(pid: number, port: number) {
+  if (process.platform !== "linux") {
     return yield* Launch.refused(
       `Launched WebKit requires Linux procfs socket ownership verification. ${attachGuidance}`
     )
@@ -223,23 +224,28 @@ const spawnProcess = Effect.fnUntraced(function*(
           XDG_CONFIG_HOME: `${directory}/config`
         }
       }).pipe(Scope.provide(own))
+      const exited = `The spawned process exited before inspector ownership was verified. ${ownershipGuidance}`
+      const running = launched.handle.isRunning.pipe(Effect.orElseSucceed(() => false))
+      const requireRunning = Effect.flatMap(running, (alive) => alive ? Effect.void : Launch.notReady(launched, exited))
+      // A disappearing procfs entry can be a child exit, not a permission failure (ROOK-140).
+      const listener = inspectorListener(Number(launched.handle.pid), port).pipe(
+        Effect.catch((error) =>
+          Effect.flatMap(running, (alive) => alive ? Effect.fail(error) : Launch.notReady(launched, exited))
+        ),
+        Effect.tap(() => requireRunning)
+      )
       const outcome = yield* Effect.raceFirst(
         Effect.gen(function*() {
-          if (!(yield* launched.handle.isRunning.pipe(Effect.orElseSucceed(() => false)))) {
-            return yield* Launch.notReady(
-              launched,
-              `The spawned process exited before inspector ownership was verified. ${attachGuidance}`
-            )
-          }
-          const inode = yield* inspectorListener(Number(launched.handle.pid), port)
+          yield* requireRunning
+          const inode = yield* listener
           if (inode === undefined) return yield* Effect.fail(new ListenerPending())
           const connecting = yield* Scope.fork(own)
           return yield* Effect.gen(function*() {
             const connection = yield* connector.connect({ host: "127.0.0.1", port }).pipe(Scope.provide(connecting))
-            const after = yield* inspectorListener(Number(launched.handle.pid), port)
-            if (after !== inode || !(yield* launched.handle.isRunning.pipe(Effect.orElseSucceed(() => false)))) {
+            const after = yield* listener
+            if (after !== inode) {
               return yield* Launch.refused(
-                `WebKit child PID ${launched.handle.pid} no longer holds the same inspector listener after connecting. ${attachGuidance}`
+                `WebKit child PID ${launched.handle.pid} no longer holds the same inspector listener after connecting. ${ownershipGuidance}`
               )
             }
             return connection
@@ -273,7 +279,7 @@ const spawnProcess = Effect.fnUntraced(function*(
         default:
           return yield* Launch.notReady(
             launched,
-            `Its inspector server on port ${port} never answered with verifiable ownership by spawned PID ${launched.handle.pid}; fork-only wrappers are not supported (the spawned process must exec MiniBrowser). ${attachGuidance}`
+            `Its inspector server on port ${port} never answered with verifiable ownership by spawned PID ${launched.handle.pid}. ${ownershipGuidance}`
           )
       }
     }).pipe(Effect.onExit((exit) => Exit.isFailure(exit) ? Scope.close(own, exit) : Effect.void))

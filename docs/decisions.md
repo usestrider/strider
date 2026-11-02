@@ -434,7 +434,10 @@ hold the loopback LISTEN socket inode; after connecting, it must still hold the 
 any inspector write. The stock inspector binds exclusively, so retaining the same listener across connection
 establishment excludes a different server accepting that connection. A wrapper must exec MiniBrowser, not merely
 fork it. We do not search descendants or fall back when the proof is unavailable. Refusal explains why and directs
-the caller to attach to an externally managed inspector HTTP endpoint. Attach keeps its existing requirements.
+the caller to attach to an externally managed inspector HTTP endpoint. A live child whose procfs cannot be read
+is refused with `ConnectionFailed`; a child that exits during either ownership check retains `ProcessExited`
+with its exit code and stderr. Exits before ownership also explain that wrappers must exec MiniBrowser and name
+attach, without assuming every exit was caused by a fork. Attach keeps its existing requirements.
 The existing deadline, 100 ms polling and five reported-collision attempts remain the policy.
 
 Rejected: checking port availability then releasing it (another process can bind in the gap), a launch mutex

@@ -45,8 +45,10 @@ import type * as Url from "../Url.ts"
  *
  * Launch requires Linux with readable child procfs (`/proc/<pid>/net/tcp` and `/proc/<pid>/fd`). Before and after
  * connecting, the spawned PID itself must hold the same inspector listener. A wrapper must exec MiniBrowser rather
- * than only fork it. Unsupported operating systems, unreadable procfs and unverifiable ownership fail with
- * `ConnectionFailed` and an explanation. Use `layerAttach` with an externally managed inspector HTTP endpoint when
+ * than only fork it. Unsupported operating systems, unreadable procfs for a live child and unverifiable live-child
+ * ownership fail with `ConnectionFailed` and an explanation. A child that exits before ownership is verified
+ * instead fails with `ProcessExited`, preserving its exit code and stderr. Both failures explain the applicable
+ * launch requirements and the attach alternative. Use `layerAttach` with an externally managed inspector HTTP endpoint when
  * launch ownership cannot be verified.
  *
  * **Gotchas**
