@@ -3,12 +3,14 @@
  * and the digest calls a page by the name it has as each line is noted.
  */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser } from "@usestrider/browser"
+import { Browser, Snapshot, Target } from "@usestrider/browser"
 import { CapturePolicy } from "@usestrider/browser/ai"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
+import * as Snapshots from "../src/internal/snapshot.ts"
 import * as ToolkitImpl from "../src/internal/toolkit.ts"
 
 describe("Session with explicit tab control", () => {
@@ -88,6 +90,119 @@ describe("Session with explicit tab control, after the tab closes", () => {
       const result = Option.getOrThrow(listed).result
       if (!("outcome" in result)) return assert.fail("pages did not return an outcome")
       assert.deepStrictEqual(result.outcome, [])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
+
+describe("Session closed-page cleanup", () => {
+  for (const discoverContextPages of [false, true]) {
+    it.effect(`retires a renamed closed tab and reuses its name (discovery ${discoverContextPages})`, () =>
+      Effect.gen(function*() {
+        const browser = yield* Browser.Browser
+        const context = yield* Browser.newContext()
+        const session = yield* ToolkitImpl.makeSession({
+          context,
+          browser,
+          secrets: {},
+          capture: CapturePolicy.local,
+          discoverContextPages
+        })
+        const page = yield* context.newPage
+        let released = 0
+        const control = page.control
+        Object.defineProperty(page, "control", {
+          value: Effect.andThen(
+            Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                released++
+              })
+            ),
+            control
+          )
+        })
+        const snapshot = new Snapshots.SnapshotImpl({
+          document: Schema.decodeUnknownSync(Target.DocumentId)("document"),
+          generation: Schema.decodeUnknownSync(Snapshot.Generation)(1),
+          root: {
+            ref: Option.none(),
+            role: { _tag: "Aria", role: "document" },
+            name: { _tag: "None" },
+            states: new Set(),
+            validationMessage: Option.none(),
+            children: []
+          },
+          text: "document"
+        })
+        Object.defineProperty(page, "snapshot", { value: () => Effect.succeed(snapshot) })
+        if (discoverContextPages) yield* session.name(page, "remote")
+        else {yield* session.toolkit.handle("control", { tab: String(page.id), name: "remote" }).pipe(
+            Effect.flatMap(Stream.runDrain)
+          )}
+        yield* session.rename("remote", "renamed")
+        yield* session.toolkit.handle("snapshot", { page: "renamed" }).pipe(Effect.flatMap(Stream.runDrain))
+        assert.isTrue(Option.isSome(session.latest("renamed")))
+        yield* page.close()
+        // Exercise the close watcher independently of a listing's synchronous pruning.
+        yield* TestClock.adjust("1 millis")
+        assert.strictEqual(released, discoverContextPages ? 0 : 1)
+        assert.isTrue(Option.isNone(session.named("remote")))
+        assert.isTrue(Option.isNone(session.named("renamed")))
+        assert.isTrue(Option.isNone(session.latest("renamed")))
+        assert.deepStrictEqual(yield* session.pages, [])
+        const replacement = yield* context.newPage
+        if (discoverContextPages) yield* session.name(replacement, "renamed")
+        else {yield* session.toolkit.handle("control", { tab: String(replacement.id), name: "renamed" }).pipe(
+            Effect.flatMap(Stream.runDrain)
+          )}
+        assert.strictEqual((yield* session.page("renamed")).id, replacement.id)
+        if (!discoverContextPages) {
+          yield* session.toolkit.handle("release", { page: "renamed" }).pipe(Effect.flatMap(Stream.runDrain))
+          assert.deepStrictEqual(yield* session.pages, [])
+          assert.isTrue(Option.isNone(session.named("renamed")))
+        }
+        assert.strictEqual(released, discoverContextPages ? 0 : 1, "old grant retires exactly once")
+      }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+  }
+
+  it.effect("finishes cleanup when external close and release race", () =>
+    Effect.gen(function*() {
+      const browser = yield* Browser.Browser
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      let released = 0
+      const control = page.control
+      Object.defineProperty(page, "control", {
+        value: Effect.andThen(
+          Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              released++
+            })
+          ),
+          control
+        )
+      })
+      const session = yield* ToolkitImpl.makeSession({
+        context,
+        browser,
+        secrets: {},
+        capture: CapturePolicy.local,
+        discoverContextPages: false
+      })
+      yield* session.toolkit.handle("control", { tab: String(page.id), name: "remote" }).pipe(
+        Effect.flatMap(Stream.runDrain)
+      )
+      yield* Effect.all([
+        page.close(),
+        session.toolkit.handle("release", { page: "remote" }).pipe(Effect.flatMap(Stream.runDrain), Effect.result)
+      ], { concurrency: "unbounded" })
+      yield* TestClock.adjust("1 millis")
+      assert.strictEqual(released, 1)
+      assert.deepStrictEqual(yield* session.pages, [])
+      assert.isTrue(Option.isNone(session.named("remote")))
+      const replacement = yield* context.newPage
+      yield* session.toolkit.handle("control", { tab: String(replacement.id), name: "remote" }).pipe(
+        Effect.flatMap(Stream.runDrain)
+      )
+      assert.strictEqual((yield* session.page("remote")).id, replacement.id)
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 })
 
