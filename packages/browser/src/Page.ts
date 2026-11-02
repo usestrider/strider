@@ -574,6 +574,18 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
   /**
    * A screenshot; the viewport as PNG unless options say otherwise.
    *
+   * **Gotchas**
+   *
+   * On Chromium, committed main-document replacement before the native capture reply fails with
+   * `CaptureInvalidated`, naming both documents, including a same-URL reload. Preparation belongs to the
+   * original document too. Same-document changes and canceled navigations do not invalidate capture. The
+   * first received native reply keeps its result across a later replacement, even while decoding.
+   * This does not cancel Chromium's pending command, restore its temporary settings, or retry. A caller
+   * may explicitly capture again. In a controlled overlap on Chromium 155.0.8059.79, an immediate second
+   * capture returned replacement-document pixels at the requested viewport dimensions. Completion and
+   * unchanged dimensions are not guaranteed for every invalidation.
+   * Other backends, subframe replacement and hangs without a main-document commit keep the existing deadline.
+   *
    * **Example** (Capturing one element)
    *
    * ```ts import.meta.vitest
@@ -1127,6 +1139,34 @@ export class CloseCanceled extends Schema.Error<CloseCanceled>("@usestrider/brow
 }
 
 /**
+ * A Chromium `page.screenshot` call's main document was replaced before its native capture reply arrived.
+ *
+ * **Details**
+ *
+ * The capture is not retried. Chromium's outstanding command cannot be canceled, and its temporary capture
+ * settings may remain changed. A caller may explicitly capture the replacement document, but this error does
+ * not guarantee that a subsequent capture will complete. An immediate explicit replacement capture completed
+ * with the expected pixels and viewport dimensions in a controlled Chromium 155.0.8059.79 overlap.
+ * Other backends retain their existing behavior.
+ *
+ * @stability unstable
+ * @category errors
+ * @since 0.1.0
+ */
+export class CaptureInvalidated
+  extends Schema.Error<CaptureInvalidated>("@usestrider/browser/Page/CaptureInvalidated")({
+    _tag: Schema.tag("CaptureInvalidated"),
+    document: Target.DocumentId,
+    replacement: Target.DocumentId,
+    hint: Schema.String
+  })
+{
+  override get message(): string {
+    return `Screenshot document ${this.document} was replaced by ${this.replacement} (${this.hint})`
+  }
+}
+
+/**
  * Schema for the reasons a page operation can fail.
  *
  * @stability unstable
@@ -1141,6 +1181,7 @@ export const PageErrorReason = Schema.Union([
   PageNavigation.NoContent,
   InitializationFailed,
   CloseCanceled,
+  CaptureInvalidated,
   Reason.EvaluationThrown,
   Reason.NotSerializable,
   // A capture's element: none, or several (QUIRKS.md, Q126)

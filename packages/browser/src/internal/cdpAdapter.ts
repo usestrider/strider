@@ -168,12 +168,16 @@ Contexts.register(handlers)
 
 const fold = (state: State.State): ProtocolClient.Fold => ({
   events: handlers.events,
-  apply: (session, method, params) =>
+  apply: (session, method, params, received) =>
     Effect.suspend(() => {
       handlers.apply(method, params, {
         state,
         target: session.key === undefined ? undefined : state.targets.get(session)
       })
+      for (const guard of state.captures) {
+        const document = state.navigables.get(guard.page)?.document
+        if (document !== undefined && document.id !== guard.document) guard.replaced(document.id, received)
+      }
       return state.buffer.flush
     }),
   lost: (session) => Effect.sync(() => Targets.lost(state, session)),
@@ -277,6 +281,7 @@ export const connect: (
       pausedRequestBody: (obligation) => Obligations.pausedRequestBody(state, obligation),
       pausedResponseBody: (obligation) => Obligations.pausedResponseBody(state, obligation),
       declare: (scope, declaration) => Declare.declare(state, scope, declaration),
+      captureGuard: { run: (page, effect) => Capture.guard(state, page, effect) },
       screenshot: (page, options) => Capture.screenshot(state, page, options),
       pdf: (page, options) => Capture.pdf(state, page, options),
       accessibilityTree: (page) => Capture.accessibilityTree(state, page),

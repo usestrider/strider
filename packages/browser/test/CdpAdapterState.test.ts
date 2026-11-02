@@ -19,6 +19,7 @@ import * as Deadline from "../src/Deadline.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
+import * as Capture from "../src/internal/cdpAdapter/capture.ts"
 import * as Declare from "../src/internal/cdpAdapter/declare.ts"
 import * as Network from "../src/internal/cdpAdapter/network.ts"
 import * as Obligations from "../src/internal/cdpAdapter/obligations.ts"
@@ -27,7 +28,7 @@ import * as State from "../src/internal/cdpAdapter/state.ts"
 import * as Targets from "../src/internal/cdpAdapter/targets.ts"
 import * as Tree from "../src/internal/cdpAdapter/tree.ts"
 import * as Groups from "../src/internal/objectGroups.ts"
-import type * as ProtocolClient from "../src/internal/protocolClient.ts"
+import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 import * as Target from "../src/Target.ts"
 
@@ -40,7 +41,7 @@ const control: ProtocolClient.FoldControl = {
 }
 
 /** A state with one page in the default context, and the facts it reports once flushed. */
-const withPage = Effect.fnUntraced(function*() {
+const withPage = Effect.fnUntraced(function*(protocolSession = session) {
   const facts: Array<Adapter.Fact> = []
   const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
   buffer.connect(control)
@@ -49,7 +50,7 @@ const withPage = Effect.fnUntraced(function*() {
     ids: Kit.makeIds(),
     buffer,
     control,
-    root: () => session,
+    root: () => protocolSession,
     release: Responses.release
   })
   const context: State.ContextEntry = {
@@ -62,7 +63,7 @@ const withPage = Effect.fnUntraced(function*() {
   const target: State.TargetEntry = {
     kind: "page",
     targetId: "T1",
-    session,
+    session: protocolSession,
     page: undefined,
     frame: undefined,
     url: "about:blank",
@@ -1074,5 +1075,84 @@ describe("CDP unknown viewport baseline lifecycle", () => {
       }))
       assert.deepStrictEqual(contexts, [8, 8])
       assert.isUndefined(entry.viewport)
+    }))
+})
+
+describe("Chromium screenshot guard lifecycle", () => {
+  for (const outcome of ["success", "failure", "interruption"] as const) {
+    it.effect(`removes its registration on ${outcome}`, () =>
+      Effect.gen(function*() {
+        const { state, page } = yield* withPage()
+        const entered = yield* Deferred.make<void>()
+        const effect = Effect.gen(function*() {
+          assert.strictEqual(state.captures.size, 1)
+          yield* Deferred.succeed(entered, undefined)
+          if (outcome === "failure") return yield* Effect.fail("original failure")
+          if (outcome === "interruption") return yield* Effect.never
+          return "pixels"
+        })
+        const fiber = yield* Effect.forkScoped(Capture.guard(state, page.id, effect))
+        yield* Deferred.await(entered)
+        if (outcome === "interruption") yield* Fiber.interrupt(fiber)
+        else {
+          const exit = yield* Fiber.await(fiber)
+          if (outcome === "success") assert.deepStrictEqual(exit, Exit.succeed("pixels"))
+          else assert.deepStrictEqual(exit, Exit.fail("original failure"))
+        }
+        assert.strictEqual(state.captures.size, 0)
+      }))
+  }
+
+  it.effect("keeps a received native reply while its decoding/delivery is suspended across replacement", () =>
+    Effect.gen(function*() {
+      const receipt = yield* Deferred.make<void>()
+      const decoded = yield* Deferred.make<void>()
+      const native = {
+        ...session,
+        drainObserved: Effect.void,
+        send: Effect.fnUntraced(function*() {
+          const observe = yield* ProtocolClient.ReplyReceived
+          observe?.(10)
+          yield* Deferred.succeed(receipt, undefined)
+          yield* Deferred.await(decoded)
+          return { data: "AA==" }
+        })
+      } as unknown as ProtocolClient.Session
+      const { state, page } = yield* withPage(native)
+      const frame = state.navigables.get(page.id)!
+      Tree.commit(
+        state,
+        frame,
+        { loaderId: "initial", url: "about:blank", origin: "://" },
+        () => ({ _tag: "InitialBlank" }),
+        undefined,
+        "test"
+      )
+      const fiber = yield* Effect.forkScoped(Capture.guard(
+        state,
+        page.id,
+        Capture.screenshot(state, page.id, {
+          format: "png",
+          quality: Option.none(),
+          clip: Option.none(),
+          fullPage: false,
+          scale: "device",
+          omitBackground: false
+        })
+      ))
+      yield* Deferred.await(receipt)
+      const replacement = Tree.commit(
+        state,
+        frame,
+        { loaderId: "replacement", url: "about:blank", origin: "://" },
+        () => ({ _tag: "Adopted" }),
+        undefined,
+        "test"
+      )
+      for (const guard of state.captures) guard.replaced(replacement.id, 11)
+      assert.isUndefined(fiber.pollUnsafe())
+      yield* Deferred.succeed(decoded, undefined)
+      assert.deepStrictEqual(Array.from(yield* Fiber.join(fiber)), [0])
+      assert.strictEqual(state.captures.size, 0)
     }))
 })

@@ -30,6 +30,7 @@ import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import type * as NetworkConnection from "../NetworkConnection.ts"
 import type * as NetworkRequest from "../NetworkRequest.ts"
 import type * as NetworkResponse from "../NetworkResponse.ts"
+import type * as Page from "../Page.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import type * as Protocol from "../protocol/Protocol.ts"
 import type * as Transport from "../protocol/Transport.ts"
@@ -756,6 +757,7 @@ export type TargetDescription = Target.Description
 
 /** Why an adapter operation failed, beyond the protocol's own errors. */
 export type AdapterErrorReason =
+  | Page.CaptureInvalidated
   | {
     readonly _tag: "ViewportMismatch"
     readonly requested: { readonly width: number; readonly height: number }
@@ -772,6 +774,8 @@ export class AdapterError extends Data.TaggedError("AdapterError")<{ readonly re
   override get message(): string {
     const reason = this.reason
     switch (reason._tag) {
+      case "CaptureInvalidated":
+        return reason.message
       case "ViewportMismatch":
         return `Viewport ${reason.requested.width}x${reason.requested.height} was not confirmed; measured ${reason.actual.width}x${reason.actual.height} (${reason.hint})`
       case "Gone":
@@ -906,6 +910,13 @@ export interface AdapterConnection {
   ) => Effect.Effect<RegistrationId, AdapterError, Scope.Scope>
 
   // Capture, storage, network, files
+  /** Optional document guard, enclosing L1 preparation as well as native dispatch. */
+  readonly captureGuard?: {
+    readonly run: <A, E, R>(
+      page: Target.NavigableId,
+      effect: Effect.Effect<A, E, R>
+    ) => Effect.Effect<A, E | AdapterError, R>
+  } | undefined
   readonly screenshot: (
     page: Target.NavigableId,
     options: ScreenshotOptions

@@ -2,6 +2,8 @@
  * What a page looks like on CDP: screenshots, PDFs, the browser's accessibility tree and a screencast of its
  * frames.
  */
+import * as Context from "effect/Context"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
@@ -10,11 +12,74 @@ import * as DOM from "../../cdp/DOM.ts"
 import * as Emulation from "../../cdp/Emulation.ts"
 import * as Page from "../../cdp/Page.ts"
 import * as Runtime from "../../cdp/Runtime.ts"
+import * as L1Page from "../../Page.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as L1Target from "../../Target.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
-import { pageOf, type State, type TargetEntry } from "./state.ts"
+import * as ProtocolClient from "../protocolClient.ts"
+import { type CaptureGuard, pageOf, type State, type TargetEntry } from "./state.ts"
+
+interface Guard {
+  readonly check: Effect.Effect<void, Adapter.AdapterError>
+  readonly reply: (received: number) => void
+}
+const CurrentGuard = Context.Reference<Guard | undefined>("strider/internal/captureGuard", {
+  defaultValue: () => undefined
+})
+
+/** Install in the event worker before any document-dependent L1 preparation. */
+export const guard = <A, E, R>(
+  state: State,
+  id: L1Target.NavigableId,
+  effect: Effect.Effect<A, E, R>
+): Effect.Effect<A, E | Adapter.AdapterError, R> =>
+  Effect.gen(function*() {
+    yield* pageOf(state, id)
+    const invalidated = yield* Deferred.make<never, Adapter.AdapterError>()
+    let reply: number | undefined
+    let failure: Adapter.AdapterError | undefined
+    let registration!: CaptureGuard
+    const acquire = state.control.run(Effect.sync(() => {
+      registration = {
+        page: id,
+        document: state.navigables.get(id)?.document?.id,
+        replaced: (replacement, received) => {
+          if (failure !== undefined || (reply !== undefined && reply < received)) return
+          // A page without an initial document cannot yet supply document-dependent geometry.
+          if (registration.document === undefined) return
+          failure = new Adapter.AdapterError({
+            reason: new L1Page.CaptureInvalidated({
+              document: registration.document,
+              replacement,
+              hint:
+                "Navigation replaced the screenshot's document; no retry or repair is attempted, and a dispatched Chromium capture is not canceled"
+            })
+          })
+          Deferred.doneUnsafe(invalidated, Effect.fail(failure))
+        }
+      }
+      state.captures.add(registration)
+    }))
+    const current: Guard = {
+      check: Effect.suspend(() => failure === undefined ? Effect.void : Effect.fail(failure)),
+      reply: (received) => {
+        reply = received
+      }
+    }
+    return yield* Effect.acquireUseRelease(
+      acquire,
+      () =>
+        effect.pipe(
+          Effect.provideService(CurrentGuard, current),
+          Effect.raceFirst(Deferred.await(invalidated))
+        ),
+      () =>
+        Effect.sync(() => {
+          state.captures.delete(registration)
+        })
+    )
+  })
 
 export const screenshot = Effect.fnUntraced(
   function*(state: State, id: L1Target.NavigableId, options: Adapter.ScreenshotOptions) {
@@ -45,18 +110,37 @@ export const screenshot = Effect.fnUntraced(
     if (options.omitBackground) {
       yield* Kit.protocol(Emulation.setDefaultBackgroundColorOverride({ color: { r: 0, g: 0, b: 0, a: 0 } }).pipe(on))
     }
+    const guard = yield* CurrentGuard
+    yield* page.target.session.drainObserved
+    if (guard !== undefined) yield* guard.check
     const { data } = yield* Kit.protocol(
       Page.captureScreenshot({
         format: options.format,
         ...(Option.isSome(options.quality) ? { quality: options.quality.value } : {}),
         ...(clip === undefined ? {} : { clip: { ...clip, scale }, captureBeyondViewport: true }),
         fromSurface: true
-      }).pipe(on)
+      }).pipe(on, Effect.provideService(ProtocolClient.ReplyReceived, guard?.reply))
     ).pipe(
+      Effect.catch((error) => {
+        const reason = error.reason
+        // Only a native terminal reply participates: a lost session or an unanswered command retains its error.
+        if (
+          guard === undefined || (reason._tag !== "Unsupported" && !(reason._tag === "Protocol" &&
+            (reason.error.reason._tag === "Rejected" || reason.error.reason._tag === "Decode")))
+        ) {
+          return Effect.fail(error)
+        }
+        return page.target.session.drainObserved.pipe(
+          Effect.andThen(guard.check),
+          Effect.andThen(Effect.fail(error))
+        )
+      }),
       Effect.ensuring(
         options.omitBackground ? Emulation.setDefaultBackgroundColorOverride({}).pipe(on, Effect.ignore) : Effect.void
       )
     )
+    yield* page.target.session.drainObserved
+    if (guard !== undefined) yield* guard.check
     return yield* Kit.decodeBase64(data, "Page.captureScreenshot")
   }
 )
