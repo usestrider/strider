@@ -575,6 +575,10 @@ describe("Chromium claims (ROOK-95)", () => {
           Effect.gen(function*() {
             const browser = yield* launch
             const { origin } = yield* serve
+            const cleanupWarnings: Array<unknown> = []
+            const cleanupLogger = Logger.make((entry) => {
+              if (entry.logLevel === "Warn") cleanupWarnings.push(entry.message)
+            })
             const old = yield* Scope.make()
             yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
             const services = yield* Layer.buildWithScope(browser.connect, old)
@@ -589,8 +593,15 @@ describe("Chromium claims (ROOK-95)", () => {
               })
               yield* opened
               return claim
-            }).pipe(Scope.provide(old), Effect.provide(services))
-            const snapshots = yield* handoff(old)
+            }).pipe(
+              Scope.provide(old),
+              Effect.provide(services),
+              Effect.provideService(Logger.CurrentLoggers, new Set([cleanupLogger]))
+            )
+            const snapshots = yield* handoff(old).pipe(
+              Effect.provideService(Logger.CurrentLoggers, new Set([cleanupLogger]))
+            )
+            assert.deepStrictEqual(cleanupWarnings, [], "handoff must confirm declaration cleanup")
             const lastKnown = snapshots.find((entry) => entry.claim === claim)!
             assert.isDefined(lastKnown)
             const before = (yield* browser.targets).find((info) => info.url === `${origin}/before-handoff-dialog`)!
