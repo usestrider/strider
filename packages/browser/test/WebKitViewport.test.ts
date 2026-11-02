@@ -302,6 +302,55 @@ describe("WebKit viewport confirmation", () => {
       assert.strictEqual(answer, true)
     }))
 
+  for (const popupFirst of [false, true]) {
+    it.effect(`tracks the failed handle when the popup arrives ${popupFirst ? "before" : "after"} its announcement`, () =>
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const removed = yield* Deferred.make<void>()
+        const context = { browserContextId: "context" } as State.ContextEntry
+        // targets.ts consumes one pending creation at the first announcement, irrespective of actual origin.
+        let pending = 1
+        const announce = (id: string) => {
+          const popup = pending === 0
+          if (pending > 0) pending--
+          return { id, context, popup, ended: false } as State.PageEntry
+        }
+        const ordered = popupFirst
+          ? [announce("unrelated"), announce("failed")]
+          : [announce("failed"), announce("unrelated")]
+        const failed = ordered.find((page) => page.id === "failed")!
+        const unrelated = ordered.find((page) => page.id === "unrelated")!
+        const pages = new Map(ordered.map((page) => [page.id, page]))
+        const state = {
+          pages,
+          pageHandles: new Map([[failed, handle]]),
+          creating: new Map([["context", pending]]),
+          root: () => ({ drainObserved: Effect.void }),
+          buffer: {
+            waitFor: Effect.fnUntraced(function*(check: () => unknown) {
+              assert.isUndefined(check(), "the actual failed page must still be awaited, even with popup: true")
+              yield* Deferred.succeed(entered, undefined)
+              yield* Deferred.await(removed)
+              assert.strictEqual(check(), true, "an unrelated unpaired page must not block a known handle")
+            })
+          }
+        } as unknown as Parameters<typeof WebKitAutomation.closeFailedPage>[0]
+        const fiber = yield* WebKitAutomation.closeFailedPage(
+          state,
+          context,
+          processFor(() => measure()),
+          handle,
+          new Set()
+        ).pipe(Effect.forkChild)
+        yield* Deferred.await(entered)
+        assert.isUndefined(fiber.pollUnsafe())
+        pages.delete(failed.id)
+        yield* Deferred.succeed(removed, undefined)
+        yield* Fiber.join(fiber)
+        assert.isTrue(pages.has(unrelated.id))
+      }))
+  }
+
   it.effect("does not add a defect when failed creation cleanup finds a vanished window", () =>
     Effect.gen(function*() {
       const gone = new Protocol.ProtocolError({
