@@ -47,7 +47,7 @@ export const Claim = Schema.String.pipe(Schema.brand("~@usestrider/browser/exper
 export type Claim = typeof Claim.Type
 
 /**
- * Issues a claim for a non-default context this connection owns.
+ * Issues a claim for a non-default reclaimable context this connection owns.
  *
  * **Example** (Using claims)
  *

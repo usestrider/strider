@@ -18,20 +18,17 @@ import * as Handles from "./handles.ts"
 import * as Handoff from "./handoff.ts"
 import * as Operation from "./operation.ts"
 
-const Payload = Schema.Struct({
-  backend: Schema.Literal("chromium"),
-  browser: Schema.String,
-  context: Schema.String,
-  tab: Schema.optional(Schema.String)
-})
+const identity = { backend: Schema.Literal("chromium"), browser: Schema.String, context: Schema.String }
+const PagePayload = Schema.Struct({ ...identity, kind: Schema.Literal("page"), tab: Schema.String })
+const ContextPayload = Schema.Struct({ ...identity, kind: Schema.Literal("context") })
 const error = (operation: string, reason: Claim.ClaimError["reason"]) =>
   new Claim.ClaimError({ operation, reason, diagnostics: Operation.diagnosticsNow() })
-const unsupported = (operation: string) =>
+const unsupported = (operation: string, backend: string) =>
   error(
     operation,
     new Reason.Unsupported({
       capability: "claims",
-      backend: "this connection",
+      backend,
       hint:
         "Claims require a Chromium browser WebSocket identity; Firefox and stock WebKit do not support direct recovery"
     })
@@ -40,7 +37,11 @@ const gone = (operation: string) => error(operation, new Claim.Gone({ hint: "The
 const notOwned = (operation: string) =>
   error(
     operation,
-    new Reason.NotPermitted({ required: "control", hint: "Claims require ownership, not a control grant" })
+    new Reason.NotPermitted({
+      required: "control",
+      hint:
+        "Claims require ownership in a reclaimable context or of a default-context page; control alone is insufficient"
+    })
   )
 const mapAdapter = (operation: string, backend: string) => (failure: Adapter.AdapterError | Deadline.Timeout) => {
   const mapped = Operation.fromAdapter(failure, Operation.idNow(), backend)
@@ -50,9 +51,9 @@ const mapAdapter = (operation: string, backend: string) => (failure: Adapter.Ada
     ? gone(operation)
     : error(operation, mapped.reason)
 }
-const decode = (operation: string, value: string) =>
+const decode = <A>(operation: string, value: string, payload: Schema.Codec<A, unknown>) =>
   Effect.try({
-    try: () => Schema.decodeUnknownSync(Payload)(JSON.parse(value)),
+    try: () => Schema.decodeUnknownSync(payload)(JSON.parse(value)),
     catch: () =>
       error(
         operation,
@@ -63,7 +64,7 @@ const decode = (operation: string, value: string) =>
         })
       )
   })
-const checkBrowser = (operation: string, claims: { readonly browser: string }, payload: typeof Payload.Type) =>
+const checkBrowser = (operation: string, claims: { readonly browser: string }, payload: { readonly browser: string }) =>
   claims.browser === payload.browser
     ? Effect.void
     : Effect.fail(
@@ -73,14 +74,17 @@ const checkBrowser = (operation: string, claims: { readonly browser: string }, p
 export const claimPage = Operation.fn("Page.claim")(function*(page: Page.Page) {
   const { runtime, entry, grant } = Handles.page(page)
   const claims = runtime.model.adapter.claims
-  if (claims === undefined) return yield* Effect.fail(unsupported("Page.claim"))
+  if (claims === undefined) return yield* Effect.fail(unsupported("Page.claim", runtime.backend))
   yield* Access.check(grant)
   const state = yield* entry.state.get
   if (state.status._tag === "Closed") return yield* Effect.fail(gone("Page.claim"))
+  if (!entry.contextEntry.isDefault && !(yield* entry.contextEntry.state.get).settings.reclaimable) {
+    return yield* Effect.fail(notOwned("Page.claim"))
+  }
   if (Option.isNone(state.owner)) return yield* Effect.fail(notOwned("Page.claim"))
   const identity = yield* claims.page(entry.id).pipe(Effect.mapError(mapAdapter("Page.claim", runtime.backend)))
   Handoff.allow(state.owner.value)
-  return PageClaim.Claim.make(JSON.stringify({ backend: "chromium", ...identity }))
+  return PageClaim.Claim.make(JSON.stringify({ backend: "chromium", kind: "page", ...identity }))
 })
 
 export const claimUserContext = Operation.fn("UserContext.claim")(function*(context: UserContext.UserContext) {
@@ -88,24 +92,26 @@ export const claimUserContext = Operation.fn("UserContext.claim")(function*(cont
   // Narrow the handle through the context branch; pages are not accepted by this signature.
   if (!("isDefault" in entry)) return yield* Effect.die(new Error("Expected a context"))
   const claims = runtime.model.adapter.claims
-  if (claims === undefined) return yield* Effect.fail(unsupported("UserContext.claim"))
+  if (claims === undefined) return yield* Effect.fail(unsupported("UserContext.claim", runtime.backend))
   yield* Access.check(grant)
   const state = yield* entry.state.get
   if (Option.isSome(state.closed)) return yield* Effect.fail(gone("UserContext.claim"))
-  if (entry.isDefault || !state.settings.owned || Option.isSome(grant)) {
+  if (entry.isDefault || !state.settings.owned || !state.settings.reclaimable || Option.isSome(grant)) {
     return yield* Effect.fail(notOwned("UserContext.claim"))
   }
   const identity = yield* claims.context(entry.id).pipe(
     Effect.mapError(mapAdapter("UserContext.claim", runtime.backend))
   )
-  return ContextClaim.Claim.make(JSON.stringify({ backend: "chromium", browser: claims.browser, context: identity }))
+  return ContextClaim.Claim.make(
+    JSON.stringify({ backend: "chromium", kind: "context", browser: claims.browser, context: identity })
+  )
 })
 
 export const createContext = Operation.fn("UserContext.createReclaimable")(
   function*(options: UserContext.Options & { readonly reclaimable: true }) {
     const hooks = Hooks.get(yield* Browser.Browser)
     if (hooks.runtime.model.adapter.claims === undefined) {
-      return yield* Effect.fail(unsupported("UserContext.createReclaimable"))
+      return yield* Effect.fail(unsupported("UserContext.createReclaimable", hooks.runtime.backend))
     }
     return yield* hooks.context(options, { reclaimable: true })
   }
@@ -114,10 +120,9 @@ export const createContext = Operation.fn("UserContext.createReclaimable")(
 export const reclaimPage = Operation.fn("Browser.reclaim")(function*(claim: PageClaim.Claim) {
   const { runtime } = Hooks.get(yield* Browser.Browser)
   const claims = runtime.model.adapter.claims
-  if (claims === undefined) return yield* Effect.fail(unsupported("Browser.reclaim"))
-  const payload = yield* decode("Browser.reclaim", claim)
+  if (claims === undefined) return yield* Effect.fail(unsupported("Browser.reclaim", runtime.backend))
+  const payload = yield* decode("Browser.reclaim", claim, PagePayload)
   yield* checkBrowser("Browser.reclaim", claims, payload)
-  if (payload.tab === undefined) return yield* Effect.fail(gone("Browser.reclaim"))
   const id = yield* claims.findPage({ ...payload, tab: payload.tab }).pipe(
     Effect.mapError(mapAdapter("Browser.reclaim", runtime.backend))
   )
@@ -140,8 +145,8 @@ export const reclaimContext = Operation.fn("UserContext.reclaim")(
     const hooks = Hooks.get(yield* Browser.Browser)
     const { runtime } = hooks
     const claims = runtime.model.adapter.claims
-    if (claims === undefined) return yield* Effect.fail(unsupported("UserContext.reclaim"))
-    const payload = yield* decode("UserContext.reclaim", claim)
+    if (claims === undefined) return yield* Effect.fail(unsupported("UserContext.reclaim", runtime.backend))
+    const payload = yield* decode("UserContext.reclaim", claim, ContextPayload)
     yield* checkBrowser("UserContext.reclaim", claims, payload)
     const context = yield* claims.findContext(payload.context).pipe(
       Effect.mapError(mapAdapter("UserContext.reclaim", runtime.backend))

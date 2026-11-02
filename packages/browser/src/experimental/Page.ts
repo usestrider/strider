@@ -47,7 +47,12 @@ export const Claim = Schema.String.pipe(Schema.brand("~@usestrider/browser/exper
 export type Claim = typeof Claim.Type
 
 /**
- * Issues a claim for a page this connection owns. Control access alone does not give ownership.
+ * Issues a claim for an owned page in a reclaimable context or the default context.
+ *
+ * **Details**
+ *
+ * Control access alone does not give ownership. Pages in ordinary disposable contexts are refused because
+ * those contexts and their tabs cannot survive the creating connection.
  *
  * **Example** (Using claims)
  *

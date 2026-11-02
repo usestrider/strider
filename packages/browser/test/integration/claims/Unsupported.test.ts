@@ -35,6 +35,7 @@ for (const [name, backend] of backends) {
     layer(backend, { excludeTestServices: true })((it) => {
       it.effect("refuses creation, issuance and reclaim with a named capability", () =>
         Effect.gen(function*() {
+          const browser = yield* Browser.Browser
           const page = yield* Browser.newPage()
           const calls: Array<Effect.Effect<unknown, unknown, Browser.Browser | import("effect/Scope").Scope>> = [
             Claims.UserContext.create({ reclaimable: true }),
@@ -49,7 +50,10 @@ for (const [name, backend] of backends) {
             const failure = Option.getOrThrow(Exit.findErrorOption(exit))
             assert(failure instanceof Claims.Claim.ClaimError)
             assert.strictEqual(failure.reason._tag, "Unsupported")
-            if (failure.reason._tag === "Unsupported") assert.strictEqual(failure.reason.capability, "claims")
+            if (failure.reason._tag === "Unsupported") {
+              assert.strictEqual(failure.reason.capability, "claims")
+              assert.strictEqual(failure.reason.backend, browser.info.product)
+            }
           }
         }), 60_000)
     })
