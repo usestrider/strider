@@ -17,7 +17,7 @@ import * as Schedule from "effect/Schedule"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import type * as PageNavigation from "../../../src/PageNavigation.ts"
-import type * as Target from "../../../src/Target.ts"
+import * as Target from "../../../src/Target.ts"
 import { type Backend, json, makeRecorder, type Recorder, type Site, site, tlsSite } from "./harness.ts"
 
 const timeout = 60_000
@@ -378,7 +378,7 @@ export const conformance = (backend: Backend) =>
               )
               yield* mainRealm(world, frame.frame)
             }
-            const urls = frames.map((frame) =>
+            const urls: Array<string> = frames.map((frame) =>
               world.facts.all("DocumentCommitted").filter((fact) => fact.navigable === frame.frame).at(-1)!.url
             )
             assert.sameMembers(urls, [`${world.site.origin}/child`, `${world.site.crossSite}/child`])
@@ -393,7 +393,7 @@ export const conformance = (backend: Backend) =>
               "NavigableRemoved",
               (fact) => frames.some((frame) => frame.frame === fact.navigable)
             )
-            assert.deepStrictEqual(removed.reason, { _tag: "FrameDetached" })
+            assert.deepStrictEqual(removed.reason, new Target.FrameDetached({}))
             yield* goto(world, page, `${world.site.origin}/hello`)
             for (const frame of frames) {
               yield* world.facts.when("NavigableRemoved", (fact) => fact.navigable === frame.frame)
@@ -1263,11 +1263,11 @@ export const conformance = (backend: Backend) =>
             yield* goto(world, page, `${world.site.origin}/hello`)
             yield* world.adapter.closePage(page, { runBeforeUnload: false })
             const removed = yield* world.facts.when("NavigableRemoved", (fact) => fact.navigable === page)
-            assert.deepStrictEqual(removed.reason, { _tag: "PageClosed", by: "command" })
+            assert.deepStrictEqual(removed.reason, new Target.PageClosed({ by: "command" }))
             const second = yield* world.adapter.createPage(context)
             yield* world.adapter.removeUserContext(context)
             const gone = yield* world.facts.when("NavigableRemoved", (fact) => fact.navigable === second)
-            assert.deepStrictEqual(gone.reason, { _tag: "PageClosed", by: "userContextRemoved" })
+            assert.deepStrictEqual(gone.reason, new Target.PageClosed({ by: "userContextRemoved" }))
             yield* world.facts.when("UserContextRemoved", (fact) => fact.context === context)
           }), timeout)
 
@@ -1313,7 +1313,7 @@ export const conformance = (backend: Backend) =>
             assert.strictEqual(lost.initiator, "remote")
             for (const navigable of [page, frame.frame]) {
               const removed = yield* world.facts.when("NavigableRemoved", (fact) => fact.navigable === navigable)
-              assert.deepStrictEqual(removed.reason, { _tag: "ConnectionLost" })
+              assert.deepStrictEqual(removed.reason, new Target.ConnectionLost({}))
             }
             const late = yield* world.adapter.createPage(world.adapter.defaultContext).pipe(Effect.flip)
             assert.strictEqual(late._tag, "AdapterError")

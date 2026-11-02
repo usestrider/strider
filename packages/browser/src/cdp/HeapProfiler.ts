@@ -55,7 +55,7 @@ export const SamplingHeapProfile = /*#__PURE__*/ Schema.suspend(() =>
     head: SamplingHeapProfileNode,
     samples: Schema.Array(SamplingHeapProfileSample)
   }).annotate({ identifier: "HeapProfiler.SamplingHeapProfile" })
-) as any as Schema.Codec<SamplingHeapProfile>
+) as any as Schema.Codec<SamplingHeapProfile, unknown>
 
 /**
  * Sampling Heap Profile node. Holds callsite information, allocation statistics and child nodes.
@@ -97,7 +97,7 @@ export const SamplingHeapProfileNode = /*#__PURE__*/ Schema.suspend(() =>
     id: Schema.Int,
     children: Schema.Array(SamplingHeapProfileNode)
   }).annotate({ identifier: "HeapProfiler.SamplingHeapProfileNode" })
-) as any as Schema.Codec<SamplingHeapProfileNode>
+) as any as Schema.Codec<SamplingHeapProfileNode, unknown>
 
 /**
  * A single sample from a sampling profile.
@@ -324,7 +324,7 @@ export const GetSamplingProfileResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     profile: SamplingHeapProfile
   }).annotate({ identifier: "HeapProfiler.GetSamplingProfileResult" })
-) as any as Schema.Codec<GetSamplingProfileResult>
+) as any as Schema.Codec<GetSamplingProfileResult, unknown>
 
 /**
  * If heap objects tracking has been started then backend may send update for one or more fragments
@@ -515,7 +515,7 @@ export const StopSamplingResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     profile: SamplingHeapProfile
   }).annotate({ identifier: "HeapProfiler.StopSamplingResult" })
-) as any as Schema.Codec<StopSamplingResult>
+) as any as Schema.Codec<StopSamplingResult, unknown>
 
 /**
  * `stopTrackingHeapObjects.Params`.

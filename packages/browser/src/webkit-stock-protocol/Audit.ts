@@ -70,7 +70,7 @@ export const RunResult = /*#__PURE__*/ Schema.suspend(() =>
     result: Runtime.RemoteObject,
     wasThrown: Schema.optional(Schema.Boolean)
   }).annotate({ identifier: "Audit.RunResult" })
-) as any as Schema.Codec<RunResult>
+) as any as Schema.Codec<RunResult, unknown>
 
 /**
  * Creates the `WebInspectorAudit` object that is passed to run. Must call teardown before calling setup more than once.

@@ -131,7 +131,7 @@ export const ServiceWorkerRouterCondition = /*#__PURE__*/ Schema.suspend(() =>
     or: Schema.optional(Schema.Array(ServiceWorkerRouterCondition)),
     not: Schema.optional(ServiceWorkerRouterCondition)
   }).annotate({ identifier: "ServiceWorker.ServiceWorkerRouterCondition" })
-) as any as Schema.Codec<ServiceWorkerRouterCondition>
+) as any as Schema.Codec<ServiceWorkerRouterCondition, unknown>
 
 /**
  * `ServiceWorkerRouterRule`.
@@ -162,7 +162,7 @@ export const ServiceWorkerRouterRule = /*#__PURE__*/ Schema.suspend(() =>
     source: ServiceWorkerRouterSource,
     id: Schema.Int
   }).annotate({ identifier: "ServiceWorker.ServiceWorkerRouterRule" })
-) as any as Schema.Codec<ServiceWorkerRouterRule>
+) as any as Schema.Codec<ServiceWorkerRouterRule, unknown>
 
 /**
  * Corresponds to `RouterSource` in the spec while the representation is different as follows.
@@ -299,7 +299,7 @@ export const ServiceWorkerVersion = /*#__PURE__*/ Schema.suspend(() =>
     routerRules: Schema.optional(Schema.String),
     typedRouterRules: Schema.optional(Schema.Array(ServiceWorkerRouterRule))
   }).annotate({ identifier: "ServiceWorker.ServiceWorkerVersion" })
-) as any as Schema.Codec<ServiceWorkerVersion>
+) as any as Schema.Codec<ServiceWorkerVersion, unknown>
 
 /**
  * `ServiceWorkerVersionRunningStatus` values.
@@ -649,7 +649,7 @@ export const WorkerVersionUpdatedParams = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     versions: Schema.Array(ServiceWorkerVersion)
   }).annotate({ identifier: "ServiceWorker.WorkerVersionUpdatedParams" })
-) as any as Schema.Codec<WorkerVersionUpdatedParams>
+) as any as Schema.Codec<WorkerVersionUpdatedParams, unknown>
 
 /**
  * Sends `ServiceWorker.deliverPushMessage`.

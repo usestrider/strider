@@ -217,7 +217,7 @@ export const Cookie = /*#__PURE__*/ Schema.suspend(() =>
     session: Schema.Boolean,
     sameSite: CookieSameSitePolicy
   }).annotate({ identifier: "Automation.Cookie" })
-) as any as Schema.Codec<Cookie>
+) as any as Schema.Codec<Cookie, unknown>
 
 /**
  * Enumerates values for cookies same site policy
@@ -1114,7 +1114,7 @@ export const AddSingleCookieParams = /*#__PURE__*/ Schema.suspend(() =>
     browsingContextHandle: BrowsingContextHandle,
     cookie: Cookie
   }).annotate({ identifier: "Automation.AddSingleCookieParams" })
-) as any as Schema.Codec<AddSingleCookieParams>
+) as any as Schema.Codec<AddSingleCookieParams, unknown>
 
 /**
  * Adds a virtual web authentication authenticator for the specified browsing context.
@@ -1761,7 +1761,7 @@ export const GetAllCookiesResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     cookies: Schema.Array(Cookie)
   }).annotate({ identifier: "Automation.GetAllCookiesResult" })
-) as any as Schema.Codec<GetAllCookiesResult>
+) as any as Schema.Codec<GetAllCookiesResult, unknown>
 
 /**
  * Fetches information about the specified browsing context.

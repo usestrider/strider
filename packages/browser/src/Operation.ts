@@ -47,7 +47,7 @@ export interface Operation {
  * @category tags
  * @since 0.1.0
  */
-export class Current extends Context.Service<Current, Operation>()("@usestrider/browser/Operation/Current") {}
+export class Current extends Context.Service<Current, Operation>()(Internal.CurrentKey) {}
 
 /**
  * Settings for an operation's span.
@@ -246,13 +246,7 @@ export interface Fn {
  * @category constructors
  * @since 0.1.0
  */
-export const fn = (name: string, options?: Options | undefined): Fn =>
-  ((body: Function, ...pipeables: Array<Function>) =>
-    Effect.fnUntraced(
-      body as never,
-      (effect: Effect.Effect<unknown, unknown, unknown>) => Internal.named(name, options)(effect),
-      ...pipeables as []
-    )) as Fn
+export const fn = (name: string, options?: Options | undefined): Fn => Internal.fnWith(name, options) as Fn
 
 /**
  * Notes that from here, the operation may have had an effect outside the program, such as a call to your shop's API.

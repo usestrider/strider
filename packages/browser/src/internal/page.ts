@@ -12,15 +12,20 @@
  * the readiness `waitUntil` asks for of the document it committed, all under one deadline; a navigation with
  * no outcome by then is `Timeout{postcondition}` (CONCEPTS.md §4).
  */
+import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Hash from "effect/Hash"
+import * as HttpUrl from "effect/http/Url"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import { pipeArguments } from "effect/Pipeable"
+import * as Result from "effect/Result"
 import type * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
 import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as JSHandle from "../JSHandle.ts"
@@ -53,33 +58,34 @@ import * as Routes from "./routes.ts"
 import * as Runtime from "./runtime.ts"
 import * as Snapshots from "./snapshot.ts"
 import * as Storage from "./storage.ts"
+import * as Urls from "./urls.ts"
 import * as Watchable from "./watchable.ts"
 
 const PageTypeId = "~@usestrider/browser/Page"
 
-const opened = (state: Model.PageState): Option.Option<Page.Status> =>
-  state._tag === "Opening"
+const opened = ({ status }: Model.PageState): Option.Option<Page.Status> =>
+  status._tag === "Opening"
     ? Option.none()
     : Option.some(
-      state._tag === "Open"
-        ? { _tag: "Open", url: state.url as Url.Url, document: state.document, prompt: state.prompt }
-        : { _tag: "Closed", reason: state.reason }
+      status._tag === "Open"
+        ? { _tag: "Open", url: status.url, document: status.document, prompt: status.prompt }
+        : { _tag: "Closed", reason: status.reason }
     )
 
-const pageEnded = (state: Model.PageState): Option.Option<Target.CloseReason> =>
-  state._tag === "Closed" ? Option.some(state.reason) : Option.none()
+const pageEnded = ({ status }: Model.PageState): Option.Option<Target.CloseReason> =>
+  status._tag === "Closed" ? Option.some(status.reason) : Option.none()
 
 /** A page's frame tree, from the model's: each frame under its parent, in the order they were added. */
-const frameTree = (page: Target.NavigableId, state: Model.FrameTreeState): Page.FrameTree => {
+const frameTree = (page: Target.NavigableId, state: Model.PageState): Page.FrameTree => {
   const children = (parent: Target.NavigableId): ReadonlyArray<Page.FrameTree> =>
     state.frames.filter((frame) => frame.parent === parent).map((frame) => ({
       id: frame.id,
-      url: frame.url as Url.Url,
+      url: frame.url,
       // No backend reports a frame's name, and `window.name` is its document's to read
       name: Option.none(),
       children: children(frame.id)
     }))
-  return { id: page, url: state.url as Url.Url, name: Option.none(), children: children(page) }
+  return { id: page, url: state.status.url, name: Option.none(), children: children(page) }
 }
 
 const pageError = (operation: string, reason: Page.PageErrorReason, id: Diagnostics.OperationId) =>
@@ -114,21 +120,21 @@ const observeMembers = (owner: ObservedOwner) => {
     }),
     url: Watchable.make({
       ref: entry.state,
-      project: (state: Model.PageState) => state._tag === "Opening" ? Option.none() : Option.some(state.url as Url.Url),
+      project: ({ status }: Model.PageState) => status._tag === "Opening" ? Option.none() : Option.some(status.url),
       ended: pageEnded,
       target: { _tag: "Page", id: entry.id },
       operation: "Page.url.waitFor"
     }),
     frames: Watchable.make({
-      ref: entry.tree,
-      project: (state: Model.FrameTreeState) => Option.some(frameTree(entry.id, state)),
-      ended: (state: Model.FrameTreeState) => state.closed,
+      ref: entry.state,
+      project: (state: Model.PageState) => Option.some(frameTree(entry.id, state)),
+      ended: pageEnded,
       target: { _tag: "Page", id: entry.id },
       operation: "Page.frames.waitFor"
     }),
     workers: Watchable.make({
-      ref: entry.workers,
-      project: (workers: ReadonlyArray<Model.WorkerEntry>) => Option.some(workers.map(runtime.worker)),
+      ref: entry.state,
+      project: (state: Model.PageState) => Option.some(state.workers.map(runtime.worker)),
       ended: () => Option.none(),
       target: { _tag: "Page", id: entry.id },
       operation: "Page.workers.waitFor"
@@ -159,7 +165,7 @@ const observeMembers = (owner: ObservedOwner) => {
 
 /** A page the connection observes: its state, its events, and the upgrades. */
 export const observed = (owner: ObservedOwner): Page.ObservedPage => {
-  const page = observeMembers(owner) as unknown as Page.ObservedPage
+  const page: Page.ObservedPage = observeMembers(owner)
   Handles.registerPage(page, { runtime: owner.runtime, entry: owner.entry, grant: Option.none() })
   return page
 }
@@ -207,14 +213,16 @@ export const make = (owner: PageOwner): Page.Page => {
       )
       if (Option.isNone(started)) return Option.none<PageNavigation.PageNavigation>()
       record.markConfirmed()
-      const navigation = model.navigation(started.value)
+      const navigation = yield* model.navigation(started.value)
       const outcome = yield* record.bound(
         Deferred.await(navigation.outcome),
         () => Option.some("The navigation had no outcome before the deadline")
-      ).pipe(Effect.ensuring(Effect.sync(() => model.forget(started.value))))
+      ).pipe(Effect.ensuring(model.forget(started.value)))
       // Where it ended: the document's URL, which a same-document navigation set, or where it was going
-      const document = "document" in outcome ? model.documents.get(outcome.document) : undefined
-      const at = document?.url ?? Option.getOrElse(url, () => "")
+      const document = "document" in outcome ? model.document(outcome.document) : Option.none()
+      const at = Option.isSome(document)
+        ? (yield* document.value.state.get).url
+        : Option.getOrElse(url, () => Urls.reported(""))
       const result = yield* Navigation.settle(
         model,
         operation,
@@ -231,7 +239,7 @@ export const make = (owner: PageOwner): Page.Page => {
       }
       return Option.some(result)
     }).pipe(
-      Effect.raceFirst(Runtime.pageEnded(entry, Operation.operationId())),
+      Effect.raceFirst(Runtime.pageEnded(entry)),
       Operation.named(operation, {
         attributes: {
           "browser.page.id": entry.id,
@@ -326,8 +334,10 @@ export const make = (owner: PageOwner): Page.Page => {
     snapshot: (options) =>
       Effect.gen(function*() {
         const record = yield* Operation.record
+        const snapshotOwner = { runtime, page: entry, grant: owner.grant }
         const taken = yield* Snapshots.take(
-          { runtime, page: entry, grant: owner.grant },
+          snapshotOwner,
+          LocatorImpl.locatorOn(snapshotOwner),
           null,
           options,
           record.id,
@@ -363,10 +373,8 @@ export const make = (owner: PageOwner): Page.Page => {
     capability: (capability) => Capabilities.acquire(runtime, entry, capability),
     context: owner.context,
     goto: (url, options) => {
-      let parsed: URL
-      try {
-        parsed = new URL(url)
-      } catch {
+      const result = HttpUrl.fromString(url)
+      if (Result.isFailure(result)) {
         return Effect.fail(pageError(
           "Page.goto",
           new Reason.InvalidInput({
@@ -374,12 +382,13 @@ export const make = (owner: PageOwner): Page.Page => {
             expected: "an absolute URL",
             hint: `${JSON.stringify(url)} doesn't parse`
           }),
-          Operation.operationId()
+          Operation.idNow()
         ))
       }
+      const parsed = result.success
       return navigate(
         "Page.goto",
-        Option.some(parsed.href as Url.Url),
+        Option.some(Urls.reported(parsed.href)),
         (id) =>
           Effect.map(adapter.navigate(entry.id, parsed.href, { referrer: Option.none() }), Option.some).pipe(
             Effect.mapError((error) => failure("Page.goto", id, error))
@@ -444,10 +453,8 @@ export const make = (owner: PageOwner): Page.Page => {
       pages: () => [entry],
       name: "Page.clock",
       // One timeline covers a page
-      conflicting: () => {
-        const context = runtime.model.contexts.get(entry.context)
-        return context !== undefined && Clock.isInstalled(context) ? Option.some("UserContext.clock") : Option.none()
-      }
+      conflicting: () =>
+        Clock.isInstalled(runtime.timelines, entry.contextEntry) ? Option.some("UserContext.clock") : Option.none()
     }, entry),
     route: <E, R, P extends Route.Phase = "request">(
       pattern: Url.Pattern | string,
@@ -458,7 +465,7 @@ export const make = (owner: PageOwner): Page.Page => {
         {
           runtime,
           scope: declared,
-          routes: entry.routes,
+          routes: entry,
           target: { _tag: "Page", id: entry.id },
           operation: "Page.route"
         },
@@ -488,38 +495,44 @@ export const make = (owner: PageOwner): Page.Page => {
         const id = record.id
         if (Option.isSome(yield* Deferred.poll(entry.closed))) return
         // `runBeforeUnload`: the prompt is decided as any dialog is, and a handler's
-        // stay ends the close with the page open
-        const stayed = yield* Deferred.make<void>()
-        const onStay = () => Deferred.doneUnsafe(stayed, Exit.void)
-        if (runBeforeUnload) entry.stayed.add(onStay)
+        // stay, which the page's state counts, ends the close with the page open
+        const stays = (yield* entry.state.get).stayed
+        const stayed = runBeforeUnload
+          ? entry.state.changes.pipe(Stream.filter((state) => state.stayed > stays), Stream.runHead)
+          : Effect.never
         record.markSent()
-        const outcome = yield* Effect.gen(function*() {
-          yield* adapter.closePage(entry.id, { runBeforeUnload }).pipe(Effect.catch((error): Effect.Effect<
-            void,
-            Page.PageError | Deadline.Timeout
-          > => {
-            const mapped = Operation.fromAdapter(error, id, runtime.backend)
+        // Sent apart, in the model's scope: the close runs to its own end, whenever this stops waiting
+        const close = yield* model.closeApart(entry.id, { runBeforeUnload })
+        // Its failure, unless the page was gone already, which its end reports; its reply is no outcome
+        const refused = Effect.flatMap(
+          Fiber.await(close),
+          (exit): Effect.Effect<never, Page.PageError | Deadline.Timeout> => {
+            // Interrupted, it went with the model's scope, and the connection's loss ends the page
+            const error = Exit.isFailure(exit) ? Cause.findErrorOption(exit.cause) : Option.none()
+            if (Option.isNone(error)) return Effect.never
+            const mapped = Operation.fromAdapter(error.value, id, runtime.backend)
             // A backend that can't ask the page refuses to, naming the capability (`close.runBeforeUnload`)
             return mapped._tag === "Gone"
-              ? Effect.void
+              ? Effect.never
               : mapped._tag === "Timeout"
               ? Effect.fail(mapped.error)
               : Effect.fail(pageError("Page.close", mapped.reason, id))
-          }))
-          return yield* Deferred.await(entry.closed).pipe(
+          }
+        )
+        // Done once the page ends, whether or not the browser has answered the close
+        const outcome = yield* record.bound(
+          Deferred.await(entry.closed).pipe(
             Effect.as("closed" as const),
-            Effect.raceFirst(Effect.as(Deferred.await(stayed), "stayed" as const))
-          )
-        }).pipe(
-          (closing) =>
-            record.bound(closing, () =>
-              Option.some(
-                runBeforeUnload
-                  ? "The browser was asked to close the page, and hadn't confirmed it by the deadline; a " +
-                    "beforeunload prompt nothing decided keeps it open"
-                  : "The browser was asked to close the page, and hadn't confirmed it by the deadline"
-              )),
-          Effect.ensuring(Effect.sync(() => entry.stayed.delete(onStay)))
+            Effect.raceFirst(Effect.as(stayed, "stayed" as const)),
+            Effect.raceFirst(refused)
+          ),
+          () =>
+            Option.some(
+              runBeforeUnload
+                ? "The browser was asked to close the page, and hadn't confirmed it by the deadline; a " +
+                  "beforeunload prompt nothing decided keeps it open"
+                : "The browser was asked to close the page, and hadn't confirmed it by the deadline"
+            )
         )
         if (outcome === "stayed") {
           return yield* Effect.fail(pageError(

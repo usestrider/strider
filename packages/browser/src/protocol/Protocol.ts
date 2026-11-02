@@ -492,7 +492,7 @@ export interface ProtocolSession {
  * @category tags
  * @since 0.1.0
  */
-export const ProtocolSession: Context.Service<ProtocolSession, ProtocolSession> = Context.Service(
+export const ProtocolSession: Context.Service<ProtocolSession, ProtocolSession> = Context.Service<ProtocolSession>(
   "@usestrider/browser/protocol/Protocol/ProtocolSession"
 )
 

@@ -13,7 +13,7 @@ you expect.
 | Error                  | Means                                                         | Carries                                 |
 | ---------------------- | ------------------------------------------------------------- | --------------------------------------- |
 | the module's own error | the operation couldn't do what it was asked                    | a `reason`, a class with its own fields |
-| [`TargetGone`](/docs/api/browser/Target#TargetGone) | something it needed ended: the page closed, the frame detached | `reason`: why it ended                  |
+| [`TargetGone`](/docs/api/browser/Target#TargetGone) | something it needed ended: the page closed, the frame detached | `reason`: why it ended, a class with a `hint` |
 | `Timeout`              | the [deadline](/docs/deadlines) passed                         | `phase`: [how far it got](/docs/deadlines#timeouts) |
 
 Each module has one error: `LocatorError` for a click, `PageError` for a navigation,
@@ -64,6 +64,24 @@ const invoicePdf = Effect.fn("invoicePdf")(function*(page: Page.Page) {
 
 A shared reason is the same class in every module, so one handler serves them all: `noPdf` would serve a
 `LocatorError`'s `Unsupported` too.
+
+`TargetGone` has reasons of the same kind, declared in `Target`: `PageClosed`, `FrameDetached`, `DocumentReplaced`,
+`ConnectionLost` and the others. A popup that closes under a click is a `PageClosed`, which says what closed it:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const dismiss = Effect.fn("dismiss")(function*(popup: Page.Page) {
+  yield* popup.getByRole("button", { name: "Close" }).click().pipe(
+    Effect.catchReason(
+      "TargetGone",
+      "PageClosed",
+      (closed) => Effect.logInfo(`The popup closed by ${closed.by}`)
+    )
+  )
+})
+```
 
 ## Strictness
 

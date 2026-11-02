@@ -159,7 +159,7 @@ export const screenshot = (
         record.bound(capturing, () => Option.some("The browser didn't finish the capture before the deadline"))
     )
   }).pipe(
-    Effect.raceFirst(Runtime.pageEnded(page, Operation.operationId())),
+    Effect.raceFirst(Runtime.pageEnded(page)),
     Operation.named(operation, {
       attributes: {
         "browser.page.id": page.id,
@@ -240,7 +240,7 @@ export const pdf = (
       (printing) => record.bound(printing, () => Option.some("The browser didn't finish printing before the deadline"))
     )
   }).pipe(
-    Effect.raceFirst(Runtime.pageEnded(page, Operation.operationId())),
+    Effect.raceFirst(Runtime.pageEnded(page)),
     Operation.named(operation, { attributes: { "browser.page.id": page.id } })
   )
 }

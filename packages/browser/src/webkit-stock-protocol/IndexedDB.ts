@@ -45,7 +45,7 @@ export const DataEntry = /*#__PURE__*/ Schema.suspend(() =>
     primaryKey: Runtime.RemoteObject,
     value: Runtime.RemoteObject
   }).annotate({ identifier: "IndexedDB.DataEntry" })
-) as any as Schema.Codec<DataEntry>
+) as any as Schema.Codec<DataEntry, unknown>
 
 /**
  * Database with an array of object stores.
@@ -129,7 +129,7 @@ export const Key = /*#__PURE__*/ Schema.suspend(() =>
     date: Schema.optional(Schema.Number),
     array: Schema.optional(Schema.Array(Key))
   }).annotate({ identifier: "IndexedDB.Key" })
-) as any as Schema.Codec<Key>
+) as any as Schema.Codec<Key, unknown>
 
 /**
  * Key type.
@@ -253,7 +253,7 @@ export const KeyRange = /*#__PURE__*/ Schema.suspend(() =>
     lowerOpen: Schema.Boolean,
     upperOpen: Schema.Boolean
   }).annotate({ identifier: "IndexedDB.KeyRange" })
-) as any as Schema.Codec<KeyRange>
+) as any as Schema.Codec<KeyRange, unknown>
 
 /**
  * Object store.
@@ -431,7 +431,7 @@ export const RequestDataParams = /*#__PURE__*/ Schema.suspend(() =>
     pageSize: Schema.Int,
     keyRange: Schema.optional(KeyRange)
   }).annotate({ identifier: "IndexedDB.RequestDataParams" })
-) as any as Schema.Codec<RequestDataParams>
+) as any as Schema.Codec<RequestDataParams, unknown>
 
 /**
  * Requests data from object store or index.
@@ -463,7 +463,7 @@ export const RequestDataResult = /*#__PURE__*/ Schema.suspend(() =>
     objectStoreDataEntries: Schema.Array(DataEntry),
     hasMore: Schema.Boolean
   }).annotate({ identifier: "IndexedDB.RequestDataResult" })
-) as any as Schema.Codec<RequestDataResult>
+) as any as Schema.Codec<RequestDataResult, unknown>
 
 /**
  * Requests database with given name in given frame.

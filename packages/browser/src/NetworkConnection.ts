@@ -26,12 +26,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
-import * as Events from "./internal/events.ts"
-import * as Filters from "./internal/filters.ts"
-import * as Handles from "./internal/handles.ts"
-import type * as Model from "./internal/model.ts"
-import * as Operation from "./internal/operation.ts"
-import type * as Runtime from "./internal/runtime.ts"
+import * as NetworkConnectionImpl from "./internal/networkConnection.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -199,40 +194,6 @@ export interface Filter {
   readonly kind?: Kind | undefined
 }
 
-// ── Implementation ──
-
-const kind = (
-  runtime: Runtime.Runtime,
-  operation: string
-): Events.Kind<Model.ConnectionEntry, NetworkConnection> => ({
-  operation,
-  noun: "a connection",
-  deliver: (entry) => runtime.connection(entry)
-})
-
-const subscription = (
-  target: Page.ObservedPage | UserContext.ObservedUserContext,
-  filter: Filter | undefined,
-  operation: string
-) =>
-  Effect.suspend(() => {
-    const found = Handles.target(target)
-    const runtime = found.behind.runtime
-    const wanted = filter?.kind
-    return Filters.requires(runtime, operation, "networkConnections").pipe(
-      Effect.andThen(
-        wanted === "eventSource" ? Filters.requires(runtime, operation, "networkConnections.eventSource") : Effect.void
-      ),
-      Effect.andThen(Filters.url(operation, filter?.url)),
-      Effect.map((matches) => ({
-        kind: kind(runtime, operation),
-        channel: found.behind.entry.events.connection,
-        accepts: (entry: Events.Entry<Model.ConnectionEntry>) =>
-          Filters.urlMatches(matches, entry.value.url) && (wanted === undefined || entry.value.kind === wanted)
-      }))
-    )
-  })
-
 /**
  * Subscribes to connections and returns the wait: an effect whose value is the first match, the same each time it
  * runs.
@@ -266,11 +227,7 @@ export const next = <PE = never, PR = never>(
   Effect.Effect<NetworkConnection, PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
-> =>
-  Effect.flatMap(
-    subscription(target, filter, "NetworkConnection.next"),
-    ({ accepts, channel, kind }) => Events.next(kind, channel, accepts, where)
-  ).pipe(Operation.named("NetworkConnection.next"))
+> => NetworkConnectionImpl.next(target, filter, where)
 
 /**
  * Subscribes to connections and emits every match from now on.
@@ -302,11 +259,7 @@ export const stream = <PE = never, PR = never>(
   Stream.Stream<NetworkConnection, PE | Subscription.EventOverflow | Target.TargetGone>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
-> =>
-  Effect.flatMap(
-    subscription(target, filter, "NetworkConnection.stream"),
-    ({ accepts, channel, kind }) => Events.stream(kind, channel, accepts, where)
-  )
+> => NetworkConnectionImpl.stream(target, filter, where)
 
 /**
  * Reads the connections the target's event log kept (`UserContext.Options.eventLog`); never waits.
@@ -331,7 +284,4 @@ export const history = (
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   filter?: Filter | undefined
 ): Effect.Effect<Subscription.History<NetworkConnection>, Subscription.SubscriptionError> =>
-  Effect.flatMap(
-    subscription(target, filter, "NetworkConnection.history"),
-    ({ accepts, channel, kind }) => Events.history(kind, channel, accepts)
-  )
+  NetworkConnectionImpl.history(target, filter)

@@ -40,7 +40,8 @@ import * as Watchable from "./watchable.ts"
 export interface Owner {
   readonly runtime: Runtime.Runtime
   readonly scope: Adapter.DeclarationScope
-  readonly routes: Array<Model.RouteEntry>
+  /** The page or context the route is added to. */
+  readonly routes: Model.PageEntry | Model.ContextEntry
   readonly target: Target.Description
   /** `Page.route` or `UserContext.route`. */
   readonly operation: string
@@ -72,12 +73,8 @@ const fixedPrefix = (pattern: string): string => {
     const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(fixed)
     return scheme === null ? "" : scheme[0].toLowerCase()
   }
-  try {
-    const origin = new URL(`${parts[1]}://${parts[2]}/`)
-    return `${origin.protocol}//${origin.host}${parts[3]}`
-  } catch {
-    return `${parts[1]!.toLowerCase()}://`
-  }
+  const origin = URL.parse(`${parts[1]}://${parts[2]}/`)
+  return origin === null ? `${parts[1]!.toLowerCase()}://` : `${origin.protocol}//${origin.host}${parts[3]}`
 }
 
 /** A header's value as the browser sends it: a redacted one unwrapped, since it is going back where it came from. */
@@ -186,7 +183,7 @@ const toAdapter = (
 const bodyError =
   (owner: Owner, pattern: string) =>
   (error: Adapter.AdapterError | Deadline.Timeout): Route.RouteError | Target.TargetGone | Deadline.Timeout => {
-    const id = Operation.operationId()
+    const id = Operation.idNow()
     const mapped = Operation.fromAdapter(error, id, owner.runtime.backend)
     return mapped._tag !== "Reason"
       ? mapped.error
@@ -262,15 +259,6 @@ export const register = <E, R, P extends Route.Phase>(
     const budget = yield* Effect.service(Deadline.DefaultBudget)
     const clock = yield* Effect.service(BrowserClock.CurrentClock)
     const scope = yield* Scope.fork(yield* Effect.scope)
-    yield* adapter.declare(owner.scope, { _tag: "Intercept", patterns: [covering(pattern)], phases: [phase] }).pipe(
-      Scope.provide(scope),
-      Effect.mapError((error) => {
-        const mapped = Operation.fromAdapter(error, id, owner.runtime.backend)
-        // A target that went is TargetGone, as for every operation on it (QUIRKS.md, Q143)
-        return mapped._tag !== "Reason" ? mapped.error : fail(mapped.reason)
-      }),
-      Effect.onError(() => Scope.close(scope, Exit.void))
-    )
     const fibers = yield* FiberSet.make<Route.Decision<P>, E>().pipe(Scope.provide(scope))
     const hits = yield* SubscriptionRef.make(0)
     const route: Model.RouteEntry = {
@@ -305,13 +293,16 @@ export const register = <E, R, P extends Route.Phase>(
         return { _tag: "Decided", decision: decision.value } as const
       })
     }
-    owner.routes.push(route)
-    yield* Scope.addFinalizer(
-      scope,
-      Effect.sync(() => {
-        const index = owner.routes.indexOf(route)
-        if (index >= 0) owner.routes.splice(index, 1)
-      })
+    // Added before its intercept is declared, so no request the intercept pauses misses it
+    yield* owner.runtime.model.route(owner.routes, route).pipe(Scope.provide(scope))
+    yield* adapter.declare(owner.scope, { _tag: "Intercept", patterns: [covering(pattern)], phases: [phase] }).pipe(
+      Scope.provide(scope),
+      Effect.mapError((error) => {
+        const mapped = Operation.fromAdapter(error, id, owner.runtime.backend)
+        // A target that went is TargetGone, as for every operation on it (QUIRKS.md, Q143)
+        return mapped._tag !== "Reason" ? mapped.error : fail(mapped.reason)
+      }),
+      Effect.onError(() => Scope.close(scope, Exit.void))
     )
     const registration: Route.Registration = {
       remove: Scope.close(scope, Exit.void),

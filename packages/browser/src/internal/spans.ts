@@ -69,6 +69,7 @@ export const operation = (name: string, options: Options = {}) => <A, E, R>(self
         Effect.tapError((error) => Effect.annotateCurrentSpan("error.type", errorType(error)))
       ),
       (yield* Tracing.SpanNameGenerator)(operation),
-      { attributes }
+      // The frame a span captures would be this line's, for every operation: `Operation.fn` adds its caller's instead
+      { attributes, captureStackTrace: false }
     )
   })

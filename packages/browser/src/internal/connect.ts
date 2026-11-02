@@ -10,10 +10,11 @@
  * The headers go with the WebSocket handshake, and with Chromium's and WebKit's HTTP requests.
  */
 import * as Effect from "effect/Effect"
-import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as HttpUrl from "effect/http/Url"
 import * as Redacted from "effect/Redacted"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Socket from "effect/socket/Socket"
@@ -32,12 +33,9 @@ const refused = (hint: string) => Launch.fail(new Browser.ConnectionFailed({ sta
 /** The endpoint, parsed, with its scheme one of `schemes`. */
 const parse = (endpoint: string, schemes: ReadonlyArray<string>, expected: string) =>
   Effect.suspend(() => {
-    let url: URL
-    try {
-      url = new URL(endpoint)
-    } catch {
-      return invalid(expected, `${JSON.stringify(endpoint)} doesn't parse`)
-    }
+    const parsed = HttpUrl.fromString(endpoint)
+    if (Result.isFailure(parsed)) return invalid(expected, `${JSON.stringify(endpoint)} doesn't parse`)
+    const url = parsed.success
     return schemes.includes(url.protocol)
       ? Effect.succeed(url)
       : invalid(expected, `${url.protocol} isn't one of ${schemes.join(", ")}`)
@@ -52,8 +50,14 @@ const plainHeaders = (headers: Browser.ConnectOptions["headers"]) =>
 
 const Version = Schema.Struct({ webSocketDebuggerUrl: Schema.String })
 
-/** Chromium's browser WebSocket: the URL given, or the one its HTTP endpoint's `/json/version` names. */
-export const chromiumWebSocket = (endpoint: string, options: Browser.ConnectOptions | undefined) =>
+/**
+ * Chromium's browser WebSocket: the URL given, or the one its HTTP endpoint's `/json/version` names, asked
+ * through the `HttpClient` in context.
+ */
+export const chromiumWebSocket = (
+  endpoint: string,
+  options: Browser.ConnectOptions | undefined
+): Effect.Effect<string, Browser.BrowserError, HttpClient.HttpClient> =>
   Effect.gen(function*() {
     const url = yield* parse(
       endpoint,
@@ -71,7 +75,6 @@ export const chromiumWebSocket = (endpoint: string, options: Browser.ConnectOpti
     ).pipe(
       Effect.flatMap((response) => response.json),
       Effect.flatMap(Schema.decodeUnknownEffect(Version)),
-      Effect.provide(FetchHttpClient.layer),
       Effect.catch((error) => refused(`${version.href} named no browser WebSocket: ${error.message}`))
     )
     return answer.webSocketDebuggerUrl
@@ -98,11 +101,18 @@ export const webSocket = (
     Spans.operation("Browser.connect", { attributes: { "browser.endpoint": url } })
   )
 
-/** Stock WebKit's inspector server at its HTTP endpoint, as one transport: its pages, read from its list. */
+/**
+ * Stock WebKit's inspector server at its HTTP endpoint, as one transport: its pages, read from its list through the
+ * `HttpClient` in context.
+ */
 export const webkitInspector = (
   endpoint: string,
   options: Browser.ConnectOptions | undefined
-): Effect.Effect<Transport.Transport, Browser.BrowserError, Scope.Scope | Socket.WebSocketConstructor> =>
+): Effect.Effect<
+  Transport.Transport,
+  Browser.BrowserError,
+  Scope.Scope | Socket.WebSocketConstructor | HttpClient.HttpClient
+> =>
   Effect.gen(function*() {
     const url = yield* parse(
       endpoint,

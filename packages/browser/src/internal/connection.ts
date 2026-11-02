@@ -7,7 +7,6 @@ import * as Effect from "effect/Effect"
 import * as Inspectable from "effect/Inspectable"
 import { pipeArguments } from "effect/Pipeable"
 import type * as NetworkConnection from "../NetworkConnection.ts"
-import type * as Url from "../Url.ts"
 import * as Events from "./events.ts"
 import type * as Model from "./model.ts"
 
@@ -23,7 +22,7 @@ export const make = (entry: Model.ConnectionEntry): NetworkConnection.NetworkCon
   [TypeId]: TypeId,
   id: entry.id,
   kind: entry.kind,
-  url: entry.url as Url.Url,
+  url: entry.url,
   openedAt: entry.openedAt,
   frames: Effect.suspend(() => Events.stream(frames, entry.frames, () => true, undefined)),
   closed: Deferred.await(entry.closed),

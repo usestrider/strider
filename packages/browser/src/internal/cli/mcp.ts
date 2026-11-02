@@ -6,118 +6,261 @@
  *
  * - `strider mcp -s shop` serves session `shop`, started with `strider start`.
  * - `strider mcp --start --chromium <path>` starts a session for the client, named `--name` or `mcp-<pid>`,
- *   which ends when this process does, unless `--keep`. Every other flag goes to `start`.
+ *   which ends when this process does, unless `--keep`. `start`'s other flags go to `start`.
  *
  * Standard output is the client's, so what `start` reports goes to standard error.
  */
 import * as McpProtocol from "effect/ai/McpProtocol"
+import * as McpSchema from "effect/ai/McpSchema"
 import * as McpServer from "effect/ai/McpServer"
+import * as Tool from "effect/ai/Tool"
+import type * as Toolkit from "effect/ai/Toolkit"
+import * as Cause from "effect/Cause"
+import * as Command from "effect/cli/Command"
+import * as Flag from "effect/cli/Flag"
+import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
+import * as Base64 from "effect/encoding/Base64"
+import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import type * as Stdio from "effect/Stdio"
 import * as Tools from "../tools.ts"
 import * as Client from "./client.ts"
+import * as Daemon from "./daemon.ts"
 import * as Node from "./node.ts"
 import * as Session from "./session.ts"
 
-/** What `strider mcp`'s arguments ask for: the session to serve, and whether to start it. */
-export const parse = (
+/** What `strider mcp` was asked for: the session to serve, and the `start` arguments that start it, if it does. */
+export type Plan =
+  | { readonly _tag: "Serve"; readonly session: string }
+  | { readonly _tag: "Start"; readonly session: string; readonly start: ReadonlyArray<string> }
+  | { readonly _tag: "Invalid"; readonly message: string }
+
+/** `start`'s flags, with the name and idle timeout optional, and `mcp`'s own. */
+const flags = {
+  ...Daemon.startFlags,
+  name: Flag.String("name").pipe(
+    Flag.withDescription("Name the started session; defaults to -s or mcp-<pid>"),
+    Flag.optional
+  ),
+  idle: Flag.String("idle").pipe(
+    Flag.withDescription("Stop the started session after this duration without commands (default: 1 hour)"),
+    Flag.optional
+  ),
+  capture: Flag.Literals("capture", ["local", "strict"]).pipe(
+    Flag.withDescription(
+      "What the started session's snapshots, screenshots and digests may hold: local or strict (default: local)"
+    ),
+    Flag.optional
+  ),
+  start: Flag.Boolean("start").pipe(
+    Flag.withDescription("Start a session with the launch options below; otherwise serve -s or STRIDER_SESSION"),
+    Flag.withDefault(false)
+  ),
+  keep: Flag.Boolean("keep").pipe(
+    Flag.withDescription("With --start, keep the session running after this MCP process exits"),
+    Flag.withDefault(false)
+  )
+}
+
+type Flags = Command.Command.Config.Infer<typeof flags>
+
+/** `strider start`'s arguments for the flags given, which end the session with `pid` unless it's kept. */
+const startArgs = (name: string, given: Flags, pid: number): ReadonlyArray<string> => {
+  const option = (flag: string, value: Option.Option<string | number>) =>
+    Option.match(value, { onNone: () => [], onSome: (value) => [`--${flag}`, String(value)] })
+  return [
+    "start",
+    "--name",
+    name,
+    ...option("chromium", given.chromium),
+    ...option("firefox", given.firefox),
+    ...option("webkit", given.webkit),
+    ...option("attach", given.attach),
+    ...option("user-data-dir", given.userDataDir),
+    ...option("state", given.state),
+    ...option("fork", given.fork),
+    ...option("viewport", given.viewport),
+    ...option("idle", given.idle),
+    ...option("capture", given.capture),
+    ...Object.entries(given.secret).flatMap(([secret, variable]) => ["--secret", `${secret}=${variable}`]),
+    // The session ends with this process unless it is kept
+    ...option("owner-pid", Option.orElse(given.ownerPid, () => given.keep ? Option.none() : Option.some(pid)))
+  ]
+}
+
+/** The session `-s` or `STRIDER_SESSION` names, which `strider mcp` serves, or starts with `--start`. */
+const plan = (
+  given: Flags,
+  selected: Option.Option<string>,
+  pid: number,
+  env: Readonly<Record<string, string | undefined>>
+): Plan => {
+  if (given.start) {
+    const name = Option.getOrElse(Option.orElse(given.name, () => selected), () => `mcp-${pid}`)
+    return { _tag: "Start", session: name, start: startArgs(name, given, pid) }
+  }
+  const name = Option.getOrElse(selected, () => env.STRIDER_SESSION ?? "")
+  return name === ""
+    ? { _tag: "Invalid", message: "strider mcp serves a session: name it with -s, or start one with --start" }
+    : { _tag: "Serve", session: name }
+}
+
+const root = Command.make("strider").pipe(Command.withSharedFlags(Daemon.selectors))
+
+/** `strider mcp`, whose plan `serve` carries out. */
+export const command = <E, R>(
+  serve: (plan: Plan) => Effect.Effect<void, E, R>,
+  pid: number = Node.process.pid,
+  env: Readonly<Record<string, string | undefined>> = Node.process.env
+) =>
+  Command.make(
+    "mcp",
+    flags,
+    (given) => Effect.flatMap(root, ({ session }) => serve(plan(given, session, pid, env)))
+  ).pipe(Command.withDescription("Serve a session's tools over MCP on standard input and output"))
+
+/** What `strider mcp`'s arguments ask for, as its command parses them. */
+export const parse = Effect.fnUntraced(function*(
   argv: ReadonlyArray<string>,
   pid: number,
   env: Readonly<Record<string, string | undefined>>
-):
-  | { readonly _tag: "Serve"; readonly session: string }
-  | { readonly _tag: "Start"; readonly session: string; readonly start: ReadonlyArray<string> }
-  | { readonly _tag: "Invalid"; readonly message: string } =>
-{
-  const rest = [...argv]
-  const at = rest.indexOf("mcp")
-  if (at >= 0) rest.splice(at, 1)
-  let session = Session.scan(argv).session
-  const take = (flag: string): string | undefined => {
-    const index = rest.indexOf(flag)
-    if (index < 0) return undefined
-    const value = rest[index + 1]
-    rest.splice(index, 2)
-    return value
-  }
-  session = take("-s") ?? take("--session") ?? session
-  const start = rest.indexOf("--start")
-  if (start < 0) {
-    const name = session ?? env.STRIDER_SESSION
-    return name === undefined || name === ""
-      ? { _tag: "Invalid", message: "strider mcp serves a session: name it with -s, or start one with --start" }
-      : { _tag: "Serve", session: name }
-  }
-  rest.splice(start, 1)
-  const keep = rest.indexOf("--keep")
-  if (keep >= 0) rest.splice(keep, 1)
-  const name = take("--name") ?? session ?? `mcp-${pid}`
-  return {
-    _tag: "Start",
-    session: name,
-    // The session ends with this process unless it is kept
-    start: ["start", "--name", name, ...rest, ...(keep >= 0 ? [] : ["--owner-pid", String(pid)])]
-  }
-}
+) {
+  let planned: Plan | undefined
+  yield* Command.runWith(
+    root.pipe(Command.withSubcommands([command((plan) => Effect.sync(() => void (planned = plan)), pid, env)])),
+    { version: "" }
+  )(argv)
+  return planned
+})
 
 /** A tool call, forwarded to the session's daemon, and its result decoded by the tool's own Schemas. */
-const forward = (rootDir: string, session: string, name: keyof Tools.Tools) => (params: unknown) =>
-  Effect.gen(function*() {
-    const tool = Tools.toolkit.tools[name]
-    const answer = yield* Effect.promise(() => Client.callTool(rootDir, session, name, params))
-    if (answer._tag === "NoResult") {
-      return yield* Effect.fail(new Tools.ToolFailure({ error: "NoSession", message: answer.message }))
-    }
-    if (answer.failure) {
-      return yield* Effect.flatMap(
-        Schema.decodeUnknownEffect(tool.failureSchema as typeof Tools.ToolFailure)(answer.value).pipe(Effect.orDie),
-        Effect.fail
+const forward =
+  <K extends Tools.ToolName>(client: Client.Client, session: string, name: K) => (params: Tools.Params<K>) =>
+    Effect.gen(function*() {
+      const schemas = Tools.schemas[name]
+      const encoded = yield* Schema.encodeEffect(schemas.parametersSchema)(params).pipe(Effect.orDie)
+      const value = yield* client.Tool({ tool: name, params: encoded }).pipe(
+        Effect.catchTag("RpcClientError", (error) =>
+          Effect.fail(
+            new Tools.ToolFailure({
+              error: "NoSession",
+              message: Client.unreachable(error)
+                ? `The session ${session} isn't running: ${error.message}`
+                : `The session ${session} didn't answer: ${error.message}`
+            })
+          ))
       )
-    }
-    return yield* Schema.decodeUnknownEffect(tool.successSchema as Schema.Top)(answer.value).pipe(Effect.orDie)
+      return yield* Schema.decodeUnknownEffect(schemas.successSchema)(value).pipe(Effect.orDie)
+    })
+
+/**
+ * A screenshot's result as a client shows a model an image: its PNG as `ImageContent`, and the rest of its result as
+ * text, rather than the whole result as JSON text, base64 and all. Its structured result is the tool's without the
+ * bytes (`Tools.screenshotWithoutBytes`), so the image crosses once. Any other result, a failure's included, is as
+ * it was.
+ */
+export const asImage = (result: McpSchema.CallToolResult | McpSchema.InputRequired) => {
+  if (!(result instanceof McpSchema.CallToolResult) || result.isError === true) return result
+  const shot = Schema.decodeUnknownOption(Tools.schemas.screenshot.successSchema)(result.structuredContent)
+  if (Option.isNone(shot)) return result
+  const bytes = Base64.decode(shot.value.outcome.data)
+  if (bytes._tag === "Failure") return result
+  const image: McpSchema.ImageContent = { type: "image", data: bytes.success, mimeType: shot.value.outcome.mediaType }
+  const rest: McpSchema.TextContent = { type: "text", text: JSON.stringify({ sinceLast: shot.value.sinceLast }) }
+  const structuredContent = { outcome: { mediaType: shot.value.outcome.mediaType }, sinceLast: shot.value.sinceLast }
+  return new McpSchema.CallToolResult({ ...result, structuredContent, content: [image, rest] })
+}
+
+/** The MCP server, with each screenshot it answers given to the client as an image, and its output schema to match. */
+const screenshotsAsImages = (server: McpServer.McpServer["Service"]): McpServer.McpServer["Service"] =>
+  McpServer.McpServer.of({
+    ...server,
+    addTool: (options) =>
+      server.addTool(
+        options.tool.name === Tools.screenshot.name
+          ? {
+            ...options,
+            tool: new McpSchema.Tool({
+              ...options.tool,
+              outputSchema: Tool.getJsonSchemaFromSchema(Tools.screenshotWithoutBytes)
+            }),
+            handle: (payload) => Effect.map(options.handle(payload), asImage)
+          }
+          : options
+      )
   })
 
-/** Serves the session's tools over standard input and output, until the client goes. */
-export const run = Effect.fnUntraced(
-  function*(argv: ReadonlyArray<string>, bin: string, stdio: Layer.Layer<Stdio.Stdio>) {
-    const process = Node.process
-    const rootDir = Session.root(process.env, (yield* Effect.promise(() => Node.os())).tmpdir())
-    const asked = parse(argv, process.pid, process.env)
-    if (asked._tag === "Invalid") {
-      process.stderr.write(`${asked.message}\n`)
-      process.exitCode = Session.exitCodes.CliError!
-      return
+/** Serves a session's tools over standard input and output, starting it first if asked, until the client goes. */
+const serve = Effect.fnUntraced(
+  function*(plan: Plan, bin: string, stdio: Layer.Layer<Stdio.Stdio>) {
+    if (plan._tag === "Invalid") {
+      yield* Console.error(plan.message)
+      return yield* new Client.Exit({ code: Session.exitCodes.CliError! })
     }
-    if (asked._tag === "Start") {
-      const code = yield* Effect.promise(() =>
-        Client.start(asked.start, bin, (text) => void process.stderr.write(`${text}\n`))
-      )
-      if (code !== 0) {
-        process.exitCode = code
-        return
-      }
+    // Standard output is the client's: what start reports goes to standard error
+    if (plan._tag === "Start") yield* Client.start(plan.start, bin, Console.error)
+    const rootDir = yield* Client.sessionRoot
+    const client = yield* Client.session(rootDir, plan.session)
+    const to = <K extends Tools.ToolName>(name: K) => forward(client, plan.session, name)
+    // Each tool's call goes to the session's daemon
+    const handlers: Toolkit.HandlersFrom<Tools.Tools> = {
+      pages: to("pages"),
+      newPage: to("newPage"),
+      tabs: to("tabs"),
+      control: to("control"),
+      release: to("release"),
+      goto: to("goto"),
+      back: to("back"),
+      snapshot: to("snapshot"),
+      find: to("find"),
+      screenshot: to("screenshot"),
+      click: to("click"),
+      fill: to("fill"),
+      press: to("press"),
+      select: to("select"),
+      scroll: to("scroll"),
+      next: to("next"),
+      await: to("await"),
+      expect: to("expect"),
+      history: to("history"),
+      route: to("route"),
+      dialog: to("dialog")
     }
-    const handlers = Object.fromEntries(
-      (Object.keys(Tools.toolkit.tools) as Array<keyof Tools.Tools>).map((name) => [
-        name,
-        forward(rootDir, asked.session, name)
-      ])
-    )
-    const server = McpServer.toolkit(Tools.toolkit).pipe(
-      Layer.provide(Tools.toolkit.toLayer(handlers as never)),
+    const server = Layer.effectDiscard(
+      McpServer.registerToolkit(Tools.toolkit).pipe(Effect.updateService(McpServer.McpServer, screenshotsAsImages))
+    ).pipe(
+      Layer.provide(Tools.toolkit.toLayer(handlers)),
       Layer.provide(McpServer.layerStdio({
         name: "strider",
-        version: "0.1.0",
+        version: yield* Session.version,
         instructions:
-          `Browser tools for the strider session ${asked.session}. Every page tool names its page; snapshot gives refs to target, and find searches it.`,
+          `Browser tools for the strider session ${plan.session}. Every page tool names its page; snapshot gives refs to target, and find searches it.`,
         protocols: [McpProtocol.v2025_11_25, McpProtocol.v2025_06_18, McpProtocol.v2025_03_26, McpProtocol.v2024_11_05]
       })),
       Layer.provide(stdio)
     )
-    // Standard output is the client's: what the server logs goes to standard error
-    return yield* Layer.launch(server).pipe(Effect.provideService(Logger.LogToStderr, true))
+    // Standard output is the client's: what the server logs goes to standard error. Effect's stdio transport ends
+    // the fiber that built the server, as an interruption, when the client closes standard input; the server runs
+    // in a fiber of its own, so its client going is how this finishes, with code 0, where a signal interrupting the
+    // process still interrupts it
+    const serving = yield* Layer.launch(server).pipe(Effect.provideService(Logger.LogToStderr, true), Effect.forkChild)
+    const exit = yield* Effect.exit(Fiber.join(serving))
+    if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) return yield* Effect.failCause(exit.cause)
+  },
+  Effect.scoped
+)
+
+/** Runs `strider mcp` with its arguments: `bin` starts a session's daemon, and `stdio` is the client's. */
+export const run = Effect.fnUntraced(
+  function*(argv: ReadonlyArray<string>, bin: string, stdio: Layer.Layer<Stdio.Stdio>) {
+    return yield* Command.runWith(
+      root.pipe(Command.withSubcommands([command((plan) => serve(plan, bin, stdio))])),
+      { version: yield* Session.version }
+    )(argv)
   }
 )

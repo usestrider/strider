@@ -1,0 +1,152 @@
+---
+title: Strider for Playwright users
+description: Playwright's calls and Strider's for browsers and pages, reads and waits, subscribing before acting, routes and recordings, timeout options, and tests.
+order: 5
+---
+
+A Playwright program translates to Strider almost line by line, but kept habit for habit, it reads elements
+before they appear, keeps pages open past their step and returns from `goto` before the load. Each section pairs
+Playwright's calls with Strider's and says which habit changes.
+
+## Browsers and pages
+
+| Playwright                          | Strider                                                                                               |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `npx playwright install`            | none: Strider runs browsers you've installed, and [`npx strider browsers`](/docs/installation#a-browser) lists them |
+| `chromium.launch()`                 | [`Chromium.layer({ executablePath })`](/docs/installation#backends), a layer you provide to the program; `Firefox.layer` and `WebKit.layer` likewise |
+| `browser.close()`                   | the end of the program the layer is provided to                                                       |
+| `chromium.connectOverCDP(endpoint)` | [`Chromium.layerConnect(endpoint)`](/docs/pages/attaching#connecting), whose tabs you [`control`](/docs/pages/attaching#access-levels) before acting on them |
+| `browser.newContext(options)`       | [`Browser.newContext(options)`](/docs/pages/contexts), with `viewport`, `locale`, `userAgent` and `timezone` (Playwright's `timezoneId`) under `emulation` |
+| `browser.newPage()`                 | `Browser.newPage()`, in a new context, as in Playwright                                               |
+| `context.newPage()`                 | `context.newPage`, a value                                                                            |
+| `page.close()`                      | `page.close()`, or the end of the `Scope` that opened the page                                        |
+| `context.close()`                   | the end of the `Scope` that opened the context                                                        |
+
+Where a Playwright program closes its page in a `finally`, a Strider program opens it in a scope, which closes it
+however the step ends:
+
+```ts
+import { Browser, Expect } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const orderStatus = Effect.fn("orderStatus")(function*(orderId: string) {
+  const page = yield* Browser.newPage()
+  yield* page.goto(`https://shop.example.com/orders/${orderId}`)
+  const status = page.getByTestId("order-status")
+  yield* status.pipe(Expect.toBeVisible)
+  return yield* status.readText
+}, Effect.scoped)
+```
+
+`Effect.scoped`, as `Effect.fn`'s last argument, gives each call its own scope: the page closes when
+`orderStatus` ends, even on failure. A member with nothing to configure is a value, not a method, so
+`context.newPage`, `locator.first` and `status.readText` take no parentheses.
+
+## Reads and waits
+
+| Playwright                           | Strider                                                                                      |
+| ------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `page.goto(url)`                     | `page.goto(url, { waitUntil: "load" })`; without it, `goto` returns when the navigation commits. `"domcontentloaded"` is `"domContentLoaded"`, and there's no `"networkidle"` |
+| `locator.textContent()`              | `locator.readText`, with whitespace collapsed                                                |
+| `locator.inputValue()`               | `locator.readValue`                                                                          |
+| `locator.getAttribute(name)`         | `locator.readAttribute(name)`, an `Option`                                                   |
+| `page.evaluate(fn)`                  | `page.evaluateInMainWorld(fn)`; `page.evaluate` runs in an isolated world, where the page's globals are invisible, and fails with `Unsupported` on WebKit |
+| `page.locator(selector)`             | `page.locator(css)`, CSS only: `text=` and `:has-text()` become `getByText` or `filter({ hasText })`, and `>>` a locator inside a locator |
+| `locator.waitFor()`                  | `locator.pipe(Expect.toBeVisible)`                                                           |
+| `locator.waitFor({ state: "hidden" })` | `locator.pipe(Expect.toBeHidden)`                                                          |
+| `expect(locator).toHaveText(text)`, and each matcher | [`locator.pipe(Expect.toHaveText(text))`](/docs/pages/expectations), and so on |
+| `page.waitForURL("**/orders")`       | `page.pipe(Expect.toHaveURL(/\/orders$/))`, which doesn't wait for the load: a string must equal the whole URL |
+| `page.waitForTimeout(ms)`            | an expectation of what the pause was for                                                     |
+
+Playwright's `textContent()`, `inputValue()` and `getAttribute()` wait for an element to match. Strider's reads
+take the page as it is and fail with `NoMatch` when nothing matches yet. Actions and expectations wait, as in
+Playwright, so wait with an expectation, then read, as `orderStatus` does.
+
+## Subscribing before acting
+
+| Playwright                         | Strider                                                                           |
+| ---------------------------------- | --------------------------------------------------------------------------------- |
+| `page.waitForEvent("popup")`       | [`Popup.next(page)`](/docs/events/kinds#popups)                                   |
+| `page.waitForEvent("download")`    | [`Download.next(page)`](/docs/events/kinds#downloads)                             |
+| `page.waitForResponse(predicate)`  | [`NetworkResponse.next(page, { url })`](/docs/events/network): `url` is required, a body comes only from a `body` decoder in the filter, and a predicate becomes the `where` argument |
+| `page.on("dialog", handler)`       | [`Dialog.handle(page, handler)`](/docs/events/kinds#dialogs-and-file-choosers), whose handler returns `dialog.accept` or `dialog.dismiss` rather than calling it |
+| `page.on("console", listener)`     | [`ConsoleMessage.stream(page)`](/docs/events/events#streams), run with `Stream.runForEach` and forked |
+
+As in Playwright, start the wait before the click. `page.waitForEvent` starts waiting when it's called, but
+`Popup.next` subscribes only when it runs, so `yield*` it before the click and run what it returns after:
+
+```ts
+import { Expect, Page, Popup } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const openHelp = Effect.fn("openHelp")(function*(page: Page.Page) {
+  const popups = yield* Popup.next(page)
+  yield* page.getByRole("link", { name: "Help" }).click()
+  const help = yield* popups
+  yield* help.getByRole("heading", { name: "Help center" }).pipe(Expect.toBeVisible)
+  return help
+})
+```
+
+Subscribe after the click and the wait times out with a hint: "a popup came 12 ms before Popup.next subscribed;
+call Popup.next before the action that causes it".
+
+Playwright emulates focus for every page. Strider doesn't by default, so on Chromium the opener stops rendering
+once the popup opens, and actions on it time out until [`page.activate`](/docs/api/browser/Page#Page.activate).
+`Browser.newContext({ focus: "emulated" })` does as Playwright does, on Chromium only. WebKit doesn't say which
+page opened a popup, so there `Popup.next` fails with `Unsupported`:
+[wait for the context's new page](/docs/browsers/webkit#differences) instead.
+
+## Routes and recordings
+
+| Playwright                          | Strider                                                                                           |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `page.route(url, handler)`          | [`page.route(url, handler)`](/docs/events/routes), whose handler returns a decision, such as `Route.continue`, `Route.abort()` or `Route.fulfill(response)`, instead of calling `route.continue()` |
+| `context.routeFromHAR(path)`        | [`context.route("**/*", yield* Route.fromHar(path))`](/docs/events/routes#replaying-a-recording) |
+| `context.storageState()`            | [`context.exportStorageState`](/docs/pages/contexts#logging-in-once)                              |
+| `browser.newContext({ recordHar })` | [`Har.record(context, { content: "embed" })`](/docs/tools/recordings#har-files), then `har.exportHar(path)`; replaying a POST matches its body, which the export keeps only with `include: ["requestBodies"]` |
+| `context.tracing.start()`           | [`Trace.record(context)`](/docs/tools/recordings#traces), then `trace.exportTrace(path)`, which Playwright's trace viewer opens |
+
+`page.unroute` and `tracing.stop` become `remove` on what `route` or `record` returned, or the end of its scope.
+
+## Timeout options
+
+| Playwright                     | Strider                                                                         |
+| ------------------------------ | ------------------------------------------------------------------------------- |
+| `{ timeout }` on a call        | [`Deadline.within(duration)`](/docs/deadlines), piped onto the call             |
+| `page.setDefaultTimeout(ms)`   | `Deadline.withDefaultBudget(duration)` around the program or a step             |
+| `expect`'s 5-second timeout    | 30 seconds, as for every other call                                             |
+| `waitForEvent(event, { timeout })` | `Popup.next(page).pipe(Deadline.within(duration))`: a wait keeps the deadline in force where it subscribes |
+
+Strider has no `timeout` option. `Deadline.within` sets a deadline for an effect, whether one call or a whole
+step, and every call inside shares it:
+
+```ts
+import { Deadline, Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const pay = Effect.fn("pay")(function*(page: Page.Page) {
+  yield* page.getByRole("button", { name: "Pay" }).click().pipe(
+    Deadline.within("10 seconds")
+  )
+  yield* page.getByText("Payment received").pipe(
+    Expect.toBeVisible,
+    Deadline.within("1 minute")
+  )
+})
+```
+
+A `Timeout`'s `phase` says how far the call got, such as whether the click reached the page;
+[Timeouts](/docs/deadlines#timeouts) says when retrying is safe.
+
+## Tests
+
+| Playwright                            | Strider                                                                    |
+| ------------------------------------- | -------------------------------------------------------------------------- |
+| `test` from `@playwright/test`        | `it.effect` from `@effect/vitest`                                          |
+| the `page` fixture                    | `Browser.newPage()`, in a fresh context for each test                      |
+| the config's browser                  | [`VitestBrowser.layer`](/docs/tools/testing) from `@usestrider/vitest`, in a `layer` block |
+
+A `layer` block shares one browser among a file's tests: [Tests with Vitest](/docs/tools/testing) shows the setup.
+Vitest stops a test after 5 seconds, sooner than Strider's 30-second deadlines, so raise `testTimeout` in the
+Vitest config.

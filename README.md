@@ -27,7 +27,7 @@ Each layer document has the same shape: purpose, top data models, interface sket
 | — | [CLI.md](CLI.md) | the command line: named sessions, commands, files, storage and forks, export |
 | L0 | [PROTOCOL.md](PROTOCOL.md) | transports, protocol clients, code generation, ingestion, backend adapters, capabilities |
 | — | [PROBES.md](PROBES.md) | conformance probes, hazard coverage, deterministic model tests |
-| — | [QUIRKS.md](QUIRKS.md) | weird behaviors found while building, browsers' and our own, to reconsider when the library is built |
+| — | [QUIRKS.md](QUIRKS.md) | weird behaviors found while building, browsers' and our own; closed, with new findings filed on the Rookery board |
 | — | [research/](research/) | prior-art notes (historical evidence) |
 | — | [docs/](docs/) | [decisions.md](docs/decisions.md): the principles and architectural decisions, and why; [conventions.md](docs/conventions.md): the Effect conventions the code follows |
 | — | [upstream/](upstream/) | drafts of proposals for upstream projects, for the maintainer to post |
@@ -140,5 +140,5 @@ Built through all three layers on Chromium (CDP), Firefox (WebDriver BiDi) and s
 
 - **The packages:** `@usestrider/browser`, with the CLI (`strider`) and the agent toolkit, and `@usestrider/vitest`. Neither is published. Both are under the MIT license ([LICENSE](LICENSE)); `@usestrider/browser`'s generated protocol modules and keyboard layouts also carry their sources' notices ([THIRD_PARTY_NOTICES.md](packages/browser/THIRD_PARTY_NOTICES.md)). `pnpm pack-check` checks what would be published.
 - **Tests:** `pnpm all` runs the checks that need no browser. `pnpm test:integration` runs the adapter conformance suite and the slices in the Nix environment (`flake.nix`), against Chromium 155.0.8059.79, Firefox 158.0 and WebKitGTK 2.54.1. CI runs `pnpm all`, the build and the package check on every pull request and every push to `main`, and the integration tests nightly when `main` has changed, or on demand.
-- **Compared with Playwright:** `pnpm scenarios` runs the same scenarios with both libraries on the same stock Chromium and writes [packages/scenarios/RESULTS.md](packages/scenarios/RESULTS.md).
+- **Compared with Playwright:** `pnpm scenarios` runs the same scenarios with both libraries on the same stock Chromium and writes [packages/scenarios/RESULTS.md](packages/scenarios/RESULTS.md). `pnpm bench` measures individual operations with warmups and raw samples; `pnpm bench --check` enforces a configurable per-case median ratio ([benchmark suite](packages/scenarios/BENCHMARKS.md)).
 - **Upstream:** drafted reports and proposals for browsers and Effect are in `upstream/`, not yet sent.

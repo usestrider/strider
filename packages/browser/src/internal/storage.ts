@@ -11,8 +11,10 @@
  */
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as HttpUrl from "effect/http/Url"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as Result from "effect/Result"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as CookieJar from "../CookieJar.ts"
 import type * as Deadline from "../Deadline.ts"
@@ -107,12 +109,11 @@ const fromInput = (input: CookieJar.Input): Adapter.Cookie | Reason.InvalidInput
   let domain: string
   let path: string
   if (input.scope._tag === "Url") {
-    let url: URL
-    try {
-      url = new URL(input.scope.url)
-    } catch {
+    const parsed = HttpUrl.fromString(input.scope.url)
+    if (Result.isFailure(parsed)) {
       return invalid("scope", "an absolute URL", `${JSON.stringify(input.scope.url)} doesn't parse`)
     }
+    const url = parsed.success
     domain = url.hostname
     path = defaultPath(url.pathname)
   } else {
@@ -186,10 +187,8 @@ export const cookieJar = (runtime: Runtime.Runtime, context: UserContext.Id): Co
     },
     listFor: Operation.fn("CookieJar.listFor", attributes)(function*(url: Url.Url | string) {
       const { id } = yield* Operation.record
-      let parsed: URL
-      try {
-        parsed = new URL(url)
-      } catch {
+      const result = HttpUrl.fromString(url)
+      if (Result.isFailure(result)) {
         return yield* Effect.fail(cookieError(
           "CookieJar.listFor",
           new Reason.InvalidInput({
@@ -200,6 +199,7 @@ export const cookieJar = (runtime: Runtime.Runtime, context: UserContext.Id): Co
           id
         ))
       }
+      const parsed = result.success
       const now = Date.now()
       return (yield* list("CookieJar.listFor", id)).filter((cookie) => sends(parsed, cookie, now))
     }),
@@ -285,7 +285,6 @@ const storageFailure = (operation: string, record: Operation.Record) =>
       new Reason.BackendFailure({
         kind: "Rejected",
         method: operation,
-        metadata: {},
         hint: name === "SecurityError"
           ? `The document's origin has no storage, as an opaque one hasn't (${message})`
           : `${name}: ${message}`
@@ -297,7 +296,7 @@ const storageFailure = (operation: string, record: Operation.Record) =>
     operation,
     reason._tag === "Unsupported" || reason._tag === "BackendFailure"
       ? reason
-      : new Reason.BackendFailure({ kind: "Rejected", method: operation, metadata: {}, hint: reason.message }),
+      : new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: reason.message }),
     id
   )
 }

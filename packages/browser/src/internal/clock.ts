@@ -22,7 +22,6 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
-import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
 import * as PageClock from "../PageClock.ts"
@@ -304,11 +303,15 @@ export interface Owner {
   readonly conflicting: () => Option.Option<string>
 }
 
-/** Every timeline, by what owns it: a page's entry or a context's. */
-const timelines = new WeakMap<object, { installed: Option.Option<Installed> }>()
+/** Every timeline of a connection, by what owns it: a page's entry or a context's. The runtime holds them. */
+export type Timelines = WeakMap<object, { installed: Option.Option<Installed> }>
+
+/** A connection's timelines, none yet. */
+export const makeTimelines = (): Timelines => new WeakMap()
 
 /** Whether a page's or a context's clock is installed. */
-export const isInstalled = (owner: object): boolean => Option.isSome(timelines.get(owner)?.installed ?? Option.none())
+export const isInstalled = (timelines: Timelines, owner: object): boolean =>
+  Option.isSome(timelines.get(owner)?.installed ?? Option.none())
 
 const stateOf = (mode: PageClock.Mode): State | string => {
   const time = (input: DateTime.DateTime.Input) => Option.map(DateTime.make(input), DateTime.toEpochMillis)
@@ -333,7 +336,7 @@ const stateOf = (mode: PageClock.Mode): State | string => {
 /** A page clock over a timeline. */
 export const make = (owner: Owner, key: object): PageClock.PageClock => {
   const timeline = { installed: Option.none<Installed>() }
-  timelines.set(key, timeline)
+  owner.runtime.timelines.set(key, timeline)
   const token = `@usestrider/browser/clock/${crypto.randomUUID()}`
   const adapter = owner.runtime.model.adapter
 
@@ -343,17 +346,21 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
    */
   const broadcast = (functionDeclaration: string, workers: boolean) =>
     Effect.flatMap(
-      workers
-        ? Effect.map(Effect.forEach(owner.pages(), (page) => SubscriptionRef.get(page.workers)), (each) => each.flat())
-        : Effect.succeed([]),
-      (dedicated) =>
+      Effect.forEach(owner.pages(), (page) => page.state.get),
+      (states) =>
         Effect.forEach(
           [
-            ...[...owner.runtime.model.documents.values()].filter((document) => {
-              const page = owner.runtime.model.pageOf(document.navigable)
-              return Option.isSome(page) && owner.pages().includes(page.value)
-            }).map((document) => ({ url: document.url, realm: adapter.realm(document.id, { _tag: "Main" }) })),
-            ...dedicated.map((worker) => ({ url: worker.url, realm: Effect.succeed(worker.realm) }))
+            // Each page's document and its frames'
+            ...states.flatMap((state) => [
+              ...(state.status._tag === "Open" ? [{ id: state.status.document.id, url: state.status.url }] : []),
+              ...state.frames.flatMap((frame) =>
+                Option.toArray(Option.map(frame.document, (id) => ({ id, url: frame.url })))
+              )
+            ]).map((document) => ({ url: document.url, realm: adapter.realm(document.id, { _tag: "Main" }) })),
+            ...(workers ? states.flatMap((state) => state.workers) : []).map((worker) => ({
+              url: worker.url,
+              realm: Effect.succeed(worker.realm)
+            }))
           ],
           (where) =>
             where.realm.pipe(
@@ -397,11 +404,10 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
     return script
   })
 
-  const clockError = (operation: string, reason: PageClock.PageClockErrorReason, id = Operation.operationId()) =>
+  const clockError = (operation: string, reason: PageClock.PageClockErrorReason, id = Operation.idNow()) =>
     new PageClock.PageClockError({ operation, reason, diagnostics: Operation.diagnostics(id) })
 
-  const backendFailure = (method: string, hint: string) =>
-    new Reason.BackendFailure({ kind: "Rejected", method, metadata: {}, hint })
+  const backendFailure = (method: string, hint: string) => new Reason.BackendFailure({ kind: "Rejected", method, hint })
 
   /** The installed timeline, or why an operation can't run on it. */
   const require = (operation: string, modes: ReadonlyArray<State["mode"]>) =>

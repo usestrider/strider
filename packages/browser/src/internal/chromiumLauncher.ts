@@ -35,6 +35,8 @@ export interface Settings {
   readonly args?: ReadonlyArray<string> | undefined
   /** A profile directory the caller owns, never deleted; otherwise a temporary one. */
   readonly userDataDir?: string | undefined
+  /** @default false */
+  readonly coreDumps?: boolean | undefined
 }
 
 /** A launch: the executable it names, as an absolute path, and its settings. */
@@ -63,7 +65,8 @@ export const launch: (
   const path = yield* Launch.executable(options.executablePath)
   const userDataDir = yield* Launch.profileDirectory(options.userDataDir, "strider-chromium-")
   const launched = yield* Launch.spawn(path, argsFor(options, userDataDir, "pipe"), userDataDir, {
-    additionalFds: Transport.pipeFds
+    additionalFds: Transport.pipeFds,
+    coreDumps: options.coreDumps
   })
   const transport = yield* Transport.pipe(launched.handle)
   return { launched, transport }
@@ -79,7 +82,9 @@ export const launchWithPort = Effect.fnUntraced(function*(
   const fs = yield* FileSystem.FileSystem
   const path = yield* Launch.executable(options.executablePath)
   const userDataDir = yield* Launch.profileDirectory(options.userDataDir, "strider-chromium-")
-  const launched = yield* Launch.spawn(path, argsFor(options, userDataDir, "port"), userDataDir, {})
+  const launched = yield* Launch.spawn(path, argsFor(options, userDataDir, "port"), userDataDir, {
+    coreDumps: options.coreDumps
+  })
   const timeout = options.timeout ?? "30 seconds"
   const active = yield* fs.readFileString(`${userDataDir}/DevToolsActivePort`).pipe(
     Effect.filterOrFail((text) => text.includes("\n")),
