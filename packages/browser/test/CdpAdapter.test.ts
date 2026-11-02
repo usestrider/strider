@@ -1,9 +1,18 @@
 /** Deterministic CDP event ordering regressions, without launching a browser. */
 import { assert, describe, it } from "@effect/vitest"
+import { Browser, Deadline, NetworkRequest } from "@usestrider/browser"
+import * as Clock from "effect/Clock"
+import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
+import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Queue from "effect/Queue"
+import { TestClock } from "effect/testing"
 import type * as Adapter from "../src/internal/adapter.ts"
+import * as BrowserImpl from "../src/internal/browser.ts"
+import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as CdpAdapter from "../src/internal/cdpAdapter.ts"
 import * as Har from "../src/internal/har.ts"
 import captured from "./fixtures/redirect-extra-info.ts"
@@ -232,76 +241,165 @@ describe("CDP adapter redirect headers", () => {
   }
 })
 
-describe("CDP adapter sent headers before a response", () => {
-  it.effect("reports a request's ExtraInfo headers while its response is outstanding", () =>
-    Effect.gen(function*() {
-      const browser = yield* makeBrowser
-      const ready = yield* Deferred.make<void>()
-      const settled = yield* Deferred.make<void>()
-      const facts: Array<Adapter.Fact> = []
-      yield* Effect.gen(function*() {
-        while (true) {
-          const command = yield* browser.next
-          const result = command.method === "Browser.getVersion"
-            ? {
-              protocolVersion: "1.3",
-              product: "Chrome/155.0.8059.79",
-              revision: "test",
-              userAgent: "HeadlessChrome",
-              jsVersion: "test"
-            }
-            : command.method === "Target.getBrowserContexts"
-            ? { browserContextIds: [] }
-            : command.method === "Page.getFrameTree"
-            ? {
-              frameTree: {
-                frame: {
-                  id: "76F3487A52CF4F79FE4AD28961E44D32",
-                  loaderId: "initial",
-                  url: "about:blank",
-                  securityOrigin: "://",
-                  mimeType: "text/html"
-                }
-              }
-            }
-            : {}
-          yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
+/** A synthetic CDP connection folded into the real public Browser layer. */
+const sentHeaders = Effect.gen(function*() {
+  const browser = yield* makeBrowser
+  const ready = yield* Deferred.make<void>()
+  const settled = yield* Queue.unbounded<void>()
+  const facts: Array<Adapter.Fact> = []
+  yield* Effect.gen(function*() {
+    while (true) {
+      const command = yield* browser.next
+      const result = command.method === "Browser.getVersion"
+        ? {
+          protocolVersion: "1.3",
+          product: "Chrome/155.0.8059.79",
+          revision: "test",
+          userAgent: "HeadlessChrome",
+          jsVersion: "test"
         }
-      }).pipe(Effect.forkScoped)
-      yield* CdpAdapter.connect(browser.transport, {
-        ownership: "attached",
-        sink: Effect.fnUntraced(function*(fact) {
-          facts.push(fact)
-          if (fact._tag === "PageReady") yield* Deferred.succeed(ready, undefined)
-          if (fact._tag === "ConnectionOpened") yield* Deferred.succeed(settled, undefined)
-        })
-      })
-      yield* browser.receive({
-        method: "Target.attachedToTarget",
-        params: {
-          sessionId: "S1",
-          targetInfo: { targetId: "T1", type: "page", title: "", url: "about:blank", attached: true },
-          waitingForDebugger: false
+        : command.method === "Target.getBrowserContexts"
+        ? { browserContextIds: [] }
+        : command.method === "Page.getFrameTree"
+        ? {
+          frameTree: {
+            frame: {
+              id: "76F3487A52CF4F79FE4AD28961E44D32",
+              loaderId: "initial",
+              url: "about:blank",
+              securityOrigin: "://",
+              mimeType: "text/html"
+            }
+          }
         }
+        : {}
+      yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
+    }
+  }).pipe(Effect.forkScoped)
+  const services = yield* Layer.build(BrowserImpl.layer((sink) =>
+    CdpAdapter.connect(browser.transport, {
+      ownership: "attached",
+      sink: Effect.fnUntraced(function*(fact) {
+        yield* sink(fact)
+        facts.push(fact)
+        if (fact._tag === "PageReady") yield* Deferred.succeed(ready, undefined)
+        if (fact._tag === "ConnectionOpened") yield* Queue.offer(settled, undefined)
       })
-      yield* Deferred.await(ready)
-      // The server hasn't answered: only the request event and its ExtraInfo have come, in the captured order.
-      for (const event of captured.slice(0, 2)) {
-        yield* browser.receive({ method: event.method, params: event.params, sessionId: "S1" })
+    })
+  ))
+  yield* browser.receive({
+    method: "Target.attachedToTarget",
+    params: {
+      sessionId: "S1",
+      targetInfo: {
+        targetId: "76F3487A52CF4F79FE4AD28961E44D32",
+        type: "page",
+        title: "",
+        url: "about:blank",
+        attached: true
+      },
+      waitingForDebugger: false
+    }
+  })
+  yield* Deferred.await(ready)
+  const service = Context.get(services, Browser.Browser)
+  const page = (yield* service.pages.waitFor((pages) => pages.length > 0))[0]!
+  const next = yield* NetworkRequest.next(page, { url: "**" })
+  const send = (event: (typeof captured)[number]) => browser.receive({ ...event, sessionId: "S1" })
+  const barrier = Effect.gen(function*() {
+    yield* browser.receive({
+      method: "Network.webSocketCreated",
+      sessionId: "S1",
+      params: {
+        requestId: `sentinel-${facts.length}`,
+        url: "ws://127.0.0.1/"
       }
-      // A later event marks that the adapter has handled both.
-      yield* browser.receive({
-        method: "Network.webSocketCreated",
-        sessionId: "S1",
-        params: { requestId: "sentinel", url: "ws://127.0.0.1/" }
-      })
-      yield* Deferred.await(settled)
-      const request = facts.find((fact) => fact._tag === "RequestSent")!
-      assert.deepStrictEqual(
-        facts.flatMap((fact) =>
-          fact._tag === "HopHeaders" ? [{ hop: fact.hop, phase: fact.phase, type: fact.headers["content-type"] }] : []
-        ),
-        [{ hop: request.request.hop, phase: "request", type: "application/json" }]
+    })
+    yield* Queue.take(settled)
+  })
+  yield* send(captured[0]!)
+  yield* barrier
+  const request = yield* next
+  return { browser, page, request, send, barrier }
+})
+
+/** The synthetic browser and its deadlines advance together, without wall-clock delays. */
+const onTestClock = <A, E, R>(self: Effect.Effect<A, E, R>) =>
+  Clock.clockWith((clock) => Effect.provideService(self, BrowserClock.CurrentClock, BrowserClock.fromClock(clock)))
+
+describe("Chromium public sent-header waiting", () => {
+  it.effect("waits for attribution, then returns the network headers", () =>
+    Effect.gen(function*() {
+      const { page, request, send, barrier } = yield* sentHeaders
+      const waiting = yield* Effect.forkScoped(
+        NetworkRequest.headersSent(page, request).pipe(Deadline.within("1 second"))
       )
-    }))
+      yield* send(captured[1]!)
+      yield* barrier
+      yield* TestClock.adjust("0 millis")
+      assert.isUndefined(waiting.pollUnsafe())
+      yield* send(captured[2]!)
+      yield* send(captured[3]!)
+      yield* barrier
+      yield* TestClock.adjust("0 millis")
+      assert.isDefined(waiting.pollUnsafe())
+      assert.strictEqual((yield* Fiber.join(waiting)).cookie, "flavor=oat")
+    }).pipe(onTestClock))
+
+  it.effect("times out at its public deadline while attribution is unavailable", () =>
+    Effect.gen(function*() {
+      const { page, request, send, barrier } = yield* sentHeaders
+      yield* send(captured[1]!)
+      yield* barrier
+      const waiting = yield* Effect.forkScoped(
+        NetworkRequest.headersSent(page, request).pipe(Deadline.within("1 second"), Effect.flip)
+      )
+      yield* TestClock.adjust("999 millis")
+      assert.isUndefined(waiting.pollUnsafe())
+      yield* TestClock.adjust("1 millis")
+      const timeout = yield* Fiber.join(waiting)
+      assert(Deadline.isTimeout(timeout))
+      assert.strictEqual(timeout.operation, "NetworkRequest.headersSent")
+      assert.strictEqual(timeout.phase, "waitingForEvent")
+    }).pipe(onTestClock))
+
+  for (const terminal of ["fails", "is canceled", "loses its page"] as const) {
+    it.effect(`settles without advancing the deadline when a request ${terminal}`, () =>
+      Effect.gen(function*() {
+        const { browser, page, request, send, barrier } = yield* sentHeaders
+        // A failed request can settle queued network headers; cancellation and page removal have none.
+        if (terminal === "fails") yield* send(captured[1]!)
+        yield* barrier
+        const waiting = yield* Effect.forkScoped(
+          NetworkRequest.headersSent(page, request).pipe(Deadline.within("1 second"))
+        )
+        yield* TestClock.adjust("0 millis")
+        assert.isUndefined(waiting.pollUnsafe())
+        if (terminal === "loses its page") {
+          yield* browser.receive({
+            method: "Target.detachedFromTarget",
+            params: { sessionId: "S1", targetId: "76F3487A52CF4F79FE4AD28961E44D32" }
+          })
+          yield* page.closed
+        } else {
+          yield* browser.receive({
+            method: "Network.loadingFailed",
+            sessionId: "S1",
+            params: {
+              requestId: captured[0]!.params.requestId,
+              timestamp: 772297,
+              type: "Fetch",
+              errorText: terminal === "fails" ? "net::ERR_FAILED" : "net::ERR_ABORTED",
+              canceled: terminal === "is canceled"
+            }
+          })
+          yield* barrier
+        }
+        yield* TestClock.adjust("0 millis")
+        assert.isDefined(waiting.pollUnsafe(), "the terminal event must settle headers without advancing the clock")
+        const headers = yield* Fiber.join(waiting)
+        if (terminal === "fails") assert.strictEqual(headers.cookie, "flavor=oat")
+        else assert.deepStrictEqual(headers, request.headers)
+      }).pipe(onTestClock))
+  }
 })
