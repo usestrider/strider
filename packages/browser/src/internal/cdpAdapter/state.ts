@@ -226,7 +226,14 @@ export interface DragEntry {
 
 // ── The state ─────────────────────────────────────────────────────────────────────────────────────────────
 
+export interface CaptureGuard {
+  readonly page: L1Target.NavigableId
+  readonly document: L1Target.DocumentId | undefined
+  readonly replaced: (document: L1Target.DocumentId, received: number) => void
+}
+
 export interface State {
+  readonly captures: Set<CaptureGuard>
   readonly options: Adapter.ConnectOptions
   readonly ids: Kit.Ids
   readonly buffer: Kit.FactBuffer
@@ -290,6 +297,7 @@ export const make = (options: {
   const requests = new Map<string, RequestEntry>()
   const hops = new Map<NetworkRequest.HopId, RequestEntry>()
   const state: State = {
+    captures: new Set(),
     options: options.connect,
     ids: options.ids,
     buffer: options.buffer,

@@ -332,6 +332,14 @@ export const valuesAt = (value: unknown, pointer: string): ReadonlyArray<unknown
 
 // ── The client ────────────────────────────────────────────────────────────────────────────────────────────
 
+/** Internal receipt hook: called synchronously before reply decoding or event folding. */
+export const ReplyReceived = Context.Reference<((received: number) => void) | undefined>(
+  "strider/internal/ReplyReceived",
+  {
+    defaultValue: () => undefined
+  }
+)
+
 interface Pending {
   readonly id: number
   readonly session: SessionState
@@ -341,6 +349,7 @@ interface Pending {
   readonly reply: Deferred.Deferred<unknown, Protocol.ProtocolError>
   /** The receive sequence number of the reply. */
   received: number
+  onReceipt?: ((received: number) => void) | undefined
   replied: boolean
   raw: unknown
   /** Set once the caller stopped waiting on a command that creates a resource. */
@@ -499,6 +508,7 @@ export const make: (
       ? undefined
       : decoder(definition.Result, method, yield* Protocol.CurrentValidation)
     const entry = register(state, method, encoded, definition.traits.release ?? [])
+    entry.onReceipt = yield* ReplyReceived
     let consumed = false
     // The caller stopped waiting. A reply still to come is dropped, or handed to the late-reply handler; one
     // that arrived but wasn't consumed goes straight to the handler.
@@ -702,6 +712,7 @@ export const make: (
         if (entry === undefined) return
         unregister(entry)
         entry.received = received
+        entry.onReceipt?.(received)
         if (incoming._tag === "ErrorReply") {
           if (entry.late === undefined) {
             Deferred.doneUnsafe(entry.reply, Effect.fail(failure(classify(wire.errors, entry.method, incoming.error))))

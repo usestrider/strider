@@ -18,7 +18,7 @@ import * as CdpAdapter from "../src/internal/cdpAdapter.ts"
 import * as Har from "../src/internal/har.ts"
 import * as Readable from "../src/internal/readable.ts"
 import captured from "./fixtures/redirect-extra-info.ts"
-import { makeBrowser } from "./utils/FakeBrowser.ts"
+import { makeBrowser, type Sent } from "./utils/FakeBrowser.ts"
 
 describe("CDP adapter redirect headers", () => {
   for (
@@ -253,12 +253,17 @@ const sentHeaders = Effect.gen(function*() {
   const ready = yield* Deferred.make<void>()
   const settled = yield* Queue.unbounded<void>()
   const facts: Array<Adapter.Fact> = []
-  const captures = yield* Queue.unbounded<void>()
+  const captures = yield* Queue.unbounded<Sent>()
+  const preparation = yield* Queue.unbounded<Sent>()
   yield* Effect.gen(function*() {
     while (true) {
       const command = yield* browser.next
       if (command.method === "Page.captureScreenshot") {
-        yield* Queue.offer(captures, undefined)
+        yield* Queue.offer(captures, command)
+        continue
+      }
+      if (command.method === "Page.getLayoutMetrics" || command.method === "Page.createIsolatedWorld") {
+        yield* Queue.offer(preparation, command)
         continue
       }
       const result = command.method === "Browser.getVersion"
@@ -331,7 +336,7 @@ const sentHeaders = Effect.gen(function*() {
   yield* send(captured[0]!)
   yield* barrier
   const request = yield* next
-  return { browser, page, request, send, barrier, captures }
+  return { browser, page, request, send, barrier, captures, preparation, facts }
 })
 
 /** The synthetic browser and its deadlines advance together, without wall-clock delays. */
@@ -415,31 +420,201 @@ describe("Chromium public sent-header waiting", () => {
   }
 })
 
+const replacementEvent = (loaderId = "replacement") => ({
+  sessionId: "S1",
+  method: "Page.frameNavigated",
+  params: {
+    frame: {
+      id: "76F3487A52CF4F79FE4AD28961E44D32",
+      loaderId,
+      url: "https://example.com/replacement",
+      securityOrigin: "https://example.com",
+      mimeType: "text/html"
+    }
+  }
+})
+
+const replyCapture = (browser: Effect.Success<typeof makeBrowser>, command: Sent) =>
+  browser.receive({ id: command.id, sessionId: command.sessionId, result: { data: "AA==" } })
+
 describe("Chromium capture document replacement", () => {
-  it.effect("fails a pending capture promptly when the main document commits", () =>
-    Effect.gen(function*() {
-      const { browser, page, barrier, captures } = yield* sentHeaders
-      const reader = yield* page.control
-      const pending = yield* Effect.forkScoped(reader.screenshot().pipe(Effect.flip))
-      yield* Queue.take(captures)
-      yield* browser.receive({
-        sessionId: "S1",
-        method: "Page.frameNavigated",
-        params: {
-          frame: {
-            id: "76F3487A52CF4F79FE4AD28961E44D32",
-            loaderId: "replacement",
-            url: "https://example.com/replacement",
-            securityOrigin: "https://example.com",
-            mimeType: "text/html"
+  for (const preparation of ["native", "layout", "element"] as const) {
+    it.effect(`fails promptly during ${preparation} capture preparation or dispatch`, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders
+        const reader = yield* h.page.control
+        const pending = yield* Effect.forkScoped(
+          reader.screenshot(
+            preparation === "layout"
+              ? { area: { _tag: "FullPage" } }
+              : preparation === "element"
+              ? { area: { _tag: "Element", locator: reader.locator("main") } }
+              : undefined
+          ).pipe(Effect.flip)
+        )
+        yield* Queue.take(preparation !== "native" ? h.preparation : h.captures)
+        yield* h.browser.receive(replacementEvent())
+        yield* h.barrier
+        yield* TestClock.adjust("0 millis")
+        assert.isDefined(pending.pollUnsafe(), "capture must fail on commit without advancing its deadline")
+        const error = yield* Fiber.join(pending)
+        assert.strictEqual(error._tag, "PageError")
+        if (error._tag === "PageError") {
+          assert.strictEqual(error.reason._tag, "CaptureInvalidated")
+          if (error.reason._tag === "CaptureInvalidated") {
+            const documents = h.facts.filter((fact) => fact._tag === "DocumentCommitted")
+            assert.deepStrictEqual([error.reason.document, error.reason.replacement], [
+              documents.at(-2)?.document,
+              documents.at(-1)?.document
+            ])
           }
         }
+        if (preparation !== "native") assert.strictEqual(yield* Queue.size(h.captures), 0)
+      }).pipe(onTestClock))
+  }
+
+  it.effect("keeps a native reply received before replacement terminal", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders
+      const page = yield* h.page.control
+      const pending = yield* Effect.forkScoped(page.screenshot())
+      const command = yield* Queue.take(h.captures)
+      yield* replyCapture(h.browser, command)
+      yield* h.browser.receive(replacementEvent())
+      yield* h.barrier
+      assert.deepStrictEqual(Array.from(yield* Fiber.join(pending)), [0])
+    }).pipe(onTestClock))
+
+  it.effect("keeps a native error reply received before replacement terminal", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders
+      const page = yield* h.page.control
+      const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+      const command = yield* Queue.take(h.captures)
+      yield* h.browser.receive({
+        id: command.id,
+        sessionId: command.sessionId,
+        error: { code: -32000, message: "capture failed" }
       })
-      yield* barrier
-      yield* TestClock.adjust("0 millis")
-      assert.isDefined(pending.pollUnsafe(), "capture must fail on commit without advancing its deadline")
+      yield* h.browser.receive(replacementEvent())
+      yield* h.barrier
+      const error = yield* Fiber.join(pending)
+      assert.strictEqual(error._tag, "PageError")
+      if (error._tag === "PageError") assert.strictEqual(error.reason._tag, "BackendFailure")
+    }).pipe(onTestClock))
+
+  it.effect("keeps a page crash as TargetGone instead of capture invalidation", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders
+      const page = yield* h.page.control
+      const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+      yield* Queue.take(h.captures)
+      yield* h.browser.receive({ method: "Inspector.targetCrashed", sessionId: "S1", params: {} })
+      const error = yield* Fiber.join(pending)
+      assert.strictEqual(error._tag, "TargetGone")
+      if (error._tag === "TargetGone") assert.strictEqual(error.reason._tag, "PageCrashed")
+    }).pipe(onTestClock))
+
+  it.effect("invalidates when commit was received before the native reply", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders
+      const page = yield* h.page.control
+      const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+      const command = yield* Queue.take(h.captures)
+      yield* h.browser.receive(replacementEvent())
+      yield* replyCapture(h.browser, command)
+      yield* h.barrier
       const error = yield* Fiber.join(pending)
       assert.strictEqual(error._tag, "PageError")
       if (error._tag === "PageError") assert.strictEqual(error.reason._tag, "CaptureInvalidated")
+      // A late reply and the old guard cannot affect a subsequent caller.
+      const next = yield* Effect.forkScoped(page.screenshot())
+      yield* replyCapture(h.browser, yield* Queue.take(h.captures))
+      assert.deepStrictEqual(Array.from(yield* Fiber.join(next)), [0])
+    }).pipe(onTestClock))
+
+  for (const method of ["Page.navigatedWithinDocument", "Page.frameStartedLoading", "Page.frameStoppedLoading"]) {
+    it.effect(`does not invalidate for ${method}`, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders
+        const page = yield* h.page.control
+        const pending = yield* Effect.forkScoped(page.screenshot())
+        const command = yield* Queue.take(h.captures)
+        yield* h.browser.receive({
+          sessionId: "S1",
+          method,
+          params: {
+            frameId: "76F3487A52CF4F79FE4AD28961E44D32",
+            url: "about:blank#hash",
+            navigationType: "fragment"
+          }
+        })
+        yield* h.barrier
+        assert.isUndefined(pending.pollUnsafe())
+        yield* replyCapture(h.browser, command)
+        assert.deepStrictEqual(Array.from(yield* Fiber.join(pending)), [0])
+      }).pipe(onTestClock))
+  }
+
+  it.effect("does not invalidate for a committed child-frame replacement", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders
+      const page = yield* h.page.control
+      const pending = yield* Effect.forkScoped(page.screenshot())
+      const command = yield* Queue.take(h.captures)
+      const event = replacementEvent()
+      yield* h.browser.receive({
+        ...event,
+        params: { frame: { ...event.params.frame, id: "child", parentId: event.params.frame.id } }
+      })
+      yield* h.barrier
+      assert.isUndefined(pending.pollUnsafe())
+      yield* replyCapture(h.browser, command)
+      assert.deepStrictEqual(Array.from(yield* Fiber.join(pending)), [0])
+    }).pipe(onTestClock))
+
+  it.effect("invalidates a same-URL reload with a new document identity", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders
+      const page = yield* h.page.control
+      const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+      yield* Queue.take(h.captures)
+      const event = replacementEvent()
+      yield* h.browser.receive({ ...event, params: { frame: { ...event.params.frame, url: "about:blank" } } })
+      yield* h.barrier
+      const error = yield* Fiber.join(pending)
+      assert.strictEqual(error._tag, "PageError")
+      if (error._tag === "PageError") assert.strictEqual(error.reason._tag, "CaptureInvalidated")
+    }).pipe(onTestClock))
+
+  it.effect("retains the native session-ended error instead of reporting document invalidation", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders
+      const page = yield* h.page.control
+      const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+      yield* Queue.take(h.captures)
+      yield* h.browser.receive({
+        method: "Target.detachedFromTarget",
+        params: { sessionId: "S1", targetId: "76F3487A52CF4F79FE4AD28961E44D32" }
+      })
+      const error = yield* Fiber.join(pending)
+      assert.strictEqual(error._tag, "PageError")
+      if (error._tag === "PageError") assert.strictEqual(error.reason._tag, "BackendFailure")
+    }).pipe(onTestClock))
+
+  it.effect("retains an already expired deadline across later replacement", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders
+      const page = yield* h.page.control
+      const pending = yield* Effect.forkScoped(page.screenshot().pipe(Deadline.within("1 second"), Effect.flip))
+      yield* Queue.take(h.captures)
+      yield* TestClock.adjust("1 second")
+      const error = yield* Fiber.join(pending)
+      assert.strictEqual(error._tag, "Timeout")
+      yield* h.browser.receive(replacementEvent())
+      yield* h.barrier
+      const next = yield* Effect.forkScoped(page.screenshot())
+      yield* replyCapture(h.browser, yield* Queue.take(h.captures))
+      assert.deepStrictEqual(Array.from(yield* Fiber.join(next)), [0])
     }).pipe(onTestClock))
 })

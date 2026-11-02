@@ -30,7 +30,7 @@ type Connection = Adapter.AdapterConnection
 
 /** The adapter's methods: its members that are functions returning an effect. */
 type Method = {
-  [K in keyof Connection]: Connection[K] extends (...args: Array<any>) => Effect.Effect<any, any, any> ? K : never
+  [K in keyof Connection]-?: Connection[K] extends (...args: Array<any>) => Effect.Effect<any, any, any> ? K : never
 }[keyof Connection]
 
 /** The methods that are cleanup. */

@@ -1410,6 +1410,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
 
 *errors*
 
+- `class CaptureInvalidated: Schema.Error { document, replacement, hint }`
 - `class PageError: Schema.TaggedError "PageError" { operation, reason, diagnostics }`
   - `override get cause(): unknown`
 

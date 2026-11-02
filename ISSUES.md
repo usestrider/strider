@@ -151,6 +151,7 @@ the dialog then isn't known.
 
 **I32.** A screenshot timed out once in a full integration run, and passed alone. Reproduce it as the project's
 guidance says: many processes beside busy loops, traced from the protocol's messages.
+- **Documented** by ROOK-13, in the commit `Fail Chromium captures when their main document is replaced`. The recorded Chromium 155 capture/navigation overlap now fails promptly with `Page.CaptureInvalidated`, without retry or repair; an immediate explicit replacement capture passed the pinned regression. This settles the documented handling of the proven overlap, not the cause of the original one-off or the unrecorded October 29 sightings. The investigation and its durable evidence remain on ROOK-13.
 
 **I33.** The HAR recording slice (`records a HAR with statuses, protocols, bodies and the library's timings,
 redacted`) failed once in a full `pnpm test:integration packages/browser/test/integration/slice` run, on a backend
