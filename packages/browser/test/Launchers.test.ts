@@ -244,6 +244,7 @@ describe("WebKit launcher", () => {
       readonly connectionClosed: Deferred.Deferred<void>
       readonly events: ReadonlyArray<string>
       readonly reads: () => number
+      readonly stops: () => number
     }
 
     const ownershipAttempt = Effect.fnUntraced(
@@ -381,7 +382,7 @@ describe("WebKit launcher", () => {
             Effect.provideService(SocketConnector.SocketConnector, connector),
             Effect.flip
           )
-        const error = yield* around(start, { failed, connectionClosed, events, reads: () => reads })
+        const error = yield* around(start, { failed, connectionClosed, events, reads: () => reads, stops: () => stopped })
         return { error, spawned, stopped, connected, closed, writes }
       }
     )
@@ -458,8 +459,9 @@ describe("WebKit launcher", () => {
                     yield* Deferred.await(progress.failed)
                     if (mode === "unreadable-after") yield* Deferred.await(progress.connectionClosed)
                     yield* Deferred.await(armed)
-                    yield* Effect.yieldNow
-                    assert.isUndefined(fiber.pollUnsafe(), "the original deadline is still pending")
+                    const finished = yield* Fiber.await(fiber).pipe(Effect.timeoutOption("20 millis"))
+                    assert.isTrue(Option.isNone(finished), "the controlled launch deadline has not expired")
+                    assert.strictEqual(progress.stops(), 0, "the child remains available for exit observation until the deadline")
                     assert.strictEqual(sleeps.length, 1, "no timer or budget is restarted after the error")
                     assert.isAbove(sleeps[0]!, 0)
                     assert.isAtMost(sleeps[0]!, 50, "only the configured budget's remaining time is used")
