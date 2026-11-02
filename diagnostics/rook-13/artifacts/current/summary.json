@@ -1,0 +1,205 @@
+{
+  "conditions": [
+    {
+      "server": "dev",
+      "path": "errors",
+      "area": "element",
+      "exit": "Success",
+      "count": 167
+    },
+    {
+      "server": "dev",
+      "path": "errors",
+      "area": "viewport",
+      "exit": "Success",
+      "count": 167
+    },
+    {
+      "server": "dev",
+      "path": "playwright",
+      "area": "element",
+      "exit": "Failure",
+      "count": 1
+    },
+    {
+      "server": "dev",
+      "path": "playwright",
+      "area": "element",
+      "exit": "Success",
+      "count": 166
+    },
+    {
+      "server": "dev",
+      "path": "playwright",
+      "area": "viewport",
+      "exit": "Success",
+      "count": 167
+    },
+    {
+      "server": "static",
+      "path": "errors",
+      "area": "element",
+      "exit": "Success",
+      "count": 167
+    },
+    {
+      "server": "static",
+      "path": "errors",
+      "area": "viewport",
+      "exit": "Success",
+      "count": 166
+    },
+    {
+      "server": "static",
+      "path": "playwright",
+      "area": "element",
+      "exit": "Success",
+      "count": 167
+    },
+    {
+      "server": "static",
+      "path": "playwright",
+      "area": "viewport",
+      "exit": "Success",
+      "count": 167
+    }
+  ],
+  "failures": [
+    {
+      "at": "2026-11-02T07:12:11.602Z",
+      "monotonicMs": 31100.736715,
+      "attempt": 1,
+      "server": "dev",
+      "path": "playwright",
+      "area": "element",
+      "instrumented": false,
+      "event": "end",
+      "elapsedMs": 30731.189228,
+      "exit": {
+        "_id": "Exit",
+        "_tag": "Failure",
+        "cause": {
+          "_id": "Cause",
+          "reasons": [
+            {
+              "_tag": "Fail",
+              "error": {
+                "_tag": "Timeout",
+                "operation": "Page.screenshot",
+                "phase": "dispatchedUnconfirmed",
+                "budget": {
+                  "_id": "Duration",
+                  "_tag": "Millis",
+                  "millis": 30000
+                },
+                "last": {
+                  "_id": "Option",
+                  "_tag": "None"
+                },
+                "history": [],
+                "hint": {
+                  "_id": "Option",
+                  "_tag": "Some",
+                  "value": "The page didn't answer before the deadline"
+                },
+                "diagnostics": {
+                  "operationId": "OP8",
+                  "dispatch": {
+                    "_tag": "MayHaveBeenSent"
+                  },
+                  "progress": [],
+                  "lastObserved": {
+                    "_id": "Option",
+                    "_tag": "None"
+                  },
+                  "cleanup": {
+                    "_tag": "NotNeeded"
+                  }
+                },
+                "~@usestrider/browser/Deadline/Timeout": "~@usestrider/browser/Deadline/Timeout"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "answeredCaptures": 1334,
+  "captureLatencyMs": {
+    "min": 39.176450000028126,
+    "max": 186.12612299999455
+  },
+  "unansweredCaptures": [
+    {
+      "at": "2026-11-02T07:11:41.555Z",
+      "monotonicMs": 1054.495329,
+      "connection": 1,
+      "direction": "out",
+      "bytes": 236,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 35,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "clip": {
+            "x": 256,
+            "y": 93.265625,
+            "width": 829,
+            "height": 5630.8125,
+            "scale": 1
+          },
+          "fromSurface": true,
+          "captureBeyondViewport": true
+        },
+        "sessionId": "4A89C26B44BE36F0CA23113953817616"
+      }
+    }
+  ],
+  "otherUnansweredCommands": [],
+  "frameEvents": {
+    "Page.lifecycleEvent": 21379,
+    "Page.frameResized": 6673
+  },
+  "firstAnsweredCapture": [
+    {
+      "sent": {
+        "at": "2026-11-02T07:12:11.853Z",
+        "monotonicMs": 31351.642255,
+        "connection": 2,
+        "direction": "out",
+        "bytes": 135,
+        "method": "Page.captureScreenshot",
+        "message": {
+          "id": 34,
+          "method": "Page.captureScreenshot",
+          "params": {
+            "format": "png",
+            "fromSurface": true
+          },
+          "sessionId": "8BE342919FA703B395A1E7EC32D4C795"
+        }
+      },
+      "received": {
+        "at": "2026-11-02T07:12:11.927Z",
+        "monotonicMs": 31425.821545,
+        "connection": 2,
+        "direction": "in",
+        "bytes": 236453,
+        "method": "Page.captureScreenshot",
+        "message": {
+          "id": 34,
+          "result": {
+            "data": {
+              "base64Length": 236376,
+              "decodedBytes": 177280,
+              "sha256": "3743d8e41a63c98e6d7032b839214948de856d51dd6c9cef2b5776970e5e502c"
+            }
+          },
+          "sessionId": "8BE342919FA703B395A1E7EC32D4C795"
+        }
+      },
+      "elapsedMs": 74.17929000000004
+    }
+  ]
+}

@@ -61,11 +61,8 @@ Analyze a recording with:
 python3 diagnostics/rook-13/analyze.py diagnostics/rook-13/artifacts/current
 ```
 
-Committed wire files are gzip-compressed without dropping records. Expand them before analyzing:
-
-```sh
-gzip -dk diagnostics/rook-13/artifacts/current/wire.ndjson.gz
-```
+Committed wire files are compressed without dropping records. The analyzer reads plain NDJSON, xz or gzip
+recordings directly, so expansion is optional.
 
 Pair commands by `(connection, sessionId, id)`, including late replies received after a timeout. `summary.json`
 contains the computed counts and unmatched commands. `failure-excerpt.ndjson` is an aid to reading the failure;

@@ -2,6 +2,8 @@
 """Pair every command by connection, session and ID; summarize attempts without sampling."""
 import collections
 import json
+import gzip
+import lzma
 import pathlib
 import sys
 
@@ -17,7 +19,14 @@ for line in (root / 'attempts.ndjson').open():
 pending = {}
 captures = []
 frame_events = collections.Counter()
-for line in (root / 'wire.ndjson').open():
+wire = root / 'wire.ndjson'
+if wire.exists():
+    traffic = wire.open()
+elif wire.with_suffix('.ndjson.xz').exists():
+    traffic = lzma.open(wire.with_suffix('.ndjson.xz'), 'rt')
+else:
+    traffic = gzip.open(wire.with_suffix('.ndjson.gz'), 'rt')
+for line in traffic:
     row = json.loads(line)
     message = row['message']
     key = (row['connection'], message.get('sessionId'), message.get('id'))

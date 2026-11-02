@@ -1,0 +1,121 @@
+{
+  "conditions": [
+    {
+      "server": "dev",
+      "path": "errors",
+      "area": "element",
+      "exit": "Success",
+      "count": 93
+    },
+    {
+      "server": "dev",
+      "path": "errors",
+      "area": "viewport",
+      "exit": "Success",
+      "count": 93
+    },
+    {
+      "server": "dev",
+      "path": "playwright",
+      "area": "element",
+      "exit": "Success",
+      "count": 94
+    },
+    {
+      "server": "dev",
+      "path": "playwright",
+      "area": "viewport",
+      "exit": "Success",
+      "count": 94
+    },
+    {
+      "server": "static",
+      "path": "errors",
+      "area": "element",
+      "exit": "Success",
+      "count": 93
+    },
+    {
+      "server": "static",
+      "path": "errors",
+      "area": "viewport",
+      "exit": "Success",
+      "count": 93
+    },
+    {
+      "server": "static",
+      "path": "playwright",
+      "area": "element",
+      "exit": "Success",
+      "count": 93
+    },
+    {
+      "server": "static",
+      "path": "playwright",
+      "area": "viewport",
+      "exit": "Success",
+      "count": 93
+    }
+  ],
+  "failures": [],
+  "answeredCaptures": 746,
+  "captureLatencyMs": {
+    "min": 40.67612400001963,
+    "max": 172.04253099999914
+  },
+  "unansweredCaptures": [],
+  "otherUnansweredCommands": [],
+  "frameEvents": {
+    "Page.lifecycleEvent": 8208,
+    "Page.frameResized": 3730
+  },
+  "firstAnsweredCapture": [
+    {
+      "sent": {
+        "at": "2026-11-02T07:21:41.952Z",
+        "monotonicMs": 604.52679,
+        "connection": 1,
+        "direction": "out",
+        "bytes": 236,
+        "method": "Page.captureScreenshot",
+        "message": {
+          "id": 22,
+          "method": "Page.captureScreenshot",
+          "params": {
+            "format": "png",
+            "clip": {
+              "x": 256,
+              "y": 93.265625,
+              "width": 829,
+              "height": 5630.8125,
+              "scale": 1
+            },
+            "fromSurface": true,
+            "captureBeyondViewport": true
+          },
+          "sessionId": "0AE2BAEC28D5270837F5100547FF382C"
+        }
+      },
+      "received": {
+        "at": "2026-11-02T07:21:42.113Z",
+        "monotonicMs": 764.85779,
+        "connection": 1,
+        "direction": "in",
+        "bytes": 937681,
+        "method": "Page.captureScreenshot",
+        "message": {
+          "id": 22,
+          "result": {
+            "data": {
+              "base64Length": 937604,
+              "decodedBytes": 703202,
+              "sha256": "744eedc8f6a7243ef54fec3659003dd5ce27d467559b9ad45fe5c16c7a95cfc4"
+            }
+          },
+          "sessionId": "0AE2BAEC28D5270837F5100547FF382C"
+        }
+      },
+      "elapsedMs": 160.33100000000002
+    }
+  ]
+}

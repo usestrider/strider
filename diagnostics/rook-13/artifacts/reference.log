@@ -1,0 +1,13 @@
+$ pnpm jsdocs && pnpm examples && pnpm index && pnpm api-reference
+$ strider-docs jsdocs
+Wrote .data/jsdocs.json
+$ strider-docs examples
+Checking 355 examples and 125 guide blocks
+$ strider-docs index
+Wrote INDEX.md: 665 declarations, 566 members
+Wrote INDEX.md: 1 declarations, 0 members
+$ strider-docs api-reference
+Wrote 159 modules to .data/api-reference/browser
+Wrote 1 modules to .data/api-reference/vitest
+Read 480 code blocks with TypeScript 6.0.3
+Wrote 78 capabilities for 3 backends to .data/api-reference

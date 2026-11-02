@@ -1,0 +1,23 @@
+[
+  {
+    "at": "2026-11-02T07:11:41.535Z",
+    "monotonicMs": 1033.809504,
+    "connection": 1,
+    "direction": "in",
+    "bytes": 232,
+    "method": "Network.webSocketFrameReceived",
+    "message": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "1039351.52",
+        "timestamp": 944427.466559,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"type\":\"full-reload\"}"
+        }
+      },
+      "sessionId": "4A89C26B44BE36F0CA23113953817616"
+    }
+  }
+]
