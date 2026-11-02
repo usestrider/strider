@@ -14,6 +14,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
+import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import type * as PageNavigation from "../../../src/PageNavigation.ts"
@@ -1129,6 +1130,44 @@ export const conformance = (backend: Backend) =>
             }
           }), timeout)
 
+        it.effect("captures screencast frames at the overridden viewport's size", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            if (!(yield* supports(world, "capability.screencast"))) {
+              return
+            }
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/hello`)
+            yield* evaluate(
+              world,
+              page,
+              `() => { document.documentElement.style.overflow = 'hidden'; let n = 0; setInterval(() => { document.body.style.background = 'rgb(' + (n++ % 255) + ',1,1)' }, 16) }`
+            )
+            const seen: Record<string, Array<ReadonlyArray<number>>> = {}
+            for (const [width, height] of [[640, 480], [1000, 700]] as const) {
+              const key = `${width}x${height}`
+              seen[key] = []
+              yield* Effect.scoped(Effect.gen(function*() {
+                yield* world.adapter.declare({ _tag: "Page", page }, {
+                  _tag: "Override",
+                  override: { _tag: "Viewport", width, height, deviceScaleFactor: 1, mobile: false }
+                })
+                const frames = yield* world.adapter.screencast(page)
+                yield* frames.pipe(
+                  Stream.take(6),
+                  Stream.runForEach((frame) =>
+                    Effect.sync(() =>
+                      seen[key]!.push([frame.width, frame.height])
+                    )
+                  ),
+                  Effect.timeout("3 seconds"),
+                  Effect.ignore
+                )
+              }))
+              assert.deepStrictEqual(seen[key]!.at(-1), [width, height], "the last frame is the viewport's size")
+            }
+          }), timeout)
+
         it.effect("captures screenshots and PDFs, and reads response bodies", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
@@ -1222,8 +1261,7 @@ export const conformance = (backend: Backend) =>
             yield* declared
             yield* goto(world, page, `${world.site.origin}/form`)
             yield* evaluate(world, page, "() => document.querySelector('#f').click()", true)
-            const opened = yield* world.facts.when("ObligationOpened", (fact) =>
-              fact.subject._tag === "FileChooser")
+            const opened = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "FileChooser")
             assert(opened.subject._tag === "FileChooser")
             assert.isTrue(opened.subject.multiple)
             yield* world.adapter.resolve(opened.obligation, { _tag: "SetFiles", files: [import.meta.filename] })
@@ -1237,9 +1275,7 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { context, page } = yield* newPage(world)
-            const directory = (yield* Effect.promise(() =>
-              import("node:os")
-            )).tmpdir() +
+            const directory = (yield* Effect.promise(() => import("node:os"))).tmpdir() +
               `/strider-downloads-${process.pid}`
             const declared = world.adapter.declare({ _tag: "UserContext", context }, {
               _tag: "Downloads",
