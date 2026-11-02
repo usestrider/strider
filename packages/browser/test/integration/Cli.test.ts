@@ -611,7 +611,7 @@ describe("strider", () => {
           ].join("\n")
         )
         // The route the session removed ends where it did, through its handle; the dialog handler it kept doesn't
-        assert.include(exported, `const r1 = yield* shop.route("**/api/status", () => Effect.succeed(Route.fulfill(`)
+        assert.include(exported, `const r1 = yield* shop.route("**/api/status", () => Route.fulfill(`)
         assert.include(exported, `yield* r1.remove\n`)
         assert.include(exported, `        yield* Dialog.handle(shop, Dialog.dismissAll)\n`)
         // The page the segment returned is its placeholder's to declare

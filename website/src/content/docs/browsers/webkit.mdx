@@ -170,21 +170,19 @@ const deleteAccount = Effect.fn("deleteAccount")(function*(page: Page.Page) {
     switch (dialog._tag) {
       case "Unknown":
         if (dialog.message.includes("type DELETE")) {
-          return Effect.succeed(dialog.respond("DELETE"))
+          return dialog.respond("DELETE")
         }
-        return Effect.succeed(
-          dialog.message.includes("delete") ? dialog.accept : dialog.dismiss
-        )
+        return dialog.message.includes("delete") ? dialog.accept : dialog.dismiss
+
       case "Confirm":
-        return Effect.succeed(
-          dialog.message.includes("delete") ? dialog.accept : dialog.dismiss
-        )
+        return dialog.message.includes("delete") ? dialog.accept : dialog.dismiss
+
       case "Prompt":
-        return Effect.succeed(dialog.respond("DELETE"))
+        return dialog.respond("DELETE")
       case "Alert":
-        return Effect.succeed(dialog.accept)
+        return dialog.accept
       case "BeforeUnload":
-        return Effect.succeed(dialog.leave)
+        return dialog.leave
     }
   })
   yield* page.getByRole("button", { name: "Delete account" }).click()

@@ -184,7 +184,7 @@ const popupPlaywright = async (browser: Playwright.Browser, origin: string) => {
 ```ts
 const blockStrider = Effect.fn("block")(function*(origin: string) {
   const page = yield* Browser.newPage()
-  yield* page.route(`${origin}/analytics/**`, () => Effect.succeed(Route.abort()))
+  yield* page.route(`${origin}/analytics/**`, () => Route.abort())
   yield* page.goto(`${origin}/tracked`)
   yield* page.getByText("analytics blocked").pipe(Expect.toBeVisible)
   return yield* page.locator("#out").readText

@@ -854,7 +854,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
             ...(contentType === undefined ? {} : { contentType })
           }))
         return Effect.flatMap(
-          page.route(pattern, () => Effect.succeed(decision)).pipe(Scope.provide(scope)),
+          page.route(pattern, () => decision).pipe(Scope.provide(scope)),
           register
         )
       }),
@@ -862,19 +862,17 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       onPage(name, (page) =>
         Effect.flatMap(
           Dialog.handle(page, (pending) =>
-            Effect.succeed(
-              decision === "accept"
-                ? (pending._tag === "Prompt" || pending._tag === "Unknown") && text !== undefined
-                  ? pending.respond(text)
-                  : pending._tag === "BeforeUnload"
-                  ? pending.leave
-                  : pending.accept
-                : pending._tag === "Alert"
-                ? pending.accept
+            decision === "accept"
+              ? (pending._tag === "Prompt" || pending._tag === "Unknown") && text !== undefined
+                ? pending.respond(text)
                 : pending._tag === "BeforeUnload"
-                ? pending.stay
-                : pending.dismiss
-            )).pipe(Scope.provide(scope)),
+                ? pending.leave
+                : pending.accept
+              : pending._tag === "Alert"
+              ? pending.accept
+              : pending._tag === "BeforeUnload"
+              ? pending.stay
+              : pending.dismiss).pipe(Scope.provide(scope)),
           register
         ))
   })

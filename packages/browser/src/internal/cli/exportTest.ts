@@ -563,7 +563,7 @@ export const render = (options: {
           : `Route.fulfill(HttpServerResponse.text(${quote(text ?? "")}, { status: ${status ?? 200}${
             contentType === undefined ? "" : `, contentType: ${quote(contentType)}`
           } }))`
-        body.push(`${handle(step)}yield* ${page}.route(${quote(pattern)}, () => Effect.succeed(${decision}))`)
+        body.push(`${handle(step)}yield* ${page}.route(${quote(pattern)}, () => ${decision})`)
         break
       }
       case "dialog": {
@@ -572,9 +572,9 @@ export const render = (options: {
         body.push(
           handle(step) + (decision === "accept" && text !== undefined
             // As in the session, a dialog of unknown kind, as every dialog on WebKit is, gets the text too
-            ? `yield* Dialog.handle(${page}, (dialog) => Effect.succeed(dialog._tag === "Prompt" || dialog._tag === "Unknown" ? dialog.respond(${
+            ? `yield* Dialog.handle(${page}, (dialog) => dialog._tag === "Prompt" || dialog._tag === "Unknown" ? dialog.respond(${
               quote(text)
-            }) : dialog._tag === "BeforeUnload" ? dialog.leave : dialog.accept))`
+            }) : dialog._tag === "BeforeUnload" ? dialog.leave : dialog.accept)`
             : `yield* Dialog.handle(${page}, Dialog.${decision === "accept" ? "acceptAll" : "dismissAll"})`)
         )
         break

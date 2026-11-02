@@ -750,27 +750,27 @@ interface ResponsePhase extends Paused {
   readonly responseBody: Effect<Uint8Array, RouteError | TargetGone | Timeout>   // interception.responseBody: CDP only
 }
 interface AuthPhase extends Paused { readonly phase: "auth"; readonly challenge: { origin: string; scheme: string; realm: string } }
-declare const continue: Decision<Phase>                  // at auth: the page gets the challenge's response
-declare const fallthrough: Decision<Phase>               // the next matching route, or the default
+declare const continue: Effect<Decision<Phase>>                  // at auth: the page gets the challenge's response
+declare const fallthrough: Effect<Decision<Phase>>               // the next matching route, or the default
 declare const continueWith: {
-  (change: (request: HttpClientRequest) => HttpClientRequest): Decision<"request">   // only what changed is sent
-  (change: ResponseChange): Decision<"response">         // interception.responseHeaders: CDP and BiDi
+  (change: (request: HttpClientRequest) => HttpClientRequest): Effect<Decision<"request">>   // only what changed is sent
+  (change: ResponseChange): Effect<Decision<"response">>         // interception.responseHeaders: CDP and BiDi
 }
 interface ResponseChange {
   readonly status?: number | undefined                   // with its standard phrase; default the server's
   readonly headers?: Headers.Input | undefined           // replace the server's whole; default the server's
 }
-declare const fulfill: (response: HttpServerResponse) => Decision<"request" | "response">   // HttpServerResponse.json, .text, .uint8Array, .stream, .file
-declare const abort: (reason?: AbortReason | undefined) => Decision<"request" | "response">   // default "failed"; another reason is CDP's
-declare const provideCredentials: (credentials: { username: string; password: Redacted<string> }) => Decision<"auth">
+declare const fulfill: (response: HttpServerResponse) => Effect<Decision<"request" | "response">>   // HttpServerResponse.json, .text, .uint8Array, .stream, .file
+declare const abort: (reason?: AbortReason | undefined) => Effect<Decision<"request" | "response">>   // default "failed"; another reason is CDP's
+declare const provideCredentials: (credentials: { username: string; password: Redacted<string> }) => Effect<Decision<"auth">>
 declare const fromHar: (path: FilePath.Local | string, options?: { readonly notFound?: "abort" | "fallthrough" | undefined } | undefined) =>
   Effect<Handler<never, never, "request">, Har.HarError, FileSystem>   // reads the HAR now; default notFound "abort"
 // HAR recording: Recordings, below
 
-yield* page.route("https://app.example.com/api/user", () => Effect.succeed(Route.fulfill(HttpServerResponse.jsonUnsafe({ name: "Ada" }))))
-yield* page.route("https://app.example.com/api/**", () => Effect.succeed(Route.continueWith(HttpClientRequest.setHeader("x-test", "1"))))
+yield* page.route("https://app.example.com/api/user", () => Route.fulfill(HttpServerResponse.jsonUnsafe({ name: "Ada" })))
+yield* page.route("https://app.example.com/api/**", () => Route.continueWith(HttpClientRequest.setHeader("x-test", "1")))
 yield* page.route("https://app.example.com/api/slow", (intercepted) =>   // what the server sent, patched (CDP)
-  Effect.map(intercepted.responseBody, (body) =>
+  Effect.flatMap(intercepted.responseBody, (body) =>
     Route.fulfill(HttpServerResponse.uint8Array(body, { status: intercepted.response.status, headers: intercepted.response.headers }))),
   { phase: "response" })
 ```
@@ -792,6 +792,7 @@ interface InitScript extends Declaration.Registration { readonly id: Id }   // a
 
 - **The handler's return type is the obligation.** A handler that fails, is interrupted, runs out of its `Deadline.DefaultBudget` (as read at `route`), or returns a decision the backend can't apply gets the default decision, `continue`; its failure is logged at Effect's `References.UnhandledLogLevel`, and the decision is published as an `AutoResolution{PausedRequest}` (`policy: Default`; QUIRKS.md, Q105) on the page and its context, as it is when every matching route falls through. A paused request is never left hanging, and one no route matches continues at once. At an authentication challenge the default is the challenge's response, never the browser's own prompt, which waits forever on headless Firefox. A context the library creates has its challenges paused where the backend can, so a challenge no route matches gets that response too, and `goto` commits at the server's `401`: every challenge on Firefox, a document's on Chromium, where a `fetch`'s or a subresource's still waits on the prompt, and none on WebKit, whose navigation never commits (`network.challenges`; QUIRKS.md, Q252, Q254 and Q255).
 - **Order.** Routes compose by precedence: the page's before its context's, then the most recent first; `fallthrough` asks the next. `hits` counts the requests a route was asked about. A route matches its pattern itself, with `Url.Pattern`'s rules; the browser is asked to pause what covers it: a glob or URL as it is, and a `URLPattern` as its fixed prefix, up to its first variable part (QUIRKS.md, Q106).
+- **Route decisions are Effects.** A one-line handler returns `Route.abort()` directly. A generator ends with `return yield* Route.abort()` after its other work. Handlers always return Effects, and each resulting decision remains restricted to its valid phases.
 - **A response can be changed without its body.** `Route.continueWith({ status, headers })` at the response phase sends the server's response on with its status or headers replaced and its body as it came, on CDP and BiDi; Firefox can't fulfill there, and this is what it can do (Q93). WebKit can't do either without reading the body, which it can't (`interception.responseHeaders`).
 - **Replaying a HAR is a route.** `Route.fromHar(path)` reads a HAR, or the zip `Har.record`'s `content: "attach"` writes, told apart by its signature, and makes a handler: `page.route("**/api/**", yield* Route.fromHar("api.har"))`. An entry matches by method and URL, and by body where both have one, which the export writes with `include: ["requestBodies"]`; the latest match wins. Its response is fulfilled as recorded, a redirect as a redirect (which WebKit doesn't follow, Q90), with its body decoded and the headers that described the encoding, and a redacted `Set-Cookie`, left out; an entry that failed without a response fails the request. A request nothing matches is aborted unless `notFound: "fallthrough"`. The file is read once, as the handler is made, so a missing or malformed one fails `fromHar` with `HarError{ReadFailed}` or `InvalidInput`, not each request.
 - **A route has one phase.** `"request"` unless `options.phase` says `"response"`, when the server's status and headers are in (and on Chromium its body), or `"auth"`, at a challenge. The phase types what the handler is given and may return: `provideCredentials` is no decision for a request-phase route.
@@ -810,11 +811,11 @@ const Dialog = Schema.Union([                         // what events report: dat
   Schema.TaggedStruct("Unknown", { id: PromptId, message: Schema.String })   // a browser that doesn't say which kind: stock WebKit
 ])
 type Pending =                                         // what a handler decides: each shape offers only the decisions valid for it
-  | Alert & { readonly accept: Decision }
-  | Confirm & { readonly accept: Decision; readonly dismiss: Decision }
-  | Prompt & { readonly accept: Decision; respond(text: string): Decision; readonly dismiss: Decision }   // accept answers with defaultValue
-  | BeforeUnload & { readonly leave: Decision; readonly stay: Decision }
-  | Unknown & { readonly accept: Decision; respond(text: string): Decision; readonly dismiss: Decision }   // accept: as OK would; respond, refused unless it was a prompt, leaves it to the policy
+  | Alert & { readonly accept: Effect<Decision> }
+  | Confirm & { readonly accept: Effect<Decision>; readonly dismiss: Effect<Decision> }
+  | Prompt & { readonly accept: Effect<Decision>; respond(text: string): Effect<Decision>; readonly dismiss: Effect<Decision> }   // accept answers with defaultValue
+  | BeforeUnload & { readonly leave: Effect<Decision>; readonly stay: Effect<Decision> }
+  | Unknown & { readonly accept: Effect<Decision>; respond(text: string): Effect<Decision>; readonly dismiss: Effect<Decision> }   // accept: as OK would; respond, refused unless it was a prompt, leaves it to the policy
 declare const handle: <E, R>(page: Page.Page, handler: (dialog: Pending) => Effect<Decision, E, R>) =>
   Effect<Declaration.HandlerRegistration, Declaration.DeclarationError | TargetGone, Scope | R>   // Unsupported where nothing would ask it
 // ready-made handlers; match on _tag for anything finer
@@ -824,8 +825,8 @@ declare const dismissAll: (dialog: Pending) => Effect<Decision>   // Alert: acce
 // FileChooser
 const FileChooser = Schema.Union([Schema.TaggedStruct("Single", {}), Schema.TaggedStruct("Multiple", {})])   // what events report: data
 type Pending =                                         // what a handler decides; doesn't pause the page; Cancel when no handler decides
-  | { readonly _tag: "Single"; select(file: FileInput.FileInput): Decision; readonly cancel: Decision }
-  | { readonly _tag: "Multiple"; select(files: ReadonlyArray<FileInput.FileInput>): Decision; readonly cancel: Decision }
+  | { readonly _tag: "Single"; select(file: FileInput.FileInput): Effect<Decision>; readonly cancel: Effect<Decision> }
+  | { readonly _tag: "Multiple"; select(files: ReadonlyArray<FileInput.FileInput>): Effect<Decision>; readonly cancel: Effect<Decision> }
 declare const handle: <E, R>(page: Page.Page, handler: (chooser: Pending) => Effect<Decision, E, R>) =>
   Effect<Declaration.HandlerRegistration, Declaration.DeclarationError | TargetGone, Scope | R>   // Unsupported where nothing would ask it
 declare const choose: (files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>) =>
@@ -880,6 +881,7 @@ class StorageState extends Schema.Class<StorageState>("@usestrider/browser/Stora
 declare const Json: Schema.Codec<StorageState, string>   // Schema.fromJsonString(Schema.toCodecJson(StorageState)): encode to save, decode to load
 ```
 
+- **Decisions are Effects.** Return a pending dialog or file chooser decision directly from a handler. After other work in a generator, end with `return yield* dialog.accept` or `return yield* chooser.cancel`; running a decision produces the value the handler returns, and the handler machinery sends it to the browser.
 - **A dialog event is data; a handler gets the decisions.** `Dialog.next`, `stream` and `history` report a `Dialog`, which observing doesn't decide; a handler receives it as `Pending`, with the decisions its kind offers.
 - **Which handler decides.** The page's latest `Dialog.handle` still in its scope, chosen when the dialog opens; removing it leaves later dialogs to the one before. It has `Deadline.DefaultBudget`, as read at `handle`, per dialog. A handler that fails, is interrupted or runs out of time leaves the dialog to the policy, and its failure is logged at Effect's `References.UnhandledLogLevel`. The decision is delivered by a resolver in the model's scope, apart from the handler's fiber, so a late handler can't contradict it. `handled` counts what a registration decided.
 - **Default dialog policy.** It is explicit and has no delay. A context's `dialogs` option (`"dismiss"`, the default for owned contexts; `"accept"`; or `"leaveOpen"`) decides immediately when no handler claims a dialog. `beforeunload` is accepted under `"dismiss"`, so closing never hangs. On attached pages there is no default unless the caller sets one. Every automatic decision is an `AutoResolution` event on the page and its context (`decision: "dismiss"`, `policy: ContextOption{ name: "dialogs", value: "dismiss" }`) and is recorded on the operation that was running.
@@ -1186,7 +1188,7 @@ yield* Effect.scoped(Effect.gen(function*() {
   const reader = yield* first.inspect
   const text = yield* reader.getByRole("heading").readText
   const tab = yield* second.control
-  const blocked = yield* tab.route("https://*.example.com/analytics/**", () => Effect.succeed(Route.abort()))
+  const blocked = yield* tab.route("https://*.example.com/analytics/**", () => Route.abort())
   yield* tab.getByRole("button", { name: "Refresh" }).click()
   yield* Console.log(`blocked ${yield* blocked.hits} analytics calls`)
 }))                                                     // route and access released; both tabs stay open

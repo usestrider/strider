@@ -591,8 +591,7 @@ export const applyState = (
         )
       )
       const { entry } = Handles.page(page)
-      const html = (body: string) =>
-        Effect.succeed(Route.fulfill(HttpServerResponse.text(body, { contentType: "text/html" })))
+      const html = (body: string) => Route.fulfill(HttpServerResponse.text(body, { contentType: "text/html" }))
       for (const [index, origin] of origins.entries()) {
         const seed = `${origin.origin}${seedPath}/${index}`
         yield* context.route(seed, () => html("<!DOCTYPE html><title>storage state</title>")).pipe(

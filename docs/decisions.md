@@ -354,10 +354,21 @@ could remove the wait; current CDP does not supply one.
 
 ## The public API (L2)
 
-**A decision that doesn't apply is a type error.** A dialog handler gets `Dialog.Pending`, whose shapes carry only
-the decisions valid for that dialog: an alert can't be dismissed. A route's decisions are module-level values typed
-by phase, `Decision<in P>`. Contravariance gives the same guarantee while keeping `Route.continue` and
-`Route.fulfill` plain values a handler returns.
+**Decision types describe where they apply.** A dialog handler gets `Dialog.Pending`, whose shapes carry only
+the decisions valid for that dialog: an alert can't be dismissed. A route decision's type, `Decision<in P>`, carries
+the phases where it is valid. Contravariance allows a decision valid at more phases where fewer are required:
+`Decision<Phase>` is assignable to `Decision<"request">`, while `Decision<"auth">` is not. With an explicit `phase`
+option, a route handler must produce a decision compatible with that phase.
+
+**Handlers produce decisions through Effects.** Route's constructors and the decisions on `Dialog.Pending` and
+`FileChooser.Pending` provide `Effect<Decision<…>>`, so a handler can return `Route.abort()` or `dialog.accept`
+directly. A generator that does other work ends with `return yield* Route.abort()` to produce the decision rather
+than another Effect. This keeps handlers consistent with Effect's own callbacks and removes the
+`Effect.succeed(…)` wrapper from one-line handlers (ISSUES.md, I34).
+
+Rejected: allowing a handler to return either a plain decision or an Effect of one, because the union return is
+unlike Effect's own callbacks; and making a decision itself an Effect, as `Exit` is, because that requires Effect's
+internals. The decision remains a plain value produced by the Effect; `isDecision` checks that produced value.
 
 **A wait is an `Effect`, not a `Deferred`.** See [conventions.md](conventions.md#a-wait-is-an-effect-not-a-deferred).
 

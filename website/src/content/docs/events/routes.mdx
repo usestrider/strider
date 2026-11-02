@@ -32,14 +32,14 @@ const asTestAccount = Effect.fn("asTestAccount")(function*(page: Page.Page) {
   const token = yield* Config.Redacted("API_TOKEN")
   yield* page.route(
     "https://app.example.com/api/**",
-    () => Effect.succeed(Route.continueWith(HttpClientRequest.bearerToken(token)))
+    () => Route.continueWith(HttpClientRequest.bearerToken(token))
   )
   // Added after the route above, so asked before it
   yield* page.route(
     "https://app.example.com/api/user",
-    () => Effect.succeed(Route.fulfill(HttpServerResponse.jsonUnsafe({ name: "Ada" })))
+    () => Route.fulfill(HttpServerResponse.jsonUnsafe({ name: "Ada" }))
   )
-  yield* page.context.route("**/analytics/**", () => Effect.succeed(Route.abort()))
+  yield* page.context.route("**/analytics/**", () => Route.abort())
   yield* page.goto("https://app.example.com")
 })
 ```
@@ -64,6 +64,9 @@ const asTestAccount = Effect.fn("asTestAccount")(function*(page: Page.Page) {
   request, or an `abort` reason other than `"failed"` anywhere but Chromium. The failure is logged and reported as
   an [`AutoResolution`](/docs/events/events#event-modules) event.
 
+Each decision is an Effect, so a handler returns it directly. After other work in a generator, use
+`return yield*` to return its decision, as in the response handler below.
+
 A handler gets the paused request, so it can decide by method, headers or body, and pass the rest on with
 `fallthrough`. The handle's `remove` ends a route before its scope does, to see the page recover:
 
@@ -76,11 +79,9 @@ const retryAfterOutage = Effect.fn("retryAfterOutage")(function*(page: Page.Page
   const outage = yield* page.route(
     "https://shop.example.com/api/orders",
     ({ request }) =>
-      Effect.succeed(
-        request.method === "POST"
-          ? Route.fulfill(HttpServerResponse.empty({ status: 503 }))
-          : Route.fallthrough
-      )
+      request.method === "POST"
+        ? Route.fulfill(HttpServerResponse.empty({ status: 503 }))
+        : Route.fallthrough
   )
   yield* page.getByRole("button", { name: "Place order" }).click()
   yield* page.getByText("Try again").pipe(Expect.toBeVisible)
@@ -106,11 +107,9 @@ const freshApi = Effect.fn("freshApi")(function*(page: Page.Page) {
   yield* page.route(
     "https://app.example.com/api/**",
     ({ response }) =>
-      Effect.succeed(
-        Route.continueWith({
-          headers: Headers.set(response.headers, "cache-control", "no-store")
-        })
-      ),
+      Route.continueWith({
+        headers: Headers.set(response.headers, "cache-control", "no-store")
+      }),
     { phase: "response" }
   )
 })
@@ -135,7 +134,9 @@ const withNewCheckout = Effect.fn("withNewCheckout")(
   function*(intercepted: Route.Intercepted<"response">) {
     const text = new TextDecoder().decode(yield* intercepted.responseBody)
     const flags = yield* decodeFlags(text)
-    return Route.fulfill(HttpServerResponse.jsonUnsafe({ ...flags, newCheckout: true }))
+    return yield* Route.fulfill(
+      HttpServerResponse.jsonUnsafe({ ...flags, newCheckout: true })
+    )
   }
 )
 
@@ -163,7 +164,7 @@ const signInToStaging = Effect.fn("signInToStaging")(function*(page: Page.Page) 
   const password = yield* Config.Redacted("STAGING_PASSWORD")
   yield* page.route(
     "https://staging.example.com/**",
-    () => Effect.succeed(Route.provideCredentials({ username: "ada", password })),
+    () => Route.provideCredentials({ username: "ada", password }),
     { phase: "auth" }
   )
   yield* page.goto("https://staging.example.com")
