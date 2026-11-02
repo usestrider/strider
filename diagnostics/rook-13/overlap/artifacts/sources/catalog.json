@@ -1,0 +1,93 @@
+[
+  {
+    "path": "content/browser/renderer_host/render_widget_host_impl.cc",
+    "revision": "a49e2e3d4addfd84e765b52afe230bedb81096db",
+    "url": "https://chromium.googlesource.com/chromium/src/+/a49e2e3d4addfd84e765b52afe230bedb81096db/content/browser/renderer_host/render_widget_host_impl.cc?format=TEXT",
+    "bytes": 169245,
+    "sha256": "e5a9d75766d0a642283c6caf413534c5fee0f692140441a88f0e68733b77f51d"
+  },
+  {
+    "path": "content/browser/renderer_host/render_widget_host_impl.h",
+    "revision": "a49e2e3d4addfd84e765b52afe230bedb81096db",
+    "url": "https://chromium.googlesource.com/chromium/src/+/a49e2e3d4addfd84e765b52afe230bedb81096db/content/browser/renderer_host/render_widget_host_impl.h?format=TEXT",
+    "bytes": 75594,
+    "sha256": "1990a900152758a41a720a4dc22a059dc45848d1bdf473f7e488b62434d5bf22"
+  },
+  {
+    "path": "content/browser/renderer_host/render_widget_host_view_base.cc",
+    "revision": "a49e2e3d4addfd84e765b52afe230bedb81096db",
+    "url": "https://chromium.googlesource.com/chromium/src/+/a49e2e3d4addfd84e765b52afe230bedb81096db/content/browser/renderer_host/render_widget_host_view_base.cc?format=TEXT",
+    "bytes": 42123,
+    "sha256": "9f812ebbc35fa1e715c5063fde6f4334076bb0b7c63776c7eca1897360a040c1"
+  },
+  {
+    "path": "content/browser/devtools/render_frame_devtools_agent_host.cc",
+    "revision": "a49e2e3d4addfd84e765b52afe230bedb81096db",
+    "url": "https://chromium.googlesource.com/chromium/src/+/a49e2e3d4addfd84e765b52afe230bedb81096db/content/browser/devtools/render_frame_devtools_agent_host.cc?format=TEXT",
+    "bytes": 45899,
+    "sha256": "69f117e21aabaf417d856665c6fcd5b28d956d9011976f3cbfe1313f5a0a5b0e"
+  },
+  {
+    "path": "content/browser/devtools/protocol/page_handler.h",
+    "revision": "a49e2e3d4addfd84e765b52afe230bedb81096db",
+    "url": "https://chromium.googlesource.com/chromium/src/+/a49e2e3d4addfd84e765b52afe230bedb81096db/content/browser/devtools/protocol/page_handler.h?format=TEXT",
+    "bytes": 13178,
+    "sha256": "56bfe791fc9580eb938987cb080ec99628963d2bbacb1b5283bef5d7c70e3f91"
+  },
+  {
+    "path": "content/browser/web_contents/web_contents_impl.cc",
+    "revision": "a49e2e3d4addfd84e765b52afe230bedb81096db",
+    "url": "https://chromium.googlesource.com/chromium/src/+/a49e2e3d4addfd84e765b52afe230bedb81096db/content/browser/web_contents/web_contents_impl.cc?format=TEXT",
+    "bytes": 515091,
+    "sha256": "adc65d8677955cb086b327111eaf69b5d202c04f1dafed92cbe99ddd0a68be75"
+  },
+  {
+    "path": "content/browser/devtools/devtools_renderer_channel.cc",
+    "revision": "a49e2e3d4addfd84e765b52afe230bedb81096db",
+    "url": "https://chromium.googlesource.com/chromium/src/+/a49e2e3d4addfd84e765b52afe230bedb81096db/content/browser/devtools/devtools_renderer_channel.cc?format=TEXT",
+    "bytes": 10112,
+    "sha256": "8a9c755a5b609684b968f12988e92085118d89efc3c6057ccae2af48e753ba42"
+  },
+  {
+    "path": "content/browser/devtools/devtools_session.cc",
+    "revision": "a49e2e3d4addfd84e765b52afe230bedb81096db",
+    "url": "https://chromium.googlesource.com/chromium/src/+/a49e2e3d4addfd84e765b52afe230bedb81096db/content/browser/devtools/devtools_session.cc?format=TEXT",
+    "bytes": 33365,
+    "sha256": "73975372043a5b39d3d8267b00fc6c327b14c86ec4b9df64a0a40855de7198db"
+  },
+  {
+    "path": "content/public/common/content_features.cc",
+    "revision": "a49e2e3d4addfd84e765b52afe230bedb81096db",
+    "url": "https://chromium.googlesource.com/chromium/src/+/a49e2e3d4addfd84e765b52afe230bedb81096db/content/public/common/content_features.cc?format=TEXT",
+    "bytes": 74547,
+    "sha256": "a654171fe0a57a66df6f078f4c9e2da76f88b2097036efaf89ae90b87e1bf6b3"
+  },
+  {
+    "path": "content/browser/renderer_host/delegated_frame_host.cc",
+    "revision": "a49e2e3d4addfd84e765b52afe230bedb81096db",
+    "url": "https://chromium.googlesource.com/chromium/src/+/a49e2e3d4addfd84e765b52afe230bedb81096db/content/browser/renderer_host/delegated_frame_host.cc?format=TEXT",
+    "bytes": 30387,
+    "sha256": "ae1b3cee5fdf469be885587fdbe0a8988121b526634e0523471b2be308ac9622"
+  },
+  {
+    "path": "third_party/blink/renderer/platform/widget/widget_base.cc",
+    "revision": "a49e2e3d4addfd84e765b52afe230bedb81096db",
+    "url": "https://chromium.googlesource.com/chromium/src/+/a49e2e3d4addfd84e765b52afe230bedb81096db/third_party/blink/renderer/platform/widget/widget_base.cc?format=TEXT",
+    "bytes": 83530,
+    "sha256": "f6355acee21d04a9d392e30d95b260eb0dc5b871e33dde8c998655763912d548"
+  },
+  {
+    "path": "content/browser/devtools/protocol/page_handler.cc",
+    "revision": "a49e2e3d4addfd84e765b52afe230bedb81096db",
+    "url": "https://chromium.googlesource.com/chromium/src/+/a49e2e3d4addfd84e765b52afe230bedb81096db/content/browser/devtools/protocol/page_handler.cc?format=TEXT",
+    "bytes": 113633,
+    "sha256": "768a47e82d54c7646b58df863fbd8b5aaa1576f0324c749a6567ecb2dad3d4ac"
+  },
+  {
+    "path": "content/common/features.cc",
+    "revision": "a49e2e3d4addfd84e765b52afe230bedb81096db",
+    "url": "https://chromium.googlesource.com/chromium/src/+/a49e2e3d4addfd84e765b52afe230bedb81096db/content/common/features.cc?format=TEXT",
+    "bytes": 41084,
+    "sha256": "e1b8863731915a46566a06788171d8025b4b5be041ad534eae3ebbe956b2da77"
+  }
+]

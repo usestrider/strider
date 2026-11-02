@@ -1,0 +1,880 @@
+{
+  "counts": [
+    {
+      "order": "capture-navigation",
+      "resize": false,
+      "area": "clip",
+      "status": "timeout",
+      "count": 1
+    },
+    {
+      "order": "capture-navigation",
+      "resize": false,
+      "area": "viewport",
+      "status": "timeout",
+      "count": 1
+    },
+    {
+      "order": "capture-navigation",
+      "resize": true,
+      "area": "clip",
+      "status": "timeout",
+      "count": 1
+    },
+    {
+      "order": "capture-navigation",
+      "resize": true,
+      "area": "viewport",
+      "status": "timeout",
+      "count": 1
+    },
+    {
+      "order": "navigation-capture",
+      "resize": false,
+      "area": "clip",
+      "status": "timeout",
+      "count": 1
+    },
+    {
+      "order": "navigation-capture",
+      "resize": false,
+      "area": "viewport",
+      "status": "timeout",
+      "count": 1
+    },
+    {
+      "order": "navigation-capture",
+      "resize": true,
+      "area": "clip",
+      "status": "timeout",
+      "count": 1
+    },
+    {
+      "order": "navigation-capture",
+      "resize": true,
+      "area": "viewport",
+      "status": "timeout",
+      "count": 1
+    },
+    {
+      "order": "no-navigation",
+      "resize": false,
+      "area": "clip",
+      "status": "success",
+      "count": 1
+    },
+    {
+      "order": "no-navigation",
+      "resize": false,
+      "area": "viewport",
+      "status": "success",
+      "count": 1
+    },
+    {
+      "order": "no-navigation",
+      "resize": true,
+      "area": "clip",
+      "status": "success",
+      "count": 1
+    },
+    {
+      "order": "no-navigation",
+      "resize": true,
+      "area": "viewport",
+      "status": "success",
+      "count": 1
+    }
+  ],
+  "setupErrors": [],
+  "results": [
+    {
+      "condition": {
+        "order": "capture-navigation",
+        "resize": true,
+        "area": "clip",
+        "round": 1
+      },
+      "outcome": {
+        "status": "timeout",
+        "elapsedMs": 30003.478673000005,
+        "error": "TimeoutError: page.screenshot: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n"
+      },
+      "captureCommands": [
+        {
+          "connection": 1,
+          "sessionId": "738947B12FC95FA92BB20E81C8DEF373",
+          "captureId": 40,
+          "sentAt": "2026-11-02T16:02:21.915Z",
+          "captureParams": {
+            "format": "png",
+            "clip": {
+              "x": 256,
+              "y": 93,
+              "width": 829,
+              "height": 5631,
+              "scale": 1
+            },
+            "captureBeyondViewport": true
+          },
+          "replyAt": null,
+          "replyError": null,
+          "replyElapsedMs": null,
+          "navigationId": 41,
+          "navigationSentAt": "2026-11-02T16:02:21.915Z",
+          "navigationMinusCaptureMs": 0.03340399998705834,
+          "firstReplyBeforeSecondSend": false,
+          "paintEventsAfterCapture": 4,
+          "screencastReceipts": 0
+        }
+      ],
+      "navigation": {
+        "status": "success",
+        "elapsedMs": 2.669277000008151,
+        "value": {
+          "frameId": "234179D0AE13734C0880C50B48DF2A3F",
+          "loaderId": "F17AD90C8C586E876399995359B4B831",
+          "isDownload": false
+        }
+      }
+    },
+    {
+      "condition": {
+        "order": "capture-navigation",
+        "resize": true,
+        "area": "viewport",
+        "round": 1
+      },
+      "outcome": {
+        "status": "timeout",
+        "elapsedMs": 30002.822436999995,
+        "error": "TimeoutError: page.screenshot: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n"
+      },
+      "captureCommands": [
+        {
+          "connection": 2,
+          "sessionId": "084602A2C3D9A5B551EC20220A7D8CB5",
+          "captureId": 37,
+          "sentAt": "2026-11-02T16:02:52.085Z",
+          "captureParams": {
+            "format": "png",
+            "clip": {
+              "x": 0,
+              "y": 0,
+              "width": 1100,
+              "height": 1000,
+              "scale": 1
+            },
+            "captureBeyondViewport": false
+          },
+          "replyAt": null,
+          "replyError": null,
+          "replyElapsedMs": null,
+          "navigationId": 38,
+          "navigationSentAt": "2026-11-02T16:02:52.085Z",
+          "navigationMinusCaptureMs": 0.020428999967407435,
+          "firstReplyBeforeSecondSend": false,
+          "paintEventsAfterCapture": 4,
+          "screencastReceipts": 0
+        }
+      ],
+      "navigation": {
+        "status": "success",
+        "elapsedMs": 2.4861979999695905,
+        "value": {
+          "frameId": "7DD8325FF5FA560528A7C888958327D7",
+          "loaderId": "0789565F4B978F380A6F188C464D3B58",
+          "isDownload": false
+        }
+      }
+    },
+    {
+      "condition": {
+        "order": "capture-navigation",
+        "resize": false,
+        "area": "clip",
+        "round": 1
+      },
+      "outcome": {
+        "status": "timeout",
+        "elapsedMs": 30002.02584899997,
+        "error": "TimeoutError: page.screenshot: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n"
+      },
+      "captureCommands": [
+        {
+          "connection": 3,
+          "sessionId": "175D82B72503F1DE7BB198A509EBE322",
+          "captureId": 38,
+          "sentAt": "2026-11-02T16:03:22.253Z",
+          "captureParams": {
+            "format": "png",
+            "clip": {
+              "x": 256,
+              "y": 93,
+              "width": 829,
+              "height": 5631,
+              "scale": 1
+            },
+            "captureBeyondViewport": true
+          },
+          "replyAt": null,
+          "replyError": null,
+          "replyElapsedMs": null,
+          "navigationId": 39,
+          "navigationSentAt": "2026-11-02T16:03:22.253Z",
+          "navigationMinusCaptureMs": 0.02193200000328943,
+          "firstReplyBeforeSecondSend": false,
+          "paintEventsAfterCapture": 4,
+          "screencastReceipts": 0
+        }
+      ],
+      "navigation": {
+        "status": "success",
+        "elapsedMs": 3.4877770000020973,
+        "value": {
+          "frameId": "A4741575870AB345CD8423995320362C",
+          "loaderId": "1FE58D349EECD11384687CF4AA00CA7C",
+          "isDownload": false
+        }
+      }
+    },
+    {
+      "condition": {
+        "order": "capture-navigation",
+        "resize": false,
+        "area": "viewport",
+        "round": 1
+      },
+      "outcome": {
+        "status": "timeout",
+        "elapsedMs": 30001.519410000008,
+        "error": "TimeoutError: page.screenshot: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n"
+      },
+      "captureCommands": [
+        {
+          "connection": 4,
+          "sessionId": "8F345D2218E17E58E53C9B2D914E38DD",
+          "captureId": 35,
+          "sentAt": "2026-11-02T16:03:52.418Z",
+          "captureParams": {
+            "format": "png",
+            "clip": {
+              "x": 0,
+              "y": 0,
+              "width": 1440,
+              "height": 1000,
+              "scale": 1
+            },
+            "captureBeyondViewport": false
+          },
+          "replyAt": null,
+          "replyError": null,
+          "replyElapsedMs": null,
+          "navigationId": 36,
+          "navigationSentAt": "2026-11-02T16:03:52.418Z",
+          "navigationMinusCaptureMs": 0.011441999988164753,
+          "firstReplyBeforeSecondSend": false,
+          "paintEventsAfterCapture": 4,
+          "screencastReceipts": 0
+        }
+      ],
+      "navigation": {
+        "status": "success",
+        "elapsedMs": 2.7401519999839365,
+        "value": {
+          "frameId": "C3434D80B86CBD7B7E4A86806A0D6155",
+          "loaderId": "ADAC09BE64E19553B535193702F20BEC",
+          "isDownload": false
+        }
+      }
+    },
+    {
+      "condition": {
+        "order": "navigation-capture",
+        "resize": true,
+        "area": "clip",
+        "round": 1
+      },
+      "outcome": {
+        "status": "timeout",
+        "elapsedMs": 30004.278239000007,
+        "error": "TimeoutError: page.screenshot: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n"
+      },
+      "captureCommands": [
+        {
+          "connection": 5,
+          "sessionId": "B8060DE4587340287E88897562E444BC",
+          "captureId": 40,
+          "sentAt": "2026-11-02T16:04:22.586Z",
+          "captureParams": {
+            "format": "png",
+            "clip": {
+              "x": 256,
+              "y": 93,
+              "width": 829,
+              "height": 5631,
+              "scale": 1
+            },
+            "captureBeyondViewport": true
+          },
+          "replyAt": null,
+          "replyError": null,
+          "replyElapsedMs": null,
+          "navigationId": 41,
+          "navigationSentAt": "2026-11-02T16:04:22.586Z",
+          "navigationMinusCaptureMs": -0.026640999945811927,
+          "firstReplyBeforeSecondSend": false,
+          "paintEventsAfterCapture": 4,
+          "screencastReceipts": 0
+        }
+      ],
+      "navigation": {
+        "status": "success",
+        "elapsedMs": 2.4409519999753684,
+        "value": {
+          "frameId": "E24505F0C9B0E57C7781A13F95CCB2EC",
+          "loaderId": "1E09B53401DF1A10199BFE70D80C760D",
+          "isDownload": false
+        }
+      }
+    },
+    {
+      "condition": {
+        "order": "navigation-capture",
+        "resize": true,
+        "area": "viewport",
+        "round": 1
+      },
+      "outcome": {
+        "status": "timeout",
+        "elapsedMs": 30003.162336999958,
+        "error": "TimeoutError: page.screenshot: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n"
+      },
+      "captureCommands": [
+        {
+          "connection": 6,
+          "sessionId": "47A43F4EF59561D52050C56F25445304",
+          "captureId": 37,
+          "sentAt": "2026-11-02T16:04:52.750Z",
+          "captureParams": {
+            "format": "png",
+            "clip": {
+              "x": 0,
+              "y": 0,
+              "width": 1100,
+              "height": 1000,
+              "scale": 1
+            },
+            "captureBeyondViewport": false
+          },
+          "replyAt": null,
+          "replyError": null,
+          "replyElapsedMs": null,
+          "navigationId": 38,
+          "navigationSentAt": "2026-11-02T16:04:52.750Z",
+          "navigationMinusCaptureMs": -0.040827999997418374,
+          "firstReplyBeforeSecondSend": false,
+          "paintEventsAfterCapture": 4,
+          "screencastReceipts": 0
+        }
+      ],
+      "navigation": {
+        "status": "success",
+        "elapsedMs": 2.6418350000167266,
+        "value": {
+          "frameId": "30FE8BC3D9663017D9B87DEA12ABF6B2",
+          "loaderId": "A5FE052BAC83FD7EA500B782702A08BE",
+          "isDownload": false
+        }
+      }
+    },
+    {
+      "condition": {
+        "order": "navigation-capture",
+        "resize": false,
+        "area": "clip",
+        "round": 1
+      },
+      "outcome": {
+        "status": "timeout",
+        "elapsedMs": 30003.418854999996,
+        "error": "TimeoutError: page.screenshot: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n"
+      },
+      "captureCommands": [
+        {
+          "connection": 7,
+          "sessionId": "DDA6F7F305ABCC3321F9726E2CC5E523",
+          "captureId": 38,
+          "sentAt": "2026-11-02T16:05:22.911Z",
+          "captureParams": {
+            "format": "png",
+            "clip": {
+              "x": 256,
+              "y": 93,
+              "width": 829,
+              "height": 5631,
+              "scale": 1
+            },
+            "captureBeyondViewport": true
+          },
+          "replyAt": null,
+          "replyError": null,
+          "replyElapsedMs": null,
+          "navigationId": 39,
+          "navigationSentAt": "2026-11-02T16:05:22.911Z",
+          "navigationMinusCaptureMs": -0.02051900001242757,
+          "firstReplyBeforeSecondSend": false,
+          "paintEventsAfterCapture": 4,
+          "screencastReceipts": 0
+        }
+      ],
+      "navigation": {
+        "status": "success",
+        "elapsedMs": 3.186271999962628,
+        "value": {
+          "frameId": "DB1367D406A40D2CBB2CF976447608D5",
+          "loaderId": "6BCC69A03D343222F7969145FC96CA99",
+          "isDownload": false
+        }
+      }
+    },
+    {
+      "condition": {
+        "order": "navigation-capture",
+        "resize": false,
+        "area": "viewport",
+        "round": 1
+      },
+      "outcome": {
+        "status": "timeout",
+        "elapsedMs": 30000.72326,
+        "error": "TimeoutError: page.screenshot: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n"
+      },
+      "captureCommands": [
+        {
+          "connection": 8,
+          "sessionId": "FDBBEDA687DBB679C6387B64B0E097CB",
+          "captureId": 35,
+          "sentAt": "2026-11-02T16:05:53.078Z",
+          "captureParams": {
+            "format": "png",
+            "clip": {
+              "x": 0,
+              "y": 0,
+              "width": 1440,
+              "height": 1000,
+              "scale": 1
+            },
+            "captureBeyondViewport": false
+          },
+          "replyAt": null,
+          "replyError": null,
+          "replyElapsedMs": null,
+          "navigationId": 36,
+          "navigationSentAt": "2026-11-02T16:05:53.078Z",
+          "navigationMinusCaptureMs": -0.017494000028818846,
+          "firstReplyBeforeSecondSend": false,
+          "paintEventsAfterCapture": 7,
+          "screencastReceipts": 0
+        }
+      ],
+      "navigation": {
+        "status": "success",
+        "elapsedMs": 3.276183999958448,
+        "value": {
+          "frameId": "DE0979EFCAC93BD810A5A7C7F923E989",
+          "loaderId": "D4CD14D2BE277BB7868448CE412DC165",
+          "isDownload": false
+        }
+      }
+    },
+    {
+      "condition": {
+        "order": "no-navigation",
+        "resize": true,
+        "area": "clip",
+        "round": 1
+      },
+      "outcome": {
+        "status": "success",
+        "elapsedMs": 76.44549199996982,
+        "bytes": 83765
+      },
+      "captureCommands": [
+        {
+          "connection": 9,
+          "sessionId": "954339D381B074B366B8CE37761E68E1",
+          "captureId": 40,
+          "sentAt": "2026-11-02T16:06:23.250Z",
+          "captureParams": {
+            "format": "png",
+            "clip": {
+              "x": 256,
+              "y": 93,
+              "width": 829,
+              "height": 5631,
+              "scale": 1
+            },
+            "captureBeyondViewport": true
+          },
+          "replyAt": "2026-11-02T16:06:23.322Z",
+          "replyError": null,
+          "replyElapsedMs": 72.25483500002883,
+          "navigationId": null,
+          "navigationSentAt": null,
+          "navigationMinusCaptureMs": null,
+          "firstReplyBeforeSecondSend": null,
+          "paintEventsAfterCapture": 0,
+          "screencastReceipts": 0
+        }
+      ],
+      "navigation": null
+    },
+    {
+      "condition": {
+        "order": "no-navigation",
+        "resize": true,
+        "area": "viewport",
+        "round": 1
+      },
+      "outcome": {
+        "status": "success",
+        "elapsedMs": 34.15845999994781,
+        "bytes": 28564
+      },
+      "captureCommands": [
+        {
+          "connection": 10,
+          "sessionId": "1D1D9175B17B5F5185F81615A3565EB5",
+          "captureId": 37,
+          "sentAt": "2026-11-02T16:06:23.525Z",
+          "captureParams": {
+            "format": "png",
+            "clip": {
+              "x": 0,
+              "y": 0,
+              "width": 1100,
+              "height": 1000,
+              "scale": 1
+            },
+            "captureBeyondViewport": false
+          },
+          "replyAt": "2026-11-02T16:06:23.557Z",
+          "replyError": null,
+          "replyElapsedMs": 32.39151300000958,
+          "navigationId": null,
+          "navigationSentAt": null,
+          "navigationMinusCaptureMs": null,
+          "firstReplyBeforeSecondSend": null,
+          "paintEventsAfterCapture": 0,
+          "screencastReceipts": 0
+        }
+      ],
+      "navigation": null
+    },
+    {
+      "condition": {
+        "order": "no-navigation",
+        "resize": false,
+        "area": "clip",
+        "round": 1
+      },
+      "outcome": {
+        "status": "success",
+        "elapsedMs": 72.69643599994015,
+        "bytes": 83765
+      },
+      "captureCommands": [
+        {
+          "connection": 11,
+          "sessionId": "0F72F243C76358EFBAA3C77335D2A52C",
+          "captureId": 38,
+          "sentAt": "2026-11-02T16:06:23.751Z",
+          "captureParams": {
+            "format": "png",
+            "clip": {
+              "x": 256,
+              "y": 93,
+              "width": 829,
+              "height": 5631,
+              "scale": 1
+            },
+            "captureBeyondViewport": true
+          },
+          "replyAt": "2026-11-02T16:06:23.819Z",
+          "replyError": null,
+          "replyElapsedMs": 68.78416099993046,
+          "navigationId": null,
+          "navigationSentAt": null,
+          "navigationMinusCaptureMs": null,
+          "firstReplyBeforeSecondSend": null,
+          "paintEventsAfterCapture": 3,
+          "screencastReceipts": 0
+        }
+      ],
+      "navigation": null
+    },
+    {
+      "condition": {
+        "order": "no-navigation",
+        "resize": false,
+        "area": "viewport",
+        "round": 1
+      },
+      "outcome": {
+        "status": "success",
+        "elapsedMs": 34.94400699995458,
+        "bytes": 30416
+      },
+      "captureCommands": [
+        {
+          "connection": 12,
+          "sessionId": "E2F68BC9A3E231CC861408579EBCCFAF",
+          "captureId": 35,
+          "sentAt": "2026-11-02T16:06:24.025Z",
+          "captureParams": {
+            "format": "png",
+            "clip": {
+              "x": 0,
+              "y": 0,
+              "width": 1440,
+              "height": 1000,
+              "scale": 1
+            },
+            "captureBeyondViewport": false
+          },
+          "replyAt": "2026-11-02T16:06:24.057Z",
+          "replyError": null,
+          "replyElapsedMs": 31.881461000069976,
+          "navigationId": null,
+          "navigationSentAt": null,
+          "navigationMinusCaptureMs": null,
+          "firstReplyBeforeSecondSend": null,
+          "paintEventsAfterCapture": 3,
+          "screencastReceipts": 0
+        }
+      ],
+      "navigation": null
+    }
+  ],
+  "unansweredCaptures": [
+    {
+      "at": "2026-11-02T16:02:21.915Z",
+      "monotonicMs": 333070.219889,
+      "connection": 1,
+      "direction": "out",
+      "bytes": 205,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 40,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "clip": {
+            "x": 256,
+            "y": 93,
+            "width": 829,
+            "height": 5631,
+            "scale": 1
+          },
+          "captureBeyondViewport": true
+        },
+        "sessionId": "738947B12FC95FA92BB20E81C8DEF373"
+      }
+    },
+    {
+      "at": "2026-11-02T16:02:52.085Z",
+      "monotonicMs": 363239.920304,
+      "connection": 2,
+      "direction": "out",
+      "bytes": 204,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 37,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "clip": {
+            "x": 0,
+            "y": 0,
+            "width": 1100,
+            "height": 1000,
+            "scale": 1
+          },
+          "captureBeyondViewport": false
+        },
+        "sessionId": "084602A2C3D9A5B551EC20220A7D8CB5"
+      }
+    },
+    {
+      "at": "2026-11-02T16:03:22.253Z",
+      "monotonicMs": 393407.802508,
+      "connection": 3,
+      "direction": "out",
+      "bytes": 205,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 38,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "clip": {
+            "x": 256,
+            "y": 93,
+            "width": 829,
+            "height": 5631,
+            "scale": 1
+          },
+          "captureBeyondViewport": true
+        },
+        "sessionId": "175D82B72503F1DE7BB198A509EBE322"
+      }
+    },
+    {
+      "at": "2026-11-02T16:03:52.418Z",
+      "monotonicMs": 423573.114202,
+      "connection": 4,
+      "direction": "out",
+      "bytes": 204,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 35,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "clip": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1000,
+            "scale": 1
+          },
+          "captureBeyondViewport": false
+        },
+        "sessionId": "8F345D2218E17E58E53C9B2D914E38DD"
+      }
+    },
+    {
+      "at": "2026-11-02T16:04:22.586Z",
+      "monotonicMs": 453741.03224,
+      "connection": 5,
+      "direction": "out",
+      "bytes": 205,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 40,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "clip": {
+            "x": 256,
+            "y": 93,
+            "width": 829,
+            "height": 5631,
+            "scale": 1
+          },
+          "captureBeyondViewport": true
+        },
+        "sessionId": "B8060DE4587340287E88897562E444BC"
+      }
+    },
+    {
+      "at": "2026-11-02T16:04:52.750Z",
+      "monotonicMs": 483904.661114,
+      "connection": 6,
+      "direction": "out",
+      "bytes": 204,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 37,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "clip": {
+            "x": 0,
+            "y": 0,
+            "width": 1100,
+            "height": 1000,
+            "scale": 1
+          },
+          "captureBeyondViewport": false
+        },
+        "sessionId": "47A43F4EF59561D52050C56F25445304"
+      }
+    },
+    {
+      "at": "2026-11-02T16:05:22.911Z",
+      "monotonicMs": 514066.167718,
+      "connection": 7,
+      "direction": "out",
+      "bytes": 205,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 38,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "clip": {
+            "x": 256,
+            "y": 93,
+            "width": 829,
+            "height": 5631,
+            "scale": 1
+          },
+          "captureBeyondViewport": true
+        },
+        "sessionId": "DDA6F7F305ABCC3321F9726E2CC5E523"
+      }
+    },
+    {
+      "at": "2026-11-02T16:05:53.078Z",
+      "monotonicMs": 544232.944646,
+      "connection": 8,
+      "direction": "out",
+      "bytes": 204,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 35,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "clip": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1000,
+            "scale": 1
+          },
+          "captureBeyondViewport": false
+        },
+        "sessionId": "FDBBEDA687DBB679C6387B64B0E097CB"
+      }
+    },
+    {
+      "at": "2026-11-02T16:06:24.259Z",
+      "monotonicMs": 575413.719663,
+      "connection": 13,
+      "direction": "out",
+      "bytes": 205,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 40,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "clip": {
+            "x": 256,
+            "y": 93,
+            "width": 829,
+            "height": 5631,
+            "scale": 1
+          },
+          "captureBeyondViewport": true
+        },
+        "sessionId": "C35E0939EFA43395774F9B2921E6B1F1"
+      }
+    }
+  ],
+  "lateCaptureReplies": [],
+  "postTimeoutFrames": [],
+  "wireRecords": 1936
+}

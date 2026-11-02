@@ -70,3 +70,9 @@ replies, checks adjacent forced navigation and whether the first reply preceded 
 lifecycle paints separately from screencast-frame receipts. Attempt summaries contain API outcome durations,
 wire capture counts and navigation results. Compressed wire recordings preserve all records; integrity
 metadata verifies them against the original byte streams.
+
+Pinned Chromium source URLs, revision and full-file SHA-256 hashes are recorded in
+`artifacts/sources/catalog.json`; `anchors.json` identifies the inspected functions and line numbers. The source
+files were fetched from chromium.googlesource.com at the browser's reported revision after browser attempts
+ended. They are not vendored here. Playwright's installed bundle hash and inspected function positions are in
+`artifacts/playwright/source-provenance.json`.

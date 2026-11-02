@@ -1,0 +1,14 @@
+[
+  {
+    "path": "raw/wire.ndjson.xz",
+    "sha256Uncompressed": "4d2e5d73e4f0c84133c43f4b28aee8c19aa0b551f7eb02072516cd1ea0e2c47c",
+    "compressedBytes": 18060,
+    "uncompressedBytes": 325513
+  },
+  {
+    "path": "playwright/wire.ndjson.xz",
+    "sha256Uncompressed": "53dcababc6391db24f15d2e9e1c7267cea312817657df8294859b8a9f431badd",
+    "compressedBytes": 119828,
+    "uncompressedBytes": 8721323
+  }
+]
