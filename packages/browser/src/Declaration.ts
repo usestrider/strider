@@ -143,7 +143,8 @@ export const DeclarationErrorReason = Schema.Union([
   Reason.InvalidInput,
   Reason.NotPermitted,
   Reason.Unsupported,
-  Reason.BackendFailure
+  Reason.BackendFailure,
+  Reason.ViewportMismatch
 ])
 
 /**

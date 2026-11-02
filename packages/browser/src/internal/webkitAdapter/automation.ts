@@ -21,6 +21,7 @@ import { navigateByScript } from "./navigation.ts"
 import { promptClosed, promptOpened } from "./obligations.ts"
 import { type ContextEntry, contextOf, frameById, type PageEntry, pageOf, placement, type State } from "./state.ts"
 import { withoutFragment } from "./tree.ts"
+import * as Viewport from "./viewport.ts"
 
 // ── Processes and pages ───────────────────────────────────────────────────────────────────────────────────
 
@@ -114,7 +115,22 @@ export const afterPairing = Effect.fnUntraced(function*(
   process: WebKitAutomation.Process
 ) {
   const viewport = state.registry.overrides(placement(page)).get("Viewport")
-  if (viewport !== undefined) yield* resizeWindow(state, page, viewport).pipe(Effect.ignore)
+  if (viewport !== undefined) {
+    yield* resizeWindow(state, page, viewport).pipe(
+      Effect.catch((error) =>
+        Effect.gen(function*() {
+          page.viewportFailure = Kit.protocolError(error)
+          yield* Effect.logWarning("A stock WebKit page default viewport could not be applied", error)
+        })
+      )
+    )
+  }
+  if (viewport !== undefined && page.popup) {
+    yield* Effect.logWarning(
+      "Stock WebKit popup viewport default is unconfirmed; explicitly emulate the popup to confirm its size",
+      { page: page.id }
+    )
+  }
   state.buffer.start(watchDialogs(state, page, handle, process))
 })
 
@@ -203,13 +219,14 @@ export const resizeWindow = (
     if (!state.naturalWindows.has(page)) {
       const { context } = yield* Automation.getBrowsingContext({ handle }).pipe(on)
       state.naturalWindows.set(page, context.windowSize)
-      if (!state.chrome.has(process.key)) {
+      {
         const { result } = yield* Automation.evaluateJavaScriptFunction({
           browsingContextHandle: handle,
           function: "function() { return [innerWidth, innerHeight] }",
           arguments: []
         }).pipe(on)
         const [width, height] = Option.getOrElse(resultOf(result), () => [0, 0]) as [number, number]
+        state.naturalViewports.set(page, { width, height })
         state.chrome.set(process.key, {
           width: context.windowSize.width - width,
           height: context.windowSize.height - height
@@ -273,52 +290,110 @@ export const removeUserContextLaunched = Effect.fnUntraced(function*(state: Stat
   }))
 })
 
+/**
+ * Waits for removal using the handle's page when known. False means unpaired popup labels leave identity
+ * ambiguous; the creating operation must report that cleanup could not be confirmed.
+ */
+export const closeFailedPage = Effect.fnUntraced(function*(
+  state: Pick<State, "root" | "pages" | "pageHandles" | "buffer" | "creating">,
+  context: ContextEntry,
+  process: Pick<WebKitAutomation.Process, "automation">,
+  handle: Automation.BrowsingContextHandle,
+  before: ReadonlySet<L1Target.NavigableId>
+) {
+  const closed = yield* Automation.closeBrowsingContext({ handle }).pipe(
+    Protocol.on(process.automation),
+    Kit.protocol,
+    Effect.as(true),
+    Effect.catch((error) => Viewport.isGone(error) ? Effect.succeed(false) : Effect.fail(error))
+  )
+  if (!closed) return true
+  const paired = () =>
+    [...state.pageHandles].find(([page, pairedHandle]) => page.context === context && pairedHandle === handle)?.[0]
+  let known = paired()
+  yield* state.root().drainObserved
+  const unpaired = (page: PageEntry) =>
+    !page.ended && page.context === context &&
+    !before.has(page.id) && !state.pageHandles.has(page)
+  yield* state.buffer.waitFor(() => {
+    known ??= paired()
+    if (known !== undefined) return known.ended || state.pages.get(known.id) !== known ? true : undefined
+    const pending = [...state.pages.values()].some((page) => unpaired(page) && !page.popup)
+    return !pending && (state.creating.get(context.browserContextId ?? "default") ?? 0) === 0 ? true : undefined
+  })
+  // Pending-count classification can label the actual created page as a popup. Without a pairing, a
+  // surviving popup-labelled candidate is ambiguity, not proof of removal and not a reason to wait on it.
+  return known !== undefined || ![...state.pages.values()].some(unpaired)
+})
+
 export const createPageLaunched = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {
   const context = yield* contextOf(state, id)
   const process = yield* processOfContext(state, context)
   const key = context.browserContextId ?? "default"
+  const before = new Set(state.pages.keys())
   state.creating.set(key, (state.creating.get(key) ?? 0) + 1)
   const { handle } = yield* automationOf(process, Automation.createBrowsingContext({ presentationHint: "Window" }))
     .pipe(
       Effect.tapError(() => Effect.sync(() => state.creating.set(key, Math.max(0, (state.creating.get(key) ?? 1) - 1))))
     )
-  // Its first document is still loading, and a navigation sent before it ends is lost (QUIRKS.md, Q211)
-  yield* automationOf(
-    process,
-    Automation.waitForNavigationToComplete({ browsingContextHandle: handle, pageLoadStrategy: "Normal" })
-  )
-  // A page the browser reports in this context, unpaired or paired to our handle by another creation's search
-  const candidate = () => {
-    for (const page of state.pages.values()) {
-      if (page.context === context && !page.ended && state.pageHandles.get(page) !== undefined) {
-        if (state.pageHandles.get(page) === handle) return page
-      } else if (page.context === context && !page.ended) return page
-    }
-    return undefined
-  }
-  const round = Effect.gen(function*() {
-    yield* state.root().drainObserved
-    for (const page of state.pages.values()) {
-      if (page.context !== context || page.ended) continue
-      if (state.pageHandles.has(page)) {
-        if (state.pageHandles.get(page) === handle) return Option.some(page.id)
-        continue
+  return yield* Effect.gen(function*() {
+    // Its first document is still loading, and a navigation sent before it ends is lost (QUIRKS.md, Q211)
+    yield* automationOf(
+      process,
+      Automation.waitForNavigationToComplete({ browsingContextHandle: handle, pageLoadStrategy: "Normal" })
+    )
+    // A page the browser reports in this context, unpaired or paired to our handle by another creation's search
+    const candidate = () => {
+      for (const page of state.pages.values()) {
+        if (page.context === context && !page.ended && state.pageHandles.get(page) !== undefined) {
+          if (state.pageHandles.get(page) === handle) return page
+        } else if (page.context === context && !page.ended) return page
       }
-      yield* Deferred.await(page.ready)
-      const paired = yield* state.pairing.withPermits(1)(pairOnce(state, page))
-      if (Option.isSome(paired) && paired.value === handle) return Option.some(page.id)
+      return undefined
     }
-    return Option.none<L1Target.NavigableId>()
-  })
-  // The page arrives as the inspector's event, which wakes the wait; its pairing is then looked for until found
-  const found = yield* state.buffer.waitFor(candidate).pipe(
-    Effect.andThen(round.pipe(
-      Effect.repeat({ schedule: pairingSchedule, times: pairingAttempts, until: Option.isSome })
-    )),
-    BrowserClock.onLive
-  )
-  if (Option.isSome(found)) return found.value
-  return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.Vanished({})))
+    const round = Effect.gen(function*() {
+      yield* state.root().drainObserved
+      for (const page of state.pages.values()) {
+        if (page.context !== context || page.ended) continue
+        if (state.pageHandles.has(page)) {
+          if (state.pageHandles.get(page) === handle) return Option.some(page.id)
+          continue
+        }
+        yield* Deferred.await(page.ready)
+        const paired = yield* state.pairing.withPermits(1)(pairOnce(state, page))
+        if (Option.isSome(paired) && paired.value === handle) return Option.some(page.id)
+      }
+      return Option.none<L1Target.NavigableId>()
+    })
+    // The page arrives as the inspector's event, which wakes the wait; its pairing is then looked for until found
+    const found = yield* state.buffer.waitFor(candidate).pipe(
+      Effect.andThen(round.pipe(
+        Effect.repeat({ schedule: pairingSchedule, times: pairingAttempts, until: Option.isSome })
+      )),
+      BrowserClock.onLive
+    )
+    if (Option.isSome(found)) {
+      const page = yield* pageOf(state, found.value)
+      if (page.viewportFailure !== undefined) return yield* Effect.fail(page.viewportFailure)
+      const viewport = state.registry.overrides(placement(page)).get("Viewport")
+      if (viewport?._tag === "Viewport") yield* Viewport.confirm(process, handle, viewport)
+      return found.value
+    }
+    return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.Vanished({})))
+  }).pipe(Effect.onError(() =>
+    Viewport.cleanup(closeFailedPage(state, context, process, handle, before)).pipe(
+      Effect.flatMap((confirmed) =>
+        confirmed ? Effect.void : Effect.die(
+          new Error("WebKit failed-page cleanup cannot confirm removal: unpaired popup identity is ambiguous")
+        )
+      ),
+      Effect.catch((error) =>
+        Viewport.isGone(error) ? Effect.void : Effect.die(
+          new Error("WebKit failed-page cleanup did not confirm removal", { cause: error })
+        )
+      )
+    )
+  ))
 })
 
 export const closePageLaunched = Effect.fnUntraced(

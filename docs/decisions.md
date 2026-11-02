@@ -422,3 +422,34 @@ newer commit and reset readiness; and mutating published provenance or publishin
 correlation is released on completion or interruption, and all correlation state is cleared on navigable removal.
 The one retained completed failure is not a live reservation and is cleared when its document arrives or a normal
 commit supersedes it after outstanding correlation finishes. No public operation or policy is added.
+
+## Confirm stock WebKit viewport requests against the renderer (ROOK-91)
+
+Stock WebKit sizes a native window. Its reply can follow a native target-size wait that expired, and renderer
+geometry updates are asynchronous. A successful command therefore needs an observed match, not an assumption
+that the reply is a completion fence. Confirm immediately and on resize events through Automation, with a
+browser-enforced default limit of five seconds capped by the operation deadline, and one final measurement at
+that confirmation limit. Report `Reason.ViewportMismatch` with numeric requested and actual dimensions if the
+target was not observed. This does not assert permanent inability or prevent a later window-manager change.
+
+Pair a page before applying its explicit override. Confirm defaults on pages created by an operation; close a
+failed page before returning the failure. Popup defaults have no creation operation to fail and remain attempted
+but unconfirmed until an explicit declaration. Restore failed overrides under a detached five-second cleanup
+budget, and expose failed rollback alongside the initiating failure rather than claiming the old size was restored.
+Reserve the last second of this shared budget for a final measurement, including when multiple pages restore at
+once. Nested cleanup cannot extend it. Ordinary release retains non-failing teardown: confirmed gone resources need
+nothing, and other release errors are warnings rather than restoration claims. Callback disposal likewise preserves
+the primary result, ignoring vanished windows and logging other failures. Failed-creation cleanup prefers the page
+paired to its Automation handle and waits only for that page, independent of popup labels, unrelated popups or
+other pending creations. Without a pairing it waits for newly observed non-popup candidates within the same bound.
+Popup labels come from the pending creation count: a popup arriving first can consume that count and leave the
+actual created page labelled as a popup. If an unpaired popup-labelled candidate remains, cleanup reports identity
+ambiguity rather than waiting for that popup or claiming the failed page was removed. An unrelated page wrongly
+labelled as a creation can still exhaust the bounded wait when no pairing exists. Concurrent unpaired creations
+and a creation count whose announcement never arrives remain ambiguous; no identity is guessed from those labels.
+Context-wide restoration is fail-fast: a non-gone failure can interrupt sibling restoration, and the rollback
+failure or release warning does not claim that every sibling was restored.
+
+Rejected: treating the resize reply or an arbitrary number of frames as completion; polling or resending the
+resize; using screen dimensions as a universal preflight limit across window managers; reporting `Unsupported`
+for a bounded observation; and enlarging the test display without retaining the constrained-display regression.

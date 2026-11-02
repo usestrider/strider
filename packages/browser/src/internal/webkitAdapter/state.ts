@@ -48,6 +48,7 @@ export interface PageEntry {
   readonly pageProxyId: string
   readonly session: ProtocolClient.Session
   readonly context: ContextEntry
+  readonly popup: boolean
   readonly ready: Deferred.Deferred<void, Adapter.AdapterError>
   /** The committed target, and the one a cross-site navigation is loading in. */
   target: TargetEntry | undefined
@@ -55,6 +56,7 @@ export interface PageEntry {
   readonly main: FrameEntry
   /** The open dialog's obligation, so that only an open dialog is answered. */
   dialog: Adapter.ObligationId | undefined
+  viewportFailure?: Adapter.AdapterError | undefined
   closing: L1Target.CloseReason | undefined
   ended: boolean
 }
@@ -240,6 +242,7 @@ export interface State {
   /** The window's size less the viewport's, measured once per process: its toolbar. */
   readonly chrome: Map<string, { readonly width: number; readonly height: number }>
   /** Each page's window as it was before its first resize, to restore when the viewport is released. */
+  readonly naturalViewports: WeakMap<PageEntry, { readonly width: number; readonly height: number }>
   readonly naturalWindows: WeakMap<PageEntry, { readonly width: number; readonly height: number }>
   /** Each process's wheel state so far: a session's wheel scrolls by the difference (QUIRKS.md, Q223). */
   readonly wheelStates: Map<string, { width: number; height: number }>
@@ -314,6 +317,7 @@ export const make = (options: {
     pairedHandles: new Set(),
     pairing: options.pairing,
     chrome: new Map(),
+    naturalViewports: new WeakMap(),
     naturalWindows: new WeakMap(),
     wheelStates: new Map(),
     frameHandles: new WeakMap()

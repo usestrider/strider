@@ -440,7 +440,8 @@ export const UserContextErrorReason = Schema.Union([
   Reason.InvalidInput,
   Reason.NotPermitted,
   Reason.Unsupported,
-  Reason.BackendFailure
+  Reason.BackendFailure,
+  Reason.ViewportMismatch
 ])
 
 /**
