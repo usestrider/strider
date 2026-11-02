@@ -412,6 +412,10 @@ describe("WebKit launcher", () => {
         readonly vanishes?: boolean | undefined
         readonly vanishesAfterConnect?: boolean | undefined
         readonly exitsBeforePolling?: boolean | undefined
+        /** Procfs already lost the child, but Node hasn't reported its exit yet. */
+        readonly vanishesBeforeExitEvent?: boolean | undefined
+        /** Its stderr ended, as a child's does when it exits, but Node hasn't reported its exit yet. */
+        readonly stderrEndsBeforeExitEvent?: boolean | undefined
       },
       connect: Effect.Effect<void> = Effect.void,
       timeout = "200 millis"
@@ -427,6 +431,13 @@ describe("WebKit launcher", () => {
       const written: Array<number> = []
       const base = 9100000
       const gone = new Set<number>()
+      const exitEvents = new Map<number, Deferred.Deferred<ChildProcessSpawner.ExitCode>>()
+      const reportExitSoon = (spawn: number) => {
+        setTimeout(() => {
+          gone.add(spawn)
+          Deferred.doneUnsafe(exitEvents.get(spawn)!, Effect.succeed(ChildProcessSpawner.ExitCode(1)))
+        }, 20)
+      }
       const spawner = ChildProcessSpawner.make((command) =>
         Effect.gen(function*() {
           assert(command._tag === "StandardCommand")
@@ -437,8 +448,16 @@ describe("WebKit launcher", () => {
           const exits = behavior(spawn).vanishes === true || behavior(spawn).vanishesAfterConnect === true ||
             behavior(spawn).exitsBeforePolling === true
           if (behavior(spawn).exitsBeforePolling === true) gone.add(spawn)
+          const failed = new TextEncoder().encode("MiniBrowser startup failed\n")
+          const exitEvent = yield* Deferred.make<ChildProcessSpawner.ExitCode>()
+          exitEvents.set(spawn, exitEvent)
+          if (behavior(spawn).stderrEndsBeforeExitEvent === true) reportExitSoon(spawn)
           const stderr = behavior(spawn).collides === true
             ? Stream.concat(Stream.make(line), Stream.never)
+            : behavior(spawn).stderrEndsBeforeExitEvent === true
+            ? Stream.make(failed)
+            : behavior(spawn).vanishesBeforeExitEvent === true
+            ? Stream.concat(Stream.make(failed), Stream.never)
             : exits
             ? Stream.concat(Stream.make(new TextEncoder().encode("MiniBrowser startup failed\n")), Stream.never)
             : Stream.never
@@ -446,7 +465,7 @@ describe("WebKit launcher", () => {
             pid: ChildProcessSpawner.ProcessId(base + spawn),
             exitCode: exits
               ? Effect.succeed(ChildProcessSpawner.ExitCode(1))
-              : Effect.never,
+              : Deferred.await(exitEvent),
             isRunning: Effect.sync(() => !gone.has(spawn)),
             kill: () => Effect.void,
             stdin: Sink.drain,
@@ -476,6 +495,11 @@ describe("WebKit launcher", () => {
           ) {
             gone.add(spawn)
             return fs.readFileString(`${directory}/gone`)
+          }
+          if (behavior(spawn).vanishesBeforeExitEvent === true) {
+            return fs.readFileString(`${directory}/gone`).pipe(
+              Effect.tapError(() => Effect.sync(() => reportExitSoon(spawn)))
+            )
           }
           const { foreign, held } = behavior(spawn)
           return Effect.succeed(
@@ -568,6 +592,29 @@ describe("WebKit launcher", () => {
         assert.deepStrictEqual(result.closed, result.connected)
         assert.deepStrictEqual(result.written, [])
         assert.deepStrictEqual(result.stopped, [0])
+      }))
+
+    // Seen on real children in 150 launches each: stderr ending first 147 times, procfs going first 1 to 2 times.
+    it.effect("keeps a child's exit when its stderr ends before Node reports the exit", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(() => ({ held: false, stderrEndsBeforeExitEvent: true }))
+        assert(result.exit._tag === "Failure")
+        const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
+        assert.strictEqual(error.reason._tag, "ProcessExited", "the child exited: it didn't fail to answer")
+        assert(error.reason._tag === "ProcessExited")
+        assert.deepStrictEqual(error.reason.code, Option.some(1))
+        assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+      }))
+
+    it.effect("keeps a child's exit when procfs loses it before Node reports the exit", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(() => ({ held: false, vanishesBeforeExitEvent: true }))
+        assert(result.exit._tag === "Failure")
+        const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
+        assert.strictEqual(error.reason._tag, "ProcessExited", "the child is gone: procfs isn't what's wrong")
+        assert(error.reason._tag === "ProcessExited")
+        assert.deepStrictEqual(error.reason.code, Option.some(1))
+        assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
       }))
 
     it.effect("explains exec and attach for exits before ownership without diagnosing a fork", () =>
