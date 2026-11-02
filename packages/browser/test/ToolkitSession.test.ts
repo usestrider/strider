@@ -5,7 +5,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Browser, Snapshot, Target } from "@usestrider/browser"
 import { CapturePolicy } from "@usestrider/browser/ai"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -162,6 +164,57 @@ describe("Session closed-page cleanup", () => {
         assert.strictEqual(released, discoverContextPages ? 0 : 1, "old grant retires exactly once")
       }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
   }
+
+  it.effect("does not cache an old snapshot after the name is reused", () =>
+    Effect.gen(function*() {
+      const browser = yield* Browser.Browser
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const started = yield* Deferred.make<void>()
+      const answer = yield* Deferred.make<Snapshots.SnapshotImpl>()
+      Object.defineProperty(page, "snapshot", {
+        value: () => Effect.andThen(Deferred.succeed(started, undefined), Deferred.await(answer))
+      })
+      const session = yield* ToolkitImpl.makeSession({
+        context,
+        browser,
+        secrets: {},
+        capture: CapturePolicy.local,
+        discoverContextPages: false
+      })
+      yield* session.toolkit.handle("control", { tab: String(page.id), name: "remote" }).pipe(
+        Effect.flatMap(Stream.runDrain)
+      )
+      const pending = yield* session.toolkit.handle("snapshot", { page: "remote" }).pipe(
+        Effect.flatMap(Stream.runDrain),
+        Effect.forkChild
+      )
+      yield* Deferred.await(started)
+      yield* page.close()
+      const replacement = yield* context.newPage
+      yield* session.toolkit.handle("control", { tab: String(replacement.id), name: "remote" }).pipe(
+        Effect.flatMap(Stream.runDrain)
+      )
+      yield* Deferred.succeed(
+        answer,
+        new Snapshots.SnapshotImpl({
+          document: Schema.decodeUnknownSync(Target.DocumentId)("old-document"),
+          generation: Schema.decodeUnknownSync(Snapshot.Generation)(1),
+          root: {
+            ref: Option.none(),
+            role: { _tag: "Aria", role: "document" },
+            name: { _tag: "None" },
+            states: new Set(),
+            validationMessage: Option.none(),
+            children: []
+          },
+          text: "old-document"
+        })
+      )
+      yield* Fiber.join(pending)
+      assert.isTrue(Option.isNone(session.latest("remote")))
+      assert.strictEqual((yield* session.page("remote")).id, replacement.id)
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 
   it.effect("finishes cleanup when external close and release race", () =>
     Effect.gen(function*() {
