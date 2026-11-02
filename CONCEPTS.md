@@ -317,6 +317,25 @@ Cleanup groups can span sibling pages, independently of this graph.
 - **Suspension** (back/forward cache) is a domain state, not a scope operation. Explicit-ref operations fail fast; waits may opt in to resume within their deadline. Resuming never revives invalid handles.
 - **Cleanup order.** Transport, ingestion and obligation resolvers stay alive while owned resources tear down. The order is: stop new work, drain obligations within the cleanup budget, release declarations and owned resources in dependency order, then disconnect or close the owned process. Finalizers are bounded.
 
+### Experimental claims and handoff
+
+The experimental subpath gives session hosts opaque Schema claims for owned Chromium pages and non-default
+contexts. A saved claim identifies the browser by its WebSocket GUID, a tab by its tab target and a context by
+its native context id; public ids remain connection-local and change on reconnect. A scoped control grant alone
+does not permit claim issuance. Firefox, stock WebKit and Chromium pipe connections without a WebSocket
+identity refuse direct claims with a named `Unsupported` capability. A vanished target is `Gone`, and a claim
+from another browser is `OtherBrowser`.
+
+Only the experimental reclaimable-context constructor opts out of Chromium's `disposeOnDetach`; ordinary
+contexts keep their existing disconnect and scope cleanup. Internal Chromium handoff closes the old scope and
+its declarations, settling paused handlers, while leaving owned pages and reclaimable contexts open. Reclaim
+acquires ownership for the new scope, which closes the page or removes the context on ordinary exit. Default
+context control never gives removal ownership. Context settings are supplied again because they belong to the
+old protocol sessions; routes and init scripts are declared again by the host. Reclaim reports observed leftover
+state without resetting the page. An open Chromium dialog can block inspector initialization, so the current
+reclaim path fails at its deadline rather than return an unproved empty dialog report. Leases (ROOK-96), expiry (ROOK-97) and host adoption are
+separate; persistent contexts must not be enabled by a host until expiry cleanup is available.
+
 ## 4. Documents, realms and navigation
 
 - **Document lifecycle.** `Active ⇄ Suspended` (back/forward cache, only with confirmed evidence) and `→ Ended{reason}`.
