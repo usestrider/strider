@@ -248,7 +248,12 @@ describe("Chromium adapter, CDP only", () => {
                 const page = yield* Browser.newPage()
                 const html =
                   `<button id="go">Go</button><script>window.log=[];for(const type of ['mousedown','mouseup','click'])document.getElementById('go').addEventListener(type,e=>log.push(e.type));</script>`
-                yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+                yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
+                // A click at a point has no checks of its own, and input before the page has rendered is lost,
+                // though the browser answers it (ROOK-154); the test's raw click starts after two rendering updates
+                yield* page.evaluateInMainWorld(() =>
+                  new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+                )
                 const target = page.locator("#go")
                 assert(target instanceof LocatorImpl)
                 const click = yield* Effect.gen(function*() {
