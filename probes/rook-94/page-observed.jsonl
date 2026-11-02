@@ -1,0 +1,36 @@
+{"pid":1570526,"kind":"platform","version":"Mozilla Firefox 158.0\n"}
+{"pid":1570526,"kind":"run","run":1,"ending":"sigkill"}
+{"pid":1570526,"kind":"http","run":1,"since":null,"path":"/initial"}
+{"pid":1570526,"kind":"http","run":1,"since":null,"path":"/favicon.ico"}
+{"pid":1570526,"kind":"http","run":1,"since":null,"path":"/preload-frame?phase=before"}
+{"pid":1570526,"kind":"http","run":1,"since":null,"path":"/beacon/preload?phase=before&value=old-preload"}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":null}
+{"pid":1570526,"kind":"http","run":1,"since":null,"path":"/paused-continued"}
+{"pid":1570526,"kind":"http","run":1,"since":null,"path":"/beacon/failed-rejected?TypeError%3A%20NetworkError%20when%20attempting%20to%20fetch%20resource."}
+{"pid":1570526,"kind":"http","run":1,"since":null,"path":"/beacon/continued-resolved"}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":null}
+{"pid":1570526,"kind":"controls-done","run":1,"intercept":"81fc3ee0-7dc9-4dc8-9ad3-1f87b0d5a3e3","hits":["/initial","/favicon.ico","/preload-frame?phase=before","/beacon/preload?phase=before&value=old-preload","/paused-continued","/beacon/failed-rejected?TypeError%3A%20NetworkError%20when%20attempting%20to%20fetch%20resource.","/beacon/continued-resolved"]}
+{"pid":1570526,"kind":"client-exit","run":1,"since":0,"signal":"SIGKILL","browserAlive":true}
+{"pid":1570526,"kind":"new-attempt","run":1,"since":12,"type":"error","error":"session not created","message":"Maximum number of active sessions"}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":562}
+{"pid":1570526,"kind":"new-attempt","run":1,"since":1002,"type":"error","error":"session not created","message":"Maximum number of active sessions"}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":1565}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":2565}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":3566}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":4565}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":5565}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":6565}
+{"pid":1570526,"kind":"http","run":1,"since":6568,"path":"/preload-frame?phase=after0"}
+{"pid":1570526,"kind":"http","run":1,"since":6570,"path":"/beacon/preload?phase=after0&value=old-preload"}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":7566}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":8569}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":9569}
+{"pid":1570526,"kind":"new-attempt","run":1,"since":10004,"type":"error","error":"session not created","message":"Maximum number of active sessions"}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":10569}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":11569}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":12569}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":13569}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":14570}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":15638}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":16638}
+{"pid":1570526,"kind":"heartbeat","run":1,"since":23499}
