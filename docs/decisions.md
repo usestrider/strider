@@ -648,3 +648,18 @@ dialog; returning fresh-looking empty current state; treating historical details
 or expiry implementation here. ROOK-96 owns claim leases, ROOK-97 owns expiry, and no host may
 enable persistent contexts before expiry cleanup ships. Claims are identity tokens, not authentication or a
 mutual-exclusion mechanism. A browser debugging endpoint remains the trust boundary.
+
+
+## CDP declaration cleanup lifetime and caller wait (ROOK-95)
+
+Removing a declaration updates the registry synchronously, then starts the browser reapplication in a
+connection-owned fiber with its own cleanup budget. Its lifetime must outlast the operation that registered it:
+an expired registration deadline must not prevent restoration. Its caller's wait is separately bounded by the
+operation doing the cleanup. A caller timing out stops waiting without canceling that connection-owned work.
+Borrowed-context rollback explicitly requests confirmation, so prior settings are not reported restored before
+its setup registrations have been released. Finalizers preserve their registration environment for browser work,
+but read the closing caller's deadline and confirmation policy before entering that environment.
+
+Rejected: retaining an expired protocol deadline for release; waiting for a fresh full cleanup budget inside
+every ordinary operation; cancelling restoration when the caller stops waiting; discarding release failures;
+and returning borrowed-context rollback as confirmed while browser restoration is still pending.
