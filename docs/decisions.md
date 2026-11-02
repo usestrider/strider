@@ -567,4 +567,14 @@ would trust page titles controlled by a site, and treating any 404 as WebKit wou
 Proxies removing the inspector identity are rejected rather than guessed. This detects compatibility, not server
 authenticity (ROOK-4). An attached inspector uses scoped control of its existing default context, rather than
 creating a context the inspector cannot supply. Startup state and viewport defaults are rejected in this mode;
-existing tabs remain available for explicit control, and stopping releases control without closing them.
+existing tabs remain available for explicit control, and stopping releases control without closing them. The
+supplied endpoint stays in the spec and export; the discovered socket is connection state for this startup alone,
+since Chromium's browser socket identity changes when the browser restarts. Every exported attachment supplies
+its required WebSocket constructor.
+
+Shared-context tabs are listed as held pages only while explicitly controlled. Digest subscriptions in this mode
+belong to each controlled page's scope, including waits for failed requests, instead of the shared context: the
+fold publishes context events for uncontrolled tabs too. Subscriptions start at control without replaying history
+and stop at release, covering page events and workers attributable to that page. Context-wide digest subscriptions
+remain appropriate for sessions with their own context. Filtering the context stream only when draining it could
+admit events queued before control or after release; page scopes enforce the same lifetime as control.
