@@ -43,6 +43,12 @@ const timeout = 120_000
 const bin = new URL("../../src/bin/strider.ts", import.meta.url).pathname
 const fixtures = new URL("../fixtures/segments/", import.meta.url).pathname
 
+const segmentImports = `
+import * as Effect from ${JSON.stringify(import.meta.resolve("effect/Effect"))}
+import * as Schema from ${JSON.stringify(import.meta.resolve("effect/Schema"))}
+import { CurrentSession, Segment } from ${JSON.stringify(new URL("../../src/cli/index.ts", import.meta.url).href)}
+`
+
 /** A run of `strider`, with the environment given: its exit code and output. */
 const strider = (env: Record<string, string>, ...args: ReadonlyArray<string>) =>
   Effect.callback<{ readonly code: number; readonly out: string; readonly err: string }>((resume) => {
@@ -140,6 +146,162 @@ const app = `<title>shop</title>
 </script>`
 
 describe("strider", () => {
+  for (const capture of ["local", "strict"]) {
+    it.live(
+      `prints segment values and validates typed arguments with ${capture} capture`,
+      () =>
+        Effect.scoped(Effect.gen(function*() {
+          const env = { ...environment(), SEGMENT_SECRET: "return-secret" }
+          const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "segments", ...args)
+          const file = path.join(env.XDG_RUNTIME_DIR, "segment.ts")
+          const write = (body: string) => fs.writeFileSync(file, segmentImports + body)
+          const started = yield* strider(
+            env,
+            "start",
+            "--name",
+            "segments",
+            "--chromium",
+            chromium.executable,
+            "--capture",
+            capture,
+            "--secret",
+            "token=SEGMENT_SECRET"
+          )
+          assert.strictEqual(started.code, 0, started.err)
+          try {
+            write(
+              "export default Segment.make(Schema.Record(Schema.String, Schema.Never), () => Effect.succeed({status:200, body:\"return-secret\"}))"
+            )
+            const plain = yield* run("run", file)
+            assert.strictEqual(plain.code, 0, plain.err)
+            assert.include(plain.out, capture === "local" ? "→ {\"status\":200,\"body\":\"%token%\"}" : "→ \"•••\"")
+            const printed = yield* run("--json", "run", file)
+            assert.strictEqual(printed.code, 0, printed.err)
+            const result = JSON.parse(printed.out)
+            assert.deepStrictEqual(result.value, capture === "local" ? { status: 200, body: "%token%" } : "•••")
+            assert.deepStrictEqual(result.handles, {})
+            assert.strictEqual(result.file, file)
+            assert.isAtLeast(result.durationMs, 0)
+            assert.notInclude(printed.out, "return-secret")
+            const unexpected = yield* run("run", file, "--arg", "unexpected=yes", "--json")
+            assert.strictEqual(unexpected.code, 15, unexpected.err)
+
+            yield* run("page", "new", "--name", "main", "about:blank")
+            write(
+              `export default Segment.make(Schema.Record(Schema.String, Schema.Never), Effect.fnUntraced(function*() {
+            const session = yield* CurrentSession.CurrentSession
+            return yield* session.page("main")
+          }))`
+            )
+            const handle = yield* run("run", file, "--json")
+            assert.strictEqual(handle.code, 0, handle.err)
+            assert.strictEqual(JSON.parse(handle.out).value, "main")
+            assert.strictEqual(JSON.parse(handle.out).handles.main.type, "page")
+            assert.include((yield* run("run", file)).out, "→ main")
+
+            write(`export default Segment.make(Schema.Struct({
+            tag: Schema.String, count: Schema.NumberFromString.check(Schema.isInt()), payload: Schema.Struct({ id: Schema.Number })
+          }), Effect.fnUntraced(function*(args) {
+            const session = yield* CurrentSession.CurrentSession
+            const page = yield* session.page("main")
+            yield* page.goto("data:text/html,<title>callback ran</title>")
+            return args
+          }))`)
+            const payload = path.join(env.XDG_RUNTIME_DIR, "payload.json")
+            fs.writeFileSync(payload, "{\"id\":42}")
+            fs.writeFileSync(`${payload}.invalid`, "{broken")
+            for (
+              const args of [
+                [],
+                ["--arg", "tag=update", "--arg", "count=bad", "--arg", `payload=@${payload}`],
+                ["--arg", "count=1", "--arg", "count=2"],
+                ["--arg", "bad"],
+                ["--arg", `payload=@${payload}.invalid`],
+                [
+                  "--arg",
+                  `payload=@${payload}.missing`
+                ],
+                ["--arg", "tag=update", "--arg", "count=2", "--arg", `payload=@${payload}`, "--arg", "typo=yes"]
+              ]
+            ) {
+              const invalid = yield* run("run", file, "--json", ...args)
+              assert.strictEqual(invalid.code, 15, JSON.stringify({ args, ...invalid }))
+              assert.strictEqual(JSON.parse(invalid.err).phase, "arguments")
+            }
+            assert.include((yield* run("pages")).out, "about:blank")
+            const args = yield* run(
+              "run",
+              file,
+              "--arg",
+              "tag=@@update=Unit",
+              "--arg",
+              "count=2",
+              "--arg",
+              `payload=@${path.relative(process.cwd(), payload)}`,
+              "--json"
+            )
+            assert.strictEqual(args.code, 0, args.err)
+            assert.deepStrictEqual(
+              JSON.parse(args.out).value,
+              capture === "local" ? { tag: "@update=Unit", count: 2, payload: { id: 42 } } : "•••"
+            )
+
+            write(
+              `export default Segment.make(Schema.Record(Schema.String, Schema.Never), Effect.fnUntraced(function*() {
+            const session = yield* CurrentSession.CurrentSession
+            const page = yield* session.page("main")
+            yield* page.goto("data:text/html,<title>earlier step</title>")
+            return yield* page.getByText("missing").readText
+          }))`
+            )
+            const failed = yield* run("run", file, "--json")
+            assert.strictEqual(failed.code, 10, failed.err)
+            const failure = JSON.parse(failed.err)
+            assert.strictEqual(failure.error, "LocatorError")
+            assert.strictEqual(failure.reason, "NoMatch")
+            assert.strictEqual(failure.phase, "execute")
+            assert.include(failure.step, "readText")
+            assert.isString(failure.hint)
+            assert.include((yield* run("pages")).out, "earlier")
+
+            write(
+              "export default Segment.make(Schema.Record(Schema.String, Schema.Never), () => Effect.sync(() => { const value = {}; value.self = value; return value }))"
+            )
+            const cycle = yield* run("run", file, "--json")
+            assert.strictEqual(cycle.code, 1, cycle.err)
+            assert.strictEqual(JSON.parse(cycle.err).error, "NotSerializable")
+            assert.strictEqual(JSON.parse(cycle.err).phase, "serialize")
+
+            write(
+              "export default Segment.make(Schema.Record(Schema.String, Schema.Never), () => Effect.die(new Error(\"return-secret\")))"
+            )
+            const defect = yield* run("run", file, "--json")
+            assert.strictEqual(defect.code, 1)
+            assert.strictEqual(JSON.parse(defect.err).phase, "execute")
+            assert.notInclude(defect.err, "return-secret")
+
+            write("export default Effect.void")
+            const legacy = yield* run("run", file, "--json")
+            assert.strictEqual(legacy.code, 15)
+            assert.strictEqual(JSON.parse(legacy.err).phase, "load")
+            if (capture === "local") assert.include(legacy.err, "Segment.make")
+
+            write(
+              "export default Segment.make(Schema.Record(Schema.String, Schema.Never), () => Effect.succeed(\"x\".repeat(5000)))"
+            )
+            const large = yield* run("run", file)
+            assert.strictEqual(large.code, 0, large.err)
+            if (capture === "local") assert.include(large.out, "truncated")
+            const full = yield* run("run", file, "--json")
+            assert.strictEqual(full.code, 0, full.err)
+            assert.strictEqual(JSON.parse(full.out).value, capture === "local" ? "x".repeat(5000) : "•••")
+          } finally {
+            yield* run("stop")
+          }
+        })).pipe(Effect.provide(NodeServices.layer)),
+      timeout
+    )
+  }
   it.live(
     "refuses viewport sizing on inspector-only stock WebKit without replacing prior scope",
     () =>
@@ -548,8 +710,8 @@ describe("strider", () => {
         assert.include((yield* shop("--json", "pages")).out, `"page":"shop"`)
         // A segment: run in the session, its returned page named into it
         const segment = yield* run("-s", "shop", "run", path.join(fixtures, "open-popup.ts"))
-        assert.match(segment.out, /^ran .*open-popup\.ts; popup is p\d+/, segment.err)
-        const returned = /popup is (p\d+)/.exec(segment.out)![1]!
+        assert.match(segment.out, /^ran .*open-popup\.ts → \{"popup":"p\d+"\}/, segment.err)
+        const returned = /"popup":"(p\d+)"/.exec(segment.out)![1]!
         assert.strictEqual((yield* run("-s", "shop", "-p", returned, "expect", "css=p", "visible")).code, 0)
         const missing = yield* run("-s", "shop", "run", path.join(fixtures, "missing-page.ts"))
         assert.notStrictEqual(missing.code, 0)

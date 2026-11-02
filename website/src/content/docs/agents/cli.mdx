@@ -224,28 +224,31 @@ endpoint or a WebDriver BiDi endpoint, such as Firefox's; it can't reach stock W
 
 A command does one thing and returns. A segment is a program, so it can decide as it goes: catch a failure, loop
 over a list, or work in a popup the moment it opens. It runs in the live session: a TypeScript file whose default
-export is an `Effect` that finds pages by name through [`CurrentSession`](/docs/api/browser/cli/CurrentSession):
+export is made with `Segment.make`. Its callback finds pages by name through [`CurrentSession`](/docs/api/browser/cli/CurrentSession):
 
 ```ts title="pay.ts"
 import { Deadline, Popup } from "@usestrider/browser"
-import { CurrentSession } from "@usestrider/browser/cli"
-import { Effect } from "effect"
+import { CurrentSession, Segment } from "@usestrider/browser/cli"
+import { Effect, Schema } from "effect"
 
-export default Effect.gen(function*() {
-  const session = yield* CurrentSession.CurrentSession
-  const shop = yield* session.page("main")
-  const popups = yield* Popup.next(shop)
-  yield* shop.getByText("Pay").click()
-  const popup = yield* popups
-  yield* popup.getByLabel("Card number").fill("4242 4242 4242 4242")
-  yield* popup.getByRole("button", { name: "Pay" }).click()
-  // Some cards ask the bank to confirm; most don't
-  yield* popup.getByRole("button", { name: "Confirm with my bank" }).click().pipe(
-    Deadline.within("5 seconds"),
-    Effect.catchTag("Timeout", () => Effect.void)
-  )
-  return { popup }
-})
+export default Segment.make(
+  Schema.Record(Schema.String, Schema.Never),
+  Effect.fnUntraced(function*() {
+    const session = yield* CurrentSession.CurrentSession
+    const shop = yield* session.page("main")
+    const popups = yield* Popup.next(shop)
+    yield* shop.getByText("Pay").click()
+    const popup = yield* popups
+    yield* popup.getByLabel("Card number").fill("4242 4242 4242 4242")
+    yield* popup.getByRole("button", { name: "Pay" }).click()
+    // Some cards ask the bank to confirm; most don't
+    yield* popup.getByRole("button", { name: "Confirm with my bank" }).click().pipe(
+      Deadline.within("5 seconds"),
+      Effect.catchTag("Timeout", () => Effect.void)
+    )
+    return { popup }
+  })
+)
 ```
 
 `strider run` doesn't type-check, so run your project's `tsc` first, against the same `@usestrider/browser` version
@@ -259,7 +262,7 @@ strider -s shop -p card snapshot
 ```
 
 ```
-ran /home/ada/shop/pay.ts; popup is p1
+ran /home/ada/shop/pay.ts → {"popup":"p1"}
 main  https://shop.example.com/cart
 p1  https://pay.example.com/card
 (0 ms)
@@ -269,22 +272,85 @@ p1 is now card
 - A segment runs in its own scope: its [routes](/docs/events/routes),
   [handlers](/docs/events/kinds#dialogs-and-file-choosers) and waits end with it.
 - Pages it returns are named into the session as a page opened without a name is, `p1` and on: `ran` says which
-  name each key got, and `page name` renames one. They aren't kept: a popup of a session page stays open, since its
+  name each returned page got, and `page name` renames one. They aren't kept: a popup of a session page stays open, since its
   opener owns it, and a page the segment opened itself closes with the segment.
 - To keep a page it opened, call [`session.keep`](/docs/api/browser/cli/CurrentSession#CurrentSession.keep). For a
   page you know you want, `page new --name orders <url>` is simpler; a segment keeps one it opens partway through:
 
 ```ts title="orders.ts"
-import { CurrentSession } from "@usestrider/browser/cli"
-import { Effect } from "effect"
+import { CurrentSession, Segment } from "@usestrider/browser/cli"
+import { Effect, Schema } from "effect"
 
-export default Effect.gen(function*() {
-  const session = yield* CurrentSession.CurrentSession
-  const orders = yield* session.context.newPage
-  yield* orders.goto("https://shop.example.com/orders")
-  yield* session.keep(orders, "orders")
-})
+export default Segment.make(
+  Schema.Record(Schema.String, Schema.Never),
+  Effect.fnUntraced(function*() {
+    const session = yield* CurrentSession.CurrentSession
+    const orders = yield* session.context.newPage
+    yield* orders.goto("https://shop.example.com/orders")
+    yield* session.keep(orders, "orders")
+  })
+)
 ```
+
+### Typed arguments and return values
+
+A schema lets one segment handle different inputs and validates them before its callback acts on the browser.
+Define the callback with `Effect.fnUntraced`: its arguments are decoded, so here `count` is a number even though
+its command-line input is a string.
+
+```ts title="read.ts"
+import { CurrentSession, Segment } from "@usestrider/browser/cli"
+import { Effect, Schema } from "effect"
+
+export default Segment.make(
+  Schema.Struct({
+    page: Schema.String,
+    count: Schema.NumberFromString.check(Schema.isInt())
+  }),
+  Effect.fnUntraced(function*(args) {
+    const session = yield* CurrentSession.CurrentSession
+    const page = yield* session.page(args.page)
+    return { title: yield* page.title, count: args.count }
+  })
+)
+```
+
+```sh
+strider -s shop run read.ts --arg page=main --arg count=2 --json
+```
+
+```json
+{
+  "file": "/home/ada/shop/read.ts",
+  "value": { "title": "Shop", "count": 2 },
+  "handles": {},
+  "durationMs": 12
+}
+```
+
+Use `Schema.Record(Schema.String, Schema.Never)` to reject all arguments; `Schema.Struct({})` is permissive.
+A plain `Effect` default export must be wrapped in
+`Segment.make(Schema.Record(Schema.String, Schema.Never), Effect.fnUntraced(function*() { return yield* effect }))`. Duplicate arguments, unknown keys and schema errors stop the
+command before its callback runs.
+
+An argument beginning with `@` reads JSON from a file relative to your shell's working directory. For a segment
+whose schema includes a `payload` field, pass `--arg payload=@payload.json`. Use `--arg tag=@@literal` to pass
+`@literal` as text. A JSON file supplies parsed values, so its schema can use `Schema.Number` directly.
+
+`run` prints its return value. Plain output truncates previews after 4,096 characters with a note; `--json` keeps
+the full captured value. Pages become names, with their IDs in `handles`. Values JSON cannot represent use type
+tags: for example, `undefined` is `{"type":"undefined"}` and a bigint is `{"type":"bigint","value":"42"}`.
+Dates and regular expressions retain their type tags; maps contain key/value pairs and sets contain arrays.
+Cycles and unsupported return values fail with a path and a hint. Read a `JSHandle` before returning its value.
+
+Named secrets are concealed in output. With `--capture strict`, arbitrary return data is masked as `•••` because
+its source field is no longer known. Direct page handles and the `handles` table remain available. Failures go to
+stderr; `--json` includes the error tag, reason and hint when available, the failed phase, the browser operation
+when known, and elapsed milliseconds. Strict capture masks failure messages and hints too. Earlier actions stay
+done when a segment fails.
+
+Imports resolve from the segment's directory. Keep segment files in the project with the same Strider and Effect
+versions as the daemon. A file in `/tmp` cannot automatically use that project's `node_modules`.
 
 ## MCP
 

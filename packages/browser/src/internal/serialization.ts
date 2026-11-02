@@ -34,7 +34,21 @@ const number = (value: number): Adapter.RemoteValue => {
 const skipped = (value: unknown) => typeof value === "function" || typeof value === "symbol"
 
 /** A value as a local value for an evaluation's argument. */
-export const toRemote = (value: unknown, path = "argument", seen = new Set<object>()): Adapter.RemoteValue => {
+export const toRemote = (value: unknown, path = "argument", seen = new Set<object>()): Adapter.RemoteValue =>
+  encode(value, path, seen)
+
+/** A local result under the same rules as evaluation, optionally replacing application handles. */
+export const result = (
+  value: unknown,
+  replace: (value: object, path: string) => Adapter.RemoteValue | undefined = () => undefined
+): Adapter.RemoteValue => encode(value, "result", new Set(), replace)
+
+const encode = (
+  value: unknown,
+  path: string,
+  seen: Set<object>,
+  replace?: (value: object, path: string) => Adapter.RemoteValue | undefined
+): Adapter.RemoteValue => {
   switch (typeof value) {
     case "undefined":
       return { type: "undefined" }
@@ -48,10 +62,19 @@ export const toRemote = (value: unknown, path = "argument", seen = new Set<objec
       return { type: "bigint", value: value.toString() }
     case "function":
     case "symbol":
-      throw new Unserializable(path, `A ${typeof value} can't cross into a realm by value`)
+      throw new Unserializable(
+        path,
+        `A ${typeof value} can't cross${replace === undefined ? " into a realm" : ""} by value`
+      )
   }
   if (value === null) return { type: "null" }
   const object = value as object
+  const replaced = replace?.(object, path)
+  if (replaced !== undefined) return replaced
+  if (replace !== undefined && seen.size >= 64) throw deeper(path)
+  if (replace !== undefined && (object instanceof Promise || object instanceof WeakMap || object instanceof WeakSet)) {
+    throw new Unserializable(path, "Promises and weak collections don't cross by value; return their data instead")
+  }
   if (object instanceof Date) return { type: "date", value: object.toISOString() }
   if (object instanceof RegExp) return { type: "regexp", value: { pattern: object.source, flags: object.flags } }
   if (seen.has(object)) throw new Unserializable(path, "The value refers to itself, which can't cross by value")
@@ -60,14 +83,16 @@ export const toRemote = (value: unknown, path = "argument", seen = new Set<objec
     if (Array.isArray(object)) {
       return {
         type: "array",
-        value: object.map((item, index) => toRemote(item, `${path}[${index}]`, seen))
+        value: (replace === undefined ? object : Array.from(object)).map((item, index) =>
+          encode(replace !== undefined && skipped(item) ? undefined : item, `${path}[${index}]`, seen, replace)
+        )
       }
     }
     if (object instanceof Set) {
       return {
         type: "set",
         value: [...object].filter((item) => !skipped(item)).map((item, index) =>
-          toRemote(item, `${path}.<set ${index}>`, seen)
+          encode(item, `${path}.<set ${index}>`, seen, replace)
         )
       }
     }
@@ -76,8 +101,8 @@ export const toRemote = (value: unknown, path = "argument", seen = new Set<objec
         type: "map",
         value: [...object].filter(([, item]) => !skipped(item)).map(([key, item]) =>
           [
-            typeof key === "string" ? key : toRemote(key, `${path}.<key>`, seen),
-            toRemote(item, `${path}.get(${String(key)})`, seen)
+            typeof key === "string" ? key : encode(key, `${path}.<key>`, seen, replace),
+            encode(item, `${path}.get(${String(key)})`, seen, replace)
           ] as const
         )
       }
@@ -85,7 +110,7 @@ export const toRemote = (value: unknown, path = "argument", seen = new Set<objec
     return {
       type: "object",
       value: Object.entries(object).filter(([, item]) => !skipped(item)).map(([key, item]) =>
-        [key, toRemote(item, `${path}.${key}`, seen)] as const
+        [key, encode(item, `${path}.${key}`, seen, replace)] as const
       )
     }
   } finally {
