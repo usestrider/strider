@@ -12,9 +12,10 @@ import * as Page from "../../webkit-stock-protocol/Page.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Declarations from "../declarations.ts"
-import { resizeWindow } from "./automation.ts"
+import { pageHandleOf, processOfContext, resizeWindow } from "./automation.ts"
 import { overrideCapability } from "./capabilities.ts"
 import { type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
+import * as Viewport from "./viewport.ts"
 
 // ── Mapping ───────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -45,10 +46,20 @@ const applyPageOverride = (
   page: PageEntry,
   kind: Adapter.Override["_tag"],
   override: Adapter.Override | undefined
-): Effect.Effect<void, Protocol.ProtocolError> => {
+): Effect.Effect<void, Protocol.ProtocolError | Adapter.AdapterError> => {
   switch (kind) {
     case "Viewport":
-      return resizeWindow(state, page, override)
+      return Effect.gen(function*() {
+        const handle = yield* pageHandleOf(state, page)
+        const process = yield* processOfContext(state, page.context)
+        yield* resizeWindow(state, page, override)
+        if (override?._tag === "Viewport") yield* Viewport.confirm(process, handle, override)
+        else {
+          // Restoration without an override uses the saved original viewport.
+          const natural = state.naturalViewports.get(page)
+          if (natural !== undefined) yield* Viewport.confirm(process, handle, natural)
+        }
+      })
     case "JavaScriptEnabled":
       return page.target === undefined || page.target.ended
         ? Effect.void
@@ -163,17 +174,27 @@ const pagesInScope = (state: State, scope: Adapter.DeclarationScope) =>
 const targetsOf = (page: PageEntry) =>
   [page.target, page.provisional].filter((target): target is TargetEntry => target !== undefined && !target.ended)
 
-const applyDeclaration = (state: State, declaration: Adapter.Declaration, scope: Adapter.DeclarationScope) => {
+const applyDeclaration = (
+  state: State,
+  declaration: Adapter.Declaration,
+  scope: Adapter.DeclarationScope,
+  restoring = false
+) => {
   switch (declaration._tag) {
     case "Override": {
       const kind = declaration.override._tag
       return Effect.forEach(pagesInScope(state, scope), (page) => {
         const override = state.registry.overrides(placement(page)).get(kind)
-        return pageKinds.has(kind)
+        const applying = pageKinds.has(kind)
           ? applyPageOverride(state, page, kind, override)
           : Effect.forEach(targetsOf(page), (target) => applyTargetOverride(target, kind, override), {
             discard: true
           })
+        return restoring ?
+          applying.pipe(
+            Effect.catch((error) => page.ended || Viewport.isGone(error) ? Effect.void : Effect.fail(error))
+          ) :
+          applying
       }, { concurrency: "unbounded", discard: true })
     }
     case "InitScript":
@@ -243,18 +264,38 @@ export const declare = Effect.fnUntraced(
         )
       )
     }
-    const id = state.ids.registration()
-    state.registry.add(scope, declaration, id)
-    yield* Effect.addFinalizer(() =>
-      Effect.suspend(() => {
-        state.registry.remove(id)
-        return applyDeclaration(state, declaration, scope).pipe(Effect.ignore)
+    // Pair before registering a page override, so afterPairing cannot apply this new setting twice.
+    if (declaration._tag === "Override" && declaration.override._tag === "Viewport") {
+      yield* Effect.forEach(pagesInScope(state, scope), (page) => pageHandleOf(state, page), { discard: true })
+    }
+    return yield* Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function*() {
+        const id = state.ids.registration()
+        state.registry.add(scope, declaration, id)
+        const remove = Effect.suspend(() => {
+          if (Option.isNone(state.registry.remove(id))) return Effect.void
+          return applyDeclaration(state, declaration, scope, true)
+        })
+        const viewport = declaration._tag === "Override" && declaration.override._tag === "Viewport"
+        yield* Effect.addFinalizer(() =>
+          viewport
+            ? Viewport.reportCleanup(Viewport.cleanup(remove), "WebKit viewport release could not confirm restoration")
+            : remove.pipe(Effect.ignore)
+        )
+        yield* applyDeclaration(state, declaration, scope).pipe(
+          restore,
+          Effect.mapError((error) => error._tag === "AdapterError" ? error : Kit.protocolError(error)),
+          Effect.onError(() =>
+            viewport
+              ? Viewport.cleanup(remove).pipe(
+                Effect.catch((error) => Effect.die(new Error("WebKit viewport restoration failed", { cause: error })))
+              )
+              : Effect.void
+          )
+        )
+        return id
       })
     )
-    yield* applyDeclaration(state, declaration, scope).pipe(
-      Effect.mapError((error) => error._tag === "AdapterError" ? error : Kit.protocolError(error))
-    )
-    return id
   }
 )
 

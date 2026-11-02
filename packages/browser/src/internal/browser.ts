@@ -74,7 +74,7 @@ const asContextReason = (
   reason: Declaration.DeclarationErrorReason | Target.TargetGone
 ): UserContext.UserContextErrorReason =>
   reason._tag === "InvalidInput" || reason._tag === "NotPermitted" || reason._tag === "Unsupported" ||
-    reason._tag === "BackendFailure"
+    (reason._tag === "BackendFailure" || reason._tag === "ViewportMismatch")
     ? reason
     : new Reason.BackendFailure({ kind: "Rejected", method: "Browser.newContext", hint: reason.message })
 
@@ -136,7 +136,7 @@ const makeContext = (
       const scope = yield* Effect.scope
       const created = yield* Effect.acquireRelease(
         adapter.createPage(entry.id).pipe(Effect.mapError((error) => {
-          const mapped = Operation.fromAdapter(error, id, runtime.backend)
+          const mapped = Operation.fromViewportAdapter(error, id, runtime.backend)
           return mapped._tag === "Timeout"
             ? mapped.error
             : mapped._tag === "Gone"

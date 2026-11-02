@@ -84,6 +84,7 @@ const startArgs = (name: string, given: Flags, pid: number): ReadonlyArray<strin
     ...option("user-data-dir", given.userDataDir),
     ...option("state", given.state),
     ...option("fork", given.fork),
+    ...option("viewport", given.viewport),
     ...option("idle", given.idle),
     ...option("capture", given.capture),
     ...Object.entries(given.secret).flatMap(([secret, variable]) => ["--secret", `${secret}=${variable}`]),

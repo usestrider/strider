@@ -38,7 +38,7 @@ import * as Result from "effect/Result"
 import * as RpcSerialization from "effect/rpc/RpcSerialization"
 import * as RpcServer from "effect/rpc/RpcServer"
 import * as Schema from "effect/Schema"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
 import type * as Socket from "effect/socket/Socket"
 import * as Stream from "effect/Stream"
 import * as CapturePolicy from "../../ai/CapturePolicy.ts"
@@ -63,6 +63,42 @@ import * as Protocol from "./protocol.ts"
 import * as Recorder from "./recorder.ts"
 import * as Session from "./session.ts"
 
+type Viewport = { readonly width: number; readonly height: number }
+
+const parseViewport = (text: string) => {
+  const match = /^([0-9]+)x([0-9]+)$/.exec(text)
+  const width = Number(match?.[1])
+  const height = Number(match?.[2])
+  return match !== null && Number.isSafeInteger(width) && width > 0 && Number.isSafeInteger(height) && height > 0
+    ? Effect.succeed({ width, height })
+    : Effect.fail(
+      new CommandFailed({
+        error: "InvalidInput",
+        message: "A viewport is WIDTHxHEIGHT in positive integer CSS pixels, such as 1440x1000"
+      })
+    )
+}
+
+/** Replaces a CLI override only after its successor has been accepted by the backend. */
+export const setViewport = (
+  owner: { readonly scope: Scope.Scope; readonly viewports: Map<string, Scope.Closeable> },
+  page: { readonly id: string; readonly emulate: Page.Page["emulate"] },
+  viewport: Viewport
+) =>
+  Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function*() {
+      const scope = yield* Scope.fork(owner.scope)
+      yield* page.emulate({ viewport }).pipe(
+        Scope.provide(scope),
+        restore,
+        Effect.onError(() => Scope.close(scope, Exit.void))
+      )
+      const previous = owner.viewports.get(page.id)
+      owner.viewports.set(page.id, scope)
+      if (previous !== undefined) yield* Scope.close(previous, Exit.void)
+    })
+  )
+
 // ── The session ──
 
 /** How a command shows a tool's outcome: its text, and the files it wrote. */
@@ -81,6 +117,8 @@ interface Daemon {
   readonly fork: string | undefined
   /** The profile directory the session's browser runs on, when it isn't the session's own. */
   readonly userDataDir: string | undefined
+  readonly viewport: Viewport | undefined
+  readonly viewports: Map<string, Scope.Closeable>
   readonly context: UserContext.UserContext
   readonly session: ToolkitImpl.Session
   readonly scope: Scope.Scope
@@ -539,6 +577,16 @@ export const commands = (getDaemon: () => Daemon) => {
   // ── Session commands ──
   const page = Command.make("page").pipe(
     Command.withSubcommands([
+      Command.make("viewport", { size: Argument.String("size") }, ({ size }) =>
+        Effect.gen(function*() {
+          const viewport = yield* parseViewport(size)
+          const name = yield* pageFlag
+          const daemon = getDaemon()
+          const page = yield* daemon.session.page(name).pipe(Effect.mapError((failure) => new CommandFailed(failure)))
+          yield* setViewport(daemon, page, viewport).pipe(Effect.mapError(failedWith))
+          daemon.recorder.record({ _tag: "Viewport", page: name, viewport })
+          yield* Console.log(`${name} viewport ${viewport.width}x${viewport.height}`)
+        })).pipe(Command.withDescription("Set the selected page's viewport in CSS pixels")),
       Command.make(
         "new",
         { name: Flag.String("name").pipe(Flag.optional), url: Argument.String("url").pipe(Argument.optional) },
@@ -653,6 +701,7 @@ export const commands = (getDaemon: () => Daemon) => {
           const { placeholders, text } = ExportTest.render({
             name: getDaemon().name,
             browser: getDaemon().browser,
+            viewport: getDaemon().viewport,
             secrets: getDaemon().secretVariables,
             state: getDaemon().state,
             fork: getDaemon().fork,
@@ -1044,6 +1093,10 @@ export const startFlags = {
     Flag.withDescription("Copy initial storage state from this running session; cannot be combined with --state"),
     Flag.optional
   ),
+  viewport: Flag.String("viewport").pipe(
+    Flag.withDescription("Viewport WIDTHxHEIGHT in positive integer CSS pixels for new pages"),
+    Flag.optional
+  ),
   idle: Flag.String("idle").pipe(
     Flag.withDescription("Stop after this duration without commands (default: 1 hour)"),
     Flag.withDefault("1 hour")
@@ -1077,6 +1130,7 @@ export const start = Command.make(
           })
         )
       }
+      const viewport = Option.isSome(flags.viewport) ? yield* parseViewport(flags.viewport.value) : undefined
       const browser = yield* browserOf(flags)
       // What Duration.fromInput reads, as a Schema decodes it from text
       const parsed = Schema.decodeUnknownOption(Schema.DurationFromString)(flags.idle)
@@ -1140,7 +1194,7 @@ export const start = Command.make(
       )
       // What the daemon logs goes to the session's log, as it has no output of its own
       const log = yield* Logger.toFile(Logger.formatSimple, paths.log).pipe(Effect.mapError(failedWith))
-      keep = yield* serve(flags, { browser, idle, paths, initial, stateFile, forkOf, secrets, version }).pipe(
+      keep = yield* serve(flags, { browser, idle, paths, initial, stateFile, forkOf, secrets, version, viewport }).pipe(
         Effect.provide(Logger.layer([log]))
       )
     }).pipe(Effect.scoped)
@@ -1148,6 +1202,7 @@ export const start = Command.make(
 
 /** What `start` found before the session's browser: where the session lives, its browser, and how it starts. */
 interface Prepared {
+  readonly viewport: Viewport | undefined
   readonly browser: ExportTest.Browser
   readonly idle: Duration.Duration
   readonly paths: ReturnType<typeof Session.paths>
@@ -1163,7 +1218,7 @@ const serve = Effect.fnUntraced(
   function*(flags: Command.Command.Config.Infer<typeof startFlags>, prepared: Prepared) {
     const fs = yield* FileSystem.FileSystem
     const process = Node.process
-    const { browser, forkOf, idle, initial, paths, secrets, stateFile, version } = prepared
+    const { browser, forkOf, idle, initial, paths, secrets, stateFile, version, viewport } = prepared
     for (const dir of [paths.downloads, paths.artifacts]) {
       yield* fs.makeDirectory(dir).pipe(Effect.mapError(failedWith))
     }
@@ -1189,6 +1244,7 @@ const serve = Effect.fnUntraced(
     const context = yield* instance.newContext({
       ...Option.match(initial, { onNone: () => ({}), onSome: (storageState) => ({ storageState }) }),
       focus,
+      ...(viewport === undefined ? {} : { emulation: { viewport } }),
       // The session's own directory, which strider stop --keep keeps
       downloads: reportsDownloads ? { directory: paths.downloads } : undefined
     }).pipe(
@@ -1213,6 +1269,8 @@ const serve = Effect.fnUntraced(
     let last = performance.now()
     const daemon: Daemon = {
       name: flags.name,
+      viewport,
+      viewports: new Map(),
       paths,
       browser,
       secretVariables: flags.secret,
@@ -1264,7 +1322,7 @@ const serve = Effect.fnUntraced(
           : Option.isSome(flags.fork)
           ? ` · forked from ${flags.fork.value}`
           : ""
-      }`
+      }${viewport === undefined ? "" : ` · requested viewport default ${viewport.width}x${viewport.height}`}`
     )
     return yield* Deferred.await(stopped)
   }
