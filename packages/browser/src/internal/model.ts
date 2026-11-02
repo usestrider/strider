@@ -547,6 +547,11 @@ export const make = Effect.fnUntraced(function*() {
       (state): PageState => state._tag === "Closed" ? state : { _tag: "Closed", reason, url: state.url }
     )
     yield* SubscriptionRef.update(page.tree, (tree) => ({ ...tree, frames: [], closed: Option.some(reason) }))
+    // A removed page can leave requests without terminal network events. Settle their header waits with
+    // what is already known; do not invent a network failure or attribute still-ambiguous ExtraInfo.
+    for (const hop of hops.values()) {
+      if (Option.isSome(hop.page) && hop.page.value === page) Deferred.doneUnsafe(hop.sentKnown, Effect.void)
+    }
     yield* Deferred.succeed(page.closed, reason)
     const context = contexts.get(page.context)
     if (context !== undefined) {

@@ -7,6 +7,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import { site } from "../adapter/harness.ts"
 import { assertPinned, chromium } from "../browsers.ts"
 
@@ -21,22 +22,22 @@ describe("Chromium sent-header waiting", () => {
         const { origin } = yield* site
         const page = yield* Browser.newPage()
         yield* page.goto(`${origin}/hello`)
-        const observed = yield* Deferred.make<Deadline.Timeout>()
+        const observed = yield* Deferred.make<Option.Option<Deadline.Timeout>>()
         const request = yield* NetworkRequest.next(page, { url: `${origin}/json` })
         yield* page.route(`${origin}/json`, ({ request }) =>
           Effect.gen(function*() {
             const timeout = yield* NetworkRequest.headersSent(page, request).pipe(
               Deadline.within("100 millis"),
-              Effect.flip
+              Effect.match({ onFailure: Option.some, onSuccess: () => Option.none() })
             )
-            assert(Deadline.isTimeout(timeout))
-            assert.strictEqual(timeout.phase, "waitingForEvent")
             yield* Deferred.succeed(observed, timeout)
             return Route.continue
           }), { phase: "response" })
         const response = yield* page.evaluateInMainWorld(async () => (await fetch("/json")).status)
         assert.strictEqual(response, 200)
-        yield* Deferred.await(observed)
+        const timeout = Option.getOrThrow(yield* Deferred.await(observed))
+        assert(Deadline.isTimeout(timeout))
+        assert.strictEqual(timeout.phase, "waitingForEvent")
         // Once the handler has allowed the response through, attribution can settle with the network headers.
         const sent = yield* NetworkRequest.headersSent(page, yield* request).pipe(Deadline.within("1 second"))
         assert.strictEqual(sent.host, new URL(origin).host)
@@ -47,11 +48,12 @@ describe("Chromium sent-header waiting", () => {
         const { origin } = yield* site
         const page = yield* Browser.newPage()
         yield* page.goto(`${origin}/hello`)
-        const paused = yield* Deferred.make<NetworkRequest.NetworkRequest>()
+        const paused = yield* Deferred.make<void>()
         const release = yield* Deferred.make<void>()
-        yield* page.route(`${origin}/json`, ({ request }) =>
+        const next = yield* NetworkRequest.next(page, { url: `${origin}/json` })
+        yield* page.route(`${origin}/json`, () =>
           Effect.gen(function*() {
-            yield* Deferred.succeed(paused, request)
+            yield* Deferred.succeed(paused, undefined)
             yield* Deferred.await(release)
             return Route.continue
           }), { phase: "response" })
@@ -60,11 +62,14 @@ describe("Chromium sent-header waiting", () => {
           void fetch("/json").catch(() => {})
           return true
         })
-        const request = yield* Deferred.await(paused)
+        yield* Deferred.await(paused)
+        const request = yield* next
         const waiting = yield* NetworkRequest.headersSent(page, request).pipe(
           Deadline.within("10 seconds"),
           Effect.forkScoped
         )
+        yield* Effect.yieldNow
+        assert.isUndefined(waiting.pollUnsafe())
         yield* page.close()
         const sent = yield* Fiber.join(waiting).pipe(Deadline.within("1 second"))
         assert.deepStrictEqual(sent, request.headers)

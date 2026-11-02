@@ -367,8 +367,8 @@ describe("Chromium public sent-header waiting", () => {
     it.effect(`settles without advancing the deadline when a request ${terminal}`, () =>
       Effect.gen(function*() {
         const { browser, page, request, send, barrier } = yield* sentHeaders
-        // A failed request can settle queued network headers; cancellation and page removal have none.
-        if (terminal === "fails") yield* send(captured[1]!)
+        // Failure attributes queued headers to the last hop; page removal cannot safely do that.
+        if (terminal !== "is canceled") yield* send(captured[1]!)
         yield* barrier
         const waiting = yield* Effect.forkScoped(
           NetworkRequest.headersSent(page, request).pipe(Deadline.within("1 second"))
