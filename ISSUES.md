@@ -167,4 +167,4 @@ decisions, `Dialog.Pending`'s and `FileChooser`'s, `Dialog.acceptAll` and `dismi
 scenarios and the JSDoc examples. Rejected: a handler that may return a decision or an Effect of one, a union return
 unlike Effect's own callbacks; and a decision that is itself an Effect, as `Exit` is, which needs Effect's internals.
 
-- **Fixed** in ROOK-15: every decision constructor returns an Effect, handlers keep Effect-only returns and Route phase restrictions, and callers use direct Effects or `return yield*`.
+- **Fixed** in `b7a7f60` (ROOK-15): every decision constructor returns an Effect, handlers keep Effect-only returns and Route phase restrictions, and callers use direct Effects or `return yield*`.
