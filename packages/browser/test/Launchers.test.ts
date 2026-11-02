@@ -7,10 +7,12 @@ import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, it, layer } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
+import * as Random from "effect/Random"
 import * as Schedule from "effect/Schedule"
 import * as Sink from "effect/Sink"
 import * as Socket from "effect/socket/Socket"
@@ -383,6 +385,137 @@ describe("WebKit launcher", () => {
         assert.strictEqual(result.writes, 0)
         assert(result.error.reason._tag === "ConnectionFailed")
         assert.include(result.error.reason.hint, "Five ports")
+      }))
+
+    /** A fake MiniBrowser whose ownership each spawn's behavior decides, and what the launch did to it. */
+    const scriptedLaunch = Effect.fnUntraced(function*(
+      behavior: (spawn: number) => {
+        readonly held: boolean
+        readonly foreign?: boolean | undefined
+        readonly collides?: boolean | undefined
+        readonly vanishes?: boolean | undefined
+      },
+      connect: Effect.Effect<void> = Effect.void,
+      timeout = "200 millis"
+    ) {
+      const fs = yield* FileSystem.FileSystem
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-test-" })
+      const executablePath = `${directory}/MiniBrowser`
+      yield* fs.writeFileString(executablePath, "")
+      const ports: Array<number> = []
+      const stopped: Array<number> = []
+      const connected: Array<number> = []
+      const closed: Array<number> = []
+      const written: Array<number> = []
+      const base = 9100000
+      const spawner = ChildProcessSpawner.make((command) =>
+        Effect.gen(function*() {
+          assert(command._tag === "StandardCommand")
+          const port = Number(command.options.env!["WEBKIT_INSPECTOR_SERVER"]!.split(":")[1])
+          const spawn = ports.push(port) - 1
+          yield* Effect.addFinalizer(() => Effect.sync(() => stopped.push(spawn)))
+          const line = new TextEncoder().encode(`Failed to start remote inspector server on 127.0.0.1:${port}\n`)
+          const stderr = behavior(spawn).collides === true
+            ? Stream.concat(Stream.make(line), Stream.never)
+            : Stream.never
+          let polls = 0
+          return ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(base + spawn),
+            exitCode: behavior(spawn).vanishes === true
+              ? Effect.succeed(ChildProcessSpawner.ExitCode(1))
+              : Effect.never,
+            isRunning: Effect.sync(() => behavior(spawn).vanishes !== true || polls++ === 0),
+            kill: () => Effect.void,
+            stdin: Sink.drain,
+            stdout: Stream.empty,
+            stderr,
+            all: stderr,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+            unref: Effect.succeed(Effect.void)
+          })
+        })
+      )
+      const row = (port: number, inode: string) =>
+        `0: 0100007F:${port.toString(16).toUpperCase().padStart(4, "0")} 00000000:0000 0A 0:0 00:0 0 1000 0 ${inode}\n`
+      const spawnOf = (path: string) => {
+        const pid = /^\/proc\/(\d+)\//.exec(path)?.[1]
+        return pid === undefined ? undefined : Number(pid) - base
+      }
+      const procfs: FileSystem.FileSystem = {
+        ...fs,
+        readFileString: (path, options) => {
+          const spawn = spawnOf(path)
+          if (spawn === undefined) return fs.readFileString(path, options)
+          if (behavior(spawn).vanishes === true) return fs.readFileString(`${directory}/gone`)
+          const { foreign, held } = behavior(spawn)
+          return Effect.succeed(
+            "sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
+              + (held ? row(ports[spawn]!, `${1000 + spawn}`) : foreign === true ? row(ports[spawn]!, "777") : "")
+          )
+        },
+        readDirectory: (path, options) =>
+          spawnOf(path) === undefined ? fs.readDirectory(path, options) : Effect.succeed(["7"]),
+        readLink: (path) => {
+          const spawn = spawnOf(path)
+          return spawn === undefined ? fs.readLink(path) : Effect.succeed(`socket:[${1000 + spawn}]`)
+        }
+      }
+      const connector: SocketConnector.SocketConnector = {
+        connect: Effect.fnUntraced(function*({ port }) {
+          connected.push(port)
+          yield* Effect.addFinalizer(() => Effect.sync(() => closed.push(port)))
+          yield* connect
+          const write = () =>
+            Effect.andThen(
+              Effect.sync(() => written.push(port)),
+              Effect.fail(
+                new Socket.SocketError({
+                  reason: new Socket.SocketWriteError({ cause: "stop after the first write" })
+                })
+              )
+            )
+          // A listener that accepts and never answers: it only ever reads what it is sent.
+          return { pull: Effect.never, upgrade: () => Effect.void, write, writeAll: write, close: Effect.void }
+        })
+      }
+      const exit = yield* WebKitAutomation.start({ executablePath, timeout }).pipe(
+        Effect.scoped,
+        Effect.provideService(FileSystem.FileSystem, procfs),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(SocketConnector.SocketConnector, connector),
+        Effect.exit
+      )
+      return { exit, ports, stopped, connected, closed, written }
+    })
+
+    it.effect("writes nothing to a silent foreign listener, and starts owned on the next port its collision picks", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch((spawn) =>
+          spawn === 0 ? { held: false, foreign: true, collides: true } : { held: true }
+        )
+        assert.strictEqual(result.ports.length, 2)
+        assert.notStrictEqual(result.ports[0], result.ports[1])
+        assert.deepStrictEqual(result.connected, [result.ports[1]])
+        assert.deepStrictEqual(result.written, [result.ports[1]])
+        assert.include(result.stopped, 0)
+      }).pipe(Random.withSeed("rook-140")))
+
+    it.effect("closes the connection and stops the child when the deadline interrupts a connection in progress", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(() => ({ held: true }), Effect.never, "50 millis")
+        assert.strictEqual(result.connected.length, 1)
+        assert.deepStrictEqual(result.closed, result.connected)
+        assert.deepStrictEqual(result.stopped, [0])
+        assert.strictEqual(result.written.length, 0)
+      }))
+
+    it.effect("reports a child that exits while being polled as its exit, not as unreadable procfs", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(() => ({ held: false, vanishes: true }))
+        assert(result.exit._tag === "Failure")
+        const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
+        assert.strictEqual(error.reason._tag, "ProcessExited", "the child is gone: procfs isn't what's wrong")
       }))
 
     it.effect("distinguishes simultaneous children sharing the namespace TCP table", () =>
