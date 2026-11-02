@@ -60,6 +60,7 @@ const pageProxyCreated = (state: State, params: Envelope.PageProxyCreatedParams)
     pageProxyId: params.pageProxyId,
     session,
     context,
+    popup: launchedPopup,
     ready: Deferred.makeUnsafe(),
     target: undefined,
     provisional: undefined,

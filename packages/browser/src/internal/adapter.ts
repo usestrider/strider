@@ -756,6 +756,12 @@ export type TargetDescription = Target.Description
 
 /** Why an adapter operation failed, beyond the protocol's own errors. */
 export type AdapterErrorReason =
+  | {
+    readonly _tag: "ViewportMismatch"
+    readonly requested: { readonly width: number; readonly height: number }
+    readonly actual: { readonly width: number; readonly height: number }
+    readonly hint: string
+  }
   | { readonly _tag: "Gone"; readonly target: TargetDescription; readonly reason: Target.CloseReason }
   | { readonly _tag: "Unsupported"; readonly capability: string; readonly hint: string }
   | { readonly _tag: "Foreign"; readonly id: string }
@@ -766,6 +772,8 @@ export class AdapterError extends Data.TaggedError("AdapterError")<{ readonly re
   override get message(): string {
     const reason = this.reason
     switch (reason._tag) {
+      case "ViewportMismatch":
+        return `Viewport ${reason.requested.width}x${reason.requested.height} was not confirmed; measured ${reason.actual.width}x${reason.actual.height} (${reason.hint})`
       case "Gone":
         return `${reason.target._tag} gone: ${reason.reason._tag}`
       case "Unsupported":

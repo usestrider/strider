@@ -85,6 +85,52 @@ describe("strider help", () => {
     for (const command of ["page", "find", "snapshot", "select", "click", "history", "stop"]) {
       assert.match(text, new RegExp(`^\\s+${command}\\b`, "m"), `Missing ${command} from help:\n${text}`)
     }
+  })
+
+  it("shows select's target and labels through command help without connecting to a session", () => {
+    const text = help("-s", "help-check", "select")
+    assert.match(text, /USAGE/)
+    assert.match(text, /\btarget\b/)
+    assert.match(text, /\blabel\b/)
+    assert.include(text, "role=")
+  })
+
+  it("discovers page subcommands and reaches page new's argument help without a session", () => {
+    const pages = help("-s", "help-check", "page")
+    assert.match(pages, /^\s+new\b/m)
+    assert.match(pages, /^\s+viewport\b/m)
+    const text = help("-s", "help-check", "page", "new")
+    assert.match(text, /USAGE/)
+    assert.match(text, /\burl\b/)
+    assert.include(text, "--name")
+  })
+
+  it("describes every start flag, beyond its type", () => {
+    const text = help("start")
+    for (
+      const flag of [
+        "name",
+        "chromium",
+        "firefox",
+        "webkit",
+        "attach",
+        "user-data-dir",
+        "state",
+        "fork",
+        "viewport",
+        "idle",
+        "owner-pid",
+        "secret"
+      ]
+    ) {
+      const row = text.split("\n").find((line) => line.trimStart().startsWith(`--${flag} `))
+      assert.isDefined(row, `Missing --${flag} from help:\n${text}`)
+      assert.match(row!, /^\s+--\S+\s+\S+\s{2,}\S/, `Missing description for --${flag}:\n${text}`)
+    }
+  })
+
+  it("describes each command in the root listing, as the toolkit's tools are described", () => {
+    const text = help("-s", "help-check")
     for (
       const command of [
         "start",
@@ -182,6 +228,7 @@ describe("strider help", () => {
         "user-data-dir",
         "state",
         "fork",
+        "viewport",
         "idle",
         "owner-pid",
         "secret"
