@@ -6,19 +6,25 @@
  * mistakes a command can make fail at once, with an exit code of their own.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, it } from "@effect/vitest"
+import { Browser } from "@usestrider/browser"
 import { Firefox } from "@usestrider/browser/firefox"
+import { WebKit } from "@usestrider/browser/webkit"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Layer from "effect/Layer"
+import * as Scope from "effect/Scope"
 import { execFile, spawn } from "node:child_process"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
+import * as Daemon from "../../src/internal/cli/daemon.ts"
 import { site } from "./adapter/harness.ts"
 import { chromium, firefox, webkitgtk } from "./browsers.ts"
 import { firefoxAttachable } from "./slice/attaching.ts"
-import { useXvfb } from "./stockWebKit.ts"
+import { startMiniBrowser, useXvfb } from "./stockWebKit.ts"
 
 const timeout = 120_000
 const bin = new URL("../../src/bin/strider.ts", import.meta.url).pathname
@@ -115,90 +121,143 @@ const app = `<title>shop</title>
 </script>`
 
 describe("strider", () => {
-  for (const [backend, executable] of [["chromium", chromium.executable], ["firefox", firefox.executable]] as const) {
-    it.live(`${backend} preserves startup and repeated page viewports`, () =>
-      Effect.scoped(Effect.gen(function*() {
-        const env = environment()
-        const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "sized", ...args)
-        const started = yield* strider(
-          env,
-          "start",
-          "--name",
-          "sized",
-          `--${backend}`,
-          executable,
-          "--viewport",
-          "1440x1000"
-        )
-        assert.strictEqual(started.code, 0, started.err)
-        const ledger = path.join(env.XDG_STATE_HOME, "strider", "ledger")
-        const records = fs.readdirSync(ledger).map((file) =>
-          JSON.parse(fs.readFileSync(path.join(ledger, file), "utf8"))
-        )
-        const owned = records.flatMap((record) => record.items).filter((item) => item._tag === "Browser")
-        assert.strictEqual(owned.length, 1)
-        const browserPid = owned[0].pid
-        try {
-          assert.include(started.out, "viewport 1440x1000")
+  it.live(
+    "refuses viewport sizing on inspector-only stock WebKit without replacing prior scope",
+    () =>
+      Effect.scoped(
+        Effect.gen(function*() {
           const served = yield* site
-          const html =
-            `<p id="size"></p><script>function size() { document.querySelector('#size').textContent = innerWidth + 'x' + innerHeight }; onresize = size; size()</script>`
-          const url = `${served.origin}/fixture?html=${encodeURIComponent(html)}`
-          for (const name of ["first", "second"]) {
-            assert.strictEqual((yield* run("page", "new", "--name", name, url)).code, 0)
+          const launched = yield* startMiniBrowser(served.origin)
+          const services = yield* Layer.build(
+            WebKit.layerAttach(launched.endpoint).pipe(
+              Layer.provide(NodeSocket.layerWebSocketConstructor)
+            )
+          )
+          const browser = yield* Browser.Browser.pipe(Effect.provideContext(services))
+          const page = yield* (yield* browser.pages)[0]!.control
+          const before = yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight])
+          const previous = yield* Scope.make()
+          let closed = false
+          yield* Scope.addFinalizer(
+            previous,
+            Effect.sync(() => {
+              closed = true
+            })
+          )
+          const owner = { scope: yield* Effect.scope, viewports: new Map([[page.id, previous]]) }
+          yield* Scope.addFinalizer(owner.scope, Scope.close(previous, Exit.void))
+          const error = yield* Daemon.setViewport(owner, page, { width: 800, height: 600 }).pipe(Effect.flip)
+          assert.strictEqual(error._tag, "DeclarationError")
+          if (error._tag !== "DeclarationError") return assert.fail("Expected a capability refusal")
+          assert.strictEqual(error.reason._tag, "Unsupported")
+          if (error.reason._tag === "Unsupported") assert.strictEqual(error.reason.capability, "emulation.viewport")
+          assert.strictEqual(owner.viewports.get(page.id), previous)
+          assert.isFalse(closed)
+          assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), before)
+        }).pipe(Effect.provide(NodeServices.layer))
+      ),
+    timeout
+  )
+
+  for (
+    const [backend, executable] of [["chromium", chromium.executable], ["firefox", firefox.executable], [
+      "webkit",
+      webkitgtk.executable
+    ]] as const
+  ) {
+    it.live(`${backend} preserves startup and repeated page viewports`, () =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          if (backend === "webkit") yield* useXvfb()
+          const env = environment()
+          const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "sized", ...args)
+          const started = yield* strider(
+            env,
+            "start",
+            "--name",
+            "sized",
+            `--${backend}`,
+            executable,
+            "--viewport",
+            "1440x1000"
+          )
+          assert.strictEqual(started.code, 0, started.err)
+          let browserPids: Array<number> = []
+          try {
+            const ledger = path.join(env.XDG_STATE_HOME, "strider", "ledger")
+            const records = fs.readdirSync(ledger).map((file) =>
+              JSON.parse(fs.readFileSync(path.join(ledger, file), "utf8"))
+            )
+            const owned = records.flatMap((record) => record.items).filter((item) => item._tag === "Browser")
+            // Stock WebKit owns the initial browser and the context's automation process.
+            assert.isAtLeast(owned.length, 1)
+            browserPids = owned.map((item) => item.pid)
+            assert.include(started.out, "viewport 1440x1000")
+            const served = yield* site
+            const html =
+              `<p id="size"></p><script>function size() { document.querySelector('#size').textContent = innerWidth + 'x' + innerHeight }; onresize = size; size()</script>`
+            const url = `${served.origin}/fixture?html=${encodeURIComponent(html)}`
+            for (const name of ["first", "second"]) {
+              assert.strictEqual((yield* run("page", "new", "--name", name, url)).code, 0)
+              assert.strictEqual(
+                (yield* run("-p", name, "expect", "css=#size", "visible", "--text", "1440x1000")).code,
+                0
+              )
+            }
+            for (const size of ["800x600", "1200x900", "640x480"]) {
+              const resized = yield* run("-p", "first", "page", "viewport", size)
+              assert.strictEqual(resized.code, 0, resized.err)
+              assert.strictEqual((yield* run("-p", "first", "expect", "css=#size", "visible", "--text", size)).code, 0)
+            }
+            for (const size of ["0x600", "-1x600", "1.5x600", "800X600", "9007199254740992x600"]) {
+              assert.notStrictEqual((yield* run("-p", "first", "page", "viewport", size)).code, 0)
+            }
             assert.strictEqual(
-              (yield* run("-p", name, "expect", "css=#size", "visible", "--text", "1440x1000")).code,
+              (yield* run("-p", "first", "expect", "css=#size", "visible", "--text", "640x480")).code,
               0
             )
+            assert.strictEqual(
+              (yield* run("-p", "second", "expect", "css=#size", "visible", "--text", "1440x1000")).code,
+              0
+            )
+            const file = path.join(env.XDG_RUNTIME_DIR, "sized.test.ts")
+            assert.strictEqual((yield* run("export", "test", file)).code, 0)
+            const exported = fs.readFileSync(file, "utf8")
+            assert.include(exported, "emulation: { viewport: { width: 1440, height: 1000 } }")
+            assert.include(exported, "width: 640, height: 480")
+            assert.notInclude(exported, "9007199254740992")
+          } finally {
+            assert.strictEqual((yield* run("stop")).code, 0)
           }
-          for (const size of ["800x600", "1200x900", "640x480"]) {
-            const resized = yield* run("-p", "first", "page", "viewport", size)
-            assert.strictEqual(resized.code, 0, resized.err)
-            assert.strictEqual((yield* run("-p", "first", "expect", "css=#size", "visible", "--text", size)).code, 0)
+          const deadline = Date.now() + 5000
+          const alive = (browserPid: number) => {
+            try {
+              process.kill(browserPid, 0)
+              return true
+            } catch {
+              return false
+            }
           }
-          for (const size of ["0x600", "-1x600", "1.5x600", "800X600", "9007199254740992x600"]) {
-            assert.notStrictEqual((yield* run("-p", "first", "page", "viewport", size)).code, 0)
+          while (browserPids.some(alive) && Date.now() < deadline) yield* Effect.sleep("10 millis")
+          for (const browserPid of browserPids) {
+            assert.isFalse(alive(browserPid), `owned ${backend} process ${browserPid} survived stop`)
           }
-          assert.strictEqual((yield* run("-p", "first", "expect", "css=#size", "visible", "--text", "640x480")).code, 0)
-          assert.strictEqual(
-            (yield* run("-p", "second", "expect", "css=#size", "visible", "--text", "1440x1000")).code,
-            0
+          assert.notInclude((yield* strider(env, "sessions")).out, "sized")
+          const invalid = yield* strider(
+            env,
+            "start",
+            "--name",
+            "invalid",
+            `--${backend}`,
+            executable,
+            "--viewport",
+            "0x600"
           )
-          const file = path.join(env.XDG_RUNTIME_DIR, "sized.test.ts")
-          assert.strictEqual((yield* run("export", "test", file)).code, 0)
-          const exported = fs.readFileSync(file, "utf8")
-          assert.include(exported, "emulation: { viewport: { width: 1440, height: 1000 } }")
-          assert.include(exported, "width: 640, height: 480")
-          assert.notInclude(exported, "9007199254740992")
-        } finally {
-          assert.strictEqual((yield* run("stop")).code, 0)
-        }
-        const deadline = Date.now() + 5000
-        const alive = () => {
-          try {
-            process.kill(browserPid, 0)
-            return true
-          } catch {
-            return false
-          }
-        }
-        while (alive() && Date.now() < deadline) yield* Effect.sleep("10 millis")
-        assert.isFalse(alive(), `owned ${backend} process ${browserPid} survived stop`)
-        assert.notInclude((yield* strider(env, "sessions")).out, "sized")
-        const invalid = yield* strider(
-          env,
-          "start",
-          "--name",
-          "invalid",
-          `--${backend}`,
-          executable,
-          "--viewport",
-          "0x600"
-        )
-        assert.notStrictEqual(invalid.code, 0)
-        assert.include(invalid.err, "positive integer CSS pixels")
-        assert.isFalse(fs.existsSync(path.join(env.XDG_RUNTIME_DIR, "strider", "invalid")))
-      })), timeout)
+          assert.notStrictEqual(invalid.code, 0)
+          assert.include(invalid.err, "positive integer CSS pixels")
+          assert.isFalse(fs.existsSync(path.join(env.XDG_RUNTIME_DIR, "strider", "invalid")))
+        }).pipe(Effect.provide(NodeServices.layer))
+      ), timeout)
   }
 
   it.live("starts a stock WebKit session, drives a page, refuses download waits, and stops", () =>
