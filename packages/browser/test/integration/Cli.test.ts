@@ -958,6 +958,46 @@ describe("strider", () => {
       }).pipe(Effect.provide(NodeServices.layer))
     ), timeout)
 
+  // ROOK-4: a tab closed outside the session leaves it, on a real browser's control grant
+  it.live("retires a controlled tab closed outside the session", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const served = yield* site
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const closes = `${served.origin}/fixture?html=${encodeURIComponent("<title>closes</title>")}`
+        const stays = `${served.origin}/fixture?html=${encodeURIComponent("<title>stays</title>")}`
+        const { endpoint } = yield* chromiumAttachable(Chromium.layerConnect).start(closes, stays)
+        try {
+          assert.strictEqual((yield* run("start", "--name", "remote", "--attach", endpoint)).code, 0)
+          const lines = (yield* run("-s", "remote", "tabs")).out.split("\n")
+          const idOf = (url: string) => lines.find((line) => line.includes(url))!.split("  ")[0]!
+          assert.strictEqual((yield* run("-s", "remote", "control", idOf(closes), "--name", "own")).code, 0)
+          assert.strictEqual((yield* run("-s", "remote", "-p", "own", "snapshot")).code, 0)
+          const targets = yield* Effect.promise(() =>
+            fetch(new URL("/json/list", endpoint)).then((response) =>
+              response.json() as Promise<ReadonlyArray<{ readonly id: string; readonly url: string }>>
+            )
+          )
+          const target = targets.find((each) => each.url === closes)!
+          const closing = yield* Effect.promise(() => fetch(new URL(`/json/close/${target.id}`, endpoint)))
+          assert.strictEqual(closing.status, 200)
+          let code = 0
+          for (let attempt = 0; attempt < 50 && code === 0; attempt++) {
+            yield* Effect.sleep("100 millis")
+            code = (yield* run("-s", "remote", "-p", "own", "snapshot")).code
+          }
+          assert.strictEqual(code, 16, "a closed tab has no name")
+          const taken = yield* run("-s", "remote", "control", idOf(stays), "--name", "own")
+          assert.strictEqual(taken.code, 0, taken.err)
+          assert.strictEqual((yield* run("-s", "remote", "-p", "own", "snapshot")).code, 0)
+          assert.strictEqual((yield* run("-s", "remote", "release", "-p", "own")).code, 0)
+        } finally {
+          assert.strictEqual((yield* run("-s", "remote", "stop")).code, 0)
+        }
+      }).pipe(Effect.provide(NodeServices.layer))
+    ), timeout)
+
   // ROOK-4: the browser WebSocket's id dies with that browser; the endpoint given outlives it
   it.live("exports a Chromium HTTP attachment by the endpoint it was given", () =>
     Effect.scoped(

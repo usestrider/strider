@@ -259,6 +259,96 @@ describe("Session closed-page cleanup", () => {
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 })
 
+describe("Session held-tab retirement", () => {
+  const setup = Effect.gen(function*() {
+    const browser = yield* Browser.Browser
+    const context = yield* Browser.newContext()
+    const page = yield* context.newPage
+    const counts = { taken: 0, released: 0 }
+    const control = page.control
+    Object.defineProperty(page, "control", {
+      value: Effect.andThen(
+        Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            counts.released++
+          })
+        ),
+        Effect.andThen(
+          Effect.sync(() => {
+            counts.taken++
+          }),
+          control
+        )
+      )
+    })
+    const session = yield* ToolkitImpl.makeSession({
+      context,
+      browser,
+      secrets: {},
+      capture: CapturePolicy.local,
+      discoverContextPages: false
+    })
+    return { counts, page, session }
+  })
+  const take = (session: ToolkitImpl.Session, tab: string, name: string) =>
+    session.toolkit.handle("control", { tab, name }).pipe(Effect.flatMap(Stream.runDrain))
+
+  it.effect("reports a closed tab once, by its current name", () =>
+    Effect.gen(function*() {
+      const { page, session } = yield* setup
+      yield* take(session, String(page.id), "remote")
+      yield* session.rename("remote", "renamed")
+      yield* page.close()
+      yield* TestClock.adjust("1 millis")
+      const first = yield* session.toolkit.handle("pages", {}).pipe(Effect.flatMap(Stream.runLast))
+      const result = Option.getOrThrow(first).result
+      if (!("sinceLast" in result)) return assert.fail("pages returned no digest")
+      assert.deepStrictEqual(result.sinceLast.filter((line) => line.includes("closed")).length, 1)
+      assert.isTrue(result.sinceLast.some((line) => line.startsWith("renamed closed: ")))
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+  it.effect("finishes retiring a grant when its release is interrupted", () =>
+    Effect.gen(function*() {
+      const { counts, page, session } = yield* setup
+      const started = yield* Deferred.make<void>()
+      const finish = yield* Deferred.make<void>()
+      const control = page.control
+      Object.defineProperty(page, "control", {
+        value: Effect.andThen(
+          Effect.addFinalizer(() => Effect.andThen(Deferred.succeed(started, undefined), Deferred.await(finish))),
+          control
+        )
+      })
+      yield* take(session, String(page.id), "remote")
+      const release = yield* session.toolkit.handle("release", { page: "remote" }).pipe(
+        Effect.flatMap(Stream.runDrain),
+        Effect.forkChild
+      )
+      yield* Deferred.await(started)
+      const interrupted = yield* Effect.forkChild(Fiber.interrupt(release))
+      yield* Effect.yieldNow
+      assert.isUndefined(interrupted.pollUnsafe())
+      yield* Deferred.succeed(finish, undefined)
+      yield* Fiber.join(interrupted)
+      assert.strictEqual(counts.released, 1)
+      assert.deepStrictEqual(yield* session.pages, [])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+  // ROOK-4: the second concurrent control overwrites the first grant, which release then leaves held
+  it.effect("retires every grant when one tab is taken twice at once", () =>
+    Effect.gen(function*() {
+      const { counts, page, session } = yield* setup
+      const tab = String(page.id)
+      yield* Effect.all([take(session, tab, "remote"), take(session, tab, "remote")], { concurrency: "unbounded" })
+        .pipe(
+          Effect.result
+        )
+      yield* session.toolkit.handle("release", { page: "remote" }).pipe(Effect.flatMap(Stream.runDrain))
+      assert.deepStrictEqual(yield* session.pages, [])
+      assert.strictEqual(counts.released, counts.taken)
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
+
 describe("Session.page", () => {
   it.effect("fails PageNotFound for a generated handle no one kept", () =>
     Effect.gen(function*() {
