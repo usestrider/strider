@@ -1,8 +1,8 @@
-/** ROOK-95 acceptance contract: real Chromium, no claims implementation in this commit. */
+/** ROOK-95 acceptance tests against the pinned Chromium browser. */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, CookieJar, Dialog, StorageState } from "@usestrider/browser"
+import { Browser, CookieJar, Deadline, Dialog, StorageState } from "@usestrider/browser"
 import * as CdpBrowser from "@usestrider/browser/cdp/Browser"
 import * as Preload from "@usestrider/browser/cdp/Preload"
 import * as Runtime from "@usestrider/browser/cdp/Runtime"
@@ -16,6 +16,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
@@ -29,6 +30,7 @@ import * as Kit from "../../../src/internal/adapterKit.ts"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
 import * as ClaimHooks from "../../../src/internal/claimHooks.ts"
 import { handoff } from "../../../src/internal/handoff.ts"
+import * as Operation from "../../../src/internal/operation.ts"
 import { assertPinned, chromium } from "../browsers.ts"
 
 const serve = Effect.acquireRelease(
@@ -631,7 +633,7 @@ describe("Chromium claims (ROOK-95)", () => {
           })).pipe(Effect.provide(browser.connect))
         }), 60_000)
 
-      for (const failure of ["failed", "interrupted"] as const) {
+      for (const failure of ["failed", "interrupted", "timed-out"] as const) {
         it.effect(
           `${failure} storageState reclaim unwinds registrations without destroying survivors`,
           () =>
@@ -669,12 +671,14 @@ describe("Chromium claims (ROOK-95)", () => {
                       return id
                     }
                   ),
-                  setCookies: () =>
-                    Deferred.succeed(entered, undefined).pipe(Effect.andThen(
-                      failure === "interrupted"
-                        ? Effect.never :
-                        Effect.fail(Kit.unsupported("test.storageState", "injected after context declarations"))
-                    ))
+                  setCookies: Effect.fnUntraced(function*() {
+                    yield* Deferred.succeed(entered, undefined)
+                    if (failure === "timed-out") return yield* (yield* Operation.record).bound(Effect.never)
+                    if (failure === "interrupted") return yield* Effect.never
+                    return yield* Effect.fail(
+                      Kit.unsupported("test.storageState", "injected after context declarations")
+                    )
+                  })
                 })
                 yield* Effect.addFinalizer(() =>
                   Effect.sync(() => {
@@ -695,17 +699,28 @@ describe("Chromium claims (ROOK-95)", () => {
                   partitionKey: { _tag: "Unpartitioned" },
                   priority: Option.none()
                 })
-                const setup = api.UserContext.reclaim(claim, {
+                const warnings: Array<unknown> = []
+                const logger = Logger.make((entry) => {
+                  if (entry.logLevel === "Warn") warnings.push(entry.message)
+                })
+                const restore = api.UserContext.reclaim(claim, {
                   emulation: { locale: "fr-FR" },
                   storageState: new StorageState.StorageState({ cookies: [cookie], origins: [] })
-                }).pipe(Scope.provide(destination))
+                }).pipe(Scope.provide(destination), Effect.provideService(Logger.CurrentLoggers, new Set([logger])))
+                const setup = failure === "timed-out" ? restore.pipe(Deadline.within("1 second")) : restore
                 if (failure === "interrupted") {
                   const fiber = yield* setup.pipe(Effect.forkChild)
                   yield* Deferred.await(entered)
                   yield* Fiber.interrupt(fiber)
                 } else {
-                  assert(Exit.isFailure(yield* setup.pipe(Effect.exit)))
+                  const exit = yield* setup.pipe(Effect.exit)
+                  assert(Exit.isFailure(exit))
+                  if (failure === "timed-out") {
+                    assert.isTrue(yield* Deferred.isDone(entered), "must reach storage setup before the deadline")
+                    assert.isTrue(Deadline.isTimeout(Option.getOrThrow(Exit.findErrorOption(exit))))
+                  }
                 }
+                assert.deepStrictEqual(warnings, [], "rollback commands must complete with their own cleanup budget")
                 assert.strictEqual(registrations, 0, "setup registrations must unwind before the caller's scope ends")
                 yield* Scope.close(destination, Exit.void)
                 assert.isTrue((yield* browser.targets).some((info) => info.url === url), "surviving tab was destroyed")
