@@ -294,7 +294,8 @@ export class PromptBlocking extends Schema.Error<PromptBlocking>("@usestrider/br
  *
  * Stock WebKit confirms dimensions immediately and on resize events for up to five seconds, capped by the
  * operation deadline. This records the last measurement; it does not establish permanent lack of support.
- * A failed restoration is reported separately and must not be treated as a restored viewport.
+ * A failed-change rollback failure is reported separately and must not be treated as a restored viewport.
+ * Ordinary scope release logs restoration failures without failing teardown; gone pages need no restoration.
  *
  * **Example** (Reading the measured size)
  *

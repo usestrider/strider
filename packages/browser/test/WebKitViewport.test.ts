@@ -7,10 +7,14 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as vm from "node:vm"
+import * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
+import * as WebKitAutomation from "../src/internal/webkitAdapter/automation.ts"
+import type * as State from "../src/internal/webkitAdapter/state.ts"
 import * as Viewport from "../src/internal/webkitAdapter/viewport.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
+import * as Target from "../src/Target.ts"
 import type * as Automation from "../src/webkit-automation-protocol/Automation.ts"
 
 const handle = "page" as Automation.BrowsingContextHandle
@@ -181,6 +185,119 @@ describe("WebKit viewport confirmation", () => {
       const result = yield* Viewport.cleanup(Viewport.confirm(process, handle, requested)).pipe(Effect.exit)
       assert.strictEqual(reads, 1)
       assert.strictEqual(result._tag, "Success")
+    }))
+
+  it("does not mistake pairing exhaustion or a different protocol rejection for confirmed removal", () => {
+    const unpaired = new Adapter.AdapterError({
+      reason: {
+        _tag: "Gone",
+        target: { _tag: "Browser" },
+        reason: new Target.Vanished({})
+      }
+    })
+    assert.isFalse(Viewport.isGone(unpaired))
+    const other = new Protocol.ProtocolError({
+      reason: new Protocol.Rejected({
+        method: "Automation.evaluateJavaScriptFunction",
+        reason: "NoSuchFrame",
+        code: -32000,
+        description: "FrameNotFound"
+      })
+    })
+    assert.isFalse(Viewport.isGone(other))
+  })
+
+  it.effect("preserves confirmation success when non-gone disposal fails", () =>
+    Effect.gen(function*() {
+      const failure = new Protocol.ProtocolError({
+        reason: new Protocol.Rejected({
+          method: "Automation.evaluateJavaScriptFunction",
+          reason: "Unrecognized",
+          code: -32000,
+          description: "InternalError"
+        })
+      })
+      const process = processFor((params) =>
+        params.expectsImplicitCallbackArgument
+          ? Effect.succeed({ result: "\"matched\"" }) :
+          Effect.fail(failure)
+      )
+      const result = yield* Viewport.confirm(process, handle, requested).pipe(Effect.exit)
+      assert.strictEqual(result._tag, "Success")
+      assert.isFalse(Viewport.isGone(failure))
+    }))
+
+  it.effect("reserves final-measurement time and never extends nested cleanup deadlines", () =>
+    Effect.gen(function*() {
+      yield* Viewport.cleanup(Effect.gen(function*() {
+        const outer = yield* ProtocolClient.CommandDeadline
+        const inner = yield* Viewport.cleanup(ProtocolClient.CommandDeadline)
+        assert.deepStrictEqual(inner, outer)
+        const process = processFor((params) => {
+          if (params.expectsImplicitCallbackArgument) {
+            assert.isAtMost(params.callbackTimeout!, 4000)
+            assert.isAbove(params.callbackTimeout!, 0)
+            return Effect.fail(timeout)
+          }
+          return measure()
+        })
+        yield* Viewport.confirm(process, handle, requested)
+      }))
+    }))
+
+  it.effect("waits for an unpaired failed creation to leave the inspector model", () =>
+    Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const removed = yield* Deferred.make<void>()
+      const context = { browserContextId: "context" } as State.ContextEntry
+      const page = { id: "unpaired", context, ended: false } as State.PageEntry
+      const pages = new Map([[page.id, page]])
+      const state = {
+        pages,
+        pageHandles: new Map(),
+        creating: new Map(),
+        root: () => ({ drainObserved: Effect.void }),
+        buffer: {
+          waitFor: Effect.fnUntraced(function*(check: () => unknown) {
+            assert.isUndefined(check(), "an unpaired page is still listed")
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(removed)
+            assert.strictEqual(check(), true)
+          })
+        }
+      } as unknown as Parameters<typeof WebKitAutomation.closeFailedPage>[0]
+      const fiber = yield* WebKitAutomation.closeFailedPage(
+        state,
+        context,
+        processFor(() => measure()),
+        handle,
+        new Set()
+      ).pipe(Effect.forkChild)
+      yield* Deferred.await(entered)
+      assert.isUndefined(fiber.pollUnsafe())
+      pages.delete(page.id)
+      yield* Deferred.succeed(removed, undefined)
+      yield* Fiber.join(fiber)
+    }))
+
+  it.effect("does not add a defect when failed creation cleanup finds a vanished window", () =>
+    Effect.gen(function*() {
+      const gone = new Protocol.ProtocolError({
+        reason: new Protocol.Rejected({
+          method: "Automation.closeBrowsingContext",
+          reason: "NoSuchTarget",
+          code: -32000,
+          description: "WindowNotFound"
+        })
+      })
+      const state = {} as Parameters<typeof WebKitAutomation.closeFailedPage>[0]
+      yield* WebKitAutomation.closeFailedPage(
+        state,
+        {} as State.ContextEntry,
+        processFor(() => Effect.fail(gone)),
+        handle,
+        new Set()
+      )
     }))
 
   it("cleans listeners on an unchanged size, resize, navigation, timeout and cancellation", () => {

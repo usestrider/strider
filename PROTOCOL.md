@@ -1108,5 +1108,9 @@ The check confirms an observation, not permanent sizing support. Listeners and c
 timeout, navigation and interruption. Failed page creation closes the Automation handle and waits for removal.
 Failed declarations remove their new registration, then restore and confirm the previous effective setting under
 a separate detached five-second cleanup budget. Cleanup failure is visible as a defect alongside the original
-failure; it is never described as a successful restoration. Popup defaults are attempted without confirmation,
+failure; it is never described as a successful restoration. Ordinary scope release stays non-failing: a confirmed
+gone page requires no restoration, and other failures are logged without claiming success. Callback disposal
+preserves the primary outcome, ignoring confirmed vanished windows and warning on other failures. Restoration
+reserves its last second for a final measurement inside the same shared five-second budget. Nested cleanup
+inherits that deadline rather than extending it; genuine operation deadlines remain timeouts. Popup defaults are attempted without confirmation,
 since there is no creation operation to receive that failure; an explicit page declaration confirms them.

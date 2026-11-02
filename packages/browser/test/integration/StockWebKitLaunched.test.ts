@@ -187,6 +187,67 @@ describe("Stock WebKit, launched in automation mode", () => {
       })), timeout)
 
     it.effect(
+      "warns without failing ordinary viewport release when restoration cannot be confirmed",
+      () =>
+        launched(Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          const registration = yield* page.emulate({ viewport: { width: 640, height: 480 } })
+          yield* page.evaluateInMainWorld(() => {
+            const host = globalThis as unknown as Record<string, unknown>
+            host["__originalInnerWidth"] = Object.getOwnPropertyDescriptor(globalThis, "innerWidth")
+            Object.defineProperty(globalThis, "innerWidth", { configurable: true, get: () => 0 })
+          })
+          const result = yield* registration.remove.pipe(Effect.exit)
+          assert.strictEqual(result._tag, "Success")
+          yield* page.evaluateInMainWorld(() => {
+            const host = globalThis as unknown as Record<string, unknown>
+            Object.defineProperty(globalThis, "innerWidth", host["__originalInnerWidth"] as PropertyDescriptor)
+            delete host["__originalInnerWidth"]
+          })
+        })),
+      timeout
+    )
+
+    it.effect("releases a viewport registration after its page has closed", () =>
+      launched(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const registration = yield* page.emulate({ viewport: { width: 640, height: 480 } })
+        yield* page.close()
+        assert.strictEqual((yield* registration.remove.pipe(Effect.exit))._tag, "Success")
+      })), timeout)
+
+    it.effect(
+      "restores a natural viewport when the first explicit override fails",
+      () =>
+        launched(Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          const natural = yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight])
+          const result = yield* Effect.scoped(page.emulate({ viewport: { width: 1440, height: 1000 } })).pipe(
+            Effect.exit
+          )
+          assert.deepInclude(reasonOf(result)?.reason, { _tag: "ViewportMismatch" })
+          assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), natural)
+        })),
+      timeout
+    )
+
+    it.effect("restores every page after a context viewport override fails", () =>
+      launched(Effect.gen(function*() {
+        const browser = yield* Browser.Browser
+        const context = yield* browser.newContext()
+        yield* context.emulate({ viewport: { width: 640, height: 480 } })
+        const first = yield* context.newPage
+        const second = yield* context.newPage
+        const result = yield* Effect.scoped(context.emulate({ viewport: { width: 1440, height: 1000 } })).pipe(
+          Effect.exit
+        )
+        assert.deepInclude(reasonOf(result)?.reason, { _tag: "ViewportMismatch" })
+        for (const page of [first, second]) {
+          assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), [640, 480])
+        }
+      })), timeout)
+
+    it.effect(
       "names itself, has its first tab, and drives a page with input the page trusts",
       () =>
         launched(Effect.gen(function*() {

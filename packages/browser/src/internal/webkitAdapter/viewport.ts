@@ -1,7 +1,9 @@
 /** Bounded, event-driven confirmation of stock WebKit's native-window viewport (ROOK-91). */
+import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import type * as MonotonicInstant from "../../MonotonicInstant.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as Automation from "../../webkit-automation-protocol/Automation.ts"
 import * as Adapter from "../adapter.ts"
@@ -14,12 +16,39 @@ import type * as WebKitAutomation from "../webkitAutomation.ts"
 export const confirmationMillis = 5000
 type Size = { readonly width: number; readonly height: number }
 let sequence = 0
+// This is part of the existing cleanup budget, not an additional wait.
+const finalMeasurementMillis = 1000
+const CleanupDeadline = Context.Reference<Option.Option<MonotonicInstant.MonotonicInstant>>(
+  "@usestrider/browser/internal/WebKitViewport/CleanupDeadline",
+  { defaultValue: () => Option.none() }
+)
+
+/** Only a confirmed vanished resource makes cleanup unnecessary. */
+export const isGone = (error: Adapter.AdapterError | Protocol.ProtocolError): boolean => {
+  if (error._tag === "AdapterError") {
+    // Pairing exhaustion also uses Vanished for a still-listed page; that is not proof of removal.
+    if (error.reason._tag === "Gone") return error.reason.reason._tag !== "Vanished"
+    return error.reason._tag === "Protocol" && isGone(error.reason.error)
+  }
+  return error.reason._tag === "SessionEnded" ||
+    (error.reason._tag === "Rejected" && error.reason.code === -32000 &&
+      error.reason.description === "WindowNotFound")
+}
+
+/** Best-effort teardown preserves the primary outcome; a gone resource needs no cleanup. */
+export const reportCleanup = <A, E extends Adapter.AdapterError | Protocol.ProtocolError, R>(
+  effect: Effect.Effect<A, E, R>,
+  message: string
+) => effect.pipe(Effect.catch((error) => isGone(error) ? Effect.void : Effect.logWarning(message, error)))
 
 /** A separate five-second budget for restoration, callback disposal and failed creation cleanup. */
 export const cleanup = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Operation.detached(Effect.gen(function*() {
-    const at = yield* BrowserClock.after(confirmationMillis)
+    const inherited = yield* CleanupDeadline
+    const next = yield* BrowserClock.after(confirmationMillis)
+    const at = Option.isSome(inherited) && inherited.value < next ? inherited.value : next
     const result = yield* effect.pipe(
+      Effect.provideService(CleanupDeadline, Option.some(at)),
       Effect.provideService(ProtocolClient.CommandDeadline, Option.some(at)),
       BrowserClock.until(at)
     )
@@ -75,7 +104,8 @@ export const confirm = Effect.fnUntraced(function*(
   const on = Protocol.on(process.automation)
   const deadline = yield* ProtocolClient.CommandDeadline
   const left = Option.isSome(deadline) ? BrowserClock.millisLeft(BrowserClock.live, deadline.value) : Infinity
-  const millis = Math.min(confirmationMillis, left)
+  const restoring = Option.isSome(yield* CleanupDeadline)
+  const millis = Math.max(0, Math.min(confirmationMillis, restoring ? left - finalMeasurementMillis : left))
   const key = `__striderViewport${++sequence}`
   const read = Effect.gen(function*() {
     const { result } = yield* Automation.evaluateJavaScriptFunction({
@@ -98,7 +128,8 @@ export const confirm = Effect.fnUntraced(function*(
     arguments: [JSON.stringify(key)]
   }).pipe(on, Kit.protocol)
   yield* Effect.gen(function*() {
-    const reply = yield* Automation.evaluateJavaScriptFunction({
+    // With only the reserved measurement time left, measure directly within the shared cleanup budget.
+    const waiting = Automation.evaluateJavaScriptFunction({
       browsingContextHandle: handle,
       function: watch.toString(),
       arguments: [
@@ -118,7 +149,7 @@ export const confirm = Effect.fnUntraced(function*(
           /^JavaScriptTimeout(?:$|[;: ])/.test(error.reason.description)
         ) {
           // A shorter operation deadline remains a timeout, never a viewport mismatch.
-          if (left < confirmationMillis) {
+          if (!restoring && left < confirmationMillis) {
             return Effect.fail(Kit.protocolError(
               new Protocol.ProtocolError({
                 reason: new Protocol.NoReply({
@@ -133,6 +164,9 @@ export const confirm = Effect.fnUntraced(function*(
         return Effect.fail(Kit.protocolError(error))
       })
     )
+    const reply = restoring && millis === 0
+      ? Option.none<Automation.EvaluateJavaScriptFunctionResult>()
+      : yield* waiting
     if (Option.isSome(reply)) {
       if (reply.value.result === "\"matched\"") return
       return yield* Effect.fail(Kit.protocolError(
@@ -159,5 +193,9 @@ export const confirm = Effect.fnUntraced(function*(
         }
       })
     )
-  }).pipe(Effect.ensuring(cleanup(dispose).pipe(Effect.orDie)))
+  }).pipe(
+    Effect.ensuring(
+      reportCleanup(cleanup(dispose), "WebKit viewport callback disposal failed; the primary outcome is unchanged")
+    )
+  )
 })

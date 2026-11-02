@@ -435,7 +435,13 @@ target was not observed. This does not assert permanent inability or prevent a l
 Pair a page before applying its explicit override. Confirm defaults on pages created by an operation; close a
 failed page before returning the failure. Popup defaults have no creation operation to fail and remain attempted
 but unconfirmed until an explicit declaration. Restore failed overrides under a detached five-second cleanup
-budget, and expose failed cleanup alongside the initiating failure rather than claiming the old size was restored.
+budget, and expose failed rollback alongside the initiating failure rather than claiming the old size was restored.
+Reserve the last second of this shared budget for a final measurement, including when multiple pages restore at
+once. Nested cleanup cannot extend it. Ordinary release retains non-failing teardown: confirmed gone resources need
+nothing, and other release errors are warnings rather than restoration claims. Callback disposal likewise preserves
+the primary result, ignoring vanished windows and logging other failures. Failed-creation cleanup waits for inspector
+removal even for an unpaired page; simultaneous unpaired candidates conservatively share this bounded wait instead
+of guessing which entry belongs to the handle.
 
 Rejected: treating the resize reply or an arbitrary number of frames as completion; polling or resending the
 resize; using screen dimensions as a universal preflight limit across window managers; reporting `Unsupported`

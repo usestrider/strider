@@ -290,10 +290,38 @@ export const removeUserContextLaunched = Effect.fnUntraced(function*(state: Stat
   }))
 })
 
+/** Waits for inspector removal even when the failed page never acquired its Automation pairing. */
+export const closeFailedPage = Effect.fnUntraced(function*(
+  state: Pick<State, "root" | "pages" | "pageHandles" | "buffer" | "creating">,
+  context: ContextEntry,
+  process: Pick<WebKitAutomation.Process, "automation">,
+  handle: Automation.BrowsingContextHandle,
+  before: ReadonlySet<L1Target.NavigableId>
+) {
+  const closed = yield* Automation.closeBrowsingContext({ handle }).pipe(
+    Protocol.on(process.automation),
+    Kit.protocol,
+    Effect.as(true),
+    Effect.catch((error) => Viewport.isGone(error) ? Effect.succeed(false) : Effect.fail(error))
+  )
+  if (!closed) return
+  yield* state.root().drainObserved
+  yield* state.buffer.waitFor(() => {
+    // Without a pairing, do not claim removal while a newly observed candidate is still listed.
+    // Concurrent unpaired creations conservatively share this boundary rather than guessing their identity.
+    const pending = [...state.pages.values()].some((page) =>
+      !page.ended && page.context === context &&
+      (state.pageHandles.get(page) === handle || (!before.has(page.id) && !state.pageHandles.has(page)))
+    )
+    return !pending && (state.creating.get(context.browserContextId ?? "default") ?? 0) === 0 ? true : undefined
+  })
+})
+
 export const createPageLaunched = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {
   const context = yield* contextOf(state, id)
   const process = yield* processOfContext(state, context)
   const key = context.browserContextId ?? "default"
+  const before = new Set(state.pages.keys())
   state.creating.set(key, (state.creating.get(key) ?? 0) + 1)
   const { handle } = yield* automationOf(process, Automation.createBrowsingContext({ presentationHint: "Window" }))
     .pipe(
@@ -344,14 +372,13 @@ export const createPageLaunched = Effect.fnUntraced(function*(state: State, id: 
     }
     return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.Vanished({})))
   }).pipe(Effect.onError(() =>
-    Viewport.cleanup(Effect.gen(function*() {
-      yield* automationOf(process, Automation.closeBrowsingContext({ handle }))
-      yield* state.buffer.waitFor(() =>
-        [...state.pages.values()].every((page) => state.pageHandles.get(page) !== handle || page.ended) ?
-          true :
-          undefined
+    Viewport.cleanup(closeFailedPage(state, context, process, handle, before)).pipe(
+      Effect.catch((error) =>
+        Viewport.isGone(error) ? Effect.void : Effect.die(
+          new Error("WebKit failed-page cleanup did not confirm removal", { cause: error })
+        )
       )
-    })).pipe(Effect.orDie)
+    )
   ))
 })
 

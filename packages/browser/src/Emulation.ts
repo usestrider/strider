@@ -120,7 +120,9 @@ export type TimeZoneId = typeof TimeZoneId.Type
  * observation, and later window-manager or user changes can change the size again.
  *
  * Failed changes attempt confirmed restoration under a separate five-second cleanup budget; restoration
- * failure remains visible as a defect alongside the original failure. Creation defaults are confirmed when a
+ * failure remains visible as a defect alongside the original failure. Ordinary scope release is non-failing:
+ * confirmed gone pages need no restoration, and other release failures produce warnings. Cleanup reserves its
+ * final second for measurement within the same five-second budget. Creation defaults are confirmed when a
  * page is created by an operation. Popup defaults are attempted but unconfirmed until explicitly emulated.
  *
  * **Example** (A phone-sized page)

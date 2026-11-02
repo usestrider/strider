@@ -174,17 +174,27 @@ const pagesInScope = (state: State, scope: Adapter.DeclarationScope) =>
 const targetsOf = (page: PageEntry) =>
   [page.target, page.provisional].filter((target): target is TargetEntry => target !== undefined && !target.ended)
 
-const applyDeclaration = (state: State, declaration: Adapter.Declaration, scope: Adapter.DeclarationScope) => {
+const applyDeclaration = (
+  state: State,
+  declaration: Adapter.Declaration,
+  scope: Adapter.DeclarationScope,
+  restoring = false
+) => {
   switch (declaration._tag) {
     case "Override": {
       const kind = declaration.override._tag
       return Effect.forEach(pagesInScope(state, scope), (page) => {
         const override = state.registry.overrides(placement(page)).get(kind)
-        return pageKinds.has(kind)
+        const applying = pageKinds.has(kind)
           ? applyPageOverride(state, page, kind, override)
           : Effect.forEach(targetsOf(page), (target) => applyTargetOverride(target, kind, override), {
             discard: true
           })
+        return restoring ?
+          applying.pipe(
+            Effect.catch((error) => page.ended || Viewport.isGone(error) ? Effect.void : Effect.fail(error))
+          ) :
+          applying
       }, { concurrency: "unbounded", discard: true })
     }
     case "InitScript":
@@ -264,14 +274,12 @@ export const declare = Effect.fnUntraced(
         state.registry.add(scope, declaration, id)
         const remove = Effect.suspend(() => {
           if (Option.isNone(state.registry.remove(id))) return Effect.void
-          return applyDeclaration(state, declaration, scope)
+          return applyDeclaration(state, declaration, scope, true)
         })
         const viewport = declaration._tag === "Override" && declaration.override._tag === "Viewport"
         yield* Effect.addFinalizer(() =>
           viewport
-            ? Viewport.cleanup(remove).pipe(
-              Effect.catch((error) => Effect.die(new Error("WebKit viewport restoration failed", { cause: error })))
-            )
+            ? Viewport.reportCleanup(Viewport.cleanup(remove), "WebKit viewport release could not confirm restoration")
             : remove.pipe(Effect.ignore)
         )
         yield* applyDeclaration(state, declaration, scope).pipe(
