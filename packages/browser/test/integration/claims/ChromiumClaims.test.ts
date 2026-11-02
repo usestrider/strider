@@ -2,7 +2,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Dialog } from "@usestrider/browser"
+import { Browser, CookieJar, Dialog, StorageState } from "@usestrider/browser"
 import * as CdpBrowser from "@usestrider/browser/cdp/Browser"
 import * as Preload from "@usestrider/browser/cdp/Preload"
 import * as Runtime from "@usestrider/browser/cdp/Runtime"
@@ -17,6 +17,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
@@ -24,7 +25,9 @@ import { spawn } from "node:child_process"
 import { readFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
+import * as Kit from "../../../src/internal/adapterKit.ts"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
+import * as ClaimHooks from "../../../src/internal/claimHooks.ts"
 import { handoff } from "../../../src/internal/handoff.ts"
 import { assertPinned, chromium } from "../browsers.ts"
 
@@ -592,18 +595,16 @@ describe("Chromium claims (ROOK-95)", () => {
       )
 
       it.effect(
-        "refuses claims on an ordinary context and its pages, which cannot survive",
+        "refuses claims on an ordinary context, which cannot survive",
         () =>
           Effect.gen(function*() {
             const browser = yield* launch
             yield* Effect.scoped(Effect.gen(function*() {
               const context = yield* Browser.newContext()
-              const page = yield* context.newPage
               assert.isTrue(
                 Exit.isFailure(yield* api.UserContext.claim(context).pipe(Effect.exit)),
                 "context claim issued"
               )
-              assert.isTrue(Exit.isFailure(yield* api.Page.claim(page).pipe(Effect.exit)), "page claim issued")
             })).pipe(Effect.provide(browser.connect))
           }),
         60_000
@@ -618,6 +619,120 @@ describe("Chromium claims (ROOK-95)", () => {
             const wrong = Schema.decodeUnknownSync(api.Page.Claim)(encoded)
             const exit = yield* Effect.scoped(api.Browser.reclaim(wrong)).pipe(Effect.exit)
             assert.strictEqual(reason(exit), "InvalidInput")
+          })).pipe(Effect.provide(browser.connect))
+        }), 60_000)
+      it.effect("refuses claims on an ordinary context's pages, which cannot survive", () =>
+        Effect.gen(function*() {
+          const browser = yield* launch
+          yield* Effect.scoped(Effect.gen(function*() {
+            const context = yield* Browser.newContext()
+            const page = yield* context.newPage
+            assert.strictEqual(reason(yield* api.Page.claim(page).pipe(Effect.exit)), "NotPermitted")
+          })).pipe(Effect.provide(browser.connect))
+        }), 60_000)
+
+      for (const failure of ["failed", "interrupted"] as const) {
+        it.effect(
+          `${failure} storageState reclaim unwinds registrations without destroying survivors`,
+          () =>
+            Effect.gen(function*() {
+              const browser = yield* launch
+              const { origin } = yield* serve
+              const old = yield* Scope.make()
+              yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
+              const services = yield* Layer.buildWithScope(browser.connect, old)
+              const url = `${origin}/rollback-${failure}`
+              const claim = yield* Effect.gen(function*() {
+                const context = yield* api.UserContext.create({ reclaimable: true })
+                const page = yield* context.newPage
+                yield* page.goto(url)
+                return yield* api.UserContext.claim(context)
+              }).pipe(Scope.provide(old), Effect.provide(services))
+              yield* handoff(old)
+              yield* Effect.scoped(Effect.gen(function*() {
+                const connected = yield* Browser.Browser
+                const adapter = ClaimHooks.get(connected).runtime.model.adapter
+                const declare = adapter.declare
+                const setCookies = adapter.setCookies
+                const entered = yield* Deferred.make<void>()
+                let registrations = 0
+                Object.assign(adapter, {
+                  declare: Effect.fnUntraced(
+                    function*(scope: Parameters<typeof declare>[0], declaration: Parameters<typeof declare>[1]) {
+                      const id = yield* declare(scope, declaration)
+                      registrations++
+                      yield* Effect.addFinalizer(() =>
+                        Effect.sync(() => {
+                          registrations--
+                        })
+                      )
+                      return id
+                    }
+                  ),
+                  setCookies: () =>
+                    Deferred.succeed(entered, undefined).pipe(Effect.andThen(
+                      failure === "interrupted"
+                        ? Effect.never :
+                        Effect.fail(Kit.unsupported("test.storageState", "injected after context declarations"))
+                    ))
+                })
+                yield* Effect.addFinalizer(() =>
+                  Effect.sync(() => {
+                    Object.assign(adapter, { declare, setCookies })
+                  })
+                )
+                const destination = yield* Scope.make()
+                yield* Effect.addFinalizer(() => Scope.close(destination, Exit.void))
+                const cookie = new CookieJar.Cookie({
+                  name: CookieJar.Name.make("session"),
+                  value: Redacted.make("saved"),
+                  domain: CookieJar.Domain.make("localhost"),
+                  path: "/",
+                  expires: Option.none(),
+                  httpOnly: false,
+                  secure: false,
+                  sameSite: Option.none(),
+                  partitionKey: { _tag: "Unpartitioned" },
+                  priority: Option.none()
+                })
+                const setup = api.UserContext.reclaim(claim, {
+                  emulation: { locale: "fr-FR" },
+                  storageState: new StorageState.StorageState({ cookies: [cookie], origins: [] })
+                }).pipe(Scope.provide(destination))
+                if (failure === "interrupted") {
+                  const fiber = yield* setup.pipe(Effect.forkChild)
+                  yield* Deferred.await(entered)
+                  yield* Fiber.interrupt(fiber)
+                } else {
+                  assert(Exit.isFailure(yield* setup.pipe(Effect.exit)))
+                }
+                assert.strictEqual(registrations, 0, "setup registrations must unwind before the caller's scope ends")
+                yield* Scope.close(destination, Exit.void)
+                assert.isTrue((yield* browser.targets).some((info) => info.url === url), "surviving tab was destroyed")
+                // Read the survivor through its actual URL rather than assuming a public id survives reconnect.
+                for (const page of yield* connected.pages) {
+                  if ((yield* page.url) !== url) continue
+                  const control = yield* page.control
+                  assert.strictEqual(yield* control.evaluateInMainWorld(() => navigator.language), "en-US")
+                }
+              })).pipe(Effect.provide(browser.connect))
+            }),
+          60_000
+        )
+      }
+
+      it.effect("rejects a page claim passed as a context claim", () =>
+        Effect.gen(function*() {
+          const browser = yield* launch
+          yield* Effect.scoped(Effect.gen(function*() {
+            const context = yield* api.UserContext.create({ reclaimable: true })
+            const page = yield* context.newPage
+            const encoded = Schema.encodeSync(api.Page.Claim)(yield* api.Page.claim(page))
+            const wrong = Schema.decodeUnknownSync(api.UserContext.Claim)(encoded)
+            assert.strictEqual(
+              reason(yield* Effect.scoped(api.UserContext.reclaim(wrong)).pipe(Effect.exit)),
+              "InvalidInput"
+            )
           })).pipe(Effect.provide(browser.connect))
         }), 60_000)
     }
