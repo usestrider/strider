@@ -29,6 +29,7 @@ import * as Random from "effect/Random"
 import * as Schedule from "effect/Schedule"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
+import * as Browser from "../Browser.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Protocol from "../protocol/Protocol.ts"
 import * as SocketConnector from "../protocol/SocketConnector.ts"
@@ -121,6 +122,9 @@ class PortTaken extends Data.TaggedError("PortTaken") {}
 /** Readiness polling shares the launcher's existing connection polling policy. */
 class ListenerPending extends Data.TaggedError("ListenerPending") {}
 
+/** A missing procfs entry can precede delivery of the child exit event. */
+class ProcfsMissing extends Data.TaggedError("ProcfsMissing")<{ readonly description: string }> {}
+
 const attachGuidance = "Use WebKit.layerAttach with an externally managed inspector HTTP endpoint instead."
 const ownershipGuidance = `Wrappers must exec MiniBrowser; fork-only wrappers are not supported. ${attachGuidance}`
 
@@ -163,8 +167,12 @@ export const inspectorListener = Effect.fnUntraced(function*(pid: number, port: 
     }
     return undefined
   }).pipe(
-    Effect.catch((error) =>
-      Launch.refused(`Cannot read Linux procfs to verify WebKit child PID ${pid}: ${error.message}. ${attachGuidance}`)
+    Effect.catch((error): Effect.Effect<never, Launch.LaunchError | ProcfsMissing> =>
+      error.reason._tag === "NotFound"
+        ? Effect.fail(new ProcfsMissing({ description: error.message }))
+        : Launch.refused(
+          `Cannot read Linux procfs to verify WebKit child PID ${pid}: ${error.message}. ${attachGuidance}`
+        )
     )
   )
 })
@@ -224,25 +232,22 @@ const spawnProcess = Effect.fnUntraced(function*(
           XDG_CONFIG_HOME: `${directory}/config`
         }
       }).pipe(Scope.provide(own))
-      const exited = `The spawned process exited before inspector ownership was verified. ${ownershipGuidance}`
-      const running = launched.handle.isRunning.pipe(Effect.orElseSucceed(() => false))
-      const requireRunning = Effect.flatMap(running, (alive) => alive ? Effect.void : Launch.notReady(launched, exited))
-      // A disappearing procfs entry can be a child exit, not a permission failure (ROOK-140).
-      const listener = inspectorListener(Number(launched.handle.pid), port).pipe(
-        Effect.catch((error) =>
-          Effect.flatMap(running, (alive) => alive ? Effect.fail(error) : Launch.notReady(launched, exited))
-        ),
-        Effect.tap(() => requireRunning)
-      )
-      const outcome = yield* Effect.raceFirst(
+      let unavailable: string | undefined
+      const listener = inspectorListener(Number(launched.handle.pid), port)
+      const outcome = yield* Effect.raceAllFirst([
         Effect.gen(function*() {
-          yield* requireRunning
           const inode = yield* listener
           if (inode === undefined) return yield* Effect.fail(new ListenerPending())
           const connecting = yield* Scope.fork(own)
           return yield* Effect.gen(function*() {
             const connection = yield* connector.connect({ host: "127.0.0.1", port }).pipe(Scope.provide(connecting))
             const after = yield* listener
+            if (after === undefined) {
+              unavailable =
+                `WebKit child PID ${launched.handle.pid} no longer holds its inspector listener after connecting.`
+              yield* Scope.close(connecting, Exit.void)
+              return yield* Effect.never
+            }
             if (after !== inode) {
               return yield* Launch.refused(
                 `WebKit child PID ${launched.handle.pid} no longer holds the same inspector listener after connecting. ${ownershipGuidance}`
@@ -251,6 +256,12 @@ const spawnProcess = Effect.fnUntraced(function*(
             return connection
           }).pipe(Effect.onExit((exit) => Exit.isFailure(exit) ? Scope.close(connecting, exit) : Effect.void))
         }).pipe(
+          // A missing procfs entry can beat Node's exit event. The connection scope has already closed on failure.
+          Effect.catchTag("ProcfsMissing", (error) => {
+            unavailable =
+              `Cannot read Linux procfs to verify WebKit child PID ${launched.handle.pid}: ${error.description}.`
+            return Effect.never
+          }),
           Effect.retry({
             while: (error) => error._tag === "ListenerPending" || error._tag === "SocketError",
             schedule: Schedule.spaced("100 millis")
@@ -268,18 +279,35 @@ const spawnProcess = Effect.fnUntraced(function*(
           BrowserClock.onLive
         ),
         launched.stderrLine(new RegExp(`Failed to start remote inspector server on 127\\.0\\.0\\.1:${port}`)).pipe(
-          Effect.map((line) => Option.isSome(line) ? { _tag: "Taken" as const } : { _tag: "Exited" as const })
-        )
-      )
+          Effect.flatMap((line) => Option.isSome(line) ? Effect.succeed({ _tag: "Taken" as const }) : Effect.never)
+        ),
+        launched.handle.exitCode.pipe(Effect.exit, Effect.map((exit) => ({ _tag: "Exited" as const, exit })))
+      ])
       switch (outcome._tag) {
         case "Connected":
           return { connection: outcome.connection, launched }
         case "Taken":
           return yield* Effect.fail(new PortTaken())
+        case "Exited": {
+          // Drain stderr if it closes, but descendants can keep it open. Neither case extends the launch deadline.
+          yield* launched.stderrLine(/(?!)/).pipe(byDeadline(deadline), BrowserClock.onLive)
+          const stderrTail = yield* launched.stderrTail
+          return yield* Launch.fail(
+            new Browser.ProcessExited({
+              code: Exit.isSuccess(outcome.exit) ? Option.some(Number(outcome.exit.value)) : Option.none(),
+              stderrTail,
+              hint:
+                `The spawned process exited before inspector ownership was verified; its stderr is in stderrTail. ${ownershipGuidance}`
+            }),
+            "connect"
+          )
+        }
         default:
-          return yield* Launch.notReady(
-            launched,
-            `Its inspector server on port ${port} never answered with verifiable ownership by spawned PID ${launched.handle.pid}. ${ownershipGuidance}`
+          return yield* Launch.refused(
+            `${
+              unavailable ??
+                `Its inspector server on port ${port} never answered with verifiable ownership by spawned PID ${launched.handle.pid}.`
+            } No child exit was observed before the launch deadline. ${ownershipGuidance}`
           )
       }
     }).pipe(Effect.onExit((exit) => Exit.isFailure(exit) ? Scope.close(own, exit) : Effect.void))

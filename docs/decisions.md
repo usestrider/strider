@@ -435,8 +435,10 @@ any inspector write. The stock inspector binds exclusively, so retaining the sam
 establishment excludes a different server accepting that connection. A wrapper must exec MiniBrowser, not merely
 fork it. We do not search descendants or fall back when the proof is unavailable. Refusal explains why and directs
 the caller to attach to an externally managed inspector HTTP endpoint. A live child whose procfs cannot be read
-is refused with `ConnectionFailed`; a child that exits during either ownership check retains `ProcessExited`
-with its exit code and stderr. Exits before ownership also explain that wrappers must exec MiniBrowser and name
+is refused with `ConnectionFailed`. Missing procfs can precede delivery of the exit event, so startup races readiness
+against that event within its existing deadline instead of trusting an immediate liveness snapshot. Stderr ending
+alone is not an exit; a live child may still start successfully. An observed exit retains `ProcessExited` with its
+exit code, and remaining stderr is collected only within the same deadline, since descendants may hold it open. Exits before ownership also explain that wrappers must exec MiniBrowser and name
 attach, without assuming every exit was caused by a fork. Attach keeps its existing requirements.
 The existing deadline, 100 ms polling and five reported-collision attempts remain the policy.
 
