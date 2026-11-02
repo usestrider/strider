@@ -16,6 +16,7 @@
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
+import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
 import * as Hash from "effect/Hash"
 import * as Inspectable from "effect/Inspectable"
@@ -23,7 +24,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import { pipeArguments } from "effect/Pipeable"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Browser from "../Browser.ts"
 import * as CookieJar from "../CookieJar.ts"
@@ -493,15 +494,21 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       Navigation.settle(model, operation, navigation, frame, url, at, outcome, id)
   }
 
-  const newContext = (
+  const setupContext = (
     options?: UserContext.Options,
-    mode?: { readonly reclaimable: true } | { readonly context: UserContext.Id }
+    mode?: { readonly reclaimable: true } | {
+      readonly context: UserContext.Id
+      readonly ownership: { committed: boolean }
+    }
   ): Effect.Effect<UserContext.UserContext, UserContext.UserContextError | Deadline.Timeout, Scope.Scope> =>
     Effect.gen(function*() {
       const { id } = yield* Operation.record
       const ownerScope = yield* Effect.scope
       const reclaimable = mode !== undefined
-      if (reclaimable) Handoff.allow(ownerScope)
+      const ownership = mode !== undefined && "context" in mode ? mode.ownership : undefined
+      const committed = () => ownership === undefined || ownership.committed
+      let handle: UserContext.UserContext | undefined
+      let previous: UserContext.UserContext | undefined
       // A partition the backend can't set fails the context before it exists: nothing is applied partly
       if (options?.storageState !== undefined) {
         const partitions = yield* StorageStates.unsupportedPartitions(runtime, options.storageState)
@@ -587,16 +594,24 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             Effect.flatMap(model.context)
           ),
         (entry) =>
-          (reclaimable && Handoff.leavesOpen(ownerScope) ? Effect.void : model.remove(entry)).pipe(
-            Effect.ensuring(Effect.sync(() => contexts.delete(entry.id)))
+          (!committed() || (reclaimable && Handoff.leavesOpen(ownerScope)) ? Effect.void : model.remove(entry)).pipe(
+            Effect.ensuring(Effect.sync(() => {
+              if (handle === undefined || contexts.get(entry.id) !== handle) return
+              if (!committed() && previous !== undefined) contexts.set(entry.id, previous)
+              else contexts.delete(entry.id)
+            }))
           )
       )
       const created = entry.id
       // Owned contexts decide dialogs no handler claims at once, and cancel file choosers no handler answers
       // (CONCEPTS.md §5)
       const settings = (yield* entry.state.get).settings
+      if (ownership !== undefined) {
+        yield* Effect.addFinalizer(() => committed() ? Effect.void : model.configure(entry, settings))
+      }
       yield* model.configure(entry, {
         owned: true,
+        reclaimable,
         policy: Option.some(options?.dialogs ?? "dismiss"),
         eventLog: options?.eventLog ?? settings.eventLog,
         keyboardLayout: options?.keyboardLayout ?? settings.keyboardLayout
@@ -653,15 +668,46 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         page: (pageEntry) => Option.getOrThrow(runtime.page(pageEntry)),
         control: Effect.sync(() => context)
       })
+      previous = contexts.get(created)
+      handle = context
       contexts.set(created, context)
-      // The saved storage, before the context's first page; a context it can't be written into isn't kept
+      // A new context is removed when saved storage fails; a borrowed context must survive failed setup.
       if (options?.storageState !== undefined) {
         yield* StorageStates.applyState(runtime, context, options.storageState, id).pipe(
-          Effect.onError(() => adapter.removeUserContext(created).pipe(Effect.ignore))
+          Effect.onError(() =>
+            ownership === undefined ? adapter.removeUserContext(created).pipe(Effect.ignore) : Effect.void
+          )
         )
       }
       return context
     }).pipe(Operation.named("Browser.newContext"))
+
+  // Existing targets are borrowed while setup runs. Its registrations live in a child scope that is
+  // unwound immediately on failure/interruption; only successful setup commits destruction ownership.
+  const newContext = Effect.fnUntraced(function*(
+    options?: UserContext.Options,
+    mode?: { readonly reclaimable: true } | { readonly context: UserContext.Id }
+  ) {
+    if (mode === undefined || !("context" in mode)) {
+      const context = yield* setupContext(options, mode)
+      if (mode !== undefined) Handoff.allow(yield* Effect.scope)
+      return context
+    }
+    return yield* Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function*() {
+        const scope = yield* Scope.fork(yield* Effect.scope)
+        const ownership = { committed: false }
+        const context = yield* restore(
+          setupContext(options, { context: mode.context, ownership }).pipe(Scope.provide(scope))
+        ).pipe(
+          Effect.onError(() => Scope.close(scope, Exit.void))
+        )
+        ownership.committed = true
+        Handoff.allow(scope)
+        return context
+      })
+    )
+  })
 
   const defaultEntry = yield* model.context(adapter.defaultContext)
   const browser: Browser.Browser = {

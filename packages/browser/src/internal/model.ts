@@ -306,6 +306,8 @@ export interface ContextSettings {
    * choosers no handler answers are canceled (CONCEPTS.md §5).
    */
   readonly owned: boolean
+  /** Whether this context was created for recovery instead of disposal on disconnect. */
+  readonly reclaimable: boolean
   /** `None` for a context nobody set a policy for, such as the default context: no automatic decision. */
   readonly policy: Option.Option<DialogPolicy>
   /** Events retained per kind and target, for `history` (`UserContext.Options.eventLog`). */

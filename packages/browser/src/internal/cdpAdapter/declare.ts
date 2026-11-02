@@ -18,7 +18,7 @@ import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Declarations from "../declarations.ts"
 import * as Operation from "../operation.ts"
-import type * as ProtocolClient from "../protocolClient.ts"
+import * as ProtocolClient from "../protocolClient.ts"
 import { type ContextEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
 
 /** A URL pattern no request matches: a scheme nothing uses. */
@@ -411,7 +411,11 @@ export const declare = Effect.fnUntraced(function*(
           }
         )
         : releaseDeclaration(state, declaration, scope)
-    })
+    }).pipe(
+      Operation.detached,
+      // Registration may have captured the operation's expired protocol deadline. Release has its own budget.
+      Effect.provideService(ProtocolClient.CommandDeadline, Option.none())
+    )
   )
   if (declaration._tag === "Downloads") {
     const affected = scope._tag === "UserContext"

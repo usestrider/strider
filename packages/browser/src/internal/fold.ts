@@ -56,6 +56,7 @@ const defaultEventLog = 100
 /** A context's settings until the library sets them: none of its policies, as for a context it didn't create. */
 const defaultSettings: Model.ContextSettings = {
   owned: false,
+  reclaimable: false,
   policy: Option.none(),
   eventLog: defaultEventLog,
   keyboardLayout: "us"
