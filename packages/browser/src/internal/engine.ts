@@ -17,9 +17,10 @@
  *   The document's `head` isn't searched.
  * - **`getByRole`** takes the first role token the engine knows from `role`, or else the implicit role under
  *   HTML-AAM, and computes the accessible name under accname 1.2.
- * - **Actions** check at each animation frame, in the page, until the checks pass or the round's cap runs out
- *   (CONCEPTS.md §8): visible, enabled, notInert, inViewport (scrolling into view once), stable across
- *   `frames` frames, and receivesPointer at the action point.
+ * - **Actions** take an initial stability sample immediately, then check at each animation frame until the
+ *   checks pass or the round's cap runs out. The checks (CONCEPTS.md §8) are visible, enabled, notInert,
+ *   inViewport (scrolling into view once), stable across `frames` rendering updates, and receivesPointer at
+ *   the action point. Actions without a stability check still await a rendering update.
  */
 
 import * as Schema from "effect/Schema"
@@ -228,6 +229,8 @@ export type Request =
      * round only checks, and answers the point and what it read.
      */
     readonly apply: boolean
+    /** Capture stability for immediate revalidation, or consume the returned token. Expires at the next frame. */
+    readonly stability?: string
   }
   /** Removes the guard an action armed, and says whether it stopped the gesture. */
   | { readonly op: "disarm" }
@@ -285,6 +288,8 @@ export const Response = Schema.Union([
   Schema.TaggedStruct("Ready", {
     element: Schema.String,
     scrolled: Schema.Boolean,
+    /** Stability evidence for an immediate check of the same element and rectangle. */
+    stability: Schema.optionalKey(Schema.String),
     /** The action point, for `Point`. */
     point: Schema.NullOr(Point),
     /** Whether an HTML drag would start from it: it or an ancestor is `draggable`. */
@@ -1395,7 +1400,18 @@ export function engine(render: (root: SnapNode) => string) {
 
   // ── Actions ──
 
+  let stabilitySequence = 0
+  let stability: {
+    readonly token: string
+    readonly element: Element
+    readonly rect: DOMRect
+    readonly frames: number
+  } | null = null
+
   const act = async (request: Extract<Request, { op: "act" }>): Promise<Response> => {
+    // Evidence is single-use and lasts only until the next rendering update. Another attempt supersedes it.
+    let previous = stability !== null && request.stability === stability.token ? stability : null
+    stability = null
     const end = now() + request.cap
     const history: Array<NotReady> = []
     const seen = new Set<string>()
@@ -1410,6 +1426,7 @@ export function engine(render: (root: SnapNode) => string) {
     }
     let scrolled = false
     let frames = 0
+    let sampled = false
     // The rects of one element across frames, for the stable check
     let tracked: Element | null = null
     let rects: Array<DOMRect> = []
@@ -1417,12 +1434,18 @@ export function engine(render: (root: SnapNode) => string) {
     while (true) {
       const left = end - now()
       if (left <= 0) return { _tag: "NotReady", reason: last, history, scrolled, checked: history.length > 0 }
-      if (!(await nextFrame(left))) {
-        // A round the deadline cut too short for any page to render says nothing about rendering
-        if (frames === 0 && request.cap >= 100) note({ _tag: "NoRenderingOpportunity" })
-        return { _tag: "NotReady", reason: last, history, scrolled, checked: history.length > 0 }
+      // The current rectangle is the baseline; k rendering updates still have to agree with it. Waiting for
+      // a frame just to take that baseline adds a frame to both the preliminary check and the check under the
+      // input permit. With stability disabled, retain the rendering opportunity before any action can pass.
+      if (sampled || !(request.checks.stable > 0)) {
+        if (!(await nextFrame(left))) {
+          // A round the deadline cut too short for any page to render says nothing about rendering
+          if (frames === 0 && request.cap >= 100) note({ _tag: "NoRenderingOpportunity" })
+          return { _tag: "NotReady", reason: last, history, scrolled, checked: history.length > 0 }
+        }
+        frames++
       }
-      frames++
+      sampled = true
       rawText.clear()
       roleCache.clear()
       nameCache.clear()
@@ -1459,6 +1482,8 @@ export function engine(render: (root: SnapNode) => string) {
         }
       }
       const checks = request.checks
+      const evidence = previous
+      previous = null
       let reason: NotReady | null = null
       if (element === undefined) reason = { _tag: "NoMatch" }
       else if (checks.visible && !visible(element)) reason = { _tag: "NotVisible" }
@@ -1472,9 +1497,12 @@ export function engine(render: (root: SnapNode) => string) {
           scrolled = true
         }
       } else if (checks.stable > 0) {
-        rects.push(element.getBoundingClientRect())
+        const rect = element.getBoundingClientRect()
+        rects.push(rect)
         if (rects.length > checks.stable + 1) rects.shift()
-        if (rects.length < checks.stable + 1 || !rects.every((rect) => sameRect(rect, rects[0]!))) {
+        const unchanged = evidence !== null && evidence.element === element && evidence.frames === checks.stable &&
+          sameRect(evidence.rect, rect)
+        if (!unchanged && (rects.length < checks.stable + 1 || !rects.every((rect) => sameRect(rect, rects[0]!)))) {
           reason = { _tag: "NotStable" }
         }
       }
@@ -1493,7 +1521,24 @@ export function engine(render: (root: SnapNode) => string) {
         )
         if (missing !== undefined) reason = { _tag: "NoSuchOption", option: describeChoice(missing) }
       }
-      if (reason === null && element !== undefined) return ready(element, action, request.apply, scrolled)
+      if (reason === null && element !== undefined) {
+        const response = ready(element, action, request.apply, scrolled)
+        if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
+          const captured = {
+            token: `${generation}:${++stabilitySequence}`,
+            element,
+            rect: rects[rects.length - 1]!,
+            frames: checks.stable
+          }
+          stability = captured
+          const token = captured.token
+          onFrame(() => {
+            if (stability?.token === token) stability = null
+          })
+          return { ...response, stability: captured.token }
+        }
+        return response
+      }
       if (reason!._tag !== "NotStable") rects = []
       // A rect still settling within its first frames is the check working, not a reason to report
       if (reason!._tag !== "NotStable" || rects.length === checks.stable + 1) note(reason!)

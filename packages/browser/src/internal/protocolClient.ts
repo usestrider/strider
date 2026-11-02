@@ -142,6 +142,13 @@ export interface Session extends Protocol.ProtocolSession {
   readonly sendSequenced: <M extends string, P, A>(
     command: Protocol.Command<M, P, A>
   ) => Effect.Effect<{ readonly result: A; readonly received: number }, Protocol.ProtocolError>
+  /**
+   * Writes the commands to the transport in order as one step, which interruption doesn't split, then waits for every
+   * reply together. A failure or interruption then stops waiting; what was written can't be taken back.
+   */
+  readonly sendOrdered: <M extends string, P>(
+    commands: ReadonlyArray<Protocol.Command<M, P, void>>
+  ) => Effect.Effect<void, Protocol.ProtocolError>
 }
 
 /** A session's snapshot: what it installs into the model, and how far into the session's events it reaches. */
@@ -470,7 +477,8 @@ export const make: (
     run(handler({ session: state.handle, method: entry.method, params: entry.params, result: entry.raw, release }))
   }
 
-  const send = Effect.fnUntraced(function*<M extends string, P, A>(
+  /** A registered command: writing it, the wait for its reply, and giving up on that reply. */
+  const prepare = Effect.fnUntraced(function*<M extends string, P, A>(
     state: SessionState,
     command: Protocol.Command<M, P, A>
   ) {
@@ -510,28 +518,65 @@ export const make: (
         orElse: () => Effect.andThen(abandon, Effect.fail(failure(new Protocol.NoReply({ method, timeout }))))
       }).pipe(BrowserClock.onLive)
       : Deferred.await(entry.reply)
-    const exchange = transport.send(wire.encode(entry.id, method, encoded, state.key)).pipe(
-      Effect.catch(() =>
-        Effect.andThen(
-          Effect.sync(() => unregister(entry)),
-          Effect.fail(failure(new Protocol.SessionEnded({ why: "connectionLost" })))
+    const tracing = yield* Tracing.TraceProtocolCommands
+    return {
+      write: transport.send(wire.encode(entry.id, method, encoded, state.key)).pipe(
+        Effect.catch(() =>
+          Effect.andThen(
+            Effect.sync(() => unregister(entry)),
+            Effect.fail(failure(new Protocol.SessionEnded({ why: "connectionLost" })))
+          )
         )
       ),
-      Effect.andThen(awaited),
-      Effect.flatMap((raw) => decode === undefined ? Effect.succeed(undefined as A) : decode(raw)),
-      Effect.map((result) => {
-        consumed = true
-        return { result, received: entry.received }
-      }),
-      Effect.onInterrupt(() => abandon)
-    )
-    // `Browser.TraceProtocolCommands`: each command its own span, under the operation that sent it.
-    return yield* (yield* Tracing.TraceProtocolCommands)
-      ? Effect.withSpan(exchange, method, {
-        attributes: { "browser.protocol.method": method, "browser.protocol.id": entry.id }
-      })
-      : exchange
+      reply: awaited.pipe(
+        Effect.flatMap((raw) => decode === undefined ? Effect.succeed(undefined as A) : decode(raw)),
+        Effect.map((result) => {
+          consumed = true
+          return { result, received: entry.received }
+        })
+      ),
+      abandon,
+      // `Browser.TraceProtocolCommands`: each command its own span, under the operation that sent it.
+      traced: <B, E, R>(exchange: Effect.Effect<B, E, R>) =>
+        tracing
+          ? Effect.withSpan(exchange, method, {
+            attributes: { "browser.protocol.method": method, "browser.protocol.id": entry.id }
+          })
+          : exchange
+    }
   })
+
+  const send = Effect.fnUntraced(function*<M extends string, P, A>(
+    state: SessionState,
+    command: Protocol.Command<M, P, A>
+  ) {
+    const { abandon, reply, traced, write } = yield* prepare(state, command)
+    return yield* traced(write.pipe(Effect.andThen(reply), Effect.onInterrupt(() => abandon)))
+  })
+
+  const sendOrdered = <M extends string, P>(
+    state: SessionState,
+    commands: ReadonlyArray<Protocol.Command<M, P, void>>
+  ) =>
+    Effect.uninterruptibleMask((restore) =>
+      Effect.suspend(() => {
+        const started: Array<{
+          readonly abandon: Effect.Effect<void>
+          readonly reply: Effect.Effect<unknown, Protocol.ProtocolError>
+          readonly traced: <B, E, R>(exchange: Effect.Effect<B, E, R>) => Effect.Effect<B, E, R>
+        }> = []
+        return Effect.forEach(commands, (command) =>
+          Effect.flatMap(prepare(state, command), (prepared) => {
+            started.push(prepared)
+            return prepared.write
+          }), { discard: true }).pipe(
+            Effect.andThen(restore(
+              Effect.forEach(started, ({ reply, traced }) => traced(reply), { concurrency: "unbounded", discard: true })
+            )),
+            Effect.onError(() => Effect.forEach(started, ({ abandon }) => abandon, { discard: true }))
+          )
+      })
+    )
 
   // ── Subscriptions ──
 
@@ -600,6 +645,7 @@ export const make: (
       key,
       send: (command) => Effect.map(send(state, command), ({ result }) => result),
       sendSequenced: (command) => send(state, command),
+      sendOrdered: (commands) => sendOrdered(state, commands),
       subscribe: subscribeTo,
       drainObserved: Effect.suspend(() => ingestion.drained(state.ingest)),
       ended: Effect.suspend(() => Deferred.await(state.ingest.ended))

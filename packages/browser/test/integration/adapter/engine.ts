@@ -18,7 +18,7 @@ const timeout = 60_000
 const string = (value: string): Adapter.LocalValue => ({ _tag: "Value", value: { type: "string", value } })
 
 /** A page showing `html`, and a function that sends the engine a request in the world the library would use. */
-const open = Effect.fnUntraced(function*(backend: Backend, html: string) {
+const open = Effect.fnUntraced(function*(backend: Backend, html: string, beforeInstall?: string) {
   const served = yield* site
   const facts = makeRecorder()
   const { adapter } = yield* backend.connect(facts.sink)
@@ -50,6 +50,10 @@ const open = Effect.fnUntraced(function*(backend: Backend, html: string) {
       result: "value",
       userActivation: false
     })
+  if (beforeInstall !== undefined) {
+    const prepared = yield* call(beforeInstall, [])
+    assert(prepared._tag === "Value", prepared._tag === "Exception" ? prepared.text : "")
+  }
   const installed = yield* call(Engine.install, [])
   assert(installed._tag === "Value", installed._tag === "Exception" ? installed.text : "")
   const send = Effect.fnUntraced(function*(request: Engine.Request) {
@@ -59,7 +63,7 @@ const open = Effect.fnUntraced(function*(backend: Backend, html: string) {
     // Decoded as the library decodes it, so every answer the tests see is one the schema accepts
     return yield* Engine.decodeResponse(result.value.value).pipe(Effect.orDie)
   })
-  return { send, adapter, page }
+  return { send, call, adapter, page }
 })
 
 const text = (value: string, exact = false): Engine.TextMatcher => ({ _tag: "String", value, exact })
@@ -84,10 +88,183 @@ const count = (response: Engine.Response) => {
   return response.count
 }
 
+// Count real rendering callbacks in the engine's realm, optionally changing the fixture at a chosen frame.
+// This checks the sampling contract without depending on the machine's frame rate or wall-clock latency.
+const countFrames = (onFrame = "") =>
+  `() => {
+  const frame = globalThis.requestAnimationFrame.bind(globalThis)
+  globalThis.engineTestFrames = 0
+  globalThis.requestAnimationFrame = (callback) => frame((time) => {
+    globalThis.engineTestFrames++
+    ${onFrame}
+    callback(time)
+  })
+}`
+
+const point = (stable: number): Extract<Engine.Request, { op: "act" }> => ({
+  op: "act",
+  steps: [{ _tag: "Css", selector: "#go" }],
+  checks: { ...all, stable },
+  cap: 1000,
+  action: { _tag: "Point", position: null, guard: false },
+  apply: false
+})
+
+const framesRead = Effect.fnUntraced(function*(call: Effect.Success<ReturnType<typeof open>>["call"]) {
+  const result = yield* call("() => globalThis.engineTestFrames", [])
+  assert(result._tag === "Value")
+  assert(result.value.type === "number")
+  return result.value.value
+})
+
+/** Both rounds share one evaluation so the test controls what happens between them, independent of wire latency. */
+const revalidate = Effect.fnUntraced(function*(
+  call: Effect.Success<ReturnType<typeof open>>["call"],
+  between: string,
+  stable = 2
+) {
+  const result = yield* call(
+    `async (json) => {
+    const engine = globalThis[Symbol.for(${JSON.stringify(Engine.installKey)})]
+    const request = JSON.parse(json)
+    const first = JSON.parse(await engine.run(JSON.stringify({ ...request, stability: "capture" })))
+    if (first._tag !== "Ready" || typeof first.stability !== "string") throw new Error("No stability evidence")
+    ${between}
+    const before = globalThis.engineTestFrames
+    const response = await engine.run(JSON.stringify({
+      ...request, checks: { ...request.checks, stable: ${stable} }, stability: first.stability
+    }))
+    return JSON.stringify({ response, frames: globalThis.engineTestFrames - before })
+  }`,
+    [string(JSON.stringify(point(2)))]
+  )
+  assert(result._tag === "Value", result._tag === "Exception" ? result.text : "")
+  assert(result.value.type === "string")
+  const measured = JSON.parse(result.value.value) as { response: string; frames: number }
+  return { response: yield* Engine.decodeResponse(measured.response).pipe(Effect.orDie), frames: measured.frames }
+})
+
 export const engine = (backend: Backend) =>
   describe(`${backend.name} engine`, () => {
     layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
       (it) => {
+        it.effect("revalidates fresh stability without another rendering wait", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, `<button id="go">Go</button>`, countFrames())
+            const result = yield* revalidate(call, "")
+            assert.strictEqual(result.response._tag, "Ready")
+            assert.strictEqual(result.frames, 0)
+          }), timeout)
+
+        for (
+          const [name, between, stable] of [
+            ["a moved target", `document.getElementById("go").style.marginLeft = "40px"`, 2],
+            [
+              "a replacement with identical geometry",
+              `const old = document.getElementById("go"); old.replaceWith(old.cloneNode(true))`,
+              2
+            ],
+            ["an intervening rendering frame", `await new Promise(requestAnimationFrame)`, 2],
+            [
+              "already consumed evidence",
+              `await engine.run(JSON.stringify({ ...request, stability: first.stability }))`,
+              2
+            ],
+            ["superseded evidence", `await engine.run(JSON.stringify({ ...request, stability: "capture" }))`, 2],
+            ["a different stability requirement", "", 4]
+          ] as const
+        ) {
+          it.effect(`takes new stability samples after ${name}`, () =>
+            Effect.gen(function*() {
+              const { call } = yield* open(backend, `<button id="go">Go</button>`, countFrames())
+              const result = yield* revalidate(call, between, stable)
+              assert.strictEqual(result.response._tag, "Ready")
+              assert.isAtLeast(result.frames, stable)
+            }), timeout)
+        }
+
+        for (
+          const [name, between, reason] of [
+            ["disabled", `document.getElementById("go").disabled = true`, "Disabled"],
+            ["hidden", `document.getElementById("go").style.visibility = "hidden"`, "NotVisible"],
+            ["inert", `document.getElementById("go").inert = true`, "Inert"],
+            [
+              "covered",
+              `const cover = document.createElement("div"); cover.style.cssText = "position:fixed;inset:0;z-index:1"; document.body.append(cover)`,
+              "Covered"
+            ],
+            ["detached", `document.getElementById("go").remove()`, "NoMatch"]
+          ] as const
+        ) {
+          it.effect(`refuses fresh stability when the target becomes ${name}`, () =>
+            Effect.gen(function*() {
+              const { call } = yield* open(backend, `<button id="go">Go</button>`, countFrames())
+              const result = yield* revalidate(call, between)
+              assert(result.response._tag === "NotReady", JSON.stringify(result.response))
+              assert.strictEqual(result.response.reason._tag, reason)
+            }), timeout)
+        }
+
+        it.effect("samples stability immediately, then across the configured rendering updates", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(backend, `<button id="go">Go</button>`, countFrames())
+            for (const stable of [1, 2, 4]) {
+              yield* call("() => { globalThis.engineTestFrames = 0 }", [])
+              const response = yield* send(point(stable))
+              assert(response._tag === "Ready", JSON.stringify(response))
+              assert.strictEqual(yield* framesRead(call), stable)
+            }
+          }), timeout)
+
+        it.effect("restarts stability sampling when the rectangle changes", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(
+              backend,
+              `<button id="go" style="position:absolute;left:0;top:0">Go</button>`,
+              countFrames(
+                `document.getElementById('go').style.left = Math.min(globalThis.engineTestFrames, 3) * 5 + 'px'`
+              )
+            )
+            const response = yield* send(point(2))
+            assert(response._tag === "Ready", JSON.stringify(response))
+            assert.strictEqual(yield* framesRead(call), 5)
+          }), timeout)
+
+        it.effect("does not carry stability samples to a replacement with the same rectangle", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(
+              backend,
+              `<button id="go">Go</button>`,
+              countFrames(`if (globalThis.engineTestFrames === 2) {
+                const button = document.getElementById('go')
+                button.replaceWith(button.cloneNode(true))
+              }`)
+            )
+            const response = yield* send(point(2))
+            assert(response._tag === "Ready", JSON.stringify(response))
+            assert.strictEqual(yield* framesRead(call), 4)
+          }), timeout)
+
+        it.effect("still waits for rendering when stability is disabled", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(backend, `<button id="go">Go</button>`, countFrames())
+            const response = yield* send(point(0))
+            assert(response._tag === "Ready", JSON.stringify(response))
+            assert.strictEqual(yield* framesRead(call), 1)
+          }), timeout)
+
+        it.effect("refuses an action when rendering never arrives, even with an initial rectangle", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<button id="go">Go</button>`,
+              "() => { globalThis.requestAnimationFrame = () => 0 }"
+            )
+            const response = yield* send({ ...point(2), cap: 100 })
+            assert(response._tag === "NotReady", JSON.stringify(response))
+            assert.strictEqual(response.reason._tag, "NoRenderingOpportunity")
+          }), timeout)
+
         it.effect("computes roles and accessible names", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
@@ -108,7 +285,9 @@ export const engine = (backend: Backend) =>
             )
             const response = yield* send({ op: "role", steps: [{ _tag: "Css", selector: "body *" }] })
             assert(response._tag === "Roles")
-            const named = response.roles.filter((each) => each.role !== null && each.role !== "generic")
+            const named = response.roles.filter((each) =>
+              each.role !== null && each.role !== "generic"
+            )
             assert.deepStrictEqual(named, [
               { role: "heading", name: "Cart" },
               { role: "button", name: "Add to cart" },

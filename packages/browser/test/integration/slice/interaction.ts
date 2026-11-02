@@ -6,10 +6,13 @@
 import { assert, describe, layer } from "@effect/vitest"
 import { Browser, Condition, Deadline, Expect, FileInput, Keyboard, Locator, Mouse } from "@usestrider/browser"
 import * as Cause from "effect/Cause"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import { LocatorImpl } from "../../../src/internal/locator.ts"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
 
@@ -29,6 +32,110 @@ const say = (text: string) => `document.getElementById('out').textContent = ${te
 export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} interaction`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      for (const change of ["replaced", "moved", "disabled", "covered", "interrupted", "expired"] as const) {
+        it.effect(`handles a queued click when ${change}`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<button id="go" data-name="old" onclick="const out = document.getElementById('out'); out.dataset.count = String(Number(out.dataset.count ?? 0) + 1); out.textContent = this.dataset.name + ' clicked ' + out.dataset.count">Go</button>${out}`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const locator = page.locator("#go")
+              assert(locator instanceof LocatorImpl)
+              const input = locator.owner.page.input
+              const original = input.withPermit
+              const waiting = yield* Deferred.make<void>()
+              // Observe the actual permit boundary after preflight, without a sleep or a timing assumption.
+              yield* Effect.acquireRelease(
+                Effect.sync(() => {
+                  input.withPermit = (effect) => Effect.andThen(Deferred.succeed(waiting, undefined), original(effect))
+                }),
+                () =>
+                  Effect.sync(() => {
+                    input.withPermit = original
+                  })
+              )
+              const clicked = yield* original(Effect.gen(function*() {
+                const fiber = yield* locator.click().pipe(Deadline.within("2 seconds"), Effect.forkScoped)
+                yield* Deferred.await(waiting)
+                assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+                if (change === "expired") {
+                  const error = yield* Fiber.join(fiber).pipe(Effect.flip)
+                  assert(Deadline.isTimeout(error), String(error))
+                  assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+                } else if (change === "interrupted") {
+                  yield* Fiber.interrupt(fiber)
+                } else {
+                  yield* page.evaluateInMainWorld((change: string) => {
+                    const button = document.getElementById("go") as HTMLButtonElement
+                    if (change === "replaced") {
+                      const replacement = button.cloneNode(true) as HTMLButtonElement
+                      replacement.dataset["name"] = "new"
+                      button.replaceWith(replacement)
+                    } else if (change === "moved") {
+                      button.style.marginLeft = "200px"
+                    } else if (change === "disabled") {
+                      button.disabled = true
+                    } else {
+                      const cover = document.createElement("div")
+                      cover.style.cssText = "position:fixed;inset:0;z-index:1"
+                      document.body.append(cover)
+                    }
+                  }, change)
+                }
+                return fiber
+              }))
+              if (change === "disabled" || change === "covered") {
+                const error = yield* Fiber.join(clicked).pipe(Effect.flip)
+                assert(Deadline.isTimeout(error), String(error))
+                assert(error.history.some((entry) =>
+                  (entry.value as { _tag: string })._tag === (change === "disabled" ? "Disabled" : "Covered")
+                ))
+                assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+              } else {
+                if (change === "interrupted" || change === "expired") {
+                  yield* locator.click()
+                } else yield* Fiber.join(clicked)
+                assert.strictEqual(
+                  yield* page.locator("#out").readText,
+                  `${change === "replaced" ? "new" : "old"} clicked 1`
+                )
+              }
+            }))
+          }), timeout)
+      }
+
+      // On stock WebKit the page sees only the press (ROOK-149)
+      if (name !== "WebKit") {
+        it.effect("finishes a click whose mousedown opens a dialog", () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<button id="go" onmousedown="confirm('Go?'); out.textContent += 'down '" onmouseup="out.textContent += 'up '" onclick="out.textContent += 'click'">Go</button><p id="out"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#go").click()
+              assert.strictEqual(yield* page.locator("#out").readText, "down up click")
+            }))
+          }), timeout)
+      }
+
+      it.effect("serializes competing clicks and delivers each gesture once", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<button id="go" onmousedown="out.textContent += 'down '" onmouseup="out.textContent += 'up '" onclick="out.textContent += 'click '">Go</button><p id="out"></p>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const button = page.locator("#go")
+            yield* Effect.all([button.click(), button.click()], { concurrency: "unbounded" })
+            assert.strictEqual(yield* page.locator("#out").readText, "down up click down up click")
+          }))
+        }), timeout)
+
       it.effect("runs call site 1 up to its storage state: fill, click, and expect", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
