@@ -569,6 +569,58 @@ describe("Chromium claims (ROOK-95)", () => {
         60_000
       )
 
+      it.effect("measures raw file-chooser release with an open dialog", () =>
+        Effect.gen(function*() {
+          const browser = yield* launch
+          const CdpPage = yield* Effect.promise(() => import("@usestrider/browser/cdp/Page"))
+          const { targetId } = yield* Target.createTarget({ url: "about:blank" }).pipe(
+            Protocol.on(browser.observer.browser)
+          )
+          const { sessionId } = yield* Target.attachToTarget({ targetId, flatten: true }).pipe(
+            Protocol.on(browser.observer.browser)
+          )
+          const session = yield* browser.observer.session(sessionId)
+          yield* CdpPage.enable().pipe(Protocol.on(session))
+          yield* CdpPage.setInterceptFileChooserDialog({ enabled: true }).pipe(Protocol.on(session))
+          const beforeAt = performance.now()
+          const before = yield* CdpPage.setInterceptFileChooserDialog({ enabled: false }).pipe(
+            Protocol.on(session),
+            BrowserClock.timeoutOption(1000)
+          )
+          assert.isTrue(Option.isSome(before), "release must work without a dialog")
+          const baseline = performance.now() - beforeAt
+          yield* CdpPage.setInterceptFileChooserDialog({ enabled: true }).pipe(Protocol.on(session))
+          const events = yield* session.subscribe(CdpPage.javascriptDialogOpening)
+          const opened = yield* Stream.runHead(events).pipe(Effect.forkChild)
+          yield* Runtime.evaluate({ expression: "setTimeout(() => alert('raw release probe'), 0); undefined" }).pipe(
+            Protocol.on(session)
+          )
+          assert.strictEqual(Option.getOrThrow(yield* Fiber.join(opened)).message, "raw release probe")
+          const blockedAt = performance.now()
+          const disabled = yield* CdpPage.setInterceptFileChooserDialog({ enabled: false }).pipe(
+            Protocol.on(session),
+            BrowserClock.timeoutOption(1000)
+          )
+          const blocked = performance.now() - blockedAt
+          assert.isTrue(Option.isNone(disabled), "the tested open-dialog command path did not answer")
+          const historyAt = performance.now()
+          const history = yield* CdpPage.getNavigationHistory().pipe(
+            Protocol.on(session),
+            BrowserClock.timeoutOption(1000)
+          )
+          assert.isTrue(Option.isSome(history), "browser-handled commands still answer")
+          const historyMillis = performance.now() - historyAt
+          const evaluation = yield* Runtime.evaluate({ expression: "42" }).pipe(
+            Protocol.on(session),
+            BrowserClock.timeoutOption(200)
+          )
+          assert.isTrue(Option.isNone(evaluation), "the dialog was not dismissed by the release attempt")
+          const closeAt = performance.now()
+          yield* Target.closeTarget({ targetId }).pipe(Protocol.on(browser.observer.browser))
+          yield* until(browser.targets, (infos) => !infos.some((info) => info.targetId === targetId))
+          yield* Effect.logInfo({ baseline, blocked, historyMillis, closeMillis: performance.now() - closeAt })
+        }), 10_000)
+
       it.effect(
         "carries a pre-handoff dialog only as last-known and scope-cleans an unknown page",
         () =>
