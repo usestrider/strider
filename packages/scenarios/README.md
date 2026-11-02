@@ -11,7 +11,7 @@ navigation and assertions; operation timings help identify which individual acti
 
 Project PROJ-2's attached document DOC-2 maps the performance investigations by shared mechanism. The
 [investigation workflow](BENCHMARKS.md#investigating-an-area) covers benchmark coverage, architecture comparisons,
-experiments and the human review required for public API or contract changes. Findings and progress stay on Rookery.
+experiments and the human review required for public API or contract changes. Findings and progress stay on Clutch.
 
 A private workspace package, never published. It runs the same scenarios with Strider
 and with Playwright against the same stock Chromium, the one the integration environment pins, and writes what it
