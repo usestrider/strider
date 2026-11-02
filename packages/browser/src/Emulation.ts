@@ -6,6 +6,13 @@
  * untouched. Removing an override restores the previous value when it's known and your access allows, and a page's
  * overrides win over its context's.
  *
+ * On Chromium, releasing the last viewport override clears emulation and waits for the original renderer dimensions
+ * within a fresh `Deadline.DefaultBudget` (30 seconds by default). It measures in an isolated world; page-defined
+ * globals cannot supply the dimensions. A missing baseline does not prevent applying a viewport. If the original
+ * dimensions are unknown, a restore fails, or the wait reaches its deadline, cleanup logs a warning and continues
+ * without failing the scope. An ended session is quiet. A native window resize or navigation during the override
+ * can prevent verification of the original dimensions.
+ *
  * @stability unstable
  * @since 0.1.0
  */

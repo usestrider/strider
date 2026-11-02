@@ -50,8 +50,8 @@ export interface TargetEntry {
   intercepts: string
   readonly scripts: Map<string, string>
   ended: boolean
-  /** Original renderer dimensions, retained until viewport restoration completes. */
-  viewport?: { readonly width: number; readonly height: number } | undefined
+  /** Original renderer dimensions, retained until restoration completes; null means the original is unknown. */
+  viewport?: { readonly width: number; readonly height: number } | null | undefined
   viewportLock?: Semaphore.Semaphore | undefined
 }
 

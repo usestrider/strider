@@ -45,12 +45,32 @@ const network = (
   ], { discard: true })
 }
 
-const dimensions = Effect.fnUntraced(function*(session: ProtocolClient.Session) {
-  const { result } = yield* Runtime.evaluate({ expression: "[innerWidth, innerHeight]", returnByValue: true }).pipe(
-    Protocol.on(session)
-  )
+const dimensions = Effect.fnUntraced(function*(target: TargetEntry) {
+  const on = Protocol.on(target.session)
+  const { executionContextId } = yield* Page.createIsolatedWorld({
+    frameId: (target.frame?.frameId ?? target.targetId) as Page.FrameId,
+    worldName: "__strider_viewport"
+  }).pipe(on)
+  if (!Number.isFinite(executionContextId)) {
+    return yield* Effect.fail(
+      new Protocol.ProtocolError({
+        reason: new Protocol.Decode({
+          method: "Page.createIsolatedWorld",
+          issue: "Expected a viewport measurement context"
+        })
+      })
+    )
+  }
+  const { result } = yield* Runtime.evaluate({
+    expression: "[innerWidth, innerHeight]",
+    contextId: executionContextId,
+    returnByValue: true
+  }).pipe(on)
   const value = result.value
-  if (!Array.isArray(value) || typeof value[0] !== "number" || typeof value[1] !== "number") {
+  if (
+    !Array.isArray(value) || typeof value[0] !== "number" || typeof value[1] !== "number" ||
+    !Number.isFinite(value[0]) || !Number.isFinite(value[1]) || value[0] <= 0 || value[1] <= 0
+  ) {
     return yield* Effect.fail(
       new Protocol.ProtocolError({
         reason: new Protocol.Decode({ method: "Runtime.evaluate", issue: "Expected viewport dimensions" })
@@ -72,7 +92,11 @@ const viewport = (
     )
     if (override?._tag === "Viewport") {
       return Effect.gen(function*() {
-        target.viewport ??= yield* dimensions(target.session)
+        if (target.viewport === undefined) {
+          target.viewport = yield* dimensions(target).pipe(
+            Effect.match({ onFailure: () => null, onSuccess: (value) => value })
+          )
+        }
         yield* Emulation.setDeviceMetricsOverride({
           width: override.width,
           height: override.height,
@@ -89,10 +113,16 @@ const viewport = (
       yield* Emulation.clearDeviceMetricsOverride().pipe(Protocol.on(target.session))
       if (Option.isSome(operation)) operation.value.markConfirmed()
       const original = target.viewport
-      if (original === undefined) return
+      if (original === undefined || original === null) {
+        return yield* Effect.logWarning(
+          "CDP viewport restoration could not be verified: original dimensions are unknown"
+        ).pipe(
+          Effect.annotateLogs("browser.page.id", target.page?.id)
+        )
+      }
       yield* Stream.concat(Stream.succeed(undefined), resized).pipe(
         Stream.mapEffect(() =>
-          dimensions(target.session).pipe(Effect.tap((value) =>
+          dimensions(target).pipe(Effect.tap((value) =>
             Effect.sync(() => {
               if (Option.isSome(operation)) operation.value.observe(value)
             })

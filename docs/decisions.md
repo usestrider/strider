@@ -429,10 +429,24 @@ commit supersedes it after outstanding correlation finishes. No public operation
 CDP viewport release explicitly waits for the original renderer dimensions after clearing emulation (ROOK-145).
 Chromium can acknowledge clearing device metrics before its native-view resize reaches the renderer: immediate
 release reproduced a successful clear followed by the overridden width. A clear reply alone cannot implement the
-restoration contract. Each target records its original width and height before its first viewport override; nested
+restoration contract. Each target attempts to record its original width and height before its first viewport override; nested
 and replacement registrations retain those dimensions until the last override has been cleared and restored.
 While an override remains, release reapplies the current effective override. Per-target serialization recomputes
 that effective override when the command runs, including when registrations are released out of order.
+
+Measure in the named `__strider_viewport` isolated world for the target's main frame (or its own frame for an iframe),
+passing the returned execution context id explicitly to `Runtime.evaluate`. Create or retrieve that world for each
+measurement rather than caching an execution context across navigation. Main-world lexical bindings and numeric
+or nonnumeric shadows must not supply the baseline. Missing, rejected or nonfinite measurements do not prevent
+sending the viewport command. Record an explicit unknown baseline on the first unsuccessful attempt; do not
+recapture after emulation has started, even across nested/replaced overrides or an unverifiable clear. Final release
+still sends clear, then warns if the original size is unknown, without claiming verification. A clear that fails
+because the session ended stays quiet. A successfully verified clear releases the saved known baseline.
+
+A native window resize during emulation can make the saved original size stale. Navigation can reject a measurement
+or replace a renderer without the resize event the wait needs. Such cases warn or reach the cleanup deadline;
+there is no retry or promise to track external window resizing, and an unknown baseline persists for the target's
+remaining lifetime. This policy preserves viewport application when verification is unavailable.
 
 Subscribe to resize events before clearing, measure immediately after its reply, and remeasure on resize until the
 original dimensions return. There is no sleep, polling timer or command retry. Cleanup runs detached from the
