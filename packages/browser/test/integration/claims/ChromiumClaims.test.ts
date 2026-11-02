@@ -446,15 +446,17 @@ describe("Chromium claims (ROOK-95)", () => {
                 assert.strictEqual(Option.getOrThrow(Exit.findErrorOption(short))._tag, "Timeout")
                 assert.isTrue((yield* browser.targets).some((info) => info.targetId === target.targetId))
                 const pending = yield* api.Browser.reclaim(claim).pipe(Effect.forkChild)
-              yield* BrowserClock.sleep(100)
-              yield* Fiber.interrupt(pending)
-              assert.isTrue((yield* browser.targets).some((info) => info.targetId === target.targetId))
-              const started = performance.now()
+                yield* BrowserClock.sleep(100)
+                yield* Fiber.interrupt(pending)
+              assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(pending)))
+                assert.isTrue((yield* browser.targets).some((info) => info.targetId === target.targetId))
+                const started = performance.now()
                 const { page, found } = yield* api.Browser.reclaim(claim).pipe(Deadline.within("3 seconds"))
                 assert.deepStrictEqual(Schema.decodeUnknownSync(api.Browser.Found)(found), {
                   _tag: "Unknown"
                 })
-                assert.isBelow(performance.now() - started, 2500)
+                assert.isAtLeast(performance.now() - started, 900)
+              assert.isBelow(performance.now() - started, 2500)
                 const actionAt = performance.now()
                 const action = yield* page.evaluateInMainWorld(() => 42).pipe(
                   Deadline.within("150 millis"),
@@ -577,8 +579,7 @@ describe("Chromium claims (ROOK-95)", () => {
             yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
             const services = yield* Layer.buildWithScope(browser.connect, old)
             const claim = yield* Effect.gen(function*() {
-              const connected = yield* Browser.Browser
-              const context = yield* connected.defaultContext.control
+              const context = yield* api.UserContext.create({ reclaimable: true, eventLog: 0, dialogs: "leaveOpen" })
               const page = yield* context.newPage
               yield* page.goto(`${origin}/before-handoff-dialog`)
               const claim = yield* api.Page.claim(page)
@@ -591,14 +592,17 @@ describe("Chromium claims (ROOK-95)", () => {
             }).pipe(Scope.provide(old), Effect.provide(services))
             const snapshots = yield* handoff(old)
             const lastKnown = snapshots.find((entry) => entry.claim === claim)!
-          assert.isDefined(lastKnown)
+            assert.isDefined(lastKnown)
             const before = (yield* browser.targets).find((info) => info.url === `${origin}/before-handoff-dialog`)!
             yield* Effect.scoped(Effect.gen(function*() {
-              const restoredSnapshot = Schema.decodeUnknownSync(api.Browser.LastKnown)(JSON.parse(JSON.stringify(Schema.encodeSync(api.Browser.LastKnown)(lastKnown))))
-            const recovered = yield* api.Browser.reclaim(claim, { lastKnown: restoredSnapshot })
-            assert.deepStrictEqual(recovered.found, { _tag: "Unknown" })
+              const restoredSnapshot = Schema.decodeUnknownSync(api.Browser.LastKnown)(
+                JSON.parse(JSON.stringify(Schema.encodeSync(api.Browser.LastKnown)(lastKnown)))
+              )
+              const recovered = yield* api.Browser.reclaim(claim, { lastKnown: restoredSnapshot })
+              assert.deepStrictEqual(recovered.found, { _tag: "Unknown" })
               assert.deepStrictEqual(recovered.lastKnown, {
                 _tag: "LastKnown",
+                claim,
                 dialogs: [{ kind: "alert", message: "before handoff" }]
               })
             })).pipe(Effect.provide(browser.connect))

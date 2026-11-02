@@ -4,9 +4,10 @@ import * as Schema from "effect/Schema"
 
 describe("claim reports", () => {
   it("discriminates unknown state from observed dialog state across Schema round trips", () => {
-    const roundTrip = (value: Browser.Found) => Schema.decodeUnknownSync(Browser.Found)(
-      JSON.parse(JSON.stringify(Schema.encodeSync(Browser.Found)(value)))
-    )
+    const roundTrip = (value: Browser.Found) =>
+      Schema.decodeUnknownSync(Browser.Found)(
+        JSON.parse(JSON.stringify(Schema.encodeSync(Browser.Found)(value)))
+      )
     assert.deepStrictEqual(roundTrip({ _tag: "Unknown" }), { _tag: "Unknown" })
     const found = roundTrip({ _tag: "Observed", dialogs: [{ kind: "alert", message: "hello" }] })
     assert.strictEqual(found._tag, "Observed")
