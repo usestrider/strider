@@ -8,6 +8,7 @@ import { assert, describe, it, layer } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -19,6 +20,7 @@ import * as Sink from "effect/Sink"
 import * as Socket from "effect/socket/Socket"
 import * as Stream from "effect/Stream"
 import { readFile } from "node:fs/promises"
+import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as ChromiumLauncher from "../src/internal/chromiumLauncher.ts"
 import * as FirefoxLauncher from "../src/internal/firefoxLauncher.ts"
 import * as Launch from "../src/internal/launch.ts"
@@ -237,12 +239,36 @@ describe("WebKit launcher", () => {
         assert.strictEqual(writes, 0, "must not send StartAutomationSession to another browser's inspector")
       }))
 
+    interface OwnershipProgress {
+      readonly failed: Deferred.Deferred<void>
+      readonly connectionClosed: Deferred.Deferred<void>
+      readonly events: ReadonlyArray<string>
+      readonly reads: () => number
+    }
+
     const ownershipAttempt = Effect.fnUntraced(
-      function*(mode: "owned" | "replaced" | "unreadable" | "foreign" | "collision" | "unreadable-after") {
+      function*(
+        mode:
+          | "owned"
+          | "replaced"
+          | "unreadable"
+          | "foreign"
+          | "collision"
+          | "unreadable-after"
+          | "unreadable-collision",
+        around: (
+          start: Effect.Effect<Launch.LaunchError, WebKitAutomation.Group>,
+          progress: OwnershipProgress
+        ) => Effect.Effect<Launch.LaunchError, WebKitAutomation.Group> = (start) => start
+      ) {
         const fs = yield* FileSystem.FileSystem
         const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-test-" })
         const executablePath = `${directory}/MiniBrowser`
         yield* fs.writeFileString(executablePath, "")
+        const failed = yield* Deferred.make<void>()
+        const connectionClosed = yield* Deferred.make<void>()
+        const events: Array<string> = []
+        let reads = 0
         let port = 0
         let inode = "12345"
         let spawned = 0
@@ -262,8 +288,8 @@ describe("WebKit launcher", () => {
               })
             )
             inspected = yield* Deferred.make<void>()
-            const stderr = mode === "collision"
-              ? Stream.fromEffect(Deferred.await(inspected)).pipe(
+            const stderr = mode === "collision" || mode === "unreadable-collision"
+              ? Stream.fromEffect(Deferred.await(mode === "collision" ? inspected : failed)).pipe(
                 Stream.map(() =>
                   new TextEncoder().encode(`Failed to start remote inspector server on 127.0.0.1:${port}\n`)
                 ),
@@ -289,21 +315,29 @@ describe("WebKit launcher", () => {
           ...fs,
           readFileString: (path, options) =>
             path === "/proc/9000001/net/tcp"
-              ? (mode === "unreadable" || (mode === "unreadable-after" && connected > 0)) ?
-                Effect.fail(
-                  PlatformError.systemError({
+              ? Effect.suspend(() => {
+                events.push("read")
+                reads++
+                if (
+                  mode === "unreadable" || mode === "unreadable-collision" ||
+                  (mode === "unreadable-after" && connected > 0)
+                ) {
+                  events.push("access-failed")
+                  Deferred.doneUnsafe(failed, Effect.void)
+                  return Effect.fail(PlatformError.systemError({
                     _tag: "PermissionDenied",
                     module: "FileSystem",
                     method: "readFileString",
                     pathOrDescriptor: path
-                  })
-                ) :
-                Effect.sync(() => {
-                  Deferred.doneUnsafe(inspected, Effect.void)
-                  return `sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n 0: 0100007F:${
+                  }))
+                }
+                Deferred.doneUnsafe(inspected, Effect.void)
+                return Effect.succeed(
+                  `sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n 0: 0100007F:${
                     port.toString(16).toUpperCase().padStart(4, "0")
                   } 00000000:0000 0A 0:0 00:0 0 1000 0 ${inode}\n`
-                })
+                )
+              })
               : fs.readFileString(path, options),
           readDirectory: (path, options) =>
             path === "/proc/9000001/fd" ? Effect.succeed(["7"]) : fs.readDirectory(path, options),
@@ -315,12 +349,15 @@ describe("WebKit launcher", () => {
         const connector: SocketConnector.SocketConnector = {
           connect: Effect.fnUntraced(function*() {
             connected++
+            events.push("connect")
             if (mode === "replaced") inode = "54321"
             let isClosed = false
             const close = Effect.sync(() => {
               if (!isClosed) {
                 isClosed = true
                 closed++
+                events.push("closed")
+                Deferred.doneUnsafe(connectionClosed, Effect.void)
               }
             })
             yield* Effect.addFinalizer(() => close)
@@ -336,7 +373,7 @@ describe("WebKit launcher", () => {
             return { pull: Effect.never, upgrade: () => Effect.void, write, writeAll: write, close }
           })
         }
-        const error = yield* WebKitAutomation.start({ executablePath, timeout: "50 millis" }).pipe(onPlatform("linux"))
+        const start = WebKitAutomation.start({ executablePath, timeout: "50 millis" }).pipe(onPlatform("linux"))
           .pipe(
             Effect.scoped,
             Effect.provideService(FileSystem.FileSystem, procfs),
@@ -344,6 +381,7 @@ describe("WebKit launcher", () => {
             Effect.provideService(SocketConnector.SocketConnector, connector),
             Effect.flip
           )
+        const error = yield* around(start, { failed, connectionClosed, events, reads: () => reads })
         return { error, spawned, stopped, connected, closed, writes }
       }
     )
@@ -389,6 +427,71 @@ describe("WebKit launcher", () => {
         assert(result.error.reason._tag === "ConnectionFailed")
         assert.include(result.error.reason.hint, "Cannot read Linux procfs")
       }))
+
+    for (const mode of ["unreadable", "unreadable-after", "unreadable-collision"] as const) {
+      it.effect(`waits on the original deadline after ${mode} procfs, with cleanup before waiting`, () =>
+        Effect.gen(function*() {
+          const expire = yield* Deferred.make<void>()
+          const armed = yield* Deferred.make<void>()
+          const sleeps: Array<number> = []
+          const descriptor = Object.getOwnPropertyDescriptor(BrowserClock.live, "sleep")!
+          const result = yield* Effect.acquireUseRelease(
+            Effect.sync(() =>
+              Object.defineProperty(BrowserClock.live, "sleep", {
+                ...descriptor,
+                value: (millis: number) => {
+                  sleeps.push(millis)
+                  Deferred.doneUnsafe(armed, Effect.void)
+                  return Deferred.await(expire)
+                }
+              })
+            ),
+            () =>
+              ownershipAttempt(
+                mode,
+                Effect.fnUntraced(
+                  function*(
+                    start: Effect.Effect<Launch.LaunchError, WebKitAutomation.Group>,
+                    progress: OwnershipProgress
+                  ) {
+                    const fiber = yield* Effect.forkChild(start)
+                    yield* Deferred.await(progress.failed)
+                    if (mode === "unreadable-after") yield* Deferred.await(progress.connectionClosed)
+                    yield* Deferred.await(armed)
+                    yield* Effect.yieldNow
+                    assert.isUndefined(fiber.pollUnsafe(), "the original deadline is still pending")
+                    assert.strictEqual(sleeps.length, 1, "no timer or budget is restarted after the error")
+                    assert.isAbove(sleeps[0]!, 0)
+                    assert.isAtMost(sleeps[0]!, 50, "only the configured budget's remaining time is used")
+                    assert.strictEqual(progress.reads(), mode === "unreadable-after" ? 2 : 1)
+                    assert.deepStrictEqual(
+                      progress.events,
+                      mode !== "unreadable-after"
+                        ? ["read", "access-failed"]
+                        : ["read", "connect", "read", "access-failed", "closed"]
+                    )
+                    yield* Deferred.succeed(expire, undefined)
+                    return yield* Fiber.join(fiber)
+                  }
+                )
+              ),
+            () =>
+              Effect.sync(() => {
+                Object.defineProperty(BrowserClock.live, "sleep", descriptor)
+              })
+          )
+          assert(result.error.reason._tag === "ConnectionFailed")
+          assert.strictEqual(result.error.reason.stage, "refused")
+          assert.include(
+            result.error.reason.hint,
+            "PermissionDenied: FileSystem.readFileString (/proc/9000001/net/tcp)"
+          )
+          assert.include(result.error.reason.hint, "WebKit.layerAttach")
+          assert.strictEqual(result.spawned, 1)
+          assert.strictEqual(result.stopped, 1)
+          assert.strictEqual(result.writes, 0)
+        }))
+    }
 
     it.effect("refuses a listener not held by the spawned PID without looking for descendants", () =>
       Effect.gen(function*() {
@@ -739,6 +842,7 @@ describe("WebKit launcher", () => {
         assert(result.exit._tag === "Failure")
         const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
         assert(error.reason._tag === "ConnectionFailed")
+        assert.strictEqual(error.reason.stage, "handshake")
         assert.include(error.reason.hint, "No child exit was observed")
         assert.deepStrictEqual(result.connected, [])
         assert.deepStrictEqual(result.stopped, [0])
