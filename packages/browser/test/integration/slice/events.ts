@@ -350,7 +350,10 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage({ dialogs: "leaveOpen" })
             yield* page.goto(url)
+            const clicked = Date.now()
             const error = yield* page.getByText("Ask").click().pipe(Effect.flip)
+            // The page can't confirm a release while its dialog is open, so the click doesn't wait to try
+            assert.isBelow(Date.now() - clicked, 1000)
             assert(Locator.isLocatorError(error), String(error))
             assert(error.reason._tag === "PromptBlocking", String(error))
             assert.strictEqual(error.reason.kind, (yield* supports("prompts.kind")) ? "confirm" : "unknown")

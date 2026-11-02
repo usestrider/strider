@@ -139,6 +139,22 @@ that need the ids, and can't see which command a reply answers.
 
 ## The browser model (L1)
 
+**A plain click's commands go out as one step, and only their replies overlap.** The move's reply waits a rendering
+frame the click has no use for. So `sendOrdered` writes the move, press and release to the transport in order, in a
+step interruption doesn't split, then waits for all three replies together. A deadline or interruption stops only
+the waiting, so it can't leave the button pressed, and no cleanup has to run: a failed click needs no release, and the
+failure is reported on time. A transport send that never finishes holds the click until it does, which the built-in
+transports don't do. CDP uses this only for one unheld move/press/release click at the same point, on a page without
+child frames and before the page has enabled HTML drag interception; late drag announcements still need sequential
+cancellation. Frame routing stays sequential after an acknowledged cross-site click failed to reach its target in a
+full integration run (ROOK-123), and checking the whole page also covers coordinate clicks, whose target frame is
+unknown before dispatch. Playwright's `mouse.click` also sends these commands without waiting for each reply.
+Rejected: starting the sends concurrently, which can reorder them when a transport send suspends; awaiting every
+reply before the next send, which adds the measured wait; letting interruption stop the sends and releasing the button
+afterwards, which sends a stray `mouseup` in the usual case where all three were already written, overruns the deadline,
+and on Firefox, whose release repeats the click's move, can leave an off-viewport click's page blocked for good; and
+applying this to drags or modifier transitions without establishing their semantics.
+
 **The fold is the model's one writer, and a caller's setting is a command in its stream.** Every write goes through
 the fold: entity state, and the caller's settings (handlers, routes, a context's options, a page's owner, grants, a
 `beforeunload` stay). The adapter's facts and the caller's commands are one inbox, applied one at a time in arrival
@@ -266,6 +282,28 @@ world and document. Removing a script affects future documents only, and nothing
 **Every frame is resolved by its own document's engine, same-origin frames too.** Reaching into a same-origin iframe
 from the parent's engine works only for same-origin frames, and a cross-site frame needs the per-document route
 anyway. One path for both keeps locating independent of what a page's script can reach.
+
+**Stability measures from the current rectangle across the requested rendering updates.** The first rectangle is
+sampled immediately; the following samples still require native rendering. Checks run again after acquiring the
+input permit, so a queued action never uses the preliminary check's stale geometry or element.
+
+- **Why.** Waiting for rendering before taking the baseline adds one frame to each of the two checks without
+  adding a rendering update between samples. A changed rectangle or replacement element still resets stability.
+- **Rejected:** removing the rendering wait entirely when stability is disabled, since a browser may drop input
+  before rendering; and skipping the check under the input permit, since another action may change the target
+  while this one waits for the permit.
+
+**An unqueued click may reuse stability within the same rendering frame.** Its preliminary check returns a
+single-use token. Under the input permit, the engine resolves the locator again and checks every condition; only
+the stability wait can be reused, and only for the same element, rectangle and requested frame count. The next
+rendering update or another action attempt invalidates the token. The engine retains at most one such record.
+
+- **Why.** Repeating the observation window for a target just observed to be stable adds two frames to an ordinary
+  click. Immediate revalidation retains that observation while checking the conditions that could have changed.
+  A queued click always takes new samples; an expired token, moved target or replacement also takes new samples.
+- **Rejected:** dropping the second check, sharing evidence across rendering updates, or treating matching
+  rectangles on different elements as the same observation. Each can dispatch input using stale readiness.
+  Moving the entire wait under the input permit would also block other actions while a target isn't ready.
 
 **A value means the same on every backend.** Where backends measure differently, Strider measures once itself. HAR
 timings are an example. Chromium, Firefox and WebKit each time a response on their own base, so `wait` and `receive`

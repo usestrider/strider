@@ -58,6 +58,24 @@ export const recover = <E>(
 
 const bits: Readonly<Record<Mouse.Button, number>> = { left: 1, right: 2, middle: 4 }
 
+/** One move, press and release at the same point, with no other buttons held or modifier transitions. */
+export const singleClick = (events: ReadonlyArray<Adapter.InputEvent>) => {
+  const [move, down, up] = events
+  if (
+    events.length !== 3 || move?._tag !== "Mouse" || down?._tag !== "Mouse" || up?._tag !== "Mouse" ||
+    move.type !== "move" || move.buttons !== 0 || move.button !== "none" || move.clickCount !== 0 ||
+    down.type !== "down" || (down.button !== "left" && down.button !== "middle" && down.button !== "right") ||
+    down.buttons !== bits[down.button] || down.clickCount !== 1 ||
+    up.type !== "up" || up.button !== down.button || up.buttons !== 0 || up.clickCount !== 1 ||
+    move.x !== down.x || move.y !== down.y || up.x !== down.x || up.y !== down.y ||
+    [move, up].some((event) =>
+      event.modifiers.alt !== down.modifiers.alt || event.modifiers.control !== down.modifiers.control ||
+      event.modifiers.meta !== down.modifiers.meta || event.modifiers.shift !== down.modifiers.shift
+    )
+  ) return undefined
+  return [move, down, up] as const
+}
+
 /** The modifier flags of what is held, with `extra`. */
 export const modifiers = (
   state: State,
