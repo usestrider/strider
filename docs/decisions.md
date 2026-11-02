@@ -328,6 +328,30 @@ answers is canceled.
   Chromium, for the cost above; and canceling challenges in contexts the library didn't create, where a person's
   browser shows its prompt.
 
+**Chromium sent headers wait for attribution, not merely arrival.** CDP reuses a request id across redirects,
+allows ExtraInfo before the corresponding main event, and does not emit ExtraInfo for every hop. A main request
+followed by request ExtraInfo therefore cannot tell us whether those headers belong to that hop or to its
+unannounced successor. Early headers wait in `ahead`; outstanding expectations in `owed` retain the hop and
+phase, so a late report satisfies the earliest expectation for its phase without changing another hop's headers.
+The redirect flag determines whether the preceding hop expects both phases; for a final network response,
+`hasExtraInfo: true` registers both expectations and holds the response for its headers. A final response from
+a cache, service worker or route does not wait even if that flag is true, and uses the request event's headers
+when sent headers have not already been reported. A failure assigns only already-queued headers to the last hop.
+Correct attribution takes precedence over prompt publication for slow or outstanding Chromium requests
+(ROOK-104).
+
+The wait uses the operation's deadline. A hop's end, including failure or cancellation, or its page's removal
+settles it promptly with the available sent headers, otherwise the request snapshot's headers. Page removal
+need not produce a network terminal event, so it releases header waiters without inventing one. Code that awaits
+`headersSent` before allowing the same response to proceed waits until its deadline; callers can instead let
+the response proceed first or use the immediate snapshot with its possible omissions.
+
+Rejected: eager publication followed by correction, because a caller can already have received another hop's
+Cookie header; matching main-event headers or connection timestamps, because CDP supplies no reliable per-hop
+match there before the response; and returning a provisional snapshot as definitive before termination, because
+it can omit the network additions the caller requested. An earlier protocol hop identifier or presence flag
+could remove the wait; current CDP does not supply one.
+
 ## The public API (L2)
 
 **A decision that doesn't apply is a type error.** A dialog handler gets `Dialog.Pending`, whose shapes carry only

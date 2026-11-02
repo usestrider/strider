@@ -345,17 +345,24 @@ export const toHttpClientRequest = (request: NetworkRequest): HttpClientRequest.
   HttpClientRequest.make(request.method)(request.url, { headers: request.headers })
 
 /**
- * Gives the headers a request was sent with, as the network sent them, once the browser has reported them.
+ * Gives a request's sent headers, waiting until the browser can attribute them to that request.
  *
  * **Details**
  *
  * - A request's `headers` are the ones its event gives, which on Chromium and WebKit leave out what the network
- *   adds, such as `Cookie`. This waits until the browser reports the rest: on Chromium for the `ExtraInfo` event
- *   its response promises, on WebKit for the response. On Firefox it returns at once.
+ *   adds, such as `Cookie`. On Chromium this can wait for response or redirect information even after the extra
+ *   headers arrive, so they cannot be confused with another redirect hop's headers. On WebKit it waits for the
+ *   response. On Firefox it returns at once. The operation's deadline bounds the wait.
+ * - If the request finishes, fails, is canceled or its page goes away before its sent headers are known, this
+ *   returns the available sent headers, or the request event's headers if none were reported. Those can omit
+ *   network additions such as `Cookie`.
  * - `target` is the page or context the request was seen on.
  * - Strider keeps the last 1000 redirect hops; for an older request, this gives its event's headers.
  *
  * **Gotchas**
+ *
+ * On Chromium, awaiting this before letting the same request's response proceed waits until the deadline. Let
+ * the response proceed first, or read `request.headers` immediately if its possible omissions are acceptable.
  *
  * WebKit never reports `Cookie` among the headers sent (`network.headersSent` is partial there).
  *

@@ -335,6 +335,11 @@ export const make = Effect.fnUntraced(function*(options: {
       ...state,
       pages: state.pages.filter((each) => each !== page)
     }))
+    // A removed page can leave requests without terminal network events. Settle their header waits with
+    // what is already known; do not invent a network failure or attribute still-ambiguous ExtraInfo.
+    for (const hop of hops.values()) {
+      if (Option.isSome(hop.page) && hop.page.value === page) Deferred.doneUnsafe(hop.sentKnown, Effect.void)
+    }
     yield* Deferred.succeed(page.closed, reason)
     for (const document of Array.from(documents.values())) {
       if (document.navigable === page.id) yield* endDocument(document.id, reason)
