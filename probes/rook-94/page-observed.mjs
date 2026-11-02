@@ -205,6 +205,8 @@ if (process.argv[2] === "client") {
             const users = await c.send("browser.getUserContexts")
             log("new-attempt", {
               ...row,
+              oldContext: context,
+              tree: tree.result.contexts.map((x) => ({ context: x.context, userContext: x.userContext, url: x.url })),
               oldContextListed: tree.result.contexts.some((x) => x.context === context),
               oldUserContextListed: users.result.userContexts.some((x) => x.userContext === user.userContext)
             })
