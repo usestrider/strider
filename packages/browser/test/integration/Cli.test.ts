@@ -19,6 +19,7 @@ import * as Layer from "effect/Layer"
 import * as Scope from "effect/Scope"
 import { execFile, spawn } from "node:child_process"
 import * as fs from "node:fs"
+import * as http from "node:http"
 import * as os from "node:os"
 import * as path from "node:path"
 import * as Daemon from "../../src/internal/cli/daemon.ts"
@@ -903,6 +904,22 @@ describe("strider", () => {
         }).pipe(Effect.provide(NodeServices.layer))
       ), timeout)
   }
+
+  // ROOK-4: an endpoint that is neither backend fails the start, with the reason
+  it.live("refuses an HTTP endpoint that is neither Chromium nor stock WebKit", () =>
+    Effect.gen(function*() {
+      const server = http.createServer((_, response) => {
+        response.writeHead(404)
+        response.end("<title>WebKitInspectorHTTPServer</title>")
+      })
+      yield* Effect.callback<void>((resume) => void server.listen(0, "127.0.0.1", () => resume(Effect.void)))
+      const { port } = server.address() as { readonly port: number }
+      const started = yield* strider(environment(), "start", "--name", "remote", "--attach", `http://127.0.0.1:${port}`)
+      server.close()
+      assert.notStrictEqual(started.code, 0)
+      assert.include(started.err, "Cannot detect attachment backend")
+      assert.include(started.err, "WebKitInspectorHTTPServer Server token")
+    }).pipe(Effect.provide(NodeServices.layer)), timeout)
 
   // ROOK-4: an inspector's tab, taken with control, stays listed and works until it is released
   it.live("controls and releases a tab of an attached stock WebKit", () =>
