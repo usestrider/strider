@@ -165,7 +165,7 @@ const assertOwned = Effect.fnUntraced(
     yield* Effect.scoped(
       Effect.gen(function*() {
         const { page, found } = yield* api.Browser.reclaim(claim)
-        assert.deepStrictEqual(Schema.decodeUnknownSync(api.Browser.Found)(found) as unknown, {
+        assert.deepStrictEqual(Schema.decodeUnknownSync(api.Browser.Found)(found), {
           _tag: "Observed",
           dialogs: []
         })
@@ -386,11 +386,7 @@ describe("Chromium claims (ROOK-95)", () => {
             yield* Effect.scoped(
               Effect.gen(function*() {
                 const recovered = yield* api.UserContext.reclaim(saved.contextClaim, { emulation: { locale: "fr-FR" } })
-                assert.isTrue("context" in recovered)
-                const { context, found } = recovered as unknown as {
-                  context: import("../../../src/UserContext.ts").UserContext
-                  found: { pages: ReadonlyArray<{ found: unknown }> }
-                }
+                const { context, found } = recovered
                 assert.deepStrictEqual(found.pages.map((page) => page.found), [{ _tag: "Observed", dialogs: [] }])
                 const { page } = yield* api.Browser.reclaim(saved.pageClaim)
                 assert.strictEqual(page.context.id, context.id)
@@ -449,9 +445,13 @@ describe("Chromium claims (ROOK-95)", () => {
                 assert.isTrue(Exit.isFailure(short))
                 assert.strictEqual(Option.getOrThrow(Exit.findErrorOption(short))._tag, "Timeout")
                 assert.isTrue((yield* browser.targets).some((info) => info.targetId === target.targetId))
-                const started = performance.now()
+                const pending = yield* api.Browser.reclaim(claim).pipe(Effect.forkChild)
+              yield* BrowserClock.sleep(100)
+              yield* Fiber.interrupt(pending)
+              assert.isTrue((yield* browser.targets).some((info) => info.targetId === target.targetId))
+              const started = performance.now()
                 const { page, found } = yield* api.Browser.reclaim(claim).pipe(Deadline.within("3 seconds"))
-                assert.deepStrictEqual(Schema.decodeUnknownSync(api.Browser.Found)(found) as unknown, {
+                assert.deepStrictEqual(Schema.decodeUnknownSync(api.Browser.Found)(found), {
                   _tag: "Unknown"
                 })
                 assert.isBelow(performance.now() - started, 2500)
@@ -590,19 +590,14 @@ describe("Chromium claims (ROOK-95)", () => {
               return claim
             }).pipe(Scope.provide(old), Effect.provide(services))
             const snapshots = yield* handoff(old)
-            const lastKnown = (snapshots as unknown as ReadonlyArray<
-              { claim: string; dialogs: ReadonlyArray<{ kind: string; message: string }> }
-            >).find((entry) => entry.claim === claim)
-            assert.isDefined(lastKnown)
+            const lastKnown = snapshots.find((entry) => entry.claim === claim)!
+          assert.isDefined(lastKnown)
             const before = (yield* browser.targets).find((info) => info.url === `${origin}/before-handoff-dialog`)!
             yield* Effect.scoped(Effect.gen(function*() {
-              const reclaim = api.Browser.reclaim as (
-                claim: api.Page.Claim,
-                options: { lastKnown: unknown }
-              ) => ReturnType<typeof api.Browser.reclaim>
-              const recovered = yield* reclaim(claim, { lastKnown })
-              assert.deepStrictEqual(recovered.found as unknown, { _tag: "Unknown" })
-              assert.deepStrictEqual((recovered as unknown as { lastKnown: unknown }).lastKnown, {
+              const restoredSnapshot = Schema.decodeUnknownSync(api.Browser.LastKnown)(JSON.parse(JSON.stringify(Schema.encodeSync(api.Browser.LastKnown)(lastKnown))))
+            const recovered = yield* api.Browser.reclaim(claim, { lastKnown: restoredSnapshot })
+            assert.deepStrictEqual(recovered.found, { _tag: "Unknown" })
+              assert.deepStrictEqual(recovered.lastKnown, {
                 _tag: "LastKnown",
                 dialogs: [{ kind: "alert", message: "before handoff" }]
               })
