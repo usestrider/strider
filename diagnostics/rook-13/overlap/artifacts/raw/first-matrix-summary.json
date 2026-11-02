@@ -1,0 +1,1126 @@
+{
+  "counts": [
+    {
+      "order": "capture-navigation",
+      "resize": false,
+      "area": "clip",
+      "status": "timeout",
+      "count": 1
+    },
+    {
+      "order": "capture-navigation",
+      "resize": false,
+      "area": "viewport",
+      "status": "timeout",
+      "count": 1
+    },
+    {
+      "order": "capture-navigation",
+      "resize": true,
+      "area": "clip",
+      "status": "timeout",
+      "count": 1
+    },
+    {
+      "order": "capture-navigation",
+      "resize": true,
+      "area": "viewport",
+      "status": "timeout",
+      "count": 1
+    },
+    {
+      "order": "navigation-capture",
+      "resize": false,
+      "area": "clip",
+      "status": "timeout",
+      "count": 1
+    },
+    {
+      "order": "navigation-capture",
+      "resize": false,
+      "area": "viewport",
+      "status": "timeout",
+      "count": 1
+    },
+    {
+      "order": "navigation-capture",
+      "resize": true,
+      "area": "clip",
+      "status": "timeout",
+      "count": 1
+    },
+    {
+      "order": "navigation-capture",
+      "resize": true,
+      "area": "viewport",
+      "status": "timeout",
+      "count": 1
+    },
+    {
+      "order": "no-navigation",
+      "resize": false,
+      "area": "clip",
+      "status": "success",
+      "count": 1
+    },
+    {
+      "order": "no-navigation",
+      "resize": false,
+      "area": "viewport",
+      "status": "success",
+      "count": 1
+    },
+    {
+      "order": "no-navigation",
+      "resize": true,
+      "area": "clip",
+      "status": "success",
+      "count": 1
+    },
+    {
+      "order": "no-navigation",
+      "resize": true,
+      "area": "viewport",
+      "status": "success",
+      "count": 1
+    }
+  ],
+  "setupErrors": [],
+  "results": [
+    {
+      "condition": {
+        "order": "capture-navigation",
+        "resize": true,
+        "area": "clip",
+        "round": 1
+      },
+      "outcome": {
+        "status": "timeout",
+        "elapsedMs": 30000.299096000002
+      },
+      "captureCommands": [
+        {
+          "connection": 1,
+          "sessionId": "6CE8F93FFFA631B19E476C16887C1765",
+          "captureId": 11,
+          "sentAt": "2026-11-02T15:56:49.160Z",
+          "captureParams": {
+            "format": "png",
+            "fromSurface": true,
+            "clip": {
+              "x": 256,
+              "y": 93,
+              "width": 829,
+              "height": 5631,
+              "scale": 1
+            },
+            "captureBeyondViewport": true
+          },
+          "replyAt": null,
+          "replyError": null,
+          "replyElapsedMs": null,
+          "navigationId": 12,
+          "navigationSentAt": "2026-11-02T15:56:49.160Z",
+          "navigationMinusCaptureMs": 0.022191999999961354,
+          "firstReplyBeforeSecondSend": false,
+          "paintEventsAfterCapture": 4,
+          "screencastReceipts": 1
+        }
+      ],
+      "navigation": {
+        "status": "success",
+        "elapsedMs": 2.777564000000041,
+        "value": {
+          "frameId": "76D22279CD1978FFBE3CF0C656F051C0",
+          "loaderId": "88D04E116022FDE6BD3BB13EFBD3AD00",
+          "isDownload": false
+        }
+      }
+    },
+    {
+      "condition": {
+        "order": "capture-navigation",
+        "resize": true,
+        "area": "viewport",
+        "round": 1
+      },
+      "outcome": {
+        "status": "timeout",
+        "elapsedMs": 30000.155808000003
+      },
+      "captureCommands": [
+        {
+          "connection": 2,
+          "sessionId": "892EB75E634156152885C01181778879",
+          "captureId": 11,
+          "sentAt": "2026-11-02T15:57:19.332Z",
+          "captureParams": {
+            "format": "png",
+            "fromSurface": true
+          },
+          "replyAt": null,
+          "replyError": null,
+          "replyElapsedMs": null,
+          "navigationId": 12,
+          "navigationSentAt": "2026-11-02T15:57:19.332Z",
+          "navigationMinusCaptureMs": 0.0182039999999688,
+          "firstReplyBeforeSecondSend": false,
+          "paintEventsAfterCapture": 4,
+          "screencastReceipts": 1
+        }
+      ],
+      "navigation": {
+        "status": "success",
+        "elapsedMs": 3.8173549999992247,
+        "value": {
+          "frameId": "1E63DF91E0F659D981DBB8BD53E5DC2D",
+          "loaderId": "7B62AD1EEF3E05ED590810082CB78FA0",
+          "isDownload": false
+        }
+      }
+    },
+    {
+      "condition": {
+        "order": "capture-navigation",
+        "resize": false,
+        "area": "clip",
+        "round": 1
+      },
+      "outcome": {
+        "status": "timeout",
+        "elapsedMs": 30001.291940000003
+      },
+      "captureCommands": [
+        {
+          "connection": 3,
+          "sessionId": "9947204947DBE30333C83BDADBE8F113",
+          "captureId": 10,
+          "sentAt": "2026-11-02T15:57:49.495Z",
+          "captureParams": {
+            "format": "png",
+            "fromSurface": true,
+            "clip": {
+              "x": 256,
+              "y": 93,
+              "width": 829,
+              "height": 5631,
+              "scale": 1
+            },
+            "captureBeyondViewport": true
+          },
+          "replyAt": null,
+          "replyError": null,
+          "replyElapsedMs": null,
+          "navigationId": 11,
+          "navigationSentAt": "2026-11-02T15:57:49.495Z",
+          "navigationMinusCaptureMs": 0.01734299999952782,
+          "firstReplyBeforeSecondSend": false,
+          "paintEventsAfterCapture": 4,
+          "screencastReceipts": 1
+        }
+      ],
+      "navigation": {
+        "status": "success",
+        "elapsedMs": 4.797714000000269,
+        "value": {
+          "frameId": "ACD88037E36DAA89183703D999CAE713",
+          "loaderId": "908F19C1C91E1B6D154CE535020303CB",
+          "isDownload": false
+        }
+      }
+    },
+    {
+      "condition": {
+        "order": "capture-navigation",
+        "resize": false,
+        "area": "viewport",
+        "round": 1
+      },
+      "outcome": {
+        "status": "timeout",
+        "elapsedMs": 30000.465303000004
+      },
+      "captureCommands": [
+        {
+          "connection": 4,
+          "sessionId": "261C7C496D72737E600517C66C1E3AA6",
+          "captureId": 10,
+          "sentAt": "2026-11-02T15:58:19.667Z",
+          "captureParams": {
+            "format": "png",
+            "fromSurface": true
+          },
+          "replyAt": null,
+          "replyError": null,
+          "replyElapsedMs": null,
+          "navigationId": 11,
+          "navigationSentAt": "2026-11-02T15:58:19.667Z",
+          "navigationMinusCaptureMs": 0.050636999993002973,
+          "firstReplyBeforeSecondSend": false,
+          "paintEventsAfterCapture": 4,
+          "screencastReceipts": 1
+        }
+      ],
+      "navigation": {
+        "status": "success",
+        "elapsedMs": 3.7608580000087386,
+        "value": {
+          "frameId": "2A62414539C47D7A0BA0D36E906E1423",
+          "loaderId": "1E6E3E53757078C44879849B0A6B873B",
+          "isDownload": false
+        }
+      }
+    },
+    {
+      "condition": {
+        "order": "navigation-capture",
+        "resize": true,
+        "area": "clip",
+        "round": 1
+      },
+      "outcome": {
+        "status": "timeout",
+        "elapsedMs": 30001.021089
+      },
+      "captureCommands": [
+        {
+          "connection": 5,
+          "sessionId": "604CF4F45DE23A26DC97C2B0BC849D16",
+          "captureId": 12,
+          "sentAt": "2026-11-02T15:58:49.836Z",
+          "captureParams": {
+            "format": "png",
+            "fromSurface": true,
+            "clip": {
+              "x": 256,
+              "y": 93,
+              "width": 829,
+              "height": 5631,
+              "scale": 1
+            },
+            "captureBeyondViewport": true
+          },
+          "replyAt": null,
+          "replyError": null,
+          "replyElapsedMs": null,
+          "navigationId": 11,
+          "navigationSentAt": "2026-11-02T15:58:49.836Z",
+          "navigationMinusCaptureMs": -0.041279000011854805,
+          "firstReplyBeforeSecondSend": false,
+          "paintEventsAfterCapture": 4,
+          "screencastReceipts": 1
+        }
+      ],
+      "navigation": {
+        "status": "success",
+        "elapsedMs": 3.327662000010605,
+        "value": {
+          "frameId": "5D0767400BDE389F9FA6F9FEEC87DC61",
+          "loaderId": "5CDE8B928D272C7C6BD902B62BC8089A",
+          "isDownload": false
+        }
+      }
+    },
+    {
+      "condition": {
+        "order": "navigation-capture",
+        "resize": true,
+        "area": "viewport",
+        "round": 1
+      },
+      "outcome": {
+        "status": "timeout",
+        "elapsedMs": 30000.334701999993
+      },
+      "captureCommands": [
+        {
+          "connection": 6,
+          "sessionId": "D530D9DA01243AB721D5E06527B5ECD1",
+          "captureId": 12,
+          "sentAt": "2026-11-02T15:59:20.013Z",
+          "captureParams": {
+            "format": "png",
+            "fromSurface": true
+          },
+          "replyAt": null,
+          "replyError": null,
+          "replyElapsedMs": null,
+          "navigationId": 11,
+          "navigationSentAt": "2026-11-02T15:59:20.013Z",
+          "navigationMinusCaptureMs": -0.02806300000520423,
+          "firstReplyBeforeSecondSend": false,
+          "paintEventsAfterCapture": 4,
+          "screencastReceipts": 1
+        }
+      ],
+      "navigation": {
+        "status": "success",
+        "elapsedMs": 2.9199250000237953,
+        "value": {
+          "frameId": "86BD5F9507D9CDF7D528E25F40ACA62C",
+          "loaderId": "69F1BFF525C809595D4BF0B2128A5773",
+          "isDownload": false
+        }
+      }
+    },
+    {
+      "condition": {
+        "order": "navigation-capture",
+        "resize": false,
+        "area": "clip",
+        "round": 1
+      },
+      "outcome": {
+        "status": "timeout",
+        "elapsedMs": 30000.695886
+      },
+      "captureCommands": [
+        {
+          "connection": 7,
+          "sessionId": "1911BE2B4F732DBC94A9822078E0A940",
+          "captureId": 11,
+          "sentAt": "2026-11-02T15:59:50.179Z",
+          "captureParams": {
+            "format": "png",
+            "fromSurface": true,
+            "clip": {
+              "x": 256,
+              "y": 93,
+              "width": 829,
+              "height": 5631,
+              "scale": 1
+            },
+            "captureBeyondViewport": true
+          },
+          "replyAt": null,
+          "replyError": null,
+          "replyElapsedMs": null,
+          "navigationId": 10,
+          "navigationSentAt": "2026-11-02T15:59:50.179Z",
+          "navigationMinusCaptureMs": -0.03211099997861311,
+          "firstReplyBeforeSecondSend": false,
+          "paintEventsAfterCapture": 4,
+          "screencastReceipts": 1
+        }
+      ],
+      "navigation": {
+        "status": "success",
+        "elapsedMs": 3.344863999984227,
+        "value": {
+          "frameId": "8F83272B619C32798C945AFF3A1A0653",
+          "loaderId": "7D77408DD68360A106032098ED7E6973",
+          "isDownload": false
+        }
+      }
+    },
+    {
+      "condition": {
+        "order": "navigation-capture",
+        "resize": false,
+        "area": "viewport",
+        "round": 1
+      },
+      "outcome": {
+        "status": "timeout",
+        "elapsedMs": 30001.611320000025
+      },
+      "captureCommands": [
+        {
+          "connection": 8,
+          "sessionId": "5C52CC25408D05E43FE3CB89432A18CF",
+          "captureId": 11,
+          "sentAt": "2026-11-02T16:00:20.354Z",
+          "captureParams": {
+            "format": "png",
+            "fromSurface": true
+          },
+          "replyAt": null,
+          "replyError": null,
+          "replyElapsedMs": null,
+          "navigationId": 10,
+          "navigationSentAt": "2026-11-02T16:00:20.354Z",
+          "navigationMinusCaptureMs": -0.029757000011159107,
+          "firstReplyBeforeSecondSend": false,
+          "paintEventsAfterCapture": 4,
+          "screencastReceipts": 1
+        }
+      ],
+      "navigation": {
+        "status": "success",
+        "elapsedMs": 3.056494999997085,
+        "value": {
+          "frameId": "63D6A0D9F7A8BAAD8E2A5D643379511A",
+          "loaderId": "69C2AE5F3E69F4C88A9151627983A30D",
+          "isDownload": false
+        }
+      }
+    },
+    {
+      "condition": {
+        "order": "no-navigation",
+        "resize": true,
+        "area": "clip",
+        "round": 1
+      },
+      "outcome": {
+        "status": "success",
+        "elapsedMs": 72.1085080000048,
+        "value": {
+          "base64Length": 111688
+        }
+      },
+      "captureCommands": [
+        {
+          "connection": 9,
+          "sessionId": "B5240D0F4B72F40E22E5BA3FCB558030",
+          "captureId": 11,
+          "sentAt": "2026-11-02T16:00:50.531Z",
+          "captureParams": {
+            "format": "png",
+            "fromSurface": true,
+            "clip": {
+              "x": 256,
+              "y": 93,
+              "width": 829,
+              "height": 5631,
+              "scale": 1
+            },
+            "captureBeyondViewport": true
+          },
+          "replyAt": "2026-11-02T16:00:50.604Z",
+          "replyError": null,
+          "replyElapsedMs": 72.06929300000775,
+          "navigationId": null,
+          "navigationSentAt": null,
+          "navigationMinusCaptureMs": null,
+          "firstReplyBeforeSecondSend": null,
+          "paintEventsAfterCapture": 3,
+          "screencastReceipts": 0
+        }
+      ],
+      "navigation": null
+    },
+    {
+      "condition": {
+        "order": "no-navigation",
+        "resize": true,
+        "area": "viewport",
+        "round": 1
+      },
+      "outcome": {
+        "status": "success",
+        "elapsedMs": 31.710906000022078,
+        "value": {
+          "base64Length": 38780
+        }
+      },
+      "captureCommands": [
+        {
+          "connection": 10,
+          "sessionId": "E8FA29FC57A6313337490248667200E1",
+          "captureId": 11,
+          "sentAt": "2026-11-02T16:00:50.772Z",
+          "captureParams": {
+            "format": "png",
+            "fromSurface": true
+          },
+          "replyAt": "2026-11-02T16:00:50.803Z",
+          "replyError": null,
+          "replyElapsedMs": 31.67012799999793,
+          "navigationId": null,
+          "navigationSentAt": null,
+          "navigationMinusCaptureMs": null,
+          "firstReplyBeforeSecondSend": null,
+          "paintEventsAfterCapture": 3,
+          "screencastReceipts": 0
+        }
+      ],
+      "navigation": null
+    },
+    {
+      "condition": {
+        "order": "no-navigation",
+        "resize": false,
+        "area": "clip",
+        "round": 1
+      },
+      "outcome": {
+        "status": "success",
+        "elapsedMs": 68.77118700000574,
+        "value": {
+          "base64Length": 111688
+        }
+      },
+      "captureCommands": [
+        {
+          "connection": 11,
+          "sessionId": "E71452B78616A172FF523F6D865442E4",
+          "captureId": 10,
+          "sentAt": "2026-11-02T16:00:50.964Z",
+          "captureParams": {
+            "format": "png",
+            "fromSurface": true,
+            "clip": {
+              "x": 256,
+              "y": 93,
+              "width": 829,
+              "height": 5631,
+              "scale": 1
+            },
+            "captureBeyondViewport": true
+          },
+          "replyAt": "2026-11-02T16:00:51.033Z",
+          "replyError": null,
+          "replyElapsedMs": 68.71964900000603,
+          "navigationId": null,
+          "navigationSentAt": null,
+          "navigationMinusCaptureMs": null,
+          "firstReplyBeforeSecondSend": null,
+          "paintEventsAfterCapture": 3,
+          "screencastReceipts": 0
+        }
+      ],
+      "navigation": null
+    },
+    {
+      "condition": {
+        "order": "no-navigation",
+        "resize": false,
+        "area": "viewport",
+        "round": 1
+      },
+      "outcome": {
+        "status": "success",
+        "elapsedMs": 43.842107000004034,
+        "value": {
+          "base64Length": 41560
+        }
+      },
+      "captureCommands": [
+        {
+          "connection": 12,
+          "sessionId": "59513A4B7B5F71D1967F9BC0FB6189C7",
+          "captureId": 10,
+          "sentAt": "2026-11-02T16:00:51.194Z",
+          "captureParams": {
+            "format": "png",
+            "fromSurface": true
+          },
+          "replyAt": "2026-11-02T16:00:51.237Z",
+          "replyError": null,
+          "replyElapsedMs": 43.846756000013556,
+          "navigationId": null,
+          "navigationSentAt": null,
+          "navigationMinusCaptureMs": null,
+          "firstReplyBeforeSecondSend": null,
+          "paintEventsAfterCapture": 3,
+          "screencastReceipts": 0
+        }
+      ],
+      "navigation": null
+    }
+  ],
+  "unansweredCaptures": [
+    {
+      "at": "2026-11-02T15:56:49.160Z",
+      "monotonicMs": 315.299365,
+      "connection": 1,
+      "direction": "out",
+      "bytes": 224,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 11,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "fromSurface": true,
+          "clip": {
+            "x": 256,
+            "y": 93,
+            "width": 829,
+            "height": 5631,
+            "scale": 1
+          },
+          "captureBeyondViewport": true
+        },
+        "sessionId": "6CE8F93FFFA631B19E476C16887C1765"
+      }
+    },
+    {
+      "at": "2026-11-02T15:57:19.332Z",
+      "monotonicMs": 30486.53152,
+      "connection": 2,
+      "direction": "out",
+      "bytes": 135,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 11,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "fromSurface": true
+        },
+        "sessionId": "892EB75E634156152885C01181778879"
+      }
+    },
+    {
+      "at": "2026-11-02T15:57:49.495Z",
+      "monotonicMs": 60650.150237,
+      "connection": 3,
+      "direction": "out",
+      "bytes": 224,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 10,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "fromSurface": true,
+          "clip": {
+            "x": 256,
+            "y": 93,
+            "width": 829,
+            "height": 5631,
+            "scale": 1
+          },
+          "captureBeyondViewport": true
+        },
+        "sessionId": "9947204947DBE30333C83BDADBE8F113"
+      }
+    },
+    {
+      "at": "2026-11-02T15:58:19.667Z",
+      "monotonicMs": 90821.853099,
+      "connection": 4,
+      "direction": "out",
+      "bytes": 135,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 10,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "fromSurface": true
+        },
+        "sessionId": "261C7C496D72737E600517C66C1E3AA6"
+      }
+    },
+    {
+      "at": "2026-11-02T15:58:49.836Z",
+      "monotonicMs": 120991.073346,
+      "connection": 5,
+      "direction": "out",
+      "bytes": 224,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 12,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "fromSurface": true,
+          "clip": {
+            "x": 256,
+            "y": 93,
+            "width": 829,
+            "height": 5631,
+            "scale": 1
+          },
+          "captureBeyondViewport": true
+        },
+        "sessionId": "604CF4F45DE23A26DC97C2B0BC849D16"
+      }
+    },
+    {
+      "at": "2026-11-02T15:59:20.013Z",
+      "monotonicMs": 151167.921906,
+      "connection": 6,
+      "direction": "out",
+      "bytes": 135,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 12,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "fromSurface": true
+        },
+        "sessionId": "D530D9DA01243AB721D5E06527B5ECD1"
+      }
+    },
+    {
+      "at": "2026-11-02T15:59:50.179Z",
+      "monotonicMs": 181334.382039,
+      "connection": 7,
+      "direction": "out",
+      "bytes": 224,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 11,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "fromSurface": true,
+          "clip": {
+            "x": 256,
+            "y": 93,
+            "width": 829,
+            "height": 5631,
+            "scale": 1
+          },
+          "captureBeyondViewport": true
+        },
+        "sessionId": "1911BE2B4F732DBC94A9822078E0A940"
+      }
+    },
+    {
+      "at": "2026-11-02T16:00:20.354Z",
+      "monotonicMs": 211508.540409,
+      "connection": 8,
+      "direction": "out",
+      "bytes": 135,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 11,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "fromSurface": true
+        },
+        "sessionId": "5C52CC25408D05E43FE3CB89432A18CF"
+      }
+    },
+    {
+      "at": "2026-11-02T16:00:51.398Z",
+      "monotonicMs": 242553.488971,
+      "connection": 13,
+      "direction": "out",
+      "bytes": 224,
+      "method": "Page.captureScreenshot",
+      "message": {
+        "id": 11,
+        "method": "Page.captureScreenshot",
+        "params": {
+          "format": "png",
+          "fromSurface": true,
+          "clip": {
+            "x": 256,
+            "y": 93,
+            "width": 829,
+            "height": 5631,
+            "scale": 1
+          },
+          "captureBeyondViewport": true
+        },
+        "sessionId": "DBEDADE401367F631FCCD0124DCB50F6"
+      }
+    }
+  ],
+  "lateCaptureReplies": [],
+  "postTimeoutFrames": [
+    {
+      "at": "2026-11-02T15:57:19.168Z",
+      "monotonicMs": 30323.11614,
+      "implementation": "raw",
+      "round": 1,
+      "order": "capture-navigation",
+      "resize": true,
+      "area": "clip",
+      "connection": 1,
+      "event": "post-timeout-frame",
+      "start": {
+        "status": "success",
+        "elapsedMs": 0.15222999999969034,
+        "value": {}
+      },
+      "receipt": {
+        "status": "success",
+        "elapsedMs": 7.006293000002188,
+        "value": {
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 1100,
+            "deviceHeight": 1000,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1793635039.165089
+          },
+          "sessionId": 1,
+          "imageBase64Length": 19688
+        }
+      },
+      "stop": {
+        "status": "success",
+        "elapsedMs": 0.22080099999948288,
+        "value": {}
+      }
+    },
+    {
+      "at": "2026-11-02T15:57:49.340Z",
+      "monotonicMs": 60495.014969,
+      "implementation": "raw",
+      "round": 1,
+      "order": "capture-navigation",
+      "resize": true,
+      "area": "viewport",
+      "connection": 2,
+      "event": "post-timeout-frame",
+      "start": {
+        "status": "success",
+        "elapsedMs": 0.45028800000000047,
+        "value": {}
+      },
+      "receipt": {
+        "status": "success",
+        "elapsedMs": 7.639941000001272,
+        "value": {
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 1100,
+            "deviceHeight": 1000,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1793635069.336718
+          },
+          "sessionId": 1,
+          "imageBase64Length": 22448
+        }
+      },
+      "stop": {
+        "status": "success",
+        "elapsedMs": 0.2909849999996368,
+        "value": {}
+      }
+    },
+    {
+      "at": "2026-11-02T15:58:19.505Z",
+      "monotonicMs": 90660.240667,
+      "implementation": "raw",
+      "round": 1,
+      "order": "capture-navigation",
+      "resize": false,
+      "area": "clip",
+      "connection": 3,
+      "event": "post-timeout-frame",
+      "start": {
+        "status": "success",
+        "elapsedMs": 0.2629109999979846,
+        "value": {}
+      },
+      "receipt": {
+        "status": "success",
+        "elapsedMs": 7.968257000000449,
+        "value": {
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 1440,
+            "deviceHeight": 1000,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1793635099.501147
+          },
+          "sessionId": 1,
+          "imageBase64Length": 22328
+        }
+      },
+      "stop": {
+        "status": "success",
+        "elapsedMs": 0.47884300000441726,
+        "value": {}
+      }
+    },
+    {
+      "at": "2026-11-02T15:58:49.677Z",
+      "monotonicMs": 120831.564103,
+      "implementation": "raw",
+      "round": 1,
+      "order": "capture-navigation",
+      "resize": false,
+      "area": "viewport",
+      "connection": 4,
+      "event": "post-timeout-frame",
+      "start": {
+        "status": "success",
+        "elapsedMs": 0.2968260000052396,
+        "value": {}
+      },
+      "receipt": {
+        "status": "success",
+        "elapsedMs": 8.607615000000806,
+        "value": {
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 1440,
+            "deviceHeight": 1000,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1793635129.672639
+          },
+          "sessionId": 1,
+          "imageBase64Length": 25764
+        }
+      },
+      "stop": {
+        "status": "success",
+        "elapsedMs": 0.28564400000323076,
+        "value": {}
+      }
+    },
+    {
+      "at": "2026-11-02T15:59:19.846Z",
+      "monotonicMs": 151000.697771,
+      "implementation": "raw",
+      "round": 1,
+      "order": "navigation-capture",
+      "resize": true,
+      "area": "clip",
+      "connection": 5,
+      "event": "post-timeout-frame",
+      "start": {
+        "status": "success",
+        "elapsedMs": 0.37493399999220856,
+        "value": {}
+      },
+      "receipt": {
+        "status": "success",
+        "elapsedMs": 7.550290000013774,
+        "value": {
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 1100,
+            "deviceHeight": 1000,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1793635159.841197
+          },
+          "sessionId": 1,
+          "imageBase64Length": 19688
+        }
+      },
+      "stop": {
+        "status": "success",
+        "elapsedMs": 0.5619109999970533,
+        "value": {}
+      }
+    },
+    {
+      "at": "2026-11-02T15:59:50.020Z",
+      "monotonicMs": 181175.460768,
+      "implementation": "raw",
+      "round": 1,
+      "order": "navigation-capture",
+      "resize": true,
+      "area": "viewport",
+      "connection": 6,
+      "event": "post-timeout-frame",
+      "start": {
+        "status": "success",
+        "elapsedMs": 0.2572400000062771,
+        "value": {}
+      },
+      "receipt": {
+        "status": "success",
+        "elapsedMs": 6.521478999988176,
+        "value": {
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 1100,
+            "deviceHeight": 1000,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1793635190.017404
+          },
+          "sessionId": 1,
+          "imageBase64Length": 22448
+        }
+      },
+      "stop": {
+        "status": "success",
+        "elapsedMs": 0.17624599998816848,
+        "value": {}
+      }
+    },
+    {
+      "at": "2026-11-02T16:00:20.190Z",
+      "monotonicMs": 211345.18083,
+      "implementation": "raw",
+      "round": 1,
+      "order": "navigation-capture",
+      "resize": false,
+      "area": "clip",
+      "connection": 7,
+      "event": "post-timeout-frame",
+      "start": {
+        "status": "success",
+        "elapsedMs": 0.4993609999946784,
+        "value": {}
+      },
+      "receipt": {
+        "status": "success",
+        "elapsedMs": 9.2224560000177,
+        "value": {
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 1440,
+            "deviceHeight": 1000,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1793635220.1857
+          },
+          "sessionId": 1,
+          "imageBase64Length": 22328
+        }
+      },
+      "stop": {
+        "status": "success",
+        "elapsedMs": 0.4704759999876842,
+        "value": {}
+      }
+    },
+    {
+      "at": "2026-11-02T16:00:50.365Z",
+      "monotonicMs": 241519.651725,
+      "implementation": "raw",
+      "round": 1,
+      "order": "navigation-capture",
+      "resize": false,
+      "area": "viewport",
+      "connection": 8,
+      "event": "post-timeout-frame",
+      "start": {
+        "status": "success",
+        "elapsedMs": 0.3421519999974407,
+        "value": {}
+      },
+      "receipt": {
+        "status": "success",
+        "elapsedMs": 8.774803000007523,
+        "value": {
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 1440,
+            "deviceHeight": 1000,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1793635250.360816
+          },
+          "sessionId": 1,
+          "imageBase64Length": 25764
+        }
+      },
+      "stop": {
+        "status": "success",
+        "elapsedMs": 0.34692100001848303,
+        "value": {}
+      }
+    }
+  ],
+  "wireRecords": 822
+}
