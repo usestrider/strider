@@ -1067,6 +1067,68 @@ export const conformance = (backend: Backend) =>
             assert.strictEqual(raw.exception.name, "Error")
           }), timeout)
 
+        it.effect("captures overridden viewports and full pages beyond the native view", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/hello`)
+            yield* evaluate(
+              world,
+              page,
+              `() => {
+              document.documentElement.style.overflow = 'hidden';
+              document.body.style.cssText = 'margin:0;width:1400px;height:1200px;background:rgb(0,255,0)';
+              document.body.innerHTML = '<div style="position:absolute;left:950px;top:650px;width:50px;height:50px;background:rgb(255,0,0)"></div><div style="position:absolute;left:1350px;top:1150px;width:50px;height:50px;background:rgb(0,0,255)"></div>';
+            }`
+            )
+            for (const [width, height] of [[640, 480], [1000, 700]] as const) {
+              yield* Effect.scoped(Effect.gen(function*() {
+                yield* world.adapter.declare({ _tag: "Page", page }, {
+                  _tag: "Override",
+                  override: { _tag: "Viewport", width, height, deviceScaleFactor: 1, mobile: false }
+                })
+                for (const fullPage of [false, true]) {
+                  const png = yield* world.adapter.screenshot(page, {
+                    format: "png",
+                    quality: Option.none(),
+                    clip: Option.none(),
+                    fullPage,
+                    scale: "device",
+                    omitBackground: false
+                  })
+                  const view = new DataView(png.buffer, png.byteOffset, png.byteLength)
+                  assert.deepStrictEqual(
+                    [view.getUint32(16), view.getUint32(20)],
+                    fullPage ? [1400, 1200] : [width, height]
+                  )
+                  const x = fullPage ? 1375 : width - 25
+                  const y = fullPage ? 1175 : height - 25
+                  const pixel = yield* evaluate(
+                    world,
+                    page,
+                    `async () => {
+                    const image = new Image();
+                    image.src = 'data:image/png;base64,${Buffer.from(png).toString("base64")}';
+                    await image.decode();
+                    const canvas = document.createElement('canvas');
+                    canvas.width = image.width; canvas.height = image.height;
+                    const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
+                    return Array.from(context.getImageData(${x}, ${y}, 1, 1).data);
+                  }`
+                  )
+                  assert.deepStrictEqual(
+                    pixel,
+                    fullPage ?
+                      [0, 0, 255, 255] :
+                      width === 1000
+                      ? [255, 0, 0, 255]
+                      : [0, 255, 0, 255]
+                  )
+                }
+              }))
+            }
+          }), timeout)
+
         it.effect("captures screenshots and PDFs, and reads response bodies", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)

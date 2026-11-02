@@ -6,9 +6,11 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
+import * as Declare from "../src/internal/cdpAdapter/declare.ts"
 import * as Network from "../src/internal/cdpAdapter/network.ts"
 import * as Obligations from "../src/internal/cdpAdapter/obligations.ts"
 import * as Responses from "../src/internal/cdpAdapter/responses.ts"
@@ -700,6 +702,42 @@ describe("CdpAdapter routed response source", () => {
         yield* state.buffer.flush
         const last = facts.filter((fact) => fact._tag === "ResponseReceived").at(-1)!
         assert.strictEqual(last.response.servedBy, "network")
+      }))
+  }
+})
+
+describe("CDP declaration release", () => {
+  for (
+    const reason of [
+      new Protocol.SessionEnded({ why: "targetDestroyed" }),
+      new Protocol.Rejected({
+        method: "Emulation.clearDeviceMetricsOverride",
+        reason: "Unrecognized",
+        code: -1,
+        description: "restore failed"
+      })
+    ]
+  ) {
+    it.effect(`releases without failing and ${reason._tag === "SessionEnded" ? "stays silent for SessionEnded" : "warns for Rejected"}`, () =>
+      Effect.gen(function*() {
+        const { state, target, page } = yield* withPage()
+        const warnings: Array<unknown> = []
+        const logger = Logger.make((entry) => {
+          if (entry.logLevel === "Warn") warnings.push(entry.message)
+        })
+        const failingSession = {
+          ...session,
+          send: (command: { readonly method: string }) =>
+            command.method === "Emulation.clearDeviceMetricsOverride"
+              ? Effect.fail(new Protocol.ProtocolError({ reason })) :
+              Effect.succeed({})
+        } as unknown as ProtocolClient.Session
+        state.targets.set(failingSession, { ...target, session: failingSession, page })
+        yield* Effect.scoped(Declare.declare(state, { _tag: "Page", page: page.id }, {
+          _tag: "Override",
+          override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+        })).pipe(Effect.provideService(Logger.CurrentLoggers, new Set([logger])))
+        assert.strictEqual(warnings.length, reason._tag === "SessionEnded" ? 0 : 1)
       }))
   }
 })
