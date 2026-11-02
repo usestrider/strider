@@ -9,6 +9,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, it } from "@effect/vitest"
 import { Browser } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
 import { Firefox } from "@usestrider/browser/firefox"
 import { WebKit } from "@usestrider/browser/webkit"
 import * as Deferred from "effect/Deferred"
@@ -23,7 +24,7 @@ import * as path from "node:path"
 import * as Daemon from "../../src/internal/cli/daemon.ts"
 import { site } from "./adapter/harness.ts"
 import { chromium, firefox, webkitgtk } from "./browsers.ts"
-import { firefoxAttachable } from "./slice/attaching.ts"
+import { chromiumAttachable, firefoxAttachable } from "./slice/attaching.ts"
 import { startMiniBrowser, useXvfb } from "./stockWebKit.ts"
 
 const timeout = 120_000
@@ -856,6 +857,30 @@ describe("strider", () => {
       for (const message of handshake) child.stdin.write(`${JSON.stringify(message)}\n`)
       child.stdin.end()
     }).pipe(Effect.map((code) => assert.strictEqual(code, 0))), timeout)
+
+  for (const backend of ["Chromium", "stock WebKit"] as const) {
+    it.live(`attaches to ${backend} by an HTTP endpoint`, () =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          const served = yield* site
+          const env = environment()
+          const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+          const tab = `${served.origin}/fixture?html=${encodeURIComponent("<title>remote</title>")}`
+          const { endpoint } = backend === "Chromium"
+            ? yield* chromiumAttachable(Chromium.layerConnect).start(tab, tab)
+            : yield* startMiniBrowser(tab)
+          try {
+            const started = yield* run("start", "--name", "remote", "--attach", endpoint)
+            assert.strictEqual(started.code, 0, started.err)
+            const tabs = yield* run("-s", "remote", "tabs")
+            assert.strictEqual(tabs.code, 0, tabs.err)
+            assert.include(tabs.out, tab)
+          } finally {
+            yield* run("-s", "remote", "stop")
+          }
+        }).pipe(Effect.provide(NodeServices.layer))
+      ), timeout)
+  }
 
   it.live("attaches to Firefox's remote agent by an endpoint with no path", () =>
     Effect.scoped(
