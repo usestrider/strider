@@ -59,6 +59,12 @@ WEBKIT_PATH=/usr/libexec/webkitgtk-6.0/MiniBrowser xvfb-run -a node checkout.ts
 Each context is a browser process with its own ephemeral profile, about 0.6 seconds to start. The default context
 is the first tab's. [Launch profiles](/docs/browsers/chromium#launching) don't apply to WebKit.
 
+Launching requires Linux with readable `/proc/<pid>/net/tcp` and `/proc/<pid>/fd` for the spawned process. Strider
+checks that this PID holds the same inspector listener before and after connecting, before sending any command.
+A wrapper must exec MiniBrowser rather than only fork it. Other operating systems, inaccessible procfs and
+unverifiable ownership refuse launch with an explanation; use [`WebKit.layerAttach`](#attaching) with an externally
+managed inspector HTTP endpoint instead.
+
 ## Attaching
 
 [Attach](/docs/pages/attaching) when the browser is already running, such as a WPE browser on a device, to read,

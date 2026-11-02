@@ -22,7 +22,7 @@ import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
-import type * as FileSystem from "effect/FileSystem"
+import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Random from "effect/Random"
@@ -118,6 +118,56 @@ const portRange = [49152, 65535] as const
 /** The port a launch tried was taken: another is tried. */
 class PortTaken extends Data.TaggedError("PortTaken") {}
 
+/** Readiness polling shares the launcher's existing connection polling policy. */
+class ListenerPending extends Data.TaggedError("ListenerPending") {}
+
+const attachGuidance = "Use WebKit.layerAttach with an externally managed inspector HTTP endpoint instead."
+
+/**
+ * The exact spawned PID must hold the IPv4 loopback listener. The namespace's TCP table alone includes other
+ * processes, so its inode must also occur in this PID's descriptors. Never inspect descendants (ROOK-140).
+ */
+export const inspectorListener = Effect.fnUntraced(function*(pid: number, port: number, platform = process.platform) {
+  if (platform !== "linux") {
+    return yield* Launch.refused(
+      `Launched WebKit requires Linux procfs socket ownership verification. ${attachGuidance}`
+    )
+  }
+  const fs = yield* FileSystem.FileSystem
+  return yield* Effect.gen(function*() {
+    const table = yield* fs.readFileString(`/proc/${pid}/net/tcp`)
+    // procfs prints the IPv4 word in host byte order, including on big-endian Linux.
+    const loopback = new Uint32Array(new Uint8Array([127, 0, 0, 1]).buffer)[0]!.toString(16).toUpperCase().padStart(
+      8,
+      "0"
+    )
+    const address = `${loopback}:${port.toString(16).toUpperCase().padStart(4, "0")}`
+    const inodes = new Set(
+      table.trim().split("\n").slice(1).flatMap((line) => {
+        const fields = line.trim().split(/\s+/)
+        return fields[1] === address && fields[3] === "0A" && fields[9] !== undefined && fields[9] !== "0"
+          ? [fields[9]]
+          : []
+      })
+    )
+    // Read the descriptor directory even before a listener exists: permission failures are refusals, not readiness.
+    const descriptors = yield* fs.readDirectory(`/proc/${pid}/fd`)
+    if (inodes.size !== 1) return undefined
+    for (const fd of descriptors) {
+      const target = yield* fs.readLink(`/proc/${pid}/fd/${fd}`).pipe(
+        Effect.catchIf((error) => error.reason._tag === "NotFound", () => Effect.succeed(""))
+      )
+      const match = /^socket:\[(\d+)\]$/.exec(target)
+      if (match !== null && inodes.has(match[1]!)) return match[1]!
+    }
+    return undefined
+  }).pipe(
+    Effect.catch((error) =>
+      Launch.refused(`Cannot read Linux procfs to verify WebKit child PID ${pid}: ${error.message}. ${attachGuidance}`)
+    )
+  )
+})
+
 /** What a socket that ended was lost to. */
 const lossOf = (error: Transport.TransportError) =>
   error.reason._tag === "ConnectionLost"
@@ -138,6 +188,11 @@ const spawnProcess = Effect.fnUntraced(function*(
   options: ProcessOptions,
   deadline: MonotonicInstant.MonotonicInstant
 ) {
+  if (process.platform !== "linux") {
+    return yield* Launch.refused(
+      `Launched WebKit requires Linux procfs socket ownership verification. ${attachGuidance}`
+    )
+  }
   const connector = yield* SocketConnector.SocketConnector
   const scope = yield* Effect.scope
   const path = yield* Launch.executable(settings.executablePath)
@@ -158,47 +213,79 @@ const spawnProcess = Effect.fnUntraced(function*(
   const attempt = Effect.gen(function*() {
     const port = yield* Random.nextIntBetween(portRange[0], portRange[1])
     const own = yield* Scope.fork(scope)
-    const launched = yield* Launch.spawn(path, args, directory, {
-      coreDumps: settings.coreDumps,
-      env: {
-        WEBKIT_INSPECTOR_SERVER: `127.0.0.1:${port}`,
-        XDG_DATA_HOME: `${directory}/data`,
-        XDG_CACHE_HOME: `${directory}/cache`,
-        XDG_CONFIG_HOME: `${directory}/config`
-      }
-    }).pipe(Scope.provide(own))
-    const outcome = yield* Effect.raceFirst(
-      connector.connect({ host: "127.0.0.1", port }).pipe(
-        Scope.provide(own),
-        Effect.retry({ schedule: Schedule.spaced("100 millis") }),
-        byDeadline(deadline),
-        Effect.map((connection) =>
-          Option.isSome(connection)
-            ? { _tag: "Connected" as const, connection: connection.value }
-            : { _tag: "Silent" as const }
+    return yield* Effect.gen(function*() {
+      const launched = yield* Launch.spawn(path, args, directory, {
+        coreDumps: settings.coreDumps,
+        env: {
+          WEBKIT_INSPECTOR_SERVER: `127.0.0.1:${port}`,
+          XDG_DATA_HOME: `${directory}/data`,
+          XDG_CACHE_HOME: `${directory}/cache`,
+          XDG_CONFIG_HOME: `${directory}/config`
+        }
+      }).pipe(Scope.provide(own))
+      const outcome = yield* Effect.raceFirst(
+        Effect.gen(function*() {
+          if (!(yield* launched.handle.isRunning.pipe(Effect.orElseSucceed(() => false)))) {
+            return yield* Launch.notReady(
+              launched,
+              `The spawned process exited before inspector ownership was verified. ${attachGuidance}`
+            )
+          }
+          const inode = yield* inspectorListener(Number(launched.handle.pid), port)
+          if (inode === undefined) return yield* Effect.fail(new ListenerPending())
+          const connecting = yield* Scope.fork(own)
+          return yield* Effect.gen(function*() {
+            const connection = yield* connector.connect({ host: "127.0.0.1", port }).pipe(Scope.provide(connecting))
+            const after = yield* inspectorListener(Number(launched.handle.pid), port)
+            if (after !== inode || !(yield* launched.handle.isRunning.pipe(Effect.orElseSucceed(() => false)))) {
+              return yield* Launch.refused(
+                `WebKit child PID ${launched.handle.pid} no longer holds the same inspector listener after connecting. ${attachGuidance}`
+              )
+            }
+            return connection
+          }).pipe(Effect.onExit((exit) => Exit.isFailure(exit) ? Scope.close(connecting, exit) : Effect.void))
+        }).pipe(
+          Effect.retry({
+            while: (error) => error._tag === "ListenerPending" || error._tag === "SocketError",
+            schedule: Schedule.spaced("100 millis")
+          }),
+          Effect.catchTags({
+            ListenerPending: () => Effect.succeed(undefined),
+            SocketError: () => Effect.succeed(undefined)
+          }),
+          byDeadline(deadline),
+          Effect.map((connection) =>
+            Option.isSome(connection) && connection.value !== undefined
+              ? { _tag: "Connected" as const, connection: connection.value }
+              : { _tag: "Silent" as const }
+          ),
+          BrowserClock.onLive
         ),
-        Effect.orElseSucceed(() => ({ _tag: "Silent" as const })),
-        BrowserClock.onLive
-      ),
-      launched.stderrLine(new RegExp(`Failed to start remote inspector server on 127\\.0\\.0\\.1:${port}`)).pipe(
-        Effect.map((line) => Option.isSome(line) ? { _tag: "Taken" as const } : { _tag: "Exited" as const })
+        launched.stderrLine(new RegExp(`Failed to start remote inspector server on 127\\.0\\.0\\.1:${port}`)).pipe(
+          Effect.map((line) => Option.isSome(line) ? { _tag: "Taken" as const } : { _tag: "Exited" as const })
+        )
       )
-    )
-    switch (outcome._tag) {
-      case "Connected":
-        return { connection: outcome.connection, launched }
-      case "Taken":
-        yield* Scope.close(own, Exit.void)
-        return yield* Effect.fail(new PortTaken())
-      default:
-        return yield* Launch.notReady(launched, `Its inspector server on port ${port} never answered`)
-    }
+      switch (outcome._tag) {
+        case "Connected":
+          return { connection: outcome.connection, launched }
+        case "Taken":
+          return yield* Effect.fail(new PortTaken())
+        default:
+          return yield* Launch.notReady(
+            launched,
+            `Its inspector server on port ${port} never answered with verifiable ownership by spawned PID ${launched.handle.pid}; fork-only wrappers are not supported (the spawned process must exec MiniBrowser). ${attachGuidance}`
+          )
+      }
+    }).pipe(Effect.onExit((exit) => Exit.isFailure(exit) ? Scope.close(own, exit) : Effect.void))
   })
   return yield* attempt.pipe(
     Effect.retry({ while: (error) => error._tag === "PortTaken", times: 4 }),
     Effect.catchTag(
       "PortTaken",
-      () => Launch.refused("Five ports in a row were taken, so the browser's inspector server never started")
+      () =>
+        Launch.refused(
+          `Five ports in a row were taken, so the browser's inspector server never started. ${attachGuidance}`
+        )
     )
   )
 })

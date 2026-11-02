@@ -422,3 +422,25 @@ newer commit and reset readiness; and mutating published provenance or publishin
 correlation is released on completion or interruption, and all correlation state is cleared on navigable removal.
 The one retained completed failure is not a live reservation and is cleared when its document arrives or a normal
 commit supersedes it after outstanding correlation finishes. No public operation or policy is added.
+
+## Launched WebKit verifies its inspector listener through Linux procfs
+
+A connection to a selected port is not evidence that the child started its inspector. In the traced ROOK-140
+failure another MiniBrowser accepted the connection before the child reported its failed bind. Starting an
+Automation session on that connection could interfere with someone else's browser.
+
+Launched WebKit therefore requires Linux with readable child procfs. Before connecting, the exact spawned PID must
+hold the loopback LISTEN socket inode; after connecting, it must still hold the same listener and be running before
+any inspector write. The stock inspector binds exclusively, so retaining the same listener across connection
+establishment excludes a different server accepting that connection. A wrapper must exec MiniBrowser, not merely
+fork it. We do not search descendants or fall back when the proof is unavailable. Refusal explains why and directs
+the caller to attach to an externally managed inspector HTTP endpoint. Attach keeps its existing requirements.
+The existing deadline, 100 ms polling and five reported-collision attempts remain the policy.
+
+Rejected: checking port availability then releasing it (another process can bind in the gap), a launch mutex
+(other processes do not participate), delaying for stderr (there is no bounded time that proves success), and
+checking ownership only after connecting (a replacement listener could then be mistaken for the connected server).
+Pinned WebKitGTK's launch interface accepts only a fixed nonzero IP port, with no success acknowledgement or
+inherited listener, so a private Unix socket and socket activation are not available. A portable ownership service
+or native helper would need another design and dependency; the owner approved the narrower Linux procfs requirement
+for launched WebKit. Procfs inaccessible under a sandbox is a refusal, not permission to write to an unknown server.

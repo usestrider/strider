@@ -198,13 +198,227 @@ describe("WebKit launcher", () => {
               return { pull: Effect.never, upgrade: () => Effect.void, write, writeAll: write, close: Effect.void }
             })
         }
-        yield* WebKitAutomation.start({ executablePath }).pipe(
+        // The new child has not bound any listener. In the unfixed launcher the successful connector still wins.
+        const procfs: FileSystem.FileSystem = {
+          ...fs,
+          readFileString: (path, options) =>
+            path === "/proc/1/net/tcp"
+              ? Effect.succeed(
+                "sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
+              )
+              : fs.readFileString(path, options),
+          readDirectory: (path, options) => path === "/proc/1/fd" ? Effect.succeed([]) : fs.readDirectory(path, options)
+        }
+        yield* WebKitAutomation.start({ executablePath, timeout: "50 millis" }).pipe(
+          Effect.provideService(FileSystem.FileSystem, procfs),
           Effect.scoped,
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           Effect.provideService(SocketConnector.SocketConnector, connector),
           Effect.flip
         )
         assert.strictEqual(writes, 0, "must not send StartAutomationSession to another browser's inspector")
+      }))
+
+    const ownershipAttempt = Effect.fnUntraced(
+      function*(mode: "owned" | "replaced" | "unreadable" | "foreign" | "collision" | "unreadable-after") {
+        const fs = yield* FileSystem.FileSystem
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-test-" })
+        const executablePath = `${directory}/MiniBrowser`
+        yield* fs.writeFileString(executablePath, "")
+        let port = 0
+        let inode = "12345"
+        let spawned = 0
+        let stopped = 0
+        let connected = 0
+        let closed = 0
+        let writes = 0
+        let inspected = yield* Deferred.make<void>()
+        const spawner = ChildProcessSpawner.make((command) =>
+          Effect.gen(function*() {
+            assert(command._tag === "StandardCommand")
+            port = Number(command.options.env!["WEBKIT_INSPECTOR_SERVER"]!.split(":")[1])
+            spawned++
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                stopped++
+              })
+            )
+            inspected = yield* Deferred.make<void>()
+            const stderr = mode === "collision"
+              ? Stream.fromEffect(Deferred.await(inspected)).pipe(
+                Stream.map(() =>
+                  new TextEncoder().encode(`Failed to start remote inspector server on 127.0.0.1:${port}\n`)
+                ),
+                Stream.concat(Stream.never)
+              )
+              : Stream.never
+            return ChildProcessSpawner.makeHandle({
+              pid: ChildProcessSpawner.ProcessId(9000001),
+              exitCode: Effect.never,
+              isRunning: Effect.succeed(true),
+              kill: () => Effect.void,
+              stdin: Sink.drain,
+              stdout: Stream.empty,
+              stderr,
+              all: stderr,
+              getInputFd: () => Sink.drain,
+              getOutputFd: () => Stream.empty,
+              unref: Effect.succeed(Effect.void)
+            })
+          })
+        )
+        const procfs: FileSystem.FileSystem = {
+          ...fs,
+          readFileString: (path, options) =>
+            path === "/proc/9000001/net/tcp"
+              ? (mode === "unreadable" || (mode === "unreadable-after" && connected > 0)) ?
+                fs.readFileString(`${directory}/missing-procfs`) :
+                Effect.sync(() => {
+                  Deferred.doneUnsafe(inspected, Effect.void)
+                  return `sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n 0: 0100007F:${
+                    port.toString(16).toUpperCase().padStart(4, "0")
+                  } 00000000:0000 0A 0:0 00:0 0 1000 0 ${inode}\n`
+                })
+              : fs.readFileString(path, options),
+          readDirectory: (path, options) =>
+            path === "/proc/9000001/fd" ? Effect.succeed(["7"]) : fs.readDirectory(path, options),
+          readLink: (path) =>
+            path === "/proc/9000001/fd/7"
+              ? Effect.succeed(`socket:[${mode === "foreign" || mode === "collision" ? "99999" : inode}]`)
+              : fs.readLink(path)
+        }
+        const connector: SocketConnector.SocketConnector = {
+          connect: Effect.fnUntraced(function*() {
+            connected++
+            if (mode === "replaced") inode = "54321"
+            let isClosed = false
+            const close = Effect.sync(() => {
+              if (!isClosed) {
+                isClosed = true
+                closed++
+              }
+            })
+            yield* Effect.addFinalizer(() => close)
+            const write = () =>
+              Effect.andThen(
+                Effect.sync(() => writes++),
+                Effect.fail(
+                  new Socket.SocketError({
+                    reason: new Socket.SocketWriteError({ cause: "stop after the first safe write" })
+                  })
+                )
+              )
+            return { pull: Effect.never, upgrade: () => Effect.void, write, writeAll: write, close }
+          })
+        }
+        const error = yield* WebKitAutomation.start({ executablePath, timeout: "50 millis" }).pipe(
+          Effect.scoped,
+          Effect.provideService(FileSystem.FileSystem, procfs),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(SocketConnector.SocketConnector, connector),
+          Effect.flip
+        )
+        return { error, spawned, stopped, connected, closed, writes }
+      }
+    )
+
+    it.effect("writes only after the same spawned PID holds the listener across connecting", () =>
+      Effect.gen(function*() {
+        const result = yield* ownershipAttempt("owned")
+        assert.strictEqual(result.writes, 1)
+        assert.strictEqual(result.connected, 1)
+        assert.strictEqual(result.closed, 1)
+        assert.strictEqual(result.stopped, 1)
+      }))
+
+    it.effect("refuses a replacement listener and closes its connection without writing", () =>
+      Effect.gen(function*() {
+        const result = yield* ownershipAttempt("replaced")
+        assert.strictEqual(result.writes, 0)
+        assert.strictEqual(result.connected, 1)
+        assert.strictEqual(result.closed, 1)
+        assert.strictEqual(result.stopped, 1)
+        assert(result.error.reason._tag === "ConnectionFailed")
+        assert.include(result.error.reason.hint, "same inspector listener")
+        assert.include(result.error.reason.hint, "WebKit.layerAttach")
+      }))
+
+    it.effect("refuses unreadable procfs with attach guidance before connecting", () =>
+      Effect.gen(function*() {
+        const result = yield* ownershipAttempt("unreadable")
+        assert.strictEqual(result.connected, 0)
+        assert.strictEqual(result.stopped, 1)
+        assert(result.error.reason._tag === "ConnectionFailed")
+        assert.include(result.error.reason.hint, "Cannot read Linux procfs")
+        assert.include(result.error.reason.hint, "WebKit.layerAttach")
+      }))
+
+    it.effect("closes a connection when the second procfs check fails", () =>
+      Effect.gen(function*() {
+        const result = yield* ownershipAttempt("unreadable-after")
+        assert.strictEqual(result.writes, 0)
+        assert.strictEqual(result.connected, 1)
+        assert.strictEqual(result.closed, 1)
+        assert.strictEqual(result.stopped, 1)
+        assert(result.error.reason._tag === "ConnectionFailed")
+        assert.include(result.error.reason.hint, "Cannot read Linux procfs")
+      }))
+
+    it.effect("refuses a listener not held by the spawned PID without looking for descendants", () =>
+      Effect.gen(function*() {
+        const result = yield* ownershipAttempt("foreign")
+        assert.strictEqual(result.connected, 0)
+        assert.strictEqual(result.stopped, 1)
+        assert(result.error.reason._tag === "ConnectionFailed")
+        assert.include(result.error.reason.hint, "fork-only wrappers")
+        assert.include(result.error.reason.hint, "WebKit.layerAttach")
+      }))
+
+    it.effect("cleans up each of the existing five collision attempts without connecting", () =>
+      Effect.gen(function*() {
+        const result = yield* ownershipAttempt("collision")
+        assert.strictEqual(result.spawned, 5)
+        assert.strictEqual(result.stopped, 5)
+        assert.strictEqual(result.connected, 0)
+        assert.strictEqual(result.writes, 0)
+        assert(result.error.reason._tag === "ConnectionFailed")
+        assert.include(result.error.reason.hint, "Five ports")
+      }))
+
+    it.effect("distinguishes simultaneous children sharing the namespace TCP table", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const loopback = new Uint32Array(new Uint8Array([127, 0, 0, 1]).buffer)[0]!.toString(16).toUpperCase().padStart(
+          8,
+          "0"
+        )
+        const procfs: FileSystem.FileSystem = {
+          ...fs,
+          readFileString: () =>
+            Effect.succeed(
+              `sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n`
+                + `0: ${loopback}:C000 00000000:0000 0A 0:0 00:0 0 1000 0 111\n`
+                // Other ports and connected sockets are not listeners for this endpoint.
+                + `1: ${loopback}:C001 00000000:0000 0A 0:0 00:0 0 1000 0 222\n`
+                + `2: ${loopback}:C000 00000000:0000 01 0:0 00:0 0 1000 0 222\n`
+            ),
+          readDirectory: () => Effect.succeed(["7"]),
+          readLink: (path) => Effect.succeed(path === "/proc/10/fd/7" ? "socket:[111]" : "socket:[222]")
+        }
+        const [owner, other] = yield* Effect.all([
+          WebKitAutomation.inspectorListener(10, 49152),
+          WebKitAutomation.inspectorListener(20, 49152)
+        ], { concurrency: 2 }).pipe(Effect.provideService(FileSystem.FileSystem, procfs))
+        assert.strictEqual(owner, "111")
+        assert.isUndefined(other)
+      }))
+
+    it.effect("refuses ownership verification on unsupported operating systems with attach guidance", () =>
+      Effect.gen(function*() {
+        const error = yield* WebKitAutomation.inspectorListener(123, 1234, "darwin").pipe(Effect.flip)
+        assert(error.reason._tag === "ConnectionFailed")
+        assert.include(error.reason.hint, "requires Linux procfs")
+        assert.include(error.reason.hint, "WebKit.layerAttach")
       }))
 
     it.effect("launches the MiniBrowser in automation mode, and nothing else", () =>
