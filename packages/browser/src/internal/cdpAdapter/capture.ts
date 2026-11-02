@@ -121,6 +121,20 @@ export const screenshot = Effect.fnUntraced(
         fromSurface: true
       }).pipe(on, Effect.provideService(ProtocolClient.ReplyReceived, guard?.reply))
     ).pipe(
+      Effect.catch((error) => {
+        const reason = error.reason
+        // Only a native terminal reply participates: a lost session or an unanswered command retains its error.
+        if (
+          guard === undefined || (reason._tag !== "Unsupported" && !(reason._tag === "Protocol" &&
+            (reason.error.reason._tag === "Rejected" || reason.error.reason._tag === "Decode")))
+        ) {
+          return Effect.fail(error)
+        }
+        return page.target.session.drainObserved.pipe(
+          Effect.andThen(guard.check),
+          Effect.andThen(Effect.fail(error))
+        )
+      }),
       Effect.ensuring(
         options.omitBackground ? Emulation.setDefaultBackgroundColorOverride({}).pipe(on, Effect.ignore) : Effect.void
       )

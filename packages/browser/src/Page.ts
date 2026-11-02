@@ -1139,7 +1139,7 @@ export class CloseCanceled extends Schema.Error<CloseCanceled>("@usestrider/brow
 }
 
 /**
- * A Chromium screenshot's main document was replaced before its native capture reply arrived.
+ * A Chromium `page.screenshot` call's main document was replaced before its native capture reply arrived.
  *
  * **Details**
  *
