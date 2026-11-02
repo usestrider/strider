@@ -76,7 +76,7 @@ describe("Shared-context digest control", () => {
       yield* publish(other, "uncontrolled-tab")
       yield* TestClock.adjust("1 millis")
       const during = yield* digest(session)
-      assert.includeMembers(during, [
+      assert.includeMembers([...during], [
         "console error on remote: during-control",
         "uncaught Error: during-control on remote",
         "console error on a worker: owned-worker-error",
