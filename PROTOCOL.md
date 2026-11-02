@@ -1095,3 +1095,18 @@ None. Decided:
   - AOT compilation is an explicit build choice with the same semantics.
 - **Effect `Socket`:** ship our own small fail-fast transport now, and propose upstream a fail-fast writer mode, switching over once it's released.
 - **`ws` constructor** (2026-10-19, replacing 5.15's "our own `ws` constructor"): we don't ship one. `ws` runs only on Node and Bun, so `@usestrider/browser/protocol` can't import it, and a platform subpath of our own would bend API.md's "no platform packages of our own". Instead we propose upstream that `NodeSocket.layerWebSocketConstructor` pass `ws` options (`maxPayload`, `perMessageDeflate`) through, and document the 128 MiB limit of Node's built-in WebSocket until it ships.
+
+### Stock WebKit viewport confirmation
+
+A native-window resize reply does not prove that the renderer has applied the requested size. After resizing,
+Strider uses an Automation callback to check `innerWidth` and `innerHeight` immediately and on `resize`.
+The browser enforces a default five-second callback limit, capped by the operation deadline. Only that callback
+timeout permits one final measurement; ordinary protocol, navigation and operation-deadline failures keep their
+meaning. A final mismatch carries the requested and actual numeric sizes through `Reason.ViewportMismatch`.
+
+The check confirms an observation, not permanent sizing support. Listeners and callbacks are disposed on match,
+timeout, navigation and interruption. Failed page creation closes the Automation handle and waits for removal.
+Failed declarations remove their new registration, then restore and confirm the previous effective setting under
+a separate detached five-second cleanup budget. Cleanup failure is visible as a defect alongside the original
+failure; it is never described as a successful restoration. Popup defaults are attempted without confirmation,
+since there is no creation operation to receive that failure; an explicit page declaration confirms them.

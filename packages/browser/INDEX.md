@@ -391,7 +391,7 @@ Declarations: settings and handlers that change how a page or context behaves fo
 
 *schemas*
 
-- `const DeclarationErrorReason = Schema.Union([TimingUnsupported, Conflict, DependencyReleased, Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
+- `const DeclarationErrorReason = Schema.Union([TimingUnsupported, Conflict, DependencyReleased, Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure, Reason.ViewportMismatch])`
 
 *guards*
 
@@ -1547,6 +1547,7 @@ Failure reasons that more than one module's error can carry.
 - `class EvaluationThrown: Schema.Error { exception, hint }`
 - `class NotSerializable: Schema.Error { path, hint }`
 - `class PromptBlocking: Schema.Error { kind, text, hint }`
+- `class ViewportMismatch: Schema.Error { requested, actual, hint }`
 
 ### Route
 
@@ -1899,7 +1900,7 @@ User contexts: isolated browser sessions, at two access levels.
 *schemas*
 
 - `const Id = Schema.String.pipe(Schema.brand("~@usestrider/browser/UserContext/Id"))`
-- `const UserContextErrorReason = Schema.Union([StorageState.Incompatible, Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])`
+- `const UserContextErrorReason = Schema.Union([StorageState.Incompatible, Reason.InvalidInput, Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure, Reason.ViewportMismatch])`
 
 *guards*
 

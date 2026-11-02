@@ -1322,7 +1322,7 @@ const serve = Effect.fnUntraced(
           : Option.isSome(flags.fork)
           ? ` · forked from ${flags.fork.value}`
           : ""
-      }${viewport === undefined ? "" : ` · viewport ${viewport.width}x${viewport.height}`}`
+      }${viewport === undefined ? "" : ` · requested viewport default ${viewport.width}x${viewport.height}`}`
     )
     return yield* Deferred.await(stopped)
   }

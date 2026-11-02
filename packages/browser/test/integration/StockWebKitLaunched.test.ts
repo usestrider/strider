@@ -7,8 +7,10 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, layer } from "@effect/vitest"
 import { Browser, Dialog, Expect, FileInput, Route } from "@usestrider/browser"
 import { WebKit } from "@usestrider/browser/webkit"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
@@ -26,7 +28,15 @@ const fixtureUrl = (origin: string, html: string) => `${origin}/fixture?html=${e
 const reasonOf = <A, E>(exit: Exit.Exit<A, E>) => {
   assert.isTrue(Exit.isFailure(exit), "expected a failure")
   return (Exit.isFailure(exit) ? Option.getOrUndefined(Exit.findErrorOption(exit)) : undefined) as
-    | { readonly _tag: string; readonly reason?: { readonly _tag: string; readonly capability?: string } }
+    | {
+      readonly _tag: string
+      readonly reason?: {
+        readonly _tag: string
+        readonly capability?: string
+        readonly requested?: { readonly width: number; readonly height: number }
+        readonly actual?: { readonly width: number; readonly height: number }
+      }
+    }
     | undefined
 }
 
@@ -53,12 +63,12 @@ describe("Stock WebKit, launched in automation mode", () => {
           const before = yield* context.pages
           const result = yield* Effect.exit(context.newPage)
           const error = reasonOf(result)
-          assert.deepInclude(error?.reason, { _tag: "Unsupported", capability: "emulation.viewport" })
-          if (Exit.isFailure(result)) {
-            const message = String(Option.getOrThrow(Exit.findErrorOption(result)))
-            assert.include(message, "1440x1000")
-            assert.include(message, "1280x762")
-          }
+          // Pinned MiniBrowser has 38 pixels of chrome on the fixed 1280x800 screen (ROOK-91).
+          assert.deepInclude(error?.reason, {
+            _tag: "ViewportMismatch",
+            requested: { width: 1440, height: 1000 },
+            actual: { width: 1280, height: 762 }
+          })
           assert.deepStrictEqual(yield* context.pages, before)
         })),
       timeout
@@ -75,16 +85,106 @@ describe("Stock WebKit, launched in automation mode", () => {
             Effect.exit
           )
           const error = reasonOf(result)
-          assert.deepInclude(error?.reason, { _tag: "Unsupported", capability: "emulation.viewport" })
-          if (Exit.isFailure(result)) {
-            const message = String(Option.getOrThrow(Exit.findErrorOption(result)))
-            assert.include(message, "1440x1000")
-            assert.include(message, "1280x762")
-          }
+          // Pinned MiniBrowser has 38 pixels of chrome on the fixed 1280x800 screen (ROOK-91).
+          assert.deepInclude(error?.reason, {
+            _tag: "ViewportMismatch",
+            requested: { width: 1440, height: 1000 },
+            actual: { width: 1280, height: 762 }
+          })
           assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), [640, 480])
         })),
       timeout
     )
+
+    it.effect("confirms an unchanged viewport immediately", () =>
+      launched(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        yield* page.emulate({ viewport: { width: 640, height: 480 } })
+        yield* page.emulate({ viewport: { width: 640, height: 480 } })
+        assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), [640, 480])
+      })), timeout)
+
+    it.effect(
+      "restores the prior viewport and disposes confirmation when interrupted",
+      () =>
+        launched(Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(fixtureUrl(origin, "<title>before</title>"))
+          yield* page.emulate({ viewport: { width: 640, height: 480 } })
+          yield* page.evaluateInMainWorld(() => {
+            Object.defineProperty(globalThis, "innerWidth", {
+              configurable: true,
+              get: () => {
+                document.title = "confirming"
+                return document.documentElement.clientWidth
+              }
+            })
+          })
+          const fiber = yield* Effect.scoped(page.emulate({ viewport: { width: 1440, height: 1000 } })).pipe(
+            Effect.forkChild
+          )
+          yield* page.pipe(Expect.toHaveTitle("confirming"))
+          yield* Fiber.interrupt(fiber)
+          assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), [640, 480])
+          assert.deepStrictEqual(
+            yield* page.evaluateInMainWorld(() =>
+              Object.getOwnPropertyNames(globalThis).filter((name) => name.startsWith("__striderViewport"))
+            ),
+            []
+          )
+        })),
+      timeout
+    )
+
+    it.effect(
+      "does not relabel navigation during confirmation as a viewport mismatch",
+      () =>
+        launched(Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(fixtureUrl(origin, "<title>before</title>"))
+          yield* page.emulate({ viewport: { width: 640, height: 480 } })
+          yield* page.evaluateInMainWorld((url) => {
+            Object.defineProperty(globalThis, "innerWidth", {
+              configurable: true,
+              get: () => {
+                queueMicrotask(() => {
+                  location.href = url
+                })
+                return 0
+              }
+            })
+          }, fixtureUrl(origin, "<title>after</title>"))
+          const result = yield* Effect.scoped(page.emulate({ viewport: { width: 800, height: 600 } })).pipe(Effect.exit)
+          assert.deepInclude(reasonOf(result)?.reason, { _tag: "BackendFailure" })
+          yield* page.pipe(Expect.toHaveTitle("after"))
+        })),
+      timeout
+    )
+
+    it.effect("keeps a failed restoration visible", () =>
+      launched(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        yield* page.emulate({ viewport: { width: 640, height: 480 } })
+        yield* page.evaluateInMainWorld(() => {
+          const host = globalThis as unknown as Record<string, unknown>
+          host["__originalInnerWidth"] = Object.getOwnPropertyDescriptor(globalThis, "innerWidth")
+          Object.defineProperty(globalThis, "innerWidth", { configurable: true, get: () => 0 })
+        })
+        const result = yield* Effect.scoped(page.emulate({ viewport: { width: 800, height: 600 } })).pipe(Effect.exit)
+        assert.isTrue(Exit.isFailure(result))
+        if (Exit.isFailure(result)) {
+          assert.include(Cause.pretty(result.cause), "WebKit viewport restoration failed")
+          assert.isTrue(result.cause.reasons.some((reason) => reason._tag === "Die"))
+        }
+        // Remove the artificial measurement failure before the prior registration's finalizer.
+        yield* page.evaluateInMainWorld(() => {
+          const host = globalThis as unknown as Record<string, unknown>
+          Object.defineProperty(globalThis, "innerWidth", host["__originalInnerWidth"] as PropertyDescriptor)
+          delete host["__originalInnerWidth"]
+        })
+      })), timeout)
 
     it.effect(
       "names itself, has its first tab, and drives a page with input the page trusts",

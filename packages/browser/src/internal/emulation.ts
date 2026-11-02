@@ -183,7 +183,7 @@ export const declare = (
     ).pipe(
       Scope.provide(scope),
       Effect.mapError((error) => {
-        const mapped = Operation.fromAdapter(error, id, owner.runtime.backend)
+        const mapped = Operation.fromViewportAdapter(error, id, owner.runtime.backend)
         // A target that went is TargetGone, as for every operation on it (QUIRKS.md, Q143)
         return mapped._tag !== "Reason" ? mapped.error : fail(mapped.reason)
       }),

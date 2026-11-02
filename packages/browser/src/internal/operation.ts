@@ -107,6 +107,11 @@ export const fromAdapter = (
   if (Deadline.isTimeout(error)) return { _tag: "Timeout", error }
   const reason = error.reason
   switch (reason._tag) {
+    case "ViewportMismatch":
+      return {
+        _tag: "Reason",
+        reason: new Reason.BackendFailure({ kind: "Rejected", method: "emulation.viewport", hint: error.message })
+      }
     case "Gone":
       return {
         _tag: "Gone",
@@ -135,6 +140,16 @@ export const fromAdapter = (
     }
   }
 }
+
+/** Viewport application and page creation retain the structured mismatch measurements. */
+export const fromViewportAdapter = (
+  error: AdapterError | Deadline.Timeout,
+  id: Diagnostics.OperationId,
+  backend: string
+): Failure | { readonly _tag: "Reason"; readonly reason: Reason.ViewportMismatch } =>
+  !Deadline.isTimeout(error) && error.reason._tag === "ViewportMismatch"
+    ? { _tag: "Reason", reason: new Reason.ViewportMismatch(error.reason) }
+    : fromAdapter(error, id, backend)
 
 /** An id from another connection reached an adapter: a bug in L1. */
 export class Foreign extends Data.TaggedError("Foreign")<{ readonly id: string }> {

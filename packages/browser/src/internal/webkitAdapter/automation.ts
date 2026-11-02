@@ -21,6 +21,7 @@ import { navigateByScript } from "./navigation.ts"
 import { promptClosed, promptOpened } from "./obligations.ts"
 import { type ContextEntry, contextOf, frameById, type PageEntry, pageOf, placement, type State } from "./state.ts"
 import { withoutFragment } from "./tree.ts"
+import * as Viewport from "./viewport.ts"
 
 // ── Processes and pages ───────────────────────────────────────────────────────────────────────────────────
 
@@ -114,7 +115,22 @@ export const afterPairing = Effect.fnUntraced(function*(
   process: WebKitAutomation.Process
 ) {
   const viewport = state.registry.overrides(placement(page)).get("Viewport")
-  if (viewport !== undefined) yield* resizeWindow(state, page, viewport).pipe(Effect.ignore)
+  if (viewport !== undefined) {
+    yield* resizeWindow(state, page, viewport).pipe(
+      Effect.catch((error) =>
+        Effect.gen(function*() {
+          page.viewportFailure = Kit.protocolError(error)
+          yield* Effect.logWarning("A stock WebKit page default viewport could not be applied", error)
+        })
+      )
+    )
+  }
+  if (viewport !== undefined && page.popup) {
+    yield* Effect.logWarning(
+      "Stock WebKit popup viewport default is unconfirmed; explicitly emulate the popup to confirm its size",
+      { page: page.id }
+    )
+  }
   state.buffer.start(watchDialogs(state, page, handle, process))
 })
 
@@ -203,13 +219,14 @@ export const resizeWindow = (
     if (!state.naturalWindows.has(page)) {
       const { context } = yield* Automation.getBrowsingContext({ handle }).pipe(on)
       state.naturalWindows.set(page, context.windowSize)
-      if (!state.chrome.has(process.key)) {
+      {
         const { result } = yield* Automation.evaluateJavaScriptFunction({
           browsingContextHandle: handle,
           function: "function() { return [innerWidth, innerHeight] }",
           arguments: []
         }).pipe(on)
         const [width, height] = Option.getOrElse(resultOf(result), () => [0, 0]) as [number, number]
+        state.naturalViewports.set(page, { width, height })
         state.chrome.set(process.key, {
           width: context.windowSize.width - width,
           height: context.windowSize.height - height
@@ -282,43 +299,60 @@ export const createPageLaunched = Effect.fnUntraced(function*(state: State, id: 
     .pipe(
       Effect.tapError(() => Effect.sync(() => state.creating.set(key, Math.max(0, (state.creating.get(key) ?? 1) - 1))))
     )
-  // Its first document is still loading, and a navigation sent before it ends is lost (QUIRKS.md, Q211)
-  yield* automationOf(
-    process,
-    Automation.waitForNavigationToComplete({ browsingContextHandle: handle, pageLoadStrategy: "Normal" })
-  )
-  // A page the browser reports in this context, unpaired or paired to our handle by another creation's search
-  const candidate = () => {
-    for (const page of state.pages.values()) {
-      if (page.context === context && !page.ended && state.pageHandles.get(page) !== undefined) {
-        if (state.pageHandles.get(page) === handle) return page
-      } else if (page.context === context && !page.ended) return page
-    }
-    return undefined
-  }
-  const round = Effect.gen(function*() {
-    yield* state.root().drainObserved
-    for (const page of state.pages.values()) {
-      if (page.context !== context || page.ended) continue
-      if (state.pageHandles.has(page)) {
-        if (state.pageHandles.get(page) === handle) return Option.some(page.id)
-        continue
+  return yield* Effect.gen(function*() {
+    // Its first document is still loading, and a navigation sent before it ends is lost (QUIRKS.md, Q211)
+    yield* automationOf(
+      process,
+      Automation.waitForNavigationToComplete({ browsingContextHandle: handle, pageLoadStrategy: "Normal" })
+    )
+    // A page the browser reports in this context, unpaired or paired to our handle by another creation's search
+    const candidate = () => {
+      for (const page of state.pages.values()) {
+        if (page.context === context && !page.ended && state.pageHandles.get(page) !== undefined) {
+          if (state.pageHandles.get(page) === handle) return page
+        } else if (page.context === context && !page.ended) return page
       }
-      yield* Deferred.await(page.ready)
-      const paired = yield* state.pairing.withPermits(1)(pairOnce(state, page))
-      if (Option.isSome(paired) && paired.value === handle) return Option.some(page.id)
+      return undefined
     }
-    return Option.none<L1Target.NavigableId>()
-  })
-  // The page arrives as the inspector's event, which wakes the wait; its pairing is then looked for until found
-  const found = yield* state.buffer.waitFor(candidate).pipe(
-    Effect.andThen(round.pipe(
-      Effect.repeat({ schedule: pairingSchedule, times: pairingAttempts, until: Option.isSome })
-    )),
-    BrowserClock.onLive
-  )
-  if (Option.isSome(found)) return found.value
-  return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.Vanished({})))
+    const round = Effect.gen(function*() {
+      yield* state.root().drainObserved
+      for (const page of state.pages.values()) {
+        if (page.context !== context || page.ended) continue
+        if (state.pageHandles.has(page)) {
+          if (state.pageHandles.get(page) === handle) return Option.some(page.id)
+          continue
+        }
+        yield* Deferred.await(page.ready)
+        const paired = yield* state.pairing.withPermits(1)(pairOnce(state, page))
+        if (Option.isSome(paired) && paired.value === handle) return Option.some(page.id)
+      }
+      return Option.none<L1Target.NavigableId>()
+    })
+    // The page arrives as the inspector's event, which wakes the wait; its pairing is then looked for until found
+    const found = yield* state.buffer.waitFor(candidate).pipe(
+      Effect.andThen(round.pipe(
+        Effect.repeat({ schedule: pairingSchedule, times: pairingAttempts, until: Option.isSome })
+      )),
+      BrowserClock.onLive
+    )
+    if (Option.isSome(found)) {
+      const page = yield* pageOf(state, found.value)
+      if (page.viewportFailure !== undefined) return yield* Effect.fail(page.viewportFailure)
+      const viewport = state.registry.overrides(placement(page)).get("Viewport")
+      if (viewport?._tag === "Viewport") yield* Viewport.confirm(process, handle, viewport)
+      return found.value
+    }
+    return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.Vanished({})))
+  }).pipe(Effect.onError(() =>
+    Viewport.cleanup(Effect.gen(function*() {
+      yield* automationOf(process, Automation.closeBrowsingContext({ handle }))
+      yield* state.buffer.waitFor(() =>
+        [...state.pages.values()].every((page) => state.pageHandles.get(page) !== handle || page.ended) ?
+          true :
+          undefined
+      )
+    })).pipe(Effect.orDie)
+  ))
 })
 
 export const closePageLaunched = Effect.fnUntraced(

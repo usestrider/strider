@@ -174,7 +174,7 @@ describe("strider", () => {
     it.live(`${backend} preserves startup and repeated page viewports`, () =>
       Effect.scoped(
         Effect.gen(function*() {
-          if (backend === "webkit") yield* useXvfb()
+          if (backend === "webkit") yield* useXvfb("1920x1200x24")
           const diagnostic = backend === "webkit" ? process.env["STRIDER_RECORD"] : undefined
           const env = {
             ...environment(),
@@ -205,7 +205,7 @@ describe("strider", () => {
             // Stock WebKit owns the initial browser and the context's automation process.
             assert.isAtLeast(owned.length, 1)
             browserPids = owned.map((item) => item.pid)
-            assert.include(started.out, "viewport 1440x1000")
+            assert.include(started.out, "requested viewport default 1440x1000")
             const served = yield* site
             const html =
               `<p id="size"></p><script>function size() { document.querySelector('#size').textContent = innerWidth + 'x' + innerHeight }; onresize = size; size()</script>`
