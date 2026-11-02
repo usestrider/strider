@@ -561,6 +561,65 @@ describe("Chromium claims (ROOK-95)", () => {
             void page
           })).pipe(Effect.provide(browser.connect))
         }), 60_000)
+
+      it.effect(
+        "a failed context reclaim leaves the surviving context and its tabs open",
+        () =>
+          Effect.gen(function*() {
+            const browser = yield* launch
+            const { origin } = yield* serve
+            const old = yield* Scope.make()
+            yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
+            const services = yield* Layer.buildWithScope(browser.connect, old)
+            const url = `${origin}/survivor`
+            const claim = yield* Effect.gen(function*() {
+              const context = yield* api.UserContext.create({ reclaimable: true })
+              const page = yield* context.newPage
+              yield* page.goto(url)
+              return yield* api.UserContext.claim(context)
+            }).pipe(Scope.provide(old), Effect.provide(services))
+            yield* handoff(old)
+            const exit = yield* Effect.scoped(
+              api.UserContext.reclaim(claim, { emulation: { locale: "not a locale" } })
+            ).pipe(Effect.provide(browser.connect), Effect.exit)
+            assert.isTrue(Exit.isFailure(exit), "expected the settings to be refused")
+            assert.isTrue(
+              (yield* browser.targets).some((info) => info.url === url),
+              "the claimed context's tab was destroyed"
+            )
+          }),
+        60_000
+      )
+
+      it.effect(
+        "refuses claims on an ordinary context and its pages, which cannot survive",
+        () =>
+          Effect.gen(function*() {
+            const browser = yield* launch
+            yield* Effect.scoped(Effect.gen(function*() {
+              const context = yield* Browser.newContext()
+              const page = yield* context.newPage
+              assert.isTrue(
+                Exit.isFailure(yield* api.UserContext.claim(context).pipe(Effect.exit)),
+                "context claim issued"
+              )
+              assert.isTrue(Exit.isFailure(yield* api.Page.claim(page).pipe(Effect.exit)), "page claim issued")
+            })).pipe(Effect.provide(browser.connect))
+          }),
+        60_000
+      )
+
+      it.effect("rejects a context claim passed as a page claim", () =>
+        Effect.gen(function*() {
+          const browser = yield* launch
+          yield* Effect.scoped(Effect.gen(function*() {
+            const context = yield* api.UserContext.create({ reclaimable: true })
+            const encoded = Schema.encodeSync(api.UserContext.Claim)(yield* api.UserContext.claim(context))
+            const wrong = Schema.decodeUnknownSync(api.Page.Claim)(encoded)
+            const exit = yield* Effect.scoped(api.Browser.reclaim(wrong)).pipe(Effect.exit)
+            assert.strictEqual(reason(exit), "InvalidInput")
+          })).pipe(Effect.provide(browser.connect))
+        }), 60_000)
     }
   )
 })
