@@ -153,7 +153,7 @@ export type Name = typeof Name.Type
  * @category schemas
  * @since 0.1.0
  */
-export const State = Schema.Literals(["checked", "expanded", "selected", "disabled", "focused", "pressed"])
+export const State = Schema.Literals(["checked", "expanded", "selected", "disabled", "focused", "pressed", "invalid"])
 
 /**
  * A state a node can be in, such as `checked` or `disabled`.
@@ -172,6 +172,10 @@ export type State = typeof State.Type
  * Where a role or name came from is always visible: `Aria` and `Accessible` come from the accessibility
  * tree. An `Inferred` role carries its `evidence`, and an `Inferred` name says what it came `from`.
  *
+ * Native controls that participate in constraint validation carry `invalid` and their browser-provided
+ * `validationMessage` when invalid. Other nodes carry `None`. Inspection reads current state without
+ * triggering validation events or changing focus. Invalidity does not prove a submission was attempted.
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
@@ -181,6 +185,7 @@ export interface Node {
   readonly role: Role
   readonly name: Name
   readonly states: ReadonlySet<State>
+  readonly validationMessage: Option.Option<string>
   readonly children: ReadonlyArray<Node>
 }
 
@@ -196,6 +201,7 @@ export interface NodeEncoded {
   readonly role: Node["role"]
   readonly name: Node["name"]
   readonly states: Node["states"]
+  readonly validationMessage: Option.Option<string>
   readonly children: ReadonlyArray<NodeEncoded>
 }
 
@@ -211,6 +217,7 @@ export const Node: Schema.Codec<Node, NodeEncoded> = Schema.Struct({
   role: Role,
   name: Name,
   states: Schema.ReadonlySet(State),
+  validationMessage: Schema.Option(Schema.String),
   children: Schema.Array(Schema.suspend((): Schema.Codec<Node, NodeEncoded> => Node))
 })
 

@@ -16,7 +16,8 @@ import * as Schema from "effect/Schema"
  *
  * - `screenshots`: whether images may be sent at all; `"denied"` fails the `screenshot` tool with `NotPermitted`.
  * - `snapshotText`: `"redacted"` masks the text inside an editable field (a textbox, searchbox, combobox or
- *   spinbutton) as `•••`.
+ *   spinbutton) and all validation messages as `•••`, while preserving invalid state and refs. `"full"` keeps
+ *   field text and validation messages. `CapturePolicy.strict` uses `"redacted"`; `CapturePolicy.local` uses `"full"`.
  * - `consoleText`: `"full"` sends console messages' text; `"redacted"` says a message was logged, without its
  *   text; `"omitted"` also leaves console errors out of each result's `sinceLast`.
  *

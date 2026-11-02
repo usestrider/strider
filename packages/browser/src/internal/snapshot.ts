@@ -188,8 +188,9 @@ const toNode = (node: Engine.SnapNode): Snapshot.Node => ({
     }
     : node.name,
   states: new Set(
-    node.states as ReadonlyArray<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed">
+    node.states as ReadonlyArray<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed" | "invalid">
   ),
+  validationMessage: Option.fromNullishOr(node.validationMessage),
   children: node.children.map(toNode)
 })
 
@@ -211,15 +212,17 @@ const lineOf = (node: Snapshot.Node): string =>
     role: node.role,
     name: node.name,
     states: [...node.states],
+    validationMessage: Option.getOrNull(node.validationMessage),
     children: [],
     frame: false
   }).replace(/^- /, "")
 
-/** What a diff compares of a node: its role, name and states. */
+/** What a diff compares of a node: its role, name, states and validation message. */
 const sameNode: Equivalence.Equivalence<Snapshot.Node> = Schema.toEquivalence(Schema.Struct({
   role: Snapshot.Role,
   name: Snapshot.Name,
-  states: Schema.ReadonlySet(Snapshot.State)
+  states: Schema.ReadonlySet(Snapshot.State),
+  validationMessage: Schema.Option(Schema.String)
 }))
 
 export class SnapshotImpl extends Snapshot.Data implements Snapshot.Snapshot<Locator.Locator> {
