@@ -425,11 +425,15 @@ describe("WebKit launcher", () => {
         /** Its stderr ended, as a child's does when it exits, but Node hasn't reported its exit yet. */
         readonly stderrEndsBeforeExitEvent?: boolean | undefined
         readonly stderrClosesAlive?: boolean | undefined
+        /** An exiting child's descriptors are denied before Node reports its exit, as seen on a real child. */
+        readonly fdDeniedBeforeExitEvent?: boolean | undefined
+        readonly losesListenerAfterConnect?: boolean | undefined
         readonly missingProcfsAlive?: boolean | undefined
         readonly vanishesAfterConnectBeforeExitEvent?: boolean | undefined
       },
       connect: Effect.Effect<void> = Effect.void,
-      timeout = "200 millis"
+      timeout = "200 millis",
+      around: <A, E, R>(start: Effect.Effect<A, E, R>) => Effect.Effect<unknown, E, R> = (start) => start
     ) {
       const fs = yield* FileSystem.FileSystem
       const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-test-" })
@@ -472,7 +476,7 @@ describe("WebKit launcher", () => {
             )
             : behavior(spawn).stderrEndsBeforeExitEvent === true
             ? Stream.make(failed)
-            : behavior(spawn).vanishesBeforeExitEvent === true ||
+            : behavior(spawn).fdDeniedBeforeExitEvent === true || behavior(spawn).vanishesBeforeExitEvent === true ||
                 behavior(spawn).vanishesAfterConnectBeforeExitEvent === true
             ? Stream.concat(Stream.make(failed), Stream.never)
             : exits
@@ -524,13 +528,29 @@ describe("WebKit launcher", () => {
           }
           const { foreign, held } = behavior(spawn)
           const table = "sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
-            + (held ? row(ports[spawn]!, `${1000 + spawn}`) : foreign === true ? row(ports[spawn]!, "777") : "")
+            + (held && !(behavior(spawn).losesListenerAfterConnect === true && connected.includes(ports[spawn]!))
+              ? row(ports[spawn]!, `${1000 + spawn}`) :
+              foreign === true
+              ? row(ports[spawn]!, "777")
+              : "")
           return behavior(spawn).stderrClosesAlive === true
             ? Deferred.await(stderrClosed).pipe(Effect.andThen(Effect.yieldNow), Effect.as(table))
             : Effect.succeed(table)
         },
-        readDirectory: (path, options) =>
-          spawnOf(path) === undefined ? fs.readDirectory(path, options) : Effect.succeed(["7"]),
+        readDirectory: (path, options) => {
+          const spawn = spawnOf(path)
+          if (spawn === undefined) return fs.readDirectory(path, options)
+          if (behavior(spawn).fdDeniedBeforeExitEvent !== true) return Effect.succeed(["7"])
+          reportExitSoon(spawn)
+          return Effect.fail(
+            PlatformError.systemError({
+              _tag: "PermissionDenied",
+              module: "FileSystem",
+              method: "readDirectory",
+              pathOrDescriptor: path
+            })
+          )
+        },
         readLink: (path) => {
           const spawn = spawnOf(path)
           return spawn === undefined ? fs.readLink(path) : Effect.succeed(`socket:[${1000 + spawn}]`)
@@ -554,7 +574,7 @@ describe("WebKit launcher", () => {
           return { pull: Effect.never, upgrade: () => Effect.void, write, writeAll: write, close: Effect.void }
         })
       }
-      const exit = yield* WebKitAutomation.start({ executablePath, timeout }).pipe(onPlatform("linux")).pipe(
+      const exit = yield* around(WebKitAutomation.start({ executablePath, timeout }).pipe(onPlatform("linux"))).pipe(
         Effect.scoped,
         Effect.provideService(FileSystem.FileSystem, procfs),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -647,6 +667,57 @@ describe("WebKit launcher", () => {
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(1))
         assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+        assert.strictEqual(result.connected.length, 1)
+        assert.deepStrictEqual(result.closed, result.connected)
+        assert.deepStrictEqual(result.written, [])
+        assert.deepStrictEqual(result.stopped, [0])
+      }))
+
+    it.effect("keeps a child's exit when its descriptors are denied before Node reports the exit", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(() => ({ held: false, fdDeniedBeforeExitEvent: true }))
+        assert(result.exit._tag === "Failure")
+        const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
+        assert.strictEqual(error.reason._tag, "ProcessExited", "the child was exiting: procfs isn't what's wrong")
+        assert(error.reason._tag === "ProcessExited")
+        assert.deepStrictEqual(error.reason.code, Option.some(1))
+        assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+      }))
+
+    it.effect("closes a connection in progress when the child's exit wins the race", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(() => ({ held: true, stderrEndsBeforeExitEvent: true }), Effect.never)
+        assert(result.exit._tag === "Failure")
+        const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
+        assert(error.reason._tag === "ProcessExited")
+        assert.strictEqual(result.connected.length, 1)
+        assert.deepStrictEqual(result.closed, result.connected)
+        assert.deepStrictEqual(result.written, [])
+        assert.deepStrictEqual(result.stopped, [0])
+      }))
+
+    it.effect("closes a connection in progress and stops the child when the launch is interrupted from outside", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(
+          () => ({ held: true }),
+          Effect.never,
+          "5 seconds",
+          (start) => Effect.timeoutOption(start, "30 millis")
+        )
+        assert.strictEqual(result.connected.length, 1)
+        assert.deepStrictEqual(result.closed, result.connected)
+        assert.deepStrictEqual(result.written, [])
+        assert.deepStrictEqual(result.stopped, [0])
+      }))
+
+    it.effect("closes the connection and refuses when a live child loses its listener after connecting", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(() => ({ held: true, losesListenerAfterConnect: true }))
+        assert(result.exit._tag === "Failure")
+        const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
+        assert(error.reason._tag === "ConnectionFailed")
+        assert.include(error.reason.hint, "no longer holds its inspector listener")
+        assert.include(error.reason.hint, "WebKit.layerAttach")
         assert.strictEqual(result.connected.length, 1)
         assert.deepStrictEqual(result.closed, result.connected)
         assert.deepStrictEqual(result.written, [])
