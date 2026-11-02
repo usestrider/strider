@@ -468,6 +468,40 @@ scope cleanup. Capture checks cover dimensions and pixels beyond the native view
 screencast coverage checks overridden frame dimensions. This closes the reproduced ordering gap; it does not
 establish the cause of the earlier unrecorded failure.
 
+## Launched WebKit verifies its inspector listener through Linux procfs
+
+A connection to a selected port is not evidence that the child started its inspector. In the traced ROOK-140
+failure another MiniBrowser accepted the connection before the child reported its failed bind. Starting an
+Automation session on that connection could interfere with someone else's browser.
+
+Launched WebKit therefore requires Linux with readable child procfs. Before connecting, the exact spawned PID must
+hold the loopback LISTEN socket inode; after connecting, it must still hold the same listener and be running before
+any inspector write. The stock inspector binds exclusively, so retaining the same listener across connection
+establishment excludes a different server accepting that connection. A wrapper must exec MiniBrowser, not merely
+fork it. We do not search descendants or fall back when the proof is unavailable. Refusal explains why and directs
+the caller to attach to an externally managed inspector HTTP endpoint. A procfs read failure, including permission
+errors, can precede the child exit event, so it stops ownership attempts and closes any rejected connection before
+waiting for the actual event within the remaining launch deadline. No later collision report restarts ownership
+attempts. If no exit is observed, `ConnectionFailed` retains the original access error and uses `stage: "refused"`.
+This deliberately allows a genuine access refusal to take the rest of the launch budget; it does not use a fixed
+grace period or guess the child's state from another kernel file. An ordinary readiness timeout keeps its prior
+`stage: "handshake"`.
+
+Stderr ending alone is not an exit; a live child may still start successfully. An observed exit retains
+`ProcessExited` with its exit code when available; the code can be absent, such as for a signal. Stderr contains
+only what was collected within the same launch deadline, since descendants may hold it open. Exits before ownership
+also explain that wrappers must exec MiniBrowser and name attach, without assuming every exit was caused by a fork.
+Attach keeps its existing requirements. The existing deadline, 100 ms polling and five reported-collision attempts
+remain the policy.
+
+Rejected: checking port availability then releasing it (another process can bind in the gap), a launch mutex
+(other processes do not participate), delaying for stderr (there is no bounded time that proves success), and
+checking ownership only after connecting (a replacement listener could then be mistaken for the connected server).
+Pinned WebKitGTK's launch interface accepts only a fixed nonzero IP port, with no success acknowledgement or
+inherited listener, so a private Unix socket and socket activation are not available. A portable ownership service
+or native helper would need another design and dependency; the owner approved the narrower Linux procfs requirement
+for launched WebKit. Procfs inaccessible under a sandbox is a refusal, not permission to write to an unknown server.
+
 ## Confirm stock WebKit viewport requests against the renderer (ROOK-91)
 
 Stock WebKit sizes a native window. Its reply can follow a native target-size wait that expired, and renderer
