@@ -290,7 +290,10 @@ export const removeUserContextLaunched = Effect.fnUntraced(function*(state: Stat
   }))
 })
 
-/** Waits for inspector removal even when the failed page never acquired its Automation pairing. */
+/**
+ * Waits for removal using the handle's page when known. False means unpaired popup labels leave identity
+ * ambiguous; the creating operation must report that cleanup could not be confirmed.
+ */
 export const closeFailedPage = Effect.fnUntraced(function*(
   state: Pick<State, "root" | "pages" | "pageHandles" | "buffer" | "creating">,
   context: ContextEntry,
@@ -304,17 +307,23 @@ export const closeFailedPage = Effect.fnUntraced(function*(
     Effect.as(true),
     Effect.catch((error) => Viewport.isGone(error) ? Effect.succeed(false) : Effect.fail(error))
   )
-  if (!closed) return
+  if (!closed) return true
+  const paired = () =>
+    [...state.pageHandles].find(([page, pairedHandle]) => page.context === context && pairedHandle === handle)?.[0]
+  let known = paired()
   yield* state.root().drainObserved
+  const unpaired = (page: PageEntry) =>
+    !page.ended && page.context === context &&
+    !before.has(page.id) && !state.pageHandles.has(page)
   yield* state.buffer.waitFor(() => {
-    // Without a pairing, do not claim removal while a newly observed candidate is still listed.
-    // Concurrent unpaired creations conservatively share this boundary rather than guessing their identity.
-    const pending = [...state.pages.values()].some((page) =>
-      !page.ended && page.context === context &&
-      (state.pageHandles.get(page) === handle || (!before.has(page.id) && !state.pageHandles.has(page)))
-    )
+    known ??= paired()
+    if (known !== undefined) return known.ended || state.pages.get(known.id) !== known ? true : undefined
+    const pending = [...state.pages.values()].some((page) => unpaired(page) && !page.popup)
     return !pending && (state.creating.get(context.browserContextId ?? "default") ?? 0) === 0 ? true : undefined
   })
+  // Pending-count classification can label the actual created page as a popup. Without a pairing, a
+  // surviving popup-labelled candidate is ambiguity, not proof of removal and not a reason to wait on it.
+  return known !== undefined || ![...state.pages.values()].some(unpaired)
 })
 
 export const createPageLaunched = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {
@@ -373,6 +382,11 @@ export const createPageLaunched = Effect.fnUntraced(function*(state: State, id: 
     return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.Vanished({})))
   }).pipe(Effect.onError(() =>
     Viewport.cleanup(closeFailedPage(state, context, process, handle, before)).pipe(
+      Effect.flatMap((confirmed) =>
+        confirmed ? Effect.void : Effect.die(
+          new Error("WebKit failed-page cleanup cannot confirm removal: unpaired popup identity is ambiguous")
+        )
+      ),
       Effect.catch((error) =>
         Viewport.isGone(error) ? Effect.void : Effect.die(
           new Error("WebKit failed-page cleanup did not confirm removal", { cause: error })

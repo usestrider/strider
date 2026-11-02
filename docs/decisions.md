@@ -439,9 +439,16 @@ budget, and expose failed rollback alongside the initiating failure rather than 
 Reserve the last second of this shared budget for a final measurement, including when multiple pages restore at
 once. Nested cleanup cannot extend it. Ordinary release retains non-failing teardown: confirmed gone resources need
 nothing, and other release errors are warnings rather than restoration claims. Callback disposal likewise preserves
-the primary result, ignoring vanished windows and logging other failures. Failed-creation cleanup waits for inspector
-removal even for an unpaired page; simultaneous unpaired candidates conservatively share this bounded wait instead
-of guessing which entry belongs to the handle.
+the primary result, ignoring vanished windows and logging other failures. Failed-creation cleanup prefers the page
+paired to its Automation handle and waits only for that page, independent of popup labels, unrelated popups or
+other pending creations. Without a pairing it waits for newly observed non-popup candidates within the same bound.
+Popup labels come from the pending creation count: a popup arriving first can consume that count and leave the
+actual created page labelled as a popup. If an unpaired popup-labelled candidate remains, cleanup reports identity
+ambiguity rather than waiting for that popup or claiming the failed page was removed. An unrelated page wrongly
+labelled as a creation can still exhaust the bounded wait when no pairing exists. Concurrent unpaired creations
+and a creation count whose announcement never arrives remain ambiguous; no identity is guessed from those labels.
+Context-wide restoration is fail-fast: a non-gone failure can interrupt sibling restoration, and the rollback
+failure or release warning does not claim that every sibling was restored.
 
 Rejected: treating the resize reply or an arbitrary number of frames as completion; polling or resending the
 resize; using screen dimensions as a universal preflight limit across window managers; reporting `Unsupported`

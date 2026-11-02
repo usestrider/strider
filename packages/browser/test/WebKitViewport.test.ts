@@ -324,7 +324,7 @@ describe("WebKit viewport confirmation", () => {
         const state = {
           pages,
           pageHandles: new Map([[failed, handle]]),
-          creating: new Map([["context", pending]]),
+          creating: new Map([["context", pending + 1]]),
           root: () => ({ drainObserved: Effect.void }),
           buffer: {
             waitFor: Effect.fnUntraced(function*(check: () => unknown) {
@@ -346,10 +346,43 @@ describe("WebKit viewport confirmation", () => {
         assert.isUndefined(fiber.pollUnsafe())
         pages.delete(failed.id)
         yield* Deferred.succeed(removed, undefined)
-        yield* Fiber.join(fiber)
+        assert.isTrue(yield* Fiber.join(fiber))
         assert.isTrue(pages.has(unrelated.id))
       }))
   }
+
+  it.effect("does not confirm an unpaired actual page hidden by swapped popup labels", () =>
+    Effect.gen(function*() {
+      const context = { browserContextId: "context" } as State.ContextEntry
+      // The unrelated popup consumed the pending creation; the actual page was announced second.
+      const unrelated = { id: "unrelated", context, popup: false, ended: false } as State.PageEntry
+      const actual = { id: "actual", context, popup: true, ended: false } as State.PageEntry
+      const pages = new Map([[unrelated.id, unrelated], [actual.id, actual]])
+      const state = {
+        pages,
+        pageHandles: new Map(),
+        creating: new Map([["context", 0]]),
+        root: () => ({ drainObserved: Effect.void }),
+        buffer: {
+          waitFor: Effect.fnUntraced(function*(check: () => unknown) {
+            assert.isUndefined(check())
+            // Even if the unrelated first arrival disappears, the actual failed page is still listed.
+            pages.delete(unrelated.id)
+            assert.strictEqual(check(), true, "there is no identified non-popup left to wait for")
+            yield* Effect.void
+          })
+        }
+      } as unknown as Parameters<typeof WebKitAutomation.closeFailedPage>[0]
+      const confirmed = yield* WebKitAutomation.closeFailedPage(
+        state,
+        context,
+        processFor(() => measure()),
+        handle,
+        new Set()
+      )
+      assert.isFalse(confirmed, "the creating operation must report identity ambiguity")
+      assert.isTrue(pages.has(actual.id))
+    }))
 
   it.effect("does not add a defect when failed creation cleanup finds a vanished window", () =>
     Effect.gen(function*() {
