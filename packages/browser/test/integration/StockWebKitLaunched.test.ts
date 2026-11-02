@@ -45,6 +45,48 @@ const launched = Effect.fnUntraced(function*<A, E, R>(effect: Effect.Effect<A, E
 describe("Stock WebKit, launched in automation mode", () => {
   layer(NodeServices.layer, { excludeTestServices: true, timeout })((it) => {
     it.effect(
+      "refuses a screen-constrained initial viewport without leaving a page",
+      () =>
+        launched(Effect.gen(function*() {
+          const browser = yield* Browser.Browser
+          const context = yield* browser.newContext({ emulation: { viewport: { width: 1440, height: 1000 } } })
+          const before = yield* context.pages
+          const result = yield* Effect.exit(context.newPage)
+          const error = reasonOf(result)
+          assert.deepInclude(error?.reason, { _tag: "Unsupported", capability: "emulation.viewport" })
+          if (Exit.isFailure(result)) {
+            const message = String(Option.getOrThrow(Exit.findErrorOption(result)))
+            assert.include(message, "1440x1000")
+            assert.include(message, "1280x762")
+          }
+          assert.deepStrictEqual(yield* context.pages, before)
+        })),
+      timeout
+    )
+
+    it.effect(
+      "refuses a screen-constrained replacement and restores the previous effective viewport",
+      () =>
+        launched(Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          yield* page.emulate({ viewport: { width: 640, height: 480 } })
+          assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), [640, 480])
+          const result = yield* Effect.scoped(page.emulate({ viewport: { width: 1440, height: 1000 } })).pipe(
+            Effect.exit
+          )
+          const error = reasonOf(result)
+          assert.deepInclude(error?.reason, { _tag: "Unsupported", capability: "emulation.viewport" })
+          if (Exit.isFailure(result)) {
+            const message = String(Option.getOrThrow(Exit.findErrorOption(result)))
+            assert.include(message, "1440x1000")
+            assert.include(message, "1280x762")
+          }
+          assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), [640, 480])
+        })),
+      timeout
+    )
+
+    it.effect(
       "names itself, has its first tab, and drives a page with input the page trusts",
       () =>
         launched(Effect.gen(function*() {
