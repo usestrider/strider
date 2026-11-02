@@ -90,7 +90,7 @@ describe("decision Effects", () => {
           subject: { _tag: "FileChooser", navigable: Handles.page(page).entry.id, multiple, element: Option.none() }
         })
         const pending = yield* Deferred.await(captured)
-        const file = FileInput.path("/tmp/decision-contract")
+        const file = FileInput.local("/tmp/decision-contract")
         const select = pending._tag === "Single" ? pending.select(file) : pending.select([file])
         for (const effect of [select, pending.cancel, FileChooser.choose(file)(pending)]) {
           assert.isTrue(Effect.isEffect(effect))
