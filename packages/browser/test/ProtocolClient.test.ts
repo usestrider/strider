@@ -100,6 +100,40 @@ describe("ProtocolClient", () => {
       Input.dispatchMouseEvent({ type: type as "mouseMoved" | "mousePressed" | "mouseReleased", x: 10, y: 20 })
     )
 
+  it.effect("reports success and error reply receipt sequences only to the requesting hook", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+      const receipts: Array<number> = []
+      const observe = (received: number) => {
+        receipts.push(received)
+      }
+      yield* browser.receive({ method: "Page.loadEventFired", params: { timestamp: 0 } })
+      yield* browser.delivered
+      const success = yield* Effect.forkScoped(
+        client.root.sendSequenced(Page.enable()).pipe(
+          Effect.provideService(ProtocolClient.ReplyReceived, observe)
+        )
+      )
+      const command = yield* browser.next
+      yield* browser.receive({ id: command.id, result: {} })
+      assert.strictEqual((yield* Fiber.join(success)).received, 2)
+      assert.deepStrictEqual(receipts, [2])
+      const without = yield* Effect.forkScoped(client.root.sendSequenced(Page.enable()))
+      yield* browser.receive({ id: (yield* browser.next).id, result: {} })
+      assert.strictEqual((yield* Fiber.join(without)).received, 3)
+      assert.deepStrictEqual(receipts, [2])
+      const failure = yield* Effect.forkScoped(
+        client.root.send(Page.enable()).pipe(
+          Effect.provideService(ProtocolClient.ReplyReceived, observe),
+          Effect.exit
+        )
+      )
+      yield* browser.receive({ id: (yield* browser.next).id, error: { code: -32000, message: "native failure" } })
+      assert.strictEqual(reasonOf(yield* Fiber.join(failure))._tag, "Rejected")
+      assert.deepStrictEqual(receipts, [2, 4])
+    }))
+
   it.effect("orders transport sends even when one suspends, and waits for every out-of-order reply", () =>
     Effect.gen(function*() {
       const browser = yield* makeBrowser

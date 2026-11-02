@@ -5,6 +5,7 @@ import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -253,6 +254,9 @@ const sentHeaders = Effect.gen(function*() {
   const ready = yield* Deferred.make<void>()
   const settled = yield* Queue.unbounded<void>()
   const facts: Array<Adapter.Fact> = []
+  const foldEntered = yield* Deferred.make<void>()
+  const foldRelease = yield* Deferred.make<void>()
+  let holdFold = false
   const captures = yield* Queue.unbounded<Sent>()
   const preparation = yield* Queue.unbounded<Sent>()
   yield* Effect.gen(function*() {
@@ -298,6 +302,11 @@ const sentHeaders = Effect.gen(function*() {
       sink: Effect.fnUntraced(function*(fact) {
         yield* sink(fact)
         facts.push(fact)
+        if (holdFold && fact._tag === "ConnectionOpened") {
+          holdFold = false
+          yield* Deferred.succeed(foldEntered, undefined)
+          yield* Deferred.await(foldRelease)
+        }
         if (fact._tag === "PageReady") yield* Deferred.succeed(ready, undefined)
         if (fact._tag === "ConnectionOpened") yield* Queue.offer(settled, undefined)
       })
@@ -336,7 +345,27 @@ const sentHeaders = Effect.gen(function*() {
   yield* send(captured[0]!)
   yield* barrier
   const request = yield* next
-  return { browser, page, request, send, barrier, captures, preparation, facts }
+  const pauseFold = Effect.gen(function*() {
+    holdFold = true
+    yield* browser.receive({
+      method: "Network.webSocketCreated",
+      sessionId: "S1",
+      params: { requestId: "hold-fold", url: "ws://127.0.0.1/hold" }
+    })
+    yield* Deferred.await(foldEntered)
+  })
+  return {
+    browser,
+    page,
+    request,
+    send,
+    barrier,
+    captures,
+    preparation,
+    facts,
+    pauseFold,
+    releaseFold: Deferred.succeed(foldRelease, undefined)
+  }
 })
 
 /** The synthetic browser and its deadlines advance together, without wall-clock delays. */
@@ -484,6 +513,37 @@ describe("Chromium capture document replacement", () => {
       yield* h.barrier
       assert.deepStrictEqual(Array.from(yield* Fiber.join(pending)), [0])
     }).pipe(onTestClock))
+
+  for (const errorReply of [false, true]) {
+    it.effect(`keeps an earlier native ${errorReply ? "error" : "success"} receipt while the commit fold is suspended`, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders
+        const page = yield* h.page.control
+        const pending = yield* Effect.forkScoped(Effect.exit(page.screenshot()))
+        const command = yield* Queue.take(h.captures)
+        yield* h.pauseFold
+        yield* h.browser.receive({
+          id: command.id,
+          sessionId: command.sessionId,
+          ...(errorReply ? { error: { code: -32000, message: "capture failed" } } : { result: { data: "AA==" } })
+        })
+        yield* h.browser.receive(replacementEvent())
+        yield* h.browser.delivered
+        yield* h.releaseFold
+        yield* h.barrier
+        const exit = yield* Fiber.join(pending)
+        if (errorReply) {
+          assert(Exit.isFailure(exit))
+          const error = Exit.findErrorOption(exit)
+          assert(Option.isSome(error))
+          assert.strictEqual(error.value._tag, "PageError")
+          if (error.value._tag === "PageError") assert.strictEqual(error.value.reason._tag, "BackendFailure")
+        } else {
+          assert(Exit.isSuccess(exit))
+          assert.deepStrictEqual(Array.from(exit.value), [0])
+        }
+      }).pipe(onTestClock))
+  }
 
   it.effect("keeps a native error reply received before replacement terminal", () =>
     Effect.gen(function*() {
