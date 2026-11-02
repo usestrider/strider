@@ -623,15 +623,17 @@ export const render = (options: {
       ].join(", ")
     } } from "effect"`,
     ...(needsResponse ? [`import { HttpServerResponse } from "effect/http"`] : []),
+    ...(options.browser._tag === "Attach" || launchesWebKit(options.browser)
+      ? [`import * as NodeSocket from "@effect/platform-node/NodeSocket"`]
+      : []),
     ...(launchesWebKit(options.browser)
-      ? [
-        `import * as NodeSocket from "@effect/platform-node/NodeSocket"`,
-        `import { SocketConnector } from "@usestrider/browser/protocol"`
-      ]
+      ? [`import { SocketConnector } from "@usestrider/browser/protocol"`]
       : []),
     ``,
     launchesWebKit(options.browser)
       ? `const browser = ${browserLayer}.pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, SocketConnector.layer((endpoint) => NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port })))))`
+      : options.browser._tag === "Attach"
+      ? `const browser = ${browserLayer}.pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)))`
       : `const browser = ${browserLayer}.pipe(Layer.provide(NodeServices.layer))`,
     ``,
     `describe(${quote(options.name)}, () => {`,
