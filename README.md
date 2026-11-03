@@ -28,11 +28,82 @@ const program = Effect.scoped(Effect.gen(function*() {
 
 - **Lifetimes are scopes.** A page, route or dialog handler ends with the `Scope` that acquired it, even on failure or
   interruption.
+
+  ```ts
+  import { Browser } from "@usestrider/browser"
+  import { Effect } from "effect"
+
+  const visit = Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    yield* page.goto("https://shop.example.com")
+  }).pipe(Effect.scoped) // The page closes when this scope ends, even if navigation fails.
+  ```
+
 - **Subscribe, then act.** To catch a popup, download or response an action causes, subscribe first.
+
+  ```ts
+  import { Page, Popup } from "@usestrider/browser"
+  import { Effect } from "effect"
+
+  const openHelp = Effect.fn("openHelp")(function*(page: Page.Page) {
+    const nextPopup = yield* Popup.next(page) // Subscribe before clicking.
+    yield* page.getByRole("link", { name: "Help" }).click()
+    const help = yield* nextPopup // Page.Page: title, getByRole(), goto(), etc.
+    return yield* help.title
+  })
+  ```
+
 - **Errors say what happened.** Each module has one error, whose `reason` says why, with a hint of what to do next.
+
+  ```ts
+  import { Page } from "@usestrider/browser"
+  import { Effect } from "effect"
+
+  const save = Effect.fn("save")(function*(page: Page.Page) {
+    yield* page.getByRole("button", { name: "Save" }).click().pipe(
+      Effect.tapErrorTag("LocatorError", (error) =>
+        // Example log messages:
+        // "StrictViolation"
+        // "2 elements match and 1 of them is visible; add .filter({ visible: true })"
+        Effect.logError(error.reason._tag, error.reason.hint))
+    )
+  })
+  ```
+
 - **One deadline per operation,** covering everything it does.
+
+  ```ts
+  import { Deadline, Expect, Page } from "@usestrider/browser"
+  import { Effect } from "effect"
+
+  const pay = Effect.fn("pay")(function*(page: Page.Page) {
+    yield* page.getByRole("button", { name: "Pay" }).click()
+    yield* page.getByText("Payment received").pipe(Expect.toBeVisible)
+  }, Deadline.within("5 seconds")) // One shared budget for both steps.
+  ```
+
 - **Access is typed.** Calling a control method on a tab you may only inspect is a compile error.
+
+  ```ts
+  import { Page } from "@usestrider/browser"
+  import { Effect } from "effect"
+
+  const readTitle = Effect.fn("readTitle")(function*(tab: Page.ObservedPage) {
+    const page = yield* tab.inspect
+    // yield* page.goto("https://shop.example.com") // Type error: no goto on ReadonlyPage.
+    return yield* page.title
+  })
+  ```
+
 - **Built for agents too.** A `strider` command line with named sessions, and an agent toolkit.
+
+  ```sh
+  strider start --name shop --chromium /usr/bin/chromium
+  strider -s shop page new --name main https://shop.example.com
+  strider -s shop -p main snapshot
+  strider -s shop -p main click 'role=button[name="Add to cart"]'
+  strider -s shop stop
+  ```
 
 [Introduction](https://usestrider.dev/docs) · [Coming from Playwright](https://usestrider.dev/docs/playwright) ·
 [Choosing a browser](https://usestrider.dev/docs/browsers/choosing)
