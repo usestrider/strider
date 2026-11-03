@@ -1041,6 +1041,93 @@ describe("Chromium claims (ROOK-95)", () => {
             )
           })).pipe(Effect.provide(browser.connect))
         }), 60_000)
+
+      it.effect("context-only handoff reports a dialog it dismissed", () =>
+        Effect.gen(function*() {
+          const browser = yield* launch
+          const { origin } = yield* serve
+          const old = yield* Scope.make()
+          yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
+          const services = yield* Layer.buildWithScope(browser.connect, old)
+          yield* Effect.gen(function*() {
+            const context = yield* api.UserContext.create({ reclaimable: true, dialogs: "leaveOpen" })
+            const page = yield* context.newPage
+            yield* page.goto(`${origin}/context-only`)
+            yield* api.UserContext.claim(context)
+            const opened = yield* Dialog.next(page)
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() => confirm("dismissed unseen"), 0)
+            })
+            yield* opened
+          }).pipe(Scope.provide(old), Effect.provide(services))
+          const snapshots = yield* handoff(old)
+          const events = snapshots.flatMap((snapshot) => snapshot.handoff?.events ?? [])
+          assert.deepStrictEqual(events.map((event) => event.message), ["dismissed unseen"])
+        }), 60_000)
+
+      it.effect("context reclaim with a blocked page returns it as Unknown", () =>
+        Effect.gen(function*() {
+          const browser = yield* launch
+          const { origin } = yield* serve
+          const old = yield* Scope.make()
+          yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
+          const services = yield* Layer.buildWithScope(browser.connect, old)
+          const url = `${origin}/context-blocked`
+          const claim = yield* Effect.gen(function*() {
+            const context = yield* api.UserContext.create({ reclaimable: true, dialogs: "leaveOpen" })
+            const page = yield* context.newPage
+            yield* page.goto(url)
+            return yield* api.UserContext.claim(context)
+          }).pipe(Scope.provide(old), Effect.provide(services))
+          yield* handoff(old)
+          const target = (yield* browser.targets).find((info) => info.type === "page" && info.url === url)!
+          const { sessionId } = yield* Target.attachToTarget({ targetId: target.targetId, flatten: true }).pipe(
+            Protocol.on(browser.observer.browser)
+          )
+          const session = yield* browser.observer.session(sessionId)
+          yield* Runtime.evaluate({ expression: "setTimeout(() => confirm('blocked'), 0); undefined" }).pipe(
+            Protocol.on(session)
+          )
+          yield* Effect.sleep("300 millis")
+          const start = performance.now()
+          const exit = yield* Effect.scoped(
+            api.UserContext.reclaim(claim).pipe(Effect.map(({ found }) => found.pages.map((page) => page.found._tag)))
+          ).pipe(Effect.provide(browser.connect), Effect.exit)
+          console.log(`context reclaim blocked page: ${Math.round(performance.now() - start)} ms`)
+          assert.isTrue(Exit.isSuccess(exit), `reclaim failed: ${String(exit)}`.slice(0, 300))
+          assert(Exit.isSuccess(exit))
+          assert.deepStrictEqual(exit.value, ["Unknown"])
+        }), 90_000)
+
+      it.effect("failed dismissal in a reclaimable context still ends handoff promptly", () =>
+        Effect.gen(function*() {
+          const browser = yield* launch
+          const { origin } = yield* serve
+          const old = yield* Scope.make()
+          yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
+          const services = yield* Layer.buildWithScope(browser.connect, old)
+          const claim = yield* Effect.gen(function*() {
+            const connected = yield* Browser.Browser
+            const context = yield* api.UserContext.create({ reclaimable: true, dialogs: "leaveOpen" })
+            const page = yield* context.newPage
+            yield* page.goto(`${origin}/context-dismiss-failed`)
+            const claim = yield* api.Page.claim(page)
+            const claims = ClaimHooks.get(connected).runtime.model.adapter.claims!
+            Object.assign(claims, { dismiss: () => Effect.fail(Kit.unsupported("test.dismiss", "injected refusal")) })
+            const opened = yield* Dialog.next(page)
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() => confirm("unanswered"), 0)
+            })
+            yield* opened
+            return claim
+          }).pipe(Scope.provide(old), Effect.provide(services))
+          const start = performance.now()
+          const snapshots = yield* handoff(old)
+          const elapsed = performance.now() - start
+          console.log(`failed dismissal handoff: ${Math.round(elapsed)} ms`)
+          assert.strictEqual(snapshots.find((entry) => entry.claim === claim)!.handoff?._tag, "Unknown")
+          assert.isBelow(elapsed, 5000)
+        }), 120_000)
     }
   )
 })
