@@ -14,29 +14,40 @@ results may carry.
 `effect/ai`; when an MCP client, such as an editor's agent, runs the model, serve the same tools with
 [`strider mcp`](/docs/agents/cli#mcp). Where [`pickAndClick`](/docs/agents/snapshots#acting-through-refs) gives a
 model one action, the toolkit gives it every tool below, and each result says what happened since the last call.
-A model calls tools one turn at a time, so an agent runs turns in a `Chat` until one asks for no tool:
+An agent runs turns in a `Chat` until one asks for no tool. Set `concurrency: 1` to execute each turn's browser actions in order:
 
 ```ts
 import { Browser } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
-import { Config, Console, Effect } from "effect"
+import { Config, Effect } from "effect"
 import { Chat } from "effect/ai"
 
 const signIn = Effect.fn("signIn")(function*() {
   const context = yield* Browser.newContext()
   const toolkit = yield* BrowserToolkit.make({
     context,
-    secrets: { password: yield* Config.Redacted("APP_PASSWORD") },
+    secrets: {
+      password: yield* Config.Redacted("APP_PASSWORD")
+    },
     capture: CapturePolicy.strict
   })
+
   const chat = yield* Chat.fromPrompt(
     "On app.example.com, sign in as ada@example.com with %password%."
   )
-  while (true) {
-    const turn = yield* chat.generateText({ prompt: [], toolkit })
-    for (const call of turn.toolCalls) yield* Console.log(call.name, call.params)
-    if (turn.toolCalls.length === 0) return turn.text
-  }
+
+  // Run browser tools, then let the model read the results and choose its next step.
+  // Stop when it answers without calling tools.
+  return yield* chat.generateText({
+    prompt: [],
+    toolkit,
+    concurrency: 1
+  }).pipe(
+    Effect.repeat({
+      until: (turn) => turn.toolCalls.length === 0
+    }),
+    Effect.map((turn) => turn.text) // Return the final turn's text.
+  )
 }, Effect.scoped)
 ```
 
@@ -83,7 +94,11 @@ const Capture = Config.Literals(["strict", "local"], "AGENT_CAPTURE").pipe(
 )
 
 const agentTools = Effect.fn("agentTools")(function*(context: UserContext.UserContext) {
-  return yield* BrowserToolkit.make({ context, secrets: {}, capture: yield* Capture })
+  return yield* BrowserToolkit.make({
+    context,
+    secrets: {},
+    capture: yield* Capture
+  })
 })
 ```
 
@@ -114,13 +129,23 @@ const tidyMyInbox = Effect.fn("tidyMyInbox")(
       secrets: {},
       capture: CapturePolicy.strict
     })
+
     const chat = yield* Chat.fromPrompt(
       "In my mail tab, archive the newsletters from this week."
     )
-    while (true) {
-      const turn = yield* chat.generateText({ prompt: [], toolkit })
-      if (turn.toolCalls.length === 0) return turn.text
-    }
+
+    // Run browser tools, then let the model read the results and choose its next step.
+    // Stop when it answers without calling tools.
+    return yield* chat.generateText({
+      prompt: [],
+      toolkit,
+      concurrency: 1
+    }).pipe(
+      Effect.repeat({
+        until: (turn) => turn.toolCalls.length === 0
+      }),
+      Effect.map((turn) => turn.text) // Return the final turn's text.
+    )
   },
   Effect.scoped,
   Effect.provide(MyChrome)
