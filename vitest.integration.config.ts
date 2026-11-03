@@ -25,7 +25,7 @@ export default defineConfig({
       extends: true,
       test: {
         ...upstreamTest,
-        // The diagnostic suites have known failures, tracked on Clutch; run them with test:upstream.
+        // The diagnostic suites have known failures, tracked as issues; run them with test:upstream.
         include: ["test/upstream/Astro.test.ts", "test/upstream/Vite.test.ts"]
       }
     }]

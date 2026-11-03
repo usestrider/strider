@@ -9,23 +9,32 @@ the program below runs on Chromium, Firefox and WebKit, and what a backend can't
 naming the capability.
 
 ```ts
+import { NodeServices } from "@effect/platform-node"
 import { Browser, Expect } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
+
+const BrowserLive = Chromium.layer({ executablePath: "/usr/bin/chromium" }).pipe(
+  Layer.provide(NodeServices.layer)
+)
 
 const program = Effect.scoped(Effect.gen(function*() {
   const page = yield* Browser.newPage()
   yield* page.goto("https://shop.example.com")
   yield* page.getByRole("button", { name: "Add to cart" }).click()
   yield* page.getByText("1 item").pipe(Expect.toBeVisible)
-})).pipe(Effect.provide(Chromium.layer({ executablePath: "/usr/bin/chromium" })))
+})).pipe(Effect.provide(BrowserLive))
 ```
 
 A launch runs the executable you name, and the library never looks for or installs a browser. To find the paths
-on your machine, run `npx strider browsers` in a project that has the package; it lists each browser it finds with
-its version.
+on your machine, install the `strider` command and run it; it lists each browser it finds with its version:
 
-The design, its principles and the full API are in the repository: https://github.com/usestrider/strider.
+```sh
+pnpm add -g @usestrider/cli
+strider browsers
+```
+
+The guides and the full API are at https://usestrider.dev, and the source is at https://github.com/usestrider/strider.
 
 MIT licensed. The protocol modules and keyboard layouts are generated from others' definitions, whose notices are
 in `THIRD_PARTY_NOTICES.md`.

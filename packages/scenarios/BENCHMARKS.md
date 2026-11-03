@@ -113,7 +113,7 @@ Work through one bounded investigation at a time:
 
 Use the repository's Effect conventions and existing shared mechanisms throughout. Internal refactoring should
 serve the measured problem. If an experiment settles an architectural decision, update the relevant layer document
-and `docs/decisions.md` with its reasons and rejected alternatives. Findings and unfinished work stay on Clutch.
+and `docs/decisions.md` with its reasons and rejected alternatives. Findings and unfinished work stay in issues.
 Artificial CPU-load reproduction requires prior maintainer approval, as `AGENTS.md` specifies.
 
 ### Internal changes and public API review
@@ -131,7 +131,7 @@ reviews that concrete proposal. Independent internal investigations can continue
 
 ### Investigation record
 
-Keep this record in the area's Clutch issue or an experiment comment, updating the map when the area's status
+Keep this record in the area's issue or an experiment comment, updating the map when the area's status
 changes. Do not create a separate Markdown backlog of findings.
 
 - **Scope and phase:** selected mechanism, representative workflows, current stage and explicit exclusions.

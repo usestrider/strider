@@ -1,7 +1,7 @@
 # Decisions
 
 The principles and architectural decisions behind Strider, with the alternatives rejected and why, so that a settled
-question stays settled unless the evidence changes. The layer documents (README.md, API.md, CONCEPTS.md, PROTOCOL.md,
+question stays settled unless the evidence changes. The layer documents (docs/design.md, API.md, CONCEPTS.md, PROTOCOL.md,
 CLI.md) state the contracts that follow from them.
 
 ## Principles
