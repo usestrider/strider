@@ -22,8 +22,9 @@
   --ink: #1a1a1a;
   --labels: #5a5750;
   --hairline: #e2ded3;
+  --ivory: #e6e3d9;
   /* The engraving's plate and the cover it's printed on, with the labels printed there */
-  --plate: #e6e3d9;
+  --plate: var(--ivory);
   --plate-labels: #5a5750;
   --engine-chromium: #1558c8;
   --engine-firefox: #c43e0a;
@@ -144,6 +145,11 @@ body {
   .nav-link[aria-current="page"] {
     color: var(--band-text);
     border-bottom-color: var(--band);
+  }
+
+  /* The masthead's heron is ivory on night paper, the color of the cover by day */
+  .dark .masthead-home svg {
+    --ink: var(--ivory);
   }
 
   /* The masthead's night toggle: in ink, the band's color under the pointer, showing the moon by day and the sun by
