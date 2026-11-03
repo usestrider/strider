@@ -38,8 +38,11 @@ and stock WebKit, and every member the API declares is built. One declared befor
     drift test (`test/integration/record.ts`): `pnpm test:integration --no-file-parallelism`, into
     `test/fixtures/traffic/`, when a browser rolls.
   - `INDEX.md`: every declaration and member, generated.
-  - `THIRD_PARTY_NOTICES.md`: the notices of what its generated code comes from, published with it. Both packages,
-    like the repository, are under the MIT license (`LICENSE`), which `pnpm pack` copies into each.
+  - `THIRD_PARTY_NOTICES.md`: the notices of what its generated code comes from, published with it. The published
+    packages, like the repository, are under the MIT license (`LICENSE`), which `pnpm pack` copies into each.
+- `packages/cli`: published as `@usestrider/cli`, the `strider` command to install globally: a small launcher that runs
+  `@usestrider/browser`'s command on Node, or on Bun where there's no Node. It exists to list that package and
+  `@effect/platform-node` as real dependencies, so a global install links them.
 - `packages/scenarios`: private, never published: Strider and Playwright side by side on the integration
   environment's Chromium. `pnpm scenarios` writes its `RESULTS.md`; `pnpm scenarios --record` visits
   the public demo sites once, live, into `.data/scenarios/`. Playwright (`playwright-core`) is this package's

@@ -6,7 +6,7 @@ a fresh context for each page.
 **Status:** pre-release.
 
 ```sh
-npm install --save-dev vitest @effect/vitest @effect/platform-node effect @usestrider/browser @usestrider/vitest
+pnpm add -D vitest @effect/vitest @effect/platform-node effect @usestrider/browser @usestrider/vitest
 ```
 
 `VitestBrowser.layer` provides the backend you give it, unchanged, plus `TestRun`, the test that's running:

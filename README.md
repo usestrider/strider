@@ -42,10 +42,11 @@ const program = Effect.scoped(Effect.gen(function*() {
 Pre-release, and the API can still change before 1.0. It runs on Chromium, Firefox and WebKit, and what a browser can't
 do fails with `Unsupported`, naming the capability. The packages aren't on npm yet.
 
-| Package                                  | What it's for                                 |
-| ---------------------------------------- | --------------------------------------------- |
-| [`@usestrider/browser`](packages/browser) | The library, its backends and the `strider` CLI |
-| [`@usestrider/vitest`](packages/vitest)   | The Vitest adapter                            |
+| Package                                   | What it's for                              |
+| ----------------------------------------- | ------------------------------------------ |
+| [`@usestrider/browser`](packages/browser) | The library and its backends               |
+| [`@usestrider/vitest`](packages/vitest)   | The Vitest adapter                         |
+| [`@usestrider/cli`](packages/cli)         | The `strider` command, to install globally |
 
 ## Contributing
 

@@ -27,7 +27,7 @@ body:
     id: browser
     attributes:
       label: Browser and version
-      description: "`npx strider browsers` lists them, e.g. Chromium 155.0.8059.79."
+      description: "`strider browsers` lists them, e.g. Chromium 155.0.8059.79."
     validations:
       required: true
   - type: input
