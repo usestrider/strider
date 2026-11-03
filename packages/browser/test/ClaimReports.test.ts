@@ -16,4 +16,22 @@ describe("claim reports", () => {
     assert.isFalse(Schema.is(Browser.Found)({ _tag: "Observed", dialogs: [{ kind: "invented", message: "" }] }))
     assert.deepStrictEqual(Schema.decodeUnknownSync(UserContext.Found)({ pages: [] }), { pages: [] })
   })
+  it("round-trips confirmed handoff events separately from current observations", () => {
+    const snapshot: Browser.LastKnown = {
+      _tag: "LastKnown",
+      claim: "saved claim",
+      dialogs: [{ kind: "confirm", message: "Continue?" }],
+      handoff: { _tag: "Complete", events: [{ _tag: "DialogDismissed", kind: "confirm", message: "Continue?" }] }
+    }
+    assert.deepStrictEqual(
+      Schema.decodeUnknownSync(Browser.LastKnown)(JSON.parse(JSON.stringify(
+        Schema.encodeSync(Browser.LastKnown)(snapshot)
+      ))),
+      snapshot
+    )
+    assert.deepStrictEqual(Schema.decodeUnknownSync(Browser.Handoff)({ _tag: "Unknown", events: [] }), {
+      _tag: "Unknown",
+      events: []
+    })
+  })
 })
