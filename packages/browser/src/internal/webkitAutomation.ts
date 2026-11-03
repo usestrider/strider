@@ -131,7 +131,7 @@ const ownershipGuidance = `Wrappers must exec MiniBrowser; fork-only wrappers ar
 
 /**
  * The exact spawned PID must hold the IPv4 loopback listener. The namespace's TCP table alone includes other
- * processes, so its inode must also occur in this PID's descriptors. Never inspect descendants (ROOK-140).
+ * processes, so its inode must also occur in this PID's descriptors. Never inspect descendants.
  */
 export const inspectorListener = Effect.fnUntraced(function*(pid: number, port: number) {
   if (process.platform !== "linux") {

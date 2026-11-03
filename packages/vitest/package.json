@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "type": "module",
   "license": "MIT",
+  "homepage": "https://usestrider.dev",
   "description": "Vitest for @usestrider/browser: the current test as TestRun, and its artifacts",
   "repository": {
     "type": "git",

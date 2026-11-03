@@ -48,7 +48,7 @@ export const dispatchInput = Effect.fnUntraced(
       !state.interceptingDrags.has(page.id) && !state.drags.has(page.id) &&
       (state.heldButtons.get(page.id) ?? 0) === 0
     ) {
-      // ROOK-123: the move's reply waits a rendering frame, which a complete unheld click needn't spend. Its commands
+      // The move's reply waits a rendering frame, which a complete unheld click needn't spend. Its commands
       // go out as one step, so an interruption can't leave the button pressed, and only the replies overlap.
       // Drags, held buttons, double clicks and modifier transitions stay sequential, and so does frame routing,
       // coordinate clicks included. With drag interception on, a late drag needs the sequential path's cancellation.
