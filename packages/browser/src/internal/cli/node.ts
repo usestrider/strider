@@ -1,6 +1,7 @@
 /**
  * The few Node APIs the `strider` client and daemon use directly, typed here: the package compiles without Node's
- * types, so that nothing else can come to depend on them. The command runs on Node (CLI.md).
+ * types, so that nothing else can come to depend on them. The command runs on Node, or on Bun through its Node
+ * compatibility (CLI.md).
  */
 
 export interface Process {

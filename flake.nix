@@ -55,7 +55,7 @@
         {
           # The toolchain, for the standard checks, which run anywhere, and sops, which the docs' deploy decrypts its
           # readers with
-          default = pkgs.mkShellNoCC { packages = toolchain ++ [ pkgs.sops ]; };
+          default = pkgs.mkShellNoCC { packages = toolchain ++ [ pkgs.sops pkgs.bun ]; };
 
           # The machine the browser integration tests see, the same wherever they run. `pnpm test:integration`
           # enters it with `--ignore-environment`, so nothing else of the host's reaches them: no display, no

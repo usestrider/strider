@@ -15,7 +15,7 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 
 An entry with no marker is open.
 
-**Closed** on 2026-10-29: nothing more is added here. New findings are issues on the Rookery board (`.agents/AGENTS.md`, Issues). Numbers stay stable, so documents and code comments can still cite them (`QUIRKS.md, Q12`).
+**Closed** on 2026-10-29: nothing more is added here. New findings are filed as issues (`.agents/AGENTS.md`, Issues). Numbers stay stable, so documents and code comments can still cite them (`QUIRKS.md, Q12`).
 
 ## Browsers: navigation, history and documents
 
@@ -1416,7 +1416,7 @@ An entry with no marker is open.
 - *Reconsider:* keeping the client's lightweight routing scan aligned with the daemon's shared flags when those flags change.
 
 **Q255. A WebKit expectation failure can contain no observations in a full integration run** (Untraced). `WebKit slice > fails an expectation that never holds, with what it saw` failed at `test/integration/slice/slice.ts:173`: its failure history was `[]`, where the test expected one observation with `{ matches: 2, visible: 2 }`.
-- *Seen:* ROOK-84's merge validation against pinned stock WebKit, through `rookery lock browser -- pnpm test:integration`; 537 tests passed and two failed, the other having Q180's Chromium crash-notification symptom. No isolated reproduction or protocol trace was collected, so the cause and whether it depends on a full run are unknown.
+- *Seen:* ROOK-84's merge validation against pinned stock WebKit, through `pnpm test:integration`; 537 tests passed and two failed, the other having Q180's Chromium crash-notification symptom. No isolated reproduction or protocol trace was collected, so the cause and whether it depends on a full run are unknown.
 - *We:* retain the expectation test and implementation unchanged, with no retry or delay. Report the red suite for follow-up rather than treating the merge as fully validated.
 - *Reconsider:* trace the expectation's evaluation and deadline to establish why its failure held no observation before deciding what to change.
 

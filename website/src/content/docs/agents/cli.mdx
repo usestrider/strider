@@ -55,7 +55,7 @@ filled label=Email on main · 17 ms
   command.
 - A `page new` that fails, on a name that's taken or a URL that doesn't load, leaves no page behind, so the name is
   free to try again.
-- In a project, run it as `npx strider`; these examples write `strider`. `strider --help` lists the commands, and
+- Install it with `pnpm add -g @usestrider/cli`. It runs on Node, or on Bun where there is no Node. `strider --help` lists the commands, and
   `strider <command> --help` each one's arguments.
 
 ## Waits across commands
@@ -270,7 +270,7 @@ export default Segment.make(
 as the `strider` running the session:
 
 ```sh
-npx tsc --noEmit && strider -s shop run pay.ts
+pnpm tsc --noEmit && strider -s shop run pay.ts
 strider -s shop pages
 strider -s shop -p p1 page name card
 strider -s shop -p card snapshot
@@ -375,11 +375,11 @@ tools over the Model Context Protocol; add it to your MCP client's servers:
 ```json
 {
   "mcpServers": {
-    "strider": { "command": "npx", "args": ["strider", "mcp", "-s", "shop"] }
+    "strider": { "command": "strider", "args": ["mcp", "-s", "shop"] }
   }
 }
 ```
 
 With `-s`, the agent shares a session with your shell, so you can watch and act on its pages. With
-`["strider", "mcp", "--start", "--chromium", "/usr/bin/chromium"]`, the client gets a session of its own, ending
+`["mcp", "--start", "--chromium", "/usr/bin/chromium"]`, the client gets a session of its own, ending
 with it.
