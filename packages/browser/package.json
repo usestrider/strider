@@ -46,7 +46,8 @@
     "./internal/*": null,
     "./bin/*": null,
     "./index": null,
-    "./*/index": null
+    "./*/index": null,
+    "./experimental": "./src/experimental/index.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -84,7 +85,8 @@
       "./internal/*": null,
       "./bin/*": null,
       "./index": null,
-      "./*/index": null
+      "./*/index": null,
+      "./experimental": "./dist/experimental/index.js"
     }
   },
   "scripts": {

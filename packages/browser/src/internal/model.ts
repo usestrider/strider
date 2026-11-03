@@ -259,6 +259,8 @@ export interface FrameEntry {
 
 /** Everything about a page that changes: what the browser says of it, and the caller's settings for it. */
 export interface PageState {
+  /** Active dialog details, independent of the bounded event history. */
+  readonly dialog: Option.Option<PromptEvent>
   readonly status: PageStatus
   /** Its frames, in the order they were added, as `page.frames` shows them under the page. */
   readonly frames: ReadonlyArray<FrameEntry>
@@ -306,6 +308,8 @@ export interface ContextSettings {
    * choosers no handler answers are canceled (CONCEPTS.md §5).
    */
   readonly owned: boolean
+  /** Whether this context was created for recovery instead of disposal on disconnect. */
+  readonly reclaimable: boolean
   /** `None` for a context nobody set a policy for, such as the default context: no automatic decision. */
   readonly policy: Option.Option<DialogPolicy>
   /** Events retained per kind and target, for `history` (`UserContext.Options.eventLog`). */
@@ -457,7 +461,8 @@ export const make = Effect.fnUntraced(function*() {
   /** Gives the model its adapter, once connected, and folds the connection's loss when it comes. */
   const attach = (connected: Adapter.AdapterConnection): Effect.Effect<Model, never, Scope.Scope> =>
     Effect.gen(function*() {
-      yield* ownership.attach(connected)
+      const bounded = BoundedAdapter.make(connected)
+      yield* ownership.attach(connected, bounded.claims)
       yield* connected.closed.pipe(Effect.andThen(fold.loseConnection), Effect.forkScoped)
       const release = (page: Target.NavigableId, by?: Scope.Scope) =>
         Effect.suspend(() => {
@@ -465,7 +470,7 @@ export const make = Effect.fnUntraced(function*() {
           return Option.isNone(entry) ? Effect.void : ownership.release(entry.value, by)
         })
       const model: Model = {
-        adapter: BoundedAdapter.make(connected),
+        adapter: bounded,
         pages: fold.pages,
         page: fold.page,
         document: fold.document,

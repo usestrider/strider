@@ -16,6 +16,7 @@
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
+import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
 import * as Hash from "effect/Hash"
 import * as Inspectable from "effect/Inspectable"
@@ -23,7 +24,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import { pipeArguments } from "effect/Pipeable"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Browser from "../Browser.ts"
 import * as CookieJar from "../CookieJar.ts"
@@ -42,14 +43,17 @@ import * as UserContext from "../UserContext.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserService from "./browserService.ts"
+import * as ClaimHooks from "./claimHooks.ts"
 import * as Clock from "./clock.ts"
 import * as ConnectionImpl from "./connection.ts"
+import * as Cleanup from "./declarationCleanup.ts"
 import * as DownloadImpl from "./download.ts"
 import * as Emulation from "./emulation.ts"
 import * as Evaluation from "./evaluation.ts"
 import * as Grants from "./grants.ts"
 import * as Guarded from "./guarded.ts"
 import * as Handles from "./handles.ts"
+import * as Handoff from "./handoff.ts"
 import * as InitScripts from "./initScripts.ts"
 import * as Model from "./model.ts"
 import * as Navigation from "./navigation.ts"
@@ -491,17 +495,30 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       Navigation.settle(model, operation, navigation, frame, url, at, outcome, id)
   }
 
-  const newContext = (
-    options?: UserContext.Options
+  const setupContext = (
+    options?: UserContext.Options,
+    mode?: { readonly reclaimable: true } | {
+      readonly context: UserContext.Id
+      readonly ownership: { committed: boolean }
+      readonly adopt?: boolean
+    }
   ): Effect.Effect<UserContext.UserContext, UserContext.UserContextError | Deadline.Timeout, Scope.Scope> =>
     Effect.gen(function*() {
+      const operation = mode !== undefined && "context" in mode ? "UserContext.reclaim" : "Browser.newContext"
       const { id } = yield* Operation.record
+      const ownerScope = yield* Effect.scope
+      const reclaimable = mode !== undefined
+      const adopt = mode !== undefined && "context" in mode && mode.adopt === true
+      const ownership = mode !== undefined && "context" in mode ? mode.ownership : undefined
+      const committed = () => ownership === undefined || ownership.committed
+      let handle: UserContext.UserContext | undefined
+      let previous: UserContext.UserContext | undefined
       // A partition the backend can't set fails the context before it exists: nothing is applied partly
       if (options?.storageState !== undefined) {
         const partitions = yield* StorageStates.unsupportedPartitions(runtime, options.storageState)
         if (partitions.length > 0) {
           return yield* Effect.fail(contextError(
-            "Browser.newContext",
+            operation,
             new StorageState.Incompatible({
               partitions,
               hint: `${runtime.backend} can't set a partitioned cookie (cookies.partitioned)`
@@ -519,7 +536,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           ? Effect.die(mapped.error)
           : mapped._tag === "Timeout"
           ? Effect.fail(mapped.error)
-          : Effect.fail(contextError("Browser.newContext", mapped.reason, id))
+          : Effect.fail(contextError(operation, mapped.reason, id))
       }
       // A directory the context owns for its downloads, made first so it is removed after the context;
       // or the caller's, or none
@@ -529,10 +546,10 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       const reports = (name: string) =>
         capabilities.every((entry) => entry.name !== name || entry.status !== "unsupported")
       const reportsDownloads = reports("downloads")
-      const asked = options?.downloads ?? (reportsDownloads ? "temporary" : "none")
+      const asked = options?.downloads ?? (!adopt && reportsDownloads ? "temporary" : "none")
       if (typeof asked === "object" && !/^(\/|[A-Za-z]:[\\/])/.test(asked.directory)) {
         return yield* Effect.fail(contextError(
-          "Browser.newContext",
+          operation,
           new Reason.InvalidInput({
             input: "downloads",
             expected: "an absolute directory, which the browser writes to",
@@ -557,7 +574,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           yield* runtime.fileSystem.value.makeTempDirectoryScoped({ prefix: "strider-downloads-" }).pipe(
             Effect.mapError((error) =>
               contextError(
-                "Browser.newContext",
+                operation,
                 new Reason.BackendFailure({
                   kind: "Rejected",
                   method: "FileSystem.makeTempDirectoryScoped",
@@ -574,28 +591,43 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       }
       // Removed when the scope closes, waiting for its end under a budget of its own (`Model.remove`)
       const entry = yield* Effect.acquireRelease(
-        adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: false }).pipe(
-          Effect.catch(failed),
-          Effect.flatMap(model.context)
-        ),
-        (entry) => model.remove(entry).pipe(Effect.ensuring(Effect.sync(() => contexts.delete(entry.id))))
+        (mode !== undefined && "context" in mode
+          ? Effect.succeed(mode.context)
+          : adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: false, reclaimable })).pipe(
+            Effect.catch(failed),
+            Effect.flatMap(model.context)
+          ),
+        (entry) =>
+          (!committed() || (reclaimable && Handoff.leavesOpen(ownerScope)) ? Effect.void : model.remove(entry)).pipe(
+            Effect.ensuring(Effect.sync(() => {
+              if (handle === undefined || contexts.get(entry.id) !== handle) return
+              if (!committed() && previous !== undefined) contexts.set(entry.id, previous)
+              else contexts.delete(entry.id)
+            }))
+          )
       )
       const created = entry.id
       // Owned contexts decide dialogs no handler claims at once, and cancel file choosers no handler answers
       // (CONCEPTS.md §5)
       const settings = (yield* entry.state.get).settings
+      if (ownership !== undefined) {
+        yield* Effect.addFinalizer(() => committed() ? Effect.void : model.configure(entry, settings))
+      }
       yield* model.configure(entry, {
         owned: true,
-        policy: Option.some(options?.dialogs ?? "dismiss"),
+        reclaimable,
+        policy: adopt ? Option.none() : Option.some(options?.dialogs ?? "dismiss"),
         eventLog: options?.eventLog ?? settings.eventLog,
         keyboardLayout: options?.keyboardLayout ?? settings.keyboardLayout
       })
       const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: created }
       // Where file choosers aren't reported, as on stock WebKit, the browser cancels them itself
-      if (reports("fileChooser")) yield* adapter.declare(scope, { _tag: "FileChooser" }).pipe(Effect.catch(failed))
+      if (!adopt && reports("fileChooser")) {
+        yield* adapter.declare(scope, { _tag: "FileChooser" }).pipe(Effect.catch(failed))
+      }
       // A challenge no route answers gets the server's response, never the browser's prompt, which nothing answers
       // headless, wherever the backend can pause one (QUIRKS.md, Q95 and Q252)
-      if (reports("network.challenges")) {
+      if (!adopt && reports("network.challenges")) {
         yield* adapter.declare(scope, { _tag: "Challenges" }).pipe(Effect.catch(failed))
       }
       if (asked === "deny") {
@@ -610,10 +642,10 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       if (options?.emulation !== undefined || options?.focus === "emulated") {
         const fields = Emulation.fields(options.emulation ?? {})
         if (!Array.isArray(fields)) {
-          return yield* Effect.fail(contextError("Browser.newContext", fields as Reason.InvalidInput, id))
+          return yield* Effect.fail(contextError(operation, fields as Reason.InvalidInput, id))
         }
         yield* Emulation.declare(
-          { runtime, scope, operation: "Browser.newContext" },
+          { runtime, scope, operation },
           options.focus === "emulated"
             ? [...fields, { capability: "emulation.focus", override: { _tag: "FocusEmulation", enabled: true } }]
             : fields,
@@ -621,16 +653,16 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         ).pipe(Effect.mapError((error) =>
           Deadline.isTimeout(error)
             ? error
-            : contextError("Browser.newContext", asContextReason(Target.isTargetGone(error) ? error : error.reason), id)
+            : contextError(operation, asContextReason(Target.isTargetGone(error) ? error : error.reason), id)
         ))
       }
       if (options?.permissions !== undefined) {
-        yield* Grants.grant(runtime, entry, "Browser.newContext", options.permissions, undefined).pipe(
+        yield* Grants.grant(runtime, entry, operation, options.permissions, undefined).pipe(
           Effect.mapError((error) =>
             Deadline.isTimeout(error)
               ? error
               : contextError(
-                "Browser.newContext",
+                operation,
                 asContextReason(Target.isTargetGone(error) ? error : error.reason),
                 id
               )
@@ -642,15 +674,55 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         page: (pageEntry) => Option.getOrThrow(runtime.page(pageEntry)),
         control: Effect.sync(() => context)
       })
+      previous = contexts.get(created)
+      handle = context
       contexts.set(created, context)
-      // The saved storage, before the context's first page; a context it can't be written into isn't kept
+      // A new context is removed when saved storage fails; a borrowed context must survive failed setup.
       if (options?.storageState !== undefined) {
         yield* StorageStates.applyState(runtime, context, options.storageState, id).pipe(
-          Effect.onError(() => adapter.removeUserContext(created).pipe(Effect.ignore))
+          Effect.onError(() =>
+            ownership === undefined ? adapter.removeUserContext(created).pipe(Effect.ignore) : Effect.void
+          )
         )
       }
+      if (ownership === undefined) Handoff.ownContext(entry, ownerScope)
       return context
-    }).pipe(Operation.named("Browser.newContext"))
+    }).pipe(Operation.named(mode !== undefined && "context" in mode ? "UserContext.reclaim" : "Browser.newContext"))
+
+  // Setup is interruptible; ownership, registrations and delivery share a single commit region.
+  const recover = <A>(
+    options: UserContext.Options | undefined,
+    id: UserContext.Id,
+    adopt: boolean,
+    complete: (context: UserContext.UserContext, scope: Scope.Scope) => Effect.Effect<A>
+  ) =>
+    Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function*() {
+        const scope = yield* Scope.fork(yield* Effect.scope)
+        const ownership = { committed: false }
+        const context = yield* restore(
+          setupContext(options, { context: id, ownership, adopt }).pipe(Scope.provide(scope))
+        ).pipe(Effect.onError(() => Scope.close(scope, Exit.void).pipe(Effect.provideService(Cleanup.Confirm, true))))
+        const entry = yield* model.context(id)
+        // Existing pages need release steps before the context's declarations are torn down, too.
+        for (const page of entry.state.getUnsafe().pages) yield* model.transfer(page.id, scope)
+        Handoff.ownContext(entry, scope)
+        Handoff.allow(scope)
+        ownership.committed = true
+        return yield* complete(context, scope)
+      })
+    )
+  const newContext = Effect.fnUntraced(function*(
+    options?: UserContext.Options,
+    mode?: { readonly reclaimable: true } | { readonly context: UserContext.Id }
+  ) {
+    if (mode !== undefined && "context" in mode) {
+      return yield* recover(options, mode.context, false, (context) => Effect.succeed(context))
+    }
+    const context = yield* setupContext(options, mode)
+    if (mode !== undefined) Handoff.allow(yield* Effect.scope)
+    return context
+  })
 
   const defaultEntry = yield* model.context(adapter.defaultContext)
   const browser: Browser.Browser = {
@@ -687,6 +759,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
     }),
     defaultContext: makeObservedContext(runtime, defaultEntry, upgradeContext(defaultEntry))
   }
+  ClaimHooks.register(browser, { runtime, context: newContext, recover })
   return browser
 })
 

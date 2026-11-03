@@ -8,6 +8,7 @@
 import type * as Deferred from "effect/Deferred"
 import type * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import type * as Scope from "effect/Scope"
 import type * as Semaphore from "effect/Semaphore"
 import type * as Input from "../../cdp/Input.ts"
 import type * as Network from "../../cdp/Network.ts"
@@ -233,6 +234,7 @@ export interface CaptureGuard {
 }
 
 export interface State {
+  readonly cleanupScope: Scope.Scope
   readonly captures: Set<CaptureGuard>
   readonly options: Adapter.ConnectOptions
   readonly ids: Kit.Ids
@@ -287,6 +289,7 @@ export interface State {
 
 /** A connection's empty state, with the release that retiring a request needs (`responses.ts`). */
 export const make = (options: {
+  readonly cleanupScope: Scope.Scope
   readonly connect: Adapter.ConnectOptions
   readonly ids: Kit.Ids
   readonly buffer: Kit.FactBuffer
@@ -297,6 +300,7 @@ export const make = (options: {
   const requests = new Map<string, RequestEntry>()
   const hops = new Map<NetworkRequest.HopId, RequestEntry>()
   const state: State = {
+    cleanupScope: options.cleanupScope,
     captures: new Set(),
     options: options.connect,
     ids: options.ids,

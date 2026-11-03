@@ -25,6 +25,7 @@ import type * as Transport from "../protocol/Transport.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Kit from "./adapterKit.ts"
 import * as Capture from "./cdpAdapter/capture.ts"
+import * as Claims from "./cdpAdapter/claims.ts"
 import * as Contexts from "./cdpAdapter/contexts.ts"
 import * as Declare from "./cdpAdapter/declare.ts"
 import * as Evaluation from "./cdpAdapter/evaluation.ts"
@@ -198,6 +199,7 @@ export const connect: (
   options: Adapter.ConnectOptions
 ) => Effect.Effect<Adapter.AdapterConnection, Browser.BrowserError, Scope.Scope> = Effect.fnUntraced(
   function*(transport: Transport.Transport, options: Adapter.ConnectOptions) {
+    const cleanupScope = yield* Effect.scope
     const buffer = yield* Kit.makeFactBuffer(options.sink)
     let state!: State.State
     let root!: ProtocolClient.Session
@@ -205,6 +207,7 @@ export const connect: (
       fold: (control) => {
         buffer.connect(control)
         state = State.make({
+          cleanupScope,
           connect: options,
           ids: Kit.makeIds(),
           buffer,
@@ -258,6 +261,9 @@ export const connect: (
     )
 
     return {
+      claims: options.browserIdentity === undefined || options.claimClient === undefined
+        ? undefined
+        : Claims.make(state, options.browserIdentity, options.claimClient),
       info,
       capabilities: capabilitySet,
       pauseScope: options.ownership === "launched" ? "browser" : "related",

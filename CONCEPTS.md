@@ -312,10 +312,65 @@ Cleanup groups can span sibling pages, independently of this graph.
   - **Not recorded:** contexts on an attached browser. Chromium's are disposed with their connection; Firefox's would need a new session to remove, which Firefox refuses while a dead program's lingers (QUIRKS.md, Q137).
 - **Requesting a close is not ending a lifetime.** `close({ runBeforeUnload: true })` can be refused (`PageError{CloseCanceled}`), and the page stays usable. A backend that closes a page without asking it, stock WebKit's Automation, refuses the option (`close.runBeforeUnload`). A close timeout leaves closure unconfirmed rather than fabricating `PageClosed`. Teardown of owned resources uses a bounded close without beforeunload.
   Built: the prompt is decided as any dialog is, a handler's stay is the refusal, and an owned context's policy leaves. Browsers prompt only once the user has interacted with the page, so an untouched page closes at once (QUIRKS.md, Q150). An owned page's release is done when the page ends: its close is sent apart, in the model's scope, and runs to its own end, and the release waits once, for the end, under `Deadline.DefaultBudget` from when it starts, not the deadline of the operation whose scope it finalizes; a refused close ends the wait. Halfway through, a release still waiting logs a warning naming the page and whether the browser has answered the close; it warns again if it stops waiting with the page open. `close` sends its close apart the same way and is done once the page ends, whether or not the browser has answered; it fails with `Timeout` only when the page hasn't ended by its own deadline, and a refusal or a handler's stay still fails it. A context the library created is removed the same way when its scope closes: the backend answers the removal and reports the context's end once its pages' have come, and the removal waits once, for that end, under the same budget, warning halfway naming the context and whether the browser has answered or which of its pages haven't ended. A command that fails because its target or the connection is gone already ends a wait without a warning, and a target that has ended, as everything has once the connection is lost, isn't waited for.
+- **Declaration cleanup and deadlines.** Removing a CDP declaration first removes its local registration, then reapplies the remaining settings in work owned by the connection, with its own cleanup budget. An ordinary operation waits for that work only within its own deadline; stopping that wait does not cancel the cleanup. Borrowed-context setup rollback explicitly waits for confirmation before returning to the previous model settings.
 - **Lifetime signal and `within`.** Each object has a single-assignment `closed: Effect<CloseReason>`. `within(effect): Effect<A, E | TargetGone, R>` arbitrates completion against the end of the lifetime and delivers the typed reason; closing a `Scope` alone would only interrupt. Caller interruption remains interruption. Whichever of completion or end wins the race is recorded once.
 - **Remote facts and model loss.** A remote close invalidates local bindings without sending another close. Permanent loss of observation ends lifetimes with `ConnectionLost` or `ModelUnavailable` without asserting remote destruction. A temporary quarantine fails current operations without completing `closed`, and resumes only after a verified resynchronization.
 - **Suspension** (back/forward cache) is a domain state, not a scope operation. Explicit-ref operations fail fast; waits may opt in to resume within their deadline. Resuming never revives invalid handles.
 - **Cleanup order.** Transport, ingestion and obligation resolvers stay alive while owned resources tear down. The order is: stop new work, drain obligations within the cleanup budget, release declarations and owned resources in dependency order, then disconnect or close the owned process. Finalizers are bounded.
+
+### Experimental claims and handoff
+
+The experimental subpath gives session hosts opaque Schema claims for owned Chromium pages and non-default
+contexts. A saved claim identifies the browser by its WebSocket GUID, a tab by its tab target and a context by
+its native context id; public ids remain connection-local and change on reconnect. A scoped control grant alone
+does not permit claim issuance. Firefox, stock WebKit and Chromium pipe connections without a WebSocket
+identity refuse direct claims with a named `Unsupported` capability. A vanished target is `Gone`, and a claim
+from another browser is `OtherBrowser`.
+
+Only the experimental reclaimable-context constructor opts out of Chromium's `disposeOnDetach`; ordinary
+contexts keep their existing disconnect and scope cleanup. Internal Chromium handoff closes the old scope and
+its declarations, settling paused handlers, while leaving owned pages and reclaimable contexts open. Reclaim
+acquires ownership for the new scope, which closes the page or removes the context on ordinary exit. Default
+context control never gives removal ownership. Context settings are supplied again because they belong to the
+old protocol sessions; routes and init scripts are declared again by the host. Page reclaim returns a scope-owned
+page and a Schema report discriminated as `Observed` (with the dialogs actually observed) or `Unknown` (without
+current dialog data or an inferred cause). Observation defaults to 1000 milliseconds, within the caller's deadline.
+Only expiry of that observation bound permits Unknown success; caller deadline expiry stays `Timeout`, and
+interruption stays interruption, without acquiring ownership. Unknown pages remain explicitly closeable and are
+closed on scope exit, even while their protocol initialization is blocked. Ordinary actions retain their deadlines.
+Context reclaim returns the context and per-page reports made before setup. Empty contexts and contexts whose
+pages are all Observed receive normal setup, including the normal defaults when settings are omitted. With no
+settings requested and at least one Unknown page, recovery adopts the whole context without session setup,
+so the blocked page can be owned without touching its dialog. This fallback also affects healthy siblings and
+future pages: there is no automatic dialog decision, unrouted HTTP challenge forwarding, file chooser
+interception/cancellation, or managed temporary download directory with an allow declaration. The browser's
+native behavior remains in place; normal setup is not restored automatically later. Per-page Observed reports do
+not promise these omitted defaults in a mixed context. Any supplied settings, including local `dialogs` or
+`eventLog`, are refused with `UserContext.reclaim.settings` before ownership changes when any page is Unknown.
+Observation and last-known metadata options are not settings. Otherwise settings apply within the caller
+deadline, and setup failure preserves the surviving targets.
+
+Internal planned handoff captures the current model's dialog details before teardown as serializable `LastKnown`
+snapshots bound to the exact page or context claim. A context snapshot aggregates its pages' historical events,
+including pages without individual claims. The host explicitly supplies a snapshot on the matching reclaim; it remains separate
+from the current observation report, never evidence that a dialog is still open. Empty last-known details do not
+confirm a healthy current page. Current prompt data is retained independently of the configurable event log.
+Reclaim never dismisses a dialog to make observation succeed. Planned Chromium handoff is different: after caller
+handlers have their normal opportunity to answer, the page's release finalizer dismisses residual dialogs through
+the original session before context declarations are removed. It never automatically accepts, even with an accept
+policy or for beforeunload. A caller handler may still accept normally. Dismissal has a separate 1000 ms budget;
+failure or expiry records `Unknown` and does not fail scope closure. Confirmed command reply and dialog closure
+produce typed `DialogDismissed { kind, message }` events in the separate handoff report. Historical events never
+stand for the next connection's present state. `Complete` means the release-time dismissal loop completed; it
+cannot rule out a dialog opened later during teardown. Each handoff declaration release has a separate 1000 ms
+confirmation budget. Unconfirmed release retains its warning and makes the handoff report Unknown, preserving
+any already-confirmed dismissal events; it does not fail scope closure. A bounded release may stop before
+restoring every healthy sibling, especially if the old connection stays open; Unknown does not promise restored
+settings. Handoff returns recovery snapshots only for issued page or context claims; unclaimed pages have no
+recovery record. Dismissing a navigation's beforeunload prompt cancels the navigation
+and preserves the tab and original document. A killed client runs no handoff finalizer: crash reclaim stays
+observational and can return Unknown. Leases (ROOK-96), expiry (ROOK-97) and host adoption are separate; persistent
+contexts must not be enabled by a host until expiry cleanup is available.
 
 ## 4. Documents, realms and navigation
 

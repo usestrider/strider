@@ -25,14 +25,19 @@ import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
 import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BoundedAdapter from "./boundedAdapter.ts"
 import * as BrowserClock from "./browserClock.ts"
+import * as Handoff from "./handoff.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 
 export interface Ownership {
   /** The adapter, once the model has it: a release before then waits for it. */
   readonly connected: Deferred.Deferred<Adapter.AdapterConnection>
-  readonly attach: (adapter: Adapter.AdapterConnection) => Effect.Effect<void>
+  readonly attach: (
+    adapter: Adapter.AdapterConnection,
+    claims?: BoundedAdapter.Bounded["claims"]
+  ) => Effect.Effect<void>
   /**
    * Sends a page's close in a fiber of the model's scope, which runs to its own end however long its sender waits,
    * and returns the fiber: `Page.close` waits for the page's end, under its own deadline, rather than the reply.
@@ -142,9 +147,14 @@ const awaitEnd = Effect.fnUntraced(function*(
 export const make = Effect.fnUntraced(function*() {
   const modelScope = yield* Effect.scope
   const connected = yield* Deferred.make<Adapter.AdapterConnection>()
+  let handoffClaims: BoundedAdapter.Bounded["claims"]
   const ownership: Ownership = {
     connected,
-    attach: (adapter) => Effect.asVoid(Deferred.succeed(connected, adapter)),
+    attach: (adapter, claims = BoundedAdapter.make(adapter).claims) =>
+      Effect.sync(() => {
+        handoffClaims = claims
+        Deferred.doneUnsafe(connected, Effect.succeed(adapter))
+      }),
     closeApart: (page, options) =>
       Effect.flatMap(
         Deferred.await(connected),
@@ -156,6 +166,9 @@ export const make = Effect.fnUntraced(function*() {
         if (state.status._tag === "Closed") return
         if (by !== undefined && !Option.exists(state.owner, (owner) => owner === by)) return
         const adapter = yield* Deferred.await(connected)
+        if (handoffClaims !== undefined && Option.exists(state.owner, Handoff.leavesOpen)) {
+          return yield* Handoff.dismiss(page, handoffClaims)
+        }
         yield* awaitEnd(modelScope, adapter.closePage(page.id, { runBeforeUnload: false }), page.closed, {
           target: `Page ${page.id}`,
           annotation: ["browser.page.id", page.id],

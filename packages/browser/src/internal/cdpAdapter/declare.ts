@@ -2,8 +2,12 @@
  * Declarations on CDP: what the registry (`declarations.ts`) says each target gets, applied in its gate before
  * its scripts run and again to every target in scope when a registration comes or goes.
  */
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
 import * as BrowserCdp from "../../cdp/Browser.ts"
@@ -16,9 +20,10 @@ import type * as Deadline from "../../Deadline.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Cleanup from "../declarationCleanup.ts"
 import * as Declarations from "../declarations.ts"
 import * as Operation from "../operation.ts"
-import type * as ProtocolClient from "../protocolClient.ts"
+import * as ProtocolClient from "../protocolClient.ts"
 import { type ContextEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
 
 /** A URL pattern no request matches: a scheme nothing uses. */
@@ -389,7 +394,12 @@ const releaseErrors = <A>(effect: Effect.Effect<A, Protocol.ProtocolError | Dead
       (error) => error._tag === "ProtocolError" && error.reason._tag === "SessionEnded",
       () => Effect.void
     ),
-    Effect.ignore({ log: "Warn", message: "Failed to release CDP declaration" })
+    Effect.catch((error) =>
+      Effect.gen(function*() {
+        ;(yield* Cleanup.Unconfirmed)()
+        yield* Effect.logWarning("Failed to release CDP declaration", error)
+      })
+    )
   )
 
 export const declare = Effect.fnUntraced(function*(
@@ -399,18 +409,60 @@ export const declare = Effect.fnUntraced(function*(
 ) {
   const id = state.ids.registration()
   state.registry.add(scope, declaration, id)
-  yield* Effect.addFinalizer(() =>
-    Effect.suspend(() => {
+  const registrationContext = yield* Effect.context<never>()
+  yield* Scope.addFinalizer(
+    yield* Effect.scope,
+    Effect.gen(function*() {
+      const caller = yield* Operation.current
+      const confirm = yield* Cleanup.Confirm
+      const handoff = yield* Cleanup.Handoff
+      const unconfirmed = yield* Cleanup.Unconfirmed
+      // Registry removal is synchronous, before any caller stops waiting or prior settings are restored.
       state.registry.remove(id)
-      return declaration._tag === "Downloads"
+      const release = declaration._tag === "Downloads"
         ? Effect.forEach(
           [...state.contexts.values()],
           (context) => applyDownloads(state, context).pipe(releaseErrors),
-          {
-            discard: true
-          }
+          { discard: true }
         )
         : releaseDeclaration(state, declaration, scope)
+      const boundedRelease = handoff
+        ? Effect.gen(function*() {
+          const record = yield* Operation.record
+          yield* record.bound(release.pipe(Effect.interruptible))
+        }).pipe(
+          Operation.apart("Browser.handoff.release", Duration.seconds(1)),
+          Effect.catchCause((cause) =>
+            Effect.sync(unconfirmed).pipe(
+              Effect.andThen(Effect.logWarning("Handoff could not confirm CDP declaration release", cause))
+            )
+          )
+        )
+        : release
+      const work = boundedRelease.pipe(
+        Operation.detached,
+        Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
+        Effect.provideContext(registrationContext),
+        Effect.provideService(Cleanup.Unconfirmed, unconfirmed),
+        Effect.interruptible
+      )
+      // A connection already tearing down cannot own a new fiber; finish before its transport is released.
+      if (state.cleanupScope.state._tag === "Closed") return yield* work
+      const cleanup = yield* work.pipe(Effect.forkIn(state.cleanupScope))
+      const joined = Fiber.await(cleanup).pipe(
+        Effect.flatMap((exit) =>
+          Exit.isSuccess(exit)
+            ? Effect.void
+            : Effect.sync(unconfirmed).pipe(
+              Effect.andThen(Effect.logWarning("CDP declaration cleanup ended without confirmation", exit.cause))
+            )
+        )
+      )
+      if (confirm || Option.isNone(caller) || handoff) return yield* joined
+      // The browser work survives this wait; expiration does not interrupt its connection-owned lifetime.
+      yield* caller.value.bound(joined.pipe(Effect.interruptible)).pipe(
+        Effect.catchTag("Timeout", () => Effect.void)
+      )
     })
   )
   if (declaration._tag === "Downloads") {
