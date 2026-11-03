@@ -8,12 +8,12 @@ and stock WebKit, and every member the API declares is built. One declared befor
 ## Layout
 
 - Design documents are at the root: `docs/design.md` (goals, principles, status), `API.md` (L2, the public API),
-  `CONCEPTS.md` (L1, the native model), `PROTOCOL.md` (L0), `CLI.md` and `PROBES.md`. `QUIRKS.md` and `ISSUES.md`
-  are closed records: their entries stay citable (`QUIRKS.md, Q12`, `ISSUES.md, I3`), but nothing is added to them.
+  `CONCEPTS.md` (L1, the native model), `PROTOCOL.md` (L0) and `CLI.md`. `QUIRKS.md` is a closed record: its entries
+  stay citable (`QUIRKS.md, Q12`), but nothing is added to it.
   New findings are issues (Issues, below).
 - `docs/decisions.md` holds the principles and architectural decisions, with their reasons and the alternatives
-  rejected; `docs/conventions.md` holds the Effect conventions. `research/` holds prior-art notes, a record of its
-  time: don't rewrite it. `upstream/` holds drafts of proposals for other projects, which the maintainer posts.
+  rejected; `docs/conventions.md` holds the Effect conventions. `research/` holds the two notes on Playwright's trace
+  format that the code cites.
 - `packages/browser` is the published package:
   - `src/`: one module per file, exported as namespaces. `src/index.ts` and each subpath's `index.ts` are generated.
     `src/internal/` is implementation that no subpath exports, such as the protocol client, each backend's wire,

@@ -1,4 +1,5 @@
-# What sops encrypts in this repository, and to whom: the docs deploy's settings (its Cloudflare token and account), for the maintainer's main age key and the deploy's CI key, whose private half is the
+# What sops encrypts in this repository, and to whom: the docs deploy's settings (its Cloudflare token and account, and
+# who may read the site), for the maintainer's main age key and the deploy's CI key, whose private half is the
 # SOPS_AGE_KEY secret of .github/workflows/docs.yml
 creation_rules:
   - path_regex: website/deploy\.sops\.env$
