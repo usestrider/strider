@@ -22,7 +22,7 @@
   --ink: #1a1a1a;
   --labels: #5a5750;
   --hairline: #e2ded3;
-  --ivory: #e6e3d9;
+  --ivory: #dfdcd1;
   /* The engraving's plate and the cover it's printed on, with the labels printed there */
   --plate: var(--ivory);
   --plate-labels: #5a5750;
