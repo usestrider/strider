@@ -9,27 +9,34 @@ the platform services the backend starts it with.
 
 ## The packages
 
+In your project:
+
 ```sh
 pnpm add @usestrider/browser effect @effect/platform-node
 ```
 
+The [`strider` command](/docs/agents/cli), globally:
+
+```sh
+pnpm add -g @usestrider/cli
+```
+
 | Package                 | What it's for                                                                       |
 | ----------------------- | ----------------------------------------------------------------------------------- |
-| `@usestrider/browser`   | Strider, its backends as subpaths, and the [`strider` CLI](/docs/agents/cli)        |
+| `@usestrider/browser`   | Strider, and its backends as subpaths                                               |
 | `effect`                | Effect 4, a peer dependency                                                          |
 | `@effect/platform-node` | processes, files and sockets on Node; `@effect/platform-bun` on Bun                 |
 | `@usestrider/vitest`    | the Vitest adapter, for [tests](/docs/tools/testing)                                |
-| `@usestrider/cli`       | the `strider` command, to install globally                                          |
+| `@usestrider/cli`       | the [`strider` command](/docs/agents/cli), installed globally                       |
 
 Strider depends only on Effect. Platform services are needed only where a browser is launched or connected to.
 
 ## A browser
 
 Strider never downloads, installs or looks for a browser: a launch takes an absolute path. Install browsers as
-you'd install any program. To find their paths, install the `strider` command globally and run it:
+you'd install any program. To find their paths, run the `strider` command:
 
 ```sh
-pnpm add -g @usestrider/cli
 strider browsers
 strider browsers --json
 ```
