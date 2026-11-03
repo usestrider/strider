@@ -36,14 +36,8 @@ jobs:
         run: nix develop --command pnpm build
       - name: Package checks
         run: nix develop --command pnpm pack-check
-      # npm can't trust a workflow for a package it doesn't have yet, so a package's first release signs in with a token
-      - name: Sign in for a first release
-        run: |
-          if [ -n "${NPM_TOKEN:-}" ]; then
-            echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> "$HOME/.npmrc"
-          fi
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Signs in as this workflow, npm's trusted publisher for each package. npm can't trust a workflow for a package it
+      # doesn't have yet, so a new package's first version is published by hand.
       - name: Publish
         run: |
           git config user.name "github-actions[bot]"
