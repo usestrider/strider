@@ -9,7 +9,8 @@
     "check": "astro sync && tsc --noEmit",
     "build": "astro build",
     "preview": "astro preview --port 4390",
-    "deploy": "sops exec-env deploy.sops.env 'alchemy deploy --stage prod --yes'"
+    "deploy": "sops exec-env deploy.sops.env 'alchemy deploy --stage prod --yes'",
+    "social": "node social/render.ts"
   },
   "dependencies": {
     "@astrojs/markdown-remark": "^7.3.4",
@@ -34,6 +35,7 @@
     "@types/hast": "^3.0.5",
     "@types/mdast": "^4.0.4",
     "@types/node": "^26.6.5",
+    "@usestrider/browser": "workspace:^",
     "alchemy": "2.0.0-beta.84",
     "effect": "4.0.6"
   }

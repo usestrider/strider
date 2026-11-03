@@ -41,6 +41,8 @@ reader's system until they choose with the masthead's toggle. The cover is the e
 | `src/components/Mark.astro`           | the silhouette, for the masthead and anything under 64px                              |
 | `src/assets/heron-engraving.png`      | the engraving, on the home page only                                               |
 | `public/heron.svg`                   | the favicon and T3 project icon                                                   |
+| `social/`                             | the link-preview images, as pages: `public/og.png`, and `github.png` for the repository's settings; `render.ts` says how to render them |
+| `src/features/sitemap.ts`             | `sitemap.xml`, of every page the build wrote; `public/robots.txt` points to it        |
 | `src/components/Aside.astro`          | callouts in guides: `<Aside type="note">`, `"tip"`, `"caution"` or `"warning"`        |
 
 The band is Chromium blue, Firefox orange, WebKit cyan, Edge green or Opera red, by the brand of the browser the page
