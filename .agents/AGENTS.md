@@ -72,7 +72,7 @@ and stock WebKit, and every member the API declares is built. One declared befor
 - `.github/workflows/`: CI. `checks.yml` runs `pnpm all`, `pnpm build` and `pnpm pack-check` on every pull
   request and every push to `main`, in the Nix environment's default shell; `integration.yml` runs the integration tests nightly when
   `main` has changed, and on demand, keeping the log of a failed run; `docs.yml` deploys the site from `main`; `release.yml`, run by hand, publishes to npm
-  the versions on `main` that npm doesn't have yet.
+  the versions on `main` that npm doesn't have yet; `delete-merged-branches.yml` deletes a branch three days after its pull request merges.
 - `website/`: the documentation site, built as effect.website is: Astro, MDX, Expressive Code, remark and Tailwind, in
   the design `website/README.md` describes. Guides are MDX in `website/src/content/docs/`, and their TypeScript is
   type-checked as the JSDoc examples are. The API reference is rendered from the dataset `pnpm api-reference` writes,
@@ -182,7 +182,7 @@ reconsider or decide. Search first, and comment on an existing issue rather than
 - **The maintainer's own agents,** where the `clutch` command is on your `PATH`: use the private Clutch board. File with
   `clutch issue new --title "…" --body "…"`, and leave it unassigned: assigning an agent queues a run, which is the
   maintainer's call. Use `--parent` for work that belongs to a larger issue and `--blocked-by` for what must come
-  first. Search with `clutch issue list --search "…"`, and comment with `clutch comment ROOK-12 --body "…"`.
+  first. Search with `clutch issue list --search "…"`, and comment with `clutch comment <issue> --body "…"`.
 
 Commits and code comments cite GitHub issues by number (`#51`). Everything public has to make sense to someone who
 can't open the board, so a comment explains the behavior itself.

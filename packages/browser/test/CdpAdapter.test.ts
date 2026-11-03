@@ -102,7 +102,7 @@ describe("CDP adapter redirect headers", () => {
             bodies: ["request"],
             maxBytes: 1024
           })
-          // ROOK-104 #10: Chromium 155 capture lines 63, 65–70, 72, 80, unchanged payloads.
+          // Chromium 155 capture lines 63, 65–70, 72, 80, unchanged payloads.
           // The vendored CDP requestWillBeSentExtraInfo contract permits either event to arrive first.
           // Synthetic variants preserve each ExtraInfo stream's hop order and exercise the absence flags.
           const events = structuredClone(captured)

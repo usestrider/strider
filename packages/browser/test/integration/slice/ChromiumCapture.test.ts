@@ -1,4 +1,4 @@
-/** The ROOK-13 native capture/navigation overlap, followed by an explicit replacement capture. */
+/** The native capture/navigation overlap, followed by an explicit replacement capture. */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, layer } from "@effect/vitest"
 import { Browser, Page } from "@usestrider/browser"
@@ -95,7 +95,7 @@ describe("Chromium capture invalidation", () => {
             Effect.provide(backend),
             Effect.onExit((exit) =>
               Effect.sync(() => {
-                if (Exit.isFailure(exit)) console.log("ROOK-13 overlap wire", JSON.stringify(wire))
+                if (Exit.isFailure(exit)) console.log("capture overlap wire", JSON.stringify(wire))
               })
             )
           )

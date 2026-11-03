@@ -1,7 +1,7 @@
 // Modified port of microsoft/playwright tests/page/page-fill.spec.ts.
 // Copyright 2017 Google Inc. Modifications copyright Microsoft Corporation.
 // Apache-2.0; original source, license and NOTICE: ../../upstream/playwright/.
-// Diagnostic differences: ROOK-119 (normalization), ROOK-120/121 (validation), ROOK-122 (editable descendants).
+// Diagnostic differences: normalization, validation and editable descendants.
 import { Deadline, Expect, PageNavigation } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -378,9 +378,9 @@ for (const { library, sample } of runs) {
     )
 
     scenario(
-      "ROOK-122 filling an inherited editable descendant focuses its frame",
+      "filling an inherited editable descendant focuses its frame",
       `<div contenteditable></div><iframe srcdoc="<body contenteditable><p>old</p></body>"></iframe>`,
-      Effect.fn("ROOK-122")(function*(page) {
+      Effect.fn("FI-inherited-editable")(function*(page) {
         yield* page.locator("div").fill("parent")
         const paragraph = page.frame(page.locator("iframe")).locator("p")
         yield* paragraph.fill("new")

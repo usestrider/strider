@@ -1,4 +1,4 @@
-/** ROOK-95 acceptance tests against the pinned Chromium browser. */
+/** Claims acceptance tests against the pinned Chromium browser. */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
@@ -191,7 +191,7 @@ const assertOwned = Effect.fnUntraced(
   }
 )
 
-describe("Chromium claims (ROOK-95)", () => {
+describe("Chromium claims", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
       it.effect(
@@ -235,17 +235,17 @@ describe("Chromium claims (ROOK-95)", () => {
               Protocol.on(browser.observer.browser)
             )
             yield* page.evaluateInMainWorld(() => {
-              performance.mark("ROOK-95-before")
+              performance.mark("claims-before")
             })
             yield* page.goto(`${crossSite}/after`)
             yield* page.evaluateInMainWorld(() => {
-              performance.mark("ROOK-95-after")
+              performance.mark("claims-after")
             })
             const complete = yield* browser.observer.browser.subscribe(Tracing.tracingComplete)
             const completed = yield* Stream.runHead(complete).pipe(Effect.forkChild)
             yield* Tracing.end().pipe(Protocol.on(browser.observer.browser))
             yield* Fiber.join(completed)
-            const marks = trace.filter((event) => event.name === "ROOK-95-before" || event.name === "ROOK-95-after")
+            const marks = trace.filter((event) => event.name === "claims-before" || event.name === "claims-after")
             assert.strictEqual(marks.length, 2)
             assert.notStrictEqual(marks[0]!.pid, marks[1]!.pid, "navigation must swap renderer processes")
             return claim

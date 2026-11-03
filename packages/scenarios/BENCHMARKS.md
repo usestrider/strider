@@ -72,12 +72,9 @@ ordinary unit suite; type checks include the benchmark sources.
 
 ## Investigating an area
 
-Project PROJ-2, **Performance parity and architecture**, holds the living map in its attached document DOC-2,
-**Investigation map and decision workflow**. ROOK-76 retains the original report and investigation history.
-The map groups work by shared mechanisms: resource lifecycle (ROOK-124),
-queries and reads (ROOK-125), actions (ROOK-123), observation and waiting (ROOK-132), network and bulk data
-(ROOK-133), and shared execution machinery (ROOK-134). Current coverage, measurements, open questions and outcomes
-belong in those issues. Reuse the linked investigations rather than filing another issue for the same cost.
+Group the work by shared mechanism: resource lifecycle, queries and reads, actions, observation and waiting, network
+and bulk data, and shared execution machinery. Current coverage, measurements, open questions and outcomes belong in
+issues, so reuse an existing investigation rather than filing another issue for the same cost.
 
 Work through one bounded investigation at a time:
 

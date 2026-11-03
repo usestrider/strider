@@ -106,7 +106,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
-      // On stock WebKit the page sees only the press (ROOK-149)
+      // On stock WebKit the page sees only the press
       if (name !== "WebKit") {
         it.effect("finishes a click whose mousedown opens a dialog", () =>
           Effect.gen(function*() {
@@ -206,7 +206,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
-      // ROOK-119: browsers serialize valid values differently from their source spelling.
+      // Browsers serialize valid values differently from their source spelling.
       for (
         const [type, value, expected] of [
           ["range", "42.0", "42"],
@@ -271,7 +271,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
-      // ROOK-119: a focus handler runs between validation and assignment, and may change the constraints.
+      // A focus handler runs between validation and assignment, and may change the constraints.
       it.effect("rejects a range value a focus handler's new max clamps, without events", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
@@ -372,7 +372,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
-      // ROOK-121: JavaScript callers bypass the string type, including inside Redacted.
+      // JavaScript callers bypass the string type, including inside Redacted.
       for (
         const [label, value] of [
           ["number", 123],
@@ -507,7 +507,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
-      // ROOK-117: selection and checked state are independent on these ARIA roles.
+      // Selection and checked state are independent on these ARIA roles.
       for (const role of ["option", "treeitem"] as const) {
         for (
           const [state, attributes, expected] of [
@@ -583,7 +583,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
-      // ROOK-117: optional checkability must be established before dispatching input.
+      // Optional checkability must be established before dispatching input.
       for (const kind of ["option", "treeitem", "native option"] as const) {
         for (const state of ["absent", "undefined", "empty"] as const) {
           for (const operation of ["read", "check", "uncheck"] as const) {
@@ -721,7 +721,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
-      // ROOK-118: state belongs to the control; pointer input still belongs to the label.
+      // State belongs to the control; pointer input still belongs to the label.
       for (const association of ["explicit", "wrapping"] as const) {
         for (const checked of [true, false]) {
           it.effect(
@@ -817,7 +817,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
-      // ROOK-118: a label that is itself an ARIA checkable keeps its own state, as it did before labels were followed.
+      // A label that is itself an ARIA checkable keeps its own state, as it did before labels were followed.
       it.effect("checks and unchecks a label that is itself an ARIA checkbox", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>

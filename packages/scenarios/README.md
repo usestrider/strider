@@ -9,8 +9,7 @@ For isolated operation timings, raw samples and an optional performance gate, ru
 [The operation benchmarks](BENCHMARKS.md) use local fixtures only and need no recordings. Workflow timings include
 navigation and assertions; operation timings help identify which individual action contributes to a change.
 
-Project PROJ-2's attached document DOC-2 maps the performance investigations by shared mechanism. The
-[investigation workflow](BENCHMARKS.md#investigating-an-area) covers benchmark coverage, architecture comparisons,
+The [investigation workflow](BENCHMARKS.md#investigating-an-area) covers benchmark coverage, architecture comparisons,
 experiments and the human review required for public API or contract changes. Findings and progress stay in issues.
 
 A private workspace package, never published. It runs the same scenarios with Strider

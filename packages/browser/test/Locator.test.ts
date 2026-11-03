@@ -1,4 +1,4 @@
-/** Runtime validation for JavaScript callers that bypass Locator.fill's TypeScript contract (ROOK-121). */
+/** Runtime validation for JavaScript callers that bypass Locator.fill's TypeScript contract. */
 import { assert, describe, it } from "@effect/vitest"
 import { Browser, Locator } from "@usestrider/browser"
 import * as Effect from "effect/Effect"

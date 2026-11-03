@@ -1,4 +1,4 @@
-/** ROOK-104 #10: captured Chromium 155 JSON redirect events, in their observed order. */
+/** Captured Chromium 155 JSON redirect events, in their observed order. */
 export default [
   {
     "kind": "event",

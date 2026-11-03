@@ -1,0 +1,43 @@
+# Deletes a branch three days after its pull request merged, rather than at once as GitHub's setting does, so a branch
+# can still be followed up on or reverted from. A branch with commits since the merge, or that an open pull request
+# uses, stays.
+name: Delete merged branches
+
+on:
+  schedule:
+    - cron: "41 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: delete-merged-branches
+  cancel-in-progress: false
+
+jobs:
+  delete:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cutoff=$(date -u -d '3 days ago' +%FT%TZ)
+          in_use=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 500 \
+            --json headRefName,baseRefName --jq '.[] | .headRefName, .baseRefName')
+          gh pr list --repo "$GITHUB_REPOSITORY" --state merged --limit 500 \
+            --json headRefName,headRefOid,mergedAt,isCrossRepository \
+            --jq ".[] | select((.isCrossRepository | not) and .mergedAt < \"$cutoff\") | [.headRefName, .headRefOid] | @tsv" |
+            sort -u |
+            while IFS=$'\t' read -r branch merged; do
+              [ "$branch" = "main" ] && continue
+              grep -qxF "$branch" <<<"$in_use" && continue
+              tip=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" --jq .object.sha 2>/dev/null) || continue
+              [ "$tip" = "$merged" ] || continue
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
+              echo "deleted $branch"
+            done

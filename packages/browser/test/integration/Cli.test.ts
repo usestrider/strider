@@ -1067,7 +1067,7 @@ describe("strider", () => {
       ), timeout)
   }
 
-  // ROOK-4: an endpoint that is neither backend fails the start, with the reason
+  // An endpoint that is neither backend fails the start, with the reason
   it.live("refuses an HTTP endpoint that is neither Chromium nor stock WebKit", () =>
     Effect.gen(function*() {
       const server = http.createServer((_, response) => {
@@ -1083,7 +1083,7 @@ describe("strider", () => {
       assert.include(started.err, "WebKitInspectorHTTPServer Server token")
     }).pipe(Effect.provide(NodeServices.layer)), timeout)
 
-  // ROOK-4: an inspector's tab, taken with control, stays listed and works until it is released
+  // An inspector's tab, taken with control, stays listed and works until it is released
   it.live("controls and releases a tab of an attached stock WebKit", () =>
     Effect.scoped(
       Effect.gen(function*() {
@@ -1120,7 +1120,7 @@ describe("strider", () => {
       }).pipe(Effect.provide(NodeServices.layer))
     ), timeout)
 
-  // ROOK-4: a tab closed outside the session leaves it, on a real browser's control grant
+  // A tab closed outside the session leaves it, on a real browser's control grant
   it.live("retires a controlled tab closed outside the session", () =>
     Effect.scoped(
       Effect.gen(function*() {
@@ -1225,7 +1225,7 @@ describe("strider", () => {
       }).pipe(Effect.provide(NodeServices.layer))
     ), timeout)
 
-  // ROOK-4: the browser WebSocket's id dies with that browser; the endpoint given outlives it
+  // The browser WebSocket's id dies with that browser; the endpoint given outlives it
   it.live("exports a Chromium HTTP attachment by the endpoint it was given", () =>
     Effect.scoped(
       Effect.gen(function*() {

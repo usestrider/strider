@@ -369,7 +369,7 @@ restoring every healthy sibling, especially if the old connection stays open; Un
 settings. Handoff returns recovery snapshots only for issued page or context claims; unclaimed pages have no
 recovery record. Dismissing a navigation's beforeunload prompt cancels the navigation
 and preserves the tab and original document. A killed client runs no handoff finalizer: crash reclaim stays
-observational and can return Unknown. Leases (ROOK-96), expiry (ROOK-97) and host adoption are separate; persistent
+observational and can return Unknown. Leases, expiry and host adoption are separate; persistent
 contexts must not be enabled by a host until expiry cleanup is available.
 
 ## 4. Documents, realms and navigation
