@@ -26,6 +26,7 @@
     "website:deploy": "pnpm --filter @usestrider/website run deploy",
     "strider": "node packages/browser/src/bin/strider.ts",
     "pack-check": "node packages/tools/utils/src/bin.mjs pack-check",
+    "release": "pnpm build && pnpm pack-check && changeset publish",
     "scenarios": "nix develop .#integration --ignore-environment --keep TERM --command node packages/scenarios/src/bin.ts",
     "bench": "nix develop .#integration --ignore-environment --keep TERM --command node packages/scenarios/src/benchmarks/bin.ts",
     "all": "pnpm check && pnpm lint && pnpm test --run && pnpm test-types && pnpm reference && pnpm website:check && pnpm website:build",
