@@ -108,9 +108,16 @@ export const create = (options: Base.Options & { readonly reclaimable: true }) =
  * Returns the context and per-page observations from before setup. Redeclare routes and init scripts in the new
  * scope. The default context cannot be reclaimed for removal. Observation defaults to 1000 milliseconds per page,
  * all charged to the caller's deadline; settings application also remains within that deadline. Setup that cannot
- * complete fails without acquiring destruction ownership or deleting surviving targets. With no settings requested,
- * recovery adopts pages without installing session declarations or assuming settings were applied. Requested
- * settings on an Unknown page fail with a `UserContext.reclaim.settings` backend rejection before ownership moves.
+ * complete fails without acquiring destruction ownership or deleting surviving targets. Empty contexts and contexts
+ * with only Observed pages receive normal setup, including defaults when settings are omitted.
+ *
+ * With no settings requested and at least one Unknown page, recovery instead adopts the entire context without
+ * session setup. All pages, including healthy siblings and future pages, lack automatic dialog decisions, unrouted
+ * HTTP challenge forwarding, file chooser interception/cancellation and a managed temporary download directory
+ * with an allow declaration. Native browser behavior is not replaced with these defaults, and recovery does not
+ * restore them automatically later. Supplied settings are all refused before ownership moves if any page is Unknown,
+ * even local settings such as `eventLog` or `dialogs`, with a `UserContext.reclaim.settings` backend rejection.
+ * Observation and handoff metadata options do not count as settings.
  * Pass `lastKnown` to deliver a matching context handoff snapshot; historical events stay separate from current state.
  *
  * **Example** (Using claims)

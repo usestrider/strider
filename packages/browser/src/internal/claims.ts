@@ -217,7 +217,8 @@ export const reclaimContext = Operation.fn("UserContext.reclaim")(
       Object.entries(options).some(([key, value]) =>
         key !== "observationTimeout" && key !== "lastKnown" && value !== undefined
       )
-    if (requested && pages.some((page) => page.found._tag === "Unknown")) {
+    const unknown = pages.some((page) => page.found._tag === "Unknown")
+    if (requested && unknown) {
       return yield* Effect.fail(
         error(
           "UserContext.reclaim",
@@ -232,7 +233,7 @@ export const reclaimContext = Operation.fn("UserContext.reclaim")(
     return yield* hooks.recover(
       options,
       context,
-      !requested,
+      !requested && unknown,
       (recovered, scope) =>
         trackContext(scope, claim, entry).pipe(
           Effect.as(

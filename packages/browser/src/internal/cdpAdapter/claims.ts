@@ -47,7 +47,13 @@ export const make = (
                 filter: [{ type: "page" }, { exclude: true }]
               }).pipe(Protocol.on(session))
             )
-            return Option.getOrUndefined(yield* Fiber.join(next))?.targetInfo
+            const active = yield* Fiber.join(next)
+            if (Option.isNone(active)) {
+              return yield* Effect.fail(
+                new Protocol.ProtocolError({ reason: new Protocol.SessionEnded({ why: "modelUnavailable" }) })
+              )
+            }
+            return active.value.targetInfo
           }),
         ({ sessionId }) => Target.detachFromTarget({ sessionId }).pipe(Protocol.on(identity.browser), Effect.ignore)
       )
@@ -141,7 +147,6 @@ export const make = (
       )
       if (tab === undefined) return undefined
       const info = yield* childOf(tab)
-      if (info === undefined) return undefined
       // The native target may precede its PageAdded fact on the other connection. Flush already queued
       // facts, then use the adapter's gap-free waiter for later ones. A live tab is not evidence of Gone.
       yield* state.buffer.run(() => {})
