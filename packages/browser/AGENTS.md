@@ -3,7 +3,7 @@
 Instructions for agents writing code that uses Strider. `INDEX.md` in this package lists every declaration and member.
 The design and its reasons are in the repository: https://github.com/usestrider/strider.
 
-Strider is pre-release: the API is designed and type-checked, and the implementation is in progress. Launching,
+Strider is pre-release, and the API can still change before 1.0. Launching,
 `Browser.newPage`, navigation, the queries, frames (`page.frame`, `locator.frame`, `page.frames`), every locator
 action (`click`, `dblclick`, `tap`, `hover`, `check`, `uncheck`, `focus`, `clear`, `fill`, `press`,
 `pressSequentially`, `selectOption`, `setInputFiles`, `dragTo`, `scrollIntoView`), the one-shot reads,
@@ -20,7 +20,7 @@ every event module (`Popup`, `Dialog`, `FileChooser`, `Download`, `ConsoleMessag
 `goto({ accept })`, `close({ runBeforeUnload: true })`, `Page.capability`, the span references
 (`Browser.SpanNameGenerator`, `TracerDisabledWhen`, `TraceProtocolCommands`) and `Diagnostics.withPreset`, and the
 test layers (`Browser.layerTest`, and `VitestBrowser.layer` from `@usestrider/vitest`), recordings (`Har.record`, `Trace.record`), the agent toolkit
-(`BrowserToolkit`, `CapturePolicy`) and the `strider` command (CLI.md) work on every backend. What a backend can't do or report
+(`BrowserToolkit`, `CapturePolicy`) and the `strider` command work on every backend. What a backend can't do or report
 fails with `Unsupported`, naming the capability: an HTML drag anywhere but Chromium, a CSS-pixel or transparent
 screenshot and a PDF's header on Firefox, a partitioned cookie anywhere but Chromium, `Capability.AxTree` anywhere but
 Chromium, `Capability.Screencast` on Firefox, and on WebKit, which is stock WebKit, `evaluate`, a PDF, a screencast,
@@ -33,7 +33,7 @@ waiting for a popup, a download or a file chooser, and most emulation; attached,
   `Page.Page`, `Locator.Locator`, `Download.Download`.
 - A backend layer provides `Browser`, from a subpath: `Chromium.layer({ executablePath: "/usr/bin/chromium" })`
   from `"@usestrider/browser/chromium"`, also `/firefox`, `/webkit` and `/bidi`. `executablePath` is required and
-  absolute; nothing is looked up, downloaded or installed. `npx strider browsers` lists the browsers on the machine,
+  absolute; nothing is looked up, downloaded or installed. `strider browsers` lists the browsers on the machine,
   by path. Code that runs on several machines reads the path from the environment:
   `Chromium.layerConfig({ executablePath: Config.String("CHROMIUM_PATH") })`.
 - Open a page with `Browser.newPage(options?)` inside `Effect.scoped`; the page and its context close with the scope.

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * The `strider` command (CLI.md). It runs on Node through `@effect/platform-node`, an optional peer dependency that
- * only the command needs: a program that launches a browser on Node provides it already. `__daemon` is a session's
+ * The `strider` command (CLI.md). It runs on Node, or Bun's Node compatibility, through `@effect/platform-node`, an
+ * optional peer dependency that only the command needs: a program that launches a browser on Node provides it already. `__daemon` is a session's
  * daemon, which `strider start` starts; everything else is `internal/cli.ts`'s.
  *
  * @since 0.1.0
@@ -20,7 +20,7 @@ const node = await Promise.all([
 
 if (node === undefined) {
   process.stderr.write(
-    "strider runs on Node through @effect/platform-node, which isn't installed. Install it as launching a browser on Node needs it: npm install @effect/platform-node\n"
+    "strider runs on Node through @effect/platform-node, which isn't installed. Install it as launching a browser on Node needs it: pnpm add @effect/platform-node, or pnpm add -g @usestrider/cli for a global install\n"
   )
   process.exitCode = 1
 } else {

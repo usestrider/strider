@@ -230,6 +230,18 @@ importers:
         specifier: ^4.0.6
         version: 4.0.6
 
+  packages/cli:
+    dependencies:
+      '@effect/platform-node':
+        specifier: ^4.0.6
+        version: 4.0.6(effect@4.0.6)(redis@6.3.0)
+      '@usestrider/browser':
+        specifier: workspace:^
+        version: link:../browser
+      effect:
+        specifier: ^4.0.6
+        version: 4.0.6
+
   packages/scenarios:
     devDependencies:
       '@effect/platform-node':
