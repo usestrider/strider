@@ -1,6 +1,6 @@
 ---
 title: Strider CLI
-description: Commands on a live browser, waits across commands, failures and their exit codes, exporting a session as a test, sessions, their state and managing them, attaching, TypeScript segments, and an MCP server.
+description: A usage guide for agent context and skills, commands on a live browser, waits across commands, failures and their exit codes, exporting a session as a test, sessions, their state and managing them, attaching, TypeScript segments, and an MCP server.
 order: 3
 ---
 
@@ -11,6 +11,28 @@ pnpm add -g @usestrider/cli
 A program's browser closes when the program ends. `strider`, the command-line tool, keeps one open in a named session
 between commands, so a shell, a script or an agent can drive it one step at a time. It runs on Node, or on Bun where
 there is no Node. `strider --help` lists the commands, and `strider <command> --help` each one's arguments.
+
+## Agent usage
+
+Individual help pages describe syntax; `strider agent instructions` explains how sessions, page targets, event waits,
+results and saved logins work together, with examples an agent can use as context:
+
+```sh
+strider agent instructions
+```
+
+It prints Markdown for the installed version without starting a browser or connecting to a session.
+
+The same guide can be saved as a skill. `--skill` adds the name and description that a skill loader needs;
+it uses the same usage text, so there is only one guide to maintain:
+
+```sh
+mkdir -p .agents/skills/strider
+strider agent instructions --skill > .agents/skills/strider/SKILL.md
+```
+
+Regenerate saved context or the skill after upgrading Strider. The output describes CLI usage; MCP clients still
+use their tools' schemas for argument names.
 
 ## Commands
 
@@ -372,7 +394,8 @@ versions as the daemon. A file in `/tmp` cannot automatically use that project's
 ## MCP
 
 An MCP client, such as an editor's agent, calls tools, not a shell. `strider mcp` serves a session's commands as
-tools over the Model Context Protocol; add it to your MCP client's servers:
+tools over the Model Context Protocol. The [agent usage guide](#agent-usage) explains the shared session and
+event behavior; the MCP tool schemas describe their arguments. Add the server to your MCP client:
 
 ```json
 {

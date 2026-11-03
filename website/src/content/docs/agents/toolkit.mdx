@@ -14,6 +14,8 @@ results may carry.
 `effect/ai`; when an MCP client, such as an editor's agent, runs the model, serve the same tools with
 [`strider mcp`](/docs/agents/cli#mcp). Where [`pickAndClick`](/docs/agents/snapshots#acting-through-refs) gives a
 model one action, the toolkit gives it every tool below, and each result says what happened since the last call.
+For agents using shell commands, [`strider agent instructions`](/docs/agents/cli#agent-usage) prints a usage guide
+and can generate a skill.
 An agent runs turns in a `Chat` until one asks for no tool. Set `concurrency: 1` to execute each turn's browser actions in order:
 
 ```ts
