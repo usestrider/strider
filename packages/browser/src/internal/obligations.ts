@@ -13,6 +13,7 @@ import * as References from "effect/References"
 import * as Diagnostics from "../Diagnostics.ts"
 import * as Adapter from "./adapter.ts"
 import type * as Fold from "./fold.ts"
+import * as Handoff from "./handoff.ts"
 import type * as Model from "./model.ts"
 import * as Spans from "./spans.ts"
 
@@ -129,7 +130,10 @@ const decidePrompt = Effect.fnUntraced(function*(
     }
   }
   if (Option.isNone(page)) return
-  if (Option.isNone(context) || Option.isNone(policy) || policy.value === "leaveOpen") {
+  if (
+    Option.isNone(context) || Option.isNone(policy) || policy.value === "leaveOpen" ||
+    Option.exists((yield* page.value.state.get).owner, Handoff.leavesOpen)
+  ) {
     return yield* fold.undecided(page.value, prompt)
   }
   // `beforeunload` is accepted under "dismiss", so closing never hangs (CONCEPTS.md §5)

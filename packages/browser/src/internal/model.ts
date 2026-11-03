@@ -461,7 +461,8 @@ export const make = Effect.fnUntraced(function*() {
   /** Gives the model its adapter, once connected, and folds the connection's loss when it comes. */
   const attach = (connected: Adapter.AdapterConnection): Effect.Effect<Model, never, Scope.Scope> =>
     Effect.gen(function*() {
-      yield* ownership.attach(connected)
+      const bounded = BoundedAdapter.make(connected)
+      yield* ownership.attach(connected, bounded.claims)
       yield* connected.closed.pipe(Effect.andThen(fold.loseConnection), Effect.forkScoped)
       const release = (page: Target.NavigableId, by?: Scope.Scope) =>
         Effect.suspend(() => {
@@ -469,7 +470,7 @@ export const make = Effect.fnUntraced(function*() {
           return Option.isNone(entry) ? Effect.void : ownership.release(entry.value, by)
         })
       const model: Model = {
-        adapter: BoundedAdapter.make(connected),
+        adapter: bounded,
         pages: fold.pages,
         page: fold.page,
         document: fold.document,

@@ -2056,13 +2056,16 @@ Experimental recovery of Chromium pages for session hosts.
 - `interface Reclaimed` (experimental)
   - `readonly page: Page.Page`
   - `readonly found: Found`
+  - `readonly handoff?: Handoff | undefined`
   - `readonly lastKnown?: LastKnown | undefined`
 - `type LastKnown = typeof LastKnown.Type` (experimental)
+- `type Handoff = typeof Handoff.Type` (experimental)
 
 *schemas*
 
 - `const Found = Reports.Found` (experimental)
 - `const LastKnown = Reports.LastKnown` (experimental)
+- `const Handoff = Reports.Handoff` (experimental)
 
 *claims*
 

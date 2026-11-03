@@ -158,6 +158,7 @@ export const reclaimPage = Operation.fn("Browser.reclaim")(
     return {
       page,
       found,
+      handoff: options?.lastKnown?.handoff,
       ...(options?.lastKnown === undefined
         ? {}
         : { lastKnown: options.lastKnown })
@@ -219,7 +220,12 @@ const track = (scope: Scope.Scope, claim: PageClaim.Claim, entry: Model.PageEntr
   Handoff.observe(scope, claim, () => {
     const state = entry.state.getUnsafe()
     const last = state.status._tag === "Closed" ? undefined : Option.getOrUndefined(state.dialog)
-    return { _tag: "LastKnown", claim, dialogs: last === undefined ? [] : [{ kind: last.kind, message: last.message }] }
+    return {
+      _tag: "LastKnown",
+      claim,
+      handoff: Handoff.outcome(entry),
+      dialogs: last === undefined ? [] : [{ kind: last.kind, message: last.message }]
+    }
   })
 
 const observationBound = (operation: string, milliseconds = 1000) => {

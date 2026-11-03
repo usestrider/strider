@@ -173,22 +173,25 @@ export const make = (adapter: Connection): Bounded => {
       })
   }
   if (adapter.claims !== undefined) {
-    // The claim seam only reads identities and current targets; ownership changes happen in the model.
+    // Identity and observation are reads; planned handoff dismissal is explicitly a write.
     const claims = adapter.claims
-    const bound = <A>(call: Effect.Effect<A, Adapter.AdapterError>) =>
+    const bound = <A>(call: Effect.Effect<A, Adapter.AdapterError>, kind: Kind = read("the claim identity")) =>
       Effect.flatMap(Operation.current, (current) => {
         if (Option.isNone(current)) return call
         const record = current.value
+        if (kind._tag === "Write") record.markSent()
         return record.bound(
           call.pipe(
             Effect.provideService(ProtocolClient.CommandDeadline, Option.some(record.budget.at)),
-            Effect.mapError((error) => noReply(error) ? record.timeout(hint(read("the claim identity"))()) : error)
+            Effect.mapError((error) => noReply(error) ? record.timeout(hint(kind)()) : error)
           ),
-          hint(read("the claim identity"))
+          hint(kind)
         )
       })
     bounded.claims = {
       browser: claims.browser,
+      dismiss: (id: Target.NavigableId, prompt: import("../Dialog.ts").PromptId) =>
+        bound(claims.dismiss(id, prompt), write("handoff dialog dismissal")),
       dialogs: (id: Target.NavigableId) => bound(claims.dialogs(id)),
       page: (id: Target.NavigableId) => bound(claims.page(id)),
       context: (id: UserContext.Id) => bound(claims.context(id)),

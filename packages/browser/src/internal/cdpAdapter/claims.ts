@@ -57,6 +57,17 @@ export const make = (
   )
   return {
     browser,
+    dismiss: Effect.fnUntraced(function*(id, prompt) {
+      const page = yield* pageOf(state, id)
+      const pending = Array.from(state.obligations.values()).find((entry) =>
+        entry._tag === "Prompt" && entry.prompt === prompt && entry.target.page === page
+      )
+      if (pending === undefined) return false
+      yield* Kit.protocol(Page.handleJavaScriptDialog({ accept: false }).pipe(Protocol.on(pending.target.session)))
+      yield* pending.target.session.drainObserved
+      yield* state.buffer.run(() => {})
+      return true
+    }),
     dialogs: Effect.fnUntraced(
       function*(id) {
         const page = yield* pageOf(state, id)

@@ -1,9 +1,19 @@
 /** Internal scope handoff. Other finalizers still run: only owned target destruction is suppressed. */
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
 import type * as Browser from "../experimental/Browser.ts"
 import * as Reason from "../Reason.ts"
+import type * as BoundedAdapter from "./boundedAdapter.ts"
+import type * as Reports from "./claimReports.ts"
+import type * as Model from "./model.ts"
+import * as Operation from "./operation.ts"
+
+const outcomes = new WeakMap<Model.PageEntry, typeof Reports.Handoff.Type>()
+export const outcome = (page: Model.PageEntry) => outcomes.get(page)
 
 const eligible = new WeakSet<Scope.Scope>()
 const observers = new WeakMap<Scope.Scope, Map<string, () => Browser.LastKnown>>()
@@ -45,7 +55,53 @@ export const handoff = (scope: Scope.Closeable) =>
         })
       )
     }
-    const snapshots = Array.from(observers.get(scope)?.values() ?? [], (read) => read())
+    const readers = Array.from(observers.get(scope)?.values() ?? [])
+    const snapshots = readers.map((read) => read())
     retained.add(scope)
-    return Effect.as(Scope.close(scope, Exit.void), snapshots)
+    return Effect.map(Scope.close(scope, Exit.void), () =>
+      snapshots.map((snapshot, i) => ({
+        ...snapshot,
+        handoff: readers[i]!().handoff ?? { _tag: "Unknown" as const, events: [] }
+      })))
   }).pipe(Effect.uninterruptible)
+
+/** Original-session dialog dismissal during planned handoff only. @default 1000 milliseconds */
+export const dismiss = Effect.fnUntraced(function*(
+  page: Model.PageEntry,
+  claims: NonNullable<BoundedAdapter.Bounded["claims"]>
+) {
+  const events: Array<
+    { readonly _tag: "DialogDismissed"; readonly kind: Model.PromptEvent["kind"]; readonly message: string }
+  > = []
+  const exit = yield* Effect.gen(function*() {
+    const record = yield* Operation.record
+    return yield* record.bound(
+      Effect.gen(function*() {
+        while (true) {
+          const state = yield* page.state.get
+          if (state.status._tag === "Closed" || Option.isNone(state.dialog)) return
+          // Handler resolution (or its shutdown fallback) precedes finalizer intervention.
+          if (state.status._tag !== "Open" || Option.isNone(state.status.undecided)) {
+            yield* page.state.changes.pipe(
+              Stream.filter((next) =>
+                next.status._tag === "Closed" || Option.isNone(next.dialog) ||
+                (next.status._tag === "Open" && Option.isSome(next.status.undecided))
+              ),
+              Stream.runHead
+            )
+            continue
+          }
+          const prompt = state.dialog.value
+          const confirmed = yield* claims.dismiss(page.id, prompt.prompt)
+          yield* page.state.changes.pipe(
+            Stream.filter((next) => Option.isNone(next.dialog) || next.dialog.value.prompt !== prompt.prompt),
+            Stream.runHead
+          )
+          if (confirmed) events.push({ _tag: "DialogDismissed", kind: prompt.kind, message: prompt.message })
+        }
+      }).pipe(Effect.interruptible)
+    )
+  }).pipe(Operation.apart("Browser.handoff.dismiss", Duration.seconds(1)), Effect.exit)
+  outcomes.set(page, { _tag: Exit.isSuccess(exit) ? "Complete" : "Unknown", events })
+  if (Exit.isFailure(exit)) yield* Effect.logWarning("Handoff could not confirm dialog dismissal", exit.cause)
+})

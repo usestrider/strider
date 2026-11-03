@@ -68,6 +68,7 @@ export type Found = typeof Found.Type
 export interface Reclaimed {
   readonly page: Page.Page
   readonly found: Found
+  readonly handoff?: Handoff | undefined
   readonly lastKnown?: LastKnown | undefined
 }
 
@@ -85,7 +86,8 @@ export interface Reclaimed {
  * Observation has a default bound of 1000 milliseconds, charged to the caller's deadline. If observation cannot
  * complete within that bound, ownership is acquired with Unknown state, without inferring its cause or dismissing
  * anything. Caller deadline expiry and interruption still fail without acquiring ownership.
- * Last-known handoff details are historical data, never confirmation of the current state.
+ * Last-known details and confirmed handoff dismissal events are historical data, never confirmation of current
+ * state. Planned handoff may dismiss residual dialogs on the original session; reclaim never does.
  *
  * **Example** (Using claims)
  *
@@ -118,7 +120,7 @@ export const reclaim = (
 ) => Claims.reclaimPage(claim, options)
 
 /**
- * Serializable dialog details captured before a planned handoff, bound to the saved claim.
+ * Serializable last-known dialog details and handoff results, bound to the saved claim.
  *
  * **Example** (Store handoff details)
  *
@@ -154,3 +156,50 @@ export const LastKnown = Reports.LastKnown
  * @since 0.1.0
  */
 export type LastKnown = typeof LastKnown.Type
+
+/**
+ * Confirmed dialog-dismissal events from planned handoff, separate from the reclaimed page's current state.
+ *
+ * **Details**
+ *
+ * Complete means the bounded handoff dismissal finished. Unknown means it failed or timed out; events contain
+ * only dismissals already confirmed by both command reply and the dialog closing. No event means no confirmation.
+ * Caller handlers may answer normally; the finalizer itself never accepts, including beforeunload dialogs.
+ *
+ * **Example** (Read handoff events)
+ *
+ * ```ts import.meta.vitest
+ * import { Browser } from "@usestrider/browser/experimental"
+ * import { Schema } from "effect"
+ *
+ * const report = Schema.decodeUnknownSync(Browser.Handoff)({
+ *   _tag: "Complete",
+ *   events: [
+ *     { _tag: "DialogDismissed", kind: "confirm", message: "Continue?" }
+ *   ]
+ * })
+ * console.log(report.events)
+ * ```
+ *
+ * @stability experimental
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Handoff = Reports.Handoff
+
+/**
+ * A planned-handoff result containing only confirmed dismissal events.
+ *
+ * **Example** (Inspect handoff outcomes)
+ *
+ * ```ts import.meta.vitest
+ * import { Browser } from "@usestrider/browser/experimental"
+ *
+ * const completed = (report: Browser.Handoff) => report._tag === "Complete"
+ * ```
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export type Handoff = typeof Handoff.Type

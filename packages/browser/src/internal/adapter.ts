@@ -833,6 +833,8 @@ export interface ClaimIdentity {
 }
 
 export interface Claims {
+  /** Dismisses only the identified live prompt on its original session; never accepts. */
+  readonly dismiss: (page: Target.NavigableId, prompt: Dialog.PromptId) => Effect.Effect<boolean, AdapterError>
   readonly dialogs: (
     page: Target.NavigableId
   ) => Effect.Effect<ReadonlyArray<{ readonly kind: Page.Prompt["kind"]; readonly message: string }>, AdapterError>
