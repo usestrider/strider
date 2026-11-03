@@ -641,8 +641,24 @@ and they remain separate from the current report even when the current state is 
 is independent of the event-log cap. A killed client cannot supply such a snapshot. Neither empty historical
 details nor an observed empty dialog list promises that the page is generally healthy.
 
+Planned Chromium handoff permits a narrowly different action from observational reclaim. The owning page's
+release finalizer waits for handler resolution, then dismisses a still-open dialog using its original session,
+before context declaration teardown. It has a 1000 ms budget independent of the closing caller. Confirmed reply
+and a matching dialog-closure fact are required before publishing a typed `DialogDismissed` event with kind and
+message. Failed or timed-out dismissal produces a typed Unknown handoff report and does not fail scope closure.
+The new client receives this historical event separately from current Observed/Unknown state. A caller handler
+may still accept normally, but shutdown fallback cannot apply an accept policy or beforeunload's ordinary
+implicit acceptance. Dismissing beforeunload cancels the pending navigation and leaves the tab/document alive.
+A client killed without finalizers cannot perform this handoff action and reclaim never tries it afterward.
+
+Rejected: automatic acceptance during handoff, including an option or policy enabling it, because shutdown could
+confirm a deletion or payment; pretending failed dismissal succeeded; treating a handoff event as current state;
+and disabling warnings about unconfirmed declaration teardown. Leaving all dialogs untouched during planned
+handoff was superseded: on pinned Chromium a residual dialog prevents file-chooser declaration release, while
+dismissal on the original session permits that release to complete.
+
 Rejected: matching by URL; storing connection-local public ids or page-target ids; accepting control as proof of
-ownership; changing ordinary context cleanup; a public handoff option; silently dismissing leftover dialogs; and
+ownership; changing ordinary context cleanup; a public handoff option; dismissing dialogs during reclaim; and
 refusing all ownership when bounded observation cannot complete; calling an observation timeout a confirmed
 dialog; returning fresh-looking empty current state; treating historical details as current; and adding a lease
 or expiry implementation here. ROOK-96 owns claim leases, ROOK-97 owns expiry, and no host may

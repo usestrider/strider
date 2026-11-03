@@ -345,8 +345,16 @@ Internal planned handoff captures the current model's dialog details before tear
 snapshots bound to the exact page claim. The host explicitly supplies a snapshot on reclaim; it remains separate
 from the current observation report, never evidence that a dialog is still open. Empty last-known details do not
 confirm a healthy current page. Current prompt data is retained independently of the configurable event log.
-Reclaim never dismisses a dialog to make observation succeed. Leases (ROOK-96), expiry (ROOK-97) and host adoption
-are separate; persistent contexts must not be enabled by a host until expiry cleanup is available.
+Reclaim never dismisses a dialog to make observation succeed. Planned Chromium handoff is different: after caller
+handlers have their normal opportunity to answer, the page's release finalizer dismisses residual dialogs through
+the original session before context declarations are removed. It never automatically accepts, even with an accept
+policy or for beforeunload. A caller handler may still accept normally. Dismissal has a separate 1000 ms budget;
+failure or expiry records `Unknown` and does not fail scope closure. Confirmed command reply and dialog closure
+produce typed `DialogDismissed { kind, message }` events in the separate handoff report. Historical events never
+stand for the next connection's present state. Dismissing a navigation's beforeunload prompt cancels the navigation
+and preserves the tab and original document. A killed client runs no handoff finalizer: crash reclaim stays
+observational and can return Unknown. Leases (ROOK-96), expiry (ROOK-97) and host adoption are separate; persistent
+contexts must not be enabled by a host until expiry cleanup is available.
 
 ## 4. Documents, realms and navigation
 
