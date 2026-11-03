@@ -1,6 +1,6 @@
 # PROTOCOL: transports, protocol clients and backend adapters (L0)
 
-*Revision 5.25, 2026-10-19; CDP code generation, the transports and the CDP client built 2026-10-19; the client's timeouts, late replies and validation modes, the ingestion pipeline, and the CDP and BiDi adapters built 2026-10-20; WebKit code generation and the WebKit backend built 2026-10-20; who served a response built 2026-10-20; the first slice through L1 and L2 built 2026-10-22; events, popups and dialogs built 2026-10-23; the other event modules built 2026-10-23. A condensed sketch drawn from draft 4 of the native model (commit `6cc0bc1`) and the research notes, especially `research/effect-building-blocks.md`, `research/non-js-cdp-clients.md`, `research/puppeteer-and-chromium-bidi.md`, `research/webdriver-bidi.md` and `research/webkit.md`.*
+*Revision 5.25, 2026-10-19; CDP code generation, the transports and the CDP client built 2026-10-19; the client's timeouts, late replies and validation modes, the ingestion pipeline, and the CDP and BiDi adapters built 2026-10-20; WebKit code generation and the WebKit backend built 2026-10-20; who served a response built 2026-10-20; the first slice through L1 and L2 built 2026-10-22; events, popups and dialogs built 2026-10-23; the other event modules built 2026-10-23. A condensed sketch drawn from draft 4 of the native model (commit `6cc0bc1`).*
 
 ## Purpose
 
@@ -403,7 +403,7 @@ Adapter responsibilities:
   - **Bodies** need a `BodyCollection` declaration before the request starts, a new declaration kind, which compiles to `network.addDataCollector` (CDP needs none).
   - **Permissions** are granted per origin; BiDi has no reset, so the adapter sets the ones it granted back to `prompt`.
 - **Not supported, and said so:** a navigation referrer, media-feature overrides and focus emulation on Firefox 158, which answers `unknown command` (now `AdapterError{Unsupported}` named by the method), and WebSocket frames, which BiDi has no events for.
-- **Findings** (PROBES.md, Results): Firefox sends `contextDestroyed` for frames orphaned by a navigation (probe 8); `userActivation` grants activation only during the call (probe 20); a dedicated worker's console messages come attributed to its owner's realm; `document.open()` shows as `historyUpdated` and a repeated `domContentLoaded`, which the adapter reports as a new generation (probe 17).
+- **Findings:** Firefox sends `contextDestroyed` for frames orphaned by a navigation (probe 8); `userActivation` grants activation only during the call (probe 20); a dedicated worker's console messages come attributed to its owner's realm; `document.open()` shows as `historyUpdated` and a repeated `domContentLoaded`, which the adapter reports as a new generation (probe 17).
 - **Tests:** the conformance suite's 23 tests (24 since) pass against Firefox 158 as they do against Chromium; 5 Firefox tests check the launcher, the raw connection, every error-table row against the browser, and both corrections.
 
 **Built for WebKit** (2026-10-20), for Playwright's WebKit build (`src/internal/webkitAdapter.ts`, `src/internal/webkitWire.ts`, `src/internal/webkitUtility.ts`, `src/internal/webkitLauncher.ts`, and the public `WebKitConnection`):
@@ -435,7 +435,7 @@ Adapter responsibilities:
   - The locale (`Playwright.setLanguages`) and geolocation are per context. A web process takes its languages when it starts, so a locale declared for pages that already exist is `Unsupported`; declared first, it applies to every page created after.
   - A document caches `navigator.userAgent` the first time it is read, so a user-agent override reaches a document that has read it only at its next navigation; requests carry it at once.
 - **Not supported, and said so:** PDFs, interception of authentication (WebKit answers challenges from credentials set in advance), a response-phase `Fail`, and the per-page locale and geolocation above.
-- **Hazards** (PROBES.md, Results): `Playwright.navigate` with a frame id the page doesn't have, and `Dialog.handleJavaScriptDialog` with no dialog open, abort the browser. The adapter navigates only frames it has seen and not seen go, and answers only a dialog it has seen open and not seen close; a frame that goes between that check and the command is a race it can't close.
+- **Hazards:** `Playwright.navigate` with a frame id the page doesn't have, and `Dialog.handleJavaScriptDialog` with no dialog open, abort the browser. The adapter navigates only frames it has seen and not seen go, and answers only a dialog it has seen open and not seen close; a frame that goes between that check and the command is a race it can't close.
 - **Tests:** the conformance suite's 24 tests pass against build 2359 as they do against Chromium and Firefox; 6 WebKit tests check the launcher and its revision check, the raw connection, every error-table row (with unknown methods at every level), a cross-site navigation followed across targets, `document.open()`, and a crash.
 - **Not built:** the attach-only stock profile (iOS, WKWebView, the WebKitGTK inspector). It needs stock WebKit's protocol, vendored and modeled as a backend of its own (its domains differ from Playwright's: no `Playwright`, no page proxies), and an endpoint to record against, which this environment doesn't have. (Since built for WebKitGTK's and WPE's inspector: Stock WebKit, attached, below.)
 
@@ -800,7 +800,7 @@ Adapter responsibilities:
 - **Console text** (`internal/consoleFormat.ts`; the CDP and WebKit adapters). The Console Standard's formatter, applied to the arguments CDP and WebKit report; Firefox applies its own (Q33).
 - **Settled while building.**
   - **`Dialog.handle`, `FileChooser.handle`, `Har.record`, `Trace.record` and `Browser.newPage` declare `TargetGone` too:** they refused a released grant the same way, or open a page in a context.
-  - **Objects in console text read as each browser describes them,** not one way: WebDriver BiDi serializes an `Error` without its message, so one rendering would have dropped Chromium's. And Firefox's text can't be reformatted: it arrives as one argument, with `%f` written as printf writes it (Q33; reported in `upstream/`).
+  - **Objects in console text read as each browser describes them,** not one way: WebDriver BiDi serializes an `Error` without its message, so one rendering would have dropped Chromium's. And Firefox's text can't be reformatted: it arrives as one argument, with `%f` written as printf writes it (Q33).
   - **`AutoResolution.policy`'s option is `ContextOption`,** not `Option`, which reads as Effect's.
 - **Tests.** `test/ConsoleFormat.test.ts` checks the formatter; `modules.ts` formats a call on every backend, waits for a canceled download to complete and gets `Ended`, and reads the new policies; `contents.ts` expects `NoMatch` for a capture of no element; `attaching.ts` expects `TargetGone{AccessReleased}` from a released route and cookie jar. Integration tests: 468, all passing in one full run, a file at a time.
 
@@ -1079,7 +1079,7 @@ This is a planning inventory from the research, not a conformance result. `?` me
 ## Open questions
 
 None. Decided:
-- **Codegen route:** our own emitter over a committed protocol model, with audited corrections and a separate overlay (Code generation above). The pipeline follows Alchemy's distilled; the lessons and sources are in [research/codegen-prior-art.md](research/codegen-prior-art.md).
+- **Codegen route:** our own emitter over a committed protocol model, with audited corrections and a separate overlay (Code generation above). The pipeline follows Alchemy's distilled.
   - `SchemaRepresentation.toCodeDocument` was rejected because it takes no options and the representation can't carry brands, `/*#__PURE__*/` or opaque types. Effect's OpenAPI generator, which uses it, has to rewrite JSON Schema before it and swap whole entries by name after it.
   - Smithy as the model format was rejected because distilled's generator is HTTP-bound, and events, sessions and BiDi union kinds would all need custom traits.
 - **Pipe transport** uses Effect's `ChildProcess` extra file descriptors behind our `Transport`:
