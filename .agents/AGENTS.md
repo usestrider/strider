@@ -148,6 +148,12 @@ then `**Example** (Title)` sections, each one `` ```ts import.meta.vitest `` fen
 is `unstable`, or `experimental` for what rests on an upstream proposal or an in-flight module, and `@since` is
 `0.1.0`.
 
+Choose changeset bumps using [the release policy](../.changeset/README.md#release-policy). Stability determines the
+bump: `unstable` fixes and additions are patches, and breaks are minors; `experimental` changes are patches even
+when breaking; stable or unclassified APIs follow strict semver. The CLI's public contracts are explicitly
+`unstable`, including when their implementation lives under `internal/`. Use the highest required bump per affected
+package.
+
 JSDoc is what the API reference and editors show, so write it for someone using Strider, who has none of the design
 documents. Say what a declaration does and what happens, in plain words; cite no review, principle, rule, quirk
 number or section of a design document, and leave out how the API got here. A summary must read right the first

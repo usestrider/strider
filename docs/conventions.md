@@ -270,7 +270,7 @@ Effect puts operations on handles as members (`client.get`, `handle.kill`), and 
 **Strider.**
 - **Shape.** The description starts with what the declaration does. **When to use** starts "Use to", "Use when", "Use as" or "Use with". Examples import from `"@usestrider/browser"`.
 - **Categories.** The categories in use are Effect's (`models`, `schemas`, `guards`, `constructors`, `constants`, `combinators`, `getters`, `accessors`, `converting`, `references`, `configuration`, `services`, `tags`, `layers`, `errors`, `utility types`), plus four of Strider's: `reasons`, `subscriptions`, `matchers` and `handlers`.
-- **Stability.** Until 1.0, `@stability` is `unstable`: breaking changes may come in minor releases, which 0.x semver allows. `experimental` marks what rests on an upstream proposal or an in-flight module, such as `Trace` and `Har` (built on `effect/encoding`'s `Zip`), `Browser.layerTest` and `SocketConnector`. `stable` waits for 1.0.
+- **Stability.** Until 1.0, `@stability` is `unstable`: compatible fixes and additions ship in patch releases, and breaking changes in minor releases. `experimental` marks what rests on an upstream proposal or an in-flight module, such as `Trace` and `Har` (built on `effect/encoding`'s `Zip`), `Browser.layerTest` and `SocketConnector`; even breaking changes to these APIs ship in patch releases. `stable` waits for 1.0. The [release policy](../.changeset/README.md#release-policy) defines changeset bumps, mixed-stability changes and the CLI's `unstable` classification.
 - **`@since`** is `0.1.0`.
 - **APIs that expose `effect/http` types** (`Route`, `NetworkRequest.toHttpClientRequest`, `CapturedResponse`) can change when Effect's HTTP modules do, which Effect marks unstable.
 
