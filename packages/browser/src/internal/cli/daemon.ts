@@ -1409,9 +1409,10 @@ export const start = Command.make(
       const version = yield* Session.version
       const rootDir = Session.root(process.env, (yield* Effect.promise(() => Node.os())).tmpdir())
       const paths = Session.paths(rootDir, flags.name)
-      yield* fs.makeDirectory(rootDir, { recursive: true, mode: 0o700 }).pipe(Effect.mapError(failedWith))
+      yield* Session.validateRoot(rootDir, true)
       // The directory is the session's claim: taken when it exists
       if (yield* fs.exists(paths.dir).pipe(Effect.orElseSucceed(() => false))) {
+        yield* Session.validateRoot(paths.dir)
         // Its lock names the daemon holding it, which a process reusing its id isn't
         const running = Option.isSome(yield* Session.holder(fs, paths.dir))
         return yield* Effect.fail(

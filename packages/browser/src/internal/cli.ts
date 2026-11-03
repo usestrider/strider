@@ -130,6 +130,7 @@ export const sessions = Command.make(
     const found: Array<Listed> = []
     for (const name of names) {
       const paths = Session.paths(rootDir, name)
+      yield* Session.validateRoot(paths.dir)
       const info = Option.isSome(yield* Session.holder(fs, paths.dir))
         ? yield* Effect.scoped(Effect.flatMap(Client.session(rootDir, name), (client) => client.Info())).pipe(
           Effect.option
@@ -236,6 +237,7 @@ export const prune = Command.make(
     const fs = yield* FileSystem.FileSystem
     const rootDir = yield* Client.sessionRoot
     const paths = Session.paths(rootDir, name)
+    yield* Session.validateRoot(paths.dir)
     if (!(yield* fs.exists(paths.dir).pipe(Effect.orElseSucceed(() => false)))) {
       return yield* Console.log(`No session named ${name} is left behind`)
     }

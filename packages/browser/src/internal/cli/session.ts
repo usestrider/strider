@@ -4,7 +4,7 @@
  * socket is `protocol.ts`'s.
  *
  * ```
- * $XDG_RUNTIME_DIR/strider/   the OS temporary directory's strider/ where there is no runtime directory
+ * $XDG_RUNTIME_DIR/strider/   else <OS temporary directory>/strider-<uid>/
  *   <name>/                   one per session
  *     lock  daemon.sock  daemon.log
  *     profile/  downloads/  artifacts/
@@ -22,7 +22,59 @@ export const nameRule = /^[a-z0-9][a-z0-9-]{0,31}$/
 
 /** The directory every session's directory is in. */
 export const root = (env: Readonly<Record<string, string | undefined>>, tmpdir: string): string =>
-  `${env.XDG_RUNTIME_DIR !== undefined && env.XDG_RUNTIME_DIR !== "" ? env.XDG_RUNTIME_DIR : tmpdir}/strider`
+  env.XDG_RUNTIME_DIR !== undefined && env.XDG_RUNTIME_DIR !== ""
+    ? env.XDG_RUNTIME_DIR + "/strider"
+    : tmpdir + "/strider-" + uid()
+
+const uid = (): number => {
+  if (Node.process.getuid === undefined) throw new Error("CLI session isolation requires Unix ownership metadata")
+  return Node.process.getuid()
+}
+
+/** Checks private directory metadata; ownership tests can supply metadata without changing real owners. */
+export const privateDirectory = (stat: Node.Stat, owner: number): boolean =>
+  stat.isDirectory() && !stat.isSymbolicLink() && stat.uid === owner && (stat.mode & 0o077) === 0
+
+/** Validates ancestors before any read or creation. Missing roots stay missing for readers. */
+export const validateRoot = (directory: string, create = false) =>
+  Effect.promise(async () => {
+    const owner = uid()
+    const fs = await Node.files()
+    if (!directory.startsWith("/")) throw new Error("Session root must be absolute")
+    const parts = directory.split("/").filter(Boolean)
+    let current = ""
+    for (let index = 0; index < parts.length; index++) {
+      current += "/" + parts[index]
+      const last = index === parts.length - 1
+      let stat: Node.Stat
+      try {
+        stat = await fs.lstat(current)
+      } catch (error) {
+        if ((error as { code?: string }).code !== "ENOENT") throw error
+        if (!create) return
+        if (!last) throw error
+        try {
+          await fs.mkdir(current, { mode: 0o700 })
+        } catch (error) {
+          if ((error as { code?: string }).code !== "EEXIST") throw error
+        }
+        stat = await fs.lstat(current)
+      }
+      const safe = last
+        ? privateDirectory(stat, owner)
+        : stat.isDirectory() && !stat.isSymbolicLink() && (stat.uid === 0 || stat.uid === owner) &&
+          ((stat.mode & 0o022) === 0 || (stat.uid === 0 && (stat.mode & 0o1000) !== 0))
+      if (!safe) {
+        throw new Error(
+          "Unsafe session directory: " + current + "; requires trusted ownership, permissions and no symlinks"
+        )
+      }
+    }
+  })
+
+/** Allocates an unpredictable private directory for startup files. */
+export const startupDirectory = (directory: string) =>
+  Effect.promise(async () => (await Node.files()).mkdtemp(directory + "/.start-"))
 
 /** A session's directory, its socket, its lock and its log. */
 export const paths = (rootDir: string, name: string) => {

@@ -39,23 +39,32 @@ export class Exit extends Data.TaggedError("Exit")<{ readonly code: number }> {
 }
 
 /** The directory every session's directory is in, from this process's environment. */
-export const sessionRoot = Effect.map(
+export const sessionRoot = Effect.flatMap(
   Effect.promise(() => Node.os()),
-  (os) => Session.root(Node.process.env, os.tmpdir())
+  (os) => {
+    const root = Session.root(Node.process.env, os.tmpdir())
+    return Effect.as(Session.validateRoot(root), root)
+  }
 )
 
 /** The sessions whose sockets exist. */
 export const running = Effect.fnUntraced(function*(rootDir: string) {
   const fs = yield* FileSystem.FileSystem
+  yield* Session.validateRoot(rootDir)
   const names = yield* fs.readDirectory(rootDir).pipe(Effect.orElseSucceed(() => []))
+  const sessions = names.filter((name) => Session.nameRule.test(name))
+  for (const name of sessions) yield* Session.validateRoot(Session.paths(rootDir, name).dir)
   return (yield* Effect.filter(
-    names,
+    sessions,
     (name) => fs.exists(Session.paths(rootDir, name).socket).pipe(Effect.orElseSucceed(() => false))
   )).sort()
 })
 
 /** A client of the daemon serving a socket, for the scope. It connects as its first call is made. */
 export const connect = Effect.fnUntraced(function*(socket: string) {
+  const directory = socket.slice(0, socket.lastIndexOf("/"))
+  yield* Session.validateRoot(directory.slice(0, directory.lastIndexOf("/")))
+  yield* Session.validateRoot(directory)
   const protocol = yield* Layer.build(
     RpcClient.layerProtocolSocket().pipe(
       Layer.provide([Layer.effect(Socket.Socket)(NodeSocket.makeNet({ path: socket })), RpcSerialization.layerNdjson])
@@ -140,9 +149,10 @@ export const start = Effect.fnUntraced(function*(
   const fs = yield* FileSystem.FileSystem
   const rootDir = yield* sessionRoot
   yield* Effect.scoped(Effect.gen(function*() {
-    yield* fs.makeDirectory(rootDir, { recursive: true, mode: 0o700 }).pipe(Effect.orDie)
-    const path = `${rootDir}/.start-${process.pid}.sock`
-    yield* fs.remove(path).pipe(Effect.ignore)
+    yield* Session.validateRoot(rootDir, true)
+    const startup = yield* Session.startupDirectory(rootDir)
+    yield* Effect.addFinalizer(() => fs.remove(startup, { recursive: true }).pipe(Effect.ignore))
+    const path = startup + "/ready.sock"
     const server = yield* NodeSocketServer.make({ path }).pipe(Effect.orDie)
     const said = yield* Deferred.make<string>()
     yield* server.run((socket) =>
@@ -154,7 +164,7 @@ export const start = Effect.fnUntraced(function*(
         Effect.ignore
       )
     ).pipe(Effect.forkScoped)
-    const errors = `${rootDir}/.start-${process.pid}.log`
+    const errors = startup + "/stderr.log"
     yield* Effect.addFinalizer(() => fs.remove(errors).pipe(Effect.ignore))
     const daemonArgs = [...process.execArgv, bin, "__daemon", path, ...argv]
     // The shell opens the file for the daemon's standard error and becomes it; the daemon needs no code for this,

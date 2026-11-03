@@ -9,6 +9,48 @@ import * as Client from "../src/internal/cli/client.ts"
 import * as Session from "../src/internal/cli/session.ts"
 
 describe("session files", () => {
+  it("rejects wrong-owner metadata (mock; no second user)", () => {
+    assert.isFalse(
+      Session.privateDirectory({ uid: 42, mode: 0o700, isDirectory: () => true, isSymbolicLink: () => false }, 43)
+    )
+  })
+
+  it("accepts a private root and leaves a missing root absent", async () => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+    try {
+      const root = path.join(temporary, "strider")
+      assert.deepEqual(await Effect.runPromise(Client.running(root).pipe(Effect.provide(NodeServices.layer))), [])
+      assert.isFalse(fs.existsSync(root))
+      fs.mkdirSync(root, { mode: 0o700 })
+      assert.deepEqual(await Effect.runPromise(Client.running(root).pipe(Effect.provide(NodeServices.layer))), [])
+    } finally {
+      fs.rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it("rejects unsafe ancestors before creating a missing root", async () => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+    try {
+      fs.chmodSync(temporary, 0o777)
+      const root = path.join(temporary, "strider")
+      assert.isTrue(Exit.isFailure(await Effect.runPromiseExit(Session.validateRoot(root, true))))
+      assert.isFalse(fs.existsSync(root))
+    } finally {
+      fs.rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it("rejects an unsafe root before connecting", async () => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+    try {
+      fs.chmodSync(temporary, 0o777)
+      const result = await Effect.runPromiseExit(Effect.scoped(Client.session(temporary, "example")))
+      assert.isTrue(Exit.isFailure(result))
+    } finally {
+      fs.rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
   it("uses the current user identity in the fallback", () => {
     assert.strictEqual(Session.root({}, "/tmp"), `/tmp/strider-${process.getuid!()}`)
   })
@@ -52,10 +94,19 @@ describe("session files", () => {
       const target = path.join(temporary, "target")
       fs.writeFileSync(target, "original\n")
       fs.symlinkSync(target, path.join(root, `.start-${process.pid}.log`))
+      const plantedSocket = path.join(root, `.start-${process.pid}.sock`)
+      fs.writeFileSync(plantedSocket, "leave untouched")
       const daemon = path.join(temporary, "daemon.cjs")
-      fs.writeFileSync(daemon, "process.stderr.write(\"startup-marker\\n\"); process.exitCode = 1\n")
+      const marker = path.join(temporary, "executed")
+      fs.writeFileSync(
+        daemon,
+        "require('node:fs').writeFileSync(" + JSON.stringify(marker) +
+          ", 'yes'); process.stderr.write('startup-marker\\n'); process.exitCode = 1\n"
+      )
       await Effect.runPromiseExit(Client.start([], daemon).pipe(Effect.provide(NodeServices.layer)))
       assert.strictEqual(fs.readFileSync(target, "utf8"), "original\n")
+      assert.strictEqual(fs.readFileSync(marker, "utf8"), "yes")
+      assert.strictEqual(fs.readFileSync(plantedSocket, "utf8"), "leave untouched")
     } finally {
       if (previous === undefined) delete process.env.XDG_RUNTIME_DIR
       else process.env.XDG_RUNTIME_DIR = previous

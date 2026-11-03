@@ -51,13 +51,23 @@ declare const CurrentSession: Context.Service<CurrentSession, CurrentSession>   
 ```
 
 ```
-$XDG_RUNTIME_DIR/strider/       # per user; the OS temp directory where there is no runtime directory
+$XDG_RUNTIME_DIR/strider/       # per user; otherwise <OS temp directory>/strider-<uid>
   checkout/                     # one directory per session name
     lock  daemon.sock
     profile/                    # or your --user-data-dir instead, which is never deleted
     downloads/
     artifacts/
 ```
+
+Session directories must belong to the current Unix user, have no group or other permissions, and must not be
+symlinks. Ancestors must belong to that user or root and cannot be writable by other users, except root-owned
+sticky directories such as /tmp. Unsafe existing directories are rejected without changing them. Platforms
+without Unix ownership metadata are refused by the CLI session service.
+
+The fallback used before this change, <OS temp directory>/strider, is never read or migrated automatically.
+Stop older daemons with the older CLI before upgrading. Restart sessions with the new CLI; inspect and remove
+old directories separately, after checking their ownership. Do not copy sockets or locks into the new root.
+
 
 ## Help
 
