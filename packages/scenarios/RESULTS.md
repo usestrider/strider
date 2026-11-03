@@ -45,7 +45,7 @@ Strider keeps Chromium's `Fetch` interceptor enabled on every page, with a patte
 
 ## What each leaves for a page to see
 
-What a page's own script reads about the browser driving it, the signals bot protection looks for (`/tells` in `src/site.ts`), headless, as each launches by default:
+What a page's own script reads about the browser driving it (`/tells` in `src/site.ts`), headless, as each launches by default:
 
 | | Strider | Playwright |
 |---|---|---|

@@ -387,7 +387,7 @@ contexts must not be enabled by a host until expiry cleanup is available.
   - **The library's own code** runs in a utility isolated world wherever one exists. Stock WebKit has none, and says so as a capability: there the engine, the trace capture and the library's own reads run in the page's world, and a caller's `evaluate` is refused rather than moved there (QUIRKS.md, Q194).
   - **Two discovery strategies, chosen per context:**
     - **Tracked:** realm events folded into state.
-    - **OnDemand:** no `Runtime.enable`; realms acquired when needed and validated on use. This is the stealth posture. It has no observable realm set and no console capture, and these are absent from the types rather than failing.
+    - **OnDemand:** no `Runtime.enable`; realms acquired when needed and validated on use. It has no observable realm set and no console capture, and these are absent from the types rather than failing.
   - **During a pending navigation** the active realm stays usable. A prospective replacement is tracked separately, so a canceled navigation, a 204 or a download never strands the page.
   - **Evaluation** is bounded by `within`, fails fast on known suspension or confirmed prompt blocking, and may request user activation.
 - **Values, handles and channels.**

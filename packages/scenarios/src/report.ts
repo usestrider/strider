@@ -112,7 +112,7 @@ export const report = (m: Measurements): string => {
     out.push("## What each leaves for a page to see")
     out.push("")
     out.push(
-      "What a page's own script reads about the browser driving it, the signals bot protection looks for (`/tells` in `src/site.ts`), headless, as each launches by default:"
+      "What a page's own script reads about the browser driving it (`/tells` in `src/site.ts`), headless, as each launches by default:"
     )
     out.push("")
     out.push("| | Strider | Playwright |")

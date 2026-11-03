@@ -1050,7 +1050,7 @@ Each backend ships as its own subpath export (`@usestrider/browser/chromium`, `/
 3. **WebKit, stock:**
    - launched: WebKitGTK's and WPE's MiniBrowser in automation mode, driven by WebKit's Automation protocol and looked into through the inspector, on the inspector server's socket, a browser process per context (built 2026-10-26 for WebKitGTK 2.54.1);
    - attached: the inspector server over HTTP, for looking (built 2026-10-26); iOS and WKWebView, behind Safari's own inspector, list their pages another way, which isn't read;
-   - Playwright's patched builds aren't driven (removed 2026-10-26): a patched browser is a dependency and a fingerprint.
+   - Playwright's patched builds aren't driven (removed 2026-10-26): a patched browser is a dependency.
 4. **Experimental BiDi profiles:** Safari Technology Preview (needs `safari:experimentalWebSocketUrl`) and WebKitGTK/WPE (about 23% of WPT).
 
 ### Capability snapshot

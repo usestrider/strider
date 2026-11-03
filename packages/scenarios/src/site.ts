@@ -19,7 +19,7 @@ const pixel = Buffer.from(
   "base64"
 )
 
-/** What a page reads about the browser that runs it, the tells bot protection looks for. */
+/** What a page reads about the browser that runs it. */
 const tells = `<script>
 window.tells = (async () => {
   // A console argument whose stack is read when a CDP client has Runtime.enable on, which serializes it
