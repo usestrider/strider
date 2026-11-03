@@ -634,4 +634,4 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
 
 ## 11. Open questions
 
-Browser-dependent unknowns are in [PROBES.md](PROBES.md). No design questions are open at this layer right now.
+No design questions are open at this layer right now.

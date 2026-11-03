@@ -364,7 +364,7 @@ option, a route handler must produce a decision compatible with that phase.
 `FileChooser.Pending` provide `Effect<Decision<…>>`, so a handler can return `Route.abort()` or `dialog.accept`
 directly. A generator that does other work ends with `return yield* Route.abort()` to produce the decision rather
 than another Effect. This keeps handlers consistent with Effect's own callbacks and removes the
-`Effect.succeed(…)` wrapper from one-line handlers (ISSUES.md, I34).
+`Effect.succeed(…)` wrapper from one-line handlers.
 
 Rejected: allowing a handler to return either a plain decision or an Effect of one, because the union return is
 unlike Effect's own callbacks; and making a decision itself an Effect, as `Exit` is, because that requires Effect's

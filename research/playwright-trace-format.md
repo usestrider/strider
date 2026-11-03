@@ -87,7 +87,7 @@ Sources: a full clone of `microsoft/playwright` at `b335271` (2026-10-17), at `/
 - `response.{status, statusText, headers[], content.mimeType, content._file, bodySize, _transferSize}`;
 - `time`, `startedDateTime`, `_monotonicTime`, `pageref`, `_frameref` and `_resourceType`.
 
-The UI doesn't use cookies or timings. Bodies go in `resources/<sha1>.<ext>`, referenced through `_file` (`harTracer.ts:561-565`). This is the same entry format as a recorded HAR (research/har.md).
+The UI doesn't use cookies or timings. Bodies go in `resources/<sha1>.<ext>`, referenced through `_file` (`harTracer.ts:561-565`). This is the same entry format as a recorded HAR.
 
 ## 5. Actions and nesting
 

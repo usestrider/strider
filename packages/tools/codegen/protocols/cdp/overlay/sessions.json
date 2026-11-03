@@ -1,5 +1,5 @@
 {
-  "reason": "Commands sent on the browser session, with no target session id: the Browser, SystemInfo and Target domains, and Storage's cookie commands, which take a browser context id. Target.setAutoAttach and Target.autoAttachRelated are also sent on target sessions, to attach recursively, so they carry no annotation. Source: Puppeteer's and chromium-bidi's use of the browser connection (research/puppeteer-and-chromium-bidi.md); probe 22 confirms auto-attach scope.",
+  "reason": "Commands sent on the browser session, with no target session id: the Browser, SystemInfo and Target domains, and Storage's cookie commands, which take a browser context id. Target.setAutoAttach and Target.autoAttachRelated are also sent on target sessions, to attach recursively, so they carry no annotation. Source: Puppeteer's and chromium-bidi's use of the browser connection; probe 22 confirms auto-attach scope.",
   "annotate": [
     {
       "target": "Browser#addMockCamera",
