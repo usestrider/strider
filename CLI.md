@@ -66,6 +66,18 @@ Use `strider select --help` for a command's arguments and flags, or `strider pag
 subcommands and `strider page new --help` for their arguments. The same help is available with a session selector,
 such as `strider -s checkout select --help`. `strider start --help` describes every launch and lifetime flag. Command listings describe each command, using the toolkit’s descriptions for its tools. `strider mcp --help` describes session selection, `--start`, `--keep` and the forwarded launch options, `--capture` among them, without starting an MCP server or session.
 
+### Agent usage
+
+`strider agent instructions` prints a version-stamped Markdown usage guide without starting a browser or contacting
+a session. It explains session and page selection, targets, actions and checks, event waits, output and failures,
+login-state reuse, existing tabs, cleanup and MCP. It describes behavior and examples rather than imposing a task workflow.
+
+`strider agent instructions --skill` wraps the same guide in skill metadata (`name` and `description`) for a
+`SKILL.md`. Both outputs come from `src/internal/cli/agent.ts`; there is no separately maintained skill body.
+Core command forms and exit codes are rendered from the CLI definitions. Shell examples are stored as argument
+lists, rendered with shell quoting and checked against the real command parser with handlers disabled. Behavioral
+explanations remain handwritten and are reviewed when behavior changes. Saved copies are regenerated after upgrading the CLI.
+
 ## A session
 
 ```sh

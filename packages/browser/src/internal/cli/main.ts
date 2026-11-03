@@ -9,7 +9,7 @@ import * as Client from "./client.ts"
 import * as Session from "./session.ts"
 
 /** The commands this process runs itself, without a session's daemon. */
-const local = new Set(["browsers", "sessions", "prune"])
+const local = new Set(["browsers", "sessions", "prune", "agent"])
 
 /** Runs the `strider` command with its arguments; `bin` is the script a daemon is started with. */
 export const run = Effect.fnUntraced(function*(argv: ReadonlyArray<string>, bin: string) {

@@ -1,6 +1,6 @@
 /**
  * The `strider` commands that need no session (CLI.md): `browsers`, which lists the browsers it can find, so a person
- * or an agent can copy a path into `executablePath`; `sessions`; and `prune`. A session's
+ * or an agent can copy a path into `executablePath`; `sessions`; `prune`; and `agent`. A session's
  * own commands are its daemon's (`cli/daemon.ts`).
  */
 import * as Argument from "effect/cli/Argument"
@@ -14,6 +14,7 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Ledger from "../Ledger.ts"
 import * as Browsers from "./browsers.ts"
+import * as Agent from "./cli/agent.ts"
 import * as Client from "./cli/client.ts"
 import * as Node from "./cli/node.ts"
 import type * as Protocol from "./cli/protocol.ts"
@@ -289,6 +290,7 @@ export const help = Effect.map(
         forHelp(browsers),
         forHelp(sessions),
         forHelp(prune),
+        forHelp(Agent.command),
         ...sessionCommands.subcommands
           .flatMap((group) =>
             group.commands.map((command) => forHelp(command).pipe(Command.withSharedFlags(Daemon.output)))
@@ -303,5 +305,5 @@ export const help = Effect.map(
 
 /** The commands that execute locally without a session. */
 export const strider = Command.make("strider").pipe(
-  Command.withSubcommands([browsers, sessions, prune])
+  Command.withSubcommands([browsers, sessions, prune, Agent.command])
 )
