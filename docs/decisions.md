@@ -6,11 +6,9 @@ CLI.md) state the contracts that follow from them.
 
 ## Principles
 
-**Strider drives stock browsers and depends on nothing but Effect.** The maintainer: "I don't want to use the
-playwright builds at all, I want my own versions of everything, ideally using stock as much as possible. playwright
-builds are immediately detected by bot protection", and "How does that not align with my goal of no dependencies from
-the start?" A patched browser is a dependency as much as a package is. Its protocol changes whenever its vendor rolls
-it, users can get it only through the vendor's installer, and its patches are a fingerprint. Rejected: Playwright's
+**Strider drives stock browsers and depends on nothing but Effect.** A script should run in the browser a site
+expects, not a build made for automation. A patched browser is also a dependency as much as a package is: its protocol
+changes whenever its vendor rolls it, and users can get it only through the vendor's installer. Rejected: Playwright's
 WebKit build as an option, and a patched WebKit of our own. Where a feature would need a dependency, it isn't built.
 Only Firefox records a video file, because turning Chromium's or WebKit's frames into one needs an encoder. A trace's
 DOM capture is our own code. Playwright's snapshotter is read to learn what the trace viewer expects, never copied or
@@ -60,8 +58,9 @@ happened: a fully acknowledged gesture doesn't show the application acted on it.
 have. The library doesn't bring a page to the front before acting, because that changes which page is in front
 without the caller asking. A page that can't render says so (`NoRenderingOpportunity`) and names the two remedies.
 
-**Nothing of the library's runs in a page's world unless the caller declared it.** "Never a wrapper in the page." A
-page can see a wrapper, for example that `alert` isn't the browser's, and bot detection looks for exactly that. So:
+**Nothing of the library's runs in a page's world unless the caller declared it, or the browser leaves no other way.**
+"Never a wrapper in the page." A page can see a wrapper, for example that `alert` isn't the browser's, and a script
+shouldn't change how a site behaves. So:
 
 - On stock WebKit, whose Automation reports a dialog without its kind, a dialog is `Dialog.Unknown` rather than
   learned from wrapped dialog functions.
@@ -70,7 +69,8 @@ page can see a wrapper, for example that `alert` isn't the browser's, and bot de
   pages where their scripts could read it.
 - The query engine is one self-contained function in our source, with no library in the page.
 
-What does run in the main world is what the caller declared: their init scripts and the page clock.
+What does run in the main world is what the caller declared, their init scripts and the page clock, and, on stock
+WebKit alone, the library's own engine and reads, because its inspector makes no other world (QUIRKS.md, Q194).
 
 **The design is checked as compiled code.** A compiler checks what prose can't:
 
