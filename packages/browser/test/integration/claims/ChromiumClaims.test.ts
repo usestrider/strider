@@ -2,7 +2,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, CookieJar, Deadline, Dialog, StorageState } from "@usestrider/browser"
+import { Browser, CookieJar, Deadline, Dialog, Download, FileChooser, StorageState } from "@usestrider/browser"
 import * as CdpBrowser from "@usestrider/browser/cdp/Browser"
 import * as Preload from "@usestrider/browser/cdp/Preload"
 import * as Runtime from "@usestrider/browser/cdp/Runtime"
@@ -37,6 +37,19 @@ import { assertPinned, chromium } from "../browsers.ts"
 const serve = Effect.acquireRelease(
   Effect.promise(async () => {
     const server = createServer((request, response) => {
+      if (request.url === "/claims-download") {
+        response.setHeader("Content-Type", "application/octet-stream")
+        response.setHeader("Content-Disposition", "attachment; filename=\"claims.txt\"")
+        response.end("claims bytes")
+        return
+      }
+      if (request.url === "/defaults") {
+        response.setHeader("Content-Type", "text/html")
+        response.end(
+          `<title>defaults</title><input type="file" id="file"><button onclick="document.querySelector('#file').click()">Upload</button><a href="/claims-download" download>Export</a>`
+        )
+        return
+      }
       response.setHeader("Content-Type", "text/html")
       response.end(
         request.url === "/start"
@@ -1305,6 +1318,167 @@ describe("Chromium claims (ROOK-95)", () => {
             "unconfirmed declaration release must remain visible"
           )
         }), 120_000)
+
+      for (const initial of ["empty", "healthy"] as const) {
+        it.effect(
+          `no-settings ${initial} context recovery restores dialog, file chooser and download defaults`,
+          () =>
+            Effect.gen(function*() {
+              const browser = yield* launch
+              const { origin } = yield* serve
+              const old = yield* Scope.make()
+              yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
+              const services = yield* Layer.buildWithScope(browser.connect, old)
+              const claim = yield* Effect.gen(function*() {
+                const context = yield* api.UserContext.create({ reclaimable: true })
+                if (initial === "healthy") yield* (yield* context.newPage).goto(`${origin}/defaults`)
+                return yield* api.UserContext.claim(context)
+              }).pipe(Scope.provide(old), Effect.provide(services))
+              yield* handoff(old)
+              yield* Effect.scoped(Effect.gen(function*() {
+                const adapter = ClaimHooks.get(yield* Browser.Browser).runtime.model.adapter
+                const declarations: Array<Parameters<typeof adapter.declare>[1]> = []
+                const declare = adapter.declare
+                Object.assign(adapter, {
+                  declare: (...args: Parameters<typeof declare>) => {
+                    declarations.push(args[1])
+                    return declare(...args)
+                  }
+                })
+                const { context, found } = yield* api.UserContext.reclaim(claim)
+                assert.isTrue(found.pages.every((page) => page.found._tag === "Observed"))
+                assert.isTrue(declarations.some((d) => d._tag === "Challenges"))
+                assert.isTrue(declarations.some((d) => d._tag === "FileChooser"))
+                assert.isTrue(declarations.some((d) => d._tag === "Downloads" && d.behavior._tag === "Allow"))
+                const page = yield* context.newPage
+                yield* page.goto(`${origin}/defaults`)
+                assert.strictEqual(
+                  yield* page.evaluateInMainWorld(() => {
+                    alert("dismiss by default")
+                    return "answered"
+                  }).pipe(Deadline.within("2 seconds")),
+                  "answered"
+                )
+                const chooser = yield* FileChooser.next(page)
+                yield* page.getByRole("button", { name: "Upload" }).click()
+                assert.strictEqual((yield* chooser)._tag, "Single")
+                const download = yield* Download.next(page)
+                yield* page.getByText("Export", { exact: true }).click()
+                const file = yield* download
+                const bytes = yield* Stream.runCollect(file.stream)
+                assert.strictEqual(Buffer.concat(Array.from(bytes)).toString("utf8"), "claims bytes")
+                yield* file.finished
+                assert.strictEqual((yield* file.status)._tag, "Completed")
+                if (initial === "healthy") {
+                  const existing = (yield* context.pages).find((candidate) => candidate.id !== page.id)!
+                  assert.strictEqual(
+                    yield* existing.evaluateInMainWorld(() => {
+                      alert("old page default")
+                      return "answered"
+                    }).pipe(Deadline.within("2 seconds")),
+                    "answered"
+                  )
+                }
+              })).pipe(Effect.provide(browser.connect))
+            }),
+          60_000
+        )
+      }
+
+      it.effect(
+        "mixed Unknown context recovery omits defaults for healthy siblings and future pages",
+        () =>
+          Effect.gen(function*() {
+            const browser = yield* launch
+            const { origin } = yield* serve
+            const old = yield* Scope.make()
+            yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
+            const services = yield* Layer.buildWithScope(browser.connect, old)
+            const claim = yield* Effect.gen(function*() {
+              const context = yield* api.UserContext.create({ reclaimable: true, dialogs: "leaveOpen" })
+              yield* (yield* context.newPage).goto(`${origin}/mixed-blocked`)
+              yield* (yield* context.newPage).goto(`${origin}/defaults`)
+              return yield* api.UserContext.claim(context)
+            }).pipe(Scope.provide(old), Effect.provide(services))
+            yield* handoff(old)
+            const target = (yield* browser.targets).find((info) =>
+              info.type === "page" && info.url === `${origin}/mixed-blocked`
+            )!
+            const { sessionId } = yield* Target.attachToTarget({ targetId: target.targetId, flatten: true }).pipe(
+              Protocol.on(browser.observer.browser)
+            )
+            const session = yield* browser.observer.session(sessionId)
+            const CdpPage = yield* Effect.promise(() => import("@usestrider/browser/cdp/Page"))
+            yield* CdpPage.enable().pipe(Protocol.on(session))
+            const opened = yield* Stream.runHead(yield* session.subscribe(CdpPage.javascriptDialogOpening)).pipe(
+              Effect.forkChild
+            )
+            yield* Runtime.evaluate({ expression: "setTimeout(() => confirm('mixed blocked'), 0); undefined" }).pipe(
+              Protocol.on(session)
+            )
+            assert.strictEqual(Option.getOrThrow(yield* Fiber.join(opened)).message, "mixed blocked")
+            yield* Effect.scoped(Effect.gen(function*() {
+              const adapter = ClaimHooks.get(yield* Browser.Browser).runtime.model.adapter
+              const declarations: Array<Parameters<typeof adapter.declare>[1]> = []
+              const declare = adapter.declare
+              Object.assign(adapter, {
+                declare: (...args: Parameters<typeof declare>) => {
+                  declarations.push(args[1])
+                  return declare(...args)
+                }
+              })
+              for (
+                const settings of [{ dialogs: "leaveOpen" as const }, { eventLog: 0 }, { downloads: "deny" as const }, {
+                  emulation: { locale: "fr-FR" }
+                }]
+              ) {
+                assert.strictEqual(
+                  reason(
+                    yield* api.UserContext.reclaim(claim, { ...settings, observationTimeout: 100 }).pipe(Effect.exit)
+                  ),
+                  "BackendFailure"
+                )
+                assert.isTrue((yield* browser.targets).some((info) => info.targetId === target.targetId))
+              }
+              assert.deepStrictEqual(declarations, [], "supplied settings must be refused before any declarations")
+              const { context, found } = yield* api.UserContext.reclaim(claim, { observationTimeout: 100 })
+              assert.deepStrictEqual(found.pages.map((page) => page.found._tag).sort(), ["Observed", "Unknown"])
+              const healthy = (yield* context.pages).find((page) =>
+                found.pages.some((report) => report.page === page.id && report.found._tag === "Observed")
+              )!
+              const future = yield* context.newPage
+              yield* future.goto(`${origin}/defaults`)
+              assert.deepStrictEqual(
+                declarations,
+                [],
+                "fallback omits challenge, file chooser and download declarations for the entire context"
+              )
+              for (const page of [healthy, future]) {
+                const next = yield* Dialog.next(page)
+                yield* page.evaluateInMainWorld(() => {
+                  setTimeout(() => confirm("no adopted policy"), 0)
+                })
+                yield* next
+                const blocked = yield* page.evaluateInMainWorld(() => 42).pipe(
+                  Deadline.within("150 millis"),
+                  Effect.exit
+                )
+                assert.strictEqual(reason(blocked), "PromptBlocking")
+              }
+              assert.isTrue(
+                Option.isNone(
+                  yield* Runtime.evaluate({ expression: "42" }).pipe(
+                    Protocol.on(session),
+                    BrowserClock.timeoutOption(100)
+                  )
+                ),
+                "recovery must leave the original dialog untouched"
+              )
+            })).pipe(Effect.provide(browser.connect))
+            assert.isFalse((yield* browser.targets).some((info) => info.targetId === target.targetId))
+          }),
+        60_000
+      )
 
       for (const mode of ["created", "reclaimed with no settings"] as const) {
         it.effect(

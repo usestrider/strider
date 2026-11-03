@@ -4,17 +4,29 @@ import { Url } from "@usestrider/browser"
 import { CdpConnection } from "@usestrider/browser/protocol"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
 import * as Kit from "../src/internal/adapterKit.ts"
 import * as Claims from "../src/internal/cdpAdapter/claims.ts"
 import type { PageEntry, State } from "../src/internal/cdpAdapter/state.ts"
 import type * as ProtocolClient from "../src/internal/protocolClient.ts"
 import { makeBrowser } from "./utils/FakeBrowser.ts"
 
-const harness = Effect.fnUntraced(function*(sibling?: "closing" | "empty") {
+const harness = Effect.fnUntraced(function*(sibling?: "closing" | "empty", dropped?: "connection" | "subscription") {
   const wire = yield* makeBrowser
   const client = yield* CdpConnection.make(wire.transport)
+  const subscriptionScope = yield* Scope.fork(yield* Effect.scope)
+  const identity = {
+    ...client,
+    session: (id: Parameters<typeof client.session>[0]) =>
+      client.session(id).pipe(Effect.map((session) => ({
+        ...session,
+        subscribe: ((...args: Parameters<typeof session.subscribe>) =>
+          session.subscribe(...args).pipe(Scope.provide(subscriptionScope))) as unknown as typeof session.subscribe
+      })))
+  }
   const ids = Kit.makeIds()
   const id = ids.navigable()
   const page = { id, targetId: "subject-page", ended: false } as PageEntry
@@ -74,6 +86,13 @@ const harness = Effect.fnUntraced(function*(sibling?: "closing" | "empty") {
         break
       }
       case "Target.setAutoAttach":
+        if (dropped) {
+          yield* reply({})
+          yield* wire.delivered
+          if (dropped === "connection") yield* wire.lose("identity connection dropped with a live tab")
+          else yield* Scope.close(subscriptionScope, Exit.void)
+          break
+        }
         if (command.sessionId === "tab-subject") {
           yield* wire.receive({
             sessionId: command.sessionId,
@@ -98,11 +117,38 @@ const harness = Effect.fnUntraced(function*(sibling?: "closing" | "empty") {
     buffer,
     waiting,
     published,
-    claims: Claims.make(state, "browser", Effect.succeed(client))
+    claims: Claims.make(state, "browser", Effect.succeed(identity))
   }
 })
 
 describe("CDP claim discovery", () => {
+  it.live("does not report Gone when the identity stream ends for a live tab", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const h = yield* harness(undefined, "connection")
+      const exit = yield* h.claims.findPage({ browser: "browser", context: "context", tab: "subject" }).pipe(
+        Effect.exit
+      )
+      assert.isTrue(h.pages.has(h.id), "the known native page remains live")
+      assert.isTrue(Exit.isFailure(exit), "dropped identity observation must fail, not report the tab missing")
+      const error = Option.getOrThrow(Exit.findErrorOption(exit))
+      assert.strictEqual(error.reason._tag, "Protocol")
+      if (error.reason._tag === "Protocol") {
+        assert.strictEqual(error.reason.error.reason._tag, "SessionEnded")
+      }
+    })))
+
+  it.live("does not report Gone when only the identity subscription ends", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const h = yield* harness(undefined, "subscription")
+      const exit = yield* h.claims.findPage({ browser: "browser", context: "context", tab: "subject" }).pipe(
+        Effect.exit
+      )
+      assert.isTrue(h.pages.has(h.id))
+      assert.isTrue(Exit.isFailure(exit), "ending an identity stream is not evidence of target destruction")
+      const error = Option.getOrThrow(Exit.findErrorOption(exit))
+      assert.strictEqual(error.reason._tag, "Protocol")
+    })))
+
   it.live("waits for a live active page to reach the model instead of returning Gone", () =>
     Effect.scoped(Effect.gen(function*() {
       const h = yield* harness()
