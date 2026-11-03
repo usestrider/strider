@@ -1,8 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
 <title>Strider stepping heron</title>
 <!-- Light only: a browser answers a favicon's prefers-color-scheme from its own theme, not the page's, so an adaptive
-     favicon can turn dark on a light page. The adaptive original is
-     design/strider/heron/responsive/adaptive/heron-16.svg. -->
+     favicon can turn dark on a light page. Also used as the T3 project icon. -->
 <style>
 :root { --paper: #ffffff; --ink: #202322; }
 </style>

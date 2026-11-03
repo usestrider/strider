@@ -39,7 +39,8 @@ reader's system until they choose with the masthead's toggle. The cover is the e
 | `src/components/SiteFooter.astro`     | on every page, the cover's ivory with the mark, documentation and project links     |
 | `ec.config.mjs`, `src/features/code/` | code: highlighted in inks that pass 4.5:1 on code ground, a mono title bar with the file and the language |
 | `src/components/Mark.astro`           | the silhouette, for the masthead and anything under 64px                              |
-| `src/assets/heron-engraving.png`      | the engraving, on the home page only, from `design/strider/heron/`                    |
+| `src/assets/heron-engraving.png`      | the engraving, on the home page only                                               |
+| `public/heron.svg`                   | the favicon and T3 project icon                                                   |
 | `src/components/Aside.astro`          | callouts in guides: `<Aside type="note">`, `"tip"`, `"caution"` or `"warning"`        |
 
 The band is Chromium blue, Firefox orange, WebKit cyan, Edge green or Opera red, by the brand of the browser the page
