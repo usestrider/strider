@@ -604,7 +604,7 @@ describe("BidiAdapter state", () => {
       })
       const nextUrl = "http://127.0.0.1:12345/hello"
       const next = Kit.expect(state.ids, page.expected, nextUrl)
-      // ROOK-130: synthesized ordering inferred from the live failure, not captured protocol traffic.
+      // Synthesized ordering inferred from the live failure, not captured protocol traffic.
       // A late error-page commit arrives after the next command reserved its id.
       handlers.apply("browsingContext.navigationCommitted", {
         context: "C1",
@@ -665,7 +665,7 @@ describe("BidiAdapter state", () => {
       // The retry goes to the same URL, which the server now accepts.
       const nextUrl = refusedUrl
       const next = Kit.expect(state.ids, page.expected, nextUrl)
-      // ROOK-130: synthesized ordering inferred from the live failure, not captured protocol traffic.
+      // Synthesized ordering inferred from the live failure, not captured protocol traffic.
       // A late error-page commit arrives after the next command reserved its id.
       handlers.apply("browsingContext.navigationCommitted", {
         context: "C1",
@@ -835,7 +835,7 @@ describe("BidiAdapter state", () => {
       const handlers = Contexts.register(Navigation.register(Kit.handlers<State.Event>()))
       const event = (method: string, params: Record<string, unknown>) =>
         handlers.apply(method, { context: "C1", timestamp: 1, ...params }, { state })
-      // ROOK-130: synthesized ordering, not captured protocol traffic.
+      // Synthesized ordering, not captured protocol traffic.
       // The first navigation becomes a download, which ends it before the next command is sent.
       const first = yield* Navigation.navigate(state, page.id, noContent, { referrer: Option.none() })
       event("browsingContext.navigationStarted", { navigation: "n1", url: noContent })
@@ -916,7 +916,7 @@ describe("BidiAdapter state", () => {
       const event = (method: string, navigation: string, url: string) =>
         handlers.apply(method, { context: "C1", navigation, url, timestamp: 1 }, { state })
       yield* Navigation.navigate(state, page.id, refusedUrl, { referrer: Option.none() })
-      // ROOK-130: synthesized ordering, not captured protocol traffic.
+      // Synthesized ordering, not captured protocol traffic.
       // The first command's reply is held. Its navigation starts, the refused navigation's late error page
       // arrives and is held, and the first navigation commits behind it.
       const running = yield* Effect.forkChild(Navigation.navigate(state, page.id, first, { referrer: Option.none() }))
@@ -1115,7 +1115,7 @@ describe("BidiAdapter state", () => {
       const handlers = Navigation.register(Kit.handlers<State.Event>())
       const event = (method: string, navigation: string, url: string) =>
         handlers.apply(method, { context: "C1", navigation, url, timestamp: 1 }, { state })
-      // ROOK-130: synthesized ordering, not captured protocol traffic.
+      // Synthesized ordering, not captured protocol traffic.
       // The first command's error page commits, unannounced, before the first command's reply.
       const running = yield* Effect.forkChild(Navigation.navigate(state, page.id, first, { referrer: Option.none() }))
       yield* Deferred.await(entered)

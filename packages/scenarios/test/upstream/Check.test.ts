@@ -1,7 +1,7 @@
 // Modified port of microsoft/playwright tests/page/page-check.spec.ts.
 // Copyright 2018 Google Inc. Modifications copyright Microsoft Corporation.
 // Apache-2.0; original source, license and NOTICE: ../../upstream/playwright/.
-// Diagnostic differences: ROOK-116 (trial), ROOK-117 (ARIA), ROOK-118 (labels).
+// Diagnostic differences: trial, ARIA and labels.
 import * as Effect from "effect/Effect"
 import { afterAll, beforeAll, describe, expect } from "vitest"
 import { inputCase, type InputSite } from "./inputCase.ts"

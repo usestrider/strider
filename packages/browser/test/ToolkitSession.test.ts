@@ -45,7 +45,7 @@ describe("Session with explicit tab control", () => {
 })
 
 describe("Session with explicit tab control, after control", () => {
-  // ROOK-4: refresh answers [] when context pages aren't discovered, so a page taken with control goes unlisted
+  // Refresh answers [] when context pages aren't discovered, so a page taken with control goes unlisted
   it.effect("lists a tab taken with control in pages and in session.pages", () =>
     Effect.gen(function*() {
       const browser = yield* Browser.Browser
@@ -70,7 +70,7 @@ describe("Session with explicit tab control, after control", () => {
 })
 
 describe("Session with explicit tab control, after the tab closes", () => {
-  // ROOK-4: with discovery off, refresh lists byName, which nothing prunes when a held tab closes
+  // With discovery off, refresh lists byName, which nothing prunes when a held tab closes
   it.effect("stops listing a held tab that closed", () =>
     Effect.gen(function*() {
       const browser = yield* Browser.Browser
@@ -334,7 +334,7 @@ describe("Session held-tab retirement", () => {
       assert.deepStrictEqual(yield* session.pages, [])
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 
-  // ROOK-4: the second concurrent control overwrites the first grant, which release then leaves held
+  // The second concurrent control overwrites the first grant, which release then leaves held
   it.effect("retires every grant when one tab is taken twice at once", () =>
     Effect.gen(function*() {
       const { counts, page, session } = yield* setup

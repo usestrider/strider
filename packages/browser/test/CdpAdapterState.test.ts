@@ -665,7 +665,7 @@ describe("CdpAdapter routed response source", () => {
         }))
     }
   }
-  // ROOK-136: the failing order permutes captured events; it was not captured in the live failure.
+  // The failing order permutes captured events; it was not captured in the live failure.
   for (const order of ["pause before request", "request before pause", "fulfill before request"]) {
     it.effect(`attributes a fulfilled response to its route with ${order}`, () =>
       Effect.gen(function*() {

@@ -281,7 +281,7 @@ describe("strider export test", () => {
     assert.include(text, "@usestrider/browser/webkit")
     assert.include(text, "const context = yield* (yield* Browser.Browser).defaultContext.control")
   })
-  // ROOK-4: WebKit.layerAttach requires a WebSocketConstructor, which NodeServices.layer doesn't provide
+  // WebKit.layerAttach requires a WebSocketConstructor, which NodeServices.layer doesn't provide
   it("exports a WebKit attachment that provides its WebSocket constructor", () => {
     const { text } = ExportTest.render({
       name: "remote",

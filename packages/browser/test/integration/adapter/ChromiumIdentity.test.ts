@@ -1,5 +1,5 @@
 /**
- * ROOK-93: identities observed by a second browser client. Prerender uses tab-level auto-attach;
+ * Identities observed by a second browser client. Prerender uses tab-level auto-attach;
  * the other transitions use direct page attachment. Other attachment setups are tested separately.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
@@ -69,7 +69,7 @@ const until = Effect.fnUntraced(
 
 const cases = ["cross-site", "COOP", "prerender", "BFCache", "crash"] as const
 
-describe("Chromium reconnect identity probes (ROOK-93)", () => {
+describe("Chromium reconnect identity probes", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
       for (const transition of cases) {
@@ -185,7 +185,7 @@ describe("Chromium reconnect identity probes (ROOK-93)", () => {
                 }
               }).pipe(Protocol.on(driver.browser))
             }
-            if (transition === "cross-site") yield* evaluate(session, "performance.mark('ROOK-93-before'); undefined")
+            if (transition === "cross-site") yield* evaluate(session, "performance.mark('identity-before'); undefined")
             let evidence: unknown
             if (transition === "cross-site") {
               yield* navigate(`${crossSite}/cross-site`)
@@ -203,7 +203,7 @@ describe("Chromium reconnect identity probes (ROOK-93)", () => {
                 (status) =>
                   Effect.sync(() => {
                     prerenderStatuses.push(status)
-                    console.log("ROOK-93 preload", JSON.stringify(status))
+                    console.log("identity preload", JSON.stringify(status))
                   })
               ).pipe(Effect.forkChild)
               yield* Preload.enable().pipe(Protocol.on(session))
@@ -216,7 +216,7 @@ describe("Chromium reconnect identity probes (ROOK-93)", () => {
                 (statuses) => statuses.some((status) => status.status === "Ready")
               )
               const pending = yield* targets
-              console.log("ROOK-93 prerender pending", JSON.stringify(pending))
+              console.log("identity prerender pending", JSON.stringify(pending))
               // Do not attach to the prerender: that can change its eligibility for activation.
               yield* evaluate(session, `location.href = '${origin}/prerendered'`)
               const activated = yield* until(
@@ -253,7 +253,7 @@ describe("Chromium reconnect identity probes (ROOK-93)", () => {
               yield* Page.crash().pipe(Protocol.on(session), Effect.ignore, Effect.forkChild)
               yield* Fiber.join(crashed)
               const during = yield* targets
-              console.log("ROOK-93 crashed", JSON.stringify(during))
+              console.log("identity crashed", JSON.stringify(during))
               const crashedPage = during.find((info) => info.type === "page" && info.targetId === subject.targetId)
               const crashedTab = during.find((info) => info.type === "tab" && info.targetId === subjectTab.targetId)
               assert.isDefined(crashedPage)
@@ -273,7 +273,7 @@ describe("Chromium reconnect identity probes (ROOK-93)", () => {
               assert.strictEqual(reloaded, `${origin}/start`)
               evidence = { targetCrashed: true, reloaded, oldToken, newToken }
             }
-            if (transition === "cross-site") yield* evaluate(session, "performance.mark('ROOK-93-after'); undefined")
+            if (transition === "cross-site") yield* evaluate(session, "performance.mark('identity-after'); undefined")
             if (transition === "cross-site") {
               const complete = yield* driver.browser.subscribe(Tracing.tracingComplete)
               const completed = yield* Stream.runHead(complete).pipe(Effect.forkChild)
@@ -284,7 +284,7 @@ describe("Chromium reconnect identity probes (ROOK-93)", () => {
             const afterUrl = yield* endpoint()
             assert.strictEqual(browserUrl, beforeUrl)
             assert.strictEqual(beforeUrl, afterUrl)
-            const commits = trace.filter((event) => event.name === "ROOK-93-before" || event.name === "ROOK-93-after")
+            const commits = trace.filter((event) => event.name === "identity-before" || event.name === "identity-after")
             if (transition === "cross-site") {
               assert.strictEqual(commits.length, 2)
               assert.notStrictEqual(commits[0]!.pid, commits[1]!.pid, "navigation must swap renderer processes")
@@ -318,7 +318,7 @@ describe("Chromium reconnect identity probes (ROOK-93)", () => {
             assert.strictEqual(currentPage.browserContextId, subject.browserContextId)
             assert.strictEqual(currentTab.browserContextId, subjectTab.browserContextId)
             console.log(
-              "ROOK-93",
+              "identity",
               JSON.stringify({
                 transition,
                 before: initial,

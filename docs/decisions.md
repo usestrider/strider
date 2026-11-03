@@ -147,7 +147,7 @@ failure is reported on time. A transport send that never finishes holds the clic
 transports don't do. CDP uses this only for one unheld move/press/release click at the same point, on a page without
 child frames and before the page has enabled HTML drag interception; late drag announcements still need sequential
 cancellation. Frame routing stays sequential after an acknowledged cross-site click failed to reach its target in a
-full integration run (ROOK-123), and checking the whole page also covers coordinate clicks, whose target frame is
+full integration run, and checking the whole page also covers coordinate clicks, whose target frame is
 unknown before dispatch. Playwright's `mouse.click` also sends these commands without waiting for each reply.
 Rejected: starting the sends concurrently, which can reorder them when a transport send suspends; awaiting every
 reply before the next send, which adds the measured wait; letting interruption stop the sends and releasing the button
@@ -337,8 +337,7 @@ The redirect flag determines whether the preceding hop expects both phases; for 
 `hasExtraInfo: true` registers both expectations and holds the response for its headers. A final response from
 a cache, service worker or route does not wait even if that flag is true, and uses the request event's headers
 when sent headers have not already been reported. A failure assigns only already-queued headers to the last hop.
-Correct attribution takes precedence over prompt publication for slow or outstanding Chromium requests
-(ROOK-104).
+Correct attribution takes precedence over prompt publication for slow or outstanding Chromium requests.
 
 The wait uses the operation's deadline. A hop's end, including failure or cancellation, or its page's removal
 settles it promptly with the available sent headers, otherwise the request snapshot's headers. Page removal
@@ -411,7 +410,7 @@ activation yields `StateUnchanged`. Public `isChecked` and checked expectations 
 Rejected: always preferring the associated control, which changes existing ARIA label behavior; refusing labels,
 which prevents normal label activation; redirecting the pointer to the control, which
 changes the requested target and coordinates; and teaching all checked reads to follow labels, which changes the
-meaning of read and expectation APIs beyond these actions. (ROOK-118.)
+meaning of read and expectation APIs beyond these actions.
 
 ## Agents
 
@@ -447,7 +446,7 @@ browsers are cheap to launch.
 
 ## Document observation and delayed attribution
 
-A browser can report an error document before a navigation command reply supplies its identity (ROOK-130).
+A browser can report an error document before a navigation command reply supplies its identity.
 Document observation is immediate, with explicit `UnattributedErrorPage` provenance when ownership is unknown.
 Only unresolved terminal correlation waits for command replies; later starts, commits, readiness, requests and
 downloads proceed in receive order. Their handlers must see the same current navigation and document state.
@@ -470,7 +469,7 @@ commit supersedes it after outstanding correlation finishes. No public operation
 
 ## Chromium viewport restoration as bounded cleanup
 
-CDP viewport release explicitly waits for the original renderer dimensions after clearing emulation (ROOK-145).
+CDP viewport release explicitly waits for the original renderer dimensions after clearing emulation.
 Chromium can acknowledge clearing device metrics before its native-view resize reaches the renderer: immediate
 release reproduced a successful clear followed by the overridden width. A clear reply alone cannot implement the
 restoration contract. Each target attempts to record its original width and height before its first viewport override; nested
@@ -514,7 +513,7 @@ establish the cause of the earlier unrecorded failure.
 
 ## Launched WebKit verifies its inspector listener through Linux procfs
 
-A connection to a selected port is not evidence that the child started its inspector. In the traced ROOK-140
+A connection to a selected port is not evidence that the child started its inspector. In the traced
 failure another MiniBrowser accepted the connection before the child reported its failed bind. Starting an
 Automation session on that connection could interfere with someone else's browser.
 
@@ -546,7 +545,7 @@ inherited listener, so a private Unix socket and socket activation are not avail
 or native helper would need another design and dependency; the owner approved the narrower Linux procfs requirement
 for launched WebKit. Procfs inaccessible under a sandbox is a refusal, not permission to write to an unknown server.
 
-## Confirm stock WebKit viewport requests against the renderer (ROOK-91)
+## Confirm stock WebKit viewport requests against the renderer
 
 Stock WebKit sizes a native window. Its reply can follow a native target-size wait that expired, and renderer
 geometry updates are asynchronous. A successful command therefore needs an observed match, not an assumption
@@ -585,7 +584,7 @@ redirects and reports unsupported responses or failures. The selected backend re
 exported tests. A new protocol flag would duplicate information these servers already provide; HTML matching
 would trust page titles controlled by a site, and treating any 404 as WebKit would misclassify unrelated servers.
 Proxies removing the inspector identity are rejected rather than guessed. This detects compatibility, not server
-authenticity (ROOK-4). An attached inspector uses scoped control of its existing default context, rather than
+authenticity. An attached inspector uses scoped control of its existing default context, rather than
 creating a context the inspector cannot supply. Startup state and viewport defaults are rejected in this mode;
 existing tabs remain available for explicit control, and stopping releases control without closing them. The
 supplied endpoint stays in the spec and export; the discovered socket is connection state for this startup alone,
@@ -599,7 +598,7 @@ and stop at release, covering page events and workers attributable to that page.
 remain appropriate for sessions with their own context. Filtering the context stream only when draining it could
 admit events queued before control or after release; page scopes enforce the same lifetime as control.
 
-## Chromium capture invalidation on document replacement (ROOK-13)
+## Chromium capture invalidation on document replacement
 
 Chromium 155.0.8059.79 left every forced capture/navigation overlap unanswered in the recorded fixture: 11 raw CDP and 16 Playwright captures, with all eight no-navigation controls completing. The destination committed within about 4–7 ms. Source inspection supports an originating-widget callback lifetime gap, but does not dynamically prove the exact lost callback. The unrecorded October 29 sightings have no traffic establishing this cause.
 
@@ -609,7 +608,7 @@ The policy applies to `page.screenshot`; trace screenshot collection is outside 
 
 Rejected: retaining a 30-second wait for this observed race; retrying or returning replacement-document pixels; waiting for destination load; increasing deadlines; silently restoring viewport or browser state without evidence that this repairs the pending native work; reusing `NavigationSuperseded`, which describes a navigation operation; and generalizing the workaround to browsers not covered by the Chromium evidence. The upstream report remains independent of the workaround and is not posted externally.
 
-## Experimental Chromium claims and internal handoff (ROOK-95)
+## Experimental Chromium claims and internal handoff
 
 Keep durable tab identity separate from connection-local public ids. The experimental subpath issues opaque,
 serializable branded claims only for targets the connection owns: a control grant on a discovered page is not
@@ -700,7 +699,7 @@ Rejected: matching by URL; storing connection-local public ids or page-target id
 ownership; changing ordinary context cleanup; a public handoff option; dismissing dialogs during reclaim; and
 refusing all ownership when bounded observation cannot complete; calling an observation timeout a confirmed
 dialog; returning fresh-looking empty current state; treating historical details as current; and adding a lease
-or expiry implementation here. ROOK-96 owns claim leases, ROOK-97 owns expiry, and no host may
+or expiry implementation here. Claim leases and expiry are separate work, and no host may
 enable persistent contexts before expiry cleanup ships. Claims are identity tokens, not authentication or a
 mutual-exclusion mechanism. A browser debugging endpoint remains the trust boundary.
 
@@ -710,7 +709,7 @@ modelUnavailable instead of returning Gone for a known live tab. Native absence 
 snapshots exist only for issued page/context claims; unclaimed pages have no claim-bound recovery record. The
 separate, scoped identity WebSocket per candidate tab is unchanged; no performance improvement is claimed here.
 
-## CDP declaration cleanup lifetime and caller wait (ROOK-95)
+## CDP declaration cleanup lifetime and caller wait
 
 Removing a declaration updates the registry synchronously, then starts the browser reapplication in a
 connection-owned fiber with its own cleanup budget. Its lifetime must outlast the operation that registered it:

@@ -28,6 +28,6 @@ const backend: Backend = {
 }
 
 conformance(backend)
-// ROOK-153: Firefox loses the context viewport when a page override is released.
+// Firefox loses the context viewport when a page override is released.
 viewportRestoration(backend, { nested: false })
 engine(backend)

@@ -180,7 +180,7 @@ describe("WebKit launcher", () => {
             assert.isString(endpoint)
             const connected = yield* Deferred.make<void>()
             connections.set(Number(endpoint!.split(":")[1]), connected)
-            // ROOK-140: the existing server accepts before the new child reports EADDRINUSE.
+            // The existing server accepts before the new child reports EADDRINUSE.
             const stderr = Stream.fromEffect(Deferred.await(connected)).pipe(
               Stream.map(() => new TextEncoder().encode(`Failed to start remote inspector server on ${endpoint}\n`)),
               Stream.concat(Stream.never)
@@ -710,7 +710,7 @@ describe("WebKit launcher", () => {
         assert.deepStrictEqual(result.connected, [result.ports[1]])
         assert.deepStrictEqual(result.written, [result.ports[1]])
         assert.include(result.stopped, 0)
-      }).pipe(Random.withSeed("rook-140")))
+      }).pipe(Random.withSeed("port-in-use")))
 
     it.effect("closes the connection and stops the child when the deadline interrupts a connection in progress", () =>
       Effect.gen(function*() {

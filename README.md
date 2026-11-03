@@ -40,7 +40,7 @@ const program = Effect.scoped(Effect.gen(function*() {
 ## Status
 
 Pre-release, and the API can still change before 1.0. It runs on Chromium, Firefox and WebKit, and what a browser can't
-do fails with `Unsupported`, naming the capability. The packages aren't on npm yet.
+do fails with `Unsupported`, naming the capability. The packages are on npm:
 
 | Package                                   | What it's for                              |
 | ----------------------------------------- | ------------------------------------------ |

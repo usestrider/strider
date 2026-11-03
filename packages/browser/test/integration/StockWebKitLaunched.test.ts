@@ -178,7 +178,7 @@ describe("Stock WebKit, launched in automation mode", () => {
           const before = yield* context.pages
           const result = yield* Effect.exit(context.newPage)
           const error = reasonOf(result)
-          // Pinned MiniBrowser has 38 pixels of chrome on the fixed 1280x800 screen (ROOK-91).
+          // Pinned MiniBrowser has 38 pixels of chrome on the fixed 1280x800 screen.
           assert.deepInclude(error?.reason, {
             _tag: "ViewportMismatch",
             requested: { width: 1440, height: 1000 },
@@ -200,7 +200,7 @@ describe("Stock WebKit, launched in automation mode", () => {
             Effect.exit
           )
           const error = reasonOf(result)
-          // Pinned MiniBrowser has 38 pixels of chrome on the fixed 1280x800 screen (ROOK-91).
+          // Pinned MiniBrowser has 38 pixels of chrome on the fixed 1280x800 screen.
           assert.deepInclude(error?.reason, {
             _tag: "ViewportMismatch",
             requested: { width: 1440, height: 1000 },

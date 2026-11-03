@@ -1,4 +1,4 @@
-/** ROOK-93: what a page target id does depends on who is attached, and a context can outlive its client or not. */
+/** What a page target id does depends on who is attached, and a context can outlive its client or not. */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
@@ -91,7 +91,7 @@ const selfPrerender = Effect.fnUntraced(function*({ driver, targets }: Effect.Su
   return { targetId, page, activationStart }
 })
 
-describe("Chromium identity by attachment (ROOK-93)", () => {
+describe("Chromium identity by attachment", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
       it.effect(

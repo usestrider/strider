@@ -1,4 +1,4 @@
-/** ROOK-95: direct claims fail explicitly on backends without stable recovery identity. */
+/** Direct claims fail explicitly on backends without stable recovery identity. */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
