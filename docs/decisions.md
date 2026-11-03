@@ -722,3 +722,16 @@ but read the closing caller's deadline and confirmation policy before entering t
 Rejected: retaining an expired protocol deadline for release; waiting for a fresh full cleanup budget inside
 every ordinary operation; cancelling restoration when the caller stops waiting; discarding release failures;
 and returning borrowed-context rollback as confirmed while browser restoration is still pending.
+
+## Stability determines release bumps
+
+Strider follows Effect's stability-based changeset policy, including its November 2026 rule that compatible additions
+to unstable APIs ship in patch releases. The [release policy](../.changeset/README.md#release-policy) is the source for
+bump selection. The CLI's commands and data contracts are explicitly unstable, just as the default public TypeScript
+API is before 1.0. This lets compatible features ship without consuming the minor release boundary that signals
+breaking changes to unstable APIs.
+
+Rejected: treating every addition as a minor release regardless of stability, which gives compatible features and
+unstable breaks the same version signal; treating every pre-1.0 change as a patch, which removes that signal; and
+inferring CLI stability from its implementation's location under `internal/`, which says nothing about its public
+contract.
