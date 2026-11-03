@@ -170,6 +170,15 @@ You can also [record the page](/docs/tools/recordings#traces) for Playwright's t
 
 ## Working with existing browsers and agents
 
+Give a shell-based agent Strider's [usage guide](/docs/agents/cli#agent-usage) as context: it explains sessions, page targets,
+event waits and reusable login state, with command examples for the installed version:
+
+```sh
+pnpx @usestrider/cli agent instructions
+```
+
+The command runs without a browser or session. It can also [generate a skill](/docs/agents/cli#agent-usage) from the same guide.
+
 ### Inspecting a tab before taking control
 
 A tool attached to your browser may need to read a tab you are using without changing it.

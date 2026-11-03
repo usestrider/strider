@@ -27,7 +27,13 @@ const invoke = (...args: ReadonlyArray<string>) => {
     }
     assert.isUndefined(result.error)
     assert.isNull(result.signal)
-    return { code: result.status, text: result.stdout + result.stderr }
+    return {
+      code: result.status,
+      text: result.stdout + result.stderr,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      files: fs.readdirSync(root)
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
   }
@@ -44,6 +50,7 @@ describe("strider help", () => {
     const text = help()
     assert.match(text, /^\s+select\b/m)
     assert.match(text, /^\s+mcp\b/m)
+    assert.match(text, /^\s+agent\b/m)
     for (const tool of Object.values(Tools.toolkit.tools)) {
       if (tool.name !== "newPage" && tool.name !== "dialog") {
         assert.include(text.replace(/\s+/g, " "), tool.description!.slice(0, 65), tool.name)
@@ -271,5 +278,43 @@ describe("strider help", () => {
   it("reuses the dialog toolkit description in dialog handle help", () => {
     const text = help("dialog", "handle")
     assert.include(text.replace(/\s+/g, " "), Tools.toolkit.tools.dialog.description!.slice(0, 65), "dialog")
+  })
+})
+
+describe("strider agent instructions", () => {
+  it("prints a versioned guide to stdout without creating a session", () => {
+    const result = invoke("agent", "instructions")
+    const manifest = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"))
+    assert.strictEqual(result.code, 0, result.text)
+    assert.strictEqual(result.stderr, "")
+    assert.deepStrictEqual(result.files, [])
+    assert.include(result.stdout, `@usestrider/browser v${manifest.version}`)
+  })
+
+  it("emits the same guide as a skill, with metadata and no extra output", () => {
+    const guide = invoke("agent", "instructions")
+    const skill = invoke("agent", "instructions", "--skill")
+    assert.strictEqual(guide.code, 0, guide.text)
+    assert.strictEqual(skill.code, 0, skill.text)
+    assert.strictEqual(skill.stderr, "")
+    assert.deepStrictEqual(skill.files, [])
+    const parts = skill.stdout.split("---\n")
+    assert.strictEqual(parts[0], "")
+    assert.include(parts[1]!, "name: strider\n")
+    assert.match(parts[1]!, /^description: .+/m)
+    assert.strictEqual(parts.slice(2).join("---\n"), `\n${guide.stdout}`)
+  })
+
+  it("discovers the command and its skill flag through help", () => {
+    assert.match(help("agent"), /^\s+instructions\b/m)
+    assert.include(help("agent", "instructions"), "--skill")
+  })
+
+  it("rejects unknown flags locally instead of trying to contact a session", () => {
+    const result = invoke("agent", "instructions", "--unknown")
+    assert.notStrictEqual(result.code, 0)
+    assert.include(result.text, "--unknown")
+    assert.notInclude(result.text, "No session")
+    assert.deepStrictEqual(result.files, [])
   })
 })
