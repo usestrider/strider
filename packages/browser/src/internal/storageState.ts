@@ -377,8 +377,22 @@ interface Source {
   readonly topLevelOrigin: string
 }
 
+/**
+ * Whether a cookie's domain and a host are one, or one is a subdomain of the other, so the host is sent the cookie.
+ * A saved state is narrowed by hosts rather than `siteOf`, whose last two labels would make `shop.co.uk` every
+ * `.co.uk` cookie.
+ */
+export const related = (domain: string, host: string): boolean => {
+  const bare = domain.replace(/^\./, "")
+  return bare === host || bare.endsWith(`.${host}`) || host.endsWith(`.${bare}`)
+}
+
 /** One document per origin and partition, of the documents open in the context's pages and frames. */
-const sourcesOf = Effect.fnUntraced(function*(runtime: Runtime.Runtime, context: UserContext.Id) {
+const sourcesOf = Effect.fnUntraced(function*(
+  runtime: Runtime.Runtime,
+  context: UserContext.Id,
+  hosts: ReadonlyArray<string> | undefined
+) {
   const sources = new Map<string, Source>()
   for (const page of yield* runtime.model.pages.get) {
     if (page.context !== context) continue
@@ -386,6 +400,7 @@ const sourcesOf = Effect.fnUntraced(function*(runtime: Runtime.Runtime, context:
     if (state._tag !== "Open") continue
     const top = URL.parse(state.url)
     if (top === null) continue
+    if (hosts !== undefined && !hosts.some((host) => related(top.hostname, host))) continue
     // A page that isn't on a site, such as about:blank, has no site to key a frame's partition by
     const topSite = Schema.decodeUnknownOption(Url.Site)(siteOf(top))
     if (Option.isNone(topSite)) continue
@@ -408,8 +423,8 @@ const sourcesOf = Effect.fnUntraced(function*(runtime: Runtime.Runtime, context:
   return [...sources.values()]
 })
 
-/** `context.exportStorageState`. */
-export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id) =>
+/** `context.exportStorageState`, narrowed to the state of `hosts` when given (`related`). */
+export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id, hosts?: ReadonlyArray<string>) =>
   Effect.gen(function*() {
     const operation = "UserContext.exportStorageState"
     const { id } = yield* Operation.record
@@ -431,7 +446,7 @@ export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id) =
       })
     )
     const origins: Array<typeof StorageState.OriginState.Type> = []
-    for (const source of yield* sourcesOf(runtime, context)) {
+    for (const source of yield* sourcesOf(runtime, context, hosts)) {
       const text = yield* Effect.gen(function*() {
         const realm = yield* Evaluation.documentRealm(
           runtime,
@@ -502,7 +517,14 @@ export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id) =
         }))
       })
     }
-    return new StorageState.StorageState({ cookies: cookies.map(Storage.fromAdapter), origins })
+    const kept = cookies.map(Storage.fromAdapter).filter((cookie) =>
+      hosts === undefined || hosts.some((host) =>
+        related(cookie.domain, host) ||
+        (cookie.partitionKey._tag === "Partitioned" &&
+          related(new URL(cookie.partitionKey.topLevelSite).hostname, host))
+      )
+    )
+    return new StorageState.StorageState({ cookies: kept, origins })
   }).pipe(Operation.named("UserContext.exportStorageState", { attributes: { "browser.context.id": context } }))
 
 // ── Import ────────────────────────────────────────────────────────────────────────────────────────────────

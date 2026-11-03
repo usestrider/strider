@@ -180,7 +180,7 @@ strider start --name twin --chromium /usr/bin/chromium --fork login
 ```
 
 ```
-saved the session's state to /home/ada/shop/auth/shop.state, readable by you alone
+saved 3 cookies and 1 origin for shop.example.com to /home/ada/shop/auth/shop.state, readable by you alone
 ```
 
 ## Managing sessions
@@ -214,6 +214,21 @@ strider -s mine -p mail snapshot
 ```
 N1  https://mail.example.com/inbox · 2 ms
 mail at https://mail.example.com/inbox, controlled until strider release -p mail · 2 ms
+```
+
+`state save` takes only the held tabs' state from the browser: the cookies their hosts are sent, and the storage of
+tabs open on them. `--site` adds a domain and its subdomains, such as a sign-in provider's, and `--all` saves
+every login in the browser. With tabs in several contexts, `-p` names one:
+
+```sh
+strider -s mine state save ./auth/mail.state
+strider -s mine state save ./auth/mail.state --site okta.com
+strider -s mine state save ./auth/browser.state --all
+strider -s mine -p mail state save ./auth/mail.state
+```
+
+```
+saved 14 cookies and 1 origin for mail.example.com to /home/ada/auth/mail.state, readable by you alone
 ```
 
 Stopping an attached session leaves the browser and its tabs running. `--attach` takes a Chromium's debugging
