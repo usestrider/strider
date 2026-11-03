@@ -4,9 +4,13 @@ description: Commands on a live browser, waits across commands, failures and the
 order: 3
 ---
 
-A program's browser closes when the program ends. `strider`, the command-line tool that comes with
-`@usestrider/browser`, keeps one open in a named session between commands, so a shell, a script or an agent can
-drive it one step at a time.
+```sh
+pnpm add -g @usestrider/cli
+```
+
+A program's browser closes when the program ends. `strider`, the command-line tool, keeps one open in a named session
+between commands, so a shell, a script or an agent can drive it one step at a time. It runs on Node, or on Bun where
+there is no Node. `strider --help` lists the commands, and `strider <command> --help` each one's arguments.
 
 ## Commands
 
@@ -55,8 +59,6 @@ filled label=Email on main · 17 ms
   command.
 - A `page new` that fails, on a name that's taken or a URL that doesn't load, leaves no page behind, so the name is
   free to try again.
-- Install it with `pnpm add -g @usestrider/cli`. It runs on Node, or on Bun where there is no Node. `strider --help` lists the commands, and
-  `strider <command> --help` each one's arguments.
 
 ## Waits across commands
 
