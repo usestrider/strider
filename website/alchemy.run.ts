@@ -1,11 +1,8 @@
-// The documentation site on Cloudflare, with Alchemy: the built site as a Worker's static assets at usestrider.dev,
-// behind Cloudflare Access. The account's Zero Trust organization and its one-time PIN login are referenced, not
-// owned: other sites on the account use them, so this stack must never change or remove them.
+// The documentation site on Cloudflare, with Alchemy: the built site as a Worker's static assets at usestrider.dev.
 // `pnpm website:deploy` deploys it with the settings decrypted from deploy.sops.env, and `.github/workflows/docs.yml`
 // does from main.
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Alchemy from "alchemy"
-import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import * as Path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -19,12 +16,6 @@ export default Alchemy.Stack(
   "StriderDocs",
   { providers: Cloudflare.providers(), state: Cloudflare.state() },
   Effect.gen(function*() {
-    // The account's login method for readers: a code sent to their email, so they need no account anywhere
-    const pin = Cloudflare.Access.getIdentityProvider({ type: "onetimepin" })
-    // Who may read the site: email addresses, comma-separated, from deploy.sops.env
-    const readers = (yield* Config.String("DOCS_ACCESS_EMAILS")).split(",").map((email) => email.trim()).filter(
-      (email) => email.length > 0
-    )
     const site = yield* Cloudflare.Website.StaticSite("Docs", {
       // The API reference's data, then the site: one script, since Alchemy runs the command without a shell
       command: "pnpm website:dist",
@@ -32,15 +23,8 @@ export default Alchemy.Stack(
       outdir: "website/dist",
       // www redirects to the bare domain (301, path kept), by a zone redirect rule ahead of the Worker
       domain: { name: "usestrider.dev", redirects: ["www.usestrider.dev"] },
-      // No workers.dev URL: the domain, behind Access, is the only way in
-      workersDev: false,
-      access: {
-        name: "Strider docs",
-        sessionDuration: "168h",
-        allowedIdps: [pin.identityProviderId.as<string>()],
-        autoRedirectToIdentity: true,
-        policies: [{ decision: "allow", include: readers.map((email) => ({ email })) }]
-      }
+      // No workers.dev URL: the domain is the only way in
+      workersDev: false
     })
     return { url: site.url }
   })

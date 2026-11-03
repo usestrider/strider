@@ -25,7 +25,7 @@ A launch runs the executable you name, and the library never looks for or instal
 on your machine, run `npx strider browsers` in a project that has the package; it lists each browser it finds with
 its version.
 
-The design, its principles and the full API are in the repository: https://github.com/usestrider/strider.
+The guides and the full API are at https://usestrider.dev, and the source is at https://github.com/usestrider/strider.
 
 MIT licensed. The protocol modules and keyboard layouts are generated from others' definitions, whose notices are
 in `THIRD_PARTY_NOTICES.md`.

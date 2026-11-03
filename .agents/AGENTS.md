@@ -7,10 +7,10 @@ and stock WebKit, and every member the API declares is built. One declared befor
 
 ## Layout
 
-- Design documents are at the root: `README.md` (goals, principles, status), `API.md` (L2, the public API),
+- Design documents are at the root: `docs/design.md` (goals, principles, status), `API.md` (L2, the public API),
   `CONCEPTS.md` (L1, the native model), `PROTOCOL.md` (L0), `CLI.md` and `PROBES.md`. `QUIRKS.md` and `ISSUES.md`
   are closed records: their entries stay citable (`QUIRKS.md, Q12`, `ISSUES.md, I3`), but nothing is added to them.
-  New findings are issues on the Clutch board (Issues, below).
+  New findings are issues (Issues, below).
 - `docs/decisions.md` holds the principles and architectural decisions, with their reasons and the alternatives
   rejected; `docs/conventions.md` holds the Effect conventions. `research/` holds prior-art notes, a record of its
   time: don't rewrite it. `upstream/` holds drafts of proposals for other projects, which the maintainer posts.
@@ -48,7 +48,7 @@ and stock WebKit, and every member the API declares is built. One declared befor
   `pnpm test:upstream` runs their Playwright baselines and Strider ports; `pnpm benchmark:upstream` records repeated
   per-case timings in `.data/upstream/runs/`; `pnpm benchmark:compare <before> <after>` compares saved generations.
   `--output` keeps a run outside the worktree. The larger diagnostic suites expose known failures; only the validated Vite
-  and Astro cases also run in `pnpm test:integration`. Keep failures visible, and track findings on Clutch.
+  and Astro cases also run in `pnpm test:integration`. Keep failures visible, and track findings as issues.
 - `packages/tools/docs`: the JSDoc checker (vendored from Effect; don't edit it), the example check, which checks
   the guides' TypeScript too, `INDEX.md` and the API reference dataset, with what TypeScript reads in every example
   and guide block (`code.json`).
@@ -161,19 +161,27 @@ the guide reads as one. The `review-guides` skill checks all four.
 Review and fix in a loop: find what's wrong, fix it, check again. Don't write a review up as a document or commit
 one. Ask the maintainer in conversation when a change needs their decision. When the work settles a principle or an
 architectural decision, state it in the layer document it belongs to, with its reasons and the alternatives rejected
-in `docs/decisions.md`; what was found wrong along the way stays in the commits and Clutch's issues.
+in `docs/decisions.md`; what was found wrong along the way stays in the commits and the issues.
 Keep the documents at even depth and never cut detail to balance them.
 Playwright and other prior art are evidence of what works, not a template.
 
 ## Issues
 
-Work that isn't done in the change at hand goes on the Clutch board, never into a Markdown file: a bug you found, a
-browser behaving oddly or differently from the others, a compromise in Strider it forced, a probe to run, an open
-question, a follow-up. File it with `clutch issue new --title "…" --body "…"`, and leave it unassigned: assigning
-an agent queues a run, which is the maintainer's call. The body says what it is, where it was seen (with the browser
-builds), what Strider does now, and what to reconsider or decide. Use `--parent` for work that belongs to a larger
-issue and `--blocked-by` for what must come first. Search first (`clutch issue list --search "…"`), and comment on an existing issue
-(`clutch comment ROOK-12 --body "…"`) rather than filing it twice. Cite an issue by its key (`ROOK-51`) in commits and code comments.
+Work that isn't done in the change at hand goes in an issue, never into a Markdown file: a bug you found, a browser
+behaving oddly or differently from the others, a compromise in Strider it forced, a probe to run, an open question, a
+follow-up. The body says what it is, where it was seen (with the browser builds), what Strider does now, and what to
+reconsider or decide. Search first, and comment on an existing issue rather than filing it twice.
+
+- **Anyone else:** use GitHub. File with `gh issue create --title "…" --body "…"`, search with
+  `gh issue list --search "…"`, and comment with `gh issue comment 12 --body "…"`. The repository is public, so write
+  for anyone to read.
+- **The maintainer's own agents,** where the `clutch` command is on your `PATH`: use the private Clutch board. File with
+  `clutch issue new --title "…" --body "…"`, and leave it unassigned: assigning an agent queues a run, which is the
+  maintainer's call. Use `--parent` for work that belongs to a larger issue and `--blocked-by` for what must come
+  first. Search with `clutch issue list --search "…"`, and comment with `clutch comment ROOK-12 --body "…"`.
+
+Commits and code comments cite GitHub issues by number (`#51`). Everything public has to make sense to someone who
+can't open the board, so a comment explains the behavior itself.
 
 A test that fails only in full runs is an issue too: trace it from the protocol's messages and fix the cause, never
 with a retry or a delay. Reproducing it under load (many processes beside busy loops) makes the machine unusable,

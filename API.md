@@ -15,7 +15,7 @@ Excerpts name each operation's own module error (`PageError`, `LocatorError`). L
 
 ## Conventions
 
-The README's principles, as they apply to this layer, written the way Effect's own modules are. The reasons live there; these are the rules.
+The principles (docs/design.md), as they apply to this layer, written the way Effect's own modules are. The reasons live there; these are the rules.
 
 **Modules**
 - **Modules are namespaces.** The package exports each module as one, as Effect does: `import { Browser, Download, Page } from "@usestrider/browser"`. Types are written `Page.Page`, `Download.Download` and `Locator.Locator`, like `Deferred.Deferred`. Inside a module, names are short, because the namespace supplies the context: `UserContext.Options`, `CookieJar.Input`, `PageNavigation.Filter`, `Download.Id`. Access levels keep their full names (`Page.ReadonlyPage`, `OriginStorage.ReadonlyOriginStorage`), as Effect writes `Record.ReadonlyRecord`; a bare `Readonly` would shadow TypeScript's own.
@@ -1125,7 +1125,7 @@ locator.click().pipe(
 )
 ```
 
-`Diagnostics.Diagnostics` is the shared envelope: `operationId`, `dispatch`, `progress`, `lastObserved` and `cleanup`. It is rendered under the active preset (README.md). Because every error is a Schema, the CLI and the agent toolkit encode failures as data, envelope and hint included.
+`Diagnostics.Diagnostics` is the shared envelope: `operationId`, `dispatch`, `progress`, `lastObserved` and `cleanup`. It is rendered under the active preset (docs/design.md). Because every error is a Schema, the CLI and the agent toolkit encode failures as data, envelope and hint included.
 
 Every operation that sends the browser a command can time out, a declaration's or a cookie read's as much as a click's. The command waits for its reply until the operation's deadline, not for `Protocol.CommandTimeout`, which governs only what's sent outside an operation, such as cleanup. A read the browser never answers times out in the phase `resolving`, and a change it never confirmed in `dispatchedUnconfirmed`. A page or context whose creation finishes after the deadline is closed once it exists, and cleanup is never cut short by an operation's deadline.
 
