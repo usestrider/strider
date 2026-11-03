@@ -338,11 +338,15 @@ current dialog data or an inferred cause). Observation defaults to 1000 millisec
 Only expiry of that observation bound permits Unknown success; caller deadline expiry stays `Timeout`, and
 interruption stays interruption, without acquiring ownership. Unknown pages remain explicitly closeable and are
 closed on scope exit, even while their protocol initialization is blocked. Ordinary actions retain their deadlines.
-Context reclaim returns the context and per-page reports made before setup; its options are then applied within
-the same caller deadline, and setup failure preserves the surviving targets.
+Context reclaim returns the context and per-page reports made before setup. With no settings requested it adopts
+existing pages without installing session declarations or assuming settings have been applied; blocked pages can
+therefore return Unknown without touching their dialogs. Requested settings require observed pages; unknown
+state fails with a named `UserContext.reclaim.settings` rejection before ownership changes. Otherwise settings
+apply within the caller deadline, and setup failure preserves the surviving targets.
 
 Internal planned handoff captures the current model's dialog details before teardown as serializable `LastKnown`
-snapshots bound to the exact page claim. The host explicitly supplies a snapshot on reclaim; it remains separate
+snapshots bound to the exact page or context claim. A context snapshot aggregates its pages' historical events,
+including pages without individual claims. The host explicitly supplies a snapshot on the matching reclaim; it remains separate
 from the current observation report, never evidence that a dialog is still open. Empty last-known details do not
 confirm a healthy current page. Current prompt data is retained independently of the configurable event log.
 Reclaim never dismisses a dialog to make observation succeed. Planned Chromium handoff is different: after caller
@@ -351,7 +355,10 @@ the original session before context declarations are removed. It never automatic
 policy or for beforeunload. A caller handler may still accept normally. Dismissal has a separate 1000 ms budget;
 failure or expiry records `Unknown` and does not fail scope closure. Confirmed command reply and dialog closure
 produce typed `DialogDismissed { kind, message }` events in the separate handoff report. Historical events never
-stand for the next connection's present state. Dismissing a navigation's beforeunload prompt cancels the navigation
+stand for the next connection's present state. `Complete` means the release-time dismissal loop completed; it
+cannot rule out a dialog opened later during teardown. Each handoff declaration release has a separate 1000 ms
+confirmation budget. Unconfirmed release retains its warning and makes the handoff report Unknown, preserving
+any already-confirmed dismissal events; it does not fail scope closure. Dismissing a navigation's beforeunload prompt cancels the navigation
 and preserves the tab and original document. A killed client runs no handoff finalizer: crash reclaim stays
 observational and can return Unknown. Leases (ROOK-96), expiry (ROOK-97) and host adoption are separate; persistent
 contexts must not be enabled by a host until expiry cleanup is available.

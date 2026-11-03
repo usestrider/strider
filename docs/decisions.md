@@ -619,7 +619,7 @@ request handlers and access grants still run their finalizers. Reclaim acquires 
 again. Context reclaim borrows the surviving context during setup, acquiring destruction ownership only after
 setup succeeds. Failure or interruption immediately unwinds setup registrations and restores prior model
 settings without deleting existing tabs or the context, including when storage application fails. Data already
-written by storage application is not transactional. Context options apply to existing and future pages; routes and init scripts are redeclared by the host. The default context is never owned for removal.
+written by storage application is not transactional. Requested context options apply to existing and future pages; routes and init scripts are redeclared by the host. The default context is never owned for removal.
 Reclaim observes before acquiring ownership, so failed observation does not close somebody else's tab. On pinned
 Chromium 155.0.8059.79, both a dialog proved open before handoff and one opened after it blocked a new inspector's
 `Page.enable`; the existing model's initialization gate also could not complete. This prevents reliable dialog
@@ -633,10 +633,16 @@ An earlier caller deadline remains `Timeout`, and interruption remains interrupt
 Unknown success or ownership. Browser-level close and ordinary scope cleanup work independently of the blocked
 initialization gate; ordinary actions remain bounded by their own operation deadlines. Context recovery returns
 its context plus per-page observations from before settings application; failure during settings application
-still preserves the borrowed context rather than returning partial setup as successful recovery.
+still preserves the borrowed context rather than returning partial setup as successful recovery. With no settings
+requested, context reclaim adopts the existing pages without installing session declarations or assuming those
+settings were applied. This permits ownership and cleanup of Unknown pages without entering their blocked
+initialization gate. Requested settings on Unknown pages instead fail with `UserContext.reclaim.settings` before
+setup or ownership transfer. Rejected: silently skipping requested declarations and reporting successful setup,
+or making renderer-dependent defaults a prerequisite for adopting an unknown-state context.
 
 Planned handoff captures the model's current prompt before finalizers run and returns serializable snapshots
-bound to the exact page claim. The caller explicitly carries them to reclaim. Their Schema tag is `LastKnown`,
+bound to the exact page or context claim. Context snapshots aggregate historical events for all their pages,
+including pages with no individual claim. The caller explicitly carries them to the matching reclaim. Their Schema tag is `LastKnown`,
 and they remain separate from the current report even when the current state is Unknown. Active prompt data
 is independent of the event-log cap. A killed client cannot supply such a snapshot. Neither empty historical
 details nor an observed empty dialog list promises that the page is generally healthy.
@@ -650,6 +656,20 @@ The new client receives this historical event separately from current Observed/U
 may still accept normally, but shutdown fallback cannot apply an accept policy or beforeunload's ordinary
 implicit acceptance. Dismissing beforeunload cancels the pending navigation and leaves the tab/document alive.
 A client killed without finalizers cannot perform this handoff action and reclaim never tries it afterward.
+`Complete` refers to the dismissal loop at page release, not to the absence of dialogs during later teardown or
+on the next connection. Current observation remains separate even when historical handoff completed.
+
+Every handoff declaration release has a separate 1000 ms confirmation budget, independent of the ordinary
+operation's deadline and of the dismissal budget. Local registrations are removed immediately. Failed or expired
+release logs its unconfirmed outcome and makes the returned handoff report Unknown without erasing confirmed
+events or failing scope closure. The number of declarations determines the total possible teardown wait; there
+is no implicit 30-second wait per blocked release. Rejected: treating a warning as confirmed cleanup, suppressing
+the warning, or making ordinary caller deadlines wait for a fresh cleanup budget. Borrowed-context rollback
+still waits for confirmation under its own cleanup lifetime. Connection shutdown can interrupt that background
+lifetime; its waiting finalizer records an unconfirmed release rather than interrupting the caller.
+
+Ownership transfer, report registration and result construction commit together under interruption masking.
+Snapshot registration moves to the new scope with the claim instead of surviving in the old scope.
 
 Rejected: automatic acceptance during handoff, including an option or policy enabling it, because shutdown could
 confirm a deletion or payment; pretending failed dismissal succeeded; treating a handoff event as current state;
