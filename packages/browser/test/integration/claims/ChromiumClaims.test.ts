@@ -621,8 +621,152 @@ describe("Chromium claims (ROOK-95)", () => {
           yield* Effect.logInfo({ baseline, blocked, historyMillis, closeMillis: performance.now() - closeAt })
         }), 10_000)
 
+      for (const mode of ["residual", "accept-policy", "handler"] as const) {
+        it.effect(
+          `planned handoff ${mode} honors caller handlers and never auto-accepts`,
+          () =>
+            Effect.gen(function*() {
+              const browser = yield* launch
+              const { origin } = yield* serve
+              const old = yield* Scope.make()
+              yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
+              const services = yield* Layer.buildWithScope(browser.connect, old)
+              const claim = yield* Effect.gen(function*() {
+                const context = yield* api.UserContext.create({
+                  reclaimable: true,
+                  dialogs: mode === "accept-policy" ? "accept" : "leaveOpen"
+                })
+                const page = yield* context.newPage
+                yield* page.goto(`${origin}/${mode}`)
+                if (mode === "accept-policy") yield* Dialog.handle(page, () => Effect.never)
+                const handled = mode === "handler" ? yield* Dialog.handle(page, Dialog.acceptAll) : undefined
+                const claim = yield* api.Page.claim(page)
+                const opened = yield* Dialog.next(page)
+                yield* page.evaluateInMainWorld(() => {
+                  setTimeout(() => sessionStorage.setItem("answer", String(confirm("handoff confirm"))), 0)
+                })
+                yield* opened
+                if (handled !== undefined) {
+                  yield* handled.handled.waitFor((n) => n === 1)
+                  assert.strictEqual(yield* page.evaluateInMainWorld(() => sessionStorage.getItem("answer")), "true")
+                }
+                return claim
+              }).pipe(Scope.provide(old), Effect.provide(services))
+              const snapshots = yield* handoff(old)
+              const snapshot = snapshots.find((entry) => entry.claim === claim)!
+              assert.deepStrictEqual((snapshot as unknown as { handoff: unknown }).handoff, {
+                _tag: "Complete",
+                events: mode === "handler"
+                  ? []
+                  : [{ _tag: "DialogDismissed", kind: "confirm", message: "handoff confirm" }]
+              })
+              yield* Effect.scoped(Effect.gen(function*() {
+                const result = yield* api.Browser.reclaim(claim, { lastKnown: snapshot })
+                assert.deepStrictEqual(result.found, { _tag: "Observed", dialogs: [] })
+                assert.strictEqual(
+                  yield* result.page.evaluateInMainWorld(() => sessionStorage.getItem("answer")),
+                  mode === "handler" ? "true" : "false"
+                )
+              })).pipe(Effect.provide(browser.connect))
+            }),
+          60_000
+        )
+      }
+
+      for (const mode of ["failed", "timed-out"] as const) {
+        it.effect(
+          `planned handoff ${mode} dismissal returns Unknown and closes its scope`,
+          () =>
+            Effect.gen(function*() {
+              const browser = yield* launch
+              const { origin } = yield* serve
+              const old = yield* Scope.make()
+              yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
+              const services = yield* Layer.buildWithScope(browser.connect, old)
+              const claim = yield* Effect.gen(function*() {
+                const connected = yield* Browser.Browser
+                const context = yield* connected.defaultContext.control
+                const page = yield* context.newPage
+                yield* page.goto(`${origin}/dismiss-${mode}`)
+                const claim = yield* api.Page.claim(page)
+                const claims = ClaimHooks.get(connected).runtime.model.adapter.claims!
+                Object.assign(claims, {
+                  dismiss: () =>
+                    mode === "failed" ? Effect.fail(Kit.unsupported("test.dismiss", "injected refusal")) : Effect.never
+                })
+                const opened = yield* Dialog.next(page)
+                yield* page.evaluateInMainWorld(() => {
+                  setTimeout(() => confirm("unanswered"), 0)
+                })
+                yield* opened
+                return claim
+              }).pipe(Scope.provide(old), Effect.provide(services))
+              const start = performance.now()
+              const snapshots = yield* handoff(old)
+              assert.isBelow(performance.now() - start, 3000)
+              assert.strictEqual(old.state._tag, "Closed")
+              const snapshot = snapshots.find((entry) => entry.claim === claim)!
+              assert.deepStrictEqual((snapshot as unknown as { handoff: unknown }).handoff, {
+                _tag: "Unknown",
+                events: []
+              })
+              yield* Effect.scoped(Effect.gen(function*() {
+                const { page, found } = yield* api.Browser.reclaim(claim, { lastKnown: snapshot })
+                assert.deepStrictEqual(found, { _tag: "Unknown" })
+                yield* page.close()
+              })).pipe(Effect.provide(browser.connect))
+            }),
+          10_000
+        )
+      }
+
       it.effect(
-        "carries a pre-handoff dialog only as last-known and scope-cleans an unknown page",
+        "planned handoff dismisses beforeunload and cancels navigation without closing the tab",
+        () =>
+          Effect.gen(function*() {
+            const browser = yield* launch
+            const { origin } = yield* serve
+            const old = yield* Scope.make()
+            yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
+            const services = yield* Layer.buildWithScope(browser.connect, old)
+            const claim = yield* Effect.gen(function*() {
+              const context = yield* api.UserContext.create({ reclaimable: true, dialogs: "leaveOpen" })
+              const page = yield* context.newPage
+              yield* page.goto(`${origin}/beforeunload-source`)
+              yield* page.getByRole("button", { name: "Control" }).click()
+              yield* page.evaluateInMainWorld(() => {
+                sessionStorage.setItem("same-document", "yes")
+                window.addEventListener("beforeunload", (event) => {
+                  event.preventDefault()
+                  event.returnValue = ""
+                })
+              })
+              const claim = yield* api.Page.claim(page)
+              const opened = yield* Dialog.next(page)
+              yield* page.goto(`${origin}/beforeunload-destination`).pipe(Effect.forkIn(old))
+              assert.strictEqual((yield* opened)._tag, "BeforeUnload")
+              return claim
+            }).pipe(Scope.provide(old), Effect.provide(services))
+            const snapshots = yield* handoff(old)
+            const snapshot = snapshots.find((entry) => entry.claim === claim)!
+            const report = (snapshot as unknown as {
+              handoff: { _tag: string; events: ReadonlyArray<{ kind: string; message: string }> }
+            }).handoff
+            assert.strictEqual(report._tag, "Complete")
+            assert.strictEqual(report.events[0]?.kind, "beforeunload")
+            assert.strictEqual(typeof report.events[0]?.message, "string")
+            yield* Effect.scoped(Effect.gen(function*() {
+              const { page, found } = yield* api.Browser.reclaim(claim, { lastKnown: snapshot })
+              assert.deepStrictEqual(found, { _tag: "Observed", dialogs: [] })
+              assert.strictEqual(yield* page.url, `${origin}/beforeunload-source`)
+              assert.strictEqual(yield* page.evaluateInMainWorld(() => sessionStorage.getItem("same-document")), "yes")
+            })).pipe(Effect.provide(browser.connect))
+          }),
+        60_000
+      )
+
+      it.effect(
+        "dismisses a pre-handoff dialog, reports the event and confirms declaration teardown",
         () =>
           Effect.gen(function*() {
             const browser = yield* launch
@@ -662,8 +806,12 @@ describe("Chromium claims (ROOK-95)", () => {
                 JSON.parse(JSON.stringify(Schema.encodeSync(api.Browser.LastKnown)(lastKnown)))
               )
               const recovered = yield* api.Browser.reclaim(claim, { lastKnown: restoredSnapshot })
-              assert.deepStrictEqual(recovered.found, { _tag: "Unknown" })
-              assert.deepStrictEqual(recovered.lastKnown, {
+              assert.deepStrictEqual(recovered.found, { _tag: "Observed", dialogs: [] })
+              assert.deepStrictEqual({
+                _tag: recovered.lastKnown?._tag,
+                claim: recovered.lastKnown?.claim,
+                dialogs: recovered.lastKnown?.dialogs
+              }, {
                 _tag: "LastKnown",
                 claim,
                 dialogs: [{ kind: "alert", message: "before handoff" }]
