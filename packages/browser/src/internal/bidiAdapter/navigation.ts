@@ -104,7 +104,7 @@ const committed = (state: State, navigable: NavigableEntry, params: BrowsingCont
       )
     ) return
     // Observe the browser's document now. A command reply can establish provenance later, but cannot
-    // change this immutable observation or commit the document a second time (ROOK-130).
+    // change this immutable observation or commit the document a second time.
     const document = commit(
       state,
       navigable,

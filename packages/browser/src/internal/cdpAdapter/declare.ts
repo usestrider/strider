@@ -111,7 +111,7 @@ const viewport = (
       })
     }
     return Effect.gen(function*() {
-      // Subscribe before clearing: a resize can precede the command's reply (ROOK-145).
+      // Subscribe before clearing: a resize can precede the command's reply.
       const resized = yield* target.session.subscribe(Page.frameResized)
       const operation = yield* Operation.current
       if (Option.isSome(operation)) operation.value.markSent()

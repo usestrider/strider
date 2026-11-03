@@ -1,8 +1,9 @@
 {
   "name": "@usestrider/cli",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "license": "MIT",
+  "homepage": "https://usestrider.dev",
   "description": "The strider command, to install globally: drive a browser from a shell or an agent",
   "repository": {
     "type": "git",

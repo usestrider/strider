@@ -1,4 +1,4 @@
-/** One startup probe for HTTP attachment; page content never identifies a backend (ROOK-4). */
+/** One startup probe for HTTP attachment; page content never identifies a backend. */
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as HttpClient from "effect/http/HttpClient"

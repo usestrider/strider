@@ -1,8 +1,9 @@
 {
   "name": "@usestrider/browser",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "license": "MIT",
+  "homepage": "https://usestrider.dev",
   "description": "Effect-native browser automation over CDP, WebDriver BiDi and the WebKit inspector protocol",
   "repository": {
     "type": "git",
