@@ -1,6 +1,7 @@
 ---
 import { Font } from "astro:assets"
 import BackToTop from "../components/BackToTop.astro"
+import SiteFooter from "../components/SiteFooter.astro"
 import "../styles/global.css"
 
 interface Props {
@@ -53,6 +54,7 @@ const { title, description } = Astro.props
   </head>
   <body>
     <slot />
+    <SiteFooter />
     <BackToTop />
     <script>
       document.addEventListener("click", (event) => {
