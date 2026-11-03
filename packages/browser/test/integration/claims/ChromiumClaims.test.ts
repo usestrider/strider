@@ -422,7 +422,9 @@ describe("Chromium claims (ROOK-95)", () => {
               yield* page.goto(`${origin}/dialog`)
               return yield* api.Page.claim(page)
             }).pipe(Scope.provide(old), Effect.provide(services))
-            yield* handoff(old)
+            const snapshots = yield* handoff(old)
+            const lastKnown = snapshots.find((snapshot) => snapshot.claim === claim)!
+            assert.deepStrictEqual(lastKnown.handoff, { _tag: "Complete", events: [] })
             const target = (yield* browser.targets).find((info) =>
               info.type === "page" && info.url === `${origin}/dialog`
             )!
@@ -451,7 +453,14 @@ describe("Chromium claims (ROOK-95)", () => {
                 assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(pending)))
                 assert.isTrue((yield* browser.targets).some((info) => info.targetId === target.targetId))
                 const started = performance.now()
-                const { page, found } = yield* api.Browser.reclaim(claim).pipe(Deadline.within("3 seconds"))
+                const { page, found, handoff: historical } = yield* api.Browser.reclaim(claim, { lastKnown }).pipe(
+                  Deadline.within("3 seconds")
+                )
+                assert.deepStrictEqual(
+                  historical,
+                  { _tag: "Complete", events: [] },
+                  "historical completion cannot promise current observed state"
+                )
                 assert.deepStrictEqual(Schema.decodeUnknownSync(api.Browser.Found)(found), {
                   _tag: "Unknown"
                 })
@@ -1056,7 +1065,9 @@ describe("Chromium claims (ROOK-95)", () => {
             const claim = yield* api.UserContext.claim(context)
             const opened = yield* Dialog.next(page)
             yield* page.evaluateInMainWorld(() => {
-              setTimeout(() => { sessionStorage.answer = String(confirm("dismissed unseen")) }, 0)
+              setTimeout(() => {
+                sessionStorage.answer = String(confirm("dismissed unseen"))
+              }, 0)
             })
             yield* opened
             return claim
@@ -1064,11 +1075,12 @@ describe("Chromium claims (ROOK-95)", () => {
           const snapshots = yield* handoff(old)
           const events = snapshots.flatMap((snapshot) => snapshot.handoff?.events ?? [])
           assert.deepStrictEqual(events.map((event) => event.message), ["dismissed unseen"])
-          const saved = Schema.decodeUnknownSync(api.Browser.LastKnown)(JSON.parse(JSON.stringify(snapshots.find((snapshot) => snapshot.claim === claim))))
+          const saved = Schema.decodeUnknownSync(api.Browser.LastKnown)(
+            JSON.parse(JSON.stringify(snapshots.find((snapshot) => snapshot.claim === claim)))
+          )
           yield* Effect.scoped(Effect.gen(function*() {
-            // The cast keeps the regression runnable before the context transport option is implemented.
-            const recovered = yield* api.UserContext.reclaim(claim, { lastKnown: saved } as Parameters<typeof api.UserContext.reclaim>[1])
-            assert.deepStrictEqual((recovered as unknown as { handoff: typeof saved.handoff }).handoff, saved.handoff)
+            const recovered = yield* api.UserContext.reclaim(claim, { lastKnown: saved })
+            assert.deepStrictEqual(recovered.handoff, saved.handoff)
             const pages = yield* recovered.context.pages
             assert.strictEqual(yield* pages[0]!.evaluateInMainWorld(() => sessionStorage.answer), "false")
           })).pipe(Effect.provide(browser.connect))
@@ -1094,6 +1106,7 @@ describe("Chromium claims (ROOK-95)", () => {
             Protocol.on(browser.observer.browser)
           )
           const session = yield* browser.observer.session(sessionId)
+          const CdpPage = yield* Effect.promise(() => import("@usestrider/browser/cdp/Page"))
           yield* CdpPage.enable().pipe(Protocol.on(session))
           const events = yield* session.subscribe(CdpPage.javascriptDialogOpening)
           const opened = yield* Stream.runHead(events).pipe(Effect.forkChild)
@@ -1102,19 +1115,167 @@ describe("Chromium claims (ROOK-95)", () => {
           )
           assert.strictEqual(Option.getOrThrow(yield* Fiber.join(opened)).message, "blocked")
           const start = performance.now()
-          const exit = yield* Effect.scoped(
-            api.UserContext.reclaim(claim).pipe(Effect.map(({ found }) => found.pages.map((page) => page.found._tag)))
-          ).pipe(Effect.provide(browser.connect), Effect.exit)
+          const exit = yield* Effect.scoped(Effect.gen(function*() {
+            const short = yield* api.UserContext.reclaim(claim).pipe(Deadline.within("100 millis"), Effect.exit)
+            assert.strictEqual(Option.getOrThrow(Exit.findErrorOption(short))._tag, "Timeout")
+            assert.isTrue((yield* browser.targets).some((info) => info.targetId === target.targetId))
+            const settings = yield* api.UserContext.reclaim(claim, {
+              emulation: { locale: "fr-FR" },
+              observationTimeout: 100
+            }).pipe(Effect.exit)
+            assert.strictEqual(reason(settings), "BackendFailure")
+            assert.strictEqual(
+              (Option.getOrThrow(Exit.findErrorOption(settings)) as { operation: string }).operation,
+              "UserContext.reclaim"
+            )
+            assert.isTrue(
+              (yield* browser.targets).some((info) => info.targetId === target.targetId),
+              "failed settings must preserve the tab"
+            )
+            const { context, found } = yield* api.UserContext.reclaim(claim)
+            const page = (yield* context.pages)[0]!
+            const action = yield* page.evaluateInMainWorld(() => 42).pipe(Deadline.within("150 millis"), Effect.exit)
+            assert.strictEqual(Option.getOrThrow(Exit.findErrorOption(action))._tag, "Timeout")
+            const blocked = yield* Runtime.evaluate({ expression: "42" }).pipe(
+              Protocol.on(session),
+              BrowserClock.timeoutOption(100)
+            )
+            assert.isTrue(Option.isNone(blocked), "context reclaim must not touch the dialog")
+            return found.pages.map((page) => page.found._tag)
+          })).pipe(Effect.provide(browser.connect), Effect.exit)
           console.log(`context reclaim blocked page: ${Math.round(performance.now() - start)} ms`)
           assert.isTrue(Exit.isSuccess(exit), `reclaim failed: ${String(exit)}`.slice(0, 300))
           assert(Exit.isSuccess(exit))
           assert.deepStrictEqual(exit.value, ["Unknown"])
         }), 90_000)
 
+      it.effect("context SIGKILL recovery leaves a proved-open dialog untouched", () =>
+        Effect.gen(function*() {
+          const browser = yield* launch
+          const { origin } = yield* serve
+          const saved = yield* killedClient(browser.endpoint, `${origin}/context-crash-dialog`, "dialog")
+          yield* Effect.scoped(Effect.gen(function*() {
+            const { context, found, handoff: history } = yield* api.UserContext.reclaim(saved.contextClaim)
+            assert.deepStrictEqual(found.pages.map((page) => page.found._tag), ["Unknown"])
+            assert.isUndefined(history)
+            const page = (yield* context.pages)[0]!
+            const result = yield* page.evaluateInMainWorld(() => sessionStorage.getItem("crash-answer")).pipe(
+              Deadline.within("150 millis"),
+              Effect.exit
+            )
+            assert.strictEqual(Option.getOrThrow(Exit.findErrorOption(result))._tag, "Timeout")
+          })).pipe(Effect.provide(browser.connect))
+          assert.isFalse((yield* browser.targets).some((info) => info.url === `${origin}/context-crash-dialog`))
+        }), 60_000)
+
+      it.effect(
+        "finishes page transfer and snapshot registration together when interrupted at commit",
+        () =>
+          Effect.gen(function*() {
+            const browser = yield* launch
+            const old = yield* Scope.make()
+            const next = yield* Scope.make()
+            yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
+            yield* Effect.addFinalizer(() => Scope.close(next, Exit.void))
+            yield* Effect.gen(function*() {
+              const claim = yield* Effect.gen(function*() {
+                const context = yield* api.UserContext.create({ reclaimable: true })
+                return yield* api.Page.claim(yield* context.newPage)
+              }).pipe(Scope.provide(old))
+              const model = ClaimHooks.get(yield* Browser.Browser).runtime.model
+              const transfer = model.transfer
+              const entered = yield* Deferred.make<void>()
+              const resume = yield* Deferred.make<void>()
+              Object.assign(model, {
+                transfer: (...args: Parameters<typeof transfer>) =>
+                  transfer(...args).pipe(
+                    Effect.andThen(Deferred.succeed(entered, undefined)),
+                    Effect.andThen(Deferred.await(resume))
+                  )
+              })
+              const task = yield* api.Browser.reclaim(claim).pipe(Scope.provide(next), Effect.forkChild)
+              yield* Deferred.await(entered)
+              const interrupted = yield* Fiber.interrupt(task).pipe(Effect.forkChild)
+              yield* Effect.yieldNow
+              yield* Deferred.succeed(resume, undefined)
+              yield* Fiber.join(interrupted)
+              Object.assign(model, { transfer })
+              assert.deepStrictEqual(yield* handoff(old), [])
+              assert.deepStrictEqual((yield* handoff(next)).map((snapshot) => snapshot.claim), [claim])
+            }).pipe(Effect.provide(browser.connect))
+          }),
+        60_000
+      )
+
+      it.effect(
+        "finishes context transfer and snapshot registration together when interrupted at commit",
+        () =>
+          Effect.gen(function*() {
+            const browser = yield* launch
+            const old = yield* Scope.make()
+            const next = yield* Scope.make()
+            yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
+            yield* Effect.addFinalizer(() => Scope.close(next, Exit.void))
+            yield* Effect.gen(function*() {
+              const claim = yield* Effect.gen(function*() {
+                const context = yield* api.UserContext.create({ reclaimable: true })
+                yield* context.newPage
+                return yield* api.UserContext.claim(context)
+              }).pipe(Scope.provide(old))
+              const model = ClaimHooks.get(yield* Browser.Browser).runtime.model
+              const transfer = model.transfer
+              const entered = yield* Deferred.make<void>()
+              const resume = yield* Deferred.make<void>()
+              Object.assign(model, {
+                transfer: (...args: Parameters<typeof transfer>) =>
+                  transfer(...args).pipe(
+                    Effect.andThen(Deferred.succeed(entered, undefined)),
+                    Effect.andThen(Deferred.await(resume))
+                  )
+              })
+              const task = yield* api.UserContext.reclaim(claim).pipe(Scope.provide(next), Effect.forkChild)
+              yield* Deferred.await(entered)
+              const interrupted = yield* Fiber.interrupt(task).pipe(Effect.forkChild)
+              yield* Effect.yieldNow
+              yield* Deferred.succeed(resume, undefined)
+              yield* Fiber.join(interrupted)
+              Object.assign(model, { transfer })
+              assert.deepStrictEqual(yield* handoff(old), [])
+              assert.deepStrictEqual((yield* handoff(next)).map((snapshot) => snapshot.claim), [claim])
+            }).pipe(Effect.provide(browser.connect))
+          }),
+        60_000
+      )
+
+      it.effect("moves a same-connection page snapshot away from its old scope", () =>
+        Effect.gen(function*() {
+          const browser = yield* launch
+          const old = yield* Scope.make()
+          const next = yield* Scope.make()
+          yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
+          yield* Effect.addFinalizer(() => Scope.close(next, Exit.void))
+          yield* Effect.gen(function*() {
+            const claim = yield* Effect.gen(function*() {
+              const context = yield* api.UserContext.create({ reclaimable: true })
+              const page = yield* context.newPage
+              return yield* api.Page.claim(page)
+            }).pipe(Scope.provide(old))
+            yield* api.Browser.reclaim(claim).pipe(Scope.provide(next))
+            assert.deepStrictEqual(yield* handoff(old), [], "the old scope must not retain the transferred claim")
+            const snapshots = yield* handoff(next)
+            assert.deepStrictEqual(snapshots.map((snapshot) => snapshot.claim), [claim])
+          }).pipe(Effect.provide(browser.connect))
+        }), 60_000)
+
       it.effect("failed dismissal in a reclaimable context still ends handoff promptly", () =>
         Effect.gen(function*() {
           const browser = yield* launch
           const { origin } = yield* serve
+          const warnings: Array<string> = []
+          const logger = Logger.make((entry) => {
+            if (entry.logLevel === "Warn") warnings.push(String(entry.message))
+          })
+          const loggers = new Set([...(yield* Logger.CurrentLoggers), logger])
           const old = yield* Scope.make()
           yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
           const services = yield* Layer.buildWithScope(browser.connect, old)
@@ -1132,13 +1293,17 @@ describe("Chromium claims (ROOK-95)", () => {
             })
             yield* opened
             return claim
-          }).pipe(Scope.provide(old), Effect.provide(services))
+          }).pipe(Scope.provide(old), Effect.provide(services), Effect.provideService(Logger.CurrentLoggers, loggers))
           const start = performance.now()
-          const snapshots = yield* handoff(old)
+          const snapshots = yield* handoff(old).pipe(Effect.provideService(Logger.CurrentLoggers, loggers))
           const elapsed = performance.now() - start
           console.log(`failed dismissal handoff: ${Math.round(elapsed)} ms`)
           assert.strictEqual(snapshots.find((entry) => entry.claim === claim)!.handoff?._tag, "Unknown")
           assert.isBelow(elapsed, 5000)
+          assert.isTrue(
+            warnings.some((message) => message.includes("could not confirm CDP declaration release")),
+            "unconfirmed declaration release must remain visible"
+          )
         }), 120_000)
     }
   )

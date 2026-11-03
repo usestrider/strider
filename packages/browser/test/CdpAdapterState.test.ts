@@ -1161,6 +1161,33 @@ describe("Chromium screenshot guard lifecycle", () => {
 })
 
 describe("CDP declaration cleanup lifetime", () => {
+  it.effect("does not interrupt a releasing caller when the connection closes its cleanup fiber", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { state, page, target } = yield* withPage()
+      const connection = yield* Scope.make()
+      const entered = yield* Deferred.make<void>()
+      const mock = {
+        ...session,
+        send: (command: { readonly params?: { readonly timezoneId?: string } }) =>
+          command.params?.timezoneId === ""
+            ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never))
+            : Effect.succeed({})
+      } as unknown as ProtocolClient.Session
+      state.targets.set(mock, { ...target, session: mock, page })
+      const task = yield* Effect.scoped(
+        Declare.declare({ ...state, cleanupScope: connection }, { _tag: "Page", page: page.id }, {
+          _tag: "Override",
+          override: { _tag: "TimeZone", timeZone: "Asia/Tokyo" }
+        })
+      ).pipe(Operation.named("test.connectionCleanup"), Effect.forkChild)
+      yield* Deferred.await(entered)
+      yield* Scope.close(connection, Exit.void)
+      assert.isTrue(
+        Exit.isSuccess(yield* Fiber.await(task)),
+        "connection teardown must not interrupt the declaration finalizer's caller"
+      )
+    })))
+
   for (const confirm of [false, true]) {
     it.effect(
       confirm
