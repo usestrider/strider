@@ -2,7 +2,9 @@
  * Declarations on CDP: what the registry (`declarations.ts`) says each target gets, applied in its gate before
  * its scripts run and again to every target in scope when a registration comes or goes.
  */
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
@@ -392,7 +394,12 @@ const releaseErrors = <A>(effect: Effect.Effect<A, Protocol.ProtocolError | Dead
       (error) => error._tag === "ProtocolError" && error.reason._tag === "SessionEnded",
       () => Effect.void
     ),
-    Effect.ignore({ log: "Warn", message: "Failed to release CDP declaration" })
+    Effect.catch((error) =>
+      Effect.gen(function*() {
+        ;(yield* Cleanup.Unconfirmed)()
+        yield* Effect.logWarning("Failed to release CDP declaration", error)
+      })
+    )
   )
 
 export const declare = Effect.fnUntraced(function*(
@@ -408,6 +415,8 @@ export const declare = Effect.fnUntraced(function*(
     Effect.gen(function*() {
       const caller = yield* Operation.current
       const confirm = yield* Cleanup.Confirm
+      const handoff = yield* Cleanup.Handoff
+      const unconfirmed = yield* Cleanup.Unconfirmed
       // Registry removal is synchronous, before any caller stops waiting or prior settings are restored.
       state.registry.remove(id)
       const release = declaration._tag === "Downloads"
@@ -417,18 +426,41 @@ export const declare = Effect.fnUntraced(function*(
           { discard: true }
         )
         : releaseDeclaration(state, declaration, scope)
-      const work = release.pipe(
+      const boundedRelease = handoff
+        ? Effect.gen(function*() {
+          const record = yield* Operation.record
+          yield* record.bound(release.pipe(Effect.interruptible))
+        }).pipe(
+          Operation.apart("Browser.handoff.release", Duration.seconds(1)),
+          Effect.catchCause((cause) =>
+            Effect.sync(unconfirmed).pipe(
+              Effect.andThen(Effect.logWarning("Handoff could not confirm CDP declaration release", cause))
+            )
+          )
+        )
+        : release
+      const work = boundedRelease.pipe(
         Operation.detached,
         Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
         Effect.provideContext(registrationContext),
+        Effect.provideService(Cleanup.Unconfirmed, unconfirmed),
         Effect.interruptible
       )
       // A connection already tearing down cannot own a new fiber; finish before its transport is released.
       if (state.cleanupScope.state._tag === "Closed") return yield* work
       const cleanup = yield* work.pipe(Effect.forkIn(state.cleanupScope))
-      if (confirm || Option.isNone(caller)) return yield* Fiber.join(cleanup)
+      const joined = Fiber.await(cleanup).pipe(
+        Effect.flatMap((exit) =>
+          Exit.isSuccess(exit)
+            ? Effect.void
+            : Effect.sync(unconfirmed).pipe(
+              Effect.andThen(Effect.logWarning("CDP declaration cleanup ended without confirmation", exit.cause))
+            )
+        )
+      )
+      if (confirm || Option.isNone(caller) || handoff) return yield* joined
       // The browser work survives this wait; expiration does not interrupt its connection-owned lifetime.
-      yield* caller.value.bound(Fiber.join(cleanup).pipe(Effect.interruptible)).pipe(
+      yield* caller.value.bound(joined.pipe(Effect.interruptible)).pipe(
         Effect.catchTag("Timeout", () => Effect.void)
       )
     })

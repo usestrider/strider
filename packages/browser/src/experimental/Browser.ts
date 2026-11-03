@@ -162,7 +162,9 @@ export type LastKnown = typeof LastKnown.Type
  *
  * **Details**
  *
- * Complete means the bounded handoff dismissal finished. Unknown means it failed or timed out; events contain
+ * Complete means dismissal finished at page release; a dialog may open later during teardown. Unknown means
+ * dismissal or declaration cleanup could not be confirmed. Handoff declaration releases each have a separate
+ * 1000 ms confirmation budget. Events contain
  * only dismissals already confirmed by both command reply and the dialog closing. No event means no confirmation.
  * Caller handlers may answer normally; the finalizer itself never accepts, including beforeunload dialogs.
  *

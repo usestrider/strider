@@ -107,9 +107,14 @@ export const claimUserContext = Operation.fn("UserContext.claim")(function*(cont
   const identity = yield* claims.context(entry.id).pipe(
     Effect.mapError(mapAdapter("UserContext.claim", runtime.backend))
   )
-  return ContextClaim.Claim.make(
+  const claim = ContextClaim.Claim.make(
     JSON.stringify({ backend: "chromium", kind: "context", browser: claims.browser, context: identity })
   )
+  return yield* Effect.uninterruptible(Effect.gen(function*() {
+    const owner = Handoff.contextOwner(entry)
+    if (owner !== undefined) yield* trackContext(owner, claim, entry)
+    return claim
+  }))
 })
 
 export const createContext = Operation.fn("UserContext.createReclaimable")(
@@ -151,25 +156,30 @@ export const reclaimPage = Operation.fn("Browser.reclaim")(
     }
     const found = yield* observe(claims, id, "Browser.reclaim", runtime.backend, milliseconds)
     const scope = yield* Effect.scope
-    yield* runtime.model.transfer(id, scope).pipe(Effect.uninterruptible)
-    Handoff.allow(scope)
-    yield* track(scope, claim, entry.value)
-    const page = Option.getOrThrow(runtime.page(entry.value))
-    return {
-      page,
-      found,
-      handoff: options?.lastKnown?.handoff,
-      ...(options?.lastKnown === undefined
-        ? {}
-        : { lastKnown: options.lastKnown })
-    } satisfies Reclaimed.Reclaimed
+    return yield* Effect.uninterruptible(Effect.gen(function*() {
+      yield* runtime.model.transfer(id, scope)
+      Handoff.allow(scope)
+      yield* track(scope, claim, entry.value)
+      const page = Option.getOrThrow(runtime.page(entry.value))
+      return {
+        page,
+        found,
+        handoff: options?.lastKnown?.handoff,
+        ...(options?.lastKnown === undefined
+          ? {}
+          : { lastKnown: options.lastKnown })
+      } satisfies Reclaimed.Reclaimed
+    }))
   }
 )
 
 export const reclaimContext = Operation.fn("UserContext.reclaim")(
   function*(
     claim: ContextClaim.Claim,
-    options?: UserContext.Options & { readonly observationTimeout?: number | undefined }
+    options?: UserContext.Options & {
+      readonly observationTimeout?: number | undefined
+      readonly lastKnown?: Reclaimed.LastKnown | undefined
+    }
   ) {
     const hooks = Hooks.get(yield* Browser.Browser)
     const { runtime } = hooks
@@ -191,8 +201,50 @@ export const reclaimContext = Operation.fn("UserContext.reclaim")(
           (found) => ({ page: page.id, found })
         )
     )
-    const recovered = yield* hooks.context(options, { context })
-    return { context: recovered, found: { pages } } satisfies ContextClaim.Reclaimed
+    if (options?.lastKnown !== undefined && options.lastKnown.claim !== claim) {
+      return yield* Effect.fail(
+        error(
+          "UserContext.reclaim",
+          new Reason.InvalidInput({
+            input: "lastKnown",
+            expected: "a snapshot for this context claim",
+            hint: "The snapshot belongs to another claim"
+          })
+        )
+      )
+    }
+    const requested = options !== undefined &&
+      Object.entries(options).some(([key, value]) =>
+        key !== "observationTimeout" && key !== "lastKnown" && value !== undefined
+      )
+    if (requested && pages.some((page) => page.found._tag === "Unknown")) {
+      return yield* Effect.fail(
+        error(
+          "UserContext.reclaim",
+          new Reason.BackendFailure({
+            kind: "Rejected",
+            method: "UserContext.reclaim.settings",
+            hint: "Requested settings cannot be confirmed while a page's state is unknown; ownership is not transferred"
+          })
+        )
+      )
+    }
+    return yield* hooks.recover(
+      options,
+      context,
+      !requested,
+      (recovered, scope) =>
+        trackContext(scope, claim, entry).pipe(
+          Effect.as(
+            {
+              context: recovered,
+              found: { pages },
+              handoff: options?.lastKnown?.handoff,
+              lastKnown: options?.lastKnown
+            } satisfies ContextClaim.Reclaimed
+          )
+        )
+    )
   }
 )
 
@@ -240,4 +292,29 @@ const observationBound = (operation: string, milliseconds = 1000) => {
     ))
   }
   return Effect.succeed(milliseconds)
+}
+
+// Capture the page entries before closure; disconnection can empty the context's live page list.
+const trackContext = (scope: Scope.Scope, claim: ContextClaim.Claim, entry: Model.ContextEntry) => {
+  let pages: ReadonlyArray<Model.PageEntry> = []
+  let captured = false
+  return Handoff.observe(scope, claim, () => {
+    if (!captured) {
+      pages = entry.state.getUnsafe().pages
+      captured = true
+    }
+    const outcomes = pages.map(Handoff.outcome)
+    const handoff = outcomes.some((outcome) => outcome === undefined || outcome._tag === "Unknown")
+      ? { _tag: "Unknown" as const, events: outcomes.flatMap((outcome) => outcome?.events ?? []) }
+      : { _tag: "Complete" as const, events: outcomes.flatMap((outcome) => outcome?.events ?? []) }
+    return {
+      _tag: "LastKnown",
+      claim,
+      handoff,
+      dialogs: pages.flatMap((page) => {
+        const dialog = page.state.getUnsafe().dialog
+        return Option.isNone(dialog) ? [] : [{ kind: dialog.value.kind, message: dialog.value.message }]
+      })
+    }
+  })
 }

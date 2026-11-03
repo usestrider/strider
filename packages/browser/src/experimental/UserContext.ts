@@ -9,6 +9,7 @@ import * as Reports from "../internal/claimReports.ts"
 import * as Claims from "../internal/claims.ts"
 import * as Target from "../Target.ts"
 import type * as Base from "../UserContext.ts"
+import type * as Browser from "./Browser.ts"
 
 /**
  * An opaque, serializable context claim. Store its encoded value without interpreting it.
@@ -107,7 +108,10 @@ export const create = (options: Base.Options & { readonly reclaimable: true }) =
  * Returns the context and per-page observations from before setup. Redeclare routes and init scripts in the new
  * scope. The default context cannot be reclaimed for removal. Observation defaults to 1000 milliseconds per page,
  * all charged to the caller's deadline; settings application also remains within that deadline. Setup that cannot
- * complete fails without acquiring destruction ownership or deleting surviving targets.
+ * complete fails without acquiring destruction ownership or deleting surviving targets. With no settings requested,
+ * recovery adopts pages without installing session declarations or assuming settings were applied. Requested
+ * settings on an Unknown page fail with a `UserContext.reclaim.settings` backend rejection before ownership moves.
+ * Pass `lastKnown` to deliver a matching context handoff snapshot; historical events stay separate from current state.
  *
  * **Example** (Using claims)
  *
@@ -135,6 +139,8 @@ export const reclaim = (
     | Base.Options & {
       /** Milliseconds for each page observation, within the caller deadline. @default 1000 */
       readonly observationTimeout?: number | undefined
+      /** Historical context handoff information; its claim must match this context. */
+      readonly lastKnown?: Browser.LastKnown | undefined
     }
     | undefined
 ) => Claims.reclaimContext(claim, options)
@@ -200,4 +206,6 @@ export type Found = typeof Found.Type
 export interface Reclaimed {
   readonly context: Base.UserContext
   readonly found: Found
+  readonly handoff?: Browser.Handoff | undefined
+  readonly lastKnown?: Browser.LastKnown | undefined
 }

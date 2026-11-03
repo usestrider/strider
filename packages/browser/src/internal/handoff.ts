@@ -9,15 +9,23 @@ import type * as Browser from "../experimental/Browser.ts"
 import * as Reason from "../Reason.ts"
 import type * as BoundedAdapter from "./boundedAdapter.ts"
 import type * as Reports from "./claimReports.ts"
+import * as Cleanup from "./declarationCleanup.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 
 const outcomes = new WeakMap<Model.PageEntry, typeof Reports.Handoff.Type>()
 export const outcome = (page: Model.PageEntry) => outcomes.get(page)
 
+const contextOwners = new WeakMap<Model.ContextEntry, Scope.Scope>()
+export const contextOwner = (entry: Model.ContextEntry) => contextOwners.get(entry)
+export const ownContext = (entry: Model.ContextEntry, scope: Scope.Scope) => {
+  contextOwners.set(entry, scope)
+}
+const registrations = new Map<string, () => void>()
 const eligible = new WeakSet<Scope.Scope>()
 const observers = new WeakMap<Scope.Scope, Map<string, () => Browser.LastKnown>>()
 export const observe = (scope: Scope.Scope, claim: string, read: () => Browser.LastKnown) => {
+  registrations.get(claim)?.()
   const sets: Array<Map<string, () => Browser.LastKnown>> = []
   for (let current: Scope.Scope | undefined = scope; current !== undefined; current = current.parent) {
     let set = observers.get(current)
@@ -25,12 +33,12 @@ export const observe = (scope: Scope.Scope, claim: string, read: () => Browser.L
     set.set(claim, read)
     sets.push(set)
   }
-  return Scope.addFinalizer(
-    scope,
-    Effect.sync(() => {
-      for (const set of sets) if (set.get(claim) === read) set.delete(claim)
-    })
-  )
+  const remove = () => {
+    for (const set of sets) if (set.get(claim) === read) set.delete(claim)
+    if (registrations.get(claim) === remove) registrations.delete(claim)
+  }
+  registrations.set(claim, remove)
+  return Scope.addFinalizer(scope, Effect.sync(remove))
 }
 const retained = new WeakSet<Scope.Scope>()
 export const allow = (scope: Scope.Scope): void => {
@@ -58,11 +66,22 @@ export const handoff = (scope: Scope.Closeable) =>
     const readers = Array.from(observers.get(scope)?.values() ?? [])
     const snapshots = readers.map((read) => read())
     retained.add(scope)
-    return Effect.map(Scope.close(scope, Exit.void), () =>
-      snapshots.map((snapshot, i) => ({
-        ...snapshot,
-        handoff: readers[i]!().handoff ?? { _tag: "Unknown" as const, events: [] }
-      })))
+    let unconfirmed = false
+    return Effect.map(
+      Scope.close(scope, Exit.void).pipe(
+        Effect.provideService(Cleanup.Handoff, true),
+        Effect.provideService(Cleanup.Unconfirmed, () => {
+          unconfirmed = true
+        })
+      ),
+      () =>
+        snapshots.map((snapshot, i) => ({
+          ...snapshot,
+          handoff: unconfirmed
+            ? { _tag: "Unknown" as const, events: readers[i]!().handoff?.events ?? [] }
+            : readers[i]!().handoff ?? { _tag: "Unknown" as const, events: [] }
+        }))
+    )
   }).pipe(Effect.uninterruptible)
 
 /** Original-session dialog dismissal during planned handoff only. @default 1000 milliseconds */

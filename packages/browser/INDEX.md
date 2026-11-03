@@ -2111,6 +2111,8 @@ Experimental context persistence and recovery for session hosts.
 - `interface Reclaimed` (experimental)
   - `readonly context: Base.UserContext`
   - `readonly found: Found`
+  - `readonly handoff?: Browser.Handoff | undefined`
+  - `readonly lastKnown?: Browser.LastKnown | undefined`
 
 *schemas*
 
@@ -2121,7 +2123,7 @@ Experimental context persistence and recovery for session hosts.
 
 - `const claim = (value: Base.UserContext) => Claims.claimUserContext(value)` (experimental)
 - `const create = (options: Base.Options & { readonly reclaimable: true }) => Claims.createContext(options)` (experimental)
-- `const reclaim = (claim: Claim, options?: | Base.Options & { readonly observationTimeout?: number | undefined } | undefined) => Claims.reclaimContext(claim, options)` (experimental)
+- `const reclaim = (claim: Claim, options?: | Base.Options & { readonly observationTimeout?: number | undefined readonly lastKnown?: Browser.LastKnown | undefined } | undefined) => Claims.reclaimContext(claim, options)` (experimental)
 
 ## `@usestrider/browser/firefox`
 

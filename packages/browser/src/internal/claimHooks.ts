@@ -8,6 +8,12 @@ import type * as Runtime from "./runtime.ts"
 
 export interface Hooks {
   readonly runtime: Runtime.Runtime
+  readonly recover: <A>(
+    options: UserContext.Options | undefined,
+    context: UserContext.Id,
+    adopt: boolean,
+    complete: (context: UserContext.UserContext, scope: Scope.Scope) => Effect.Effect<A>
+  ) => Effect.Effect<A, UserContext.UserContextError | Deadline.Timeout, Scope.Scope>
   readonly context: (
     options: UserContext.Options | undefined,
     mode: { readonly reclaimable: true } | { readonly context: UserContext.Id }
