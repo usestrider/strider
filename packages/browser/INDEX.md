@@ -2044,6 +2044,25 @@ What `strider run` gives a segment: the live CLI session, and its pages by name.
 - `class PageNotFound: Schema.TaggedError "PageNotFound" { name, hint }` (experimental)
 - `class NameTaken: Schema.TaggedError "NameTaken" { name, hint }` (experimental)
 
+### Segment
+
+Typed programs run in a live CLI session, with arguments decoded before their callback runs.
+
+*models*
+
+- `interface Segment<S extends Schema.Constraint, A, E = never, R = never>` (experimental)
+  - `readonly [TypeId]: typeof TypeId`
+  - `readonly schema: S`
+  - `readonly run: (args: S["Type"]) => Effect.Effect<A, E, R>`
+
+*constructors*
+
+- `const make: <S extends Schema.Constraint, A, E, R>(schema: S, run: (args: S["Type"]) => Effect.Effect<A, E, R>) => Segment<S, A, E, R>` (experimental)
+
+*guards*
+
+- `const isSegment: (value: unknown) => value is Segment<Schema.Constraint, unknown, unknown, unknown>` (experimental)
+
 ## `@usestrider/browser/experimental`
 
 ### Browser

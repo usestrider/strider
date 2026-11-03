@@ -421,6 +421,15 @@ wraps `registerTool` and `unregisterTool` before the page's scripts run. `Page.m
 tools. `BrowserToolkit` gains `pageTools` and `callPageTool`, which checks the model's arguments against the tool's
 input schema and marks every result as the page's untrusted input.
 
+**CLI segments declare their argument schema before running.** A default export is `Segment.make(schema, run)`:
+the CLI parses `--arg` strings and JSON files, decodes them with the schema, and only then invokes the callback
+with the decoded type. This makes malformed inputs fail before browser actions and removes the need to generate
+a source file per payload. A plain Effect default export is rejected with a migration hint, keeping one segment
+contract. Return values use evaluation's serialization rules; JSON adds explicit type tags where JSON alone loses
+information. Plain output bounds its preview, while JSON preserves the complete captured result. Strict capture
+masks arbitrary returned data as a whole: a value no longer identifies the editable field it came from, so applying
+snapshot-text masking alone would let a segment expose that field. Page handles retain their names and IDs.
+
 **The `strider` client loads Effect, and talks to its session's daemon through one `effect/rpc` group.** Each caller,
 the command, `strider mcp`, `strider sessions` and `start --fork`, uses the same RPC client over the session's Unix
 socket, so what crosses it is a Schema: a command's output and exit code, a tool call's parameters and result, the

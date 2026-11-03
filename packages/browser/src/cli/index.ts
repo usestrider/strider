@@ -10,3 +10,9 @@
  * @since 0.1.0
  */
 export * as CurrentSession from "./CurrentSession.ts"
+
+/**
+ * @stability experimental
+ * @since 0.1.0
+ */
+export * as Segment from "./Segment.ts"
