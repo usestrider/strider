@@ -22,8 +22,10 @@
   --ink: #1a1a1a;
   --labels: #5a5750;
   --hairline: #e2ded3;
-  /* The engraving's plate and the cover it's printed on, the same by day and by night */
-  --plate: #e6e3d9;
+  --ivory: #dfdcd1;
+  /* The engraving's plate and the cover it's printed on, with the labels printed there */
+  --plate: var(--ivory);
+  --plate-labels: #5a5750;
   --engine-chromium: #1558c8;
   --engine-firefox: #c43e0a;
   --engine-webkit: #0b7a8a;
@@ -74,6 +76,9 @@
   --ink: #f2eee6;
   --labels: #aca69a;
   --hairline: #3b3934;
+  /* The plate dims so it doesn't glare beside night paper, and its labels darken to keep 4.5:1 */
+  --plate: #a8a496;
+  --plate-labels: #3a3833;
   --band-text: var(--band-lift);
   --warning-text: #cf6a75;
   color-scheme: dark;
@@ -140,6 +145,11 @@ body {
   .nav-link[aria-current="page"] {
     color: var(--band-text);
     border-bottom-color: var(--band);
+  }
+
+  /* The masthead's heron is ivory on night paper, the color of the cover by day */
+  .dark .masthead-home svg {
+    --ink: var(--ivory);
   }
 
   /* The masthead's night toggle: in ink, the band's color under the pointer, showing the moon by day and the sun by
@@ -547,12 +557,11 @@ body {
   mix-blend-mode: multiply;
 }
 
-/* The cover is the plate's ivory by day and by night, in the day's inks, so it doesn't change when the paper does. On
-   it the engraving's plate shows only its plate mark, a 1px rule just inside its edge; the engraving multiplies onto
-   the plate, not the page. */
+/* The cover is the plate's ivory by day and a dimmer ivory by night, in dark inks on both. On it the engraving's plate
+   shows only its plate mark, a 1px rule just inside its edge; the engraving multiplies onto the plate, not the page. */
 .cover {
   --ink: #1a1a1a;
-  --labels: #5a5750;
+  --labels: var(--plate-labels);
   background: var(--plate);
   color: var(--ink);
 }

@@ -2063,6 +2063,87 @@ Typed programs run in a live CLI session, with arguments decoded before their ca
 
 - `const isSegment: (value: unknown) => value is Segment<Schema.Constraint, unknown, unknown, unknown>` (experimental)
 
+## `@usestrider/browser/experimental`
+
+### Browser
+
+Experimental recovery of Chromium pages for session hosts.
+
+*models*
+
+- `type Found = typeof Found.Type` (experimental)
+- `interface Reclaimed` (experimental)
+  - `readonly page: Page.Page`
+  - `readonly found: Found`
+  - `readonly handoff?: Handoff | undefined`
+  - `readonly lastKnown?: LastKnown | undefined`
+- `type LastKnown = typeof LastKnown.Type` (experimental)
+- `type Handoff = typeof Handoff.Type` (experimental)
+
+*schemas*
+
+- `const Found = Reports.Found` (experimental)
+- `const LastKnown = Reports.LastKnown` (experimental)
+- `const Handoff = Reports.Handoff` (experimental)
+
+*claims*
+
+- `const reclaim = (claim: ClaimedPage.Claim, options?: { readonly observationTimeout?: number | undefined readonly lastKnown?: LastKnown | undefined } | undefined) => Claims.reclaimPage(claim, options)` (experimental)
+
+### Claim
+
+Errors and leftover state reported by experimental browser claims.
+
+*errors*
+
+- `class ClaimError: Schema.TaggedError "ClaimError" { operation, reason, diagnostics }` (experimental)
+
+*reasons*
+
+- `class Gone: Schema.Error { hint }` (experimental)
+- `class OtherBrowser: Schema.Error { hint }` (experimental)
+
+### Page
+
+Experimental page claims issued only for owned pages.
+
+*models*
+
+- `type Claim = typeof Claim.Type` (experimental)
+
+*schemas*
+
+- `const Claim = Schema.String.pipe(Schema.brand("~@usestrider/browser/experimental/Page/Claim"))` (experimental)
+
+*claims*
+
+- `const claim = (value: Base.Page) => Claims.claimPage(value)` (experimental)
+
+### UserContext
+
+Experimental context persistence and recovery for session hosts.
+
+*models*
+
+- `type Claim = typeof Claim.Type` (experimental)
+- `type Found = typeof Found.Type` (experimental)
+- `interface Reclaimed` (experimental)
+  - `readonly context: Base.UserContext`
+  - `readonly found: Found`
+  - `readonly handoff?: Browser.Handoff | undefined`
+  - `readonly lastKnown?: Browser.LastKnown | undefined`
+
+*schemas*
+
+- `const Claim = Schema.String.pipe(Schema.brand("~@usestrider/browser/experimental/UserContext/Claim"))` (experimental)
+- `const Found = Schema.Struct({ pages: Schema.Array(Schema.Struct({ page: Target.NavigableId, found: Reports.Found })) })` (experimental)
+
+*claims*
+
+- `const claim = (value: Base.UserContext) => Claims.claimUserContext(value)` (experimental)
+- `const create = (options: Base.Options & { readonly reclaimable: true }) => Claims.createContext(options)` (experimental)
+- `const reclaim = (claim: Claim, options?: | Base.Options & { readonly observationTimeout?: number | undefined readonly lastKnown?: Browser.LastKnown | undefined } | undefined) => Claims.reclaimContext(claim, options)` (experimental)
+
 ## `@usestrider/browser/firefox`
 
 ### Firefox

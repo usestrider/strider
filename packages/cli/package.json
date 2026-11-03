@@ -1,0 +1,40 @@
+{
+  "name": "@usestrider/cli",
+  "version": "0.0.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "The strider command, to install globally: drive a browser from a shell or an agent",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/usestrider/strider.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/usestrider/strider/issues"
+  },
+  "keywords": [
+    "effect",
+    "typescript",
+    "browser",
+    "cli"
+  ],
+  "bin": {
+    "strider": "./strider.js"
+  },
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "strider.js",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "dependencies": {
+    "@effect/platform-node": "^4.0.6",
+    "@usestrider/browser": "workspace:^",
+    "effect": "^4.0.6"
+  }
+}

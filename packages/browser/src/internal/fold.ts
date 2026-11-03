@@ -56,6 +56,7 @@ const defaultEventLog = 100
 /** A context's settings until the library sets them: none of its policies, as for a context it didn't create. */
 const defaultSettings: Model.ContextSettings = {
   owned: false,
+  reclaimable: false,
   policy: Option.none(),
   eventLog: defaultEventLog,
   keyboardLayout: "us"
@@ -468,6 +469,7 @@ export const make = Effect.fnUntraced(function*(options: {
             context: fact.context,
             contextEntry: context,
             state: yield* cell<Model.PageState>({
+              dialog: Option.none(),
               status: { _tag: "Opening", url: fact.url },
               frames: [],
               workers: [],
@@ -884,6 +886,7 @@ export const make = Effect.fnUntraced(function*(options: {
           const page = Option.fromNullishOr(pages.get(prompt.page))
           if (Option.isSome(page)) {
             Events.publish(page.value.events.dialog, prompt)
+            yield* update(page.value.state, (state) => ({ ...state, dialog: Option.some(prompt) }))
             yield* updateOpen(page.value, (open) => ({
               ...open,
               prompt: Option.some({ id: prompt.prompt, kind: prompt.kind, blocking: "confirmed" })
@@ -910,6 +913,7 @@ export const make = Effect.fnUntraced(function*(options: {
           prompts.delete(fact.prompt)
           const page = id === undefined ? undefined : pages.get(id)
           if (page !== undefined) {
+            yield* update(page.state, (state) => ({ ...state, dialog: Option.none() }))
             yield* updateOpen(page, (open) => ({ ...open, prompt: Option.none(), undecided: Option.none() }))
           }
           return

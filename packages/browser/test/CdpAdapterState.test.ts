@@ -27,7 +27,9 @@ import * as Responses from "../src/internal/cdpAdapter/responses.ts"
 import * as State from "../src/internal/cdpAdapter/state.ts"
 import * as Targets from "../src/internal/cdpAdapter/targets.ts"
 import * as Tree from "../src/internal/cdpAdapter/tree.ts"
+import * as Cleanup from "../src/internal/declarationCleanup.ts"
 import * as Groups from "../src/internal/objectGroups.ts"
+import * as Operation from "../src/internal/operation.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 import * as Target from "../src/Target.ts"
@@ -46,6 +48,7 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session) {
   const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
   buffer.connect(control)
   const state = State.make({
+    cleanupScope: yield* Effect.scope,
     connect: { sink: () => Effect.void, ownership: "launched" },
     ids: Kit.makeIds(),
     buffer,
@@ -1155,4 +1158,83 @@ describe("Chromium screenshot guard lifecycle", () => {
       assert.deepStrictEqual(Array.from(yield* Fiber.join(fiber)), [0])
       assert.strictEqual(state.captures.size, 0)
     }))
+})
+
+describe("CDP declaration cleanup lifetime", () => {
+  it.effect("does not interrupt a releasing caller when the connection closes its cleanup fiber", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { state, page, target } = yield* withPage()
+      const connection = yield* Scope.make()
+      const entered = yield* Deferred.make<void>()
+      const mock = {
+        ...session,
+        send: (command: { readonly params?: { readonly timezoneId?: string } }) =>
+          command.params?.timezoneId === ""
+            ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never))
+            : Effect.succeed({})
+      } as unknown as ProtocolClient.Session
+      state.targets.set(mock, { ...target, session: mock, page })
+      const task = yield* Effect.scoped(
+        Declare.declare({ ...state, cleanupScope: connection }, { _tag: "Page", page: page.id }, {
+          _tag: "Override",
+          override: { _tag: "TimeZone", timeZone: "Asia/Tokyo" }
+        })
+      ).pipe(Operation.named("test.connectionCleanup"), Effect.forkChild)
+      yield* Deferred.await(entered)
+      yield* Scope.close(connection, Exit.void)
+      assert.isTrue(
+        Exit.isSuccess(yield* Fiber.await(task)),
+        "connection teardown must not interrupt the declaration finalizer's caller"
+      )
+    })))
+
+  for (const confirm of [false, true]) {
+    it.effect(
+      confirm
+        ? "confirms borrowed rollback before returning"
+        : "continues release after the ordinary caller stops waiting",
+      () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { state, page, target } = yield* withPage()
+          const entered = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          let completed = false
+          const mock = {
+            ...session,
+            send: (command: { readonly params?: { readonly timezoneId?: string } }) =>
+              command.params?.timezoneId === "" ?
+                Effect.gen(function*() {
+                  yield* Deferred.succeed(entered, undefined)
+                  yield* Deferred.await(release)
+                  completed = true
+                  return {}
+                }) :
+                Effect.succeed({})
+          } as unknown as ProtocolClient.Session
+          state.targets.set(mock, { ...target, session: mock, page })
+          const task = Effect.scoped(Effect.gen(function*() {
+            yield* Declare.declare(state, { _tag: "Page", page: page.id }, {
+              _tag: "Override",
+              override: { _tag: "TimeZone", timeZone: "Asia/Tokyo" }
+            })
+            return yield* (yield* Operation.record).bound(Effect.never)
+          })).pipe(
+            Operation.named("test.cleanup"),
+            Deadline.within("50 millis"),
+            Effect.provideService(Cleanup.Confirm, confirm)
+          )
+          const fiber = yield* task.pipe(Effect.forkChild)
+          yield* Deferred.await(entered)
+          yield* BrowserClock.sleep(50)
+          assert.strictEqual(fiber.pollUnsafe() !== undefined, !confirm)
+          assert.isFalse(completed)
+          assert.strictEqual(state.registry.overrides({ page: page.id, context: page.context.id }).size, 0)
+          yield* Deferred.succeed(release, undefined)
+          const exit = yield* Fiber.await(fiber)
+          assert.isTrue(Exit.isFailure(exit))
+          yield* BrowserClock.sleep(1)
+          assert.isTrue(completed, "the cleanup lifetime must survive the caller deadline")
+        }))
+    )
+  }
 })

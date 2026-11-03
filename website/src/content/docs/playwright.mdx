@@ -12,7 +12,7 @@ Playwright's calls with Strider's and says which habit changes.
 
 | Playwright                          | Strider                                                                                               |
 | ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `npx playwright install`            | none: Strider runs browsers you've installed, and [`npx strider browsers`](/docs/installation#a-browser) lists them |
+| `npx playwright install`            | none: Strider runs browsers you've installed, and [`strider browsers`](/docs/installation#a-browser) lists them |
 | `chromium.launch()`                 | [`Chromium.layer({ executablePath })`](/docs/installation#backends), a layer you provide to the program; `Firefox.layer` and `WebKit.layer` likewise |
 | `browser.close()`                   | the end of the program the layer is provided to                                                       |
 | `chromium.connectOverCDP(endpoint)` | [`Chromium.layerConnect(endpoint)`](/docs/pages/attaching#connecting), whose tabs you [`control`](/docs/pages/attaching#access-levels) before acting on them |

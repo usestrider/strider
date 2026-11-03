@@ -1160,6 +1160,71 @@ describe("strider", () => {
       }).pipe(Effect.provide(NodeServices.layer))
     ), timeout)
 
+  it.live("lists a held tab and saves only its state from the browser, widening when asked", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const served = yield* site
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "remote", ...args)
+        const signingIn = (name: string) =>
+          `/fixture?html=${
+            encodeURIComponent(
+              `<title>${name}</title><script>document.cookie = "${name}=abc; path=/"; localStorage.setItem("${name}", "v")</script>`
+            )
+          }`
+        const app = `${served.origin}${signingIn("app")}`
+        const elsewhere = `${served.crossSite}${signingIn("elsewhere")}`
+        const { endpoint } = yield* chromiumAttachable(Chromium.layerConnect).start(app, elsewhere)
+        const state = path.join(env.XDG_RUNTIME_DIR, "held.state")
+        const saved = () => fs.readFileSync(state, "utf8")
+        try {
+          const started = yield* strider(env, "start", "--name", "remote", "--attach", endpoint)
+          assert.strictEqual(started.code, 0, started.err)
+          const empty = yield* run("state", "save", state)
+          assert.notStrictEqual(empty.code, 0, "an attached session holding nothing writes no empty file")
+          assert.include(empty.err, "strider control")
+          assert.isFalse(fs.existsSync(state))
+          const tabs = yield* run("tabs")
+          const tab = tabs.out.split("\n").find((line) => line.includes(app))!.split("  ")[0]!
+          assert.strictEqual((yield* run("control", tab, "--name", "app")).code, 0)
+          assert.include((yield* run("pages")).out, `app  ${app}`)
+          assert.include((yield* strider(env, "sessions")).out, "app")
+          // The held tab's state, not the browser's other tab's
+          const held = yield* run("state", "save", state)
+          assert.strictEqual(held.code, 0, held.err)
+          assert.include(held.out, "saved 1 cookie and 1 origin for 127.0.0.1 to ")
+          assert.include(saved(), `"app"`)
+          assert.notInclude(saved(), "elsewhere")
+          // The read's control ends with it: the tab is still the session's
+          assert.strictEqual((yield* run("-p", "app", "snapshot")).code, 0)
+          // Widening is asked for, and says what it found
+          const added = yield* run("state", "save", state, "--site", "localhost")
+          assert.strictEqual(added.code, 0, added.err)
+          assert.include(saved(), "elsewhere")
+          assert.include(added.out, "127.0.0.1, localhost")
+          const nothing = yield* run("state", "save", state, "--site", "okta.com")
+          assert.include(nothing.out, "nothing for okta.com")
+          assert.notInclude(saved(), "elsewhere")
+          const whole = yield* run("state", "save", state, "--all")
+          assert.strictEqual(whole.code, 0, whole.err)
+          assert.include(saved(), "elsewhere")
+          assert.notStrictEqual((yield* run("state", "save", state, "--all", "--site", "okta.com")).code, 0)
+          // A page of the session's own context is a second state to choose from, saved whole
+          assert.strictEqual((yield* run("page", "new", "--name", "own", `${served.origin}/fixture`)).code, 0)
+          const ambiguous = yield* run("state", "save", state)
+          assert.notStrictEqual(ambiguous.code, 0)
+          assert.include(ambiguous.err, "-p")
+          assert.strictEqual((yield* run("-p", "own", "state", "save", state)).code, 0)
+          assert.notInclude(saved(), `"app"`)
+          assert.notStrictEqual((yield* run("-p", "own", "state", "save", state, "--all")).code, 0)
+          assert.strictEqual((yield* run("-p", "app", "state", "save", state)).code, 0)
+          assert.include(saved(), `"app"`)
+        } finally {
+          assert.strictEqual((yield* run("stop")).code, 0)
+        }
+      }).pipe(Effect.provide(NodeServices.layer))
+    ), timeout)
+
   // ROOK-4: the browser WebSocket's id dies with that browser; the endpoint given outlives it
   it.live("exports a Chromium HTTP attachment by the endpoint it was given", () =>
     Effect.scoped(

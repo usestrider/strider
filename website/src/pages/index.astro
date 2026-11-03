@@ -19,19 +19,22 @@ const engravings = import.meta.glob<{ default: ImageMetadata }>("../assets/heron
   eager: true
 })
 const engraving = Object.values(engravings)[0]?.default
-const install = "npm install @usestrider/browser"
-const example = `import { Browser, Expect } from "@usestrider/browser"
+const install = "pnpm add @usestrider/browser effect @effect/platform-node"
+const example = `import { NodeServices } from "@effect/platform-node"
+import { Browser, Expect } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
+
+const BrowserLive = Chromium.layer({
+  executablePath: "/usr/bin/chromium"
+}).pipe(Layer.provide(NodeServices.layer))
 
 const program = Effect.scoped(Effect.gen(function*() {
   const page = yield* Browser.newPage()
   yield* page.goto("https://shop.example.com")
   yield* page.getByRole("button", { name: "Add to cart" }).click()
   yield* page.getByText("1 item").pipe(Expect.toBeVisible)
-})).pipe(Effect.provide(
-  Chromium.layer({ executablePath: "/usr/bin/chromium" })
-))`
+})).pipe(Effect.provide(BrowserLive))`
 ---
 
 <BaseLayout
@@ -51,7 +54,7 @@ const program = Effect.scoped(Effect.gen(function*() {
             src={engraving}
             widths={[468, 936]}
             sizes="(min-width: 520px) 468px, 100vw"
-            alt="An engraving of a great blue heron, stepping"
+            alt="A great blue heron, stepping, drawn in the style of an engraving"
             loading="eager"
           />
           </div>

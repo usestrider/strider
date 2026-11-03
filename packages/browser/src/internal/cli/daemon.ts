@@ -59,6 +59,7 @@ import * as WebKit from "../../webkit/WebKit.ts"
 import * as Handles from "../handles.ts"
 import * as OperationImpl from "../operation.ts"
 import * as Serialization from "../serialization.ts"
+import * as StorageStates from "../storageState.ts"
 import * as ToolkitImpl from "../toolkit.ts"
 import * as Tools from "../tools.ts"
 import * as Attach from "./attach.ts"
@@ -698,13 +699,30 @@ export const commands = (getDaemon: () => Daemon) => {
   )
   const state = Command.make("state").pipe(
     Command.withSubcommands([
-      Command.make("save", { path: Argument.String("path") }, ({ path }) =>
+      Command.make("save", {
+        path: Argument.String("path"),
+        all: Flag.Boolean("all").pipe(
+          Flag.withDescription("From a browser's context: save all of it, every login in it, not the held tabs' state"),
+          Flag.withDefault(false)
+        ),
+        sites: Flag.String("site").pipe(
+          Flag.withDescription("From a browser's context: also save this domain's state and its subdomains'"),
+          Flag.atLeast(0)
+        )
+      }, ({ all, path, sites }) =>
         Effect.gen(function*() {
           const fs = yield* FileSystem.FileSystem
-          const text = yield* exportState(getDaemon()).pipe(Effect.mapError((failure) => new CommandFailed(failure)))
+          const { page } = yield* root
+          const { summary, text } = yield* exportState(getDaemon(), {
+            page: Option.getOrUndefined(page),
+            all,
+            sites
+          }).pipe(
+            Effect.mapError((failure) => new CommandFailed(failure))
+          )
           const resolved = yield* resolvePath(path)
           yield* fs.writeFileString(resolved, text, { mode: 0o600 }).pipe(Effect.mapError(failedWith))
-          yield* Console.log(`saved the session's state to ${resolved}, readable by you alone`)
+          yield* Console.log(`saved ${summary} to ${resolved}, readable by you alone`)
         })).pipe(Command.withDescription("Save storage state to a file"))
     ])
   )
@@ -791,10 +809,116 @@ const resolvePath = Effect.fnUntraced(function*(path: string) {
   return paths.resolve(cwd, path)
 })
 
-const exportState = Effect.fnUntraced(function*(daemon: Daemon) {
-  const state = yield* daemon.context.exportStorageState.pipe(Effect.mapError(ToolkitImpl.toFailure))
-  // The codec for saving, which writes each Redacted value in full
-  return yield* Schema.encodeEffect(StorageState.Json)(state).pipe(Effect.orDie)
+/** A `--site`'s host, with or without a scheme, or nothing if it names none. */
+const siteHost = (site: string) =>
+  Option.fromNullishOr(URL.parse(site.includes("://") ? site : `https://${site}`)).pipe(
+    Option.map((url) => url.hostname.replace(/^\.+/, "")),
+    Option.filter((host) => host !== "")
+  )
+
+/** A state's count of something, as `state save` says it. */
+const counted = (count: number, what: string) => `${count} ${what}${count === 1 ? "" : "s"}`
+
+/** The hosts a state holds, without those a domain listed covers, the first few of them. */
+const stateHosts = (state: StorageState.StorageState) => {
+  const hosts = new Set([
+    ...state.cookies.map((cookie) => cookie.domain.replace(/^\./, "")),
+    ...state.origins.map((origin) => new URL(origin.origin).hostname)
+  ])
+  const covering = [...hosts].filter((host) => ![...hosts].some((other) => host.endsWith(`.${other}`))).sort()
+  return covering.length <= 5
+    ? covering.join(", ")
+    : `${covering.slice(0, 5).join(", ")} and ${covering.length - 5} more`
+}
+
+/**
+ * The storage state of the context the session's pages are in, or the named page's. A tab taken with control stays
+ * in its browser's context, which holds that browser's every login: control lasts as long as the read, which takes
+ * only what the held tabs' hosts are sent, and what `sites` adds, unless `all` asks for the whole context. The
+ * session's own context is its own, and is read whole. Pages in several contexts, or an attached session with
+ * nothing to read, are refused rather than saved as a state that looks whole.
+ */
+const exportState = Effect.fnUntraced(function*(
+  daemon: Daemon,
+  options: {
+    readonly page?: string | undefined
+    readonly all?: boolean | undefined
+    readonly sites?: ReadonlyArray<string> | undefined
+  } = {}
+) {
+  const refuse = (error: string, message: string) => Effect.fail(new Tools.ToolFailure({ error, message }))
+  const { all = false, page, sites = [] } = options
+  if (all && sites.length > 0) {
+    return yield* refuse("InvalidInput", "--all saves the whole context, so --site has nothing to add; give one")
+  }
+  const added: Array<string> = []
+  for (const site of sites) {
+    const host = siteHost(site)
+    if (Option.isNone(host)) {
+      return yield* refuse("InvalidInput", `${JSON.stringify(site)} isn't a site, such as okta.com`)
+    }
+    added.push(host.value)
+  }
+  const pages = yield* daemon.session.pages
+  const chosen = page === undefined ? pages : pages.filter((each) => each.name === page)
+  if (page !== undefined && chosen.length === 0) {
+    return yield* refuse(
+      "PageNotFound",
+      `No page named ${page}; the pages are ${pages.map((each) => each.name).join(", ") || "none"}`
+    )
+  }
+  const contexts = new Map(chosen.map((each) => [each.page.context.id, each.page.context]))
+  if (contexts.size > 1) {
+    return yield* refuse(
+      "InvalidInput",
+      `The session's pages are in ${contexts.size} contexts, each with its own state; name one with -p: ${
+        chosen.map((each) => each.name).join(", ")
+      }`
+    )
+  }
+  const [context] = contexts.values()
+  const source = context ?? daemon.context
+  const inspector = daemon.browser._tag === "Attach" && daemon.browser.backend === "webkit"
+  const own = !inspector && source.id === daemon.context.id
+  if (own && (all || sites.length > 0)) {
+    return yield* refuse(
+      "InvalidInput",
+      "--all and --site choose from a browser's context, and this session holds no tab of one: its own context is saved whole. strider control takes a tab"
+    )
+  }
+  const held = yield* Effect.forEach(chosen, (each) => each.page.url).pipe(Effect.mapError(ToolkitImpl.toFailure))
+  const hosts = all
+    ? undefined
+    : [
+      ...held.flatMap((url) => Option.toArray(Option.fromNullishOr(URL.parse(String(url))))).map((url) => url.hostname),
+      ...added
+    ]
+  const state = yield* Effect.scoped(
+    own
+      ? daemon.context.exportStorageState
+      : Effect.flatMap(
+        source.control,
+        (controlled) => StorageStates.exportState(Handles.target(controlled).behind.runtime, controlled.id, hosts)
+      )
+  ).pipe(Effect.mapError(ToolkitImpl.toFailure))
+  const empty = state.cookies.length === 0 && state.origins.length === 0
+  if (chosen.length === 0 && daemon.browser._tag === "Attach" && empty) {
+    return yield* refuse(
+      "InvalidInput",
+      "This session holds no page, so it has no state to save; strider tabs lists the browser's, and strider control takes one"
+    )
+  }
+  const unmatched = added.filter((host) =>
+    !state.cookies.some((cookie) => StorageStates.related(cookie.domain, host)) &&
+    !state.origins.some((origin) => StorageStates.related(new URL(origin.origin).hostname, host))
+  )
+  return {
+    // The codec for saving, which writes each Redacted value in full
+    text: yield* Schema.encodeEffect(StorageState.Json)(state).pipe(Effect.orDie),
+    summary: `${counted(state.cookies.length, "cookie")} and ${counted(state.origins.length, "origin")}${
+      empty ? "" : ` for ${stateHosts(state)}`
+    }${unmatched.length === 0 ? "" : `, nothing for ${unmatched.join(", ")}`}`
+  }
 })
 
 /** `strider run`: the file's default export, with `CurrentSession` and a scope of its own. */
@@ -1075,7 +1199,7 @@ const handlers = (daemon: Daemon, tree: ReturnType<typeof commands>, version: st
         owner: daemon.owner ?? null,
         dir: daemon.paths.dir
       })),
-    State: () => exportState(daemon)
+    State: () => Effect.map(exportState(daemon), (saved) => saved.text)
   })
 
 /**

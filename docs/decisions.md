@@ -6,11 +6,9 @@ CLI.md) state the contracts that follow from them.
 
 ## Principles
 
-**Strider drives stock browsers and depends on nothing but Effect.** The maintainer: "I don't want to use the
-playwright builds at all, I want my own versions of everything, ideally using stock as much as possible. playwright
-builds are immediately detected by bot protection", and "How does that not align with my goal of no dependencies from
-the start?" A patched browser is a dependency as much as a package is. Its protocol changes whenever its vendor rolls
-it, users can get it only through the vendor's installer, and its patches are a fingerprint. Rejected: Playwright's
+**Strider drives stock browsers and depends on nothing but Effect.** A script should run in the browser a site
+expects, not a build made for automation. A patched browser is also a dependency as much as a package is: its protocol
+changes whenever its vendor rolls it, and users can get it only through the vendor's installer. Rejected: Playwright's
 WebKit build as an option, and a patched WebKit of our own. Where a feature would need a dependency, it isn't built.
 Only Firefox records a video file, because turning Chromium's or WebKit's frames into one needs an encoder. A trace's
 DOM capture is our own code. Playwright's snapshotter is read to learn what the trace viewer expects, never copied or
@@ -60,8 +58,9 @@ happened: a fully acknowledged gesture doesn't show the application acted on it.
 have. The library doesn't bring a page to the front before acting, because that changes which page is in front
 without the caller asking. A page that can't render says so (`NoRenderingOpportunity`) and names the two remedies.
 
-**Nothing of the library's runs in a page's world unless the caller declared it.** "Never a wrapper in the page." A
-page can see a wrapper, for example that `alert` isn't the browser's, and bot detection looks for exactly that. So:
+**Nothing of the library's runs in a page's world unless the caller declared it, or the browser leaves no other way.**
+"Never a wrapper in the page." A page can see a wrapper, for example that `alert` isn't the browser's, and a script
+shouldn't change how a site behaves. So:
 
 - On stock WebKit, whose Automation reports a dialog without its kind, a dialog is `Dialog.Unknown` rather than
   learned from wrapped dialog functions.
@@ -70,7 +69,8 @@ page can see a wrapper, for example that `alert` isn't the browser's, and bot de
   pages where their scripts could read it.
 - The query engine is one self-contained function in our source, with no library in the page.
 
-What does run in the main world is what the caller declared: their init scripts and the page clock.
+What does run in the main world is what the caller declared, their init scripts and the page clock, and, on stock
+WebKit alone, the library's own engine and reads, because its inspector makes no other world (QUIRKS.md, Q194).
 
 **The design is checked as compiled code.** A compiler checks what prose can't:
 
@@ -364,7 +364,7 @@ option, a route handler must produce a decision compatible with that phase.
 `FileChooser.Pending` provide `Effect<Decision<…>>`, so a handler can return `Route.abort()` or `dialog.accept`
 directly. A generator that does other work ends with `return yield* Route.abort()` to produce the decision rather
 than another Effect. This keeps handlers consistent with Effect's own callbacks and removes the
-`Effect.succeed(…)` wrapper from one-line handlers (ISSUES.md, I34).
+`Effect.succeed(…)` wrapper from one-line handlers.
 
 Rejected: allowing a handler to return either a plain decision or an Effect of one, because the union return is
 unlike Effect's own callbacks; and making a decision itself an Effect, as `Exit` is, because that requires Effect's
@@ -608,3 +608,118 @@ Bind Chromium `page.screenshot` to the current main document before L1 geometry 
 The policy applies to `page.screenshot`; trace screenshot collection is outside this contract. This policy cannot cancel Chromium's pending command or prove temporary capture settings were restored. The pinned Chromium 155.0.8059.79 regression explicitly captures again immediately after invalidation and observes replacement pixels at 1100×1000, without waiting for load, repair or retry. That successful observation is no general repair or completion guarantee. Keep other backends unchanged; a subframe-only change or a hang without a committed main-document replacement remains bounded by the existing deadline.
 
 Rejected: retaining a 30-second wait for this observed race; retrying or returning replacement-document pixels; waiting for destination load; increasing deadlines; silently restoring viewport or browser state without evidence that this repairs the pending native work; reusing `NavigationSuperseded`, which describes a navigation operation; and generalizing the workaround to browsers not covered by the Chromium evidence. The upstream report remains independent of the workaround and is not posted externally.
+
+## Experimental Chromium claims and internal handoff (ROOK-95)
+
+Keep durable tab identity separate from connection-local public ids. The experimental subpath issues opaque,
+serializable branded claims only for targets the connection owns: a control grant on a discovered page is not
+ownership, and control of the default context never grants its removal. Disposable contexts and their pages
+cannot issue claims; default-context pages are exempt from disposal on disconnect. Page and context claims
+carry distinct kinds, checked on use before target lookup. Chromium claims bind the browser
+WebSocket GUID, the native tab target and its native context. Tab-level attachment identifies the active page;
+URLs cannot distinguish two tabs and page targets can change during prerender activation. Identity lookup uses
+a separate short-lived CDP client so it does not change the model's attachment hierarchy. A pipe connection
+without the browser WebSocket identity, Firefox and stock WebKit refuse the capability explicitly.
+
+Persistence is explicit, through the experimental context constructor; ordinary contexts retain
+`disposeOnDetach: true`. A reclaimable context uses false but still closes on ordinary scope exit. The internal
+Chromium handoff suppresses only owned target destruction while closing the old scope: registrations, paused
+request handlers and access grants still run their finalizers. Reclaim acquires close-on-scope-exit ownership
+again. Context reclaim borrows the surviving context during setup, acquiring destruction ownership only after
+setup succeeds. Failure or interruption immediately unwinds setup registrations and restores prior model
+settings without deleting existing tabs or the context, including when storage application fails. Data already
+written by storage application is not transactional. Requested context options apply to existing and future pages; routes and init scripts are redeclared by the host. The default context is never owned for removal.
+Reclaim observes before acquiring ownership, so failed observation does not close somebody else's tab. On pinned
+Chromium 155.0.8059.79, both a dialog proved open before handoff and one opened after it blocked a new inspector's
+`Page.enable`; the existing model's initialization gate also could not complete. This prevents reliable dialog
+rediscovery with the implemented protocol path. These observations do not identify a surviving tab's current
+dialog state from a later connection.
+
+The approved fallback acquires ownership after an explicit bounded observation and returns a Schema union:
+`Observed` carries dialog observations with a closed kind union; `Unknown` carries no current dialog data and
+names no inferred cause. Observation defaults to 1000 milliseconds and counts against the caller deadline.
+An earlier caller deadline remains `Timeout`, and interruption remains interruption; neither is converted into
+Unknown success or ownership. Browser-level close and ordinary scope cleanup work independently of the blocked
+initialization gate; ordinary actions remain bounded by their own operation deadlines. Context recovery returns
+its context plus per-page observations from before settings application; failure during settings application
+still preserves the borrowed context rather than returning partial setup as successful recovery. Empty and
+all-Observed contexts use normal setup, including the normal defaults when settings are omitted. Adoption is
+restricted to no-settings recovery with at least one Unknown page. It bypasses session setup for the whole
+context so ownership and cleanup do not enter a blocked initialization gate. This conservative boundary also
+applies to healthy siblings and future pages: adoption installs no automatic dialog policy, unrouted HTTP
+challenge forwarding, file chooser interception/cancellation, or temporary download directory with an allow
+declaration. Native browser behavior remains, and there is no automatic restoration later. The per-page report
+is an observation of current state, not a guarantee that these defaults were installed.
+
+Every supplied setting, including local `dialogs` or `eventLog`, is refused with `UserContext.reclaim.settings`
+if any page is Unknown, before any setup or ownership transfer. `observationTimeout` and `lastKnown` are
+metadata rather than settings. The host may choose no-settings recovery but accepts these omissions for the
+entire context; this trade-off must be stated when presenting the change. Rejected: adoption for empty or
+all-Observed contexts, silently dropping requested settings, selectively configuring healthy siblings while
+leaving an apparently uniform context, or requiring renderer-dependent defaults before adopting Unknown pages.
+
+Planned handoff captures the model's current prompt before finalizers run and returns serializable snapshots
+bound to the exact page or context claim. Context snapshots aggregate historical events for all their pages,
+including pages with no individual claim. The caller explicitly carries them to the matching reclaim. Their Schema tag is `LastKnown`,
+and they remain separate from the current report even when the current state is Unknown. Active prompt data
+is independent of the event-log cap. A killed client cannot supply such a snapshot. Neither empty historical
+details nor an observed empty dialog list promises that the page is generally healthy.
+
+Planned Chromium handoff permits a narrowly different action from observational reclaim. The owning page's
+release finalizer waits for handler resolution, then dismisses a still-open dialog using its original session,
+before context declaration teardown. It has a 1000 ms budget independent of the closing caller. Confirmed reply
+and a matching dialog-closure fact are required before publishing a typed `DialogDismissed` event with kind and
+message. Failed or timed-out dismissal produces a typed Unknown handoff report and does not fail scope closure.
+The new client receives this historical event separately from current Observed/Unknown state. A caller handler
+may still accept normally, but shutdown fallback cannot apply an accept policy or beforeunload's ordinary
+implicit acceptance. Dismissing beforeunload cancels the pending navigation and leaves the tab/document alive.
+A client killed without finalizers cannot perform this handoff action and reclaim never tries it afterward.
+`Complete` refers to the dismissal loop at page release, not to the absence of dialogs during later teardown or
+on the next connection. Current observation remains separate even when historical handoff completed.
+
+Every handoff declaration release has a separate 1000 ms confirmation budget, independent of the ordinary
+operation's deadline and of the dismissal budget. Local registrations are removed immediately. Failed or expired
+release logs its unconfirmed outcome and makes the returned handoff report Unknown without erasing confirmed
+events or failing scope closure. Expiry can interrupt restoration before every healthy page is restored, including
+when the old connection remains open; Unknown explicitly preserves that uncertainty. The number of declarations
+determines the total possible teardown wait; there is no implicit 30-second wait per blocked release. Rejected: treating a warning as confirmed cleanup, suppressing
+the warning, or making ordinary caller deadlines wait for a fresh cleanup budget. Borrowed-context rollback
+still waits for confirmation under its own cleanup lifetime. Connection shutdown can interrupt that background
+lifetime; its waiting finalizer records an unconfirmed release rather than interrupting the caller.
+
+Ownership transfer, report registration and result construction commit together under interruption masking.
+Snapshot registration moves to the new scope with the claim instead of surviving in the old scope.
+
+Rejected: automatic acceptance during handoff, including an option or policy enabling it, because shutdown could
+confirm a deletion or payment; pretending failed dismissal succeeded; treating a handoff event as current state;
+and disabling warnings about unconfirmed declaration teardown. Leaving all dialogs untouched during planned
+handoff was superseded: on pinned Chromium a residual dialog prevents file-chooser declaration release, while
+dismissal on the original session permits that release to complete.
+
+Rejected: matching by URL; storing connection-local public ids or page-target ids; accepting control as proof of
+ownership; changing ordinary context cleanup; a public handoff option; dismissing dialogs during reclaim; and
+refusing all ownership when bounded observation cannot complete; calling an observation timeout a confirmed
+dialog; returning fresh-looking empty current state; treating historical details as current; and adding a lease
+or expiry implementation here. ROOK-96 owns claim leases, ROOK-97 owns expiry, and no host may
+enable persistent contexts before expiry cleanup ships. Claims are identity tokens, not authentication or a
+mutual-exclusion mechanism. A browser debugging endpoint remains the trust boundary.
+
+Identity discovery must not interpret an ended observation stream as target destruction. Actual transport loss
+already fails subscriptions with SessionEnded; a subscription ending without an active page now fails as
+modelUnavailable instead of returning Gone for a known live tab. Native absence still permits Gone. Recovery
+snapshots exist only for issued page/context claims; unclaimed pages have no claim-bound recovery record. The
+separate, scoped identity WebSocket per candidate tab is unchanged; no performance improvement is claimed here.
+
+## CDP declaration cleanup lifetime and caller wait (ROOK-95)
+
+Removing a declaration updates the registry synchronously, then starts the browser reapplication in a
+connection-owned fiber with its own cleanup budget. Its lifetime must outlast the operation that registered it:
+an expired registration deadline must not prevent restoration. Its caller's wait is separately bounded by the
+operation doing the cleanup. A caller timing out stops waiting without canceling that connection-owned work.
+Borrowed-context rollback explicitly requests confirmation, so prior settings are not reported restored before
+its setup registrations have been released. Finalizers preserve their registration environment for browser work,
+but read the closing caller's deadline and confirmation policy before entering that environment.
+
+Rejected: retaining an expired protocol deadline for release; waiting for a fresh full cleanup budget inside
+every ordinary operation; cancelling restoration when the caller stops waiting; discarding release failures;
+and returning borrowed-context rollback as confirmed while browser restoration is still pending.
