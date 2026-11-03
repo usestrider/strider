@@ -46,6 +46,22 @@ describe("session files", () => {
     }
   })
 
+  it("checks alias target components before parent traversal", async () => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+    try {
+      fs.mkdirSync(path.join(temporary, "unsafe"))
+      fs.chmodSync(path.join(temporary, "unsafe"), 0o777)
+      fs.mkdirSync(path.join(temporary, "target"), { mode: 0o700 })
+      // Preserve .. in the link text so every traversed component must be checked.
+      fs.symlinkSync(temporary + "/unsafe/../target", path.join(temporary, "alias"))
+      assert.isTrue(
+        Exit.isFailure(await Effect.runPromiseExit(Session.validateRoot(path.join(temporary, "alias", "strider"))))
+      )
+    } finally {
+      fs.rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
   it("creates missing parents privately after validating their ancestors", async () => {
     const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
     try {
@@ -97,7 +113,24 @@ describe("session files", () => {
     }
   })
 
+  it("rejects session directory symlinks before connecting", async () => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+    try {
+      const root = path.join(temporary, "strider")
+      fs.mkdirSync(root, { mode: 0o700 })
+      fs.mkdirSync(path.join(temporary, "target"), { mode: 0o700 })
+      fs.symlinkSync(path.join(temporary, "target"), path.join(root, "example"))
+      const result = await Effect.runPromiseExit(Effect.scoped(Client.session(root, "example")))
+      assert.isTrue(Exit.isFailure(result))
+    } finally {
+      fs.rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
   it("rejects wrong-owner metadata (mock; no second user)", () => {
+    assert.isFalse(
+      Session.trustedAlias({ uid: 42, mode: 0o777, isDirectory: () => false, isSymbolicLink: () => true }, 43)
+    )
     assert.isFalse(
       Session.privateDirectory({ uid: 42, mode: 0o700, isDirectory: () => true, isSymbolicLink: () => false }, 43)
     )
