@@ -9,6 +9,23 @@ import * as Client from "../src/internal/cli/client.ts"
 import * as Session from "../src/internal/cli/session.ts"
 
 describe("session files", () => {
+  it("uses the current user identity in the fallback", () => {
+    assert.strictEqual(Session.root({}, "/tmp"), `/tmp/strider-${process.getuid!()}`)
+  })
+
+  it("rejects a symlink root before listing", async () => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+    try {
+      fs.mkdirSync(path.join(temporary, "actual"), { mode: 0o700 })
+      const root = path.join(temporary, "strider")
+      fs.symlinkSync(path.join(temporary, "actual"), root)
+      const result = await Effect.runPromiseExit(Client.running(root).pipe(Effect.provide(NodeServices.layer)))
+      assert.isTrue(Exit.isFailure(result))
+    } finally {
+      fs.rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
   it("refuses to list sessions in a pre-existing accessible root", async () => {
     const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
     try {
@@ -31,7 +48,7 @@ describe("session files", () => {
       process.env.XDG_RUNTIME_DIR = temporary
       const root = Session.root(process.env, temporary)
       fs.mkdirSync(root)
-      fs.chmodSync(root, 0o777)
+      fs.chmodSync(root, 0o700)
       const target = path.join(temporary, "target")
       fs.writeFileSync(target, "original\n")
       fs.symlinkSync(target, path.join(root, `.start-${process.pid}.log`))
