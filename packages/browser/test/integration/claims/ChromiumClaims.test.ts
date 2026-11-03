@@ -1305,6 +1305,57 @@ describe("Chromium claims (ROOK-95)", () => {
             "unconfirmed declaration release must remain visible"
           )
         }), 120_000)
+
+      for (const mode of ["created", "reclaimed with no settings"] as const) {
+        it.effect(
+          `a context ${mode} answers an unrouted HTTP challenge with the server's response`,
+          () =>
+            Effect.gen(function*() {
+              const browser = yield* launch
+              const server = yield* Effect.acquireRelease(
+                Effect.promise(async () => {
+                  const server = createServer((_, response) => {
+                    response.statusCode = 401
+                    response.setHeader("WWW-Authenticate", "Basic realm=\"claims\"")
+                    response.setHeader("Content-Type", "text/html")
+                    response.end("<title>denied</title>")
+                  })
+                  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+                  return server
+                }),
+                (server) =>
+                  Effect.promise(() =>
+                    new Promise<void>((resolve) => {
+                      server.closeAllConnections()
+                      server.close(() => resolve())
+                    })
+                  )
+              )
+              const address = server.address()
+              assert(address && typeof address !== "string")
+              const old = yield* Scope.make()
+              yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
+              const services = yield* Layer.buildWithScope(browser.connect, old)
+              const claim = yield* Effect.gen(function*() {
+                const context = yield* api.UserContext.create({ reclaimable: true })
+                return yield* api.UserContext.claim(context)
+              }).pipe(Scope.provide(old), Effect.provide(services))
+              yield* handoff(old)
+              yield* Effect.scoped(Effect.gen(function*() {
+                const context = mode === "created"
+                  ? yield* api.UserContext.create({ reclaimable: true })
+                  : (yield* api.UserContext.reclaim(claim)).context
+                const page = yield* context.newPage
+                const exit = yield* page.goto(`http://127.0.0.1:${address.port}/auth`).pipe(
+                  Deadline.within("5 seconds"),
+                  Effect.exit
+                )
+                assert.isTrue(Exit.isSuccess(exit), `goto: ${String(exit)}`.slice(0, 240))
+              })).pipe(Effect.provide(browser.connect))
+            }),
+          60_000
+        )
+      }
     }
   )
 })
