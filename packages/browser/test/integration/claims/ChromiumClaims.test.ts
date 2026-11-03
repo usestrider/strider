@@ -1049,20 +1049,29 @@ describe("Chromium claims (ROOK-95)", () => {
           const old = yield* Scope.make()
           yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
           const services = yield* Layer.buildWithScope(browser.connect, old)
-          yield* Effect.gen(function*() {
+          const claim = yield* Effect.gen(function*() {
             const context = yield* api.UserContext.create({ reclaimable: true, dialogs: "leaveOpen" })
             const page = yield* context.newPage
             yield* page.goto(`${origin}/context-only`)
-            yield* api.UserContext.claim(context)
+            const claim = yield* api.UserContext.claim(context)
             const opened = yield* Dialog.next(page)
             yield* page.evaluateInMainWorld(() => {
-              setTimeout(() => confirm("dismissed unseen"), 0)
+              setTimeout(() => { sessionStorage.answer = String(confirm("dismissed unseen")) }, 0)
             })
             yield* opened
+            return claim
           }).pipe(Scope.provide(old), Effect.provide(services))
           const snapshots = yield* handoff(old)
           const events = snapshots.flatMap((snapshot) => snapshot.handoff?.events ?? [])
           assert.deepStrictEqual(events.map((event) => event.message), ["dismissed unseen"])
+          const saved = Schema.decodeUnknownSync(api.Browser.LastKnown)(JSON.parse(JSON.stringify(snapshots.find((snapshot) => snapshot.claim === claim))))
+          yield* Effect.scoped(Effect.gen(function*() {
+            // The cast keeps the regression runnable before the context transport option is implemented.
+            const recovered = yield* api.UserContext.reclaim(claim, { lastKnown: saved } as Parameters<typeof api.UserContext.reclaim>[1])
+            assert.deepStrictEqual((recovered as unknown as { handoff: typeof saved.handoff }).handoff, saved.handoff)
+            const pages = yield* recovered.context.pages
+            assert.strictEqual(yield* pages[0]!.evaluateInMainWorld(() => sessionStorage.answer), "false")
+          })).pipe(Effect.provide(browser.connect))
         }), 60_000)
 
       it.effect("context reclaim with a blocked page returns it as Unknown", () =>
@@ -1085,10 +1094,13 @@ describe("Chromium claims (ROOK-95)", () => {
             Protocol.on(browser.observer.browser)
           )
           const session = yield* browser.observer.session(sessionId)
+          yield* CdpPage.enable().pipe(Protocol.on(session))
+          const events = yield* session.subscribe(CdpPage.javascriptDialogOpening)
+          const opened = yield* Stream.runHead(events).pipe(Effect.forkChild)
           yield* Runtime.evaluate({ expression: "setTimeout(() => confirm('blocked'), 0); undefined" }).pipe(
             Protocol.on(session)
           )
-          yield* Effect.sleep("300 millis")
+          assert.strictEqual(Option.getOrThrow(yield* Fiber.join(opened)).message, "blocked")
           const start = performance.now()
           const exit = yield* Effect.scoped(
             api.UserContext.reclaim(claim).pipe(Effect.map(({ found }) => found.pages.map((page) => page.found._tag)))
