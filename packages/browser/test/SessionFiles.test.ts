@@ -2,11 +2,25 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import { spawnSync } from "node:child_process"
 import * as fs from "node:fs"
+import * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
 import * as Client from "../src/internal/cli/client.ts"
 import * as Session from "../src/internal/cli/session.ts"
+
+const bin = new URL("../src/bin/strider.ts", import.meta.url).pathname
+
+/** The real command, with its environment replaced; a real child process on the real filesystem. */
+const strider = (env: Readonly<Record<string, string>>, ...args: ReadonlyArray<string>) => {
+  const { XDG_RUNTIME_DIR: _, ...inherited } = process.env
+  return spawnSync(process.execPath, [bin, ...args], {
+    encoding: "utf8",
+    timeout: 20_000,
+    env: { ...inherited, NO_COLOR: "1", ...env }
+  })
+}
 
 describe("session files", () => {
   it("rejects wrong-owner metadata (mock; no second user)", () => {
@@ -110,6 +124,77 @@ describe("session files", () => {
     } finally {
       if (previous === undefined) delete process.env.XDG_RUNTIME_DIR
       else process.env.XDG_RUNTIME_DIR = previous
+      fs.rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it("does not reach a socket planted in a root that was missing when the client was made", async () => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+    const planted = net.createServer((socket) => {
+      connected = true
+      socket.destroy()
+    })
+    let connected = false
+    try {
+      const root = path.join(temporary, "strider")
+      await Effect.runPromiseExit(
+        Effect.scoped(Effect.gen(function*() {
+          const client = yield* Client.session(root, "example")
+          // What another user could do in a shared /tmp once the check has found nothing: the mode stands in for
+          // the owner, as the test runs as one user
+          fs.mkdirSync(path.join(root, "example"), { recursive: true })
+          fs.chmodSync(root, 0o777)
+          fs.chmodSync(path.join(root, "example"), 0o777)
+          yield* Effect.promise(() =>
+            new Promise<void>((resolve) => planted.listen(path.join(root, "example", "daemon.sock"), resolve))
+          )
+          yield* client.Info()
+        })).pipe(Effect.timeout("2 seconds"))
+      )
+      assert.isFalse(connected, "the client connected to a socket in a root it never validated")
+    } finally {
+      planted.close()
+      fs.rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it("accepts an OS temporary directory reached through its owner's symlink, as macOS's /var and /tmp are", async () => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+    try {
+      fs.mkdirSync(path.join(temporary, "real"), { mode: 0o700 })
+      fs.symlinkSync("real", path.join(temporary, "alias"))
+      const result = strider({ TMPDIR: path.join(temporary, "alias"), XDG_STATE_HOME: temporary }, "sessions")
+      assert.strictEqual(result.status, 0, result.stderr)
+      assert.include(result.stdout, "No sessions")
+    } finally {
+      fs.rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it("refuses a prune name that leaves the session root", () => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+    try {
+      fs.mkdirSync(path.join(temporary, "strider"), { mode: 0o700 })
+      fs.mkdirSync(path.join(temporary, "outside"), { mode: 0o700 })
+      fs.writeFileSync(path.join(temporary, "outside", "keep"), "keep")
+      const result = strider({ XDG_RUNTIME_DIR: temporary, XDG_STATE_HOME: temporary }, "prune", "../outside")
+      assert.isTrue(fs.existsSync(path.join(temporary, "outside", "keep")), result.stdout + result.stderr)
+      assert.notStrictEqual(result.status, 0)
+    } finally {
+      fs.rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it("explains an unsafe root without a defect's log line and stack", () => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+    try {
+      fs.mkdirSync(path.join(temporary, "strider"))
+      fs.chmodSync(path.join(temporary, "strider"), 0o777)
+      const result = strider({ XDG_RUNTIME_DIR: temporary, XDG_STATE_HOME: temporary }, "sessions")
+      assert.notStrictEqual(result.status, 0)
+      assert.include(result.stderr, path.join(temporary, "strider"))
+      assert.notMatch(result.stderr, /ERROR \(#\d+\)|\n\s+at /)
+    } finally {
       fs.rmSync(temporary, { recursive: true, force: true })
     }
   })
