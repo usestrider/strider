@@ -14,7 +14,7 @@ const version = await versionLabel()
 const chapters = navigation(await getCollection("docs"))
 const counts = ["One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"]
 const chapterCount = `${counts[chapters.length - 1] ?? chapters.length} ${chapters.length === 1 ? "chapter" : "chapters"}`
-// The engraving, from design/strider/heron/: here, and only here
+// The homepage's engraving, kept in src/assets
 const engravings = import.meta.glob<{ default: ImageMetadata }>("../assets/heron-engraving.{png,jpg,webp,avif,svg}", {
   eager: true
 })

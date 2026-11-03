@@ -1,6 +1,6 @@
 {
   "$schema": "https://t3.codes/schema/t3.json",
-  "iconPath": "design/strider/heron/responsive/adaptive/heron-16.svg",
+  "iconPath": "website/public/heron.svg",
   "scripts": [
     {
       "name": "Setup",
