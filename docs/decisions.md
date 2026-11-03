@@ -633,12 +633,21 @@ An earlier caller deadline remains `Timeout`, and interruption remains interrupt
 Unknown success or ownership. Browser-level close and ordinary scope cleanup work independently of the blocked
 initialization gate; ordinary actions remain bounded by their own operation deadlines. Context recovery returns
 its context plus per-page observations from before settings application; failure during settings application
-still preserves the borrowed context rather than returning partial setup as successful recovery. With no settings
-requested, context reclaim adopts the existing pages without installing session declarations or assuming those
-settings were applied. This permits ownership and cleanup of Unknown pages without entering their blocked
-initialization gate. Requested settings on Unknown pages instead fail with `UserContext.reclaim.settings` before
-setup or ownership transfer. Rejected: silently skipping requested declarations and reporting successful setup,
-or making renderer-dependent defaults a prerequisite for adopting an unknown-state context.
+still preserves the borrowed context rather than returning partial setup as successful recovery. Empty and
+all-Observed contexts use normal setup, including the normal defaults when settings are omitted. Adoption is
+restricted to no-settings recovery with at least one Unknown page. It bypasses session setup for the whole
+context so ownership and cleanup do not enter a blocked initialization gate. This conservative boundary also
+applies to healthy siblings and future pages: adoption installs no automatic dialog policy, unrouted HTTP
+challenge forwarding, file chooser interception/cancellation, or temporary download directory with an allow
+declaration. Native browser behavior remains, and there is no automatic restoration later. The per-page report
+is an observation of current state, not a guarantee that these defaults were installed.
+
+Every supplied setting, including local `dialogs` or `eventLog`, is refused with `UserContext.reclaim.settings`
+if any page is Unknown, before any setup or ownership transfer. `observationTimeout` and `lastKnown` are
+metadata rather than settings. The host may choose no-settings recovery but accepts these omissions for the
+entire context; this trade-off must be stated when presenting the change. Rejected: adoption for empty or
+all-Observed contexts, silently dropping requested settings, selectively configuring healthy siblings while
+leaving an apparently uniform context, or requiring renderer-dependent defaults before adopting Unknown pages.
 
 Planned handoff captures the model's current prompt before finalizers run and returns serializable snapshots
 bound to the exact page or context claim. Context snapshots aggregate historical events for all their pages,
@@ -662,8 +671,9 @@ on the next connection. Current observation remains separate even when historica
 Every handoff declaration release has a separate 1000 ms confirmation budget, independent of the ordinary
 operation's deadline and of the dismissal budget. Local registrations are removed immediately. Failed or expired
 release logs its unconfirmed outcome and makes the returned handoff report Unknown without erasing confirmed
-events or failing scope closure. The number of declarations determines the total possible teardown wait; there
-is no implicit 30-second wait per blocked release. Rejected: treating a warning as confirmed cleanup, suppressing
+events or failing scope closure. Expiry can interrupt restoration before every healthy page is restored, including
+when the old connection remains open; Unknown explicitly preserves that uncertainty. The number of declarations
+determines the total possible teardown wait; there is no implicit 30-second wait per blocked release. Rejected: treating a warning as confirmed cleanup, suppressing
 the warning, or making ordinary caller deadlines wait for a fresh cleanup budget. Borrowed-context rollback
 still waits for confirmation under its own cleanup lifetime. Connection shutdown can interrupt that background
 lifetime; its waiting finalizer records an unconfirmed release rather than interrupting the caller.
@@ -685,6 +695,11 @@ or expiry implementation here. ROOK-96 owns claim leases, ROOK-97 owns expiry, a
 enable persistent contexts before expiry cleanup ships. Claims are identity tokens, not authentication or a
 mutual-exclusion mechanism. A browser debugging endpoint remains the trust boundary.
 
+Identity discovery must not interpret an ended observation stream as target destruction. Actual transport loss
+already fails subscriptions with SessionEnded; a subscription ending without an active page now fails as
+modelUnavailable instead of returning Gone for a known live tab. Native absence still permits Gone. Recovery
+snapshots exist only for issued page/context claims; unclaimed pages have no claim-bound recovery record. The
+separate, scoped identity WebSocket per candidate tab is unchanged; no performance improvement is claimed here.
 
 ## CDP declaration cleanup lifetime and caller wait (ROOK-95)
 

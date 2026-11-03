@@ -338,11 +338,17 @@ current dialog data or an inferred cause). Observation defaults to 1000 millisec
 Only expiry of that observation bound permits Unknown success; caller deadline expiry stays `Timeout`, and
 interruption stays interruption, without acquiring ownership. Unknown pages remain explicitly closeable and are
 closed on scope exit, even while their protocol initialization is blocked. Ordinary actions retain their deadlines.
-Context reclaim returns the context and per-page reports made before setup. With no settings requested it adopts
-existing pages without installing session declarations or assuming settings have been applied; blocked pages can
-therefore return Unknown without touching their dialogs. Requested settings require observed pages; unknown
-state fails with a named `UserContext.reclaim.settings` rejection before ownership changes. Otherwise settings
-apply within the caller deadline, and setup failure preserves the surviving targets.
+Context reclaim returns the context and per-page reports made before setup. Empty contexts and contexts whose
+pages are all Observed receive normal setup, including the normal defaults when settings are omitted. With no
+settings requested and at least one Unknown page, recovery adopts the whole context without session setup,
+so the blocked page can be owned without touching its dialog. This fallback also affects healthy siblings and
+future pages: there is no automatic dialog decision, unrouted HTTP challenge forwarding, file chooser
+interception/cancellation, or managed temporary download directory with an allow declaration. The browser's
+native behavior remains in place; normal setup is not restored automatically later. Per-page Observed reports do
+not promise these omitted defaults in a mixed context. Any supplied settings, including local `dialogs` or
+`eventLog`, are refused with `UserContext.reclaim.settings` before ownership changes when any page is Unknown.
+Observation and last-known metadata options are not settings. Otherwise settings apply within the caller
+deadline, and setup failure preserves the surviving targets.
 
 Internal planned handoff captures the current model's dialog details before teardown as serializable `LastKnown`
 snapshots bound to the exact page or context claim. A context snapshot aggregates its pages' historical events,
@@ -358,7 +364,10 @@ produce typed `DialogDismissed { kind, message }` events in the separate handoff
 stand for the next connection's present state. `Complete` means the release-time dismissal loop completed; it
 cannot rule out a dialog opened later during teardown. Each handoff declaration release has a separate 1000 ms
 confirmation budget. Unconfirmed release retains its warning and makes the handoff report Unknown, preserving
-any already-confirmed dismissal events; it does not fail scope closure. Dismissing a navigation's beforeunload prompt cancels the navigation
+any already-confirmed dismissal events; it does not fail scope closure. A bounded release may stop before
+restoring every healthy sibling, especially if the old connection stays open; Unknown does not promise restored
+settings. Handoff returns recovery snapshots only for issued page or context claims; unclaimed pages have no
+recovery record. Dismissing a navigation's beforeunload prompt cancels the navigation
 and preserves the tab and original document. A killed client runs no handoff finalizer: crash reclaim stays
 observational and can return Unknown. Leases (ROOK-96), expiry (ROOK-97) and host adoption are separate; persistent
 contexts must not be enabled by a host until expiry cleanup is available.
