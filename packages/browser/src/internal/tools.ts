@@ -70,7 +70,7 @@ const tool = <const Name extends string, P extends Schema.Struct.Fields, S exten
 
 export const pages = tool(
   "pages",
-  "Lists the context's pages by name, with their URLs.",
+  "Lists the session's pages by name, with their URLs.",
   {},
   Schema.Array(Schema.Struct({ page: Schema.String, url: Schema.String })),
   "reads"

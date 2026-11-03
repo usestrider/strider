@@ -307,7 +307,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   )
   const nameOfEntry = (id: Target.NavigableId): string => nameById.get(id) ?? id
 
-  /** The context's pages, each named, the new ones `p1`, `p2`… */
+  /** The session's pages, each named, the new ones `p1`, `p2`…: its context's, then those named outside it. */
   const refresh = Effect.gen(function*() {
     yield* pruneClosed
     if (options.discoverContextPages === false) return [...byName.values()]
@@ -317,7 +317,9 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       const name = yield* nameOf(page)
       options.seen?.({ _tag: "Listed", page, name, index })
     }
-    return pages
+    // A tab taken with control, and a popup of one, stays in the context it was already in
+    const inContext = new Set(pages.map((page) => page.id))
+    return [...pages, ...[...byName.values()].filter((page) => !inContext.has(page.id))]
   })
 
   const pageNamed = (name: string): Effect.Effect<Page.Page, Tools.ToolFailure> =>
