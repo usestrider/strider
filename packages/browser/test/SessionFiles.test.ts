@@ -23,6 +23,80 @@ const strider = (env: Readonly<Record<string, string>>, ...args: ReadonlyArray<s
 }
 
 describe("session files", () => {
+  it("rejects aliases beneath writable parents and aliases to unsafe ancestry", async () => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+    try {
+      const parent = path.join(temporary, "parent")
+      const target = path.join(temporary, "target")
+      fs.mkdirSync(parent, { mode: 0o700 })
+      fs.mkdirSync(target, { mode: 0o700 })
+      fs.symlinkSync(target, path.join(parent, "alias"))
+      fs.chmodSync(parent, 0o777)
+      assert.isTrue(
+        Exit.isFailure(await Effect.runPromiseExit(Session.validateRoot(path.join(parent, "alias", "strider"))))
+      )
+      fs.chmodSync(parent, 0o700)
+      fs.chmodSync(target, 0o777)
+      assert.isTrue(
+        Exit.isFailure(await Effect.runPromiseExit(Session.validateRoot(path.join(parent, "alias", "strider"))))
+      )
+      assert.isFalse(fs.existsSync(path.join(target, "strider")))
+    } finally {
+      fs.rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it("creates missing parents privately after validating their ancestors", async () => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+    try {
+      const root = path.join(temporary, "new", "runtime", "strider")
+      assert.isTrue(Exit.isSuccess(await Effect.runPromiseExit(Session.validateRoot(root, true))))
+      assert.strictEqual(fs.statSync(root).mode & 0o777, 0o700)
+      assert.strictEqual(fs.statSync(path.dirname(root)).mode & 0o777, 0o700)
+    } finally {
+      fs.rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it("rejects traversal from flag, environment, fork and MCP name sources without stdout", () => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+    try {
+      const cases = [
+        { args: ["-s", "../outside", "pages"], env: {} },
+        { args: ["pages"], env: { STRIDER_SESSION: "../outside" } },
+        { args: ["mcp", "-s", "../outside"], env: {} },
+        { args: ["mcp"], env: { STRIDER_SESSION: "../outside" } },
+        { args: ["start", "--name", "../outside"], env: {} },
+        { args: ["start", "--fork", "../outside"], env: {} },
+        { args: ["mcp", "--start", "--name", "../outside"], env: {} }
+      ]
+      for (const test of cases) {
+        const result = strider({ XDG_RUNTIME_DIR: temporary, XDG_STATE_HOME: temporary, ...test.env }, ...test.args)
+        assert.notStrictEqual(result.status, 0)
+        assert.strictEqual(result.stdout, "", result.stdout)
+        assert.match(result.stderr, /session name|a name is/)
+      }
+      assert.deepEqual(fs.readdirSync(temporary), [])
+    } finally {
+      fs.rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it("keeps MCP filesystem failures off stdout", () => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+    try {
+      fs.mkdirSync(path.join(temporary, "strider"), { mode: 0o777 })
+      fs.chmodSync(path.join(temporary, "strider"), 0o777)
+      const result = strider({ XDG_RUNTIME_DIR: temporary }, "mcp", "-s", "example")
+      assert.notStrictEqual(result.status, 0)
+      assert.strictEqual(result.stdout, "")
+      assert.include(result.stderr, "Unsafe session directory")
+      assert.notMatch(result.stderr, /ERROR \(#\d+\)|\n\s+at /)
+    } finally {
+      fs.rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
   it("rejects wrong-owner metadata (mock; no second user)", () => {
     assert.isFalse(
       Session.privateDirectory({ uid: 42, mode: 0o700, isDirectory: () => true, isSymbolicLink: () => false }, 43)
