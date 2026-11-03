@@ -7,8 +7,8 @@
  *   output, and `effect/cli`'s help and errors, go back over the socket; the exit code is the command's.
  * - **Lifetime.** It ends at `strider stop`, after its idle timeout, or when `--owner-pid` exits, and deletes
  *   the session's directory unless told to keep it. A profile in `--user-data-dir` is never deleted.
- * - **Segments.** `strider run file.ts` imports the file here and runs its default export, with
- *   `CurrentSession` and a scope of its own; pages it returns are named into the session.
+ * - **Segments.** `strider run file.ts` imports the default segment, decodes its arguments and runs its callback
+ *   with `CurrentSession` and a scope of its own; returned values are printed and pages named into the session.
  */
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import * as NodeSocketServer from "@effect/platform-node/NodeSocketServer"
@@ -47,14 +47,18 @@ import * as Bidi from "../../bidi/Bidi.ts"
 import * as Browser from "../../Browser.ts"
 import * as Chromium from "../../chromium/Chromium.ts"
 import * as CurrentSession from "../../cli/CurrentSession.ts"
+import * as Segment from "../../cli/Segment.ts"
 import * as Firefox from "../../firefox/Firefox.ts"
 import * as Ledger from "../../Ledger.ts"
+import * as Operation from "../../Operation.ts"
 import * as Page from "../../Page.ts"
 import type * as SocketConnector from "../../protocol/SocketConnector.ts"
 import * as StorageState from "../../StorageState.ts"
 import type * as UserContext from "../../UserContext.ts"
 import * as WebKit from "../../webkit/WebKit.ts"
 import * as Handles from "../handles.ts"
+import * as OperationImpl from "../operation.ts"
+import * as Serialization from "../serialization.ts"
 import * as ToolkitImpl from "../toolkit.ts"
 import * as Tools from "../tools.ts"
 import * as Attach from "./attach.ts"
@@ -63,6 +67,7 @@ import * as ExportTest from "./exportTest.ts"
 import * as Node from "./node.ts"
 import * as Protocol from "./protocol.ts"
 import * as Recorder from "./recorder.ts"
+import * as SegmentResult from "./segmentResult.ts"
 import * as Session from "./session.ts"
 
 type Viewport = { readonly width: number; readonly height: number }
@@ -110,6 +115,7 @@ type Present<K extends Tools.ToolName> = (
 
 interface Daemon {
   readonly name: string
+  readonly strictCapture: boolean
   readonly paths: ReturnType<typeof Session.paths>
   readonly browser: ExportTest.Browser
   readonly secretVariables: Readonly<Record<string, string>>
@@ -243,6 +249,7 @@ class CommandFailed extends Data.TaggedError("CommandFailed")<{
   readonly error: string
   readonly reason?: string | undefined
   readonly message: string
+  readonly output?: string | undefined
 }> {
   /** The exit code of its module's error, or 1. */
   get code(): number {
@@ -654,14 +661,21 @@ export const commands = (getDaemon: () => Daemon) => {
   )
   const run = Command.make(
     "run",
-    { file: Argument.String("file") },
-    ({ file }) =>
+    {
+      file: Argument.String("file"),
+      args: Flag.String("arg").pipe(
+        Flag.withDescription("A segment argument: key=value, key=@file.json, or key=@@literal"),
+        Flag.atLeast(0)
+      )
+    },
+    ({ args, file }) =>
       Effect.gen(function*() {
         // Every page named first, so what's new after the segment is its own
         const before = new Map((yield* getDaemon().session.pages).map((each) => [each.page.id, each.name]))
         return yield* recording(getDaemon(), "segment", (running) =>
           Effect.gen(function*() {
-            const ran = yield* Effect.exit(segment(getDaemon(), file))
+            const { json } = yield* root
+            const ran = yield* Effect.exit(segment(getDaemon(), file, args, json))
             const after = yield* getDaemon().session.pages
             // The pages it gave the session, which its placeholder declares, by the names they have now
             const pages = after.filter((each) =>
@@ -784,9 +798,121 @@ const exportState = Effect.fnUntraced(function*(daemon: Daemon) {
 })
 
 /** `strider run`: the file's default export, with `CurrentSession` and a scope of its own. */
-const segment = Effect.fnUntraced(function*(daemon: Daemon, file: string) {
-  const paths = yield* Path.Path
+const segment = Effect.fnUntraced(function*(daemon: Daemon, file: string, args: ReadonlyArray<string>, json: boolean) {
+  const started = performance.now()
   const resolved = yield* resolvePath(file)
+  const status: { phase: typeof SegmentResult.Failure.Type["phase"] } = { phase: "load" }
+  // Collect operation evidence without imposing a new deadline on the entire segment.
+  const operation = yield* OperationImpl.start("strider run")
+  const ran = yield* executeSegment(daemon, resolved, args, (next) => {
+    status.phase = next
+  }).pipe(
+    Effect.provideService(Operation.Current, operation),
+    Effect.flatMap((value) => {
+      status.phase = "serialize"
+      return Effect.map(SegmentResult.serialize(value, daemon.session, daemon.strictCapture), (result) => ({
+        result,
+        handle: Page.isPage(value)
+      }))
+    }),
+    Effect.exit
+  )
+  const durationMs = Math.round(performance.now() - started)
+  if (Exit.isFailure(ran)) {
+    if (Cause.hasInterruptsOnly(ran.cause)) return yield* Effect.failCause(ran.cause)
+    const error = Cause.squash(ran.cause)
+    const failure = error instanceof CommandFailed ? error : error instanceof Serialization.Unserializable
+      ? { error: "NotSerializable", message: `${error.path}: ${error.hint}` }
+      : ToolkitImpl.toFailure(error ?? String(error))
+    const detail = error as {
+      readonly hint?: unknown
+      readonly reason?: { readonly hint?: unknown }
+      readonly operation?: unknown
+    }
+    const givenHint = detail?.hint ?? detail?.reason?.hint
+    const hint = Option.isOption(givenHint) ? Option.getOrUndefined(givenHint) : givenHint
+    const lastStep = operation.progress.at(-1)
+    const step = typeof detail?.operation === "string" ?
+      detail.operation :
+      status.phase === "execute" && lastStep?.state !== "ok"
+      ? lastStep?.step
+      : undefined
+    const result = daemon.session.conceal({
+      file: resolved,
+      error: failure.error,
+      ...("reason" in failure && typeof failure.reason === "string" ? { reason: failure.reason } : {}),
+      message: daemon.strictCapture ? "Segment failed; details masked by capture strict" : failure.message,
+      ...(typeof hint === "string" ? { hint: daemon.strictCapture ? "•••" : hint } : {}),
+      phase: status.phase,
+      ...(step === undefined ? {} : { step }),
+      durationMs
+    })
+    return yield* Effect.fail(
+      new CommandFailed({
+        ...result,
+        output: json ?
+          yield* Schema.encodeEffect(Schema.fromJsonString(SegmentResult.Failure))(result).pipe(Effect.orDie) :
+          `${result.error}${result.reason === undefined ? "" : `{${result.reason}}`}: ${result.message}${
+            result.hint === undefined || result.message.includes(result.hint) ? "" : `\n  hint: ${result.hint}`
+          }\n  ${result.file}: ${result.phase}${step === undefined ? "" : ` at ${result.step}`}${
+            result.phase === "execute" || result.phase === "serialize" ? "; earlier steps remain done" : ""
+          }`
+      })
+    )
+  }
+  const result = { file: daemon.session.conceal(resolved), ...ran.value.result, durationMs }
+  yield* Console.log(
+    json
+      ? yield* Schema.encodeEffect(Schema.fromJsonString(SegmentResult.Result))(result).pipe(Effect.orDie)
+      : `ran ${result.file} → ${SegmentResult.preview(result.value, ran.value.handle)}`
+  )
+})
+
+const segmentArguments = Effect.fnUntraced(function*(given: ReadonlyArray<string>) {
+  const fs = yield* FileSystem.FileSystem
+  const args = new Map<string, unknown>()
+  for (const argument of given) {
+    const equals = argument.indexOf("=")
+    if (equals < 1) {
+      return yield* Effect.fail(
+        new CommandFailed({ error: "InvalidInput", message: "--arg expects key=value or key=@file.json" })
+      )
+    }
+    const key = argument.slice(0, equals)
+    if (args.has(key)) {
+      return yield* Effect.fail(
+        new CommandFailed({ error: "InvalidInput", message: `--arg ${key} was given more than once` })
+      )
+    }
+    const value = argument.slice(equals + 1)
+    if (value.startsWith("@@")) args.set(key, value.slice(1))
+    else if (value.startsWith("@")) {
+      const file = yield* resolvePath(value.slice(1))
+      const text = yield* fs.readFileString(file).pipe(
+        Effect.mapError((error) =>
+          new CommandFailed({ error: "InvalidInput", message: `--arg ${key}: ${error.message}` })
+        )
+      )
+      args.set(
+        key,
+        yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(text).pipe(
+          Effect.mapError((error) =>
+            new CommandFailed({ error: "InvalidInput", message: `--arg ${key}: ${file}: ${error.message}` })
+          )
+        )
+      )
+    } else args.set(key, value)
+  }
+  return Object.fromEntries(args)
+})
+
+const executeSegment = Effect.fnUntraced(function*(
+  daemon: Daemon,
+  resolved: string,
+  args: ReadonlyArray<string>,
+  phase: (phase: "arguments" | "execute") => void
+) {
+  const paths = yield* Path.Path
   const url = yield* paths.toFileUrl(resolved).pipe(Effect.mapError(failedWith))
   // A query of its own, so an edited file is imported again
   const module = (yield* Effect.tryPromise({
@@ -794,11 +920,11 @@ const segment = Effect.fnUntraced(function*(daemon: Daemon, file: string) {
     catch: (error) =>
       new CommandFailed({ error: "SegmentFailed", message: `${resolved} didn't load: ${String(error)}` })
   })) as { readonly default?: unknown }
-  if (!Effect.isEffect(module.default)) {
+  if (!Segment.isSegment(module.default)) {
     return yield* Effect.fail(
       new CommandFailed({
         error: "InvalidInput",
-        message: `${resolved} has no default export that is an Effect; a segment exports one, run with CurrentSession`
+        message: `${resolved} must default-export Segment.make(schema, args => effect) from @usestrider/browser/cli`
       })
     )
   }
@@ -817,22 +943,24 @@ const segment = Effect.fnUntraced(function*(daemon: Daemon, file: string) {
       return CurrentSession.PageName.make(named)
     })
   }
-  const value = yield* Effect.scoped(
-    (module.default as Effect.Effect<unknown, unknown, CurrentSession.CurrentSession | Scope.Scope>).pipe(
+  const segment = module.default
+  return yield* Effect.scoped(
+    (Effect.gen(function*() {
+      phase("arguments")
+      const input = yield* segmentArguments(args)
+      const decoded = yield* Schema.decodeUnknownEffect(segment.schema, { onExcessProperty: "error" })(input).pipe(
+        Effect.mapError((error) => new CommandFailed({ error: "InvalidInput", message: error.message }))
+      )
+      phase("execute")
+      return yield* segment.run(decoded)
+    }) as Effect.Effect<
+      unknown,
+      unknown,
+      CurrentSession.CurrentSession | Scope.Scope | FileSystem.FileSystem | Path.Path | WorkingDirectory
+    >).pipe(
       Effect.provideService(CurrentSession.CurrentSession, current)
     )
-  ).pipe(Effect.mapError(failedWith))
-  // Pages it returns are named into the session
-  const returned = value !== null && typeof value === "object" ? Object.entries(value) : []
-  const named: Array<string> = []
-  for (const [key, each] of returned) {
-    if (!Page.isPage(each)) continue
-    const name = yield* daemon.session.name(each as Page.Page).pipe(
-      Effect.mapError((failure) => new CommandFailed(failure))
-    )
-    named.push(`${key} is ${name}`)
-  }
-  yield* Console.log(`ran ${resolved}${named.length === 0 ? "" : `; ${named.join(", ")}`}`)
+  )
 })
 
 // ── Serving ──
@@ -884,7 +1012,7 @@ const exitOf = (exit: Exit.Exit<unknown, unknown>): { readonly code: number; rea
   const error = Cause.findErrorOption(exit.cause)
   if (Option.isSome(error)) {
     return error.value instanceof CommandFailed
-      ? { code: error.value.code, message: `${error.value.error}: ${error.value.message}` }
+      ? { code: error.value.code, message: error.value.output ?? `${error.value.error}: ${error.value.message}` }
       : { code: Session.exitCodes.CliError! }
   }
   return Cause.hasInterruptsOnly(exit.cause)
@@ -1304,6 +1432,7 @@ const serve = Effect.fnUntraced(
     let last = performance.now()
     const daemon: Daemon = {
       name: flags.name,
+      strictCapture: flags.capture === "strict",
       viewport,
       viewports: new Map(),
       paths,

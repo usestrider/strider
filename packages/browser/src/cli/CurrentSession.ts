@@ -1,7 +1,7 @@
 /**
  * What `strider run` gives a segment: the live CLI session, and its pages by name.
  *
- * A segment is a file whose default export is an effect, which `strider run` runs in a live CLI session with a scope
+ * A segment is a file whose default export is made with `Segment.make`, which `strider run` runs in a live CLI session with a scope
  * of its own. It finds the session's pages by name, such as the `shop` that `page new --name shop` gave one.
  * Programs and tests never make a session; they pass pages around as values.
  *
@@ -51,14 +51,17 @@ export interface CurrentSession {
    * **Example** (Adding to the cart on the session's `shop` page)
    *
    * ```ts import.meta.vitest
-   * import { CurrentSession } from "@usestrider/browser/cli"
-   * import { Effect } from "effect"
+   * import { CurrentSession, Segment } from "@usestrider/browser/cli"
+   * import { Effect, Schema } from "effect"
    *
-   * export default Effect.gen(function*() {
-   *   const session = yield* CurrentSession.CurrentSession
-   *   const shop = yield* session.page("shop")
-   *   yield* shop.getByRole("button", { name: "Add to cart" }).click()
-   * })
+   * export default Segment.make(
+   *   Schema.Record(Schema.String, Schema.Never),
+   *   Effect.fnUntraced(function*() {
+   *     const session = yield* CurrentSession.CurrentSession
+   *     const shop = yield* session.page("shop")
+   *     yield* shop.getByRole("button", { name: "Add to cart" }).click()
+   *   })
+   * )
    * ```
    */
   page(name: PageName | string): Effect.Effect<Page.Page, PageNotFound>
@@ -71,15 +74,18 @@ export interface CurrentSession {
    * **Example** (Opening a page that outlives the segment)
    *
    * ```ts import.meta.vitest
-   * import { CurrentSession } from "@usestrider/browser/cli"
-   * import { Effect } from "effect"
+   * import { CurrentSession, Segment } from "@usestrider/browser/cli"
+   * import { Effect, Schema } from "effect"
    *
-   * export default Effect.gen(function*() {
-   *   const session = yield* CurrentSession.CurrentSession
-   *   const orders = yield* session.context.newPage
-   *   yield* orders.goto("https://shop.example.com/orders")
-   *   yield* session.keep(orders, "orders")
-   * })
+   * export default Segment.make(
+   *   Schema.Record(Schema.String, Schema.Never),
+   *   Effect.fnUntraced(function*() {
+   *     const session = yield* CurrentSession.CurrentSession
+   *     const orders = yield* session.context.newPage
+   *     yield* orders.goto("https://shop.example.com/orders")
+   *     yield* session.keep(orders, "orders")
+   *   })
+   * )
    * ```
    */
   keep(page: Page.Page, name?: PageName | string): Effect.Effect<PageName, NameTaken>
@@ -92,18 +98,21 @@ export interface CurrentSession {
  *
  * ```ts import.meta.vitest
  * import { Popup } from "@usestrider/browser"
- * import { CurrentSession } from "@usestrider/browser/cli"
- * import { Effect } from "effect"
+ * import { CurrentSession, Segment } from "@usestrider/browser/cli"
+ * import { Effect, Schema } from "effect"
  *
- * export default Effect.gen(function*() {
- *   const session = yield* CurrentSession.CurrentSession
- *   const shop = yield* session.page("shop")
- *   const popups = yield* Popup.next(shop)
- *   yield* shop.getByText("Pay").click()
- *   const popup = yield* popups
- *   yield* popup.getByLabel("Card number").fill("4242 4242 4242 4242")
- *   return { popup }
- * })
+ * export default Segment.make(
+ *   Schema.Record(Schema.String, Schema.Never),
+ *   Effect.fnUntraced(function*() {
+ *     const session = yield* CurrentSession.CurrentSession
+ *     const shop = yield* session.page("shop")
+ *     const popups = yield* Popup.next(shop)
+ *     yield* shop.getByText("Pay").click()
+ *     const popup = yield* popups
+ *     yield* popup.getByLabel("Card number").fill("4242 4242 4242 4242")
+ *     return { popup }
+ *   })
+ * )
  * ```
  *
  * @stability experimental
