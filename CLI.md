@@ -161,7 +161,10 @@ Strict capture denies screenshots and masks editable content and validation mess
 find results. This includes native fields, ARIA fields and contenteditable elements regardless of semantic role,
 including `plaintext-only`. Names copied from field content into ancestors or other nodes are masked too,
 including embedded values, referenced controls, nearby fields and image-alt inference. Public labels, roles,
-refs and states remain visible. Strict `find` matches only that redacted
+refs and states remain visible. Provenance follows contributors under native/ARIA fields through shadow hosts
+and assigned slots, including descendants that are not themselves editable. A mixed name containing public
+text and field content is masked in full. Native select and ARIA listbox option text is masked with the field
+subtree. Strict `find` matches only that redacted
 view: a query for hidden content returns no match, while label searches and role filters still work. For example,
 `find "Card" --role textbox` can find a field labeled Card, but guessing its masked value cannot find it.
 

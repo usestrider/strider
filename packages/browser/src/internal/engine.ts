@@ -892,7 +892,11 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const nameOfNode = (node: Node, context: NameContext): string => {
-    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? ""
+    if (node.nodeType === Node.TEXT_NODE) {
+      const value = node.nodeValue ?? ""
+      if (value !== "" && inField(node)) context.contribution.fieldContent = true
+      return value
+    }
     if (!(node instanceof Element)) return ""
     return nameOfElement(node, context)
   }
@@ -902,7 +906,7 @@ export function engine(render: (root: SnapNode) => string) {
     const previous = context.contribution.fieldContent
     context.contribution.fieldContent = false
     const value = nameOfElementValue(element, context)
-    context.contribution.fieldContent = previous || (value.trim() !== "" && context.contribution.fieldContent)
+    context.contribution.fieldContent = previous || (context.contribution.fieldContent && value.trim() !== "")
     return value
   }
 
@@ -950,7 +954,7 @@ export function engine(render: (root: SnapNode) => string) {
       content += pseudoContent(element, "::after")
       if (content.trim() !== "") {
         if (!context.traversal && !context.labelledBy) namesFromContent.add(element)
-        if (fieldOf(element)) context.contribution.fieldContent = true
+        if (inField(element)) context.contribution.fieldContent = true
         return content
       }
     }
@@ -967,11 +971,21 @@ export function engine(render: (root: SnapNode) => string) {
   const nativeName = (element: Element, context: NameContext): string => {
     if (element instanceof HTMLInputElement) {
       if (element.type === "submit" || element.type === "reset" || element.type === "button") {
-        return element.value !== "" ? element.value : element.type === "submit" ? "Submit" : element.type === "reset"
+        const value = element.value !== "" ?
+          element.value :
+          element.type === "submit" ?
+          "Submit" :
+          element.type === "reset"
           ? "Reset"
           : ""
+        if (value !== "" && inField(element)) context.contribution.fieldContent = true
+        return value
       }
-      if (element.type === "image") return element.alt !== "" ? element.alt : element.value
+      if (element.type === "image") {
+        const value = element.alt !== "" ? element.alt : element.value
+        if (value !== "" && inField(element)) context.contribution.fieldContent = true
+        return value
+      }
     }
     const labels = labelsOf(element)
     if (labels.length > 0) {
@@ -979,7 +993,7 @@ export function engine(render: (root: SnapNode) => string) {
     }
     if (element instanceof HTMLImageElement || element instanceof HTMLAreaElement) {
       const alt = element.getAttribute("alt") ?? ""
-      if (alt.trim() !== "" && fieldOf(element)) context.contribution.fieldContent = true
+      if (alt.trim() !== "" && inField(element)) context.contribution.fieldContent = true
       return alt
     }
     const first = (selector: string) => Array.from(element.children).find((child) => child.matches(selector))
@@ -1495,11 +1509,7 @@ export function engine(render: (root: SnapNode) => string) {
         frames++
       }
       sampled = true
-      rawText.clear()
-      roleCache.clear()
-      nameCache.clear()
-      namesFromContent.clear()
-      namesFromFields.clear()
+      clearTreeCaches()
       const found = resolve(request.steps)
       if (found.length > 1) return strict(found)
       const element = found[0]
@@ -1716,11 +1726,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   /** Checks an expectation once: whether it holds, and what was seen. */
   const evaluate = (steps: ReadonlyArray<Step>, expectation: Expectation): { passed: boolean; observed: unknown } => {
-    rawText.clear()
-    roleCache.clear()
-    nameCache.clear()
-    namesFromContent.clear()
-    namesFromFields.clear()
+    clearTreeCaches()
     if (expectation._tag === "Title") {
       const title = collapse(document.title)
       return { passed: expected(expectation.expected, title), observed: title }
@@ -1935,15 +1941,69 @@ export function engine(render: (root: SnapNode) => string) {
   const clip = (text: string) => text.length > 80 ? `${text.slice(0, 80)}…` : text
 
   const FIELD_ROLES = new Set(["textbox", "searchbox", "combobox", "listbox", "slider", "spinbutton", "editable"])
-  const fieldOf = (element: Element): boolean =>
-    editableKind(element) || element instanceof HTMLSelectElement ||
-    FIELD_ROLES.has(roleOf(element) ?? "")
+  const fieldKinds = new Map<Element, boolean>()
+  const fieldOf = (element: Element): boolean => {
+    const cached = fieldKinds.get(element)
+    if (cached !== undefined) return cached
+    const field = FIELD_ROLES.has(roleOf(element) ?? "") || element instanceof HTMLSelectElement ||
+      typed(element) || settable(element) || contentEditable(element)
+    fieldKinds.set(element, field)
+    return field
+  }
 
-  // Follow the same flat-tree text contributors as textOf, without changing text queries or their caches.
+  // Naming follows assigned slots and shadow hosts without changing action/selector ancestry.
+  const fieldParent = (node: Node): Node | null => {
+    if ((node instanceof Element || node instanceof Text) && node.assignedSlot !== null) return node.assignedSlot
+    return node.parentNode instanceof ShadowRoot ? node.parentNode.host : node.parentNode
+  }
+
+  const fieldAncestry = new Map<Node, boolean>()
+  const inField = (node: Node): boolean => {
+    const cached = fieldAncestry.get(node)
+    if (cached !== undefined) return cached
+    const path: Array<Node> = []
+    let field = false
+    for (let current: Node | null = node; current !== null; current = fieldParent(current)) {
+      const known = fieldAncestry.get(current)
+      if (known !== undefined) {
+        field = known
+        break
+      }
+      path.push(current)
+      if (current instanceof Element && fieldOf(current)) {
+        field = true
+        break
+      }
+    }
+    // Cache negative paths too: nested clickables must not repeat a full ancestor walk per contributor.
+    for (const ancestor of path) fieldAncestry.set(ancestor, field)
+    return field
+  }
+
+  const fieldText = new Map<Element, boolean>()
+  // Follow textOf's actual flat-tree contributors. Each subtree is classified at most once per walk.
   const textContainsField = (element: Element): boolean => {
-    if (textOf(element) === "") return false
-    if (fieldOf(element)) return true
-    return flatChildNodes(element).some((child) => child instanceof Element && textContainsField(child))
+    const cached = fieldText.get(element)
+    if (cached !== undefined) return cached
+    const field = textOfNode(element).trim() !== "" && (inField(element) ||
+      flatChildNodes(element).some((child) =>
+        child instanceof Element
+          ? textContainsField(child)
+          : child.nodeType === Node.TEXT_NODE && (child.nodeValue ?? "").trim() !== "" && inField(child)
+      ))
+    fieldText.set(element, field)
+    return field
+  }
+
+  const clearTreeCaches = (): void => {
+    rawText.clear()
+    roleCache.clear()
+    nameCache.clear()
+    namesFromContent.clear()
+    namesFromFields.clear()
+    fieldKinds.clear()
+    fieldAncestry.clear()
+    fieldText.clear()
   }
 
   /** An inferred node's name: its accessible name, or where one can be read from. */
@@ -1979,7 +2039,7 @@ export function engine(render: (root: SnapNode) => string) {
         _tag: "Inferred",
         value: alt,
         from: "alt",
-        ...(fieldOf(element) || (image !== null && fieldOf(image)) ? { fieldContent: true } : {})
+        ...(image !== null && inField(image) ? { fieldContent: true } : {})
       }
     }
     const previous = element.previousElementSibling
@@ -2243,11 +2303,7 @@ export function engine(render: (root: SnapNode) => string) {
       /** For an iframe on an action's way: scrolled into view, so its frame renders (QUIRKS.md, Q110). */
       readonly scroll?: boolean
     }
-    rawText.clear()
-    roleCache.clear()
-    nameCache.clear()
-    namesFromContent.clear()
-    namesFromFields.clear()
+    clearTreeCaches()
     let found: Array<Element>
     try {
       found = resolve(request.steps)
@@ -2304,11 +2360,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   const run = async (text: string): Promise<string> => {
     const request = JSON.parse(text) as Request
-    rawText.clear()
-    roleCache.clear()
-    nameCache.clear()
-    namesFromContent.clear()
-    namesFromFields.clear()
+    clearTreeCaches()
     try {
       switch (request.op) {
         case "count":

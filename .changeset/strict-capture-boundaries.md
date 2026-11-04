@@ -5,7 +5,9 @@
 
 Make strict CLI and MCP find search only redacted snapshot content, preserving label searches and role filters.
 Mask semantic and plaintext-only editable content and all page-supplied exception details under strict capture,
-retaining exception occurrence time. Mask field content copied into other nodes' accessible or inferred names, preserving public labels.
+retaining exception occurrence time. Mask field content copied into other nodes' accessible or inferred names, following native/ARIA field ancestry
+through shadow hosts and assigned slots while preserving explicit public labels. Mixed names are masked whole;
+native select and ARIA listbox option text is masked with the field subtree.
 Add optional snapshot editability and name provenance;
 older snapshot data remains decodable. Local capture keeps its existing content and search behavior.
 

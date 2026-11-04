@@ -550,7 +550,10 @@ provenance means false for older data. These additions do not change local snaps
 The toolkit derives one redacted tree for snapshot rendering and find matching, names and paths. It masks field
 content and validation messages, including names that contain field content contributed by descendants,
 embedded control values, referenced controls, nearby fields or image-alt inference. It keeps public labels,
-roles, states and refs. Non-full console capture also
+roles, states and refs. Field ancestry follows assigned slots and shadow hosts, including noneditable
+descendants of native and ARIA fields. It classifies actual content contributors, preserving explicit public
+label precedence. A mixed name is masked whole; native select and ARIA listbox option names are masked with
+their field subtree. Non-full console capture also
 replaces exceptions in digests and history with an event marker and monotonic occurrence time, excluding all
 page-supplied details. Full local capture keeps its existing content and search behavior. Capture remains bounded:
 ordinary text, labels and other metadata can still disclose content. Assertions such as `expect --text` and

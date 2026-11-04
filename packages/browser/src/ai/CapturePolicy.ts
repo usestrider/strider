@@ -18,7 +18,9 @@ import * as Schema from "effect/Schema"
  * - `snapshotText`: `"redacted"` masks names and text inside editable fields, including semantic and
  *   plaintext-only contenteditables, and names containing field content copied through descendants,
  *   embedded values, referenced controls, nearby fields or image-alt inference. Field editability is
- *   independent of semantic role. Public labels, roles, refs and states remain visible; validation messages become
+ *   independent of semantic role. Contributors under a native/ARIA field remain field content across shadow
+ *   hosts and assigned slots. Mixed names are masked whole; native select and ARIA listbox options are masked
+ *   with the field subtree. Public labels, roles, refs and states remain visible; validation messages become
  *   `•••`. Both snapshot output and `find` use this redacted tree, so hidden content cannot match a query.
  *   `"full"` keeps content, validation messages and matching against them.
  * - `consoleText`: `"full"` sends console text and exception names/messages; `"redacted"` says a message

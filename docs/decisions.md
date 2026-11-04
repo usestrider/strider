@@ -777,3 +777,17 @@ Assertions such as `expect --text` and action selectors continue matching origin
 guesses at masked values. Restricting those operations is a separate contract decision; this change restricts
 snapshot/find capture and does not change assertion or action semantics. Name provenance is limited to field
 contributions during name construction, not general tracking of sensitive data across arbitrary page scripts.
+
+Field-content provenance follows the contributor's flat-tree ancestry through assigned slots and shadow hosts,
+including native/ARIA field ancestors whose descendants do not inherit DOM editability. Keep explicit public
+label precedence; do not infer privacy by checking only the named element or a role-limited descendant walk.
+Mixed names are masked whole, and native select/ARIA listbox options follow field-subtree masking. This
+conservative choice can hide public portions of a derived name or option labels; separate unmasked nodes
+remain searchable. It avoids treating a copied private contribution as a public label.
+
+Memoize field classification, field ancestry and inferred-text provenance only within each tree walk. Cache
+both positive and negative ancestor paths to avoid repeating a full walk per contributor. Clear these caches
+with names, roles and text before every engine request, expectation observation and action revalidation round;
+role changes, slot reassignment and reparenting must be observed by the next walk. Caching across walks would
+retain stale privacy decisions; DOM-only closest checks miss slot/shadow ancestry. This bounds the additional
+provenance traversal, not the existing cost of constructing all nested accessible or inferred name strings.
