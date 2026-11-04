@@ -197,3 +197,43 @@ describe("a browser shared through layer", () => {
     expect(contents[0]).not.toContain("FIRST_TEST")
   }, 30_000)
 })
+
+describe("shared layer lifecycle attribution", () => {
+  it("separates two failures and links shared acquisition and finalization", async () => {
+    const { spawnSync } = await import("node:child_process")
+    const directory = new URL("../../../.data/integration-failures/", import.meta.url)
+    const before = new Set(fs.readdirSync(directory))
+    const run = spawnSync("pnpm", [
+      "exec",
+      "vitest",
+      "--run",
+      "--config",
+      "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+      "sharedLifecycle.fixture"
+    ], {
+      cwd: new URL("../../../", import.meta.url),
+      encoding: "utf8"
+    })
+    expect(run.status, run.stdout + run.stderr).toBe(1)
+    const files = fs.readdirSync(directory).filter((name) => !before.has(name))
+    const parse = (name: string) =>
+      fs.readFileSync(new URL(name, directory), "utf8").trimEnd().split("\n").map((line) => JSON.parse(line))
+    const tests = files.filter((name) => name.includes("-test")).map(parse)
+    expect(tests.length).toBe(2)
+    const first = tests.find((entries) => entries[0].scope === "first shared test fails")!
+    const second = tests.find((entries) => entries[0].scope === "later shared test fails")!
+    expect(first.map((entry) => entry.payload)).toContain("FIRST_FAIL_ONLY")
+    expect(first.map((entry) => entry.payload)).not.toContain("SECOND_FAIL_SEND")
+    expect(second.map((entry) => entry.payload)).toContain("SECOND_FAIL_SEND")
+    expect(second.map((entry) => entry.payload)).toContain("SECOND_FAIL_RECEIVE")
+    expect(second.map((entry) => entry.payload)).not.toContain("FIRST_FAIL_ONLY")
+    const sharedName = files.find((name) => name.includes("-shared"))!
+    expect(first[0].sharedArtifact).toBe(sharedName)
+    expect(second[0].sharedArtifact).toBe(sharedName)
+    const shared = parse(sharedName).map((entry) => entry.payload)
+    expect(shared).toContain("SHARED_SETUP")
+    expect(shared).toContain("SHARED_CLEANUP_STDERR")
+    expect(shared).toContain("SHARED_EXIT")
+    for (const name of files) fs.unlinkSync(new URL(name, directory))
+  }, 30_000)
+})
