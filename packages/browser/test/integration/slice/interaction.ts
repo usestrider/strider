@@ -279,9 +279,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
-      for (const change of ["moved", "replaced"] as const) {
+      for (const change of ["moved", "replaced", "another preflight"] as const) {
         it.effect(
-          `refreshes parent candidates when the child is ${change} during checks`,
+          change === "another preflight" ?
+            "keeps parent selection valid during another unchanged preflight" :
+            `refreshes parent candidates when the child is ${change} during checks`,
           () =>
             Effect.gen(function*() {
               const inner =
@@ -303,6 +305,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 const evaluate = adapter.evaluate
                 const dispatch = adapter.dispatchInput
                 let applying = false
+                let probe: (() => ReturnType<typeof evaluate>) | undefined
                 let changed = false
                 let presses = 0
                 yield* Effect.acquireRelease(
@@ -315,14 +318,27 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                           call.functionDeclaration === Engine.run && arg?._tag === "Value" &&
                           arg.value.type === "string"
                         ) {
-                          const request = JSON.parse(arg.value.value) as {
-                            op: string
-                            apply?: boolean
-                            point?: unknown
+                          const request = JSON.parse(arg.value.value) as Engine.Request
+                          if (request.op === "act" && request.apply) {
+                            applying = true
+                            if (change === "another preflight") changed = false
+                            probe = () =>
+                              evaluate(realm, {
+                                ...call,
+                                arguments: [{
+                                  _tag: "Value",
+                                  value: {
+                                    type: "string",
+                                    value: JSON.stringify({ ...request, apply: false, stability: "capture" })
+                                  }
+                                }]
+                              })
                           }
-                          if (request.op === "act" && request.apply) applying = true
                           if (applying && !changed && request.op === "frame" && request.point != null) {
                             changed = true
+                            if (change === "another preflight") {
+                              return probe!().pipe(Effect.andThen(evaluate(realm, call)))
+                            }
                             return page.evaluateInMainWorld((change: string) => {
                               const go = document.querySelector("iframe")!.contentDocument!.querySelector(
                                 "#go"
