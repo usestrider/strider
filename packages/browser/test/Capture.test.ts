@@ -104,6 +104,21 @@ describe("capture tree", () => {
     assert.deepStrictEqual(Toolkit.redacted(root).name, { _tag: "Accessible", value: "•••", from: "text" })
   })
 
+  it("masks field-content names on other nodes without changing public labels or the source tree", () => {
+    for (const name of [
+      { _tag: "Accessible" as const, value: "private", fieldContent: true },
+      { _tag: "Inferred" as const, value: "private", from: "nearbyLabel" as const, fieldContent: true }
+    ]) {
+      const root = node({ name })
+      const decoded = Schema.decodeUnknownSync(Snapshot.Node)(root)
+      assert.deepStrictEqual(decoded.name, name)
+      assert.deepStrictEqual(Toolkit.redacted(decoded).name, { ...name, value: "•••" })
+      assert.deepStrictEqual(root.name, name)
+      const publicLabel = node({ name: { ...name, value: "Public", fieldContent: false } })
+      assert.deepStrictEqual(Toolkit.redacted(publicLabel).name, publicLabel.name)
+    }
+  })
+
   it("decodes old snapshot nodes without editability and preserves the new signal", () => {
     const decode = Schema.decodeUnknownSync(Snapshot.Node)
     assert.isUndefined(decode(node()).editable)
