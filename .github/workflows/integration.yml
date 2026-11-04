@@ -63,6 +63,12 @@ jobs:
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Install
         run: nix develop --command pnpm install --frozen-lockfile
+      # Ubuntu's core handler is given a fixed huge limit, whatever the process's own, so a crashed renderer stays
+      # dumping past the crash tests' deadlines: %c gives it the real one
+      - name: Respect core limits
+        run: |
+          sudo sysctl -w "kernel.core_pattern=$(sed 's/ 9223372036854775808 / %c /' /proc/sys/kernel/core_pattern)"
+          cat /proc/sys/kernel/core_pattern
       - name: Integration tests
         run: nix develop --command pnpm test:integration --no-file-parallelism 2>&1 | tee integration.log
       # The integration tests attach nothing (TestRun is for programs' tests), so the log is what a failure keeps
