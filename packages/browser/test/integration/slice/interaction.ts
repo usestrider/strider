@@ -160,6 +160,37 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      for (
+        const [title, parent] of [
+          [
+            "whose first line its parent's scrolling ancestor clips",
+            (frame: string) =>
+              `<style>body{margin:0}#s{position:absolute;left:20px;top:20px;width:300px;height:100px;overflow:auto}iframe{display:block;width:280px;height:300px;border:0}</style><div id="s">${frame}</div><script>s.scrollTop=24</script>`
+          ],
+          [
+            "whose first line an overlay in its parent covers",
+            (frame: string) =>
+              `<style>body{margin:0}iframe{position:absolute;left:20px;top:20px;width:300px;height:200px;border:0}#o{position:absolute;left:0;top:0;width:400px;height:44px;background:#fff}</style>${frame}<div id="o"></div>`
+          ]
+        ] as const
+      ) {
+        it.effect(`clicks a wrapped link in an iframe ${title}`, () =>
+          Effect.gen(function*() {
+            const inner =
+              `<!doctype html><style>body{margin:0;font:16px/24px monospace;width:240px}</style><a id="go" href="#go">${
+                Array(6).fill("abcdefghij").join(" ")
+              }</a><output id="out"></output>${recordsClick}`
+            const { url } = yield* fixture(() => `<!doctype html>${parent(`<iframe srcdoc='${inner}'></iframe>`)}`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const frame = page.frame(page.locator("iframe"))
+              yield* frame.locator("#go").click().pipe(Deadline.within("1 second"))
+              assert.strictEqual(JSON.parse(yield* frame.locator("#out").readText).target, "go")
+            }))
+          }), timeout)
+      }
+
       it.effect("clicks a wrapped link whose first line a scrolling ancestor clips", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
