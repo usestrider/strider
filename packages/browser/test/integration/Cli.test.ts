@@ -1314,6 +1314,9 @@ describe("strider", () => {
 <select aria-label="Plan"><option id="chosen-option" selected>option-private</option></select><button aria-labelledby="chosen-option"></button>
 <div role="textbox" aria-label="Rich"><span id="inside-aria">aria-descendant-private</span></div><button aria-labelledby="inside-aria"></button>
 <div onclick="void 0"><div role="textbox" aria-label="Inner"><img alt="aria-image-private" src="${pixel}"></div></div>
+<h4><span contenteditable="true"><b aria-label="descendant-label-private">x</b></span></h4>
+<h5><span contenteditable="true"><b title="descendant-title-private"></b></span></h5>
+<h6><span contenteditable="true" aria-label="public-field-label">field-root-private</span></h6>
 <h3>public-heading</h3>
 <div>public-nearby</div><div contenteditable="true"></div>`
             const server = http.createServer((_, response) => {
@@ -1360,18 +1363,21 @@ describe("strider", () => {
                 "image-alt-private",
                 "option-private",
                 "aria-descendant-private",
-                "aria-image-private"
+                "aria-image-private",
+                "descendant-label-private",
+                "descendant-title-private",
+                "field-root-private"
               ]
-              for (const content of [...contents, "public-heading", "public-nearby"]) {
+              for (const content of [...contents, "public-field-label", "public-heading", "public-nearby"]) {
                 if (snapshot.out.includes(content)) shown.push(content)
                 const found = yield* page("--json", "find", content)
                 assert.strictEqual(found.code, 0, found.err)
                 if (JSON.parse(found.out).outcome.value.length > 0) matched.push(content)
               }
               const expected = capture === "strict"
-                ? ["public-heading", "public-nearby"]
-                : [...contents, "public-heading", "public-nearby"]
-              const queries = [...contents, "public-heading", "public-nearby"]
+                ? ["public-field-label", "public-heading", "public-nearby"]
+                : [...contents, "public-field-label", "public-heading", "public-nearby"]
+              const queries = [...contents, "public-field-label", "public-heading", "public-nearby"]
               const snapshotAnswers = yield* mcp(env, ["-s", capture, "mcp"], [
                 ...handshake,
                 {
