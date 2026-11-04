@@ -8,6 +8,7 @@ import * as Stream from "effect/Stream"
 import * as assert from "node:assert/strict"
 import * as fs from "node:fs"
 import * as path from "node:path"
+import * as Kit from "../../browser/src/internal/adapterKit.ts"
 import * as BrowserImpl from "../../browser/src/internal/browser.ts"
 import * as CdpAdapter from "../../browser/src/internal/cdpAdapter.ts"
 import * as ChromiumLauncher from "../../browser/src/internal/chromiumLauncher.ts"
@@ -32,6 +33,7 @@ interface Command {
   effectDecodeMs?: number
   bufferDecodeMs?: number
   decodedBytes?: number
+  helperDecodeMs?: number
 }
 interface Sample {
   page: number
@@ -118,6 +120,11 @@ try {
               command.bufferDecodeMs = performance.now() - beforeBuffer
               command.decodedBytes = buffer.length
               if (decoded._tag === "Success") assert.deepEqual(buffer, Buffer.from(decoded.success))
+              const beforeHelper = performance.now()
+              const helper = Kit.tryDecodeBase64(data)
+              command.helperDecodeMs = performance.now() - beforeHelper
+              assert.notEqual(helper, undefined)
+              assert.deepEqual(buffer, Buffer.from(helper!))
               payloads.delete(command)
             }
           }))

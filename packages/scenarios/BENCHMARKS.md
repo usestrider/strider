@@ -151,9 +151,10 @@ the workflow runner's `--output`, or copy complete named run directories. Keep a
 summary on the issue; a Git revision or source hash alone does not preserve uncommitted experimental code.
 
 Screenshot diagnostics use `pnpm profile:screenshot /absolute/path/diagnostic.json` in the same browser lock.
-This separate, instrumented Strider run records command intervals, response sizes, extra JSON parsing cost and replayed Effect/Buffer base64 decoding cost
-for 20 samples of each screenshot workload. It does not measure an isolated renderer or network duration:
+This separate, instrumented Strider run records command intervals, response sizes, extra JSON parsing cost and
+replayed Effect/Buffer/adapter-helper base64 decoding cost for 20 samples of each screenshot workload. It does not measure an isolated renderer or network duration:
 `Page.captureScreenshot` combines renderer synchronization, capture/encoding and response transfer. Time after
 its response includes protocol decoding, base64 decoding and operation completion. Do not use diagnostic times
-as uninstrumented performance results. Large and element cases check dimensions and the first pixel's color;
-the cross-browser capture integration tests retain the broader scale, clip, transparency and invalidation checks.
+as uninstrumented performance results. The dense case reconstructs every PNG row and checks every seeded pixel.
+Solid large and element cases check dimensions and the first pixel's color. The cross-browser capture integration
+tests retain the broader scale, clip, transparency and invalidation checks.
