@@ -1283,8 +1283,8 @@ export function engine(render: (root: SnapNode) => string) {
     let top = Math.max(0, inherited?.top ?? 0)
     let right = Math.min(innerWidth, inherited?.right ?? innerWidth)
     let bottom = Math.min(innerHeight, inherited?.bottom ?? innerHeight)
-    const position = getComputedStyle(element).position
-    const offsetParent = element instanceof HTMLElement ? element.offsetParent : null
+    let position = getComputedStyle(element).position
+    let offsetParent = element instanceof HTMLElement ? element.offsetParent : null
     let clips = position !== "fixed" && position !== "absolute"
     for (let ancestor = composedParent(element); ancestor !== null; ancestor = composedParent(ancestor)) {
       const style = getComputedStyle(ancestor)
@@ -1296,6 +1296,12 @@ export function engine(render: (root: SnapNode) => string) {
           /(?:^|\s)(?:layout|paint|strict|content)(?:\s|$)/.test(style.contain) ||
           style.contentVisibility === "auto" || /(?:transform|perspective|filter)/.test(style.willChange)
         if (!clips) continue
+      }
+      // Its own overflow still clips, but its containing block determines which outer ancestors can clip it.
+      if (style.position === "fixed" || style.position === "absolute") {
+        position = style.position
+        offsetParent = ancestor instanceof HTMLElement ? ancestor.offsetParent : null
+        clips = false
       }
       // Root overflow is applied to the viewport; body overflow can be propagated there too.
       if (
