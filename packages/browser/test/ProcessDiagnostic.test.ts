@@ -69,6 +69,7 @@ describe("crash process diagnostics", () => {
             pid: number
             limits?: { text: string }
             notObservedInProcScan?: boolean
+            pidReused?: boolean
             role?: string
             cmdline?: { text: string }
             relation?: string
@@ -82,6 +83,7 @@ describe("crash process diagnostics", () => {
       }
       assert.include(result.processes.find((item) => item.pid === process.pid)!.limits!.text, "Max core file size")
       assert.isTrue(result.processes.find((item) => item.pid === 2147483647)!.notObservedInProcScan)
+      assert.notStrictEqual(result.processes.find((item) => item.pid === 2147483647)!.pidReused, true)
     }))
   it.effect("retains partial records and kill metadata when the collector is terminated", () =>
     Effect.gen(function*() {

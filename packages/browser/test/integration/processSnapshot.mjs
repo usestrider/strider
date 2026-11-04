@@ -55,7 +55,9 @@ export const collectSnapshot = ({ root, previous, emit, read = readFile, list = 
     const current = stat(item.pid)
     update(item.pid, {
       ...current,
-      pidReused: known.has(item.pid) ? current.startTime !== known.get(item.pid).startTime : false
+      pidReused: known.has(item.pid) && current.startTime !== undefined && known.get(item.pid).startTime !== undefined
+        ? current.startTime !== known.get(item.pid).startTime
+        : undefined
     })
   }
 
