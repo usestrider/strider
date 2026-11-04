@@ -916,16 +916,27 @@ export interface Locator extends ReadonlyLocator {
    * **Details**
    *
    * Checked state follows `isChecked`, including its supported ARIA roles and optional checkability.
-   * If it's already checked, nothing is sent. Otherwise it clicks, then reads the state again: a click that didn't
+   * If it's already checked, nothing is sent. Otherwise it clicks, then reads the state again: a click
+   * that didn't
    * check it fails with `StateUnchanged{expected: "checked"}`. The selected element's own checked state takes
-   * precedence. Otherwise a label, or an ordinary descendant of its nearest label, reads the associated control.
+   * precedence. Otherwise a label, or an ordinary descendant of its nearest DOM label, reads the
+   * associated control.
    * The click target and any relative position stay on the selected element. Descendant fallback refuses
-   * buttons, inputs, selects, textareas, details, summaries, frames, embeds, objects, links with href, images with
-   * usemap, audio/video with controls, editable content and ARIA widget roles: button, checkbox, combobox, grid,
-   * gridcell, link, listbox, menu, menubar, menuitem, menuitemcheckbox, menuitemradio, option, radio, radiogroup,
-   * scrollbar, searchbox, separator, slider, spinbutton, switch, tab, tablist, textbox, tree, treegrid and treeitem.
-   * This checks the selected node and each ancestor before the nearest label. Refusal is `WrongElement` before
-   * input, even if the control already matches.
+   * buttons, inputs, selects, textareas, details, summaries, frames, embeds, objects, links with href
+   * (including
+   * SVG links with namespaced xlink:href), images with usemap, audio/video with controls, editable
+   * content and ARIA widget roles: button, checkbox, combobox, grid,
+   * gridcell, link, listbox, menu, menubar, menuitem, menuitemcheckbox, menuitemradio, option, radio,
+   * radiogroup,
+   * scrollbar, searchbox, separator, slider, spinbutton, switch, tab, tablist, textbox, tree, treegrid
+   * and treeitem.
+   * Association follows DOM parents without crossing a shadow root and never borrows the label's own ARIA
+   * state.
+   * Refusal checks both DOM ancestors and the path through assigned slots and shadow hosts, stopping
+   * before that
+   * DOM label; ancestors above it are outside this guard. Slot traversal adds guards without changing
+   * association
+   * or skipping DOM guards. Refusal is `WrongElement` before input, even if the control already matches.
    * Missing or non-checkable associations also fail with `WrongElement`. This does not change `isChecked` or
    * checked expectations.
    *
@@ -943,15 +954,26 @@ export interface Locator extends ReadonlyLocator {
   check(options?: PointerOptions | undefined): ActionEffect
   /**
    * Unchecks a checkbox or an ARIA checkable, and confirms it became unchecked. Checks: the same as `click`. It
-   * works as `check` does, using the checked state and optional checkability described by `isChecked`. The selected
+   * works as `check` does, using the checked state and optional checkability described by `isChecked`.
+   * The selected
    * element's own checked state takes precedence over a label's associated control. Ordinary label descendants
-   * also follow the nearest label's control, keeping the selected element as the click target and position origin.
+   * also follow the nearest DOM label's control, keeping the selected element as the click target and
+   * position origin.
    * As with `check`, fallback refuses buttons, inputs, selects, textareas, details, summaries, frames, embeds,
-   * objects, links with href, images with usemap, audio/video with controls, editable content and ARIA widget
-   * roles: button, checkbox, combobox, grid, gridcell, link, listbox, menu, menubar, menuitem, menuitemcheckbox,
+   * objects, links with href (including SVG links with namespaced xlink:href), images with usemap, audio/video
+   * with controls, editable content and ARIA widget
+   * roles: button, checkbox, combobox, grid, gridcell, link, listbox, menu, menubar, menuitem,
+   * menuitemcheckbox,
    * menuitemradio, option, radio, radiogroup, scrollbar, searchbox, separator, slider, spinbutton, switch, tab,
-   * tablist, textbox, tree, treegrid and treeitem, on the selected node or any ancestor before the nearest label.
-   * It refuses before input even when the control already matches. Missing or non-checkable associations fail with `WrongElement`; `isChecked` and
+   * tablist, textbox, tree, treegrid and treeitem. Association follows DOM parents without crossing a
+   * shadow root,
+   * using only the label's control, never its own ARIA state. Refusal checks DOM ancestors and the path through
+   * assigned slots and shadow hosts up to, excluding, that DOM label. Slot traversal adds guards without
+   * changing
+   * association or skipping DOM guards; ancestors above the label are outside this guard. It refuses
+   * before input
+   * even when the control already matches. Missing or non-checkable associations fail with
+   * `WrongElement`; `isChecked` and
    * checked expectations remain unchanged. It fails with `StateUnchanged{expected: "unchecked"}` if the state
    * stays checked.
    *

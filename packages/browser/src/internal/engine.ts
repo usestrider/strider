@@ -1274,21 +1274,38 @@ export function engine(render: (root: SnapNode) => string) {
     "treeitem"
   ])
 
-  /** Action-only label fallback; the selected element still receives the pointer input. */
+  const interactiveLabelDescendant = (element: Element): boolean => {
+    const role = roleOf(element)
+    return element.matches(
+      "button, input, select, textarea, details, summary, iframe, frame, embed, object, a[href], area[href], img[usemap], audio[controls], video[controls]"
+    ) || (
+      element.namespaceURI === "http://www.w3.org/2000/svg" && element.localName === "a" &&
+      element.hasAttributeNS("http://www.w3.org/1999/xlink", "href")
+    ) || contentEditable(element) || (role !== null && LABEL_WIDGET_ROLES.has(role))
+  }
+
+  /** Association stays in the DOM; slots can add refusals without choosing another label. */
   const checkedForAction = (element: Element): boolean | null => {
     const own = checkedOf(element)
     if (own !== null) return own
-    let ancestor: Element | null = element
-    while (ancestor !== null && !(ancestor instanceof HTMLLabelElement)) {
-      const role = roleOf(ancestor)
-      if (
-        ancestor.matches(
-          "button, input, select, textarea, details, summary, iframe, frame, embed, object, a[href], area[href], img[usemap], audio[controls], video[controls]"
-        ) || contentEditable(ancestor) || (role !== null && LABEL_WIDGET_ROLES.has(role))
-      ) return null
+    let label: Element | null = element
+    while (label !== null && !(label instanceof HTMLLabelElement)) label = label.parentElement
+    if (label === null || label.control === null) return null
+    for (
+      let ancestor: Element | null = element;
+      ancestor !== null && ancestor !== label;
       ancestor = ancestor.parentElement
+    ) {
+      if (interactiveLabelDescendant(ancestor)) return null
     }
-    return ancestor instanceof HTMLLabelElement && ancestor.control !== null ? checkedOf(ancestor.control) : null
+    for (
+      let ancestor: Element | null = element;
+      ancestor !== null && ancestor !== label;
+      ancestor = ancestor.assignedSlot ?? composedParent(ancestor)
+    ) {
+      if (interactiveLabelDescendant(ancestor)) return null
+    }
+    return checkedOf(label.control)
   }
 
   /** The element with focus, through open shadow roots. */
