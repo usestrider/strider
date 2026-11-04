@@ -83,6 +83,13 @@ describe("failure trace runner lifecycle", () => {
     expect(payloads).not.toContain("PASS_ONLY")
     expect(payloads).not.toContain("LATE_PASS_ONLY")
     expect(read("setup.fixture")).toContain("SETUP_FAILURE_ONLY")
+    const concurrentShared = files.filter((name) => name.startsWith("concurrent.fixture") && name.includes("-shared"))
+      .map((name) => fs.readFileSync(new URL(name, directory), "utf8")).join("\n")
+    expect(concurrentShared).toContain("CONCURRENT_A")
+    expect(concurrentShared).toContain("CONCURRENT_B")
+    for (const name of files.filter((name) => name.startsWith("concurrent.fixture") && name.includes("-test"))) {
+      expect(fs.readFileSync(new URL(name, directory), "utf8")).not.toContain("CONCURRENT_")
+    }
     expect(read("process.fixture")).toContain("OWNED_STDERR")
     expect(read("process.fixture")).toContain("\"kind\":\"pipe-send\"")
     expect(read("process.fixture")).toContain("PIPE_SEND")

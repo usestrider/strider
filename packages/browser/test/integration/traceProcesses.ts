@@ -20,9 +20,16 @@ if (!prototype[patched]) {
     trace("process-start", { command: options.file, args: options.args, pid: this.pid })
     // Observing emit leaves the existing pipe consumer in charge of flow and draining.
     if (this.stderr !== null) {
+      trace("stderr-open", "Observing the existing stderr consumer")
+      let observedBytes = 0
       const emit = this.stderr.emit
       this.stderr.emit = function(event: string, ...values: Array<unknown>) {
-        if (event === "data") trace("stderr", String(values[0]))
+        if (event === "data") {
+          const text = String(values[0])
+          observedBytes += Buffer.byteLength(text)
+          trace("stderr", text)
+        }
+        if (event === "end") trace("stderr-end", { observedBytes })
         return emit.call(this, event, ...values)
       }
     } else trace("stderr-unavailable", "Process stdio configuration provides no readable stderr pipe")

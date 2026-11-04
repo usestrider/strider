@@ -33,7 +33,9 @@ const save = (file: string, trace: TraceBuffer, scope: string) => {
 install({
   connection(label) {
     const id = `${++nextConnection}:${label}`
-    const owner = TestRunner.getCurrentTest<RunnerTestCase | undefined>()?.id
+    // Vitest exposes one global current test, so it cannot identify a concurrent creator safely.
+    const ambiguous = active.size > 1
+    const owner = ambiguous ? undefined : TestRunner.getCurrentTest<RunnerTestCase | undefined>()?.id
     const record = (kind: string, value: unknown) => {
       const payload = serialize(value)
       // A connection created by a test remains that test's, even after its completion.
@@ -67,7 +69,7 @@ install({
         }
         return
       }
-      if (active.size === 1) {
+      if (active.size === 1 && !ambiguous) {
         active.values().next().value!.trace.record(id, kind, payload)
       } else {
         shared.record(id, kind, payload)
@@ -76,7 +78,7 @@ install({
         }
       }
     }
-    record("connection", { label, owner: owner ?? "shared suite context" })
+    record("connection", { label, owner: owner ?? "shared suite context", ambiguousCreator: ambiguous })
     return record
   }
 })
