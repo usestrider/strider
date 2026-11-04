@@ -1071,6 +1071,10 @@ describe("strider", () => {
           assert.strictEqual(history.code, 0, history.err)
           assert.include(history.out, "console error (text not sent)")
           assert.notInclude(history.out, consoleText)
+          // The digest of events since the last command also leaves console text out, whichever command carries it
+          for (const result of [logged, snapshot, screenshot]) {
+            assert.notInclude(result.out + result.err, consoleText)
+          }
 
           // Call separately: the MCP helper sends each batch concurrently, so no call depends on another here.
           for (
@@ -1089,6 +1093,7 @@ describe("strider", () => {
             const result = answer?.result
             assert.isDefined(result, JSON.stringify(answers))
             const output = JSON.stringify(result)
+            assert.notInclude(output, consoleText)
             if (name === "snapshot") {
               assert.isNotTrue(result.isError, output)
               assert.include(output, "Note")
@@ -1102,9 +1107,51 @@ describe("strider", () => {
             } else {
               assert.isNotTrue(result.isError, output)
               assert.include(output, "console error (text not sent)")
-              assert.notInclude(output, consoleText)
             }
           }
+        } finally {
+          const stopped = yield* run("stop")
+          assert.strictEqual(stopped.code, 0, stopped.err)
+        }
+      })),
+    timeout
+  )
+
+  it.live(
+    "masks all of an editable field's content under strict capture",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const served = yield* site
+        const url = `${served.origin}/fixture?html=${
+          encodeURIComponent(
+            `<div role="textbox" aria-label="Rich" contenteditable="true"><h1>rich-heading</h1><a href="#x">rich-link</a><button>rich-button</button><img alt="rich-image" src="data:,"></div><div contenteditable="true">roleless-field</div>`
+          )
+        }`
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "strict", ...args)
+        const page = (...args: ReadonlyArray<string>) => run("-p", "form", ...args)
+        const started = yield* strider(
+          env,
+          "start",
+          "--name",
+          "strict",
+          "--capture",
+          "strict",
+          "--chromium",
+          chromium.executable
+        )
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          const opened = yield* run("page", "new", "--name", "form", url)
+          assert.strictEqual(opened.code, 0, opened.err)
+          const snapshot = yield* page("snapshot")
+          assert.strictEqual(snapshot.code, 0, snapshot.err)
+          assert.include(snapshot.out, "textbox \"Rich\"")
+          const found = yield* page("find", "-")
+          assert.strictEqual(found.code, 0, found.err)
+          const contents = ["rich-heading", "rich-link", "rich-button", "rich-image", "roleless-field"]
+          assert.deepStrictEqual(contents.filter((content) => snapshot.out.includes(content)), [], snapshot.out)
+          assert.deepStrictEqual(contents.filter((content) => found.out.includes(content)), [], found.out)
         } finally {
           const stopped = yield* run("stop")
           assert.strictEqual(stopped.code, 0, stopped.err)
