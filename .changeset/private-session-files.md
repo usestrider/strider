@@ -15,3 +15,12 @@ arguments or long-option path values, including directory boundaries, so similar
 paths do not select a process. Trusted ancestor aliases keep their validated spelling for socket paths, and the
 internal socket basename is shortened to `sock` to leave room for 32-character session names. Stop older daemons
 with the older CLI before upgrading, including sessions in XDG_RUNTIME_DIR; socket files are not migrated.
+
+If already upgraded with an old daemon still alive, prefer stopping it with the old CLI under its original runtime
+environment. Otherwise stop sending commands and wait for the daemon's configured `--idle` timeout (default:
+`1 hour`; startup overrides apply and further commands reset the timer). Before manually terminating it, independently
+verify that the lock's `pid` still identifies your account's daemon for that session: check ownership, command/session
+arguments and process start time against `startedAt` (Unix epoch milliseconds). Never signal a process solely because
+a stale lock names its PID; if identity is uncertain, use the old CLI or wait. Once the verified daemon and its browser
+have exited, inspect and remove only identified leftovers you own, then restart with the new CLI. Do not copy locks
+or sockets, delete live profiles, or automatically reclaim the old shared fallback.

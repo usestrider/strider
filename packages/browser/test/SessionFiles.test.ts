@@ -23,101 +23,109 @@ const strider = (env: Readonly<Record<string, string>>, ...args: ReadonlyArray<s
 }
 
 describe("session files", () => {
-  it("binds and connects a 32-character session through a short trusted alias to a long path", async () => {
-    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "s-"))
-    const previous = process.env.XDG_RUNTIME_DIR
-    const server = net.createServer((socket) => {
-      connected = true
-      socket.destroy()
-    })
-    let connected = false
-    try {
-      const target = path.join(temporary, "long-target-".repeat(10))
-      fs.mkdirSync(target, { mode: 0o700 })
-      const alias = path.join(temporary, "a")
-      fs.symlinkSync(target, alias)
-      process.env.XDG_RUNTIME_DIR = alias
-      const root = Session.root(process.env, os.tmpdir())
-      fs.mkdirSync(root, { mode: 0o700 })
-      const selected = await Effect.runPromise(Client.sessionRoot)
-      assert.strictEqual(selected, root, "validation must retain the short trusted spelling")
-      const name = "a".repeat(32)
-      assert.isTrue(Session.nameRule.test(name))
-      const paths = Session.paths(selected, name)
-      fs.mkdirSync(paths.dir, { mode: 0o700 })
-      assert.isBelow(Buffer.byteLength(paths.socket), 104)
-      assert.isAbove(Buffer.byteLength(fs.realpathSync(paths.dir) + "/sock"), 108)
-      await new Promise<void>((resolve, reject) => {
-        server.once("error", reject)
-        server.listen(paths.socket, resolve)
+  // Linux-only: the fixture budgets a short Linux temp path and asserts Linux's 108-byte resolved socket limit.
+  it.skipIf(process.platform !== "linux")(
+    "binds and connects a 32-character session through a short trusted alias to a long path",
+    async () => {
+      const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "s-"))
+      const previous = process.env.XDG_RUNTIME_DIR
+      const server = net.createServer((socket) => {
+        connected = true
+        socket.destroy()
       })
-      await Effect.runPromiseExit(
-        Effect.scoped(Effect.gen(function*() {
-          const client = yield* Client.session(selected, name)
-          yield* client.Info()
-        })).pipe(Effect.timeout("1 second"))
-      )
-      assert.isTrue(connected, "the client must connect using the same short path the server bound")
-      const marker = path.join(temporary, "startup-ran")
-      const child = path.join(temporary, "daemon.cjs")
-      fs.writeFileSync(
-        child,
-        "require('node:fs').writeFileSync(" + JSON.stringify(marker) + ", 'yes'); process.exitCode = 1"
-      )
-      await Effect.runPromiseExit(Client.start([], child).pipe(Effect.provide(NodeServices.layer)))
-      assert.strictEqual(
-        fs.readFileSync(marker, "utf8"),
-        "yes",
-        "the startup listener must also bind through the alias"
-      )
-    } finally {
-      if (previous === undefined) delete process.env.XDG_RUNTIME_DIR
-      else process.env.XDG_RUNTIME_DIR = previous
-      server.close()
-      fs.rmSync(temporary, { recursive: true, force: true })
+      let connected = false
+      try {
+        const target = path.join(temporary, "long-target-".repeat(10))
+        fs.mkdirSync(target, { mode: 0o700 })
+        const alias = path.join(temporary, "a")
+        fs.symlinkSync(target, alias)
+        process.env.XDG_RUNTIME_DIR = alias
+        const root = Session.root(process.env, os.tmpdir())
+        fs.mkdirSync(root, { mode: 0o700 })
+        const selected = await Effect.runPromise(Client.sessionRoot)
+        assert.strictEqual(selected, root, "validation must retain the short trusted spelling")
+        const name = "a".repeat(32)
+        assert.isTrue(Session.nameRule.test(name))
+        const paths = Session.paths(selected, name)
+        fs.mkdirSync(paths.dir, { mode: 0o700 })
+        assert.isBelow(Buffer.byteLength(paths.socket), 104)
+        assert.isAbove(Buffer.byteLength(fs.realpathSync(paths.dir) + "/sock"), 108)
+        await new Promise<void>((resolve, reject) => {
+          server.once("error", reject)
+          server.listen(paths.socket, resolve)
+        })
+        await Effect.runPromiseExit(
+          Effect.scoped(Effect.gen(function*() {
+            const client = yield* Client.session(selected, name)
+            yield* client.Info()
+          })).pipe(Effect.timeout("1 second"))
+        )
+        assert.isTrue(connected, "the client must connect using the same short path the server bound")
+        const marker = path.join(temporary, "startup-ran")
+        const child = path.join(temporary, "daemon.cjs")
+        fs.writeFileSync(
+          child,
+          "require('node:fs').writeFileSync(" + JSON.stringify(marker) + ", 'yes'); process.exitCode = 1"
+        )
+        await Effect.runPromiseExit(Client.start([], child).pipe(Effect.provide(NodeServices.layer)))
+        assert.strictEqual(
+          fs.readFileSync(marker, "utf8"),
+          "yes",
+          "the startup listener must also bind through the alias"
+        )
+      } finally {
+        if (previous === undefined) delete process.env.XDG_RUNTIME_DIR
+        else process.env.XDG_RUNTIME_DIR = previous
+        server.close()
+        fs.rmSync(temporary, { recursive: true, force: true })
+      }
     }
-  })
+  )
 
-  it("prunes only complete session path arguments, including the intended leftover", async () => {
-    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
-    const dir = path.join(temporary, "strider", "a")
-    const argumentsToKeep = [
-      dir + "b/profile",
-      "/unrelated" + dir + "/profile",
-      "--note=prefix" + dir + "/profile",
-      "--note=" + dir + "b/profile",
-      dir + "/../ab/profile"
-    ]
-    const children = [...argumentsToKeep, "--user-data-dir=" + dir + "/profile", dir + "/profile"].map((arg) =>
-      spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", "--", arg], { stdio: "ignore" })
-    )
-    const exits = children.map((child) =>
-      new Promise<NodeJS.Signals | null>((resolve) => child.once("exit", (_, signal) => resolve(signal)))
-    )
-    try {
-      await Promise.all(children.map((child) => new Promise((resolve) => child.once("spawn", resolve))))
-      fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
-      fs.chmodSync(path.dirname(dir), 0o700)
-      const result = strider({ XDG_RUNTIME_DIR: temporary, XDG_STATE_HOME: temporary }, "prune", "a")
-      assert.strictEqual(result.status, 0, result.stderr)
-      assert.isFalse(fs.existsSync(dir))
-      for (const exited of exits.slice(argumentsToKeep.length)) {
-        assert.strictEqual(
-          await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve("alive"), 1000))]),
-          "SIGKILL"
-        )
+  // Linux-only: named prune discovers these real child processes through /proc/<pid>/cmdline.
+  it.skipIf(process.platform !== "linux")(
+    "prunes only complete session path arguments, including the intended leftover",
+    async () => {
+      const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+      const dir = path.join(temporary, "strider", "a")
+      const argumentsToKeep = [
+        dir + "b/profile",
+        "/unrelated" + dir + "/profile",
+        "--note=prefix" + dir + "/profile",
+        "--note=" + dir + "b/profile",
+        dir + "/../ab/profile"
+      ]
+      const children = [...argumentsToKeep, "--user-data-dir=" + dir + "/profile", dir + "/profile"].map((arg) =>
+        spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", "--", arg], { stdio: "ignore" })
+      )
+      const exits = children.map((child) =>
+        new Promise<NodeJS.Signals | null>((resolve) => child.once("exit", (_, signal) => resolve(signal)))
+      )
+      try {
+        await Promise.all(children.map((child) => new Promise((resolve) => child.once("spawn", resolve))))
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+        fs.chmodSync(path.dirname(dir), 0o700)
+        const result = strider({ XDG_RUNTIME_DIR: temporary, XDG_STATE_HOME: temporary }, "prune", "a")
+        assert.strictEqual(result.status, 0, result.stderr)
+        assert.isFalse(fs.existsSync(dir))
+        for (const exited of exits.slice(argumentsToKeep.length)) {
+          assert.strictEqual(
+            await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve("alive"), 1000))]),
+            "SIGKILL"
+          )
+        }
+        for (const exited of exits.slice(0, argumentsToKeep.length)) {
+          assert.strictEqual(
+            await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve("alive"), 20))]),
+            "alive"
+          )
+        }
+      } finally {
+        for (const child of children) child.kill("SIGKILL")
+        fs.rmSync(temporary, { recursive: true, force: true })
       }
-      for (const exited of exits.slice(0, argumentsToKeep.length)) {
-        assert.strictEqual(
-          await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve("alive"), 20))]),
-          "alive"
-        )
-      }
-    } finally {
-      for (const child of children) child.kill("SIGKILL")
-      fs.rmSync(temporary, { recursive: true, force: true })
     }
-  })
+  )
 
   it("rejects aliases beneath writable parents and aliases to unsafe ancestry", async () => {
     const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
@@ -208,25 +216,31 @@ describe("session files", () => {
     }
   })
 
-  it("prunes a session without killing a process of another whose name starts the same", async () => {
-    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
-    // A real process whose command line names the other session's profile, as a browser's does
-    const other = path.join(temporary, "strider", "ab", "profile")
-    const browser = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", other], { stdio: "ignore" })
-    const exited = new Promise<NodeJS.Signals | null>((resolve) => browser.once("exit", (_, signal) => resolve(signal)))
-    try {
-      await new Promise((resolve) => browser.once("spawn", resolve))
-      fs.mkdirSync(path.join(temporary, "strider", "a"), { recursive: true, mode: 0o700 })
-      fs.chmodSync(path.join(temporary, "strider"), 0o700)
-      strider({ XDG_RUNTIME_DIR: temporary, XDG_STATE_HOME: temporary }, "prune", "a")
-      assert.isFalse(fs.existsSync(path.join(temporary, "strider", "a")))
-      const killed = await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve("alive"), 500))])
-      assert.strictEqual(killed, "alive")
-    } finally {
-      browser.kill("SIGKILL")
-      fs.rmSync(temporary, { recursive: true, force: true })
+  // Linux-only: proving that a neighbour survives process selection requires the /proc command-line scan.
+  it.skipIf(process.platform !== "linux")(
+    "prunes a session without killing a process of another whose name starts the same",
+    async () => {
+      const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+      // A real process whose command line names the other session's profile, as a browser's does
+      const other = path.join(temporary, "strider", "ab", "profile")
+      const browser = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", other], { stdio: "ignore" })
+      const exited = new Promise<NodeJS.Signals | null>((resolve) =>
+        browser.once("exit", (_, signal) => resolve(signal))
+      )
+      try {
+        await new Promise((resolve) => browser.once("spawn", resolve))
+        fs.mkdirSync(path.join(temporary, "strider", "a"), { recursive: true, mode: 0o700 })
+        fs.chmodSync(path.join(temporary, "strider"), 0o700)
+        strider({ XDG_RUNTIME_DIR: temporary, XDG_STATE_HOME: temporary }, "prune", "a")
+        assert.isFalse(fs.existsSync(path.join(temporary, "strider", "a")))
+        const killed = await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve("alive"), 500))])
+        assert.strictEqual(killed, "alive")
+      } finally {
+        browser.kill("SIGKILL")
+        fs.rmSync(temporary, { recursive: true, force: true })
+      }
     }
-  })
+  )
 
   it("keeps MCP filesystem failures off stdout", () => {
     const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
