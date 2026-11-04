@@ -8,6 +8,7 @@ the command enters the same Nix environment as the integration tests.
 pnpm bench                                      # 20 measured pairs after 3 warmup pairs per case
 pnpm bench --check                              # fail if any Strider median is > 1.10 × Playwright
 pnpm bench --check --max-ratio 1                 # require parity or better for every selected case
+pnpm bench --only lifecycle                      # launch, first page, shutdown and persistent lifecycle cases
 pnpm bench --only click --runs 50 --check         # investigate one operation
 pnpm bench --runs 2 --warmup 1                    # smoke check, not a performance gate
 pnpm bench --output .data/benchmarks/before.json  # preserve a report before changing code
@@ -22,18 +23,21 @@ score can hide a slow operation. A failed operation or wrong result always exits
 
 ## Cases and timing boundaries
 
-| Case             | Timed work                                                                              |
-| ---------------- | --------------------------------------------------------------------------------------- |
-| `launch`         | Start a fresh browser and establish its automation connection; shutdown excluded        |
-| `page-lifecycle` | Create and close an isolated context and page, including viewport configuration         |
-| `navigate`       | Navigate to a local document through `load`, then read its title                        |
-| `resources`      | Load a local document with 100 uncached images through `load`, then count loaded images |
-| `evaluate`       | 20 sequential main-world evaluations returning small objects; time per batch            |
-| `locator-read`   | 20 sequential role locator text reads; time per batch                                   |
-| `click`          | Click with default actionability, then read the updated counter                         |
-| `fill`           | Fill a labeled input with default actionability, then read its value                    |
-| `visible`        | Wait for an already visible heading                                                     |
-| `screenshot`     | Capture the viewport as PNG                                                             |
+| Case                 | Timed work                                                                                               |
+| -------------------- | -------------------------------------------------------------------------------------------------------- |
+| `launch`             | Start a fresh browser and establish its automation connection; shutdown excluded                         |
+| `first-page`         | Acquire the first isolated context/page after each fresh launch; launch and cleanup excluded             |
+| `shutdown`           | Close a freshly launched browser and automation connection with no owned pages; launch excluded          |
+| `repeated-lifecycle` | Five sequential isolated context/page acquisitions and releases on a persistent browser; checks excluded |
+| `page-lifecycle`     | Create and close an isolated context and page, including viewport configuration                          |
+| `navigate`           | Navigate to a local document through `load`, then read its title                                         |
+| `resources`          | Load a local document with 100 uncached images through `load`, then count loaded images                  |
+| `evaluate`           | 20 sequential main-world evaluations returning small objects; time per batch                             |
+| `locator-read`       | 20 sequential role locator text reads; time per batch                                                    |
+| `click`              | Click with default actionability, then read the updated counter                                          |
+| `fill`               | Fill a labeled input with default actionability, then read its value                                     |
+| `visible`            | Wait for an already visible heading                                                                      |
+| `screenshot`         | Capture the viewport as PNG                                                                              |
 
 For operation cases, each sample gets a fresh context and page loaded with the same fixture. Page creation,
 initial navigation and cleanup are outside timing. Results are checked after the timer stops, including
@@ -42,8 +46,20 @@ too. Cases stop on the first failure; the report marks an incomplete run as an e
 
 The runner awaits one sample at a time and alternates which library goes first in each pair. Both use a
 1280 × 720 viewport at device scale 1, the same server, and the same browser binary, whose reported version is
-checked against the integration pin. Persistent browsers are used for all cases except launch. Every launch
+checked against the integration pin. Persistent browsers are used except for `launch`, `first-page` and `shutdown`. Every launch
 gets a fresh profile; warmup reduces library and OS cache effects, so this is not a cold-machine startup test.
+`first-page` checks that the acquired page evaluates `document.URL` as `about:blank`. It includes context
+creation and the same viewport configuration as `page-lifecycle`. `shutdown` starts no owned context or page;
+it includes each library's supported connection/process cleanup (including Strider's owned temporary profile).
+`repeated-lifecycle` reports the sum of acquisition and release times for five sequential isolated context/page
+cycles, not a per-cycle average. Between timers, it checks `about:blank`, one additional live page and return
+to the initial page count after every release. Strider also awaits each context's acknowledged terminal state;
+Playwright checks context/page counts return to their initial values. Strider's public browser has no context
+registry, so this checks page counts and context termination rather than an independent wire-level context census.
+Checks, including the page evaluation, are excluded; their browser work can affect subsequent cycles. These
+checks establish ordinary successful release, not interruption or partial-initialization correctness. No case
+here characterizes simultaneous scale, page reuse within one context, remote attach, or memory/OS resource leaks.
+
 Module imports are outside timing. Both libraries retain their default launch flags, instrumentation and
 actionability behavior: the comparison measures the cost of each library's supported public behavior.
 

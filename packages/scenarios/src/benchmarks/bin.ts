@@ -2,8 +2,10 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { Browser, Deadline } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as ManagedRuntime from "effect/ManagedRuntime"
+import * as Scope from "effect/Scope"
 import * as assert from "node:assert/strict"
 import { createHash } from "node:crypto"
 import * as fs from "node:fs"
@@ -16,7 +18,8 @@ import { cases, viewport } from "./cases.ts"
 import { compare, elapsed, measure, options } from "./measure.ts"
 
 const config = options(process.argv.slice(2))
-const names = ["launch", "page-lifecycle", ...cases.map((entry) => entry.name)]
+const lifecycleNames = ["launch", "first-page", "shutdown", "page-lifecycle", "repeated-lifecycle"]
+const names = ["lifecycle", ...lifecycleNames, ...cases.map((entry) => entry.name)]
 if (config.help) {
   process.stdout.write(`Usage: pnpm bench [options]
   --runs N          measured pairs per case (default 20)
@@ -106,14 +109,15 @@ const save = () => {
       "",
       ...results.map((result) => `- **${result.name}:** ${result.description}.`),
       "",
-      "Operation cases use a fresh context and page for every sample; setup and cleanup are outside timing. Launch excludes shutdown; page-lifecycle includes context/page creation and cleanup. Default launch flags and actionability behavior belong to each library. Browser module imports are outside all timings. Raw samples and machine/source metadata are in the JSON report. These are wall-time comparisons, not statistical significance tests or measurements of CPU/memory use.",
+      "Operation cases use a fresh context and page for every sample; setup and cleanup are outside timing. Launch excludes shutdown; first-page excludes fresh launch and cleanup; shutdown has no owned pages. Page-lifecycle includes context/page creation and cleanup; repeated-lifecycle sums five cycles with page counts and context termination checked between timers. Default launch flags and actionability behavior belong to each library. Browser module imports are outside all timings. Raw samples and machine/source metadata are in the JSON report. These are wall-time comparisons, not statistical significance tests or measurements of CPU/memory use.",
       ...(report.error === null ? [] : ["", "```text", report.error, "```"]),
       ""
     ].join("\n")
   )
 }
 
-const chosen = (name: string) => config.only === undefined || config.only === name
+const chosen = (name: string) =>
+  config.only === undefined || config.only === name || (config.only === "lifecycle" && lifecycleNames.includes(name))
 const record = async (
   name: string,
   description: string,
@@ -161,7 +165,50 @@ try {
       }
     })
   }
-  if (config.only !== "launch") {
+  for (const name of ["first-page", "shutdown"] as const) {
+    if (!chosen(name)) continue
+    await record(
+      name,
+      name === "first-page"
+        ? "Acquire the first isolated context/page after fresh launch; launch and cleanup excluded"
+        : "Close a freshly launched browser and its connection; launch excluded, no owned pages",
+      {
+        strider: async () => {
+          const runtime = makeRuntime()
+          const scope = Scope.makeUnsafe()
+          try {
+            const browser = await runtime.runPromise(Browser.Browser)
+            assert.ok(browser.info.product.includes(pins.chromium.version))
+            if (name === "shutdown") return (await elapsed(() => runtime.dispose())).ms
+            const sample = await elapsed(() =>
+              runtime.runPromise(Browser.newPage(pageOptions).pipe(Scope.provide(scope)))
+            )
+            assert.equal(await runtime.runPromise(sample.value.evaluateInMainWorld(() => document.URL)), "about:blank")
+            return sample.ms
+          } finally {
+            if (name !== "shutdown") await runtime.runPromise(Scope.close(scope, Exit.void))
+            await runtime.dispose()
+          }
+        },
+        playwright: async () => {
+          const browser = await launchPlaywright()
+          try {
+            assert.equal(browser.version(), pins.chromium.version)
+            if (name === "shutdown") return (await elapsed(() => browser.close())).ms
+            const sample = await elapsed(async () => {
+              const context = await browser.newContext({ viewport, deviceScaleFactor: 1 })
+              return context.newPage()
+            })
+            assert.equal(await sample.value.evaluate(() => document.URL), "about:blank")
+            return sample.ms
+          } finally {
+            await browser.close()
+          }
+        }
+      }
+    )
+  }
+  if (config.only === undefined || !["launch", "first-page", "shutdown"].includes(config.only)) {
     const site = await start()
     try {
       const runtime = makeRuntime()
@@ -189,6 +236,65 @@ try {
                 return sample.ms
               }
             })
+          }
+          if (chosen("repeated-lifecycle")) {
+            await record(
+              "repeated-lifecycle",
+              "Five sequential isolated context/page acquisitions and releases on a persistent browser; checks excluded",
+              {
+                strider: async () => {
+                  const before = await runtime.runPromise(info.pages)
+                  let ms = 0
+                  for (let i = 0; i < 5; i++) {
+                    const scope = Scope.makeUnsafe()
+                    try {
+                      const sample = await elapsed(() =>
+                        runtime.runPromise(Browser.newPage(pageOptions).pipe(Scope.provide(scope)))
+                      )
+                      ms += sample.ms
+                      assert.equal(
+                        await runtime.runPromise(sample.value.evaluateInMainWorld(() => document.URL)),
+                        "about:blank"
+                      )
+                      assert.equal((await runtime.runPromise(info.pages)).length, before.length + 1)
+                      ms += (await elapsed(() => runtime.runPromise(Scope.close(scope, Exit.void)))).ms
+                      await runtime.runPromise(sample.value.context.closed.pipe(Deadline.within("30 seconds")))
+                      assert.equal((await runtime.runPromise(info.pages)).length, before.length)
+                    } finally {
+                      await runtime.runPromise(Scope.close(scope, Exit.void))
+                    }
+                  }
+                  return ms
+                },
+                playwright: async () => {
+                  const before = browser.contexts().length
+                  let ms = 0
+                  for (let i = 0; i < 5; i++) {
+                    const sample = await elapsed(async () => {
+                      const context = await browser.newContext({ viewport, deviceScaleFactor: 1 })
+                      try {
+                        return { context, page: await context.newPage() }
+                      } catch (error) {
+                        await context.close()
+                        throw error
+                      }
+                    })
+                    ms += sample.ms
+                    try {
+                      assert.equal(await sample.value.page.evaluate(() => document.URL), "about:blank")
+                      assert.equal(browser.contexts().length, before + 1)
+                      assert.equal(sample.value.context.pages().length, 1)
+                      ms += (await elapsed(() => sample.value.context.close())).ms
+                      assert.equal(browser.contexts().length, before)
+                      assert.equal(sample.value.context.pages().length, 0)
+                    } finally {
+                      await sample.value.context.close()
+                    }
+                  }
+                  return ms
+                }
+              }
+            )
           }
           for (const entry of cases.filter((entry) => chosen(entry.name))) {
             await record(entry.name, entry.description, {
