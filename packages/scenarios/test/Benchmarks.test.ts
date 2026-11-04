@@ -108,6 +108,99 @@ describe("capture benchmark verification", () => {
   })
 })
 
+describe("dense capture verification of valid PNG encodings", () => {
+  const entry = captureCases.find((entry) => entry.name === "screenshot-dense")!
+  const width = 1280
+  const height = 2880
+
+  // The fixture's seeded pixels, as `prepareDenseCapture` draws them.
+  const pixels = (channels: number) => {
+    const image = new Uint8Array(width * height * channels)
+    let seed = 42
+    for (let at = 0; at < image.length; at += channels) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+      image[at] = seed & 255
+      image[at + 1] = (seed >>> 8) & 255
+      image[at + 2] = (seed >>> 16) & 255
+      if (channels === 4) image[at + 3] = 255
+    }
+    image.set([12, 34, 56], 0)
+    return image
+  }
+
+  // Encodes with the five PNG row filters in turn, so every predictor is exercised on seeded data.
+  const encode = (image: Uint8Array, channels: number, idatChunks = 1) => {
+    const header = Buffer.alloc(33)
+    Buffer.from("89504e470d0a1a0a", "hex").copy(header)
+    header.writeUInt32BE(13, 8)
+    header.write("IHDR", 12)
+    header.writeUInt32BE(width, 16)
+    header.writeUInt32BE(height, 20)
+    header[24] = 8
+    header[25] = channels === 4 ? 6 : 2
+    const stride = width * channels
+    const raw = Buffer.alloc((stride + 1) * height)
+    for (let y = 0; y < height; y++) {
+      const filter = y % 5
+      const start = y * (stride + 1)
+      raw[start] = filter
+      for (let x = 0; x < stride; x++) {
+        const value = image[y * stride + x]!
+        const left = x < channels ? 0 : image[y * stride + x - channels]!
+        const up = y === 0 ? 0 : image[(y - 1) * stride + x]!
+        const upperLeft = y === 0 || x < channels ? 0 : image[(y - 1) * stride + x - channels]!
+        let predictor = 0
+        if (filter === 1) predictor = left
+        else if (filter === 2) predictor = up
+        else if (filter === 3) predictor = (left + up) >> 1
+        else if (filter === 4) {
+          const p = left + up - upperLeft
+          const a = Math.abs(p - left)
+          const b = Math.abs(p - up)
+          const c = Math.abs(p - upperLeft)
+          predictor = a <= b && a <= c ? left : b <= c ? up : upperLeft
+        }
+        raw[start + 1 + x] = (value - predictor) & 255
+      }
+    }
+    const compressed = deflateSync(raw, { level: 1 })
+    const size = Math.ceil(compressed.length / idatChunks)
+    const parts = [header]
+    for (let at = 0; at < compressed.length; at += size) {
+      const data = compressed.subarray(at, at + size)
+      const chunk = Buffer.alloc(12 + data.length)
+      chunk.writeUInt32BE(data.length)
+      chunk.write("IDAT", 4)
+      data.copy(chunk, 8)
+      parts.push(chunk)
+    }
+    return Buffer.concat(parts)
+  }
+
+  for (const [label, channels] of [["RGB", 3], ["RGBA", 4]] as const) {
+    it(`accepts ${label} with every row filter and split IDAT chunks`, () => {
+      const image = pixels(channels)
+      entry.verify(encode(image, channels))
+      entry.verify(encode(image, channels, 7))
+    })
+
+    // One row per filter, from the bottom of the image, where earlier rows' reconstruction has to be right.
+    it(`rejects a one-channel difference in ${label} under every row filter`, () => {
+      for (const y of [2875, 2876, 2877, 2878, 2879]) {
+        const image = pixels(channels)
+        image[(y * width + 640) * channels]! ^= 1
+        expect(() => entry.verify(encode(image, channels))).toThrow(`Dense PNG differs at 640,${y}`)
+      }
+    }, 60_000)
+  }
+
+  it("rejects RGBA whose alpha is not opaque", () => {
+    const image = pixels(4)
+    image[(100 * width + 640) * 4 + 3] = 254
+    expect(() => entry.verify(encode(image, 4))).toThrow("Dense PNG differs at 640,100")
+  })
+})
+
 it("rejects dense-image corruption away from the first pixel", () => {
   const entry = captureCases.find((entry) => entry.name === "screenshot-dense")!
   const header = Buffer.alloc(33)
