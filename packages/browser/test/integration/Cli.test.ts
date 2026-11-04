@@ -1132,9 +1132,14 @@ describe("strider", () => {
         const { endpoint } = yield* chromiumAttachable(Chromium.layerConnect).start(closes, stays)
         try {
           assert.strictEqual((yield* run("start", "--name", "remote", "--attach", endpoint)).code, 0)
+          assert.include((yield* run("-s", "remote", "pages")).out, "no pages")
           const lines = (yield* run("-s", "remote", "tabs")).out.split("\n")
           const idOf = (url: string) => lines.find((line) => line.includes(url))!.split("  ")[0]!
           assert.strictEqual((yield* run("-s", "remote", "control", idOf(closes), "--name", "own")).code, 0)
+          const listed = (yield* run("-s", "remote", "pages")).out
+          assert.include(listed, "own")
+          assert.include(listed, closes)
+          assert.notInclude(listed, stays)
           assert.strictEqual((yield* run("-s", "remote", "-p", "own", "snapshot")).code, 0)
           const targets = yield* Effect.promise(() =>
             fetch(new URL("/json/list", endpoint)).then((response) =>
@@ -1150,10 +1155,14 @@ describe("strider", () => {
             code = (yield* run("-s", "remote", "-p", "own", "snapshot")).code
           }
           assert.strictEqual(code, 16, "a closed tab has no name")
+          assert.include((yield* run("-s", "remote", "pages")).out, "no pages")
           const taken = yield* run("-s", "remote", "control", idOf(stays), "--name", "own")
           assert.strictEqual(taken.code, 0, taken.err)
+          assert.include((yield* run("-s", "remote", "pages")).out, "own")
           assert.strictEqual((yield* run("-s", "remote", "-p", "own", "snapshot")).code, 0)
           assert.strictEqual((yield* run("-s", "remote", "release", "-p", "own")).code, 0)
+          assert.include((yield* run("-s", "remote", "pages")).out, "no pages")
+          assert.include((yield* run("-s", "remote", "tabs")).out, stays)
         } finally {
           assert.strictEqual((yield* run("-s", "remote", "stop")).code, 0)
         }

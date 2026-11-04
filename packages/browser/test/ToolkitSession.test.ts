@@ -69,6 +69,42 @@ describe("Session with explicit tab control, after control", () => {
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 })
 
+describe("Session with default context discovery", () => {
+  it.effect("lists controlled external tabs until release or closure, excluding uncontrolled tabs", () =>
+    Effect.gen(function*() {
+      const browser = yield* Browser.Browser
+      const context = yield* Browser.newContext()
+      const local = yield* context.newPage
+      const external = yield* Browser.newContext()
+      const page = yield* external.newPage
+      const uncontrolled = yield* external.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, browser, secrets: {}, capture: CapturePolicy.local })
+      const assertPages = Effect.fnUntraced(
+        function*(ids: ReadonlyArray<Target.NavigableId>, names: ReadonlyArray<string>) {
+          assert.deepStrictEqual((yield* session.pages).map((each) => each.page.id), ids)
+          const listed = yield* session.toolkit.handle("pages", {}).pipe(Effect.flatMap(Stream.runLast))
+          const result = Option.getOrThrow(listed).result
+          if (!("outcome" in result)) return assert.fail("pages did not return an outcome")
+          assert.deepStrictEqual(result.outcome.map((each) => each.page), names)
+        }
+      )
+      yield* assertPages([local.id], ["p1"])
+      yield* session.toolkit.handle("control", { tab: String(page.id), name: "remote" }).pipe(
+        Effect.flatMap(Stream.runDrain)
+      )
+      yield* assertPages([local.id, page.id], ["p1", "remote"])
+      yield* session.toolkit.handle("release", { page: "remote" }).pipe(Effect.flatMap(Stream.runDrain))
+      yield* assertPages([local.id], ["p1"])
+      assert.includeMembers((yield* external.pages).map((each) => each.id), [page.id, uncontrolled.id])
+      yield* session.toolkit.handle("control", { tab: String(page.id), name: "remote" }).pipe(
+        Effect.flatMap(Stream.runDrain)
+      )
+      yield* page.close()
+      yield* assertPages([local.id], ["p1"])
+      assert.deepStrictEqual((yield* external.pages).map((each) => each.id), [uncontrolled.id])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
+
 describe("Session with explicit tab control, after the tab closes", () => {
   // With discovery off, refresh lists byName, which nothing prunes when a held tab closes
   it.effect("stops listing a held tab that closed", () =>
