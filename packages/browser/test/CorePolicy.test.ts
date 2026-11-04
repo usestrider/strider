@@ -24,8 +24,6 @@ sudo() {
   if [[ "\${POLICY_FAIL_RESTORE:-}" == true && "$4" == *9223372036854775808* ]]; then return 24; fi
   if [[ "\${POLICY_SKIP_APPLY:-}" == true && "$4" != *9223372036854775808* ]]; then return 0; fi
   printf '%s\\n' "\${4#kernel.core_pattern=}" >> "$POLICY_FIXTURE/writes"
-  if [[ "\${POLICY_FAIL_RESTORE:-}" == true && "$4" == *9223372036854775808* ]]; then return 24; fi
-  if [[ "\${POLICY_SKIP_APPLY:-}" == true && "$4" != *9223372036854775808* ]]; then return 0; fi
   printf '%s\\n' "\${4#kernel.core_pattern=}" > "$POLICY_FIXTURE/pattern"
   if [[ "\${POLICY_FAIL_APPLY:-}" == true && "$4" == *9223372036854775808* ]]; then return 0; fi
   if [[ "\${POLICY_FAIL_APPLY:-}" == true ]]; then return 23; fi
