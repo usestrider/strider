@@ -65,11 +65,14 @@ jobs:
         run: nix develop --command pnpm install --frozen-lockfile
       - name: Integration tests
         run: nix develop --command pnpm test:integration --no-file-parallelism 2>&1 | tee integration.log
-      # The integration tests attach nothing (TestRun is for programs' tests), so the log is what a failure keeps
+      # Failure-only protocol and owned browser process traces accompany the log.
       - name: Keep the log
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: integration-log
-          path: integration.log
+          path: |
+            integration.log
+            .data/integration-failures/
+          include-hidden-files: true
           retention-days: 14

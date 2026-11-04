@@ -108,6 +108,20 @@ Use the narrowest check that covers the change:
 
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
 
+Integration failures name their bounded protocol traces in `.data/integration-failures/`; CI keeps them with
+`integration.log`. Each NDJSON file records both directions, connection IDs, sequence numbers and timestamps,
+with explicit payload truncation and history overflow. Shared setup/teardown context has its own file. Passing
+tests discard their buffers. Each active test and the shared context keep at most 2 MiB of serialized UTF-16
+history; individual payloads keep 32 Ki characters, and late failed-test cleanup has a separate 256 KiB budget.
+The optional `STRIDER_RECORD` drift sampler is separate and unchanged.
+
+Capture covers Strider pipe and WebSocket transports and decoded stock WebKit inspector messages in Vitest,
+including public-layer slices and the upstream cases selected by the integration configuration. Shared connections
+may deliver background events during a test; the trace records observation, not causation. Concurrent shared traffic
+stays in the shared context with the active test IDs. Separately executed CLI/daemon processes do not run in
+Vitest's module graph, so their internal protocol is not captured. Owned Node child process stderr is observed
+where an existing consumer drains it; ignored or inherited stderr is marked unavailable. No extra reader is added.
+
 ## Conventions
 
 Strider follows the Effect core team's conventions; `docs/conventions.md` records them, and API.md's Conventions
