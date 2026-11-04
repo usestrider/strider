@@ -635,7 +635,7 @@ export const conformance = (backend: Backend) =>
               page,
               fixture(
                 world.site.origin,
-                `<body style="margin:0"><script>window.got = []; addEventListener('message', (e) => got.push(e.data))</script><iframe id="cross" src="${
+                `<body style="margin:0"><script>window.got = []; addEventListener('message', (e) => got.push(e.data)); for (const type of ['pointermove','pointerdown','pointerup','mousedown','mouseup','click']) addEventListener(type, e => got.push({native: type, frame: 'parent', x: e.clientX, y: e.clientY, target: e.target.tagName, trusted: e.isTrusted}), true)</script><iframe id="cross" src="${
                   fixture(world.site.crossSite, child)
                 }" style="position:absolute;left:100px;top:50px;width:200px;height:100px;border:5px solid red;padding:3px"></iframe></body>`
               )
