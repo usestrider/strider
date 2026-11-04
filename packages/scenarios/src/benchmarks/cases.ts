@@ -1,6 +1,7 @@
 import { Expect, type Page } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as assert from "node:assert/strict"
+import { inflateSync } from "node:zlib"
 import type * as Playwright from "playwright-core"
 
 export const viewport = { width: 1280, height: 720 }
@@ -10,6 +11,8 @@ export interface Case {
   readonly description: string
   readonly strider: (page: Page.Page, origin: string) => Effect.Effect<unknown, unknown>
   readonly playwright: (page: Playwright.Page, origin: string) => Promise<unknown>
+  readonly prepareStrider?: (page: Page.Page) => Effect.Effect<unknown, unknown>
+  readonly preparePlaywright?: (page: Playwright.Page) => Promise<unknown>
   readonly verify: (value: unknown) => void
 }
 
@@ -110,5 +113,91 @@ export const cases: ReadonlyArray<Case> = [
       assert.equal(bytes.readUInt32BE(16), viewport.width)
       assert.equal(bytes.readUInt32BE(20), viewport.height)
     }
+  }
+]
+
+const prepareCapture = () => {
+  document.body.style.cssText = "margin:0;width:1280px;height:2880px;background:rgb(12,34,56)"
+  document.body.innerHTML =
+    "<div id=\"capture\" style=\"position:absolute;left:20px;top:30px;width:320px;height:180px;background:rgb(200,100,50)\"></div>"
+}
+const prepareDenseCapture = () => {
+  document.body.style.cssText = "margin:0;width:1280px;height:2880px"
+  document.body.innerHTML = "<canvas width=\"1280\" height=\"2880\" style=\"display:block\"></canvas>"
+  const context = document.querySelector("canvas")!.getContext("2d")!
+  const image = context.createImageData(1280, 2880)
+  let seed = 42
+  for (let at = 0; at < image.data.length; at += 4) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+    image.data[at] = seed & 255
+    image.data[at + 1] = (seed >>> 8) & 255
+    image.data[at + 2] = (seed >>> 16) & 255
+    image.data[at + 3] = 255
+  }
+  image.data.set([12, 34, 56, 255], 0)
+  context.putImageData(image, 0, 0)
+}
+const verifyPng = (width: number, height: number, rgb?: ReadonlyArray<number>) => (value: unknown) => {
+  assert.ok(value instanceof Uint8Array)
+  const bytes = Buffer.from(value)
+  assert.equal(bytes.subarray(0, 8).toString("hex"), "89504e470d0a1a0a")
+  assert.equal(bytes.readUInt32BE(16), width)
+  assert.equal(bytes.readUInt32BE(20), height)
+  if (rgb !== undefined) {
+    assert.equal(bytes[24], 8, "8-bit PNG")
+    assert.ok(bytes[25] === 2 || bytes[25] === 6, "RGB or RGBA PNG")
+    const chunks = []
+    for (let at = 8; at < bytes.length;) {
+      const length = bytes.readUInt32BE(at)
+      if (bytes.toString("ascii", at + 4, at + 8) === "IDAT") chunks.push(bytes.subarray(at + 8, at + 8 + length))
+      at += length + 12
+    }
+    // At the first pixel all PNG filter predictors are zero.
+    const raw = inflateSync(Buffer.concat(chunks))
+    assert.deepEqual([...raw.subarray(1, 4)], rgb)
+  }
+}
+export const captureCases: ReadonlyArray<Case> = [
+  {
+    name: "screenshot-dense",
+    description: "Capture a seeded dense 1280 by 2880 canvas full page as PNG; setup excluded",
+    prepareStrider: (page) => page.evaluateInMainWorld(prepareDenseCapture),
+    preparePlaywright: (page) => page.evaluate(prepareDenseCapture),
+    strider: (page) => page.screenshot({ area: { _tag: "FullPage" } }),
+    playwright: (page) => page.screenshot({ type: "png", fullPage: true }),
+    verify: verifyPng(1280, 2880, [12, 34, 56])
+  },
+  {
+    name: "screenshot-repeated",
+    description: "Five sequential viewport PNG captures on one prepared page (ms per batch)",
+    strider: (page) => Effect.forEach(Array.from({ length: 5 }), () => page.screenshot()),
+    playwright: async (page) => {
+      const images = []
+      for (let i = 0; i < 5; i++) images.push(await page.screenshot({ type: "png" }))
+      return images
+    },
+    verify: (value) => {
+      assert.ok(Array.isArray(value))
+      assert.equal(value.length, 5)
+      value.forEach(verifyPng(1280, 720))
+    }
+  },
+  {
+    name: "screenshot-large",
+    description: "Capture a prepared 1280 by 2880 full page as PNG; fixture setup excluded",
+    prepareStrider: (page) => page.evaluateInMainWorld(prepareCapture),
+    preparePlaywright: (page) => page.evaluate(prepareCapture),
+    strider: (page) => page.screenshot({ area: { _tag: "FullPage" } }),
+    playwright: (page) => page.screenshot({ type: "png", fullPage: true }),
+    verify: verifyPng(1280, 2880, [12, 34, 56])
+  },
+  {
+    name: "screenshot-element",
+    description: "Capture a prepared visible 320 by 180 element as PNG; fixture setup excluded",
+    prepareStrider: (page) => page.evaluateInMainWorld(prepareCapture),
+    preparePlaywright: (page) => page.evaluate(prepareCapture),
+    strider: (page) => page.screenshot({ area: { _tag: "Element", locator: page.locator("#capture") } }),
+    playwright: (page) => page.locator("#capture").screenshot({ type: "png" }),
+    verify: verifyPng(320, 180, [200, 100, 50])
   }
 ]

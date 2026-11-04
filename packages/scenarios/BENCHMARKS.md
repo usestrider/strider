@@ -22,18 +22,22 @@ score can hide a slow operation. A failed operation or wrong result always exits
 
 ## Cases and timing boundaries
 
-| Case             | Timed work                                                                              |
-| ---------------- | --------------------------------------------------------------------------------------- |
-| `launch`         | Start a fresh browser and establish its automation connection; shutdown excluded        |
-| `page-lifecycle` | Create and close an isolated context and page, including viewport configuration         |
-| `navigate`       | Navigate to a local document through `load`, then read its title                        |
-| `resources`      | Load a local document with 100 uncached images through `load`, then count loaded images |
-| `evaluate`       | 20 sequential main-world evaluations returning small objects; time per batch            |
-| `locator-read`   | 20 sequential role locator text reads; time per batch                                   |
-| `click`          | Click with default actionability, then read the updated counter                         |
-| `fill`           | Fill a labeled input with default actionability, then read its value                    |
-| `visible`        | Wait for an already visible heading                                                     |
-| `screenshot`     | Capture the viewport as PNG                                                             |
+| Case                  | Timed work                                                                              |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| `launch`              | Start a fresh browser and establish its automation connection; shutdown excluded        |
+| `page-lifecycle`      | Create and close an isolated context and page, including viewport configuration         |
+| `navigate`            | Navigate to a local document through `load`, then read its title                        |
+| `resources`           | Load a local document with 100 uncached images through `load`, then count loaded images |
+| `evaluate`            | 20 sequential main-world evaluations returning small objects; time per batch            |
+| `locator-read`        | 20 sequential role locator text reads; time per batch                                   |
+| `click`               | Click with default actionability, then read the updated counter                         |
+| `fill`                | Fill a labeled input with default actionability, then read its value                    |
+| `visible`             | Wait for an already visible heading                                                     |
+| `screenshot`          | Capture the viewport as PNG                                                             |
+| `screenshot-repeated` | Five sequential viewport PNG captures on one page; time per batch                       |
+| `screenshot-dense`    | Capture a seeded dense 1280 × 2880 canvas full page; setup excluded                     |
+| `screenshot-large`    | Capture a 1280 × 2880 full page; fixture setup excluded                                 |
+| `screenshot-element`  | Capture a visible 320 × 180 element; fixture setup excluded                             |
 
 For operation cases, each sample gets a fresh context and page loaded with the same fixture. Page creation,
 initial navigation and cleanup are outside timing. Results are checked after the timer stops, including
@@ -145,3 +149,11 @@ changes. Do not create a separate Markdown backlog of findings.
 Saved runs under `.data/` are local and ignored by Git. Preserve review evidence outside disposable worktrees with
 the workflow runner's `--output`, or copy complete named run directories. Keep a readable result and environment
 summary on the issue; a Git revision or source hash alone does not preserve uncommitted experimental code.
+
+Screenshot diagnostics use `pnpm profile:screenshot /absolute/path/diagnostic.json` in the same browser lock.
+This separate, instrumented Strider run records command intervals, response sizes, extra JSON parsing cost and replayed Effect/Buffer base64 decoding cost
+for 20 samples of each screenshot workload. It does not measure an isolated renderer or network duration:
+`Page.captureScreenshot` combines renderer synchronization, capture/encoding and response transfer. Time after
+its response includes protocol decoding, base64 decoding and operation completion. Do not use diagnostic times
+as uninstrumented performance results. Large and element cases check dimensions and the first pixel's color;
+the cross-browser capture integration tests retain the broader scale, clip, transparency and invalidation checks.

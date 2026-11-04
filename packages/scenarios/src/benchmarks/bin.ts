@@ -12,9 +12,10 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { chromium } from "playwright-core"
 import { start } from "../site.ts"
-import { cases, viewport } from "./cases.ts"
+import { captureCases, cases as ordinaryCases, viewport } from "./cases.ts"
 import { compare, elapsed, measure, options } from "./measure.ts"
 
+const cases = [...ordinaryCases, ...captureCases]
 const config = options(process.argv.slice(2))
 const names = ["launch", "page-lifecycle", ...cases.map((entry) => entry.name)]
 if (config.help) {
@@ -196,6 +197,7 @@ try {
                 runtime.runPromise(Effect.scoped(Effect.gen(function*() {
                   const page = yield* Browser.newPage(pageOptions)
                   yield* page.goto(`${site.origin}/benchmark`, { waitUntil: "load" })
+                  if (entry.prepareStrider) yield* entry.prepareStrider(page)
                   const started = yield* Effect.sync(() => performance.now())
                   const value = yield* entry.strider(page, site.origin).pipe(Deadline.within("30 seconds"))
                   const ms = yield* Effect.sync(() => performance.now() - started)
@@ -209,6 +211,7 @@ try {
                   context.setDefaultNavigationTimeout(30_000)
                   const page = await context.newPage()
                   await page.goto(`${site.origin}/benchmark`, { waitUntil: "load" })
+                  if (entry.preparePlaywright) await entry.preparePlaywright(page)
                   const sample = await elapsed(() => entry.playwright(page, site.origin))
                   entry.verify(sample.value)
                   return sample.ms

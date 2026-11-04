@@ -1,4 +1,6 @@
+import { deflateSync } from "node:zlib"
 import { describe, expect, it } from "vitest"
+import { captureCases } from "../src/benchmarks/cases.ts"
 import { compare, measure, options, summarize } from "../src/benchmarks/measure.ts"
 
 describe("benchmark measurements", () => {
@@ -73,5 +75,35 @@ describe("benchmark measurements", () => {
     ) expect(() => options(args)).toThrow()
     expect(options(["--runs", "1", "--warmup", "0"]).runs).toBe(1)
     expect(options(["--check"]).maxRatio).toBe(1.1)
+  })
+})
+
+describe("capture benchmark verification", () => {
+  it("checks repeated captures independently", () => {
+    const entry = captureCases.find((entry) => entry.name === "screenshot-repeated")!
+    expect(() => entry.verify([])).toThrow()
+    expect(() => entry.verify(Array.from({ length: 5 }, () => new Uint8Array(24)))).toThrow()
+  })
+
+  it("rejects wrong element pixels even with matching dimensions", () => {
+    const entry = captureCases.find((entry) => entry.name === "screenshot-element")!
+    const header = Buffer.alloc(33)
+    Buffer.from("89504e470d0a1a0a", "hex").copy(header)
+    header.writeUInt32BE(13, 8)
+    header.write("IHDR", 12)
+    header.writeUInt32BE(320, 16)
+    header.writeUInt32BE(180, 20)
+    header[24] = 8
+    header[25] = 2
+    const png = (rgb: Array<number>) => {
+      const compressed = deflateSync(Buffer.from([0, ...rgb]))
+      const chunk = Buffer.alloc(12 + compressed.length)
+      chunk.writeUInt32BE(compressed.length)
+      chunk.write("IDAT", 4)
+      compressed.copy(chunk, 8)
+      return Buffer.concat([header, chunk])
+    }
+    entry.verify(png([200, 100, 50]))
+    expect(() => entry.verify(png([12, 34, 56]))).toThrow()
   })
 })
