@@ -239,13 +239,6 @@ export type Request =
     /** Capture stability for immediate revalidation, or consume the returned token. Expires at the next frame. */
     readonly stability?: string
   }
-  /** Consumes a framed selection after parent probes, rejecting changed targets, geometry or local coverage. */
-  | {
-    readonly op: "validateSelection"
-    readonly token: string
-    readonly point: { readonly x: number; readonly y: number }
-    readonly clip?: Clip
-  }
   /** Removes the guard an action armed, and says whether it stopped the gesture. */
   | { readonly op: "disarm" }
   | { readonly op: "read"; readonly steps: ReadonlyArray<Step>; readonly read: Read }
@@ -305,10 +298,8 @@ export const Response = Schema.Union([
     scrolled: Schema.Boolean,
     /** Stability evidence for an immediate check of the same element and rectangle. */
     stability: Schema.optionalKey(Schema.String),
-    /** Locally reachable default candidates, freshly checked after parent probes before dispatch. */
-    selection: Schema.optionalKey(
-      Schema.Struct({ token: Schema.optionalKey(Schema.String), points: Schema.Array(Point) })
-    ),
+    /** Locally reachable default candidates for parent hit tests. */
+    candidates: Schema.optionalKey(Schema.Array(Point)),
     /** The action point, for `Point`. */
     point: Schema.NullOr(Point),
     /** Whether an HTML drag would start from it: it or an ancestor is `draggable`. */
@@ -330,7 +321,6 @@ export const Response = Schema.Union([
     checked: Schema.Boolean
   }),
   Schema.TaggedStruct("Final", { final: Final }),
-  Schema.TaggedStruct("SelectionValid", { valid: Schema.Boolean }),
   Schema.TaggedStruct("Guarded", { blocked: Schema.NullOr(Schema.String) }),
   Schema.TaggedStruct("Read", { value: Schema.NullOr(Schema.Union([Schema.String, Schema.Boolean])) }),
   Schema.TaggedStruct("NoMatch", {}),
@@ -1348,7 +1338,10 @@ export function engine(render: (root: SnapNode) => string) {
         first ??= point
         if (!receivesPointer) return [point]
         const hit = hitTarget(point.x, point.y)
-        if (hit !== null && composedContains(element, hit)) points.push(point)
+        if (hit !== null && composedContains(element, hit)) {
+          if (clip === undefined) return [point]
+          points.push(point)
+        }
       }
       return points.length > 0 ? points : first === null ? [] : [first]
     }
@@ -1482,37 +1475,7 @@ export function engine(render: (root: SnapNode) => string) {
     readonly frames: number
   } | null = null
 
-  let selectionSequence = 0
-  let selection: {
-    readonly token: string
-    readonly element: Element
-    readonly steps: ReadonlyArray<Step>
-    readonly geometry: string
-    readonly points: ReadonlyArray<{ x: number; y: number }>
-  } | null = null
-
-  const selectionGeometry = (element: Element, clip?: Clip) =>
-    JSON.stringify({
-      rect: element.getBoundingClientRect(),
-      bounds: viewportBounds(clip),
-      fragments: fragments(element, clip)
-    })
-
-  const validateSelection = (request: Extract<Request, { op: "validateSelection" }>): Response => {
-    const captured = selection
-    selection = null
-    if (captured === null || captured.token !== request.token) return { _tag: "SelectionValid", valid: false }
-    const found = resolve(captured.steps)
-    const valid = found.length === 1 && found[0] === captured.element &&
-      selectionGeometry(captured.element, request.clip) === captured.geometry &&
-      JSON.stringify(actionPoints(captured.element, null, request.clip, true)) === JSON.stringify(captured.points) &&
-      captured.points.some((point) => point.x === request.point.x && point.y === request.point.y)
-    return { _tag: "SelectionValid", valid }
-  }
-
   const act = async (request: Extract<Request, { op: "act" }>): Promise<Response> => {
-    // Preflight may overlap a permit-held check; only the applying round owns its selection evidence.
-    if (request.apply) selection = null
     // Evidence is single-use and lasts only until the next rendering update. Another attempt supersedes it.
     let previous = stability !== null && request.stability === stability.token ? stability : null
     stability = null
@@ -1637,16 +1600,7 @@ export function engine(render: (root: SnapNode) => string) {
           response._tag === "Ready" && action._tag === "Point" && action.position === null &&
           checks.receivesPointer && request.clip !== undefined && points.length > 1
         ) {
-          if (request.apply) {
-            selection = {
-              token: `${generation}:point:${++selectionSequence}`,
-              element,
-              steps: request.steps,
-              geometry: selectionGeometry(element, request.clip),
-              points
-            }
-            response = { ...response, selection: { token: selection.token, points } }
-          } else response = { ...response, selection: { points } }
+          response = { ...response, candidates: points }
         }
         if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
           const captured = {
@@ -2364,10 +2318,7 @@ export function engine(render: (root: SnapNode) => string) {
         }
         case "act":
           return JSON.stringify(await act(request))
-        case "validateSelection":
-          return JSON.stringify(validateSelection(request))
         case "disarm":
-          selection = null
           return JSON.stringify({ _tag: "Guarded", blocked: disarm() } satisfies Response)
         case "read":
           return JSON.stringify(read(request))

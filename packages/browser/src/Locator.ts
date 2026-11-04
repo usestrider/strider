@@ -691,8 +691,7 @@ export interface PointerOptions extends ActionOptions {
    * With no position, client rectangles are clipped by the viewport and all parent frames.
    * With `receivesPointer` enabled, the first centre hitting the target or a descendant and its iframe in every parent is selected,
    * allowing a later line when an earlier one is covered. Only centres are probed; if none hits, the check reports `Covered`.
-   * Candidates are produced anew under the input permit. Framed lists with multiple candidates are validated
-   * after parent probes; changed geometry or a replaced target restarts selection before dispatch.
+   * Candidates are produced anew under the input permit.
    * Disabling `receivesPointer` uses the first geometric centre without coverage probes.
    * Explicit positions are never replaced by another fragment. The point stays inside its rectangle after integer rounding
    * when that rectangle contains an integer point. A target with no visible rectangle has no default point,
