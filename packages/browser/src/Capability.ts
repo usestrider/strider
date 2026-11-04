@@ -161,9 +161,9 @@ export const AxTree: Capability<AxTreeReader> = make("AxTree")
  *
  * Acquiring this capability first reads renderer layout metrics. This adds a renderer round trip and
  * style/layout work within the existing acquisition deadline; a paused or slow renderer can exhaust
- * that deadline before the screencast starts, and a metrics error fails acquisition. The read waits
- * behind tracked navigation processing, without waiting for load. Another navigation or a detach can
- * still intervene before start; the read does not guarantee that the page stays active.
+ * that deadline before the screencast starts, and a metrics error fails acquisition. The browser may
+ * hold this read while it processes a navigation. It does not wait for the page to load. Another
+ * navigation or a detach can still intervene before start; the read does not guarantee that the page stays active.
  *
  * @stability unstable
  * @category constants
