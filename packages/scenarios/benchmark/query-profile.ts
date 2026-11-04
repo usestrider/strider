@@ -21,19 +21,16 @@ import pins from "../../browser/test/integration/browsers.json" with { type: "js
 import { cases as canonicalCases } from "../src/benchmarks/cases.ts"
 import { start } from "../src/site.ts"
 import { type Capture, state, sync, wire } from "./query-hooks.ts"
+import { profileOptions } from "./query-profile-config.ts"
 
 const executablePath = process.env["STRIDER_CHROMIUM"]
 if (process.env["STRIDER_ENVIRONMENT"] !== "nix-integration" || executablePath === undefined) {
   throw new Error("Use the pinned integration Nix shell")
 }
-if (process.argv[2] === undefined) throw new Error("Provide an absolute output JSON path")
-const output = path.resolve(process.argv[2])
-const mode = process.argv[3] ?? "plain"
-const boundary = mode.startsWith("boundary")
-const trace = mode.endsWith("trace")
-const instrumented = trace || mode === "instrumented"
-const runs = Number(process.argv[4] ?? (trace ? 3 : 20))
-const warmups = trace ? 1 : 3
+const { output, mode, boundary, trace, instrumented, runs, warmups } = profileOptions(
+  process.argv.slice(2),
+  Reflect.get(globalThis, Symbol.for("strider.queryProfile.instrumentation"))
+)
 const samples: Array<{
   library: string
   name: string
