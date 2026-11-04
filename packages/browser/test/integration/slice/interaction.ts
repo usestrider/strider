@@ -161,6 +161,50 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      for (const position of ["fixed", "absolute"] as const) {
+        it.effect(`clicks a ${position} link that escapes an overflow ancestor`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<!doctype html><style>body{margin:0}#s{margin:100px;width:30px;height:30px;overflow:hidden}#go{position:${position};left:300px;top:100px}</style><div id="s"><a id="go" href="#go">Go</a></div><output id="out"></output>${recordsClick}`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
+              assert.strictEqual(JSON.parse(yield* page.locator("#out").readText).target, "go")
+            }))
+          }), timeout)
+      }
+
+      it.effect("clicks a wrapped link clipped by nested cross-origin parent frames", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const inner =
+            `<!doctype html><style>body{margin:0;font:16px/24px monospace;width:240px}</style><a id="go" href="#go">${
+              Array(6).fill("abcdefghij").join(" ")
+            }</a><output id="out"></output>${recordsClick}`
+          const innerUrl = fixtureUrl(origin, inner)
+          const middle =
+            `<!doctype html><style>body{margin:0}iframe{position:absolute;left:0;top:0;width:300px;height:200px;border:0}</style><iframe src="${innerUrl}"></iframe>`
+          const url = fixtureUrl(
+            origin,
+            `<!doctype html><style>body{margin:0}iframe{position:absolute;left:20px;top:-24px;width:300px;height:200px;border:0}</style><iframe src="${
+              fixtureUrl(crossSite, middle)
+            }"></iframe>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const outer = page.frame(page.locator("iframe"))
+            const innerFrame = outer.frame(outer.locator("iframe"))
+            yield* innerFrame.locator("#go").click().pipe(Deadline.within("1 second"))
+            const event = JSON.parse(yield* innerFrame.locator("#out").readText) as { target: string; y: number }
+            assert.strictEqual(event.target, "go")
+            assert.isAtLeast(event.y, 24)
+            assert.isBelow(event.y, 48)
+          }))
+        }), timeout)
+
       it.effect("dispatches click inside a one-pixel fragment after rounding", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>

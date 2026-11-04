@@ -504,27 +504,72 @@ export const sendRouted = (
 ): Effect.Effect<Answer, SendFailure> =>
   Effect.raceFirst(
     // An action's frames are scrolled into view on its way, so they render (QUIRKS.md, Q110)
-    routing(runtime, page, stepsOf(request), request.op === "act", id, at, (route, last) => {
-      if (route._tag === "Answer") return Effect.succeedSome({ response: route.response, routed: route.routed })
-      const routed = route.routed
-      const stale = replaced(routed.document, last)
-      if (route._tag === "Entered" && Option.isSome(stale)) return Effect.succeedSome({ response: stale.value, routed })
-      return callEngine(
-        runtime,
-        routed.document,
-        Engine.run,
-        JSON.stringify(retarget(request, last, route._tag === "Missing")),
-        id
-      ).pipe(
-        Effect.flatMap(Option.match({
-          onNone: () => Effect.succeedNone,
-          onSome: (value) =>
-            value.type === "string"
-              ? Effect.map(decode(value.value), (response) => Option.some({ response, routed }))
-              : Effect.die(new Error("The engine answered with something other than text"))
-        }))
-      )
-    }),
+    routing(
+      runtime,
+      page,
+      stepsOf(request),
+      request.op === "act",
+      id,
+      at,
+      Effect.fnUntraced(function*(route: Route, last: ReadonlyArray<Engine.Step>) {
+        if (route._tag === "Answer") return Option.some({ response: route.response, routed: route.routed })
+        const routed = route.routed
+        const stale = replaced(routed.document, last)
+        if (route._tag === "Entered" && Option.isSome(stale)) return Option.some({ response: stale.value, routed })
+        let clip: Engine.Clip | undefined
+        if (
+          route._tag === "Entered" && request.op === "act" &&
+          ((request.action._tag === "Point" && request.action.position === null) || request.checks.receivesPointer)
+        ) {
+          // Read each ancestor in its own document: this also works across origin and process boundaries.
+          for (const hop of routed.hops) {
+            const answer = yield* sendToDocument(runtime, page, hop.document, {
+              op: "frame",
+              steps: hop.steps,
+              scroll: request.checks.inViewport,
+              point: null,
+              ...(clip === undefined ? {} : { clip })
+            }, id)
+            if (Option.isNone(answer)) return Option.none()
+            if (answer.value._tag !== "Frame") return Option.some({ response: answer.value, routed })
+            if (answer.value.scrolled) {
+              return Option.some({
+                routed,
+                response: {
+                  _tag: "NotReady" as const,
+                  reason: { _tag: "OutsideViewport" as const },
+                  history: [{ _tag: "OutsideViewport" as const }],
+                  scrolled: true,
+                  checked: true
+                }
+              })
+            }
+            clip = answer.value.viewport
+          }
+        }
+        return yield* callEngine(
+          runtime,
+          routed.document,
+          Engine.run,
+          JSON.stringify(
+            retarget(
+              request.op === "act" && clip !== undefined ? { ...request, clip } : request,
+              last,
+              route._tag === "Missing"
+            )
+          ),
+          id
+        ).pipe(
+          Effect.flatMap(Option.match({
+            onNone: () => Effect.succeedNone,
+            onSome: (value) =>
+              value.type === "string"
+                ? Effect.map(decode(value.value), (response) => Option.some({ response, routed }))
+                : Effect.die(new Error("The engine answered with something other than text"))
+          }))
+        )
+      })
+    ),
     promptBlocked(page)
   )
 
