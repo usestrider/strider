@@ -293,14 +293,15 @@ input permit, so a queued action never uses the preliminary check's stale geomet
   before rendering; and skipping the check under the input permit, since another action may change the target
   while this one waits for the permit.
 
-**An unqueued click may reuse stability within the same rendering frame.** Its preliminary check returns a
+**An unqueued click, check or uncheck may reuse stability within the same rendering frame.** Its preliminary check returns a
 single-use token. Under the input permit, the engine resolves the locator again and checks every condition; only
 the stability wait can be reused, and only for the same element, rectangle and requested frame count. The next
 rendering update or another action attempt invalidates the token. The engine retains at most one such record.
 
 - **Why.** Repeating the observation window for a target just observed to be stable adds two frames to an ordinary
-  click. Immediate revalidation retains that observation while checking the conditions that could have changed.
-  A queued click always takes new samples; an expired token, moved target or replacement also takes new samples.
+  click or an acting check/uncheck. Immediate revalidation retains that observation while checking the conditions
+  that could have changed. Check and uncheck still read the initial state and confirm the result after input.
+  A queued action always takes new samples; an expired token, moved target or replacement also takes new samples.
 - **Rejected:** dropping the second check, sharing evidence across rendering updates, or treating matching
   rectangles on different elements as the same observation. Each can dispatch input using stale readiness.
   Moving the entire wait under the input permit would also block other actions while a target isn't ready.
