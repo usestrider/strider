@@ -12,6 +12,7 @@ import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as Engine from "../../../src/internal/engine.ts"
 import { LocatorImpl } from "../../../src/internal/locator.ts"
 import { site } from "../adapter/harness.ts"
 import { type LinkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
@@ -88,6 +89,76 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           )
         }
       }
+
+      it.effect("clicks a later line when the first fragment centre is covered", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<style>body{margin:0;font:16px/24px monospace}#box{position:absolute;left:20px;top:20px;width:240px}</style><div id="box"><a id="go" href="#">${
+              Array(6).fill("abcdefghij").join(" ")
+            }</a></div><div style="position:absolute;left:0;top:0;width:400px;height:44px"></div><output id="out"></output>${recordsClick}`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const centers = yield* page.evaluateInMainWorld(() =>
+              Array.from(document.querySelector("#go")!.getClientRects(), (r) => (r.top + r.bottom) / 2)
+            )
+            assert.strictEqual(centers.length, 3)
+            yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
+            const event = JSON.parse(yield* page.locator("#out").readText) as { target: string; y: number }
+            assert.strictEqual(event.target, "go")
+            assert.closeTo(event.y, centers[1]!, 1)
+          }))
+        }), timeout)
+
+      it.effect("retries a frame-bounds NoMatch response", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<iframe srcdoc='<a id="go" href="#">Go</a><output id="out"></output>${recordsClick}'></iframe>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const locator = page.frame(page.locator("iframe")).locator("#go")
+            assert(locator instanceof LocatorImpl)
+            const adapter = locator.owner.runtime.model.adapter
+            const descriptor = Object.getOwnPropertyDescriptor(adapter, "evaluate")!
+            const original = adapter.evaluate
+            let reads = 0
+            yield* Effect.acquireRelease(
+              Effect.sync(() => {
+                Object.defineProperty(adapter, "evaluate", {
+                  ...descriptor,
+                  value: ((realm, call) => {
+                    const arg = call.arguments[0]
+                    if (
+                      call.functionDeclaration === Engine.run && arg?._tag === "Value" && arg.value.type === "string" &&
+                      JSON.parse(arg.value.value).op === "frame"
+                    ) {
+                      reads++
+                      if (reads === 1) {
+                        return Effect.succeed(
+                          {
+                            _tag: "Value",
+                            value: { type: "string", value: JSON.stringify({ _tag: "NoMatch" }) }
+                          } as const
+                        )
+                      }
+                    }
+                    return original(realm, call)
+                  }) as typeof adapter.evaluate
+                })
+              }),
+              () => Effect.sync(() => Object.defineProperty(adapter, "evaluate", descriptor))
+            )
+            yield* locator.click().pipe(Deadline.within("2 seconds"))
+            assert.isAtLeast(reads, 2)
+            const event = JSON.parse(yield* page.frame(page.locator("iframe")).locator("#out").readText) as {
+              target: string
+            }
+            assert.strictEqual(event.target, "go")
+          }))
+        }), timeout)
 
       it.effect("clicks a wrapped link whose first line a scrolling ancestor clips", () =>
         Effect.gen(function*() {

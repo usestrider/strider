@@ -183,6 +183,61 @@ export const engine = (backend: Backend) =>
           }
         }
 
+        for (
+          const mode of [
+            "later line",
+            "disabled coverage",
+            "explicit covered",
+            "wholly covered",
+            "partial ancestor"
+          ] as const
+        ) {
+          it.effect(`selects a fragment with ${mode}`, () =>
+            Effect.gen(function*() {
+              const { send, call } = yield* open(
+                backend,
+                `<style>body{margin:0;font:16px/24px monospace}#box{position:absolute;left:20px;top:20px;width:240px}${
+                  mode === "partial ancestor"
+                    ? "#box{width:75px;height:40px;overflow:hidden}#go{display:inline-block;width:100px;height:20px}"
+                    : ""
+                }</style><div id="box"><a id="go">${Array(6).fill("abcdefghij").join(" ")}</a></div>${
+                  mode === "partial ancestor"
+                    ? ""
+                    : `<div id="cover" style="position:absolute;left:0;top:0;width:400px;height:${
+                      mode === "wholly covered" ? 120 : 44
+                    }px"></div>`
+                }`,
+                `() => { globalThis.engineTestHits = 0; const original = document.elementFromPoint.bind(document); document.elementFromPoint = (...args) => { globalThis.engineTestHits++; return original(...args) } }`
+              )
+              const geometry = yield* call(
+                `() => JSON.stringify(Array.from(document.querySelector('#go').getClientRects(), r => ({x:(r.left+r.right)/2,y:(r.top+r.bottom)/2})))`,
+                []
+              )
+              assert(geometry._tag === "Value" && geometry.value.type === "string")
+              const centers = JSON.parse(geometry.value.value) as Array<{ x: number; y: number }>
+              if (mode !== "partial ancestor") assert.strictEqual(centers.length, 3)
+              const response = yield* send({
+                ...point(0),
+                cap: 150,
+                checks: { ...all, stable: 0, receivesPointer: mode !== "disabled coverage" },
+                action: { _tag: "Point", position: mode === "explicit covered" ? { x: 2, y: 2 } : null, guard: false }
+              })
+              if (mode === "explicit covered" || mode === "wholly covered") {
+                assert(response._tag === "NotReady", JSON.stringify(response))
+                assert.strictEqual(response.reason._tag, "Covered")
+                assert.strictEqual(response.scrolled, false)
+              } else {
+                assert(response._tag === "Ready", JSON.stringify(response))
+                assert.deepStrictEqual(response.point, centers[mode === "later line" ? 1 : 0])
+              }
+              if (mode === "disabled coverage") {
+                const hits = yield* call("() => globalThis.engineTestHits", [])
+                assert(hits._tag === "Value" && hits.value.type === "number")
+                assert.strictEqual(hits.value.value, 0)
+              }
+            }), timeout)
+        }
+
         it.effect("refuses a default point without a visible fragment even with checks disabled", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
