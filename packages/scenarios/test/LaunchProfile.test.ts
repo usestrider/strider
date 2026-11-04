@@ -9,9 +9,13 @@ const directory = path.join(root, "packages/scenarios/benchmark")
 
 // Launches real browsers, so it runs only in the integration environment, holding the browser lock.
 describe.runIf(process.env["STRIDER_ENVIRONMENT"] === "nix-integration")("launch diagnostics", () => {
-  it.each(["/internal/chromiumLauncher.ts", "/chromium/Chromium.ts", "/internal/cdpAdapter.ts"])(
-    "doesn't report a run as completed when the loader's rule for %s never applied",
-    (suffix) => {
+  it.each(
+    ["/internal/chromiumLauncher.ts", "/chromium/Chromium.ts", "/internal/cdpAdapter.ts"].flatMap((suffix) =>
+      ["default", "persistent"].map((mode) => [suffix, mode] as const)
+    )
+  )(
+    "doesn't report a run as completed when the loader's rule for %s never applied (%s)",
+    (suffix, mode) => {
       const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "launch-profile-"))
       try {
         const hooks = fs.readFileSync(path.join(directory, "launch-profile-hooks.mjs"), "utf8")
@@ -26,7 +30,8 @@ describe.runIf(process.env["STRIDER_ENVIRONMENT"] === "nix-integration")("launch
             path.join(scratch, "hooks.mjs"),
             path.join(directory, "launch-profile.ts"),
             output,
-            "1"
+            "1",
+            ...(mode === "persistent" ? [mode] : [])
           ],
           { cwd: root, encoding: "utf8", timeout: 60_000 }
         )
@@ -38,4 +43,29 @@ describe.runIf(process.env["STRIDER_ENVIRONMENT"] === "nix-integration")("launch
     },
     90_000
   )
+  it.each(["default", "persistent"])("rejects missing Playwright wire instrumentation (%s)", (mode) => {
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "launch-profile-wire-"))
+    try {
+      const hooks = fs.readFileSync(path.join(directory, "launch-profile-hooks.mjs"), "utf8")
+      // Keep Playwright's phase marks while suppressing only its protocol observations.
+      expect(hooks).toContain("globalThis.__launchTrace.wire(")
+      fs.writeFileSync(
+        path.join(scratch, "hooks.mjs"),
+        hooks.replaceAll("globalThis.__launchTrace.wire(", "globalThis.__launchTrace.mark(")
+      )
+      const output = path.join(scratch, "report.json")
+      const result = spawnSync(process.execPath, [
+        "--import",
+        path.join(scratch, "hooks.mjs"),
+        path.join(directory, "launch-profile.ts"),
+        output,
+        "1",
+        ...(mode === "persistent" ? [mode] : [])
+      ], { cwd: root, encoding: "utf8", timeout: 60_000 })
+      expect(JSON.parse(fs.readFileSync(output, "utf8")).status).toBe("error")
+      expect(result.status).not.toBe(0)
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true })
+    }
+  }, 90_000)
 })
