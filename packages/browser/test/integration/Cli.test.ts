@@ -1365,7 +1365,32 @@ describe("strider", () => {
               const expected = capture === "strict"
                 ? ["public-heading", "public-nearby"]
                 : [...contents, "public-heading", "public-nearby"]
+              const queries = [...contents, "public-heading", "public-nearby"]
+              const answers = yield* mcp(env, ["-s", capture, "mcp"], [
+                ...handshake,
+                {
+                  jsonrpc: "2.0",
+                  id: 2,
+                  method: "tools/call",
+                  params: { name: "snapshot", arguments: { page: "form" } }
+                },
+                ...queries.map((query, index) => ({
+                  jsonrpc: "2.0",
+                  id: index + 3,
+                  method: "tools/call",
+                  params: { name: "find", arguments: { page: "form", query } }
+                }))
+              ], queries.length + 2)
+              const mcpSnapshot = answers.find((answer) => answer.id === 2)?.result
+              assert.isNotTrue(mcpSnapshot?.isError, JSON.stringify(answers))
+              const mcpShown = queries.filter((query) => JSON.stringify(mcpSnapshot).includes(query))
+              const mcpMatched = queries.filter((_, index) => {
+                const result = answers.find((answer) => answer.id === index + 3)?.result
+                assert.isNotTrue(result?.isError, JSON.stringify(answers))
+                return result.structuredContent.outcome.length > 0
+              })
               assert.deepStrictEqual({ shown, matched }, { shown: expected, matched: expected }, snapshot.out)
+              assert.deepStrictEqual({ shown: mcpShown, matched: mcpMatched }, { shown: expected, matched: expected })
             } finally {
               const stopped = yield* run("stop")
               assert.strictEqual(stopped.code, 0, stopped.err)

@@ -172,6 +172,42 @@ export const engine = (backend: Backend) =>
             assert.deepStrictEqual(nodes[0]!.name, { _tag: "Accessible", value: "Article" })
           }), timeout)
 
+        it.effect("tracks chosen name contributions from fields without tainting public labels", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<h2><span contenteditable>ancestor-private</span></h2><button aria-label="Public"><span contenteditable>ignored-private</span></button><input id="field" aria-label="Field" value="embedded-private"><button aria-labelledby="field"></button><div>Nearby public</div><div contenteditable></div><span id="label" contenteditable aria-label="Referenced public"></span><button aria-labelledby="label"></button>`
+            )
+            const answer = yield* send({ op: "snapshot", steps: null, interactivity: true, depth: null })
+            assert.strictEqual(answer._tag, "Snapshot")
+            if (answer._tag !== "Snapshot") {
+              return
+            }
+            const names = new Map(
+              answer.root.children.flatMap((node) =>
+                node.name._tag === "None" ? [] : [[node.name.value, node.name]]
+              )
+            )
+            assert.deepStrictEqual(names.get("ancestor-private"), {
+              _tag: "Accessible",
+              value: "ancestor-private",
+              fieldContent: true
+            })
+            assert.deepStrictEqual(names.get("embedded-private"), {
+              _tag: "Accessible",
+              value: "embedded-private",
+              fieldContent: true
+            })
+            assert.deepStrictEqual(names.get("Public"), { _tag: "Accessible", value: "Public" })
+            assert.deepStrictEqual(names.get("Field"), { _tag: "Accessible", value: "Field" })
+            assert.deepStrictEqual(names.get("Referenced public"), { _tag: "Accessible", value: "Referenced public" })
+            assert.deepStrictEqual(names.get("Nearby public"), {
+              _tag: "Inferred",
+              value: "Nearby public",
+              from: "nearbyLabel"
+            })
+          }), timeout)
+
         it.effect("revalidates fresh stability without another rendering wait", () =>
           Effect.gen(function*() {
             const { call } = yield* open(backend, `<button id="go">Go</button>`, countFrames())
