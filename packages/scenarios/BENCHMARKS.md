@@ -187,7 +187,10 @@ nix develop .#integration --ignore-environment --keep TERM --command node \
 Coordinate these commands and checks with other work on the machine; retain the browser lock for the entire run.
 Flag overlap with an unlocked suite as contaminated. The profiler uses 20 alternating library pairs and three
 warmups (trace mode uses three pairs and one warmup); a fourth argument overrides the measured count for smoke
-checks. Repeat plain/instrumented generations in reverse order to expose instrumentation overhead and drift.
+checks. Modes are exactly `plain`, `instrumented`, `trace`, `boundary` and `boundary-trace`; measured counts must
+be positive safe integers. Invalid arguments are rejected before collection. Instrumented modes require the loader
+and all required in-memory transformations; completion also requires the expected sample count and actual stage/
+wire captures. Missing instrumentation cannot produce a completed report. Repeat plain/instrumented generations in reverse order to expose instrumentation overhead and drift.
 Neither generation is a performance gate or an optimized runtime. Preserve the scripts, source hashes, raw replies,
 spans and browser events alongside the reports outside disposable worktrees.
 
@@ -220,14 +223,36 @@ across three variants, rotating variant order and alternating library order:
   that animation frames, display presentation, or arbitrary future rendering have completed.
 
 The snapshot function, fixture, viewport and full result checks stay identical within each comparison. These are
-different measurement boundaries, never library speedups. Compare `warm` with `prepared` as well as `original`
-with `prepared`: removing utility initialization from the timer alone must not be credited to rendering. Fresh
-pages, discarded warmups and rotated paired order reduce reusable-cache and ordering effects; a screenshot may
-also warm browser rendering state, which is the boundary being tested.
+different measurement boundaries, never library speedups. Compare `warm` with `prepared` to isolate the added
+screenshot step, and `original` with each later boundary to study the first-evaluation wait. The original rendering
+hypothesis's less-than-5-ms/within-spread stopping rule applies to `original` versus `prepared`; it must not be
+reinterpreted as a rule about `warm` versus `prepared`. A small screenshot increment does not refute rendering
+when the warm variant has already moved rendering outside the timer. Initialization, caching, scheduling and
+rendering may all move into setup, so no contrast alone establishes a millisecond-exact causal split.
+
+A no-op evaluation is not a reliable rendering barrier. Trace observations apply to the traced samples, while
+ordinary sample tails must remain visible: report p95, spread and slow-sample counts rather than only medians.
+Fresh pages, discarded warmups and rotated paired order reduce reusable-cache and ordering effects; they do not
+guarantee that every sample observes the same rendering boundary. Keep the small-evaluation comparison separate:
+a repeated deficit after utility initialization is excluded remains unattributed until its own cost is split.
+Rejecting decoder fusion or finding no added screenshot benefit does not settle that gap or justify closing an
+entire query/read investigation.
+
+The prepared setup invokes each library's supported screenshot defaults, which need not perform identical work.
+In particular, pinned Playwright hides the caret by default and restores styles after capture, while Strider has no
+equivalent step here. That restoration is a plausible, unconfirmed explanation for later style/paint events on the
+input-heavy fixture. Without a controlled test, do not assign those events to caret restoration or generalize them
+to PNG readback, screenshots, or Playwright as a whole. Record setup cost and setup-plus-query latency too.
 
 `boundary-trace` collects each browser's renderer events independently, with clock-sync brackets and recorded
-setup/timing windows. Map local document requests to renderer processes, then check setup and operation windows for
-layout, pre-paint and paint. Keep those traces separate from ordinary wall-time comparisons, and reject a claimed
-rendering explanation if the events did not move outside timing. A prepared median reduction below 5 ms, or within
-sample spread, stops the material pending-rendering hypothesis. Report setup cost and the warmed-only control even
-when the original/prepared difference is large; serialization and scheduling remain unallocated by subtraction.
+setup/timing windows. Both now use the same category list from `query-profile-config.ts`, also recorded in reports.
+Historical boundary traces through commit `c66ef71` used `v8`, `devtools.timeline`,
+`disabled-by-default-devtools.timeline`, `disabled-by-default-v8.runtime_stats` and `blink.console` for Strider,
+but only `devtools.timeline` and `disabled-by-default-devtools.timeline` for Playwright. Keep those artifacts and
+measurements unchanged; their different tracing overhead limits cross-library duration comparisons.
+
+Map local document requests to renderer processes, then check setup and operation windows for layout, pre-paint
+and paint. Keep traces separate from ordinary wall-time comparisons. Report whether rendering overlapped timing
+in those samples, with clock-alignment uncertainty; do not turn a few absent events into a general completion
+guarantee. Original/prepared reductions can support pending-rendering overlap without identifying its entire
+causal cost. Serialization, scheduling and pre-first-byte IPC remain unallocated by subtraction.

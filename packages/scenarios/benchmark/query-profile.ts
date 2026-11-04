@@ -21,7 +21,7 @@ import pins from "../../browser/test/integration/browsers.json" with { type: "js
 import { cases as canonicalCases } from "../src/benchmarks/cases.ts"
 import { start } from "../src/site.ts"
 import { type Capture, state, sync, wire } from "./query-hooks.ts"
-import { profileOptions } from "./query-profile-config.ts"
+import { profileOptions, traceCategories, verifyCompletion } from "./query-profile-config.ts"
 
 const executablePath = process.env["STRIDER_CHROMIUM"]
 if (process.env["STRIDER_ENVIRONMENT"] !== "nix-integration" || executablePath === undefined) {
@@ -205,8 +205,7 @@ try {
   assert.equal(browser.version(), pins.chromium.version)
   if (trace) {
     await send("Tracing.start", {
-      categories:
-        "v8,devtools.timeline,disabled-by-default-devtools.timeline,disabled-by-default-v8.runtime_stats,blink.console",
+      categories: traceCategories,
       options: "record-as-much-as-possible",
       transferMode: "ReportEvents"
     })
@@ -216,7 +215,7 @@ try {
     pwSession.on("Tracing.dataCollected", ({ value }) => pwEvents.push(...value))
     pwSession.on("Tracing.tracingComplete", () => pwTraceComplete())
     await pwSession.send("Tracing.start", {
-      categories: "devtools.timeline,disabled-by-default-devtools.timeline",
+      categories: traceCategories,
       transferMode: "ReportEvents"
     })
     const before = performance.now()
@@ -329,6 +328,7 @@ try {
       await bounded(pwCompleted)
     }
   }
+  verifyCompletion(samples, runs * (boundary ? 4 * 3 : 6) * 2, instrumented)
   status = "completed"
 } finally {
   state.active = undefined
@@ -349,6 +349,7 @@ try {
       {
         status,
         mode,
+        traceCategories: trace ? traceCategories : undefined,
         runs,
         warmups,
         sourceHash: hash.digest("hex"),

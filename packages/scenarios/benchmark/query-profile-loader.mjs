@@ -1,5 +1,7 @@
 // Opt-in in-memory transforms: no browser source or installed Playwright files are changed on disk.
 import { registerHooks } from "node:module"
+const installed = new Set()
+Object.assign(globalThis, { [Symbol.for("strider.queryProfile.instrumentation")]: installed })
 const hooks = new URL("./query-hooks.ts", import.meta.url).href
 const patches = [
   ["/protocol/Transport.ts", [
@@ -37,6 +39,7 @@ registerHooks({
         if (source.split(before).length !== 2) throw new Error(`Expected one instrumentation anchor: ${before}`)
         source = source.replace(before, after)
       }
+      installed.add(patch[0])
       return {
         ...result,
         source: `import * as queryProfile from ${JSON.stringify(hooks)};\n${source}\n${
@@ -73,6 +76,7 @@ registerHooks({
         )
         .replaceAll("JSON.parse(message)", `${key}.parse(message)`)
         .replaceAll("JSON.parse(message2)", `${key}.parse(message2)`)
+      installed.add("/playwright-core/lib/coreBundle.js")
       return { ...result, source: source.slice(0, start) + section + source.slice(end) }
     }
     return result
