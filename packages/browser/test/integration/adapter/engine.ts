@@ -183,6 +183,41 @@ export const engine = (backend: Backend) =>
           }
         }
 
+        it.effect("refuses a default point without a visible fragment even with checks disabled", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<a id="go" style="position:fixed;left:-100px;top:20px;width:10px;height:10px">Go</a>`
+            )
+            const response = yield* send({
+              ...point(0),
+              cap: 100,
+              checks: {
+                visible: false,
+                enabled: false,
+                editable: false,
+                notInert: false,
+                inViewport: false,
+                stable: 0,
+                receivesPointer: false
+              }
+            })
+            assert(response._tag === "NotReady", JSON.stringify(response))
+            assert.strictEqual(response.reason._tag, "OutsideViewport")
+          }), timeout)
+
+        it.effect("keeps the rounded default point inside a one-pixel fragment", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<a id="go" style="position:fixed;left:0;top:20px;width:1px;height:10px"></a>`
+            )
+            const response = yield* send(point(0))
+            assert(response._tag === "Ready" && response.point !== null, JSON.stringify(response))
+            assert.isAtLeast(Math.round(response.point.x), 0)
+            assert.isBelow(Math.round(response.point.x), 1)
+          }), timeout)
+
         it.effect("selects explicit position from the padding-box origin", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
