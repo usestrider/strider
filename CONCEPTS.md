@@ -636,3 +636,18 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
 ## 11. Open questions
 
 No design questions are open at this layer right now.
+
+
+### Snapshot editability and capture
+
+Snapshot nodes carry optional `editable` independently of semantic role: true for native field kinds, ARIA field
+roles and contenteditable elements, including inherited and plaintext-only editability. Read-only and disabled
+fields retain the signal because they still contain field data. Absence means false; older serialized snapshot
+nodes remain decodable. An accessible editable name derived from its own content carries optional `from: "text"`;
+labels retain their existing names. These additions do not change local snapshot text or semantic roles.
+
+The toolkit derives one redacted tree for snapshot rendering and find matching, names and paths. It masks field
+content and validation messages while keeping labels, roles, states and refs. Non-full console capture also
+replaces exceptions in digests and history with an event marker and monotonic occurrence time, excluding all
+page-supplied details. Full local capture keeps its existing content and search behavior. Capture remains bounded:
+ordinary text, labels and other metadata can still disclose content; it is not taint tracking or a secrecy guarantee.

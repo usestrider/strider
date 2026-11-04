@@ -190,6 +190,7 @@ const toNode = (node: Engine.SnapNode): Snapshot.Node => ({
   states: new Set(
     node.states as ReadonlyArray<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed" | "invalid">
   ),
+  ...(node.editable === undefined ? {} : { editable: node.editable }),
   validationMessage: Option.fromNullishOr(node.validationMessage),
   children: node.children.map(toNode)
 })
@@ -204,6 +205,20 @@ const refsOf = (root: Snapshot.Node): ReadonlyMap<Snapshot.RefId, Snapshot.Node>
   visit(root)
   return refs
 }
+
+/** Renders a structured tree with the same renderer as page snapshots. */
+export const render = (node: Snapshot.Node): string => Engine.renderText(toEngine(node))
+
+const toEngine = (node: Snapshot.Node): Engine.SnapNode => ({
+  ref: Option.getOrNull(node.ref),
+  role: node.role,
+  name: node.name,
+  states: [...node.states],
+  validationMessage: Option.getOrNull(node.validationMessage),
+  ...(node.editable === undefined ? {} : { editable: node.editable }),
+  children: node.children.map(toEngine),
+  frame: false
+})
 
 /** One node's line of the text, without its children. */
 const lineOf = (node: Snapshot.Node): string =>
@@ -222,6 +237,7 @@ const sameNode: Equivalence.Equivalence<Snapshot.Node> = Schema.toEquivalence(Sc
   role: Snapshot.Role,
   name: Snapshot.Name,
   states: Schema.ReadonlySet(Snapshot.State),
+  editable: Schema.optional(Schema.Boolean),
   validationMessage: Schema.Option(Schema.String)
 }))
 

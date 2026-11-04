@@ -745,3 +745,26 @@ Rejected: treating every addition as a minor release regardless of stability, wh
 unstable breaks the same version signal; treating every pre-1.0 change as a patch, which removes that signal; and
 inferring CLI stability from its implementation's location under `internal/`, which says nothing about its public
 contract.
+
+
+## Strict capture matches the redacted snapshot
+
+Use one structured redacted tree for toolkit snapshot output and find matching, including names and paths.
+Matching hidden content and masking only the response confirms guesses at field values, so strict find must
+search what it can show. Preserve label searches and role filters; keep local capture unchanged.
+
+Carry optional field editability separately from role in engine and public snapshot data. Semantic articles,
+paragraphs and headings can be contenteditable, including plaintext-only. Native and ARIA fields count even
+when disabled or read-only: capture concerns their data, not whether an action may edit them. Absent editability
+means false for compatibility with older snapshot data. Accessible names derived from editable content carry
+optional text provenance without changing local text rendering. Labels, semantic roles, states and refs survive.
+
+For non-full console capture, exception digests and history retain a library-authored event marker and monotonic
+occurrence time, with no page-provided name, message, stack or origin text. Error names and origins are no safer
+than messages. Full local capture keeps its previous diagnostics.
+
+Rejected: matching original text while redacting output, which leaks guesses; masking by role alone, which misses
+semantic editables; replacing semantic roles with editable, which loses meaning; mandatory false flags on every
+node, which enlarge every snapshot and reject older data; and masking exception messages alone, which leaves
+other page-controlled exception details visible. Strict remains a bounded capture policy: ordinary page text,
+labels, URLs, dialogs and other metadata remain available, so it is not a secrecy or inference guarantee.

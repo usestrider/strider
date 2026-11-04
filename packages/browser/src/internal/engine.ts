@@ -177,10 +177,11 @@ export interface SnapNode {
       readonly evidence: ReadonlyArray<string>
     }
   readonly name:
-    | { readonly _tag: "Accessible"; readonly value: string }
+    | { readonly _tag: "Accessible"; readonly value: string; readonly from?: "text" | undefined }
     | { readonly _tag: "Inferred"; readonly value: string; readonly from: string }
     | { readonly _tag: "None" }
   readonly states: ReadonlyArray<string>
+  readonly editable?: boolean | undefined
   readonly validationMessage: string | null
   readonly children: ReadonlyArray<SnapNode>
   /** An iframe, whose frame's tree L1 stitches in. */
@@ -197,11 +198,12 @@ export const SnapNode: Schema.Codec<SnapNode> = Schema.Struct({
     })
   ]),
   name: Schema.Union([
-    Schema.TaggedStruct("Accessible", { value: Schema.String }),
+    Schema.TaggedStruct("Accessible", { value: Schema.String, from: Schema.optional(Schema.Literal("text")) }),
     Schema.TaggedStruct("Inferred", { value: Schema.String, from: Schema.String }),
     Schema.TaggedStruct("None", {})
   ]),
   states: Schema.Array(Schema.String),
+  editable: Schema.optional(Schema.Boolean),
   validationMessage: Schema.NullOr(Schema.String),
   children: Schema.Array(Schema.suspend((): Schema.Codec<SnapNode> => SnapNode)),
   frame: Schema.Boolean
@@ -914,7 +916,10 @@ export function engine(render: (root: SnapNode) => string) {
         content += inline ? name : ` ${name} `
       }
       content += pseudoContent(element, "::after")
-      if (content.trim() !== "") return content
+      if (content.trim() !== "") {
+        if (!context.traversal && !context.labelledBy) namesFromContent.add(element)
+        return content
+      }
     }
     // 2I: the tooltip, then a placeholder (HTML-AAM)
     const title = element.getAttribute("title") ?? ""
@@ -962,6 +967,7 @@ export function engine(render: (root: SnapNode) => string) {
     return ""
   }
 
+  const namesFromContent = new Set<Element>()
   const nameCache = new Map<Element, string>()
   const accessibleName = (element: Element, includeHidden: boolean): string => {
     const cached = nameCache.get(element)
@@ -1452,6 +1458,7 @@ export function engine(render: (root: SnapNode) => string) {
       rawText.clear()
       roleCache.clear()
       nameCache.clear()
+      namesFromContent.clear()
       const found = resolve(request.steps)
       if (found.length > 1) return strict(found)
       const element = found[0]
@@ -1671,6 +1678,7 @@ export function engine(render: (root: SnapNode) => string) {
     rawText.clear()
     roleCache.clear()
     nameCache.clear()
+    namesFromContent.clear()
     if (expectation._tag === "Title") {
       const title = collapse(document.title)
       return { passed: expected(expectation.expected, title), observed: title }
@@ -1981,11 +1989,17 @@ export function engine(render: (root: SnapNode) => string) {
     frame: boolean
   ): SnapNode => {
     const accessible = accessibleName(element, false)
+    const field = editableKind(element) ||
+      ["textbox", "searchbox", "combobox", "spinbutton", "editable"].includes(role.role)
     const name: SnapNode["name"] = role._tag === "Inferred"
       ? inferredName(element)
       : accessible === ""
       ? { _tag: "None" }
-      : { _tag: "Accessible", value: accessible }
+      : {
+        _tag: "Accessible",
+        value: accessible,
+        ...(field && namesFromContent.has(element) ? { from: "text" as const } : {})
+      }
     let children = frame || (walk.depth !== null && level >= walk.depth) ? [] : childrenOf(element, level + 1, walk)
     // Text that only repeats the node's name isn't a node of its own
     if (
@@ -1997,6 +2011,7 @@ export function engine(render: (root: SnapNode) => string) {
       role,
       name,
       states: statesOf(element, role._tag === "Aria" ? role.role : null),
+      ...(field ? { editable: true } : {}),
       validationMessage: validationMessageOf(element),
       children,
       frame
@@ -2150,6 +2165,7 @@ export function engine(render: (root: SnapNode) => string) {
     rawText.clear()
     roleCache.clear()
     nameCache.clear()
+    namesFromContent.clear()
     let found: Array<Element>
     try {
       found = resolve(request.steps)
@@ -2209,6 +2225,7 @@ export function engine(render: (root: SnapNode) => string) {
     rawText.clear()
     roleCache.clear()
     nameCache.clear()
+    namesFromContent.clear()
     try {
       switch (request.op) {
         case "count":

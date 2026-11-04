@@ -1180,7 +1180,9 @@ describe("strider", () => {
                 } else {
                   for (
                     const content of find
-                      ? contents.filter((content) => content !== "labeled-private")
+                      ? contents.filter((content) =>
+                        !["labeled-private", "article-private", "paragraph-private"].includes(content)
+                      )
                       : contents
                   ) assert.include(output, content)
                 }
@@ -1213,6 +1215,19 @@ describe("strider", () => {
                 }
                 assert.match(exceptions.out, /uncaught.*at [0-9]/)
               } else assert.include(exceptions.out, "exception-private")
+              const clickedAnswers = yield* mcp(env, ["-s", capture, "mcp"], [...handshake, {
+                jsonrpc: "2.0",
+                id: 2,
+                method: "tools/call",
+                params: { name: "click", arguments: { page: "form", target: "role=button[name=\"Throw\"]" } }
+              }], 2)
+              const clickedResult = clickedAnswers.find((answer) => answer.id === 2)?.result
+              assert.isNotTrue(clickedResult?.isError, JSON.stringify(clickedAnswers))
+              if (capture === "strict") {
+                for (const text of ["exception-private", "exception-name-private", "exception-stack-private"]) {
+                  assert.notInclude(JSON.stringify(clickedResult), text)
+                }
+              }
               const historyAnswers = yield* mcp(env, ["-s", capture, "mcp"], [...handshake, {
                 jsonrpc: "2.0",
                 id: 2,

@@ -155,7 +155,21 @@ An MCP client such as Claude Desktop launches `strider mcp` from its configurati
 }
 ```
 
-With `["mcp", "--start", "--chromium", "/usr/bin/chromium"]` instead, it starts a session of its own, which ends when the client stops it, unless `--keep`. `--capture strict`, on `strider start` or `strider mcp --start`, gives the session `CapturePolicy.strict`, for pages you don't trust: no screenshots, fields' text masked in snapshots and no console text in the digest. The default is `local`, which allows them all.
+With `["mcp", "--start", "--chromium", "/usr/bin/chromium"]` instead, it starts a session of its own, which ends when the client stops it, unless `--keep`. `--capture strict`, on `strider start` or `strider mcp --start`, gives the session `CapturePolicy.strict`. The default is `local`, which retains full capture and search.
+
+Strict capture denies screenshots and masks editable content and validation messages as `•••` in snapshots and
+find results. This includes native fields, ARIA fields and contenteditable elements regardless of semantic role,
+including `plaintext-only`. Labels, roles, refs and states remain visible. Strict `find` matches only that redacted
+view: a query for hidden content returns no match, while label searches and role filters still work. For example,
+`find "Card" --role textbox` can find a field labeled Card, but guessing its masked value cannot find it.
+
+Strict capture omits console text. Uncaught exceptions in both the digest and `history exception` retain only
+`uncaught exception at <time>`: the occurrence time in monotonic nanoseconds, with no page-supplied error name,
+message, stack or origin text. CLI and MCP apply the same policy.
+
+This is a bounded capture policy, not a secrecy or inference guarantee. Ordinary page text and labels remain
+visible, and URLs, dialogs, network/download metadata, arguments and failures can carry page content too. A page
+can put sensitive text in a label or another unmasked channel. Choose what pages and tools to expose.
 
 ```
 clicked button "Add to cart" on shop · 412 ms
