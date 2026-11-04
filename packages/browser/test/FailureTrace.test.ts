@@ -120,3 +120,25 @@ describe("owned Chromium pipe framing", () => {
     expect(entries[4]).toEqual(["pipe-receive", "last"])
   })
 })
+
+describe("failure trace files", () => {
+  it("writes only JSON lines, even when a failing file has no shared traffic", async () => {
+    const { spawnSync } = await import("node:child_process")
+    const directory = new URL("../../../.data/integration-failures/", import.meta.url)
+    const before = new Set(fs.existsSync(directory) ? fs.readdirSync(directory) : [])
+    spawnSync("pnpm", [
+      "exec",
+      "vitest",
+      "--run",
+      "--config",
+      "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+      "process.fixture"
+    ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" })
+    const files = fs.readdirSync(directory).filter((name) => !before.has(name))
+    const shared = files.filter((name) => name.includes("-shared"))
+    const contents = shared.map((name) => fs.readFileSync(new URL(name, directory), "utf8"))
+    for (const name of files) fs.unlinkSync(new URL(name, directory))
+    expect(shared.length).toBe(1)
+    for (const line of contents[0]!.replace(/\n$/, "").split("\n")) expect(() => JSON.parse(line)).not.toThrow()
+  }, 30_000)
+})
