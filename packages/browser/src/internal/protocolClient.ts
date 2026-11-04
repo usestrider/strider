@@ -526,13 +526,15 @@ export const make: (
         runLate(entry, onLate)
       }
     })
-    // On the live clock: the browser is another process, which `TestClock` doesn't move
+    // The browser clock rechecks the monotonic deadline when a timer fires early.
     const awaited = Duration.isFinite(timeout)
-      ? Effect.timeoutOrElse(Deferred.await(entry.reply), {
-        duration: timeout,
-        orElse: () => Effect.andThen(abandon, Effect.fail(failure(new Protocol.NoReply({ method, timeout }))))
-      }).pipe(
-        replyClock === undefined ? BrowserClock.onLive : Effect.provideService(Clock.Clock, replyClock)
+      ? Deferred.await(entry.reply).pipe(
+        BrowserClock.timeoutOn(replyBrowserClock, Duration.toMillis(timeout)),
+        Effect.flatMap((reply) =>
+          Option.isSome(reply)
+            ? Effect.succeed(reply.value)
+            : Effect.andThen(abandon, Effect.fail(failure(new Protocol.NoReply({ method, timeout }))))
+        )
       )
       : Deferred.await(entry.reply)
     const tracing = yield* Tracing.TraceProtocolCommands
