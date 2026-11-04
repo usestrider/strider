@@ -273,3 +273,27 @@ describe("skipped task bookkeeping", () => {
     for (const name of files) fs.unlinkSync(new URL(name, directory))
   }, 30_000)
 })
+
+describe("run-time skip bookkeeping", () => {
+  it("does not treat a test that skipped itself as a concurrent observer", async () => {
+    const { spawnSync } = await import("node:child_process")
+    const directory = new URL("../../../.data/integration-failures/", import.meta.url)
+    const before = new Set(fs.existsSync(directory) ? fs.readdirSync(directory) : [])
+    spawnSync("pnpm", [
+      "exec",
+      "vitest",
+      "--run",
+      "--config",
+      "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+      "dynamicSkip.fixture"
+    ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" })
+    const files = fs.readdirSync(directory).filter((name) => !before.has(name))
+    const read = (part: string) =>
+      fs.readFileSync(new URL(files.find((name) => name.includes(part))!, directory), "utf8")
+    const test = read("-test")
+    const shared = read("-shared")
+    for (const name of files) fs.unlinkSync(new URL(name, directory))
+    expect(test).toContain("AFTER_DYNAMIC_SKIP")
+    expect(shared).not.toContain("AFTER_DYNAMIC_SKIP")
+  }, 30_000)
+})
