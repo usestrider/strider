@@ -247,3 +247,29 @@ describe("shared layer lifecycle attribution", () => {
     for (const name of files) fs.unlinkSync(new URL(name, directory))
   }, 30_000)
 })
+
+describe("skipped task bookkeeping", () => {
+  it("does not treat a skipped test as a concurrent observer", async () => {
+    const { spawnSync } = await import("node:child_process")
+    const directory = new URL("../../../.data/integration-failures/", import.meta.url)
+    const before = new Set(fs.readdirSync(directory))
+    const run = spawnSync("pnpm", [
+      "exec",
+      "vitest",
+      "--run",
+      "--config",
+      "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+      "skipped.fixture"
+    ], {
+      cwd: new URL("../../../", import.meta.url),
+      encoding: "utf8"
+    })
+    expect(run.status, run.stdout + run.stderr).toBe(1)
+    const files = fs.readdirSync(directory).filter((name) => !before.has(name))
+    const test = files.find((name) => name.includes("-test"))!
+    const shared = files.find((name) => name.includes("-shared"))!
+    expect(fs.readFileSync(new URL(test, directory), "utf8")).toContain("AFTER_SKIP_PROBE")
+    expect(fs.readFileSync(new URL(shared, directory), "utf8")).not.toContain("AFTER_SKIP_PROBE")
+    for (const name of files) fs.unlinkSync(new URL(name, directory))
+  }, 30_000)
+})
