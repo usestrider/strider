@@ -81,14 +81,38 @@ export const guard = <A, E, R>(
     )
   })
 
+// Renderer commands wait behind tracked navigation processing; frameNavigated alone can precede
+// browser-side frame activation checked by screenshot and screencast acquisition. This single read
+// adds renderer/style/layout work within the existing deadline and can fail or exhaust it before
+// capture dispatch. It is interruptible, not an activation lease across another navigation.
+const layoutMetrics = (session: ProtocolClient.Session) =>
+  Kit.protocol(Page.getLayoutMetrics().pipe(Protocol.on(session)))
+
 export const screenshot = Effect.fnUntraced(
   function*(state: State, id: L1Target.NavigableId, options: Adapter.ScreenshotOptions) {
     const page = yield* pageOf(state, id)
     const on = Protocol.on(page.target.session)
     let clip = Option.getOrUndefined(options.clip)
     let scale = 1
+    const guard = yield* CurrentGuard
+    const metrics = yield* layoutMetrics(page.target.session).pipe(
+      Effect.catch((error) => {
+        const reason = error.reason
+        // A terminal metrics error must not overtake an already observed replacement. Metrics are
+        // preparation, not the native capture reply; a lost session or unanswered command keeps its error.
+        if (
+          guard === undefined || reason._tag !== "Protocol" ||
+          (reason.error.reason._tag !== "Rejected" && reason.error.reason._tag !== "Decode")
+        ) {
+          return Effect.fail(error)
+        }
+        return page.target.session.drainObserved.pipe(
+          Effect.andThen(guard.check),
+          Effect.andThen(Effect.fail(error))
+        )
+      })
+    )
     if ((options.fullPage && clip === undefined) || options.scale === "css") {
-      const metrics = yield* Kit.protocol(Page.getLayoutMetrics().pipe(on))
       if (options.fullPage && clip === undefined) {
         clip = { x: 0, y: 0, width: metrics.cssContentSize.width, height: metrics.cssContentSize.height }
       }
@@ -110,7 +134,6 @@ export const screenshot = Effect.fnUntraced(
     if (options.omitBackground) {
       yield* Kit.protocol(Emulation.setDefaultBackgroundColorOverride({ color: { r: 0, g: 0, b: 0, a: 0 } }).pipe(on))
     }
-    const guard = yield* CurrentGuard
     yield* page.target.session.drainObserved
     if (guard !== undefined) yield* guard.check
     const { data } = yield* Kit.protocol(
@@ -241,6 +264,7 @@ export const screencast = Effect.fnUntraced(function*(state: State, id: L1Target
   const session = page.target.session
   const on = Protocol.on(session)
   const frames = yield* session.subscribe(Page.screencastFrame)
+  yield* layoutMetrics(session)
   yield* Kit.protocol(Page.startScreencast({ format: "jpeg" }).pipe(on))
   yield* Effect.addFinalizer(() => Page.stopScreencast().pipe(on, Effect.ignore))
   return frames.pipe(
