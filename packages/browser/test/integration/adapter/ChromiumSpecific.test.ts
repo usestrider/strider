@@ -14,7 +14,6 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
-import * as Socket from "effect/socket/Socket"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Adapter from "../../../src/internal/adapter.ts"
@@ -24,8 +23,6 @@ import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
 import { LocatorImpl } from "../../../src/internal/locator.ts"
 import * as L1Target from "../../../src/Target.ts"
 import { assertPinned, chromium } from "../browsers.ts"
-import { diagnostic } from "../diagnostic.ts"
-import { observeProcesses } from "../processDiagnostic.ts"
 import { makeRecorder, site } from "./harness.ts"
 
 const executable = chromium.executable
@@ -302,23 +299,10 @@ describe("Chromium adapter, CDP only", () => {
         "ends a crashed page with PageCrashed; a second client on the same browser crashes it",
         () =>
           Effect.gen(function*() {
-            const trace = yield* diagnostic("ChromiumSpecific crash")
             const served = yield* site
             const facts = makeRecorder()
-            const { launched, transport } = yield* ChromiumLauncher.launchWithPort({ executablePath: executable }).pipe(
-              Effect.provideService(Socket.WebSocketConstructor, trace.socketConstructor("adapter"))
-            )
-            trace.note("launcher", { args: launched.args, pid: Number(launched.handle.pid) })
-            yield* Effect.addFinalizer(() =>
-              Effect.gen(function*() {
-                trace.note("launcher stderr before cleanup", yield* launched.stderrTail)
-              })
-            )
-            const adapter = yield* CdpAdapter.connect(trace.transport("adapter", transport), {
-              sink: (fact) => Effect.andThen(Effect.sync(() => trace.note("fact", fact)), facts.sink(fact)),
-              ownership: "launched"
-            })
-            trace.note("browser", adapter.info)
+            const { launched, transport } = yield* ChromiumLauncher.launchWithPort({ executablePath: executable })
+            const adapter = yield* CdpAdapter.connect(transport, { sink: facts.sink, ownership: "launched" })
             assertPinned("Chromium", adapter.info.version, chromium.version)
             const page = yield* adapter.createPage(adapter.defaultContext)
             const url = `${served.origin}/crash-me`
@@ -329,25 +313,18 @@ describe("Chromium adapter, CDP only", () => {
               import("node:fs/promises").then((fs) => fs.readFile(`${launched.userDataDir}/DevToolsActivePort`, "utf8"))
             )
             const [port, browserPath] = active.split("\n")
-            const other = yield* CdpConnection.make(
-              trace.transport(
-                "other",
-                yield* Transport.webSocket(`ws://127.0.0.1:${port}${browserPath}`).pipe(
-                  Effect.provideService(Socket.WebSocketConstructor, trace.socketConstructor("other"))
-                )
-              )
-            )
+            const other = yield* CdpConnection.make(yield* Transport.webSocket(`ws://127.0.0.1:${port}${browserPath}`))
             const { targetInfos } = yield* Target.getTargets({}).pipe(Protocol.on(other.browser))
             const target = targetInfos.find((info) => info.url === url)
             assert.isDefined(target)
             const { sessionId } = yield* Target.attachToTarget({ targetId: target.targetId, flatten: true }).pipe(
               Protocol.on(other.browser)
             )
-            yield* observeProcesses(trace.note, Number(launched.handle.pid), target.targetId)
-            // Observe its outcome without blocking the fact wait on a command that may remain pending.
+            // Page.crash can remain pending until cleanup, so observe its outcome without waiting for a reply.
             yield* Page.crash().pipe(
               Protocol.on(yield* other.session(sessionId)),
-              Effect.onExit((exit) => Effect.sync(() => trace.note("Page.crash outcome", exit))),
+              Effect.exit,
+              Effect.flatMap((exit) => Effect.log("Page.crash outcome", exit)),
               Effect.forkChild
             )
             const removed = yield* facts.when("NavigableRemoved", (fact) => fact.navigable === page)

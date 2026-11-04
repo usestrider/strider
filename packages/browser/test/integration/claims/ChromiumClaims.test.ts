@@ -21,7 +21,6 @@ import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
-import * as Socket from "effect/socket/Socket"
 import * as Stream from "effect/Stream"
 import { spawn } from "node:child_process"
 import { readFile } from "node:fs/promises"
@@ -34,7 +33,6 @@ import * as ClaimHooks from "../../../src/internal/claimHooks.ts"
 import { handoff } from "../../../src/internal/handoff.ts"
 import * as Operation from "../../../src/internal/operation.ts"
 import { assertPinned, chromium } from "../browsers.ts"
-import { diagnostic } from "../diagnostic.ts"
 
 const serve = Effect.acquireRelease(
   Effect.promise(async () => {
@@ -366,31 +364,17 @@ describe("Chromium claims", () => {
 
       it.effect("keeps ordinary context and page cleanup unchanged", () =>
         Effect.gen(function*() {
-          const trace = yield* diagnostic("ChromiumClaims ordinary cleanup")
-          const browser = yield* launch.pipe(
-            Effect.provideService(Socket.WebSocketConstructor, trace.socketConstructor("observer"))
-          )
+          const browser = yield* launch
           const { origin } = yield* serve
           yield* Effect.scoped(
             Effect.gen(function*() {
               const context = yield* Browser.newContext()
               const page = yield* context.newPage
               yield* page.goto(`${origin}/ordinary`)
-              const targets = yield* browser.targets
-              trace.note("targets after goto", targets)
-              assert.isTrue(targets.some((info) => info.url === `${origin}/ordinary`), JSON.stringify(targets))
+              assert.isTrue((yield* browser.targets).some((info) => info.url === `${origin}/ordinary`))
             })
-          ).pipe(
-            Effect.provide(
-              browser.connect.pipe(
-                Layer.provide(Layer.succeed(Socket.WebSocketConstructor, trace.socketConstructor("adapter")))
-              )
-            )
-          )
-          yield* until(
-            browser.targets.pipe(Effect.tap((targets) => Effect.sync(() => trace.note("cleanup targets", targets)))),
-            (infos) => !infos.some((info) => info.url === `${origin}/ordinary`)
-          )
+          ).pipe(Effect.provide(browser.connect))
+          yield* until(browser.targets, (infos) => !infos.some((info) => info.url === `${origin}/ordinary`))
         }), 60_000)
 
       it.effect("ordinary contexts still disappear when their client is killed", () =>
