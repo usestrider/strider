@@ -157,6 +157,14 @@ export const AxTree: Capability<AxTreeReader> = make("AxTree")
 /**
  * The browser's own screencast frames: Chromium's alone.
  *
+ * **Gotchas**
+ *
+ * Acquiring this capability first reads renderer layout metrics. This adds a renderer round trip and
+ * style/layout work within the existing acquisition deadline; a paused or slow renderer can exhaust
+ * that deadline before the screencast starts, and a metrics error fails acquisition. The read waits
+ * behind tracked navigation processing, without waiting for load. Another navigation or a detach can
+ * still intervene before start; the read does not guarantee that the page stays active.
+ *
  * @stability unstable
  * @category constants
  * @since 0.1.0
