@@ -4,7 +4,17 @@
  * with its scope, every read and matcher, the keyboard and the mouse, and two pages of one context.
  */
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Condition, Deadline, Expect, FileInput, Keyboard, Locator, Mouse } from "@usestrider/browser"
+import {
+  Browser,
+  Condition,
+  Deadline,
+  Expect,
+  FileInput,
+  Keyboard,
+  Locator,
+  Mouse,
+  Operation
+} from "@usestrider/browser"
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -12,8 +22,10 @@ import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as Engine from "../../../src/internal/engine.ts"
 import { LocatorImpl } from "../../../src/internal/locator.ts"
 import { site } from "../adapter/harness.ts"
+import { type LinkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
 import { supports } from "./capabilities.ts"
 
 const timeout = 60_000
@@ -28,10 +40,477 @@ const fixture = Effect.fnUntraced(function*(html: (origin: string) => string) {
 /** An element whose text a script writes, for asserting what happened. */
 const out = `<p id="out">nothing yet</p>`
 const say = (text: string) => `document.getElementById('out').textContent = ${text}`
+/** Writes the target and coordinates of the page's pointerdown into `#out`, keeping the click from navigating. */
+const recordsClick =
+  `<script>document.addEventListener("pointerdown",e=>document.getElementById("out").textContent=JSON.stringify({target:e.target.id,x:e.clientX,y:e.clientY}));document.addEventListener("click",e=>e.preventDefault())</script>`
 
 export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} interaction`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      for (const shape of wrappedLinks) {
+        for (const partial of shape.id === "three" ? [false, true] : [false]) {
+          it.effect(
+            `dispatches click to first visible fragment for wrapped link ${shape.id}${
+              partial ? " partially above viewport" : ""
+            }`,
+            () =>
+              Effect.gen(function*() {
+                const { url } = yield* fixture(() => wrappedLinkHtml(shape, partial))
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const geometry: LinkGeometry = yield* page.evaluateInMainWorld(() => ({
+                    rects: Array.from(
+                      document.querySelector("#go")!.getClientRects(),
+                      (r) => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom })
+                    ),
+                    width: innerWidth,
+                    height: innerHeight
+                  }))
+                  assert.strictEqual(geometry.rects.length, shape.fragments)
+                  if (partial) assert.isBelow(geometry.rects[0]!.bottom, 0)
+                  const first = geometry.rects.find((r) => r.bottom > 0 && r.top < geometry.height)!
+                  yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
+                  const event = JSON.parse(yield* page.locator("#out").readText) as {
+                    target: string
+                    x: number
+                    y: number
+                  }
+                  assert.strictEqual(event.target, "go")
+                  assert.strictEqual(
+                    yield* page.evaluateInMainWorld(() => document.querySelector("#out")!.getAttribute("data-clicked")),
+                    "go"
+                  )
+                  const x = (Math.max(0, first.left) + Math.min(geometry.width, first.right)) / 2
+                  const y = (Math.max(0, first.top) + Math.min(geometry.height, first.bottom)) / 2
+                  assert.closeTo(event.x, x, 1)
+                  assert.closeTo(event.y, y, 1)
+                  assert.isAtLeast(event.x, first.left)
+                  assert.isBelow(event.x, first.right)
+                  assert.isAtLeast(event.y, Math.max(0, first.top))
+                  assert.isBelow(event.y, first.bottom)
+                  if (name === "Firefox") {
+                    assert.strictEqual(event.x, Math.round(x))
+                    assert.strictEqual(event.y, Math.round(y))
+                  }
+                }))
+              }),
+            timeout
+          )
+        }
+      }
+
+      it.effect("clicks a later line when the first fragment centre is covered", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<style>body{margin:0;font:16px/24px monospace}#box{position:absolute;left:20px;top:20px;width:240px}</style><div id="box"><a id="go" href="#">${
+              Array(6).fill("abcdefghij").join(" ")
+            }</a></div><div style="position:absolute;left:0;top:0;width:400px;height:44px"></div><output id="out"></output>${recordsClick}`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const centers = yield* page.evaluateInMainWorld(() =>
+              Array.from(document.querySelector("#go")!.getClientRects(), (r) => (r.top + r.bottom) / 2)
+            )
+            assert.strictEqual(centers.length, 3)
+            yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
+            const event = JSON.parse(yield* page.locator("#out").readText) as { target: string; y: number }
+            assert.strictEqual(event.target, "go")
+            assert.closeTo(event.y, centers[1]!, 1)
+          }))
+        }), timeout)
+
+      it.effect("retries a frame-bounds NoMatch response", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<iframe srcdoc='<a id="go" href="#">Go</a><output id="out"></output>${recordsClick}'></iframe>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const locator = page.frame(page.locator("iframe")).locator("#go")
+            assert(locator instanceof LocatorImpl)
+            const adapter = locator.owner.runtime.model.adapter
+            const descriptor = Object.getOwnPropertyDescriptor(adapter, "evaluate")!
+            const original = adapter.evaluate
+            let reads = 0
+            yield* Effect.acquireRelease(
+              Effect.sync(() => {
+                Object.defineProperty(adapter, "evaluate", {
+                  ...descriptor,
+                  value: ((realm, call) => {
+                    const arg = call.arguments[0]
+                    if (
+                      call.functionDeclaration === Engine.run && arg?._tag === "Value" && arg.value.type === "string" &&
+                      JSON.parse(arg.value.value).op === "frame"
+                    ) {
+                      reads++
+                      if (reads === 1) {
+                        return Effect.succeed(
+                          {
+                            _tag: "Value",
+                            value: { type: "string", value: JSON.stringify({ _tag: "NoMatch" }) }
+                          } as const
+                        )
+                      }
+                    }
+                    return original(realm, call)
+                  }) as typeof adapter.evaluate
+                })
+              }),
+              () => Effect.sync(() => Object.defineProperty(adapter, "evaluate", descriptor))
+            )
+            yield* locator.click().pipe(Deadline.within("2 seconds"))
+            assert.isAtLeast(reads, 2)
+            const event = JSON.parse(yield* page.frame(page.locator("iframe")).locator("#out").readText) as {
+              target: string
+            }
+            assert.strictEqual(event.target, "go")
+          }))
+        }), timeout)
+
+      for (
+        const [title, parent] of [
+          [
+            "whose first line its parent's scrolling ancestor clips",
+            (frame: string) =>
+              `<style>body{margin:0}#s{position:absolute;left:20px;top:20px;width:300px;height:100px;overflow:auto}iframe{display:block;width:280px;height:300px;border:0}</style><div id="s">${frame}</div><script>s.scrollTop=24</script>`
+          ],
+          [
+            "whose first line an overlay in its parent covers",
+            (frame: string) =>
+              `<style>body{margin:0}iframe{position:absolute;left:20px;top:20px;width:300px;height:200px;border:0}#o{position:absolute;left:0;top:0;width:400px;height:44px;background:#fff}</style>${frame}<div id="o"></div>`
+          ]
+        ] as const
+      ) {
+        it.effect(`clicks a wrapped link in an iframe ${title}`, () =>
+          Effect.gen(function*() {
+            const inner =
+              `<!doctype html><style>body{margin:0;font:16px/24px monospace;width:240px}</style><a id="go" href="#go">${
+                Array(6).fill("abcdefghij").join(" ")
+              }</a><output id="out"></output>${recordsClick}`
+            const { url } = yield* fixture(() => `<!doctype html>${parent(`<iframe srcdoc='${inner}'></iframe>`)}`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const frame = page.frame(page.locator("iframe"))
+              yield* frame.locator("#go").click().pipe(Deadline.within("1 second"))
+              assert.strictEqual(JSON.parse(yield* frame.locator("#out").readText).target, "go")
+            }))
+          }), timeout)
+      }
+
+      for (const coveredIn of ["outer", "middle"] as const) {
+        it.effect(
+          `selects a later fragment through nested cross-origin frames covered in ${coveredIn}`,
+          () =>
+            Effect.gen(function*() {
+              const { origin, crossSite } = yield* site
+              const leaf =
+                `<!doctype html><style>body{margin:0;font:16px/24px monospace;width:240px}</style><a id="go" href="#">${
+                  Array(6).fill("abcdefghij").join(" ")
+                }</a><output id="out"></output>${recordsClick}`
+              const cover =
+                `<div id="cover" style="position:absolute;left:0;top:0;width:400px;height:24px;background:white"></div>`
+              const middle = `<style>body{margin:0}iframe{width:300px;height:150px;border:0}</style><iframe src="${
+                fixtureUrl(origin, leaf)
+              }"></iframe>${coveredIn === "middle" ? cover : ""}`
+              const html = `<style>body{margin:0}iframe{width:300px;height:160px;border:0}</style><iframe src="${
+                fixtureUrl(crossSite, middle)
+              }"></iframe>${coveredIn === "outer" ? cover : ""}`
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(fixtureUrl(origin, html))
+                const outer = page.frame(page.locator("iframe"))
+                const inner = outer.frame(outer.locator("iframe"))
+                yield* inner.locator("#go").click().pipe(Deadline.within("1 second"))
+                const event = JSON.parse(yield* inner.locator("#out").readText) as { target: string; y: number }
+                assert.strictEqual(event.target, "go")
+                assert.isAtLeast(event.y, 24)
+                assert.isBelow(event.y, 48)
+              }))
+            }),
+          timeout
+        )
+      }
+
+      for (const mode of ["wholly covered", "explicit covered", "disabled pointer checks", "drag target"] as const) {
+        it.effect(`preserves ${mode} through parent coverage`, () =>
+          Effect.gen(function*() {
+            const inner =
+              `<!doctype html><style>body{margin:0;font:16px/24px monospace;width:240px}</style><a id="go" href="#">${
+                Array(6).fill("abcdefghij").join(" ")
+              }</a><output id="out"></output>${recordsClick}`
+            const { url } = yield* fixture(() =>
+              `<style>body{margin:0}iframe{position:absolute;left:20px;top:20px;width:300px;height:150px;border:0}</style><iframe srcdoc='${inner}'></iframe><div id="cover" style="position:absolute;left:0;top:0;width:400px;height:200px"></div>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const frame = page.frame(page.locator("iframe"))
+              const target = frame.locator("#go")
+              if (mode === "disabled pointer checks") {
+                yield* target.click({ trial: true, checks: { receivesPointer: false } }).pipe(
+                  Deadline.within("1 second")
+                )
+              } else if (mode === "drag target") {
+                assert(target instanceof LocatorImpl)
+                const point = yield* target.pointOf(undefined).pipe(Operation.named("test.dragTarget"))
+                assert(Option.isSome(point))
+                const expected = yield* page.evaluateInMainWorld(() => {
+                  const rect = document.querySelector("iframe")!.contentDocument!.querySelector("#go")!
+                    .getClientRects()[0]!
+                  return { x: 20 + (rect.left + rect.right) / 2, y: 20 + (rect.top + rect.bottom) / 2 }
+                })
+                assert.deepStrictEqual(point.value, expected)
+              } else {
+                const error = yield* target.click({
+                  position: mode === "explicit covered" ? { x: 2, y: 2 } : undefined
+                }).pipe(Deadline.within("1 second"), Effect.flip)
+                assert(Deadline.isTimeout(error), String(error))
+                assert(error.history.some((e) => {
+                  const value = e.value as { _tag: string; by?: string }
+                  return value._tag === "Covered" && value.by?.includes("#cover")
+                }))
+              }
+              assert.strictEqual(yield* frame.locator("#out").readText, "")
+            }))
+          }), timeout)
+      }
+
+      it.effect("clicks a wrapped link whose first line a scrolling ancestor clips", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<!doctype html><style>body{margin:0;font:16px/24px monospace}#s{position:absolute;left:20px;top:100px;width:240px;height:48px;overflow:auto}</style><div id="s"><a id="go" href="#go">${
+              Array(6).fill("abcdefghij").join(" ")
+            }</a></div><output id="out"></output>${recordsClick}<script>s.scrollTop=24</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const lines = yield* page.evaluateInMainWorld(() => {
+              const rects = document.querySelector("#go")!.getClientRects()
+              return { count: rects.length, firstBottom: rects[0]!.bottom }
+            })
+            assert.strictEqual(lines.count, 3)
+            assert.isAtMost(lines.firstBottom, 100)
+            yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
+            assert.strictEqual(JSON.parse(yield* page.locator("#out").readText).target, "go")
+          }))
+        }), timeout)
+
+      it.effect(
+        "clicks a wrapped link in an iframe whose first line is above the page's viewport",
+        () =>
+          Effect.gen(function*() {
+            const inner =
+              `<!doctype html><style>body{margin:0;font:16px/24px monospace;width:240px}</style><a id="go" href="#go">${
+                Array(6).fill("abcdefghij").join(" ")
+              }</a><output id="out"></output>${recordsClick}`
+            const { url } = yield* fixture(() =>
+              `<!doctype html><style>body{margin:0}iframe{position:absolute;left:20px;top:-24px;width:300px;height:200px;border:0}</style><iframe srcdoc='${inner}'></iframe>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const frame = page.frame(page.locator("iframe"))
+              yield* frame.locator("#go").click().pipe(Deadline.within("1 second"))
+              assert.strictEqual(JSON.parse(yield* frame.locator("#out").readText).target, "go")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "clicks a wrapped link whose box crosses the viewport while no line does",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<!doctype html><style>body{margin:0;width:6000px;font:16px/24px monospace}#b{width:5100px}#p{display:inline-block;width:5000px;height:1px}</style><div id="b"><span id="p"></span><a id="go" href="#go">abcdefghij abcdefghij</a></div><output id="out"></output>${recordsClick}<script>scrollTo(1000,0)</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const seen = yield* page.evaluateInMainWorld(() => {
+                const go = document.querySelector("#go")!
+                const box = go.getBoundingClientRect()
+                return {
+                  lines: go.getClientRects().length,
+                  visibleLines: Array.from(go.getClientRects()).filter((r) =>
+                    r.right > 0 && r.left < innerWidth
+                  ).length,
+                  boxCrosses: box.left < innerWidth && box.right > 0
+                }
+              })
+              assert.deepStrictEqual(seen, { lines: 2, visibleLines: 0, boxCrosses: true })
+              yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
+              assert.strictEqual(JSON.parse(yield* page.locator("#out").readText).target, "go")
+            }))
+          }),
+        timeout
+      )
+
+      for (const position of ["fixed", "absolute"] as const) {
+        it.effect(`clicks a ${position} link that escapes an overflow ancestor`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<!doctype html><style>body{margin:0}#s{margin:100px;width:30px;height:30px;overflow:hidden}#go{position:${position};left:300px;top:100px}</style><div id="s"><a id="go" href="#go">Go</a></div><output id="out"></output>${recordsClick}`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
+              assert.strictEqual(JSON.parse(yield* page.locator("#out").readText).target, "go")
+            }))
+          }), timeout)
+      }
+
+      for (const position of ["fixed", "absolute"] as const) {
+        it.effect(
+          `clicks a link inside a ${position} box that escapes an overflow ancestor`,
+          () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<!doctype html><style>body{margin:0}#s{margin:100px;width:30px;height:30px;overflow:hidden}#box{position:${position};left:300px;top:100px}</style><div id="s"><span id="box"><a id="go" href="#go">Go</a></span></div><output id="out"></output>${recordsClick}`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
+                assert.strictEqual(JSON.parse(yield* page.locator("#out").readText).target, "go")
+              }))
+            }),
+          timeout
+        )
+      }
+
+      it.effect("clicks a wrapped link clipped by nested cross-origin parent frames", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const inner =
+            `<!doctype html><style>body{margin:0;font:16px/24px monospace;width:240px}</style><a id="go" href="#go">${
+              Array(6).fill("abcdefghij").join(" ")
+            }</a><output id="out"></output>${recordsClick}`
+          const innerUrl = fixtureUrl(origin, inner)
+          const middle =
+            `<!doctype html><style>body{margin:0}iframe{position:absolute;left:0;top:0;width:300px;height:200px;border:0}</style><iframe src="${innerUrl}"></iframe>`
+          const url = fixtureUrl(
+            origin,
+            `<!doctype html><style>body{margin:0}iframe{position:absolute;left:20px;top:-24px;width:300px;height:200px;border:0}</style><iframe src="${
+              fixtureUrl(crossSite, middle)
+            }"></iframe>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const outer = page.frame(page.locator("iframe"))
+            const innerFrame = outer.frame(outer.locator("iframe"))
+            yield* innerFrame.locator("#go").click().pipe(Deadline.within("1 second"))
+            const event = JSON.parse(yield* innerFrame.locator("#out").readText) as { target: string; y: number }
+            assert.strictEqual(event.target, "go")
+            assert.isAtLeast(event.y, 24)
+            assert.isBelow(event.y, 48)
+          }))
+        }), timeout)
+
+      const clippingFixtures = [
+        {
+          title: "a link inside an inline ancestor whose overflow has no effect",
+          html:
+            `<!doctype html><span style="overflow:hidden"><a id="go" href="#go">Go somewhere</a></span><output id="out"></output>`
+        },
+        {
+          title: "a link inside a display: contents ancestor with overflow set",
+          html:
+            `<!doctype html><div style="display:contents;overflow:hidden"><a id="go" href="#go">Go somewhere</a></div><output id="out"></output>`
+        },
+        {
+          title: "a shape inside a nested svg",
+          html:
+            `<!doctype html><svg width="200" height="200"><svg x="10" y="10" width="100" height="100"><rect id="go" width="50" height="50"/></svg></svg><output id="out"></output>`
+        },
+        {
+          title: "a button in a foreignObject of an svg scaled by its viewBox",
+          html:
+            `<!doctype html><style>body{margin:0}</style><svg viewBox="0 0 100 100" width="400" height="400"><foreignObject width="100" height="100"><button id="go" style="margin-left:60px;margin-top:60px;display:block">Go</button></foreignObject></svg><output id="out"></output>`
+        },
+        {
+          title: "a shape in an svg under a scaling transform",
+          html:
+            `<!doctype html><style>body{margin:0}</style><div style="transform:scale(2);transform-origin:0 0;width:100px;height:100px"><svg width="100" height="100"><rect id="go" x="80" y="80" width="15" height="15"/></svg></div><output id="out"></output>`
+        },
+        {
+          title: "an absolute link outside a zero-height body whose overflow is hidden",
+          html:
+            `<!doctype html><style>html,body{margin:0;overflow:hidden}</style><a id="go" href="#go" style="position:absolute;left:50px;top:50px">Go</a><output id="out" style="position:absolute;top:100px"></output>`
+        },
+        {
+          title: "a button in a popover whose transformed ancestor clips its box",
+          html:
+            `<!doctype html><style>body{margin:0}#c{transform:translateY(0);overflow:hidden;width:20px;height:20px}#p{position:fixed;inset:auto;left:100px;top:100px;margin:0}</style><div id="c"><div id="p" popover><button id="go">Go</button></div></div><output id="out" style="position:absolute;top:200px"></output><script>p.showPopover()</script>`
+        }
+      ] as const
+      for (const { html, title } of clippingFixtures) {
+        it.effect(`clicks ${title}`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `${html}${recordsClick}`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
+              assert.strictEqual(JSON.parse(yield* page.locator("#out").readText).target, "go")
+            }))
+          }), timeout)
+      }
+
+      it.effect(
+        "clicks at an explicit position inside an inline ancestor whose overflow has no effect",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<!doctype html><span style="overflow:hidden"><a id="go" href="#go">Go somewhere</a></span><output id="out"></output>${recordsClick}`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#go").click({ position: { x: 2, y: 2 } }).pipe(Deadline.within("1 second"))
+              assert.strictEqual(JSON.parse(yield* page.locator("#out").readText).target, "go")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect("dispatches click inside a one-pixel fragment after rounding", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<!doctype html><a id="go" style="position:fixed;left:0;top:20px;width:1px;height:10px"></a><output id="out"></output><script>go.onpointerdown=e=>out.textContent=JSON.stringify({x:e.clientX,y:e.clientY,target:e.target.id});go.onclick=()=>out.dataset.clicked="go"</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
+            assert.deepStrictEqual(JSON.parse(yield* page.locator("#out").readText), { x: 0, y: 25, target: "go" })
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => document.querySelector("#out")!.getAttribute("data-clicked")),
+              "go"
+            )
+          }))
+        }), timeout)
+
+      it.effect("dispatches explicit position from the padding-box origin", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<!doctype html><style>body{margin:0}#go{position:absolute;left:40px;top:60px;border-style:solid;border-width:7px 11px 13px 5px;padding:19px;width:100px;height:80px}</style><a id="go" href="#">Go</a><output id="out"></output><script>go.onpointerdown=e=>out.textContent=JSON.stringify({x:e.clientX,y:e.clientY,target:e.target.id});go.onclick=e=>e.preventDefault()</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.locator("#go").click({ position: { x: 13, y: 9 } })
+            assert.deepStrictEqual(JSON.parse(yield* page.locator("#out").readText), { x: 58, y: 76, target: "go" })
+          }))
+        }), timeout)
+
       for (const change of ["replaced", "moved", "disabled", "covered", "interrupted", "expired"] as const) {
         it.effect(`handles a queued click when ${change}`, () =>
           Effect.gen(function*() {
