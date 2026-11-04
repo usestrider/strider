@@ -22,23 +22,41 @@ score can hide a slow operation. A failed operation or wrong result always exits
 
 ## Cases and timing boundaries
 
-| Case             | Timed work                                                                              |
-| ---------------- | --------------------------------------------------------------------------------------- |
-| `launch`         | Start a fresh browser and establish its automation connection; shutdown excluded        |
-| `page-lifecycle` | Create and close an isolated context and page, including viewport configuration         |
-| `navigate`       | Navigate to a local document through `load`, then read its title                        |
-| `resources`      | Load a local document with 100 uncached images through `load`, then count loaded images |
-| `evaluate`       | 20 sequential main-world evaluations returning small objects; time per batch            |
-| `locator-read`   | 20 sequential role locator text reads; time per batch                                   |
-| `click`          | Click with default actionability, then read the updated counter                         |
-| `fill`           | Fill a labeled input with default actionability, then read its value                    |
-| `visible`        | Wait for an already visible heading                                                     |
-| `screenshot`     | Capture the viewport as PNG                                                             |
+| Case                 | Timed work                                                                              |
+| -------------------- | --------------------------------------------------------------------------------------- |
+| `launch`             | Start a fresh browser and establish its automation connection; shutdown excluded        |
+| `page-lifecycle`     | Create and close an isolated context and page, including viewport configuration         |
+| `navigate`           | Navigate to a local document through `load`, then read its title                        |
+| `resources`          | Load a local document with 100 uncached images through `load`, then count loaded images |
+| `evaluate`           | 20 sequential main-world evaluations returning small objects; time per batch            |
+| `locator-read`       | 20 sequential role locator text reads; time per batch                                   |
+| `locator-values`     | 20 sequential input value reads across distinct elements; time per batch                |
+| `read-snapshot-100`  | One synchronous main-world query returning 100 inputs × four properties                 |
+| `read-snapshot-1000` | The same query returning 1,000 inputs × four properties                                 |
+| `click`              | Click with default actionability, then read the updated counter                         |
+| `fill`               | Fill a labeled input with default actionability, then read its value                    |
+| `visible`            | Wait for an already visible heading                                                     |
+| `screenshot`         | Capture the viewport as PNG                                                             |
 
 For operation cases, each sample gets a fresh context and page loaded with the same fixture. Page creation,
 initial navigation and cleanup are outside timing. Results are checked after the timer stops, including
 each evaluation/read in a batch, image load counts, and screenshot format and dimensions. Warmups are checked
 too. Cases stop on the first failure; the report marks an incomplete run as an error.
+
+The query/read controls retain `evaluate` (small objects) and `locator-read` (one repeated role query).
+`locator-values` reads distinct inputs independently and sequentially: each operation can observe a later moment.
+It compares Strider `readValue` with Playwright `inputValue`, including each library's normal locator resolution.
+The snapshot cases instead use Strider `evaluateInMainWorld` and Playwright `page.evaluate` with the identical
+synchronous `querySelectorAll`/mapping function. Playwright's page-side bulk API avoids a per-element host loop;
+these snapshots are a different consistency contract from independent reads, not a faster equivalent of them.
+Each snapshot returns ordered records containing id, current value, disabled state and nullable aria-label.
+The two fixture sizes grow both document and result size, so their difference alone cannot separate query cost
+from serialization/decoding cost. All records are checked, including Unicode strings, booleans and nulls.
+Fixture navigation, parsing and initial layout are outside timing; query execution, property access, transport,
+serialization and host decoding are inside it. These static success workloads do not establish exception,
+mutation/replacement freshness, navigation, cancellation or deadline correctness. Use the integration contents,
+locator and adapter suites for those boundaries before changing shared read machinery; do not infer them from
+passing timing samples. No browser work is shared across independent reads by the harness.
 
 The runner awaits one sample at a time and alternates which library goes first in each pair. Both use a
 1280 × 720 viewport at device scale 1, the same server, and the same browser binary, whose reported version is
