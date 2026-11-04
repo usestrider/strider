@@ -306,7 +306,9 @@ export const Response = Schema.Union([
     /** Stability evidence for an immediate check of the same element and rectangle. */
     stability: Schema.optionalKey(Schema.String),
     /** Locally reachable default candidates, freshly checked after parent probes before dispatch. */
-    selection: Schema.optionalKey(Schema.Struct({ token: Schema.String, points: Schema.Array(Point) })),
+    selection: Schema.optionalKey(
+      Schema.Struct({ token: Schema.optionalKey(Schema.String), points: Schema.Array(Point) })
+    ),
     /** The action point, for `Point`. */
     point: Schema.NullOr(Point),
     /** Whether an HTML drag would start from it: it or an ancestor is `draggable`. */
@@ -1509,7 +1511,8 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const act = async (request: Extract<Request, { op: "act" }>): Promise<Response> => {
-    selection = null
+    // Preflight may overlap a permit-held check; only the applying round owns its selection evidence.
+    if (request.apply) selection = null
     // Evidence is single-use and lasts only until the next rendering update. Another attempt supersedes it.
     let previous = stability !== null && request.stability === stability.token ? stability : null
     stability = null
@@ -1634,14 +1637,16 @@ export function engine(render: (root: SnapNode) => string) {
           response._tag === "Ready" && action._tag === "Point" && action.position === null &&
           checks.receivesPointer && request.clip !== undefined && points.length > 1
         ) {
-          selection = {
-            token: `${generation}:point:${++selectionSequence}`,
-            element,
-            steps: request.steps,
-            geometry: selectionGeometry(element, request.clip),
-            points
-          }
-          response = { ...response, selection: { token: selection.token, points } }
+          if (request.apply) {
+            selection = {
+              token: `${generation}:point:${++selectionSequence}`,
+              element,
+              steps: request.steps,
+              geometry: selectionGeometry(element, request.clip),
+              points
+            }
+            response = { ...response, selection: { token: selection.token, points } }
+          } else response = { ...response, selection: { points } }
         }
         if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
           const captured = {
@@ -2362,6 +2367,7 @@ export function engine(render: (root: SnapNode) => string) {
         case "validateSelection":
           return JSON.stringify(validateSelection(request))
         case "disarm":
+          selection = null
           return JSON.stringify({ _tag: "Guarded", blocked: disarm() } satisfies Response)
         case "read":
           return JSON.stringify(read(request))

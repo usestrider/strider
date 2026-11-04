@@ -1350,7 +1350,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
                   covered ??= translated.reason
                   continue
                 }
-                if (selection !== undefined) {
+                if (selection?.token !== undefined) {
                   const validated = yield* Runtime.sendToDocument(owner.runtime, owner.page, answer.routed.document, {
                     op: "validateSelection",
                     token: selection.token,
