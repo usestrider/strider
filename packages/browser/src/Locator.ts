@@ -689,9 +689,10 @@ export interface PointerOptions extends ActionOptions {
   /**
    * Where to point, from the top left of the element's padding box.
    * With no position, client rectangles are clipped by the viewport and all parent frames.
-   * With `receivesPointer` enabled, the first centre hitting the target or a descendant in its document is selected,
+   * With `receivesPointer` enabled, the first centre hitting the target or a descendant and its iframe in every parent is selected,
    * allowing a later line when an earlier one is covered. Only centres are probed; if none hits, the check reports `Covered`.
-   * Parent-frame hit tests still protect the selected point before dispatch.
+   * Candidates are produced anew under the input permit. Framed lists with multiple candidates are validated
+   * after parent probes; changed geometry or a replaced target restarts selection before dispatch.
    * Disabling `receivesPointer` uses the first geometric centre without coverage probes.
    * Explicit positions are never replaced by another fragment. The point stays inside its rectangle after integer rounding
    * when that rectangle contains an integer point. A target with no visible rectangle has no default point,
@@ -734,9 +735,10 @@ export interface ClickOptions extends PointerOptions {
 export interface DragOptions extends PointerOptions {
   /**
    * Where to drop, from the top left of the target's padding box.
-   * The default point follows the same visible-rectangle and rounding rules as `position`.
+   * The target is checked without `receivesPointer`: its default is the first geometric fragment centre,
+   * even when covered. It follows the same viewport/frame clipping and rounding rules as `position`.
    *
-   * @default the target's first reachable fragment centre, or its first geometric centre when receivesPointer is disabled
+   * @default the centre of the target's first nonempty client rectangle after viewport and parent-frame clipping
    */
   readonly targetPosition?: Mouse.Point | undefined
   /**

@@ -965,7 +965,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     return other
   }
 
-  /** The action point of the one match, now: a drag's target, which must be visible and reachable. */
+  /** A drag target's point, with visibility/viewport checks and without pointer coverage or stability checks. */
   pointOf(position: Mouse.Point | undefined) {
     return Effect.gen({ self: this }, function*() {
       yield* Access.check(this.owner.grant)
@@ -1170,7 +1170,12 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     checks: { readonly inViewport: boolean; readonly receivesPointer: boolean },
     id: Diagnostics.OperationId
   ): Effect.Effect<
-    | { readonly _tag: "Point"; readonly point: { x: number; y: number }; readonly origin: { x: number; y: number } }
+    | {
+      readonly _tag: "Point"
+      readonly point: { x: number; y: number }
+      readonly origin: { x: number; y: number }
+      readonly clip: Engine.Clip | undefined
+    }
     | { readonly _tag: "NotReady"; readonly reason: Engine.NotReady },
     Runtime.SendFailure
   > {
@@ -1179,6 +1184,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     return Effect.gen(function*() {
       let at = { ...point }
       const origin = { x: 0, y: 0 }
+      let clip: Engine.Clip | undefined
       for (const hop of [...routed.hops].reverse()) {
         const answer = yield* Runtime.sendToDocument(runtime, page, hop.document, {
           op: "frame",
@@ -1193,11 +1199,23 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         // The iframe moved into view: the point inside it is right, but the next round reads it again
         if (frame.scrolled) return { _tag: "NotReady", reason: { _tag: "OutsideViewport" } } as const
         if (frame.covered !== null) return { _tag: "NotReady", reason: { _tag: "Covered", by: frame.covered } } as const
+        const bounds = {
+          left: frame.viewport.left - origin.x,
+          top: frame.viewport.top - origin.y,
+          right: frame.viewport.right - origin.x,
+          bottom: frame.viewport.bottom - origin.y
+        }
+        clip = clip === undefined ? bounds : {
+          left: Math.max(clip.left, bounds.left),
+          top: Math.max(clip.top, bounds.top),
+          right: Math.min(clip.right, bounds.right),
+          bottom: Math.min(clip.bottom, bounds.bottom)
+        }
         at = { x: at.x + frame.origin.x, y: at.y + frame.origin.y }
         origin.x += frame.origin.x
         origin.y += frame.origin.y
       }
-      return { _tag: "Point", point: at, origin } as const
+      return { _tag: "Point", point: at, origin, clip } as const
     })
   }
 
@@ -1314,19 +1332,50 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
               if (answer.routed.hops.length === 0 || response.point === null) {
                 return Option.some<Ready>({ response, routed: answer.routed, origin: { x: 0, y: 0 } })
               }
-              const translated = yield* this.translate(answer.routed, response.point, checks, id).pipe(
-                Effect.mapError((failure) =>
-                  failure._tag === "Deadline"
-                    ? failure
-                    : this.sendFailure(operation, failure, record)
+              const selection = checks.receivesPointer && action._tag === "Point" && action.position === null
+                ? response.selection :
+                undefined
+              const points = selection !== undefined && selection.points.length > 0
+                ? selection.points
+                : [response.point]
+              let covered: Engine.NotReady | undefined
+              for (const point of points) {
+                const translated = yield* this.translate(answer.routed, point, checks, id).pipe(
+                  Effect.mapError((failure) =>
+                    failure._tag === "Deadline" ? failure : this.sendFailure(operation, failure, record)
+                  )
                 )
-              )
-              if (translated._tag === "NotReady") return notReady(translated.reason)
-              return Option.some<Ready>({
-                response: { ...response, point: translated.point },
-                routed: answer.routed,
-                origin: translated.origin
-              })
+                if (translated._tag === "NotReady") {
+                  if (translated.reason._tag !== "Covered") return notReady(translated.reason)
+                  covered ??= translated.reason
+                  continue
+                }
+                if (selection !== undefined) {
+                  const validated = yield* Runtime.sendToDocument(owner.runtime, owner.page, answer.routed.document, {
+                    op: "validateSelection",
+                    token: selection.token,
+                    point,
+                    ...(translated.clip === undefined ? {} : { clip: translated.clip })
+                  }, id).pipe(
+                    Effect.mapError((failure) =>
+                      failure._tag === "Deadline" ? failure : this.sendFailure(operation, failure, record)
+                    )
+                  )
+                  if (Option.isNone(validated)) return notReady({ _tag: "NoMatch" })
+                  if (validated.value._tag !== "SelectionValid") {
+                    return yield* this.unmatched(operation, validated.value, id)
+                  }
+                  if (!validated.value.valid) {
+                    return notReady({ _tag: "NotStable" })
+                  }
+                }
+                return Option.some<Ready>({
+                  response: { ...response, point: translated.point },
+                  routed: answer.routed,
+                  origin: translated.origin
+                })
+              }
+              return notReady(covered!)
             }
             default:
               return yield* this.unmatched(operation, response, id)
