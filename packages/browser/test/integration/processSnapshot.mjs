@@ -34,16 +34,19 @@ for (let changed = true; changed;) {
   }
 }
 const known = new Map(previous.map((item) => [item.pid, item.startTime]))
-const selected = processes.filter((item) =>
-  descendants.has(item.pid) || known.has(item.pid) || /crashpad/i.test(item.cmdline.text ?? "")
-)
+const isCrashpad = (item) => /(?:^|\/)[^/ ]*crashpad_handler$/.test((item.cmdline.text ?? "").split(" ")[0])
+const priority = (item) => item.pid === root ? 0 : descendants.has(item.pid) ? 1 : known.has(item.pid) ? 2 : 3
+const selected = processes.filter((item) => descendants.has(item.pid) || known.has(item.pid) || isCrashpad(item)).sort((
+  a,
+  b
+) => priority(a) - priority(b) || a.pid - b.pid)
 const records = selected.slice(0, 128).map((item) => ({
   ...item,
   role: item.pid === root
     ? "browser root"
     : /--type=renderer(?: |$)/.test(item.cmdline.text ?? "")
     ? "renderer candidate"
-    : /crashpad/i.test(item.cmdline.text ?? "")
+    : isCrashpad(item)
     ? "Crashpad candidate"
     : "browser descendant",
   relation: descendants.has(item.pid)

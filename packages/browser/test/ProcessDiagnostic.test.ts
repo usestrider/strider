@@ -59,7 +59,21 @@ describe("crash process diagnostics", () => {
     Effect.gen(function*() {
       const value = yield* snapshot(process.pid, [{ pid: 2147483647, startTime: "gone" }])
       const result = value as {
-        processes: Array<{ pid: number; limits?: { text: string }; notObservedInProcScan?: boolean }>
+        processes: Array<
+          {
+            pid: number
+            limits?: { text: string }
+            notObservedInProcScan?: boolean
+            role?: string
+            cmdline?: { text: string }
+            relation?: string
+          }
+        >
+      }
+      for (const item of result.processes) {
+        if (item.role === "Crashpad candidate" || item.relation === "unattributed crashpad candidate") {
+          assert.match(item.cmdline!.text.split(" ")[0]!, /(?:^|\/)[^/ ]*crashpad_handler$/)
+        }
       }
       assert.include(result.processes.find((item) => item.pid === process.pid)!.limits!.text, "Max core file size")
       assert.isTrue(result.processes.find((item) => item.pid === 2147483647)!.notObservedInProcScan)
