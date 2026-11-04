@@ -27,6 +27,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Tracer from "effect/Tracer"
 import * as zlib from "node:zlib"
+import { pngRegion } from "../../pngRegion.ts"
 import { site } from "../adapter/harness.ts"
 import { fullySupports, supports } from "./capabilities.ts"
 
@@ -822,21 +823,11 @@ export const contents = (
               )
             const pixel = (png: Uint8Array) =>
               Effect.sync(() => {
-                const view = new DataView(png.buffer, png.byteOffset, png.byteLength)
-                assert.strictEqual(png[24], 8)
-                assert.isTrue(png[25] === 2 || png[25] === 6)
-                const chunks: Array<Uint8Array> = []
-                for (let at = 8; at < png.length;) {
-                  const length = view.getUint32(at)
-                  const type = new TextDecoder().decode(png.subarray(at + 4, at + 8))
-                  if (type === "IDAT") {
-                    chunks.push(png.subarray(at + 8, at + 8 + length))
-                  }
-                  at += length + 12
+                const pixels = pngRegion(png, { x: 4, y: 4, width: 8, height: 8 })
+                for (const value of pixels) {
+                  assert.deepStrictEqual(value, pixels[0])
                 }
-                // Every PNG row filter has zero predictors at the first pixel of the first row.
-                const raw = zlib.inflateSync(Buffer.concat(chunks))
-                return [raw[1], raw[2], raw[3], png[25] === 6 ? raw[4] : 255]
+                return pixels[0]
               })
             yield* page.goto(url("rgb(200,40,60)"), { waitUntil: "load" })
             assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [200, 40, 60, 255])
