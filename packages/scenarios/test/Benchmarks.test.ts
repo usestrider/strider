@@ -107,3 +107,23 @@ describe("capture benchmark verification", () => {
     expect(() => entry.verify(png([12, 34, 56]))).toThrow()
   })
 })
+
+it("rejects dense-image corruption away from the first pixel", () => {
+  const entry = captureCases.find((entry) => entry.name === "screenshot-dense")!
+  const header = Buffer.alloc(33)
+  Buffer.from("89504e470d0a1a0a", "hex").copy(header)
+  header.writeUInt32BE(13, 8)
+  header.write("IHDR", 12)
+  header.writeUInt32BE(1280, 16)
+  header.writeUInt32BE(2880, 20)
+  header[24] = 8
+  header[25] = 2
+  const raw = Buffer.alloc((1280 * 3 + 1) * 2880)
+  raw.set([12, 34, 56], 1)
+  const compressed = deflateSync(raw)
+  const chunk = Buffer.alloc(12 + compressed.length)
+  chunk.writeUInt32BE(compressed.length)
+  chunk.write("IDAT", 4)
+  compressed.copy(chunk, 8)
+  expect(() => entry.verify(Buffer.concat([header, chunk]))).toThrow()
+})
