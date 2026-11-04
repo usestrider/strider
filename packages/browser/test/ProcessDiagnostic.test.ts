@@ -60,31 +60,34 @@ describe("crash process diagnostics", () => {
       assert.deepStrictEqual(notes, ["process snapshot error", "process snapshot error"])
     }))
 
-  it.effect("reads actual limits and reports disappeared processes without failing", () =>
-    Effect.gen(function*() {
-      const value = yield* snapshot(process.pid, [{ pid: 2147483647, startTime: "gone" }])
-      const result = value as {
-        processes: Array<
-          {
-            pid: number
-            limits?: { text: string }
-            notObservedInProcScan?: boolean
-            pidReused?: boolean
-            role?: string
-            cmdline?: { text: string }
-            relation?: string
-          }
-        >
-      }
-      for (const item of result.processes) {
-        if (item.role === "Crashpad candidate" || item.relation === "unattributed crashpad candidate") {
-          assert.match(item.cmdline!.text.split(" ")[0]!, /(?:^|\/)[^/ ]*crashpad_handler$/)
+  it.effect.runIf(process.platform === "linux")(
+    "reads actual limits and reports disappeared processes without failing",
+    () =>
+      Effect.gen(function*() {
+        const value = yield* snapshot(process.pid, [{ pid: 2147483647, startTime: "gone" }])
+        const result = value as {
+          processes: Array<
+            {
+              pid: number
+              limits?: { text: string }
+              notObservedInProcScan?: boolean
+              pidReused?: boolean
+              role?: string
+              cmdline?: { text: string }
+              relation?: string
+            }
+          >
         }
-      }
-      assert.include(result.processes.find((item) => item.pid === process.pid)!.limits!.text, "Max core file size")
-      assert.isTrue(result.processes.find((item) => item.pid === 2147483647)!.notObservedInProcScan)
-      assert.notStrictEqual(result.processes.find((item) => item.pid === 2147483647)!.pidReused, true)
-    }))
+        for (const item of result.processes) {
+          if (item.role === "Crashpad candidate" || item.relation === "unattributed crashpad candidate") {
+            assert.match(item.cmdline!.text.split(" ")[0]!, /(?:^|\/)[^/ ]*crashpad_handler$/)
+          }
+        }
+        assert.include(result.processes.find((item) => item.pid === process.pid)!.limits!.text, "Max core file size")
+        assert.isTrue(result.processes.find((item) => item.pid === 2147483647)!.notObservedInProcScan)
+        assert.notStrictEqual(result.processes.find((item) => item.pid === 2147483647)!.pidReused, true)
+      })
+  )
   it.effect("retains partial records and kill metadata when the collector is terminated", () =>
     Effect.gen(function*() {
       const directory = mkdtempSync(join(tmpdir(), "process-snapshot-test-"))

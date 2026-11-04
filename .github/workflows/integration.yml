@@ -65,7 +65,7 @@ jobs:
         run: nix develop --command pnpm install --frozen-lockfile
       - name: Integration tests
         run: bash scripts/integration-core-policy.sh -- nix develop --command pnpm test:integration --no-file-parallelism 2>&1 | tee integration.log
-      # Failure-only protocol and owned browser process traces accompany the log.
+      # Keep recorder artifacts alongside the log when a recorder produces them.
       - name: Keep the log
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Respect process core limits on disposable GitHub-hosted Integration runners.
+# The hosted handler receives a fixed huge limit; %c passes the actual process limit
+# so renderer core dumps do not outlast the crash tests’ deadlines.
 set -euo pipefail
 if [[ ${1:-} != -- || $# -lt 2 ]]; then
   echo 'Usage: integration-core-policy.sh -- command [args...]' >&2
