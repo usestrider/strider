@@ -206,3 +206,28 @@ trees in these fixtures, verifies equality, and estimates a lower bound for an a
 tree. It deliberately refuses other kinds. It is not a production decoder: any proposed runtime alternative still
 has to preserve all supported values, omissions, depth/error paths, world selection, freshness, deadlines,
 cancellation and ownership. Replay savings alone do not establish end-to-end savings.
+
+The same diagnostic runner accepts `boundary` (ordinary wall timings) and `boundary-trace` (separate renderer
+verification, with the loader). These modes test setup timing only. They retain the canonical evaluation and
+100/1,000-record functions, plus the fixed-100-result/1,000-input control. Every index pairs fresh identical pages
+across three variants, rotating variant order and alternating library order:
+
+- `original`: start the operation timer after navigation through `load`.
+- `warm`: first complete one main-world no-op evaluation, outside timing, to initialize Playwright's utility and
+  exercise either library's evaluation path.
+- `prepared`: complete that same no-op evaluation, then capture the viewport as PNG and await its bytes outside
+  timing. Successful PNG readback is the setup completion signal; it adds real setup cost and does not promise
+  that animation frames, display presentation, or arbitrary future rendering have completed.
+
+The snapshot function, fixture, viewport and full result checks stay identical within each comparison. These are
+different measurement boundaries, never library speedups. Compare `warm` with `prepared` as well as `original`
+with `prepared`: removing utility initialization from the timer alone must not be credited to rendering. Fresh
+pages, discarded warmups and rotated paired order reduce reusable-cache and ordering effects; a screenshot may
+also warm browser rendering state, which is the boundary being tested.
+
+`boundary-trace` collects each browser's renderer events independently, with clock-sync brackets and recorded
+setup/timing windows. Map local document requests to renderer processes, then check setup and operation windows for
+layout, pre-paint and paint. Keep those traces separate from ordinary wall-time comparisons, and reject a claimed
+rendering explanation if the events did not move outside timing. A prepared median reduction below 5 ms, or within
+sample spread, stops the material pending-rendering hypothesis. Report setup cost and the warmed-only control even
+when the original/prepared difference is large; serialization and scheduling remain unallocated by subtraction.

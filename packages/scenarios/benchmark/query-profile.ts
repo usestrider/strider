@@ -10,7 +10,7 @@ import { createHash } from "node:crypto"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
-import { chromium, type Page as PWPage } from "playwright-core"
+import { type CDPSession, chromium, type Page as PWPage } from "playwright-core"
 import * as BrowserImpl from "../../browser/src/internal/browser.ts"
 import * as CdpAdapter from "../../browser/src/internal/cdpAdapter.ts"
 import * as Launcher from "../../browser/src/internal/chromiumLauncher.ts"
@@ -18,6 +18,7 @@ import * as Serialization from "../../browser/src/internal/serialization.ts"
 import * as Utility from "../../browser/src/internal/webkitUtility.ts"
 import type * as Transport from "../../browser/src/protocol/Transport.ts"
 import pins from "../../browser/test/integration/browsers.json" with { type: "json" }
+import { cases as canonicalCases } from "../src/benchmarks/cases.ts"
 import { start } from "../src/site.ts"
 import { type Capture, state, sync, wire } from "./query-hooks.ts"
 
@@ -28,8 +29,9 @@ if (process.env["STRIDER_ENVIRONMENT"] !== "nix-integration" || executablePath =
 if (process.argv[2] === undefined) throw new Error("Provide an absolute output JSON path")
 const output = path.resolve(process.argv[2])
 const mode = process.argv[3] ?? "plain"
-const instrumented = mode !== "plain"
-const trace = mode === "trace"
+const boundary = mode.startsWith("boundary")
+const trace = mode.endsWith("trace")
+const instrumented = trace || mode === "instrumented"
 const runs = Number(process.argv[4] ?? (trace ? 3 : 20))
 const warmups = trace ? 1 : 3
 const samples: Array<{
@@ -39,12 +41,22 @@ const samples: Array<{
   ms: number
   capture: Capture
   pageTiming?: unknown
+  variant?: string | undefined
+  setupStart?: number | undefined
+  setupEnd?: number | undefined
 }> = []
 let commandId = -1
 let transport: Transport.Transport
 const callbacks = new Map<number, (value: unknown) => void>()
 const loadAtStart = os.loadavg()
 const events: Array<unknown> = []
+const pwEvents: Array<unknown> = []
+let pwSession: CDPSession | undefined
+let pwClockSync: { before: number; after: number } | undefined
+let pwTraceComplete = () => {}
+const pwCompleted = new Promise<void>((resolve) => {
+  pwTraceComplete = resolve
+})
 let clockSync: { before: number; after: number } | undefined
 let traceComplete = () => {}
 const completed = new Promise<void>((resolve) => {
@@ -163,13 +175,23 @@ const cases = [
   { name: "dom0-result1000", document: 0, size: 1000, synthetic: true, encoded: false },
   { name: "dom1000-tagged-string", document: 1000, size: 1000, synthetic: false, encoded: true }
 ]
+const boundaryCanonical = (entry: typeof cases[number]) =>
+  canonicalCases.find((c) =>
+    c.name === (
+      entry.size === 0 ? "evaluate" : `read-snapshot-${entry.size}`
+    )
+  )!
+const warm = () => 0
 const striderRun = (page: Page.Page, entry: typeof cases[number]) =>
-  entry.size === 0
+  boundary && entry.document === entry.size
+    ? boundaryCanonical(entry).strider(page, site.origin)
+    : entry.size === 0
     ? Effect.forEach(Array.from({ length: 20 }), () => page.evaluateInMainWorld(() => ({ answer: 42 })))
     : entry.encoded
     ? page.evaluateInMainWorld(encoded, entry.size).pipe(Effect.map(decodeEncoded))
     : page.evaluateInMainWorld(entry.synthetic ? synthetic : read, entry.size)
 const pwRun = async (page: PWPage, entry: typeof cases[number]) => {
+  if (boundary && entry.document === entry.size) return boundaryCanonical(entry).playwright(page, site.origin)
   if (entry.encoded) return decodeEncoded(await page.evaluate(encoded, entry.size))
   if (entry.size !== 0) return page.evaluate(entry.synthetic ? synthetic : read, entry.size)
   const values = []
@@ -192,74 +214,112 @@ try {
       transferMode: "ReportEvents"
     })
   }
+  if (trace && boundary) {
+    pwSession = await browser.newBrowserCDPSession()
+    pwSession.on("Tracing.dataCollected", ({ value }) => pwEvents.push(...value))
+    pwSession.on("Tracing.tracingComplete", () => pwTraceComplete())
+    await pwSession.send("Tracing.start", {
+      categories: "devtools.timeline,disabled-by-default-devtools.timeline",
+      transferMode: "ReportEvents"
+    })
+    const before = performance.now()
+    await pwSession.send("Tracing.recordClockSyncMarker", { syncId: "query-profile" })
+    pwClockSync = { before, after: performance.now() }
+  }
   if (trace) {
     const before = performance.now()
     const marker = await send("Tracing.recordClockSyncMarker", { syncId: "query-profile" })
     assert.ok(!(marker as { error?: unknown }).error)
     clockSync = { before, after: performance.now() }
   }
-  for (const entry of cases) {
+  for (const entry of cases.filter((entry) => !boundary || !entry.synthetic && !entry.encoded)) {
     for (let index = -warmups; index < runs; index++) {
-      for (const library of index % 2 === 0 ? ["strider", "playwright"] : ["playwright", "strider"]) {
-        const capture: Capture = { start: 0, spans: [], wire: [], chunks: [] }
-        let ms: number
-        let pageTiming: unknown
-        const url = `${site.origin}${entry.document === 0 ? "/benchmark" : `/benchmark-reads?n=${entry.document}`}`
-        if (library === "strider") {
-          ms = await runtime.runPromise(Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage({ emulation: { viewport: { width: 1280, height: 720 } } })
-            yield* page.goto(url, { waitUntil: "load" })
-            const started = performance.now()
-            Object.assign(capture, { start: started })
-            if (instrumented) state.active = capture
-            const value = yield* striderRun(page, entry).pipe(
-              Deadline.within("30 seconds"),
-              Effect.ensuring(Effect.sync(() => {
-                state.active = undefined
-              }))
-            )
-            const elapsed = performance.now() - started
-            assert.deepEqual(
-              value,
-              entry.size === 0 ? Array.from({ length: 20 }, () => ({ answer: 42 })) : expected(entry.size)
-            )
-            if (entry.size !== 0) {
-              pageTiming = yield* page.evaluateInMainWorld(() =>
-                (globalThis as unknown as { __queryTiming: unknown }).__queryTiming
+      const variants = boundary ? ["original", "warm", "prepared"] : ["original"]
+      const rotate = ((index % variants.length) + variants.length) % variants.length
+      for (const variant of [...variants.slice(rotate), ...variants.slice(0, rotate)]) {
+        for (const library of index % 2 === 0 ? ["strider", "playwright"] : ["playwright", "strider"]) {
+          const capture: Capture = { start: 0, spans: [], wire: [], chunks: [] }
+          let ms: number
+          let pageTiming: unknown
+          let setupStart: number | undefined
+          let setupEnd: number | undefined
+          const url = `${site.origin}${entry.document === 0 ? "/benchmark" : `/benchmark-reads?n=${entry.document}`}`
+          if (library === "strider") {
+            ms = await runtime.runPromise(Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage({ emulation: { viewport: { width: 1280, height: 720 } } })
+              yield* page.goto(url, { waitUntil: "load" })
+              setupStart = performance.now()
+              if (variant !== "original") yield* page.evaluateInMainWorld(warm)
+              if (variant === "prepared") {
+                const png = yield* page.screenshot()
+                assert.equal(Buffer.from(png).subarray(0, 8).toString("hex"), "89504e470d0a1a0a")
+                assert.equal(Buffer.from(png).readUInt32BE(16), 1280)
+                assert.equal(Buffer.from(png).readUInt32BE(20), 720)
+              }
+              setupEnd = performance.now()
+              const started = performance.now()
+              Object.assign(capture, { start: started })
+              if (instrumented) state.active = capture
+              const value = yield* striderRun(page, entry).pipe(
+                Deadline.within("30 seconds"),
+                Effect.ensuring(Effect.sync(() => {
+                  state.active = undefined
+                }))
               )
-            }
-            return elapsed
-          })))
-        } else {
-          const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })
-          try {
-            const page = await context.newPage()
-            await page.goto(url, { waitUntil: "load" })
-            const started = performance.now()
-            Object.assign(capture, { start: started })
-            if (instrumented) state.active = capture
-            let value: unknown
+              const elapsed = performance.now() - started
+              assert.deepEqual(
+                value,
+                entry.size === 0 ? Array.from({ length: 20 }, () => ({ answer: 42 })) : expected(entry.size)
+              )
+              if (entry.size !== 0 && !boundary) {
+                pageTiming = yield* page.evaluateInMainWorld(() =>
+                  (globalThis as unknown as { __queryTiming: unknown }).__queryTiming
+                )
+              }
+              return elapsed
+            })))
+          } else {
+            const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })
             try {
-              value = await pwRun(page, entry)
-              ms = performance.now() - started
+              const page = await context.newPage()
+              await page.goto(url, { waitUntil: "load" })
+              setupStart = performance.now()
+              if (variant !== "original") await page.evaluate(warm)
+              if (variant === "prepared") {
+                const png = await page.screenshot({ type: "png" })
+                assert.equal(png.subarray(0, 8).toString("hex"), "89504e470d0a1a0a")
+                assert.equal(png.readUInt32BE(16), 1280)
+                assert.equal(png.readUInt32BE(20), 720)
+              }
+              setupEnd = performance.now()
+              const started = performance.now()
+              Object.assign(capture, { start: started })
+              if (instrumented) state.active = capture
+              let value: unknown
+              try {
+                value = await pwRun(page, entry)
+                ms = performance.now() - started
+              } finally {
+                state.active = undefined
+              }
+              assert.deepEqual(
+                value,
+                entry.size === 0 ? Array.from({ length: 20 }, () => ({ answer: 42 })) : expected(entry.size)
+              )
+              if (entry.size !== 0 && !boundary) {
+                pageTiming = await page.evaluate(() => ({
+                  ...(globalThis as unknown as { __queryTiming: object }).__queryTiming,
+                  pwSerialize: (globalThis as unknown as { __pwSerializeMs?: number }).__pwSerializeMs
+                }))
+              }
             } finally {
-              state.active = undefined
+              await context.close()
             }
-            assert.deepEqual(
-              value,
-              entry.size === 0 ? Array.from({ length: 20 }, () => ({ answer: 42 })) : expected(entry.size)
-            )
-            if (entry.size !== 0) {
-              pageTiming = await page.evaluate(() => ({
-                ...(globalThis as unknown as { __queryTiming: object }).__queryTiming,
-                pwSerialize: (globalThis as unknown as { __pwSerializeMs?: number }).__pwSerializeMs
-              }))
-            }
-          } finally {
-            await context.close()
+          }
+          if (index >= 0) {
+            samples.push({ library, name: entry.name, index, ms, capture, pageTiming, variant, setupStart, setupEnd })
           }
         }
-        if (index >= 0) samples.push({ library, name: entry.name, index, ms, capture, pageTiming })
       }
     }
     console.log(entry.name, "complete")
@@ -267,6 +327,10 @@ try {
   if (trace) {
     await send("Tracing.end")
     await bounded(completed)
+    if (pwSession !== undefined) {
+      await pwSession.send("Tracing.end")
+      await bounded(pwCompleted)
+    }
   }
   status = "completed"
 } finally {
@@ -292,6 +356,7 @@ try {
         warmups,
         sourceHash: hash.digest("hex"),
         clockSync,
+        pwClockSync,
         timeOrigin: performance.timeOrigin,
         playwrightSourceHash: createHash("sha256").update(
           fs.readFileSync("packages/scenarios/node_modules/playwright-core/lib/coreBundle.js")
@@ -305,7 +370,8 @@ try {
           load: os.loadavg()
         },
         samples,
-        events
+        events,
+        pwEvents
       },
       null,
       2
