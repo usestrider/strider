@@ -52,8 +52,8 @@ these snapshots are a different consistency contract from independent reads, not
 Each snapshot returns ordered records containing id, current value, disabled state and nullable aria-label.
 The two fixture sizes grow both document and result size, so their difference alone cannot separate query cost
 from serialization/decoding cost. All records are checked, including Unicode strings, booleans and nulls.
-Fixture navigation, parsing and initial layout are outside timing; query execution, property access, transport,
-serialization and host decoding are inside it. These static success workloads do not establish exception,
+Fixture navigation and parsing are outside timing; query execution, property access, transport,
+serialization and host decoding are inside it. Deferred browser rendering can still overlap the measured operation. These static success workloads do not establish exception,
 mutation/replacement freshness, navigation, cancellation or deadline correctness. Use the integration contents,
 locator and adapter suites for those boundaries before changing shared read machinery; do not infer them from
 passing timing samples. No browser work is shared across independent reads by the harness.
@@ -163,3 +163,46 @@ changes. Do not create a separate Markdown backlog of findings.
 Saved runs under `.data/` are local and ignored by Git. Preserve review evidence outside disposable worktrees with
 the workflow runner's `--output`, or copy complete named run directories. Keep a readable result and environment
 summary on the issue; a Git revision or source hash alone does not preserve uncommitted experimental code.
+
+### Query result attribution
+
+`benchmark/query-profile.ts` is a diagnostic counterpart to the ordinary query cases. Run it inside the pinned
+integration shell, supplying an absolute JSON report path. The opt-in Node loader applies checked in-memory
+transforms; it does not edit browser sources or installed Playwright files:
+
+```sh
+nix develop .#integration --ignore-environment --keep TERM --command node \
+  packages/scenarios/benchmark/query-profile.ts /absolute/path/plain.json plain
+nix develop .#integration --ignore-environment --keep TERM --command node \
+  --import ./packages/scenarios/benchmark/query-profile-loader.mjs \
+  packages/scenarios/benchmark/query-profile.ts /absolute/path/instrumented.json instrumented
+nix develop .#integration --ignore-environment --keep TERM --command node \
+  --import ./packages/scenarios/benchmark/query-profile-loader.mjs \
+  packages/scenarios/benchmark/query-profile.ts /absolute/path/trace.json trace
+nix develop .#integration --ignore-environment --keep TERM --command node \
+  --import ./packages/scenarios/benchmark/query-profile-loader.mjs \
+  packages/scenarios/benchmark/query-replay.ts /absolute/path/instrumented.json /absolute/path/replay.json
+```
+
+Coordinate these commands and checks with other work on the machine; retain the browser lock for the entire run.
+Flag overlap with an unlocked suite as contaminated. The profiler uses 20 alternating library pairs and three
+warmups (trace mode uses three pairs and one warmup); a fourth argument overrides the measured count for smoke
+checks. Repeat plain/instrumented generations in reverse order to expose instrumentation overhead and drift.
+Neither generation is a performance gate or an optimized runtime. Preserve the scripts, source hashes, raw replies,
+spans and browser events alongside the reports outside disposable worktrees.
+
+Controls retain the small-evaluation batch and the 100/1,000-record snapshots, then return only 100 records from
+1,000 inputs and generate the equivalent 1,000 records without a large DOM. Page timers measure query and property
+work; retrieving those timers is outside the operation timer. The profiler's snapshot function adds a slice and
+page timers, so compare its plain timings with the canonical uninstrumented cases too. Host hooks bracket parsing,
+result validation (or identify its configured skip), CDP-to-remote conversion and final value decoding. Raw command
+send/receive timestamps describe dependency intervals, including transport, browser scheduling and browser work;
+they are not pure browser duration. Nested/overlapping intervals must not be added. Browser trace mode is separate
+because tracing has its own overhead; a clock-sync marker brackets the host/browser clock alignment; a trace that lacks a serializer event cannot establish serialization cost
+by subtracting host wall timers.
+
+Offline replay measures captured host work without browser waits. Its direct decoder accepts only the plain-value
+trees in these fixtures, verifies equality, and estimates a lower bound for an alternative without an intermediate
+tree. It deliberately refuses other kinds. It is not a production decoder: any proposed runtime alternative still
+has to preserve all supported values, omissions, depth/error paths, world selection, freshness, deadlines,
+cancellation and ownership. Replay savings alone do not establish end-to-end savings.
