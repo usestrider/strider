@@ -16,11 +16,13 @@ import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Socket from "effect/socket/Socket"
 import * as Stream from "effect/Stream"
 import { readFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
 import { assertPinned, chromium } from "../browsers.ts"
+import { diagnostic } from "../diagnostic.ts"
 
 const serve = Effect.acquireRelease(
   Effect.promise(async () => {
@@ -76,12 +78,19 @@ describe("Chromium reconnect identity probes", () => {
         const attachment = transition === "prerender" ? "tab-level auto-attach" : "direct page attachment"
         it.effect(`${transition} (${attachment})`, () =>
           Effect.gen(function*() {
+            const diagnosticTrace = yield* diagnostic(`ChromiumIdentity ${transition}`)
             const { origin, crossSite } = yield* serve
             const { launched, transport } = yield* ChromiumLauncher.launchWithPort({
               executablePath: chromium.executable,
               args: ["--site-per-process"]
-            })
-            const driver = yield* CdpConnection.make(transport)
+            }).pipe(Effect.provideService(Socket.WebSocketConstructor, diagnosticTrace.socketConstructor("driver")))
+            diagnosticTrace.note("launcher", { args: launched.args, pid: Number(launched.handle.pid) })
+            yield* Effect.addFinalizer(() =>
+              Effect.gen(function*() {
+                diagnosticTrace.note("launcher stderr before cleanup", yield* launched.stderrTail)
+              })
+            )
+            const driver = yield* CdpConnection.make(diagnosticTrace.transport("driver", transport))
             const version = yield* Browser.getVersion().pipe(Protocol.on(driver.browser))
             assertPinned("Chromium", version.product.split("/")[1]!, chromium.version)
             const [port] = (yield* Effect.promise(() => readFile(`${launched.userDataDir}/DevToolsActivePort`, "utf8")))
@@ -93,7 +102,14 @@ describe("Chromium reconnect identity probes", () => {
                 return json.webSocketDebuggerUrl
               })
             const browserUrl = yield* endpoint()
-            const observer = yield* CdpConnection.make(yield* Transport.webSocket(browserUrl))
+            const observer = yield* CdpConnection.make(
+              diagnosticTrace.transport(
+                "observer",
+                yield* Transport.webSocket(browserUrl).pipe(
+                  Effect.provideService(Socket.WebSocketConstructor, diagnosticTrace.socketConstructor("observer"))
+                )
+              )
+            )
             const targets = Target.getTargets({ filter: [{ exclude: false }] }).pipe(
               Protocol.on(observer.browser),
               Effect.map((reply) => reply.targetInfos)
@@ -250,7 +266,11 @@ describe("Chromium reconnect identity probes", () => {
               assert.isNotEmpty(oldToken)
               const crashes = yield* session.subscribe(Inspector.targetCrashed)
               const crashed = yield* Stream.runHead(crashes).pipe(Effect.forkChild)
-              yield* Page.crash().pipe(Protocol.on(session), Effect.ignore, Effect.forkChild)
+              yield* Page.crash().pipe(
+                Protocol.on(session),
+                Effect.onExit((exit) => Effect.sync(() => diagnosticTrace.note("Page.crash outcome", exit))),
+                Effect.forkChild
+              )
               yield* Fiber.join(crashed)
               const during = yield* targets
               console.log("identity crashed", JSON.stringify(during))
