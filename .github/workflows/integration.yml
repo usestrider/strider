@@ -7,6 +7,11 @@ on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+    inputs:
+      respect_core_limit:
+        description: "Experimental hosted comparison: pass the real core limit to systemd-coredump"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -64,7 +69,9 @@ jobs:
       - name: Install
         run: nix develop --command pnpm install --frozen-lockfile
       - name: Integration tests
-        run: nix develop --command pnpm test:integration --no-file-parallelism 2>&1 | tee integration.log
+        env:
+          CORE_POLICY: ${{ inputs.respect_core_limit && 'respect-limit' || 'control' }}
+        run: bash scripts/integration-core-policy.sh "$CORE_POLICY" -- nix develop --command pnpm test:integration --no-file-parallelism 2>&1 | tee integration.log
       # The integration tests attach nothing (TestRun is for programs' tests), so the log is what a failure keeps
       - name: Keep the log
         if: failure()
