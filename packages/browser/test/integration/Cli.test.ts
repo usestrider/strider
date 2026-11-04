@@ -1127,7 +1127,7 @@ describe("strider", () => {
             const server = http.createServer((_, response) => {
               response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
               response.end(
-                `<div role="textbox" aria-label="Rich" contenteditable="true"><h1>rich-heading<a href="#x">rich-link</a></h1><button onclick="document.getElementById('status').textContent = 'clicked'">rich-button</button><img alt="rich-image" src="data:,"></div><div contenteditable="true">roleless-field</div><div contenteditable="true" aria-label="Labeled">labeled-private</div><article contenteditable="true" aria-label="Article">article-private</article><p contenteditable="plaintext-only">paragraph-private</p><input aria-label="Native" value="native-private"><button onclick="throw new Error('exception-private')">Throw</button><p id="status">ready</p>`
+                `<div role="textbox" aria-label="Rich" contenteditable="true"><h1>rich-heading<a href="#x">rich-link</a></h1><button onclick="document.getElementById('status').textContent = 'clicked'">rich-button</button><img alt="rich-image" src="data:,"></div><div contenteditable="true">roleless-field</div><div contenteditable="true" aria-label="Labeled">labeled-private</div><article contenteditable="true" aria-label="Article">article-private</article><h2 contenteditable="true">heading-private</h2><p contenteditable="plaintext-only">paragraph-private</p><input aria-label="Native" value="native-private"><button onclick="throw new Error('exception-private')">Throw</button><p id="status">ready</p>`
               )
             })
             yield* Effect.acquireRelease(
@@ -1171,7 +1171,7 @@ describe("strider", () => {
                 "labeled-private",
                 "article-private",
                 "paragraph-private",
-                "native-private"
+                "heading-private"
               ]
               const check = (output: string, find = false) => {
                 if (capture === "strict") {
@@ -1187,7 +1187,7 @@ describe("strider", () => {
               }
               check(snapshot.out)
               check(found.out, true)
-              for (const query of ["rich-heading", "article-private", "paragraph-private", "native-private"]) {
+              for (const query of ["rich-heading", "article-private", "paragraph-private", "heading-private"]) {
                 const guessed = yield* page("--json", "find", query)
                 assert.strictEqual(guessed.code, 0, guessed.err)
                 assert.strictEqual(JSON.parse(guessed.out).outcome.value.length > 0, capture === "local", guessed.out)

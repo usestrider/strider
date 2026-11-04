@@ -2,7 +2,10 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Toolkit from "../src/internal/toolkit.ts"
+import * as MonotonicInstant from "../src/MonotonicInstant.ts"
 import * as Snapshot from "../src/Snapshot.ts"
+import * as Target from "../src/Target.ts"
+import * as UncaughtException from "../src/UncaughtException.ts"
 
 const node = (options: Partial<Snapshot.Node> = {}): Snapshot.Node => ({
   ref: Option.some(Snapshot.RefId.make("e1")),
@@ -35,6 +38,38 @@ describe("capture tree", () => {
       })
       assert.deepStrictEqual(Toolkit.redacted(root).name, { _tag: "Inferred", value: "•••", from: "text" })
     }
+  })
+
+  it("redacts all exception details, keeping event time and preserving full diagnostics", () => {
+    const exception = new UncaughtException.UncaughtException({
+      kind: "thrown",
+      name: "private-name",
+      message: "private-message",
+      stack: Option.some("private-stack"),
+      origin: { _tag: "Page", page: Target.NavigableId.make("private-origin") },
+      at: MonotonicInstant.MonotonicInstant.make(123456789)
+    })
+    assert.strictEqual(Toolkit.exceptionLine(exception, true), "uncaught exception at 123456789")
+    assert.strictEqual(Toolkit.exceptionLine(exception, false), "private-name: private-message")
+  })
+
+  it("keeps quoted labels and masks validation text on every role", () => {
+    for (const role of ["textbox", "combobox", "button"]) {
+      const root = node({ role: { _tag: "Aria", role } })
+      const redacted = Toolkit.redacted(root)
+      assert.deepStrictEqual(redacted.name, root.name)
+      assert.deepStrictEqual(redacted.validationMessage, Option.some("•••"))
+    }
+    const ordinary = node({
+      role: { _tag: "Aria", role: "text" },
+      name: { _tag: "Accessible", value: "[validationMessage=\"ordinary text\"]" }
+    })
+    assert.deepStrictEqual(Toolkit.redacted(ordinary).name, ordinary.name)
+  })
+
+  it("masks accessible names taken from editable content without masking labels", () => {
+    const root = node({ editable: true, name: { _tag: "Accessible", value: "private", from: "text" } })
+    assert.deepStrictEqual(Toolkit.redacted(root).name, { _tag: "Accessible", value: "•••", from: "text" })
   })
 
   it("decodes old snapshot nodes without editability and preserves the new signal", () => {

@@ -148,6 +148,30 @@ export const engine = (backend: Backend) =>
   describe(`${backend.name} engine`, () => {
     layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
       (it) => {
+        it.effect("carries field editability independently of semantics and enabled state", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<article contenteditable="true" aria-label="Article">private</article><p contenteditable="plaintext-only">plain</p><h2 contenteditable="true">secret heading</h2><input aria-label="Native" readonly><textarea disabled>value</textarea><select><option>Choice</option></select><div role="textbox" aria-label="ARIA">aria value</div><button>Outside</button>`
+            )
+            const answer = yield* send({ op: "snapshot", steps: null, interactivity: true, depth: null })
+            assert.strictEqual(answer._tag, "Snapshot")
+            if (answer._tag !== "Snapshot") return
+            const nodes = answer.root.children
+            assert.deepStrictEqual(nodes.map((node) => [node.role.role, node.editable === true]), [
+              ["article", true],
+              ["paragraph", true],
+              ["heading", true],
+              ["textbox", true],
+              ["textbox", true],
+              ["combobox", true],
+              ["textbox", true],
+              ["button", false]
+            ])
+            assert.deepStrictEqual(nodes[2]!.name, { _tag: "Accessible", value: "secret heading", from: "text" })
+            assert.deepStrictEqual(nodes[0]!.name, { _tag: "Accessible", value: "Article" })
+          }), timeout)
+
         it.effect("revalidates fresh stability without another rendering wait", () =>
           Effect.gen(function*() {
             const { call } = yield* open(backend, `<button id="go">Go</button>`, countFrames())
