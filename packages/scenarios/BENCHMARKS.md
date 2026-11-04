@@ -162,7 +162,8 @@ tests retain the broader scale, clip, transparency and invalidation checks.
 ### Screenshot surface experiment
 
 `--screenshot-surface on` or `off` adds an explicit Strider-only Chromium feature switch for
-`CDPScreenshotNewSurface`; `default` adds nothing. Playwright keeps its pinned defaults. This is benchmark
+`CDPScreenshotNewSurface`; `default` adds nothing. The off variant retains the automation profile's existing disabled-feature list in the
+replacement switch, so other feature defaults stay fixed. Playwright keeps its pinned defaults. This is benchmark
 configuration, not a production launch-profile change. `--strider-arg=--enable-features=Other` appends a raw
 argument after the experiment switch; it can be repeated to investigate Chromium's own override behavior.
 

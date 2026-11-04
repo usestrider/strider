@@ -1,5 +1,6 @@
 import { deflateSync } from "node:zlib"
 import { describe, expect, it } from "vitest"
+import { chromiumArgs } from "../../browser/src/internal/profiles.ts"
 import { captureCases, cases } from "../src/benchmarks/cases.ts"
 import { compare, measure, options, summarize } from "../src/benchmarks/measure.ts"
 
@@ -145,6 +146,11 @@ describe("benchmark measurements", () => {
     ) expect(() => options(args)).toThrow()
     expect(options(["--runs", "1", "--warmup", "0"]).runs).toBe(1)
     expect(options(["--check"]).maxRatio).toBe(1.1)
+    const off = options(["--screenshot-surface", "off"]).striderArgs[0]!
+    for (const argument of chromiumArgs.automation.filter((arg) => arg.startsWith("--disable-features="))) {
+      expect(off).toContain(argument.slice("--disable-features=".length))
+    }
+    expect(off).toContain(",CDPScreenshotNewSurface")
     expect(options(["--screenshot-surface", "on", "--strider-arg=--enable-features=Other"]).striderArgs).toEqual([
       "--enable-features=CDPScreenshotNewSurface",
       "--enable-features=Other"

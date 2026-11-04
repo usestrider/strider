@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util"
+import { chromiumArgs } from "../../../browser/src/internal/profiles.ts"
 
 export const options = (args: Array<string>) => {
   const { values } = parseArgs({
@@ -27,8 +28,14 @@ export const options = (args: Array<string>) => {
   if (!["default", "off", "on"].includes(values["screenshot-surface"])) {
     throw new Error("--screenshot-surface must be default, off or on")
   }
+  // A second disable-features switch replaces the profile's list in Chromium. Keep those defaults
+  // fixed across off/on variants; only the selected screenshot feature may differ.
+  const disabled = chromiumArgs.automation.filter((arg) => arg.startsWith("--disable-features="))
+    .map((arg) => arg.slice("--disable-features=".length)).join(",")
   const surfaceArgs = values["screenshot-surface"] === "default" ? [] : [
-    `--${values["screenshot-surface"] === "on" ? "enable" : "disable"}-features=CDPScreenshotNewSurface`
+    values["screenshot-surface"] === "on" ?
+      "--enable-features=CDPScreenshotNewSurface" :
+      `--disable-features=${disabled ? `${disabled},` : ""}CDPScreenshotNewSurface`
   ]
   return { ...values, runs, warmup, maxRatio, striderArgs: [...surfaceArgs, ...values["strider-arg"]] }
 }
