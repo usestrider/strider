@@ -512,7 +512,7 @@ interface Checks {                                       // stable: default fram
   readonly stable?: boolean | { readonly frames: number } | undefined
 }
 interface PointerOptions extends ActionOptions {
-  readonly position?: Mouse.Point | undefined            // CSS pixels from the element's padding box; default its centre
+  readonly position?: Mouse.Point | undefined            // CSS pixels from the element's padding box; default the centre of its first nonempty viewport-clipped client rectangle
   readonly modifiers?: ReadonlyArray<Keyboard.Modifier> | undefined
 }
 interface ClickOptions extends PointerOptions {

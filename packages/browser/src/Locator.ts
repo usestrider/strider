@@ -689,7 +689,7 @@ export interface PointerOptions extends ActionOptions {
   /**
    * Where to point, from the top left of the element's padding box.
    *
-   * @default the centre of the padding box
+   * @default the centre of the first nonempty viewport-clipped client rectangle
    */
   readonly position?: Mouse.Point | undefined
   /**
@@ -727,7 +727,7 @@ export interface DragOptions extends PointerOptions {
   /**
    * Where to drop, from the top left of the target's padding box.
    *
-   * @default the centre of the target's padding box
+   * @default the centre of the target's first nonempty viewport-clipped client rectangle
    */
   readonly targetPosition?: Mouse.Point | undefined
   /**

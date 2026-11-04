@@ -1276,17 +1276,35 @@ export function engine(render: (root: SnapNode) => string) {
     return width > 0 && height > 0 && width * height > 0.99
   }
 
-  /** The action point, in viewport CSS pixels: the padding box's centre, or `position` from its top left. */
+  /** Keep integer-coordinate backends inside the fragment whenever it contains an integer point. */
+  const fragmentCenter = (min: number, max: number): number => {
+    const center = (min + max) / 2
+    const rounded = Math.round(center)
+    if (rounded >= max && Math.floor(center) >= min) return Math.floor(center)
+    if (rounded < min && Math.ceil(center) < max) return Math.ceil(center)
+    return center
+  }
+
+  /** The first visible fragment's centre, or an explicit offset from the padding box's top left. */
   const actionPoint = (element: Element, position: { readonly x: number; readonly y: number } | null) => {
+    if (position === null) {
+      for (const rect of element.getClientRects()) {
+        const left = Math.max(0, rect.left)
+        const top = Math.max(0, rect.top)
+        const right = Math.min(innerWidth, rect.right)
+        const bottom = Math.min(innerHeight, rect.bottom)
+        if (right > left && bottom > top) {
+          return { x: fragmentCenter(left, right), y: fragmentCenter(top, bottom) }
+        }
+      }
+      return null
+    }
     const rect = element.getBoundingClientRect()
     const style = getComputedStyle(element)
-    const left = rect.left + parseFloat(style.borderLeftWidth)
-    const top = rect.top + parseFloat(style.borderTopWidth)
-    const width = rect.width - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth)
-    const height = rect.height - parseFloat(style.borderTopWidth) - parseFloat(style.borderBottomWidth)
-    return position === null
-      ? { x: left + width / 2, y: top + height / 2 }
-      : { x: left + position.x, y: top + position.y }
+    return {
+      x: rect.left + parseFloat(style.borderLeftWidth) + position.x,
+      y: rect.top + parseFloat(style.borderTopWidth) + position.y
+    }
   }
 
   /** What the pointer would hit at a point, through open shadow roots. */
@@ -1510,11 +1528,16 @@ export function engine(render: (root: SnapNode) => string) {
         }
       }
       const position = action._tag === "Point" ? action.position : null
-      if (reason === null && element !== undefined && checks.receivesPointer) {
-        const point = actionPoint(element, position)
-        const hit = hitTarget(point.x, point.y)
-        if (hit === null || !composedContains(element, hit)) {
-          reason = { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
+      const point = reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)
+        ? actionPoint(element, position)
+        : null
+      if (reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)) {
+        if (point === null) reason = { _tag: "OutsideViewport" }
+        else if (checks.receivesPointer) {
+          const hit = hitTarget(point.x, point.y)
+          if (hit === null || !composedContains(element, hit)) {
+            reason = { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
+          }
         }
       }
       if (reason === null && element !== undefined && action._tag === "Select") {
@@ -1525,7 +1548,7 @@ export function engine(render: (root: SnapNode) => string) {
         if (missing !== undefined) reason = { _tag: "NoSuchOption", option: describeChoice(missing) }
       }
       if (reason === null && element !== undefined) {
-        const response = ready(element, action, request.apply, scrolled)
+        const response = ready(element, action, request.apply, scrolled, point)
         if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
           const captured = {
             token: `${generation}:${++stabilitySequence}`,
@@ -1550,7 +1573,13 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /** Does what the action asks of the element, now that its checks pass. */
-  const ready = (element: Element, action: Action, apply: boolean, scrolled: boolean): Response => {
+  const ready = (
+    element: Element,
+    action: Action,
+    apply: boolean,
+    scrolled: boolean,
+    point: { x: number; y: number } | null
+  ): Response => {
     const answer = {
       _tag: "Ready" as const,
       element: describe(element),
@@ -1567,7 +1596,7 @@ export function engine(render: (root: SnapNode) => string) {
           if (current.getAttribute("draggable") === "true") draggable = true
         }
         if (apply && action.guard) arm(element)
-        return { ...answer, point: actionPoint(element, action.position), draggable }
+        return { ...answer, point, draggable }
       }
       case "Checked":
         return { ...answer, checked: checkedOf(element) }
