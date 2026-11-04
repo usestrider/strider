@@ -123,17 +123,24 @@ export const Role: Schema.Codec<Role> = Schema.Union([
 /**
  * Schema for a node's name and where it came from: its accessible name (`Accessible`), one inferred from the page
  * (`Inferred`), which says what it came `from`, or none. Accessible names derived from an editable
- * element's content carry optional `from: "text"`; explicit labels do not.
+ * element's content carry optional `from: "text"`; explicit labels do not. Optional `fieldContent` is true when
+ * the chosen accessible or inferred name contains field content, even when copied from another node.
+ * Its absence means false for older snapshot data.
  *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
  */
 export const Name = Schema.Union([
-  Schema.TaggedStruct("Accessible", { value: Schema.String, from: Schema.optional(Schema.Literal("text")) }),
+  Schema.TaggedStruct("Accessible", {
+    value: Schema.String,
+    from: Schema.optional(Schema.Literal("text")),
+    fieldContent: Schema.optional(Schema.Boolean)
+  }),
   Schema.TaggedStruct("Inferred", {
     value: Schema.String,
-    from: Schema.Literals(["text", "title", "placeholder", "alt", "nearbyLabel"])
+    from: Schema.Literals(["text", "title", "placeholder", "alt", "nearbyLabel"]),
+    fieldContent: Schema.optional(Schema.Boolean)
   }),
   Schema.TaggedStruct("None", {})
 ])

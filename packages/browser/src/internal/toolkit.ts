@@ -118,7 +118,8 @@ export const toFailure = (error: unknown): Tools.ToolFailure => {
 export const redacted = (node: Snapshot.Node, inside = false): Snapshot.Node => ({
   ...node,
   name: node.name._tag !== "None" &&
-      (inside || (node.editable === true && "from" in node.name && node.name.from === "text"))
+      (inside || node.name.fieldContent === true ||
+        (node.editable === true && "from" in node.name && node.name.from === "text"))
     ? { ...node.name, value: "•••" }
     : node.name,
   validationMessage: Option.map(node.validationMessage, () => "•••"),

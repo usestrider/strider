@@ -184,7 +184,8 @@ const toNode = (node: Engine.SnapNode): Snapshot.Node => ({
     ? {
       _tag: "Inferred",
       value: node.name.value,
-      from: node.name.from as "text" | "title" | "placeholder" | "alt" | "nearbyLabel"
+      from: node.name.from as "text" | "title" | "placeholder" | "alt" | "nearbyLabel",
+      ...(node.name.fieldContent === undefined ? {} : { fieldContent: node.name.fieldContent })
     }
     : node.name,
   states: new Set(

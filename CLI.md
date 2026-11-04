@@ -159,7 +159,9 @@ With `["mcp", "--start", "--chromium", "/usr/bin/chromium"]` instead, it starts 
 
 Strict capture denies screenshots and masks editable content and validation messages as `•••` in snapshots and
 find results. This includes native fields, ARIA fields and contenteditable elements regardless of semantic role,
-including `plaintext-only`. Labels, roles, refs and states remain visible. Strict `find` matches only that redacted
+including `plaintext-only`. Names copied from field content into ancestors or other nodes are masked too,
+including embedded values, referenced controls, nearby fields and image-alt inference. Public labels, roles,
+refs and states remain visible. Strict `find` matches only that redacted
 view: a query for hidden content returns no match, while label searches and role filters still work. For example,
 `find "Card" --role textbox` can find a field labeled Card, but guessing its masked value cannot find it.
 
@@ -169,7 +171,9 @@ message, stack or origin text. CLI and MCP apply the same policy.
 
 This is a bounded capture policy, not a secrecy or inference guarantee. Ordinary page text and labels remain
 visible, and URLs, dialogs, network/download metadata, arguments and failures can carry page content too. A page
-can put sensitive text in a label or another unmasked channel. Choose what pages and tools to expose.
+can put sensitive text in a label or another unmasked channel. Assertions such as `expect --text` and action
+selectors still match original page content, so they can confirm guesses at masked values. Choose what pages
+and tools to expose.
 
 ```
 clicked button "Add to cart" on shop · 412 ms

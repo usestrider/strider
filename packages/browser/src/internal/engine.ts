@@ -177,8 +177,18 @@ export interface SnapNode {
       readonly evidence: ReadonlyArray<string>
     }
   readonly name:
-    | { readonly _tag: "Accessible"; readonly value: string; readonly from?: "text" | undefined }
-    | { readonly _tag: "Inferred"; readonly value: string; readonly from: string }
+    | {
+      readonly _tag: "Accessible"
+      readonly value: string
+      readonly from?: "text" | undefined
+      readonly fieldContent?: boolean | undefined
+    }
+    | {
+      readonly _tag: "Inferred"
+      readonly value: string
+      readonly from: string
+      readonly fieldContent?: boolean | undefined
+    }
     | { readonly _tag: "None" }
   readonly states: ReadonlyArray<string>
   readonly editable?: boolean | undefined
@@ -198,8 +208,16 @@ export const SnapNode: Schema.Codec<SnapNode> = Schema.Struct({
     })
   ]),
   name: Schema.Union([
-    Schema.TaggedStruct("Accessible", { value: Schema.String, from: Schema.optional(Schema.Literal("text")) }),
-    Schema.TaggedStruct("Inferred", { value: Schema.String, from: Schema.String }),
+    Schema.TaggedStruct("Accessible", {
+      value: Schema.String,
+      from: Schema.optional(Schema.Literal("text")),
+      fieldContent: Schema.optional(Schema.Boolean)
+    }),
+    Schema.TaggedStruct("Inferred", {
+      value: Schema.String,
+      from: Schema.String,
+      fieldContent: Schema.optional(Schema.Boolean)
+    }),
     Schema.TaggedStruct("None", {})
   ]),
   states: Schema.Array(Schema.String),
@@ -837,6 +855,7 @@ export function engine(render: (root: SnapNode) => string) {
     /** Computing another element's name, not the root's. */
     readonly traversal: boolean
     readonly includeHidden: boolean
+    readonly contribution: { fieldContent: boolean }
   }
 
   const byId = (element: Element, id: string): Element | null => {
@@ -878,7 +897,16 @@ export function engine(render: (root: SnapNode) => string) {
     return nameOfElement(node, context)
   }
 
+  // Propagate only the chosen, nonempty name. Failed naming alternatives must not taint a public label.
   const nameOfElement = (element: Element, context: NameContext): string => {
+    const previous = context.contribution.fieldContent
+    context.contribution.fieldContent = false
+    const value = nameOfElementValue(element, context)
+    context.contribution.fieldContent = previous || (value.trim() !== "" && context.contribution.fieldContent)
+    return value
+  }
+
+  const nameOfElementValue = (element: Element, context: NameContext): string => {
     if (context.visited.has(element)) return ""
     context.visited.add(element)
     // 2A: hidden, unless referenced or asked for
@@ -897,7 +925,11 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const role = roleOf(element)
     // 2E: an embedded control inside another element's name contributes its value
-    if (context.traversal && embeddedControlRole(role)) return embeddedValue(element, role)
+    if (context.traversal && embeddedControlRole(role)) {
+      const value = embeddedValue(element, role)
+      if (value.trim() !== "") context.contribution.fieldContent = true
+      return value
+    }
     // 2C: aria-label
     const label = element.getAttribute("aria-label") ?? ""
     if (label.trim() !== "") return label
@@ -918,6 +950,7 @@ export function engine(render: (root: SnapNode) => string) {
       content += pseudoContent(element, "::after")
       if (content.trim() !== "") {
         if (!context.traversal && !context.labelledBy) namesFromContent.add(element)
+        if (fieldOf(element)) context.contribution.fieldContent = true
         return content
       }
     }
@@ -945,7 +978,9 @@ export function engine(render: (root: SnapNode) => string) {
       return labels.map((label) => nameOfElement(label, { ...context, traversal: true })).join(" ")
     }
     if (element instanceof HTMLImageElement || element instanceof HTMLAreaElement) {
-      return element.getAttribute("alt") ?? ""
+      const alt = element.getAttribute("alt") ?? ""
+      if (alt.trim() !== "" && fieldOf(element)) context.contribution.fieldContent = true
+      return alt
     }
     const first = (selector: string) => Array.from(element.children).find((child) => child.matches(selector))
     if (element instanceof HTMLFieldSetElement) {
@@ -962,19 +997,24 @@ export function engine(render: (root: SnapNode) => string) {
     }
     if (element instanceof SVGSVGElement) {
       const title = first("title")
-      return title === undefined ? "" : title.textContent ?? ""
+      if (title === undefined) return ""
+      if (textContainsField(title)) context.contribution.fieldContent = true
+      return title.textContent ?? ""
     }
     return ""
   }
 
+  const namesFromFields = new Set<Element>()
   const namesFromContent = new Set<Element>()
   const nameCache = new Map<Element, string>()
   const accessibleName = (element: Element, includeHidden: boolean): string => {
     const cached = nameCache.get(element)
     if (cached !== undefined) return cached
+    const contribution = { fieldContent: false }
     const name = collapse(
-      nameOfElement(element, { visited: new Set(), labelledBy: false, traversal: false, includeHidden })
+      nameOfElement(element, { visited: new Set(), labelledBy: false, traversal: false, includeHidden, contribution })
     )
+    if (contribution.fieldContent) namesFromFields.add(element)
     nameCache.set(element, name)
     return name
   }
@@ -1459,6 +1499,7 @@ export function engine(render: (root: SnapNode) => string) {
       roleCache.clear()
       nameCache.clear()
       namesFromContent.clear()
+      namesFromFields.clear()
       const found = resolve(request.steps)
       if (found.length > 1) return strict(found)
       const element = found[0]
@@ -1679,6 +1720,7 @@ export function engine(render: (root: SnapNode) => string) {
     roleCache.clear()
     nameCache.clear()
     namesFromContent.clear()
+    namesFromFields.clear()
     if (expectation._tag === "Title") {
       const title = collapse(document.title)
       return { passed: expected(expectation.expected, title), observed: title }
@@ -1892,12 +1934,37 @@ export function engine(render: (root: SnapNode) => string) {
 
   const clip = (text: string) => text.length > 80 ? `${text.slice(0, 80)}…` : text
 
+  const FIELD_ROLES = new Set(["textbox", "searchbox", "combobox", "listbox", "slider", "spinbutton", "editable"])
+  const fieldOf = (element: Element): boolean =>
+    editableKind(element) || element instanceof HTMLSelectElement ||
+    FIELD_ROLES.has(roleOf(element) ?? "")
+
+  // Follow the same flat-tree text contributors as textOf, without changing text queries or their caches.
+  const textContainsField = (element: Element): boolean => {
+    if (textOf(element) === "") return false
+    if (fieldOf(element)) return true
+    return flatChildNodes(element).some((child) => child instanceof Element && textContainsField(child))
+  }
+
   /** An inferred node's name: its accessible name, or where one can be read from. */
   const inferredName = (element: Element): SnapNode["name"] => {
     const accessible = accessibleName(element, false)
-    if (accessible !== "") return { _tag: "Accessible", value: accessible }
+    if (accessible !== "") {
+      return {
+        _tag: "Accessible",
+        value: accessible,
+        ...(namesFromFields.has(element) ? { fieldContent: true } : {})
+      }
+    }
     const text = textOf(element)
-    if (text !== "") return { _tag: "Inferred", value: clip(text), from: "text" }
+    if (text !== "") {
+      return {
+        _tag: "Inferred",
+        value: clip(text),
+        from: "text",
+        ...(textContainsField(element) ? { fieldContent: true } : {})
+      }
+    }
     const title = collapse(element.getAttribute("title") ?? "")
     if (title !== "") return { _tag: "Inferred", value: title, from: "title" }
     const placeholder = collapse(
@@ -1907,10 +1974,24 @@ export function engine(render: (root: SnapNode) => string) {
     if (placeholder !== "") return { _tag: "Inferred", value: placeholder, from: "placeholder" }
     const image = element.querySelector("img[alt]")
     const alt = collapse(image?.getAttribute("alt") ?? "")
-    if (alt !== "") return { _tag: "Inferred", value: alt, from: "alt" }
+    if (alt !== "") {
+      return {
+        _tag: "Inferred",
+        value: alt,
+        from: "alt",
+        ...(fieldOf(element) || (image !== null && fieldOf(image)) ? { fieldContent: true } : {})
+      }
+    }
     const previous = element.previousElementSibling
     const nearby = previous === null ? "" : textOf(previous)
-    if (nearby !== "" && nearby.length <= 40) return { _tag: "Inferred", value: nearby, from: "nearbyLabel" }
+    if (nearby !== "" && nearby.length <= 40) {
+      return {
+        _tag: "Inferred",
+        value: nearby,
+        from: "nearbyLabel",
+        ...(previous !== null && textContainsField(previous) ? { fieldContent: true } : {})
+      }
+    }
     return { _tag: "None" }
   }
 
@@ -1989,8 +2070,7 @@ export function engine(render: (root: SnapNode) => string) {
     frame: boolean
   ): SnapNode => {
     const accessible = accessibleName(element, false)
-    const field = editableKind(element) ||
-      ["textbox", "searchbox", "combobox", "spinbutton", "editable"].includes(role.role)
+    const field = fieldOf(element)
     const name: SnapNode["name"] = role._tag === "Inferred"
       ? inferredName(element)
       : accessible === ""
@@ -1998,7 +2078,8 @@ export function engine(render: (root: SnapNode) => string) {
       : {
         _tag: "Accessible",
         value: accessible,
-        ...(field && namesFromContent.has(element) ? { from: "text" as const } : {})
+        ...(field && namesFromContent.has(element) ? { from: "text" as const } : {}),
+        ...(namesFromFields.has(element) ? { fieldContent: true } : {})
       }
     let children = frame || (walk.depth !== null && level >= walk.depth) ? [] : childrenOf(element, level + 1, walk)
     // Text that only repeats the node's name isn't a node of its own
@@ -2166,6 +2247,7 @@ export function engine(render: (root: SnapNode) => string) {
     roleCache.clear()
     nameCache.clear()
     namesFromContent.clear()
+    namesFromFields.clear()
     let found: Array<Element>
     try {
       found = resolve(request.steps)
@@ -2226,6 +2308,7 @@ export function engine(render: (root: SnapNode) => string) {
     roleCache.clear()
     nameCache.clear()
     namesFromContent.clear()
+    namesFromFields.clear()
     try {
       switch (request.op) {
         case "count":

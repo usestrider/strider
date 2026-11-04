@@ -16,8 +16,9 @@ import * as Schema from "effect/Schema"
  *
  * - `screenshots`: whether images may be sent at all; `"denied"` fails the `screenshot` tool with `NotPermitted`.
  * - `snapshotText`: `"redacted"` masks names and text inside editable fields, including semantic and
- *   plaintext-only contenteditables, and their own names when derived from content. Field editability is
- *   independent of semantic role. Labels, roles, refs and states remain visible; validation messages become
+ *   plaintext-only contenteditables, and names containing field content copied through descendants,
+ *   embedded values, referenced controls, nearby fields or image-alt inference. Field editability is
+ *   independent of semantic role. Public labels, roles, refs and states remain visible; validation messages become
  *   `•••`. Both snapshot output and `find` use this redacted tree, so hidden content cannot match a query.
  *   `"full"` keeps content, validation messages and matching against them.
  * - `consoleText`: `"full"` sends console text and exception names/messages; `"redacted"` says a message
@@ -27,7 +28,9 @@ import * as Schema from "effect/Schema"
  *
  * Strict capture is a bounded policy, not a secrecy or inference guarantee. Labels and ordinary page text,
  * URLs, dialogs, network and download metadata, tool arguments and failures may still contain page content.
- * A page can put sensitive text in a label or another unmasked channel. Choose what pages and tools to expose.
+ * A page can put sensitive text in a label or another unmasked channel. Assertions such as `expect --text`
+ * and action selectors still match original content and can confirm guesses at masked values. Choose what
+ * pages and tools to expose.
  * `strict` denies screenshots, redacts snapshots and omits console text. `local` keeps full capture and search.
  *
  * **Example** (Allowing screenshots but masking text)

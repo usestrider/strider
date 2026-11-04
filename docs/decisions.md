@@ -757,7 +757,11 @@ Carry optional field editability separately from role in engine and public snaps
 paragraphs and headings can be contenteditable, including plaintext-only. Native and ARIA fields count even
 when disabled or read-only: capture concerns their data, not whether an action may edit them. Absent editability
 means false for compatibility with older snapshot data. Accessible names derived from editable content carry
-optional text provenance without changing local text rendering. Labels, semantic roles, states and refs survive.
+optional text provenance without changing local text rendering. Track field contributions through the chosen
+accessible or inferred name, including ancestor content, embedded values, referenced controls, nearby fields
+and image-alt inference. Optional `fieldContent` on names lets shared redaction mask these copies outside the
+field subtree while retaining genuine public labels. Inspecting only the finished tree loses those origins.
+Labels, semantic roles, states and refs survive.
 
 For non-full console capture, exception digests and history retain a library-authored event marker and monotonic
 occurrence time, with no page-provided name, message, stack or origin text. Error names and origins are no safer
@@ -768,3 +772,8 @@ semantic editables; replacing semantic roles with editable, which loses meaning;
 node, which enlarge every snapshot and reject older data; and masking exception messages alone, which leaves
 other page-controlled exception details visible. Strict remains a bounded capture policy: ordinary page text,
 labels, URLs, dialogs and other metadata remain available, so it is not a secrecy or inference guarantee.
+
+Assertions such as `expect --text` and action selectors continue matching original page content and can confirm
+guesses at masked values. Restricting those operations is a separate contract decision; this change restricts
+snapshot/find capture and does not change assertion or action semantics. Name provenance is limited to field
+contributions during name construction, not general tracking of sensitive data across arbitrary page scripts.

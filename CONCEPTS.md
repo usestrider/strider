@@ -537,6 +537,26 @@ A locator is data: a list of steps (a query, then `filter`, `and`, `or`, `nth`) 
 - **`getByRole`** takes an element's role from its `role` attribute (the first token the engine knows), or else its implicit role under HTML-AAM, from a table in the engine. Its name is computed under accname 1.2: `aria-labelledby`, `aria-label`, the native label (`label`, `alt`, `caption`, `legend`, a button's value), the content for roles named from content, then `title` and `placeholder`. An embedded control adds its value to another element's name, never to its own. Elements outside the accessibility tree (`aria-hidden`, `display: none`, `visibility: hidden`, the `hidden` attribute) are skipped unless `includeHidden` is set. A name matches as text does.
 - **The other queries** follow from those: `getByLabel` matches labelable elements by their label (`label[for]`, a wrapping `label`, `aria-labelledby`, `aria-label`); `getByPlaceholder`, `getByAltText` and `getByTitle` match their attribute; `getByTestId` matches `data-testid` exactly; and `locator(css)` runs `querySelectorAll` in the document and each open shadow root, where a malformed selector fails with `InvalidInput` at once.
 
+### Snapshot editability and capture
+
+Snapshot nodes carry optional `editable` independently of semantic role: true for native field kinds, ARIA field
+roles and contenteditable elements, including inherited and plaintext-only editability. Read-only and disabled
+fields retain the signal because they still contain field data. Absence means false; older serialized snapshot
+nodes remain decodable. An accessible editable name derived from its own content carries optional `from: "text"`;
+labels retain their existing names. Optional `fieldContent` on accessible and inferred names records that the
+chosen name contains field content, including content copied into an ancestor or another node's name. Absent
+provenance means false for older data. These additions do not change local snapshot text or semantic roles.
+
+The toolkit derives one redacted tree for snapshot rendering and find matching, names and paths. It masks field
+content and validation messages, including names that contain field content contributed by descendants,
+embedded control values, referenced controls, nearby fields or image-alt inference. It keeps public labels,
+roles, states and refs. Non-full console capture also
+replaces exceptions in digests and history with an event marker and monotonic occurrence time, excluding all
+page-supplied details. Full local capture keeps its existing content and search behavior. Capture remains bounded:
+ordinary text, labels and other metadata can still disclose content. Assertions such as `expect --text` and
+action selectors still match original page content and can confirm guesses at masked values. Name provenance
+covers field contributions during name construction; it is not general taint tracking or a secrecy guarantee.
+
 ### Readiness predicates
 
 Each predicate yields `Ready`, `NotReady{reason}` or an observation error. A reason describes the present condition and does not promise it can never improve. L2 decides whether to wait, scroll, activate or fail; an action checks at each animation frame (§5, Actions).
@@ -636,18 +656,3 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
 ## 11. Open questions
 
 No design questions are open at this layer right now.
-
-
-### Snapshot editability and capture
-
-Snapshot nodes carry optional `editable` independently of semantic role: true for native field kinds, ARIA field
-roles and contenteditable elements, including inherited and plaintext-only editability. Read-only and disabled
-fields retain the signal because they still contain field data. Absence means false; older serialized snapshot
-nodes remain decodable. An accessible editable name derived from its own content carries optional `from: "text"`;
-labels retain their existing names. These additions do not change local snapshot text or semantic roles.
-
-The toolkit derives one redacted tree for snapshot rendering and find matching, names and paths. It masks field
-content and validation messages while keeping labels, roles, states and refs. Non-full console capture also
-replaces exceptions in digests and history with an event marker and monotonic occurrence time, excluding all
-page-supplied details. Full local capture keeps its existing content and search behavior. Capture remains bounded:
-ordinary text, labels and other metadata can still disclose content; it is not taint tracking or a secrecy guarantee.
