@@ -58,48 +58,56 @@ const launched = Effect.fnUntraced(function*<A, E, R>(effect: Effect.Effect<A, E
 
 describe("Stock WebKit, launched in automation mode", () => {
   layer(NodeServices.layer, { excludeTestServices: true, timeout })((it) => {
-    it.effect(
-      "sends a real silent listener nothing, and starts the real MiniBrowser owned on another port",
-      () =>
-        Effect.gen(function*() {
-          yield* useXvfb()
-          const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-          const received: Array<number> = []
-          let accepted = 0
-          const ports: Array<number> = []
-          const server = createServer((socket) => {
-            accepted++
-            socket.on("data", (data) => received.push(data.length))
-            socket.on("error", () => {})
-          })
-          yield* Effect.addFinalizer(() => Effect.sync(() => server.close()))
-          const observing = ChildProcessSpawner.make(Effect.fnUntraced(function*(command) {
-            if (command._tag === "StandardCommand") {
-              const endpoint = command.options.env?.["WEBKIT_INSPECTOR_SERVER"]
-              if (endpoint !== undefined) {
-                const port = Number(endpoint.split(":")[1])
-                ports.push(port)
-                // The first port is taken, by something that accepts and never answers, before the child binds it.
-                if (ports.length === 1) {
-                  yield* Effect.callback<void>((resume) => {
-                    server.listen(port, "127.0.0.1", () => resume(Effect.void))
-                  })
+    for (const collisions of [1, 2]) {
+      it.effect(
+        `sends ${collisions} real silent listeners nothing, and starts the real MiniBrowser owned on another port`,
+        () =>
+          Effect.gen(function*() {
+            yield* useXvfb()
+            const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+            const received: Array<number> = []
+            let accepted = 0
+            const ports: Array<number> = []
+            const servers = Array.from({ length: collisions }, () =>
+              createServer((socket) => {
+                accepted++
+                socket.on("data", (data) => received.push(data.length))
+                socket.on("error", () => {})
+              }))
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                for (const server of servers) server.close()
+              })
+            )
+            const observing = ChildProcessSpawner.make(Effect.fnUntraced(function*(command) {
+              if (command._tag === "StandardCommand") {
+                const endpoint = command.options.env?.["WEBKIT_INSPECTOR_SERVER"]
+                if (endpoint !== undefined) {
+                  const port = Number(endpoint.split(":")[1])
+                  ports.push(port)
+                  // Occupy each requested collision port before its child binds it.
+                  const server = servers[ports.length - 1]
+                  if (server !== undefined) {
+                    yield* Effect.callback<void>((resume) => {
+                      server.listen(port, "127.0.0.1", () => resume(Effect.void))
+                    })
+                  }
                 }
               }
-            }
-            return yield* spawner.spawn(command)
-          }))
-          yield* WebKitAutomation.start({ executablePath: webkitgtk.executable }).pipe(
-            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, observing),
-            Effect.provide(socketConnector)
-          )
-          assert.strictEqual(ports.length, 2, "the child's collision moves the launch to one other port")
-          assert.notStrictEqual(ports[0], ports[1])
-          assert.deepStrictEqual(received, [], "nothing is written to the foreign listener")
-          assert.strictEqual(accepted, 0, "nor is it connected to")
-        }).pipe(Effect.scoped),
-      timeout
-    )
+              return yield* spawner.spawn(command)
+            }))
+            yield* WebKitAutomation.start({ executablePath: webkitgtk.executable }).pipe(
+              Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, observing),
+              Effect.provide(socketConnector)
+            )
+            assert.strictEqual(ports.length, 2, "the child's collision moves the launch to one other port")
+            assert.notStrictEqual(ports[0], ports[1])
+            assert.deepStrictEqual(received, [], "nothing is written to the foreign listener")
+            assert.strictEqual(accepted, 0, "nor is it connected to")
+          }).pipe(Effect.scoped),
+        timeout
+      )
+    }
 
     it.effect(
       "refuses a real wrapper that forks the MiniBrowser rather than execing it",
