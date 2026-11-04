@@ -4,12 +4,13 @@
  * socket is `protocol.ts`'s.
  *
  * ```
- * $XDG_RUNTIME_DIR/strider/   the OS temporary directory's strider/ where there is no runtime directory
+ * $XDG_RUNTIME_DIR/strider/   else <OS temporary directory>/strider-<uid>/
  *   <name>/                   one per session
- *     lock  daemon.sock  daemon.log
+ *     lock  sock  daemon.log
  *     profile/  downloads/  artifacts/
  * ```
  */
+import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
@@ -22,14 +23,122 @@ export const nameRule = /^[a-z0-9][a-z0-9-]{0,31}$/
 
 /** The directory every session's directory is in. */
 export const root = (env: Readonly<Record<string, string | undefined>>, tmpdir: string): string =>
-  `${env.XDG_RUNTIME_DIR !== undefined && env.XDG_RUNTIME_DIR !== "" ? env.XDG_RUNTIME_DIR : tmpdir}/strider`
+  env.XDG_RUNTIME_DIR !== undefined && env.XDG_RUNTIME_DIR !== ""
+    ? env.XDG_RUNTIME_DIR + "/strider"
+    : tmpdir + "/strider-" + uid()
+
+/** A refused session path or name, reported without a defect log. */
+export class SessionError extends Data.TaggedError("SessionError")<{
+  readonly reason: "Missing" | "Unsafe" | "InvalidName"
+  readonly message: string
+}> {}
+
+const uid = (): number => {
+  if (Node.process.getuid === undefined) {
+    throw new SessionError({ reason: "Unsafe", message: "CLI session isolation requires Unix ownership metadata" })
+  }
+  return Node.process.getuid()
+}
+
+export const failure = (error: unknown): SessionError =>
+  error instanceof SessionError ?
+    error :
+    new SessionError({ reason: "Unsafe", message: error instanceof Error ? error.message : String(error) })
+
+/** Validates names before any path construction or process cleanup. */
+export const validateName = (name: string): Effect.Effect<void, SessionError> =>
+  nameRule.test(name) ? Effect.void : Effect.fail(
+    new SessionError({
+      reason: "InvalidName",
+      message: JSON.stringify(name) + ": a session name is lowercase letters, digits and dashes, at most 32"
+    })
+  )
+
+/** Checks private directory metadata; ownership tests can supply metadata without changing real owners. */
+export const privateDirectory = (stat: Node.Stat, owner: number): boolean =>
+  stat.isDirectory() && !stat.isSymbolicLink() && stat.uid === owner && (stat.mode & 0o077) === 0
+
+/** Link ownership matters in sticky parents, where only the link owner or parent owner may replace it. */
+export const trustedAlias = (stat: Node.Stat, owner: number): boolean => stat.uid === 0 || stat.uid === owner
+
+/**
+ * Resolves trusted ancestor aliases after checking their parents, owners and resolved ancestry. Roots themselves
+ * must be real private directories. Readers leave missing paths absent; socket consumers require them to exist.
+ */
+export const validateRoot = (directory: string, create = false, required = false) =>
+  Effect.tryPromise({
+    try: async () => {
+      const owner = uid()
+      const fs = await Node.files()
+      const path = await Node.path()
+      let links = 0
+      const unsafe = (at: string): never => {
+        throw new SessionError({
+          reason: "Unsafe",
+          message: "Unsafe session directory: " + at + "; requires trusted ownership, permissions and non-symlink roots"
+        })
+      }
+      const walk = async (input: string, privateLeaf: boolean): Promise<string | undefined> => {
+        if (!input.startsWith("/")) return unsafe(input)
+        const parts = input.split("/").filter(Boolean)
+        let current = "/"
+        for (let index = 0; index < parts.length; index++) {
+          const parent = current
+          current = current === "/" ? current + parts[index] : current + "/" + parts[index]
+          const last = index === parts.length - 1
+          let stat: Node.Stat
+          try {
+            stat = await fs.lstat(current)
+          } catch (error) {
+            if ((error as { code?: string }).code !== "ENOENT") throw error
+            if (!create) {
+              if (required) throw new SessionError({ reason: "Missing", message: "No session directory at " + current })
+              return undefined
+            }
+            try {
+              await fs.mkdir(current, { mode: 0o700 })
+            } catch (error) {
+              if ((error as { code?: string }).code !== "EEXIST") throw error
+            }
+            stat = await fs.lstat(current)
+          }
+          if (stat.isSymbolicLink()) {
+            if ((last && privateLeaf) || !trustedAlias(stat, owner) || ++links > 40) return unsafe(current)
+            const target = await fs.readlink(current)
+            // Do not normalize .. before checking components it traverses.
+            const resolved = await walk(target.startsWith("/") ? target : parent + "/" + target, false)
+            if (resolved === undefined) return undefined
+            current = resolved
+            continue
+          }
+          const safe = last && privateLeaf ?
+            privateDirectory(stat, owner) :
+            stat.isDirectory() && (stat.uid === 0 || stat.uid === owner) &&
+            ((stat.mode & 0o022) === 0 || (stat.uid === 0 && (stat.mode & 0o1000) !== 0))
+          if (!safe) return unsafe(current)
+        }
+        return path.resolve(current)
+      }
+      const checked = await walk(directory, true)
+      // Keep the trusted spelling for AF_UNIX: canonical aliases can exceed the platform's socket limit.
+      return checked === undefined ? undefined : directory
+    },
+    catch: failure
+  })
+
+/** Allocates an unpredictable private directory for startup files. */
+export const startupDirectory = (directory: string) =>
+  Effect.tryPromise({
+    try: async () => (await Node.files()).mkdtemp(directory + "/.start-"),
+    catch: failure
+  })
 
 /** A session's directory, its socket, its lock and its log. */
 export const paths = (rootDir: string, name: string) => {
   const dir = `${rootDir}/${name}`
   return {
     dir,
-    socket: `${dir}/daemon.sock`,
+    socket: `${dir}/sock`,
     lock: `${dir}/lock`,
     log: `${dir}/daemon.log`,
     profile: `${dir}/profile`,

@@ -12,6 +12,7 @@ export interface Process {
   readonly pid: number
   readonly platform: string
   exitCode: number | undefined
+  getuid?(): number
   cwd(): string
   kill(pid: number, signal?: number | string): void
   exit(code?: number): never
@@ -34,3 +35,21 @@ export const alive = (pid: number): boolean => {
 const load = (specifier: string): Promise<unknown> => import(specifier)
 
 export const os = () => load("node:os") as Promise<{ readonly tmpdir: () => string; readonly homedir: () => string }>
+
+/** Filesystem metadata for Unix session isolation. */
+export interface Stat {
+  readonly uid: number
+  readonly mode: number
+  isDirectory(): boolean
+  isSymbolicLink(): boolean
+}
+export const files = () =>
+  load("node:fs/promises") as Promise<{
+    lstat(path: string): Promise<Stat>
+    readlink(path: string): Promise<string>
+    mkdir(path: string, options: { readonly mode: number }): Promise<unknown>
+    mkdtemp(prefix: string): Promise<string>
+  }>
+
+export const path = () =>
+  load("node:path") as Promise<{ resolve(...paths: Array<string>): string; dirname(path: string): string }>

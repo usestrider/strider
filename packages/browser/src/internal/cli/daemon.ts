@@ -1385,12 +1385,12 @@ export const start = Command.make(
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const process = Node.process
-      if (!Session.nameRule.test(flags.name)) {
-        return yield* Effect.fail(
-          new CommandFailed({
-            error: "InvalidInput",
-            message: `${JSON.stringify(flags.name)}: a name is lowercase letters, digits and dashes, at most 32`
-          })
+      yield* Session.validateName(flags.name).pipe(
+        Effect.mapError((error) => new CommandFailed({ error: "InvalidInput", message: error.message }))
+      )
+      if (Option.isSome(flags.fork)) {
+        yield* Session.validateName(flags.fork.value).pipe(
+          Effect.mapError((error) => new CommandFailed({ error: "InvalidInput", message: error.message }))
         )
       }
       const viewport = Option.isSome(flags.viewport) ? yield* parseViewport(flags.viewport.value) : undefined
@@ -1407,11 +1407,16 @@ export const start = Command.make(
       }
       const idle = parsed.value
       const version = yield* Session.version
-      const rootDir = Session.root(process.env, (yield* Effect.promise(() => Node.os())).tmpdir())
+      const os = yield* Effect.promise(() => Node.os())
+      const selectedRoot = yield* Effect.try({
+        try: () => Session.root(process.env, os.tmpdir()),
+        catch: Session.failure
+      }).pipe(Effect.mapError(failedWith))
+      const rootDir = (yield* Session.validateRoot(selectedRoot, true).pipe(Effect.mapError(failedWith)))!
       const paths = Session.paths(rootDir, flags.name)
-      yield* fs.makeDirectory(rootDir, { recursive: true, mode: 0o700 }).pipe(Effect.mapError(failedWith))
       // The directory is the session's claim: taken when it exists
       if (yield* fs.exists(paths.dir).pipe(Effect.orElseSucceed(() => false))) {
+        yield* Session.validateRoot(paths.dir).pipe(Effect.mapError(failedWith))
         // Its lock names the daemon holding it, which a process reusing its id isn't
         const running = Option.isSome(yield* Session.holder(fs, paths.dir))
         return yield* Effect.fail(

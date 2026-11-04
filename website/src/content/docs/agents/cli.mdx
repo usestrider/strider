@@ -219,9 +219,43 @@ A session's browser runs until the session stops, so list what's running and sto
 | `strider -s s stop`                            | ends the session and deletes its directory; `--keep` keeps the directory     |
 | `strider prune`                                | lists browsers and profile directories left by programs that were killed; `--yes` removes them |
 
-A session's profile, downloads and artifacts are in `$XDG_RUNTIME_DIR/strider/<name>/`, deleted when it stops. A
+A session's profile, downloads and artifacts are in `$XDG_RUNTIME_DIR/strider/<name>/`, or
+`<OS temp directory>/strider-<uid>/<name>/` when the runtime directory is unset, deleted when it stops. A
 session idle for an hour stops itself; `start --idle "30 minutes"` changes that. Both `start` and `sessions` print the validated idle timeout with whitespace normalized to spaces, so you can copy it into `--idle` with quotes.
 
+Session roots and session directories must belong to your Unix user, have no group or other permissions, and
+cannot be symlinks. Ancestors must be owned by you or root and prevent replacement by other users; root-owned
+sticky directories such as /tmp are allowed. Trusted ancestor aliases, including macOS's /tmp and /var, are
+resolved with the same checks on the target ancestry. Unsafe existing directories are refused without changing
+their permissions. Missing parents are created privately. The CLI session service requires Unix ownership metadata.
+
+The old fallback, `<OS temp directory>/strider`, is never searched or migrated. Before upgrading, stop old daemons
+with the old CLI, then restart sessions with the new CLI. Inspect old directories and their ownership before
+removing them separately; do not copy sockets or locks into the new root. The internal socket is now named
+`sock`, so stop old daemons in XDG_RUNTIME_DIR too; socket files are not migrated. Validated ancestor aliases
+retain their short spelling for socket paths. Session names still allow 32 characters, but unusually long
+runtime paths can exceed the OS Unix socket path limit.
+
+If you have already upgraded with an old daemon still running, use the older CLI to stop it if available,
+with the same runtime-directory environment it used before the upgrade. The new CLI cannot use its old socket.
+Otherwise, stop sending it commands and wait for its configured `--idle` timeout: the default is `1 hour`, but
+an explicit value at startup takes precedence, and further commands reset its idle timer.
+
+For manual termination, treat the old session's `lock` as a lead, not proof of process identity. Independently
+verify that its `pid` still belongs to your account's Strider daemon for that session: inspect its owner,
+command line and session arguments, and compare its process start time with the lock's `startedAt` (Unix epoch
+milliseconds). A stale PID may now identify another process; neither a matching process name nor a live PID
+alone is enough. If identity is uncertain, use the old CLI or wait instead. Only after verifying identity,
+request termination of that daemon with your OS process tools (for example, SIGTERM) and wait for it to exit.
+
+After the daemon and the browser it launched have exited, inspect and remove only identified leftovers you
+own in the old session directory, then restart the session with the new CLI. Do not remove a live profile,
+trust a lock from an unsafe old shared directory without independent checks, or copy old locks or sockets
+into the new session. The old shared fallback is never reclaimed automatically.
+
+A client killed during startup can leave a private `.start-*` directory. Listings and named prune exclude it.
+After all clients and daemons using the root have stopped, inspect and remove only identified stale startup
+directories; prune does not sweep startup entries.
 
 ## Attaching
 

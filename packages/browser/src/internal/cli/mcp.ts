@@ -202,11 +202,23 @@ const serve = Effect.fnUntraced(
       yield* Console.error(plan.message)
       return yield* new Client.Exit({ code: Session.exitCodes.CliError! })
     }
+    yield* Session.validateName(plan.session)
     // Standard output is the client's: what start reports goes to standard error
     if (plan._tag === "Start") yield* Client.start(plan.start, bin, Console.error)
     const rootDir = yield* Client.sessionRoot
-    const client = yield* Client.session(rootDir, plan.session)
-    const to = <K extends Tools.ToolName>(name: K) => forward(client, plan.session, name)
+    // A handshake needs no daemon. Acquire the client only for a tool call, after validating existing paths.
+    const to = <K extends Tools.ToolName>(name: K) => (params: Tools.Params<K>) =>
+      Effect.scoped(
+        Effect.flatMap(Client.session(rootDir, plan.session), (client) => forward(client, plan.session, name)(params))
+      ).pipe(
+        Effect.catchTag("SessionError", (error) =>
+          Effect.fail(
+            new Tools.ToolFailure({
+              error: error.reason === "Missing" ? "NoSession" : "InvalidInput",
+              message: error.message
+            })
+          ))
+      )
     // Each tool's call goes to the session's daemon
     const handlers: Toolkit.HandlersFrom<Tools.Tools> = {
       pages: to("pages"),
