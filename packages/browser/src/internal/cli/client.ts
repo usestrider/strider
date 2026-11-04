@@ -94,6 +94,17 @@ export const session = Effect.fnUntraced(function*(rootDir: string, name: string
 /** Whether a call failed because no daemon serves the socket: it's gone, or it never started. */
 export const unreachable = (error: RpcClientError.RpcClientError): boolean => error.reason._tag === "SocketOpenError"
 
+/** Reports absent directories and unreachable sockets with the same session hints. */
+const noSession = Effect.fnUntraced(function*(rootDir: string, name: string) {
+  const sessions = yield* running(rootDir)
+  yield* Console.error(
+    `No session named ${name} is running${
+      sessions.length === 0 ? "" : `; running: ${sessions.join(", ")}`
+    }. strider sessions lists them, with any a crash left behind.`
+  )
+  return yield* new Exit({ code: Session.exitCodes.NoSession! })
+})
+
 /** Forwards the command to its session's daemon, which parses it; the exit code is the command's. */
 export const forward = Effect.fnUntraced(function*(argv: ReadonlyArray<string>) {
   const rootDir = yield* sessionRoot
@@ -124,14 +135,12 @@ export const forward = Effect.fnUntraced(function*(argv: ReadonlyArray<string>) 
           yield* Console.error(`The session ${name} didn't answer: ${error.message}`)
           return yield* new Exit({ code: 1 })
         }
-        const sessions = yield* running(rootDir)
-        yield* Console.error(
-          `No session named ${name} is running${
-            sessions.length === 0 ? "" : `; running: ${sessions.join(", ")}`
-          }. strider sessions lists them, with any a crash left behind.`
-        )
-        return yield* new Exit({ code: Session.exitCodes.NoSession! })
+        return yield* noSession(rootDir, name)
       })),
+    Effect.catchTag(
+      "SessionError",
+      (error) => error.reason === "Missing" ? noSession(rootDir, name) : Effect.fail(error)
+    ),
     // Ctrl-C interrupts the call, and so the command, alone
     Effect.onInterrupt(() => Console.error("interrupted; the session goes on"))
   )

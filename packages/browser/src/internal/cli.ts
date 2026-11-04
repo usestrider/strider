@@ -171,7 +171,13 @@ const runningFrom = (fs: FileSystem.FileSystem, dir: string) =>
       Effect.filter(entries.filter((entry) => /^\d+$/.test(entry)), (pid) =>
         Effect.map(
           fs.readFileString(`/proc/${pid}/cmdline`).pipe(Effect.orElseSucceed(() => "")),
-          (cmdline) => cmdline.includes(dir)
+          (cmdline) =>
+            cmdline.split("\0").some((arg) => {
+              const equals = arg.startsWith("--") ? arg.indexOf("=") : -1
+              const value = equals === -1 ? arg : arg.slice(equals + 1)
+              return value === dir ||
+                (value.startsWith(dir + "/") && !value.slice(dir.length).split("/").includes(".."))
+            })
         ))
   )
 

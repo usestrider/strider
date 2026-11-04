@@ -6,7 +6,7 @@
  * ```
  * $XDG_RUNTIME_DIR/strider/   else <OS temporary directory>/strider-<uid>/
  *   <name>/                   one per session
- *     lock  daemon.sock  daemon.log
+ *     lock  sock  daemon.log
  *     profile/  downloads/  artifacts/
  * ```
  */
@@ -119,7 +119,9 @@ export const validateRoot = (directory: string, create = false, required = false
         }
         return path.resolve(current)
       }
-      return await walk(directory, true)
+      const checked = await walk(directory, true)
+      // Keep the trusted spelling for AF_UNIX: canonical aliases can exceed the platform's socket limit.
+      return checked === undefined ? undefined : directory
     },
     catch: failure
   })
@@ -136,7 +138,7 @@ export const paths = (rootDir: string, name: string) => {
   const dir = `${rootDir}/${name}`
   return {
     dir,
-    socket: `${dir}/daemon.sock`,
+    socket: `${dir}/sock`,
     lock: `${dir}/lock`,
     log: `${dir}/daemon.log`,
     profile: `${dir}/profile`,

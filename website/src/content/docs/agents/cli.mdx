@@ -231,12 +231,14 @@ their permissions. Missing parents are created privately. The CLI session servic
 
 The old fallback, `<OS temp directory>/strider`, is never searched or migrated. Before upgrading, stop old daemons
 with the old CLI, then restart sessions with the new CLI. Inspect old directories and their ownership before
-removing them separately; do not copy sockets or locks into the new root.
+removing them separately; do not copy sockets or locks into the new root. The internal socket is now named
+`sock`, so stop old daemons in XDG_RUNTIME_DIR too; socket files are not migrated. Validated ancestor aliases
+retain their short spelling for socket paths. Session names still allow 32 characters, but unusually long
+runtime paths can exceed the OS Unix socket path limit.
 
 A client killed during startup can leave a private `.start-*` directory. Listings and named prune exclude it.
 After all clients and daemons using the root have stopped, inspect and remove only identified stale startup
 directories; prune does not sweep startup entries.
-
 
 ## Attaching
 

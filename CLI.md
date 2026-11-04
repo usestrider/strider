@@ -53,7 +53,7 @@ declare const CurrentSession: Context.Service<CurrentSession, CurrentSession>   
 ```
 $XDG_RUNTIME_DIR/strider/       # per user; otherwise <OS temp directory>/strider-<uid>
   checkout/                     # one directory per session name
-    lock  daemon.sock
+    lock  sock
     profile/                    # or your --user-data-dir instead, which is never deleted
     downloads/
     artifacts/
@@ -64,12 +64,15 @@ symlinks. Ancestors must belong to that user or root and cannot be writable by o
 sticky directories such as /tmp. Ancestor aliases such as macOS's /tmp and /var are resolved only when the link
 belongs to the current user or root, its parent prevents another user replacing it, and its resolved ancestry
 passes the same checks. Roots and session directories themselves cannot be symlinks. Missing parents are created
-privately after their existing ancestors pass validation. Unsafe existing directories are rejected without changing them. Platforms
-without Unix ownership metadata are refused by the CLI session service.
+privately after their existing ancestors pass validation. Unsafe existing directories are rejected without
+changing them. Platforms without Unix ownership metadata are refused by the CLI session service.
 
 The fallback used before this change, <OS temp directory>/strider, is never read or migrated automatically.
 Stop older daemons with the older CLI before upgrading. Restart sessions with the new CLI; inspect and remove
-old directories separately, after checking their ownership. Do not copy sockets or locks into the new root.
+old directories separately, after checking their ownership. The internal socket is now named `sock`; stop old
+daemons in XDG_RUNTIME_DIR too, because socket files are not migrated. Do not copy sockets or locks into the new root.
+Validated ancestor aliases retain their short spelling for socket bind/connect paths. The 32-character name
+limit is unchanged; unusually long runtime paths can still exceed the OS Unix socket path limit.
 
 A client killed during startup can leave a private .start-* directory in the session root. These are excluded
 from session listings and named prune. After all CLI clients and daemons using that root have stopped, inspect

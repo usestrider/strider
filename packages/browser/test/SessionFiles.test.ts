@@ -58,6 +58,18 @@ describe("session files", () => {
         })).pipe(Effect.timeout("1 second"))
       )
       assert.isTrue(connected, "the client must connect using the same short path the server bound")
+      const marker = path.join(temporary, "startup-ran")
+      const child = path.join(temporary, "daemon.cjs")
+      fs.writeFileSync(
+        child,
+        "require('node:fs').writeFileSync(" + JSON.stringify(marker) + ", 'yes'); process.exitCode = 1"
+      )
+      await Effect.runPromiseExit(Client.start([], child).pipe(Effect.provide(NodeServices.layer)))
+      assert.strictEqual(
+        fs.readFileSync(marker, "utf8"),
+        "yes",
+        "the startup listener must also bind through the alias"
+      )
     } finally {
       if (previous === undefined) delete process.env.XDG_RUNTIME_DIR
       else process.env.XDG_RUNTIME_DIR = previous
@@ -73,9 +85,10 @@ describe("session files", () => {
       dir + "b/profile",
       "/unrelated" + dir + "/profile",
       "--note=prefix" + dir + "/profile",
-      "--note=" + dir + "b/profile"
+      "--note=" + dir + "b/profile",
+      dir + "/../ab/profile"
     ]
-    const children = [...argumentsToKeep, "--user-data-dir=" + dir + "/profile"].map((arg) =>
+    const children = [...argumentsToKeep, "--user-data-dir=" + dir + "/profile", dir + "/profile"].map((arg) =>
       spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", "--", arg], { stdio: "ignore" })
     )
     const exits = children.map((child) =>
@@ -88,11 +101,13 @@ describe("session files", () => {
       const result = strider({ XDG_RUNTIME_DIR: temporary, XDG_STATE_HOME: temporary }, "prune", "a")
       assert.strictEqual(result.status, 0, result.stderr)
       assert.isFalse(fs.existsSync(dir))
-      assert.strictEqual(
-        await Promise.race([exits.at(-1)!, new Promise((resolve) => setTimeout(() => resolve("alive"), 1000))]),
-        "SIGKILL"
-      )
-      for (const exited of exits.slice(0, -1)) {
+      for (const exited of exits.slice(argumentsToKeep.length)) {
+        assert.strictEqual(
+          await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve("alive"), 1000))]),
+          "SIGKILL"
+        )
+      }
+      for (const exited of exits.slice(0, argumentsToKeep.length)) {
         assert.strictEqual(
           await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve("alive"), 20))]),
           "alive"
@@ -184,7 +199,7 @@ describe("session files", () => {
     try {
       fs.mkdirSync(path.join(temporary, "strider", "other"), { recursive: true, mode: 0o700 })
       fs.chmodSync(path.join(temporary, "strider"), 0o700)
-      fs.writeFileSync(path.join(temporary, "strider", "other", "daemon.sock"), "")
+      fs.writeFileSync(Session.paths(path.join(temporary, "strider"), "other").socket, "")
       const result = strider({ XDG_RUNTIME_DIR: temporary, XDG_STATE_HOME: temporary }, "-s", "nope", "pages")
       assert.strictEqual(result.status, 20)
       assert.include(result.stderr, "running: other")
@@ -311,7 +326,7 @@ describe("session files", () => {
       fs.mkdirSync(root)
       fs.chmodSync(root, 0o777)
       fs.mkdirSync(path.join(root, "example"))
-      fs.writeFileSync(path.join(root, "example", "daemon.sock"), "")
+      fs.writeFileSync(Session.paths(root, "example").socket, "")
       const result = await Effect.runPromiseExit(Client.running(root).pipe(Effect.provide(NodeServices.layer)))
       assert.isTrue(Exit.isFailure(result), `Expected rejection, got ${JSON.stringify(result)}`)
     } finally {
@@ -368,7 +383,7 @@ describe("session files", () => {
           fs.chmodSync(root, 0o777)
           fs.chmodSync(path.join(root, "example"), 0o777)
           yield* Effect.promise(() =>
-            new Promise<void>((resolve) => planted.listen(path.join(root, "example", "daemon.sock"), resolve))
+            new Promise<void>((resolve) => planted.listen(Session.paths(root, "example").socket, resolve))
           )
           yield* client.Info()
         })).pipe(Effect.timeout("2 seconds"))
