@@ -29,6 +29,9 @@ const fixture = Effect.fnUntraced(function*(html: (origin: string) => string) {
 /** An element whose text a script writes, for asserting what happened. */
 const out = `<p id="out">nothing yet</p>`
 const say = (text: string) => `document.getElementById('out').textContent = ${text}`
+/** Writes the target and coordinates of the page's pointerdown into `#out`, keeping the click from navigating. */
+const recordsClick =
+  `<script>document.addEventListener("pointerdown",e=>document.getElementById("out").textContent=JSON.stringify({target:e.target.id,x:e.clientX,y:e.clientY}));document.addEventListener("click",e=>e.preventDefault())</script>`
 
 export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} interaction`, () => {
@@ -85,6 +88,78 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           )
         }
       }
+
+      it.effect("clicks a wrapped link whose first line a scrolling ancestor clips", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<!doctype html><style>body{margin:0;font:16px/24px monospace}#s{position:absolute;left:20px;top:100px;width:240px;height:48px;overflow:auto}</style><div id="s"><a id="go" href="#go">${
+              Array(6).fill("abcdefghij").join(" ")
+            }</a></div><output id="out"></output>${recordsClick}<script>s.scrollTop=24</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const lines = yield* page.evaluateInMainWorld(() => {
+              const rects = document.querySelector("#go")!.getClientRects()
+              return { count: rects.length, firstBottom: rects[0]!.bottom }
+            })
+            assert.strictEqual(lines.count, 3)
+            assert.isAtMost(lines.firstBottom, 100)
+            yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
+            assert.strictEqual(JSON.parse(yield* page.locator("#out").readText).target, "go")
+          }))
+        }), timeout)
+
+      it.effect(
+        "clicks a wrapped link in an iframe whose first line is above the page's viewport",
+        () =>
+          Effect.gen(function*() {
+            const inner =
+              `<!doctype html><style>body{margin:0;font:16px/24px monospace;width:240px}</style><a id="go" href="#go">${
+                Array(6).fill("abcdefghij").join(" ")
+              }</a><output id="out"></output>${recordsClick}`
+            const { url } = yield* fixture(() =>
+              `<!doctype html><style>body{margin:0}iframe{position:absolute;left:20px;top:-24px;width:300px;height:200px;border:0}</style><iframe srcdoc='${inner}'></iframe>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const frame = page.frame(page.locator("iframe"))
+              yield* frame.locator("#go").click().pipe(Deadline.within("1 second"))
+              assert.strictEqual(JSON.parse(yield* frame.locator("#out").readText).target, "go")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "clicks a wrapped link whose box crosses the viewport while no line does",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<!doctype html><style>body{margin:0;width:6000px;font:16px/24px monospace}#b{width:5100px}#p{display:inline-block;width:5000px;height:1px}</style><div id="b"><span id="p"></span><a id="go" href="#go">abcdefghij abcdefghij</a></div><output id="out"></output>${recordsClick}<script>scrollTo(1000,0)</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const seen = yield* page.evaluateInMainWorld(() => {
+                const go = document.querySelector("#go")!
+                const box = go.getBoundingClientRect()
+                return {
+                  lines: go.getClientRects().length,
+                  visibleLines: Array.from(go.getClientRects()).filter((r) =>
+                    r.right > 0 && r.left < innerWidth
+                  ).length,
+                  boxCrosses: box.left < innerWidth && box.right > 0
+                }
+              })
+              assert.deepStrictEqual(seen, { lines: 2, visibleLines: 0, boxCrosses: true })
+              yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
+              assert.strictEqual(JSON.parse(yield* page.locator("#out").readText).target, "go")
+            }))
+          }),
+        timeout
+      )
 
       it.effect("dispatches click inside a one-pixel fragment after rounding", () =>
         Effect.gen(function*() {
