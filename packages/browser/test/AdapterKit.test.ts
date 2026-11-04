@@ -245,6 +245,33 @@ describe("AdapterKit", () => {
   })
 
   describe("values", () => {
+    it.effect("uses native decoding only after validation and falls back if the native decoder throws", () =>
+      Effect.gen(function*() {
+        const native = Buffer
+        const from = vi.fn((input: string) => native.from(input, "base64"))
+        try {
+          vi.stubGlobal("Buffer", { from })
+          const decoding = Kit.decodeBase64("AR==", "capture")
+          // Existing decoding is eager; introducing the native path must not defer it until execution.
+          assert.strictEqual(from.mock.calls.length, 1)
+          const result = yield* decoding
+          assert.strictEqual(Object.getPrototypeOf(result), Uint8Array.prototype)
+          assert.strictEqual(result.byteOffset, 0)
+          assert.strictEqual(result.buffer.byteLength, result.byteLength)
+          assert.deepStrictEqual(result, new Uint8Array([1]))
+          for (const input of ["AA-_", "AA A", "AA=A", "AAA\u2028", "\rAQ==\n"]) Kit.tryDecodeBase64(input)
+          assert.strictEqual(from.mock.calls.length, 1, "nonordinary input uses the existing decoder")
+          from.mockImplementation(() => {
+            throw new Error("native decoder unavailable")
+          })
+          assert.deepStrictEqual(Kit.tryDecodeBase64("AQI="), new Uint8Array([1, 2]))
+          assert.deepStrictEqual(yield* Kit.decodeBase64("AQID", "capture"), new Uint8Array([1, 2, 3]))
+          assert.strictEqual(from.mock.calls.length, 3)
+        } finally {
+          vi.unstubAllGlobals()
+        }
+      }))
+
     it.effect("preserves exact base64 bytes, accepted padding and CR/LF with or without native support", () =>
       Effect.gen(function*() {
         const bytes = Uint8Array.from({ length: 1025 }, (_, i) => i % 256)
