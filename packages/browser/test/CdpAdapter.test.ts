@@ -382,9 +382,18 @@ const sentHeaders = Effect.fnUntraced(function*(holdMetrics = false) {
   }
 })
 
-/** The synthetic browser and its deadlines advance together, without wall-clock delays. */
+/** Advance deadlines without delays, retaining the live epoch used by the real protocol client's command deadline. */
 const onTestClock = <A, E, R>(self: Effect.Effect<A, E, R>) =>
-  Clock.clockWith((clock) => Effect.provideService(self, BrowserClock.CurrentClock, BrowserClock.fromClock(clock)))
+  Clock.clockWith((clock) =>
+    Effect.suspend(() => {
+      const test = BrowserClock.fromClock(clock)
+      const origin = BrowserClock.live.now() - test.now()
+      return Effect.provideService(self, BrowserClock.CurrentClock, {
+        now: () => (origin + test.now()) as ReturnType<typeof test.now>,
+        sleep: test.sleep
+      })
+    })
+  )
 
 describe("Chromium public sent-header waiting", () => {
   it.effect("waits for attribution, then returns the network headers", () =>
@@ -785,7 +794,11 @@ describe("Chromium screenshot renderer readiness", () => {
                 error.value.reason._tag,
                 terminal === "replace" ? "CaptureInvalidated" : "BackendFailure"
               )
-              if (terminal === "reject") assert.include(JSON.stringify(error.value), "renderer metrics failed")
+              if (terminal === "reject" && error.value.reason._tag === "BackendFailure") {
+                assert.strictEqual(error.value.reason.kind, "Rejected")
+                assert.strictEqual(error.value.reason.method, "Page.getLayoutMetrics")
+                assert.include(error.value.reason.hint, "renderer metrics failed")
+              }
             }
           }
         }
