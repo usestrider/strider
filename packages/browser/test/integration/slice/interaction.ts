@@ -224,6 +224,73 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      const clippingFixtures = [
+        {
+          title: "a link inside an inline ancestor whose overflow has no effect",
+          html:
+            `<!doctype html><span style="overflow:hidden"><a id="go" href="#go">Go somewhere</a></span><output id="out"></output>`
+        },
+        {
+          title: "a link inside a display: contents ancestor with overflow set",
+          html:
+            `<!doctype html><div style="display:contents;overflow:hidden"><a id="go" href="#go">Go somewhere</a></div><output id="out"></output>`
+        },
+        {
+          title: "a shape inside a nested svg",
+          html:
+            `<!doctype html><svg width="200" height="200"><svg x="10" y="10" width="100" height="100"><rect id="go" width="50" height="50"/></svg></svg><output id="out"></output>`
+        },
+        {
+          title: "a button in a foreignObject of an svg scaled by its viewBox",
+          html:
+            `<!doctype html><style>body{margin:0}</style><svg viewBox="0 0 100 100" width="400" height="400"><foreignObject width="100" height="100"><button id="go" style="margin-left:60px;margin-top:60px;display:block">Go</button></foreignObject></svg><output id="out"></output>`
+        },
+        {
+          title: "a shape in an svg under a scaling transform",
+          html:
+            `<!doctype html><style>body{margin:0}</style><div style="transform:scale(2);transform-origin:0 0;width:100px;height:100px"><svg width="100" height="100"><rect id="go" x="80" y="80" width="15" height="15"/></svg></div><output id="out"></output>`
+        },
+        {
+          title: "an absolute link outside a zero-height body whose overflow is hidden",
+          html:
+            `<!doctype html><style>html,body{margin:0;overflow:hidden}</style><a id="go" href="#go" style="position:absolute;left:50px;top:50px">Go</a><output id="out" style="position:absolute;top:100px"></output>`
+        },
+        {
+          title: "a button in a popover whose transformed ancestor clips its box",
+          html:
+            `<!doctype html><style>body{margin:0}#c{transform:translateY(0);overflow:hidden;width:20px;height:20px}#p{position:fixed;inset:auto;left:100px;top:100px;margin:0}</style><div id="c"><div id="p" popover><button id="go">Go</button></div></div><output id="out" style="position:absolute;top:200px"></output><script>p.showPopover()</script>`
+        }
+      ] as const
+      for (const { html, title } of clippingFixtures) {
+        it.effect(`clicks ${title}`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `${html}${recordsClick}`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
+              assert.strictEqual(JSON.parse(yield* page.locator("#out").readText).target, "go")
+            }))
+          }), timeout)
+      }
+
+      it.effect(
+        "clicks at an explicit position inside an inline ancestor whose overflow has no effect",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<!doctype html><span style="overflow:hidden"><a id="go" href="#go">Go somewhere</a></span><output id="out"></output>${recordsClick}`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#go").click({ position: { x: 2, y: 2 } }).pipe(Deadline.within("1 second"))
+              assert.strictEqual(JSON.parse(yield* page.locator("#out").readText).target, "go")
+            }))
+          }),
+        timeout
+      )
+
       it.effect("dispatches click inside a one-pixel fragment after rounding", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
