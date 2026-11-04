@@ -267,7 +267,7 @@ const replyMetrics = (browser: Effect.Success<typeof makeBrowser>, command: Sent
   browser.receive({ id: command.id, sessionId: command.sessionId, result: metrics })
 
 /** A synthetic CDP connection folded into the real public Browser layer. */
-const sentHeaders = Effect.fnUntraced(function*(holdMetrics = false) {
+const sentHeaders = Effect.fnUntraced(function*(holdMetrics = false, holdStart = false) {
   const browser = yield* makeBrowser
   const ready = yield* Deferred.make<void>()
   const settled = yield* Queue.unbounded<void>()
@@ -301,6 +301,7 @@ const sentHeaders = Effect.fnUntraced(function*(holdMetrics = false) {
         yield* Queue.offer(preparation, command)
         continue
       }
+      if (holdStart && command.method === "Page.startScreencast") continue
       const result = command.method === "Runtime.evaluate"
         ? { result: { type: "number", value: 2 } }
         : command.method === "Browser.getVersion"
@@ -840,7 +841,10 @@ describe("Chromium screenshot renderer readiness", () => {
               )
               if (terminal === "reject" && error.value.reason._tag === "BackendFailure") {
                 assert.strictEqual(error.value.reason.kind, "Rejected")
-                assert.strictEqual(error.value.reason.method, "Page.getLayoutMetrics")
+                assert.strictEqual(
+                  error.value.reason.method,
+                  terminal === "detach" ? "unknown" : "Page.getLayoutMetrics"
+                )
                 assert.include(error.value.reason.hint, "renderer metrics failed")
               }
             }
@@ -891,6 +895,28 @@ describe("Chromium screencast renderer readiness", () => {
       assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
     }).pipe(onTestClock))
 
+  it.effect("spends the same acquisition deadline on metrics and start", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(true, true)
+      const page = yield* h.page.control
+      const pending = yield* Effect.forkScoped(Effect.exit(
+        page.capability(Capability.Screencast).pipe(
+          Deadline.within("1 second")
+        )
+      ))
+      const first = yield* Queue.take(h.screenshotWork)
+      assert.strictEqual(first.method, "Page.getLayoutMetrics")
+      yield* TestClock.adjust("750 millis")
+      yield* replyMetrics(h.browser, first)
+      assert.strictEqual((yield* Queue.take(h.screenshotWork)).method, "Page.startScreencast")
+      yield* TestClock.adjust("250 millis")
+      const exit = yield* Fiber.join(pending)
+      assert(Exit.isFailure(exit))
+      const error = Exit.findErrorOption(exit)
+      assert(Option.isSome(error) && Deadline.isTimeout(error.value))
+      assert.strictEqual(error.value.phase, "dispatchedUnconfirmed")
+    }).pipe(onTestClock))
+
   for (const terminal of ["reject", "malformed", "detach", "deadline", "interrupt"] as const) {
     it.effect(`prevents start after metrics ${terminal} and a late reply, closing the caller scope`, () =>
       Effect.gen(function*() {
@@ -929,14 +955,15 @@ describe("Chromium screencast renderer readiness", () => {
           if (terminal === "deadline") {
             assert(Deadline.isTimeout(error.value))
             assert.strictEqual(error.value.phase, "dispatchedUnconfirmed")
-          } else if (terminal === "detach") {
-            assert.strictEqual(error.value._tag, "TargetGone")
           } else {
             assert(Capability.isCapabilityError(error.value))
             assert.strictEqual(error.value.reason._tag, "BackendFailure")
             if (error.value.reason._tag === "BackendFailure") {
-              assert.strictEqual(error.value.reason.method, "Page.getLayoutMetrics")
-              assert.strictEqual(error.value.reason.kind, terminal === "reject" ? "Rejected" : "IncompatibleResponse")
+              assert.strictEqual(error.value.reason.method, terminal === "detach" ? "unknown" : "Page.getLayoutMetrics")
+              assert.strictEqual(
+                error.value.reason.kind,
+                terminal === "malformed" ? "IncompatibleResponse" : "Rejected"
+              )
             }
           }
         }
