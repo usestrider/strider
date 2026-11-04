@@ -113,7 +113,10 @@ export const toFailure = (error: unknown): Tools.ToolFailure => {
   )
 }
 
-const editable = new Set(["textbox", "searchbox", "combobox", "spinbutton"])
+const editable = new Set(["textbox", "searchbox", "combobox", "spinbutton", "editable"])
+
+/** Fields keep their labels; their descendants and text-derived editable names are field content. */
+const privateName = (role: string, fromText: boolean, inside: boolean) => inside || (role === "editable" && fromText)
 
 // Consume quoted names and text too, so only tokens outside JSON strings are masked.
 const snapshotToken = /\[validationMessage=("(?:[^"\\]|\\.)*")\]|"(?:[^"\\]|\\.)*"/g
@@ -128,10 +131,13 @@ export const masked = (text: string): string => {
   return lines.map((line) => {
     const indent = line.length - line.trimStart().length
     if (inside !== undefined && indent <= inside) inside = undefined
-    if (inside !== undefined && line.trimStart().startsWith("- text:")) return `${" ".repeat(indent)}- text: "•••"`
-    const role = /^\s*- ([a-z]+)/.exec(line)?.[1]
-    if (role !== undefined && editable.has(role) && line.endsWith(":")) inside = indent
-    return line
+    // Consume the complete JSON name before inspecting metadata, so a label cannot forge its origin.
+    const node = /^(\s*- ([a-z]+):?)(?: ("(?:[^"\\]|\\.)*"))?(.*)$/.exec(line)
+    if (node === null) return line
+    const [, prefix, role, name, metadata] = node
+    const hidden = privateName(role!, metadata!.includes("[name from: text]"), inside !== undefined)
+    if (inside === undefined && editable.has(role!) && line.endsWith(":")) inside = indent
+    return hidden && name !== undefined ? `${prefix} "•••"${metadata}` : line
   }).join("\n")
 }
 
@@ -660,28 +666,37 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
           const found: Array<{ ref: string; role: string; name: string; path: string }> = []
           const seen = new Set<string>()
           // A match without a ref of its own, such as text, is reported as the nearest element with one
-          const visit = (node: Snapshot.Node, path: ReadonlyArray<string>, owner: Snapshot.Node | undefined) => {
+          const visit = (
+            node: Snapshot.Node,
+            path: ReadonlyArray<string>,
+            owner: { readonly node: Snapshot.Node; readonly name: string } | undefined,
+            inside: boolean
+          ) => {
             const nodeName = node.name._tag === "None" ? "" : node.name.value
             const nodeRole = String(node.role.role)
-            const holder = Option.isSome(node.ref) ? node : owner
-            if (holder !== undefined && Option.isSome(holder.ref) && matches(nodeName)) {
-              const holderRole = String(holder.role.role)
-              const ref = holder.ref.value
+            const hidden = capture.snapshotText !== "full" &&
+              privateName(nodeRole, node.name._tag === "Inferred" && node.name.from === "text", inside)
+            const shown = hidden && node.name._tag !== "None" ? "•••" : nodeName
+            const holder = Option.isSome(node.ref) ? { node, name: shown } : owner
+            if (holder !== undefined && Option.isSome(holder.node.ref) && matches(nodeName)) {
+              const holderRole = String(holder.node.role.role)
+              const ref = holder.node.ref.value
               if ((role === undefined || holderRole === role) && !seen.has(ref)) {
                 seen.add(ref)
                 found.push({
                   ref,
                   role: holderRole,
-                  name: holder.name._tag === "None" ? "" : holder.name.value,
+                  name: holder.name,
                   path: path.join(" > ")
                 })
               }
             }
-            const label = nodeName === "" ? nodeRole : `${nodeRole} "${nodeName}"`
+            const label = shown === "" ? nodeRole : `${nodeRole} "${shown}"`
             const next = Option.isSome(node.ref) && nodeRole !== "text" ? [...path, label] : path
-            for (const child of node.children) visit(child, next, holder)
+            for (const child of node.children) visit(child, next, holder, inside || editable.has(nodeRole))
           }
-          visit(snapshot.root, [], undefined)
+          // Matching retains the original names; only displayed names and paths follow capture policy.
+          visit(snapshot.root, [], undefined, false)
           return found
         })),
     screenshot: ({ page: name }) =>

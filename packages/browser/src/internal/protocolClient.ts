@@ -20,6 +20,7 @@
  * sessions the lifecycle attaches and ends.
  */
 import * as Cause from "effect/Cause"
+import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
@@ -196,6 +197,8 @@ export interface Fold {
 
 /** Settings for a client. */
 export interface Options {
+  /** Internal timer seam: omitted clients retain the live browser clock and timers. */
+  readonly replyClock?: Clock.Clock | undefined
   /**
    * The fold, given the client's control. Every session the lifecycle attaches is held until the fold syncs
    * it, so the fold must sync each one, if only with an empty snapshot.
@@ -380,6 +383,8 @@ export const make: (
   wire: Wire,
   options?: Options
 ) {
+  const replyClock = options?.replyClock
+  const replyBrowserClock = replyClock === undefined ? BrowserClock.live : BrowserClock.fromClock(replyClock)
   const validation = yield* Protocol.CurrentValidation
   const pending = new Map<number, Pending>()
   const sessions = new Map<Protocol.SessionKey, SessionState>()
@@ -501,7 +506,7 @@ export const make: (
       )
     const deadline = yield* CommandDeadline
     const timeout = Option.isSome(deadline)
-      ? Duration.millis(BrowserClock.millisLeft(BrowserClock.live, deadline.value))
+      ? Duration.millis(BrowserClock.millisLeft(replyBrowserClock, deadline.value))
       : yield* Protocol.CommandTimeout
     const onLate = definition.traits.createsResource === true ? yield* Protocol.CurrentLateReplyHandler : undefined
     const decode = definition.Result === undefined
@@ -521,12 +526,16 @@ export const make: (
         runLate(entry, onLate)
       }
     })
-    // On the live clock: the browser is another process, which `TestClock` doesn't move
+    // The browser clock rechecks the monotonic deadline when a timer fires early.
     const awaited = Duration.isFinite(timeout)
-      ? Effect.timeoutOrElse(Deferred.await(entry.reply), {
-        duration: timeout,
-        orElse: () => Effect.andThen(abandon, Effect.fail(failure(new Protocol.NoReply({ method, timeout }))))
-      }).pipe(BrowserClock.onLive)
+      ? Deferred.await(entry.reply).pipe(
+        BrowserClock.timeoutOn(replyBrowserClock, Duration.toMillis(timeout)),
+        Effect.flatMap((reply) =>
+          Option.isSome(reply)
+            ? Effect.succeed(reply.value)
+            : Effect.andThen(abandon, Effect.fail(failure(new Protocol.NoReply({ method, timeout }))))
+        )
+      )
       : Deferred.await(entry.reply)
     const tracing = yield* Tracing.TraceProtocolCommands
     return {

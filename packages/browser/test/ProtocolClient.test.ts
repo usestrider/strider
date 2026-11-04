@@ -8,15 +8,24 @@ import * as Page from "@usestrider/browser/cdp/Page"
 import * as Target from "@usestrider/browser/cdp/Target"
 import { Protocol, Transport } from "@usestrider/browser/protocol"
 import * as Cause from "effect/Cause"
+import type * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
+import * as Condition from "../src/Condition.ts"
+import * as Deadline from "../src/Deadline.ts"
+import * as Expect from "../src/Expect.ts"
+import * as Adapter from "../src/internal/adapter.ts"
 import * as BidiWire from "../src/internal/bidiWire.ts"
+import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
+import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as CdpWire from "../src/internal/cdpWire.ts"
 import * as Ingestion from "../src/internal/ingestion.ts"
+import * as Operation from "../src/internal/operation.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as WebKitWire from "../src/internal/webkitWire.ts"
 import { type FakeBrowser, makeBrowser } from "./utils/FakeBrowser.ts"
@@ -93,6 +102,96 @@ const reasonOf = <A>(exit: Exit.Exit<A, Protocol.ProtocolError>) => {
   assert(error._tag === "Some")
   return error.value.reason
 }
+
+/** Only the reply timer advances time; operation-bound timers stay pending so they cannot hide an early reply. */
+const earlyReplyClock = () => {
+  let nanos = 1_000_000_000n
+  let sleeps = 0
+  const clock: Clock.Clock = {
+    currentTimeMillisUnsafe: () => Number(nanos) / 1e6,
+    currentTimeMillis: Effect.sync(() => Number(nanos) / 1e6),
+    currentTimeNanosUnsafe: () => nanos,
+    currentTimeNanos: Effect.sync(() => nanos),
+    monotonicTimeNanosUnsafe: () => nanos,
+    monotonicTimeNanos: Effect.sync(() => nanos),
+    sleep: (duration) =>
+      Effect.sync(() => {
+        const asked = Duration.toNanos(duration)
+        assert(asked._tag === "Some")
+        nanos += sleeps++ === 0 ? asked.value - 400_000n : asked.value
+      })
+  }
+  const reply = BrowserClock.fromClock(clock)
+  return {
+    clock,
+    reply,
+    operation: { now: reply.now, sleep: () => Effect.never } satisfies BrowserClock.BrowserClock,
+    sleeps: () => sleeps
+  }
+}
+
+describe("ProtocolClient reply deadlines", () => {
+  it.effect("does not report NoReply when its timer fires before the command deadline", () =>
+    Effect.gen(function*() {
+      const timer = earlyReplyClock()
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, { replyClock: timer.clock })
+      const at = timer.reply.now() + 250 * 1e6
+      const error = yield* client.root.send(Page.enable()).pipe(
+        Effect.provideService(Protocol.CommandTimeout, Duration.millis(250)),
+        Effect.flip
+      )
+      assert.strictEqual(error.reason._tag, "NoReply")
+      assert.isAtLeast(timer.reply.now(), at, "NoReply must wait for the monotonic deadline")
+      assert.isAbove(timer.sleeps(), 1)
+    }))
+
+  for (const shorter of [false, true]) {
+    it.effect(
+      shorter
+        ? "preserves a shorter explicit subject deadline after an early reply timer"
+        : "turns an inherited deadline into ExpectationFailed after an early reply timer",
+      () =>
+        Effect.gen(function*() {
+          const timer = earlyReplyClock()
+          const browser = yield* makeBrowser
+          const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, { replyClock: timer.clock })
+          const noReplyAt: Array<number> = []
+          const adapter = BoundedAdapter.make({
+            cookies: () =>
+              client.root.send(Page.enable()).pipe(
+                Effect.mapError((error) => {
+                  if (error.reason._tag === "NoReply") noReplyAt.push(timer.reply.now())
+                  return new Adapter.AdapterError({ reason: { _tag: "Protocol", error } })
+                })
+              )
+          } as unknown as Adapter.AdapterConnection)
+          const started = timer.reply.now()
+          const subject = adapter.cookies("context" as never).pipe(Operation.named("subject"))
+          const error = yield* Expect.that(
+            shorter ? subject.pipe(Deadline.within("100 millis")) : subject,
+            Condition.make("never", () => false)
+          ).pipe(
+            Deadline.within("250 millis"),
+            Effect.provideService(BrowserClock.CurrentClock, timer.operation),
+            Effect.flip
+          )
+          if (shorter) {
+            assert(Deadline.isTimeout(error), String(error))
+            assert.strictEqual(error.phase, "resolving")
+            assert.strictEqual(error.operation, "Expect.that")
+          } else {
+            assert(Expect.isExpectationFailed(error), String(error))
+            assert.deepStrictEqual(error.history.map((entry) => entry.value), [
+              { error: "a check was still running at the deadline" }
+            ])
+          }
+          assert.deepStrictEqual(noReplyAt, [started + (shorter ? 100 : 250) * 1e6])
+          assert.isAbove(timer.sleeps(), 1, "the protocol timer must re-check its clock")
+        })
+    )
+  }
+})
 
 describe("ProtocolClient", () => {
   const click = () =>
