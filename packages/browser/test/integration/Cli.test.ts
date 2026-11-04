@@ -1122,12 +1122,18 @@ describe("strider", () => {
       `masks all of an editable field's content with ${capture} capture`,
       () =>
         Effect.scoped(Effect.gen(function*() {
-          const served = yield* site
-          const url = `${served.origin}/fixture?html=${
-            encodeURIComponent(
+          const server = http.createServer((_, response) => {
+            response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+            response.end(
               `<div role="textbox" aria-label="Rich" contenteditable="true"><h1>rich-heading<a href="#x">rich-link</a></h1><button onclick="document.getElementById('status').textContent = 'clicked'">rich-button</button><img alt="rich-image" src="data:,"></div><div contenteditable="true">roleless-field</div><div contenteditable="true" aria-label="Labeled">labeled-private</div><p id="status">ready</p>`
             )
-          }`
+          })
+          yield* Effect.acquireRelease(
+            Effect.callback<void>((resume) => void server.listen(0, "127.0.0.1", () => resume(Effect.void))),
+            () => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
+          )
+          const { port } = server.address() as { readonly port: number }
+          const url = `http://127.0.0.1:${port}/form`
           const env = environment()
           const run = (...args: ReadonlyArray<string>) => strider(env, "-s", capture, ...args)
           const page = (...args: ReadonlyArray<string>) => run("-p", "form", ...args)

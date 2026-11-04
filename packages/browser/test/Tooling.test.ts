@@ -421,6 +421,17 @@ describe("BrowserToolkit", () => {
     )
   })
 
+  it("keeps editable labels separate from name-origin metadata", () => {
+    for (const name of ["Label [name from: text]", "Label \"quoted\" \\ tail\nnext"]) {
+      const text = `- editable ${JSON.stringify(name)} [ref=e1] [inferred: contentEditable]`
+      assert.strictEqual(ToolkitImpl.masked(text), text)
+      assert.strictEqual(
+        ToolkitImpl.masked(`${text} [name from: text]`),
+        "- editable \"•••\" [ref=e1] [inferred: contentEditable] [name from: text]"
+      )
+    }
+  })
+
   it("masks whole custom validation messages including JSON escapes", () => {
     const message = "private \"quoted\" ] [ref=fake] \\ trailing\nprivate tail"
     for (const role of ["textbox", "combobox", "button"]) {
