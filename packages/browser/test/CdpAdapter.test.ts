@@ -777,7 +777,7 @@ describe("Chromium screenshot renderer readiness", () => {
           if (terminal === "timeout") {
             assert(Deadline.isTimeout(error.value))
             assert.strictEqual(error.value.operation, "Page.screenshot")
-            assert.strictEqual(error.value.phase, "sent")
+            assert.strictEqual(error.value.phase, "dispatchedUnconfirmed")
           } else {
             assert.strictEqual(error.value._tag, "PageError")
             if (error.value._tag === "PageError") {
