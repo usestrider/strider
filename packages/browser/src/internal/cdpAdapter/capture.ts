@@ -81,16 +81,21 @@ export const guard = <A, E, R>(
     )
   })
 
+// Renderer commands wait behind tracked navigation processing; frameNavigated alone can precede
+// browser-side frame activation checked by screenshot and screencast acquisition. This single read
+// adds renderer/style/layout work within the existing deadline and can fail or exhaust it before
+// capture dispatch. It is interruptible, not an activation lease across another navigation.
+const layoutMetrics = (session: ProtocolClient.Session) =>
+  Kit.protocol(Page.getLayoutMetrics().pipe(Protocol.on(session)))
+
 export const screenshot = Effect.fnUntraced(
   function*(state: State, id: L1Target.NavigableId, options: Adapter.ScreenshotOptions) {
     const page = yield* pageOf(state, id)
     const on = Protocol.on(page.target.session)
     let clip = Option.getOrUndefined(options.clip)
     let scale = 1
-    // Renderer commands wait behind tracked navigation processing; frameNavigated alone can precede
-    // browser-side frame activation. This round trip is interruptible under the capture deadline.
     const guard = yield* CurrentGuard
-    const metrics = yield* Kit.protocol(Page.getLayoutMetrics().pipe(on)).pipe(
+    const metrics = yield* layoutMetrics(page.target.session).pipe(
       Effect.catch((error) => {
         const reason = error.reason
         // A terminal metrics error must not overtake an already observed replacement. Metrics are
@@ -259,6 +264,7 @@ export const screencast = Effect.fnUntraced(function*(state: State, id: L1Target
   const session = page.target.session
   const on = Protocol.on(session)
   const frames = yield* session.subscribe(Page.screencastFrame)
+  yield* layoutMetrics(session)
   yield* Kit.protocol(Page.startScreencast({ format: "jpeg" }).pipe(on))
   yield* Effect.addFinalizer(() => Page.stopScreencast().pipe(on, Effect.ignore))
   return frames.pipe(

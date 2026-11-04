@@ -108,6 +108,10 @@ Use the narrowest check that covers the change:
 
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
 
+Failed integration tests name their traces in `.data/integration-failures/`; CI retains them alongside
+`integration.log` for 14 days. Capture details, bounds and limitations are documented at the top of
+`packages/browser/test/integration/failureTrace.ts`.
+
 ## Conventions
 
 Strider follows the Effect core team's conventions; `docs/conventions.md` records them, and API.md's Conventions
