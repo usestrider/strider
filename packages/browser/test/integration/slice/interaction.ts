@@ -4,7 +4,17 @@
  * with its scope, every read and matcher, the keyboard and the mouse, and two pages of one context.
  */
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Condition, Deadline, Expect, FileInput, Keyboard, Locator, Mouse } from "@usestrider/browser"
+import {
+  Browser,
+  Condition,
+  Deadline,
+  Expect,
+  FileInput,
+  Keyboard,
+  Locator,
+  Mouse,
+  Operation
+} from "@usestrider/browser"
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -189,6 +199,174 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               assert.strictEqual(JSON.parse(yield* frame.locator("#out").readText).target, "go")
             }))
           }), timeout)
+      }
+
+      for (const coveredIn of ["outer", "middle"] as const) {
+        it.effect(
+          `selects a later fragment through nested cross-origin frames covered in ${coveredIn}`,
+          () =>
+            Effect.gen(function*() {
+              const { origin, crossSite } = yield* site
+              const leaf =
+                `<!doctype html><style>body{margin:0;font:16px/24px monospace;width:240px}</style><a id="go" href="#">${
+                  Array(6).fill("abcdefghij").join(" ")
+                }</a><output id="out"></output>${recordsClick}`
+              const cover =
+                `<div id="cover" style="position:absolute;left:0;top:0;width:400px;height:24px;background:white"></div>`
+              const middle = `<style>body{margin:0}iframe{width:300px;height:150px;border:0}</style><iframe src="${
+                fixtureUrl(origin, leaf)
+              }"></iframe>${coveredIn === "middle" ? cover : ""}`
+              const html = `<style>body{margin:0}iframe{width:300px;height:160px;border:0}</style><iframe src="${
+                fixtureUrl(crossSite, middle)
+              }"></iframe>${coveredIn === "outer" ? cover : ""}`
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(fixtureUrl(origin, html))
+                const outer = page.frame(page.locator("iframe"))
+                const inner = outer.frame(outer.locator("iframe"))
+                yield* inner.locator("#go").click().pipe(Deadline.within("1 second"))
+                const event = JSON.parse(yield* inner.locator("#out").readText) as { target: string; y: number }
+                assert.strictEqual(event.target, "go")
+                assert.isAtLeast(event.y, 24)
+                assert.isBelow(event.y, 48)
+              }))
+            }),
+          timeout
+        )
+      }
+
+      for (const mode of ["wholly covered", "explicit covered", "disabled pointer checks", "drag target"] as const) {
+        it.effect(`preserves ${mode} through parent coverage`, () =>
+          Effect.gen(function*() {
+            const inner =
+              `<!doctype html><style>body{margin:0;font:16px/24px monospace;width:240px}</style><a id="go" href="#">${
+                Array(6).fill("abcdefghij").join(" ")
+              }</a><output id="out"></output>${recordsClick}`
+            const { url } = yield* fixture(() =>
+              `<style>body{margin:0}iframe{position:absolute;left:20px;top:20px;width:300px;height:150px;border:0}</style><iframe srcdoc='${inner}'></iframe><div id="cover" style="position:absolute;left:0;top:0;width:400px;height:200px"></div>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const frame = page.frame(page.locator("iframe"))
+              const target = frame.locator("#go")
+              if (mode === "disabled pointer checks") {
+                yield* target.click({ trial: true, checks: { receivesPointer: false } }).pipe(
+                  Deadline.within("1 second")
+                )
+              } else if (mode === "drag target") {
+                assert(target instanceof LocatorImpl)
+                const point = yield* target.pointOf(undefined).pipe(Operation.named("test.dragTarget"))
+                assert(Option.isSome(point))
+                const expected = yield* page.evaluateInMainWorld(() => {
+                  const rect = document.querySelector("iframe")!.contentDocument!.querySelector("#go")!
+                    .getClientRects()[0]!
+                  return { x: 20 + (rect.left + rect.right) / 2, y: 20 + (rect.top + rect.bottom) / 2 }
+                })
+                assert.deepStrictEqual(point.value, expected)
+              } else {
+                const error = yield* target.click({
+                  position: mode === "explicit covered" ? { x: 2, y: 2 } : undefined
+                }).pipe(Deadline.within("1 second"), Effect.flip)
+                assert(Deadline.isTimeout(error), String(error))
+                assert(error.history.some((e) => {
+                  const value = e.value as { _tag: string; by?: string }
+                  return value._tag === "Covered" && value.by?.includes("#cover")
+                }))
+              }
+              assert.strictEqual(yield* frame.locator("#out").readText, "")
+            }))
+          }), timeout)
+      }
+
+      for (const change of ["moved", "replaced"] as const) {
+        it.effect(
+          `refreshes parent candidates when the child is ${change} during checks`,
+          () =>
+            Effect.gen(function*() {
+              const inner =
+                `<!doctype html><style>body{margin:0;font:16px/24px monospace;width:240px}</style><a id="go" href="#">${
+                  Array(6).fill("abcdefghij").join(" ")
+                }</a><output id="out"></output>${recordsClick}`
+              const { url } = yield* fixture(() =>
+                `<style>body{margin:0}iframe{width:400px;height:150px;border:0}</style><iframe srcdoc='${inner}'></iframe><div style="position:absolute;left:0;top:0;width:500px;height:24px"></div>`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const frame = page.frame(page.locator("iframe"))
+                const target = frame.locator("#go")
+                assert(target instanceof LocatorImpl)
+                const adapter = target.owner.runtime.model.adapter
+                const evaluateDescriptor = Object.getOwnPropertyDescriptor(adapter, "evaluate")!
+                const dispatchDescriptor = Object.getOwnPropertyDescriptor(adapter, "dispatchInput")!
+                const evaluate = adapter.evaluate
+                const dispatch = adapter.dispatchInput
+                let applying = false
+                let changed = false
+                let presses = 0
+                yield* Effect.acquireRelease(
+                  Effect.sync(() => {
+                    Object.defineProperty(adapter, "evaluate", {
+                      ...evaluateDescriptor,
+                      value: ((realm, call) => {
+                        const arg = call.arguments[0]
+                        if (
+                          call.functionDeclaration === Engine.run && arg?._tag === "Value" &&
+                          arg.value.type === "string"
+                        ) {
+                          const request = JSON.parse(arg.value.value) as {
+                            op: string
+                            apply?: boolean
+                            point?: unknown
+                          }
+                          if (request.op === "act" && request.apply) applying = true
+                          if (applying && !changed && request.op === "frame" && request.point != null) {
+                            changed = true
+                            return page.evaluateInMainWorld((change: string) => {
+                              const go = document.querySelector("iframe")!.contentDocument!.querySelector(
+                                "#go"
+                              )! as HTMLElement
+                              if (change === "moved") {
+                                go.style.position = "relative"
+                                go.style.left = "120px"
+                              } else go.replaceWith(go.cloneNode(true))
+                            }, change).pipe(Effect.andThen(evaluate(realm, call)))
+                          }
+                        }
+                        return evaluate(realm, call)
+                      }) as typeof adapter.evaluate
+                    })
+                    Object.defineProperty(adapter, "dispatchInput", {
+                      ...dispatchDescriptor,
+                      value: ((...args: Parameters<typeof adapter.dispatchInput>) => {
+                        presses += args[1].filter((e) => e._tag === "Mouse" && e.type === "down").length
+                        return dispatch(...args)
+                      }) as typeof adapter.dispatchInput
+                    })
+                  }),
+                  () =>
+                    Effect.sync(() => {
+                      Object.defineProperty(adapter, "evaluate", evaluateDescriptor)
+                      Object.defineProperty(adapter, "dispatchInput", dispatchDescriptor)
+                    })
+                )
+                yield* target.click().pipe(Deadline.within("2 seconds"))
+                assert.isTrue(changed)
+                assert.strictEqual(presses, 1, "discard changed geometry before sending any gesture")
+                const event = JSON.parse(yield* frame.locator("#out").readText) as {
+                  target: string
+                  x: number
+                  y: number
+                }
+                assert.strictEqual(event.target, "go")
+                assert.isAtLeast(event.y, 24)
+                assert.isBelow(event.y, 48)
+                if (change === "moved") assert.isAtLeast(event.x, 120)
+              }))
+            }),
+          timeout
+        )
       }
 
       it.effect("clicks a wrapped link whose first line a scrolling ancestor clips", () =>
