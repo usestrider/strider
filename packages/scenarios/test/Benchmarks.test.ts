@@ -1,6 +1,6 @@
 import { deflateSync } from "node:zlib"
 import { describe, expect, it } from "vitest"
-import { captureCases } from "../src/benchmarks/cases.ts"
+import { captureCases, cases } from "../src/benchmarks/cases.ts"
 import { compare, measure, options, summarize } from "../src/benchmarks/measure.ts"
 
 describe("benchmark measurements", () => {
@@ -219,4 +219,45 @@ it("rejects dense-image corruption away from the first pixel", () => {
   chunk.write("IDAT", 4)
   compressed.copy(chunk, 8)
   expect(() => entry.verify(Buffer.concat([header, chunk]))).toThrow()
+})
+
+
+describe("viewport capture pixels", () => {
+  const image = (corrupt: boolean) => {
+    const header = Buffer.alloc(33)
+    Buffer.from("89504e470d0a1a0a", "hex").copy(header)
+    header.writeUInt32BE(13, 8)
+    header.write("IHDR", 12)
+    header.writeUInt32BE(1280, 16)
+    header.writeUInt32BE(720, 20)
+    header[24] = 8
+    header[25] = 2
+    const stride = 1280 * 3 + 1
+    const raw = Buffer.alloc(stride * 720, 255)
+    for (let y = 0; y < 720; y++) raw[y * stride] = 0
+    for (let y = 650; y < 714; y++) {
+      for (const [left, rgb] of [[0, [200, 40, 60]], [600, [30, 170, 90]], [1216, [50, 80, 220]]] as const) {
+        for (let x = left; x < left + 64; x++) raw.set(rgb, y * stride + 1 + x * 3)
+      }
+    }
+    if (corrupt) raw[700 * stride + 1 + 620 * 3]! ^= 1
+    const data = deflateSync(raw)
+    const chunk = Buffer.alloc(12 + data.length)
+    chunk.writeUInt32BE(data.length)
+    chunk.write("IDAT", 4)
+    data.copy(chunk, 8)
+    return Buffer.concat([header, chunk])
+  }
+  it("accepts viewport marker pixels and rejects one changed channel", () => {
+    const entry = cases.find((entry) => entry.name === "screenshot")!
+    entry.verify(image(false))
+    expect(() => entry.verify(image(true))).toThrow()
+  })
+  it("checks marker pixels in every repeated capture", () => {
+    const entry = captureCases.find((entry) => entry.name === "screenshot-repeated")!
+    const images = Array.from({ length: 5 }, () => image(false))
+    entry.verify(images)
+    images[3] = image(true)
+    expect(() => entry.verify(images)).toThrow()
+  })
 })
