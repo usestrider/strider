@@ -23,6 +23,7 @@ import { createServer } from "node:http"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
 import { assertPinned, chromium } from "../browsers.ts"
 import { diagnostic } from "../diagnostic.ts"
+import { observeProcesses } from "../processDiagnostic.ts"
 
 const serve = Effect.acquireRelease(
   Effect.promise(async () => {
@@ -266,6 +267,7 @@ describe("Chromium reconnect identity probes", () => {
               assert.isNotEmpty(oldToken)
               const crashes = yield* session.subscribe(Inspector.targetCrashed)
               const crashed = yield* Stream.runHead(crashes).pipe(Effect.forkChild)
+              yield* observeProcesses(diagnosticTrace.note, Number(launched.handle.pid), subject.targetId)
               yield* Page.crash().pipe(
                 Protocol.on(session),
                 Effect.onExit((exit) => Effect.sync(() => diagnosticTrace.note("Page.crash outcome", exit))),

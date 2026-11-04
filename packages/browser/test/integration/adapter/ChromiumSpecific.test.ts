@@ -25,6 +25,7 @@ import { LocatorImpl } from "../../../src/internal/locator.ts"
 import * as L1Target from "../../../src/Target.ts"
 import { assertPinned, chromium } from "../browsers.ts"
 import { diagnostic } from "../diagnostic.ts"
+import { observeProcesses } from "../processDiagnostic.ts"
 import { makeRecorder, site } from "./harness.ts"
 
 const executable = chromium.executable
@@ -342,6 +343,7 @@ describe("Chromium adapter, CDP only", () => {
             const { sessionId } = yield* Target.attachToTarget({ targetId: target.targetId, flatten: true }).pipe(
               Protocol.on(other.browser)
             )
+            yield* observeProcesses(trace.note, Number(launched.handle.pid), target.targetId)
             // Observe its outcome without blocking the fact wait on a command that may remain pending.
             yield* Page.crash().pipe(
               Protocol.on(yield* other.session(sessionId)),
