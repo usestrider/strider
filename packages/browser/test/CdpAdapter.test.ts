@@ -841,10 +841,7 @@ describe("Chromium screenshot renderer readiness", () => {
               )
               if (terminal === "reject" && error.value.reason._tag === "BackendFailure") {
                 assert.strictEqual(error.value.reason.kind, "Rejected")
-                assert.strictEqual(
-                  error.value.reason.method,
-                  terminal === "detach" ? "unknown" : "Page.getLayoutMetrics"
-                )
+                assert.strictEqual(error.value.reason.method, "Page.getLayoutMetrics")
                 assert.include(error.value.reason.hint, "renderer metrics failed")
               }
             }
@@ -863,7 +860,7 @@ describe("Chromium screencast renderer readiness", () => {
     Effect.gen(function*() {
       const h = yield* sentHeaders(true)
       const page = yield* h.page.control
-      yield* Effect.scoped(Effect.gen(function*() {
+      const closedFrames = yield* Effect.scoped(Effect.gen(function*() {
         const pending = yield* Effect.forkScoped(page.capability(Capability.Screencast))
         const first = yield* Queue.take(h.screenshotWork)
         assert.strictEqual(first.method, "Page.getLayoutMetrics")
@@ -888,7 +885,9 @@ describe("Chromium screencast renderer readiness", () => {
           }
         })
         assert.strictEqual((yield* Fiber.join(collecting)).length, 1)
+        return acquired.frames
       }))
+      assert.deepStrictEqual(yield* Stream.runCollect(closedFrames), [], "caller scope closes the frame subscription")
       assert.strictEqual(h.commands.filter((c) => c.method === "Page.getLayoutMetrics").length, 1)
       assert.strictEqual(h.commands.filter((c) => c.method === "Page.startScreencast").length, 1)
       assert.deepStrictEqual(h.commands.find((c) => c.method === "Page.screencastFrameAck")?.params, { sessionId: 7 })
