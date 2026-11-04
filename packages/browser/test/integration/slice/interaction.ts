@@ -176,6 +176,25 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
+      for (const position of ["fixed", "absolute"] as const) {
+        it.effect(
+          `clicks a link inside a ${position} box that escapes an overflow ancestor`,
+          () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<!doctype html><style>body{margin:0}#s{margin:100px;width:30px;height:30px;overflow:hidden}#box{position:${position};left:300px;top:100px}</style><div id="s"><span id="box"><a id="go" href="#go">Go</a></span></div><output id="out"></output>${recordsClick}`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
+                assert.strictEqual(JSON.parse(yield* page.locator("#out").readText).target, "go")
+              }))
+            }),
+          timeout
+        )
+      }
+
       it.effect("clicks a wrapped link clipped by nested cross-origin parent frames", () =>
         Effect.gen(function*() {
           const { origin, crossSite } = yield* site
