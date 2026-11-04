@@ -1113,7 +1113,9 @@ describe("Chromium screenshot guard lifecycle", () => {
       const native = {
         ...session,
         drainObserved: Effect.void,
-        send: Effect.fnUntraced(function*() {
+        send: Effect.fnUntraced(function*(command: { readonly method: string }) {
+          if (command.method === "Page.getLayoutMetrics") return {}
+          assert.strictEqual(command.method, "Page.captureScreenshot")
           const observe = yield* ProtocolClient.ReplyReceived
           observe?.(10)
           yield* Deferred.succeed(receipt, undefined)

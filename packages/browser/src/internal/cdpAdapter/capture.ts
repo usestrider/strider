@@ -87,8 +87,27 @@ export const screenshot = Effect.fnUntraced(
     const on = Protocol.on(page.target.session)
     let clip = Option.getOrUndefined(options.clip)
     let scale = 1
+    // Renderer commands wait behind tracked navigation processing; frameNavigated alone can precede
+    // browser-side frame activation. This round trip is interruptible under the capture deadline.
+    const guard = yield* CurrentGuard
+    const metrics = yield* Kit.protocol(Page.getLayoutMetrics().pipe(on)).pipe(
+      Effect.catch((error) => {
+        const reason = error.reason
+        // A terminal metrics error must not overtake an already observed replacement. Metrics are
+        // preparation, not the native capture reply; a lost session or unanswered command keeps its error.
+        if (
+          guard === undefined || reason._tag !== "Protocol" ||
+          (reason.error.reason._tag !== "Rejected" && reason.error.reason._tag !== "Decode")
+        ) {
+          return Effect.fail(error)
+        }
+        return page.target.session.drainObserved.pipe(
+          Effect.andThen(guard.check),
+          Effect.andThen(Effect.fail(error))
+        )
+      })
+    )
     if ((options.fullPage && clip === undefined) || options.scale === "css") {
-      const metrics = yield* Kit.protocol(Page.getLayoutMetrics().pipe(on))
       if (options.fullPage && clip === undefined) {
         clip = { x: 0, y: 0, width: metrics.cssContentSize.width, height: metrics.cssContentSize.height }
       }
@@ -110,7 +129,6 @@ export const screenshot = Effect.fnUntraced(
     if (options.omitBackground) {
       yield* Kit.protocol(Emulation.setDefaultBackgroundColorOverride({ color: { r: 0, g: 0, b: 0, a: 0 } }).pipe(on))
     }
-    const guard = yield* CurrentGuard
     yield* page.target.session.drainObserved
     if (guard !== undefined) yield* guard.check
     const { data } = yield* Kit.protocol(
