@@ -104,6 +104,10 @@ const rules = [
   ]],
   ["/playwright-core/lib/coreBundle.js", [
     [
+      "          await browser._waitForAllPagesToBeInitialized();",
+      `          await browser._waitForAllPagesToBeInitialized();\n          ${mark("pw.persistent.ready")}`
+    ],
+    [
       "      async _prepareToLaunch(options, isPersistent, userDataDir) {",
       `      async _prepareToLaunch(options, isPersistent, userDataDir) {\n        ${mark("pw.profile.start")}`
     ],

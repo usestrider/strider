@@ -109,7 +109,7 @@ const save = () => {
       "",
       ...results.map((result) => `- **${result.name}:** ${result.description}.`),
       "",
-      "Operation cases use a fresh context and page for every sample; setup and cleanup are outside timing. Launch excludes shutdown; first-page excludes fresh launch and cleanup; shutdown has no owned pages. Page-lifecycle includes context/page creation and cleanup; repeated-lifecycle sums five cycles with page counts and context termination checked between timers. Default launch flags and actionability behavior belong to each library. Browser module imports are outside all timings. Raw samples and machine/source metadata are in the JSON report. These are wall-time comparisons, not statistical significance tests or measurements of CPU/memory use.",
+      "Operation cases use a fresh context and page for every sample; setup and cleanup are outside timing. Launch excludes shutdown; first-page excludes fresh launch and cleanup and can overlap setup of Strider’s initial page. Shutdown starts at Browser availability: Strider has an initial page whose setup can still be running, while Playwright nonpersistent launch has no targets. Strider disposes its scope and signals its process; Playwright uses browser.close(). These describe supported defaults with different resources, readiness and release paths. Page-lifecycle includes context/page creation and cleanup; repeated-lifecycle sums five cycles with page counts and context termination checked between timers. Default launch flags and actionability behavior belong to each library. Browser module imports are outside all timings. Raw samples and machine/source metadata are in the JSON report. These are wall-time comparisons, not statistical significance tests or measurements of CPU/memory use.",
       ...(report.error === null ? [] : ["", "```text", report.error, "```"]),
       ""
     ].join("\n")
@@ -170,8 +170,8 @@ try {
     await record(
       name,
       name === "first-page"
-        ? "Acquire the first isolated context/page after fresh launch; launch and cleanup excluded"
-        : "Close a freshly launched browser and its connection; launch excluded, no owned pages",
+        ? "Acquire the first isolated context/page after Browser availability; launch and cleanup excluded; Strider initial-page setup may overlap"
+        : "Shutdown after Browser availability; Strider signals its process with an initial page possibly still setting up; Playwright closes its browser with no targets; launch excluded",
       {
         strider: async () => {
           const runtime = makeRuntime()
@@ -186,8 +186,11 @@ try {
             assert.equal(await runtime.runPromise(sample.value.evaluateInMainWorld(() => document.URL)), "about:blank")
             return sample.ms
           } finally {
-            if (name !== "shutdown") await runtime.runPromise(Scope.close(scope, Exit.void))
-            await runtime.dispose()
+            try {
+              if (name !== "shutdown") await runtime.runPromise(Scope.close(scope, Exit.void))
+            } finally {
+              await runtime.dispose()
+            }
           }
         },
         playwright: async () => {

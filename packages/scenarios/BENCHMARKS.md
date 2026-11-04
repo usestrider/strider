@@ -27,7 +27,7 @@ score can hide a slow operation. A failed operation or wrong result always exits
 | -------------------- | -------------------------------------------------------------------------------------------------------- |
 | `launch`             | Start a fresh browser and establish its automation connection; shutdown excluded                         |
 | `first-page`         | Acquire the first isolated context/page after each fresh launch; launch and cleanup excluded             |
-| `shutdown`           | Close a freshly launched browser and automation connection with no owned pages; launch excluded          |
+| `shutdown`           | Release each library’s freshly launched browser after availability; launch excluded                      |
 | `repeated-lifecycle` | Five sequential isolated context/page acquisitions and releases on a persistent browser; checks excluded |
 | `page-lifecycle`     | Create and close an isolated context and page, including viewport configuration                          |
 | `navigate`           | Navigate to a local document through `load`, then read its title                                         |
@@ -49,8 +49,13 @@ The runner awaits one sample at a time and alternates which library goes first i
 checked against the integration pin. Persistent browsers are used except for `launch`, `first-page` and `shutdown`. Every launch
 gets a fresh profile; warmup reduces library and OS cache effects, so this is not a cold-machine startup test.
 `first-page` checks that the acquired page evaluates `document.URL` as `about:blank`. It includes context
-creation and the same viewport configuration as `page-lifecycle`. `shutdown` starts no owned context or page;
-it includes each library's supported connection/process cleanup (including Strider's owned temporary profile).
+creation and the same viewport configuration as `page-lifecycle`. Both `first-page` and `shutdown` start
+immediately after Browser availability. Strider has an initial observed `about:blank` page whose setup gate
+can still be running; Playwright's nonpersistent launch has no initial targets or owned contexts. First-page
+acquisition can overlap Strider's initial-page setup, and shutdown can interrupt it. The shutdown case creates
+no additional context or page. Strider disposes its scope, signals the process and removes its temporary profile;
+Playwright uses its supported `browser.close()` path. Shutdown costs and first-page comparisons describe these
+supported defaults with different initial resources, readiness and release paths, rather than equal work.
 `repeated-lifecycle` reports the sum of acquisition and release times for five sequential isolated context/page
 cycles, not a per-cycle average. Between timers, it checks `about:blank`, one additional live page and return
 to the initial page count after every release. Strider also awaits each context's acknowledged terminal state;
@@ -89,6 +94,8 @@ outside launch timing. Browser availability can precede completion of that gate;
 extra protocol command. Loader
 transforms assert their source sites and add timestamps; they do not change command arguments or ordering.
 The loader depends on the pinned Playwright bundle and must be updated if those source sites change.
+Spawn marks end when the process handle returns; they do not isolate shell execution or browser startup,
+which can continue during the first-reply wait.
 These instrumented samples are for attribution, not speed claims; use `pnpm bench` for uninstrumented comparisons.
 Protocol waits may overlap, so their individual durations cannot be summed as elapsed launch time. Exclude runs
 that overlap other suites, checks or builds even when those commands did not acquire the browser lock.

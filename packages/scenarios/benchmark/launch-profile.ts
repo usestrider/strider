@@ -21,6 +21,8 @@ assert.equal(process.env["STRIDER_ENVIRONMENT"], "nix-integration")
 assert.ok(executablePath)
 const output = path.resolve(process.argv[2] ?? ".data/benchmarks/launch-profile.json")
 const runs = Number(process.argv[3] ?? 20)
+assert.ok(process.argv[4] === undefined || process.argv[4] === "persistent", "Mode must be 'persistent' when provided")
+assert.ok(process.argv.length <= 5, "Unexpected launch diagnostic arguments")
 const persistent = process.argv[4] === "persistent"
 assert.ok(Number.isSafeInteger(runs) && runs > 0)
 const root = path.resolve(import.meta.dirname, "../../..")
@@ -80,6 +82,8 @@ const trace = {
 ;(globalThis as typeof globalThis & { __launchTrace: typeof trace }).__launchTrace = trace
 const report = {
   kind: "instrumented-launch-diagnostic",
+  timing:
+    "Launch ends at Browser availability. Strider has an initial observed page whose setup may continue afterward; the diagnostic observes gate completion outside the launch timer. Playwright nonpersistent launch has no initial targets; persistent launch waits for default-context/page initialization. Cleanup is outside timing.",
   startedAt: new Date().toISOString(),
   sourceHash: source.digest("hex"),
   instrumentationHash: hash(fs.readFileSync(import.meta.filename)),
@@ -104,6 +108,112 @@ const save = () => {
   fs.mkdirSync(path.dirname(output), { recursive: true })
   fs.writeFileSync(output, JSON.stringify(report, null, 2) + "\n")
 }
+const validateSample = (sample: Sample) => {
+  const strider = sample.library === "strider"
+  const phases = strider
+    ? [
+      "model.start",
+      "model.sink.ready",
+      "executable.start",
+      "executable.end",
+      "profile.start",
+      "profile.end",
+      "spawn.start",
+      "spawn.end",
+      "launcher.bookkeeping.end",
+      "transport.start",
+      "transport.end",
+      "adapter.start",
+      "client.ready",
+      "version.ready",
+      "contexts.start",
+      "contexts.end",
+      "downloads.start",
+      "downloads.end",
+      "autoattach.start",
+      "autoattach.ack",
+      "targets.drained",
+      "adapter.end",
+      "model.attach.start",
+      "model.attach.end",
+      "browser.make.start",
+      "browser.make.end",
+      "target.snapshot.start",
+      "target.snapshot.end",
+      "target.gate.end",
+      "initial.gate.observed"
+    ]
+    : [
+      "pw.profile.start",
+      "pw.profile.end",
+      "pw.spawn.start",
+      "pw.spawn.end",
+      "pw.transport.ready",
+      "pw.adapter.start",
+      sample.library === "playwright-persistent" ? "pw.persistent.ready" : "pw.adapter.end"
+    ]
+  const phase = (name: string) => {
+    const entry = sample.events.find((entry) => entry.kind === "mark" && entry.name === name)
+    assert.ok(entry !== undefined, `${sample.library}: missing phase mark ${name}`)
+    assert.ok(Number.isFinite(entry.at) && entry.at >= 0, `${sample.library}: invalid phase mark ${name}`)
+    return entry.at
+  }
+  for (const name of ["launch.start", "spawn.args", "launch.available", ...phases]) phase(name)
+  assert.ok(sample.ms !== undefined && Number.isFinite(sample.ms) && sample.ms > 0, "Missing launch duration")
+  const available = phase("launch.available")
+  const wires = sample.events.filter((entry) => entry.kind === "wire").map((entry) => {
+    assert.ok(typeof entry.data === "object" && entry.data !== null, "Invalid wire observation")
+    return { ...entry, message: entry.data as Record<string, unknown> }
+  })
+  const roundTrip = (method: string, rootSession: boolean, through: number) => {
+    const sent = wires.find((entry) =>
+      entry.name === "send" && entry.at <= through &&
+      entry.message["method"] === method && (entry.message["sessionId"] === undefined) === rootSession
+    )
+    assert.ok(sent !== undefined, `${sample.library}: missing protocol send ${method}`)
+    assert.ok(typeof sent.message["id"] === "number", `${sample.library}: missing protocol id ${method}`)
+    assert.ok(
+      wires.some((entry) =>
+        entry.name === "receive" && entry.at >= sent.at && entry.at <= through &&
+        entry.message["id"] === sent.message["id"] && entry.message["sessionId"] === sent.message["sessionId"]
+      ),
+      `${sample.library}: missing protocol reply ${method}`
+    )
+  }
+  for (const method of ["Browser.getVersion", "Target.setAutoAttach"]) roundTrip(method, true, available)
+  if (strider) {
+    for (const method of ["Target.getBrowserContexts", "Browser.setDownloadBehavior"]) {
+      roundTrip(method, true, available)
+    }
+    const gate = phase("target.gate.end")
+    for (
+      const method of [
+        "Page.enable",
+        "Page.setLifecycleEventsEnabled",
+        "Network.enable",
+        "Page.getFrameTree",
+        "Runtime.enable",
+        "Target.setAutoAttach"
+      ]
+    ) {
+      roundTrip(method, false, gate)
+    }
+  } else if (sample.library === "playwright-persistent") {
+    roundTrip("Browser.setDownloadBehavior", true, available)
+    // Playwright sends utility-world setup before availability but need not have its reply yet.
+    assert.ok(
+      wires.some((entry) =>
+        entry.name === "send" && entry.at <= available &&
+        entry.message["method"] === "Page.createIsolatedWorld" && entry.message["sessionId"] !== undefined
+      ),
+      `${sample.library}: missing protocol send Page.createIsolatedWorld`
+    )
+    for (const method of ["Page.enable", "Page.getFrameTree", "Runtime.enable"]) {
+      roundTrip(method, false, available)
+    }
+  }
+}
+
 const makeRuntime = () =>
   ManagedRuntime.make(
     Chromium.layer({ executablePath, headless: true }).pipe(Layer.provideMerge(NodeServices.layer))
@@ -142,27 +252,25 @@ try {
             viewport: null
           })
           : undefined
-        const browser: PlaywrightBrowser = context === undefined
-          ? await chromium.launch({ executablePath, headless: true, timeout: 30_000 })
-          : context.browser()!
-        assert.ok(browser)
-        active.ms = performance.now() - started
-        trace.mark("launch.available")
+        let browser: PlaywrightBrowser | undefined
         try {
+          browser = context === undefined
+            ? await chromium.launch({ executablePath, headless: true, timeout: 30_000 })
+            : context.browser() ?? undefined
+          assert.ok(browser)
+          active.ms = performance.now() - started
+          trace.mark("launch.available")
           assert.equal(browser.version(), pins.chromium.version)
           const session = await browser.newBrowserCDPSession()
           const targets = await session.send("Target.getTargets")
           active.resources = { contexts: browser.contexts().length, targets: targets.targetInfos }
           await session.detach()
         } finally {
-          await browser.close()
+          if (context !== undefined) await context.close()
+          else await browser?.close()
         }
       }
-      assert.ok(active.events.some((entry) => entry.name === "spawn.args"), "Spawn hook did not execute")
-      assert.ok(
-        active.events.some((entry) => entry.name === (library === "strider" ? "browser.make.end" : "pw.adapter.start")),
-        "Readiness hook did not execute"
-      )
+      validateSample(active)
       samples.push(active)
       process.stdout.write(`${i} ${library}: ${active.ms!.toFixed(2)} ms\n`)
       active = undefined
