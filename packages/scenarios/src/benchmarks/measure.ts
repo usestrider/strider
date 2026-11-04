@@ -7,6 +7,8 @@ export const options = (args: Array<string>) => {
       runs: { type: "string", default: "20" },
       warmup: { type: "string", default: "3" },
       only: { type: "string" },
+      "screenshot-surface": { type: "string", default: "default" },
+      "strider-arg": { type: "string", multiple: true, default: [] },
       output: { type: "string", default: ".data/benchmarks/latest.json" },
       "max-ratio": { type: "string", default: "1.10" },
       check: { type: "boolean", default: false },
@@ -22,7 +24,13 @@ export const options = (args: Array<string>) => {
   if (values.check && (runs < 20 || warmup < 3)) {
     throw new Error("--check requires at least 20 runs and 3 warmups; smaller runs are smoke checks only")
   }
-  return { ...values, runs, warmup, maxRatio }
+  if (!["default", "off", "on"].includes(values["screenshot-surface"])) {
+    throw new Error("--screenshot-surface must be default, off or on")
+  }
+  const surfaceArgs = values["screenshot-surface"] === "default" ? [] : [
+    `--${values["screenshot-surface"] === "on" ? "enable" : "disable"}-features=CDPScreenshotNewSurface`
+  ]
+  return { ...values, runs, warmup, maxRatio, striderArgs: [...surfaceArgs, ...values["strider-arg"]] }
 }
 
 export const summarize = (samples: ReadonlyArray<number>) => {
@@ -49,13 +57,45 @@ export const measure = async (
   runs: number,
   warmup: number
 ) => {
-  const samples = { strider: [] as Array<number>, playwright: [] as Array<number> }
+  type Library = "strider" | "playwright"
+  const samples = {
+    strider: [] as Array<number>,
+    playwright: [] as Array<number>,
+    observations: [] as Array<{
+      pairIndex: number
+      sequenceIndex: number
+      library: Library
+      position: number
+      pairOrder: ReadonlyArray<Library>
+      previousLibrary: Library | null
+      previousPosition: number | null
+      previousPairIndex: number | null
+      ms: number
+    }>
+  }
+  let previous: { library: Library; position: number; pairIndex: number } | undefined
+  let sequenceIndex = 0
   for (let i = -warmup; i < runs; i++) {
     const order = i % 2 === 0 ? (["strider", "playwright"] as const) : (["playwright", "strider"] as const)
-    for (const library of order) {
+    for (const [position, library] of order.entries()) {
       const ms = await run[library]()
       if (!Number.isFinite(ms) || ms <= 0) throw new Error(`${library} returned an invalid timing: ${ms}`)
-      if (i >= 0) samples[library].push(ms)
+      if (i >= 0) {
+        samples[library].push(ms)
+        samples.observations.push({
+          pairIndex: i,
+          sequenceIndex,
+          library,
+          position,
+          pairOrder: order,
+          previousLibrary: previous?.library ?? null,
+          previousPosition: previous?.position ?? null,
+          previousPairIndex: previous?.pairIndex ?? null,
+          ms
+        })
+      }
+      previous = { library, position, pairIndex: i }
+      sequenceIndex++
     }
   }
   return samples

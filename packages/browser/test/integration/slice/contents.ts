@@ -810,6 +810,49 @@ export const contents = (
 
       // ── Captures ──
 
+      it.effect("captures fresh pixels after mutation, replacement and opening another window", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const url = (color: string) =>
+              fixtureUrl(
+                origin,
+                `<body style="margin:0;background:${color}"><div id="color" style="height:1400px;background:inherit"></div></body>`
+              )
+            const pixel = (png: Uint8Array) =>
+              page.evaluateInMainWorld(async (encoded) => {
+                const image = new Image()
+                image.src = `data:image/png;base64,${encoded}`
+                await image.decode()
+                const canvas = document.createElement("canvas")
+                canvas.width = canvas.height = 1
+                const context = canvas.getContext("2d")!
+                context.drawImage(image, 0, 0)
+                return [...context.getImageData(0, 0, 1, 1).data]
+              }, Buffer.from(png).toString("base64"))
+            yield* page.goto(url("rgb(200,40,60)"))
+            assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [200, 40, 60, 255])
+            yield* page.evaluateInMainWorld(() => {
+              document.body.style.background = "rgb(30,170,90)"
+            })
+            assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [30, 170, 90, 255])
+            assert.deepStrictEqual(
+              yield* pixel(
+                yield* page.screenshot({
+                  area: { _tag: "Clip", rect: cssRect({ x: 20, y: 20, width: 20, height: 20 }) }
+                })
+              ),
+              [30, 170, 90, 255]
+            )
+            yield* page.goto(url("rgb(50,80,220)"))
+            assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [50, 80, 220, 255])
+            const other = yield* Browser.newPage()
+            yield* other.goto(url("black"))
+            assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [50, 80, 220, 255])
+          }))
+        }), timeout)
+
       it.effect("captures the viewport, a clip, an element and the full page, in device pixels", () =>
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
@@ -998,7 +1041,9 @@ export const contents = (
               })
               assert.deepStrictEqual(yield* listed, ["plain"])
               yield* page.goto(`${origin}/app/page`)
-              const token = (yield* jar.list).find((cookie) => cookie.name === "token")
+              const token = (yield* jar.list).find((cookie) =>
+                cookie.name === "token"
+              )
               assert.isDefined(token)
               assert.strictEqual(Redacted.value(token.value), "secret")
               assert.strictEqual(token.path, "/app")
@@ -1020,7 +1065,9 @@ export const contents = (
               sameSite: "strict"
             })
             const all = yield* jar.list
-            const token = all.find((cookie) => cookie.name === "token")!
+            const token = all.find((cookie) =>
+              cookie.name === "token"
+            )!
             assert.strictEqual(Redacted.value(token.value), "secret")
             assert.strictEqual(token.path, "/app")
             assert.deepStrictEqual(token.sameSite, Option.some("lax"))

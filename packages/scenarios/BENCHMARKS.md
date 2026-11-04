@@ -158,3 +158,22 @@ its response includes protocol decoding, base64 decoding and operation completio
 as uninstrumented performance results. The dense case reconstructs every PNG row and checks every seeded pixel.
 Solid large and element cases check dimensions and the first pixel's color. The cross-browser capture integration
 tests retain the broader scale, clip, transparency and invalidation checks.
+
+### Screenshot surface experiment
+
+`--screenshot-surface on` or `off` adds an explicit Strider-only Chromium feature switch for
+`CDPScreenshotNewSurface`; `default` adds nothing. Playwright keeps its pinned defaults. This is benchmark
+configuration, not a production launch-profile change. `--strider-arg=--enable-features=Other` appends a raw
+argument after the experiment switch; it can be repeated to investigate Chromium's own override behavior.
+
+Reports include actual Linux `/proc` browser arguments (including generated profile directories) and renderer
+arguments observed after launch, outside operation timing. Schema version 2 also retains each measured sample's
+pair index, sequence index including warmups, library, pair order, position, preceding library/position/pair index,
+and duration. Preceding positions include warmup samples; tracking restarts for each case. The duration arrays
+remain in pair-index order. Alternation couples pair position to preceding-library identity; those fields are
+strata, not independent causal variables. Compare distributions and tails within them. Aggregate median ratios
+can mix distinct modes and do not establish a stable overhead.
+
+Viewport and repeated captures check three opaque 64 × 64 color markers across the viewport after capture.
+Preparation and PNG reconstruction remain outside timing; repeated capture still times five screenshot calls,
+with no settling waits or extra commands between them. The dense case retains every-pixel verification.

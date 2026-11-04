@@ -22,6 +22,8 @@ if (config.help) {
   process.stdout.write(`Usage: pnpm bench [options]
   --runs N          measured pairs per case (default 20)
   --warmup N        discarded pairs per case (default 3)
+  --screenshot-surface MODE  Strider-only experimental default/off/on feature override
+  --strider-arg ARG          append a raw Strider launch argument (repeatable)
   --only NAME       one case: ${names.join(", ")}
   --output PATH     JSON report (default .data/benchmarks/latest.json); Markdown beside it
   --check           fail if any median exceeds the ratio limit (requires 20 runs / 3 warmups)
@@ -62,7 +64,10 @@ const results: Array<{
   comparison: ReturnType<typeof compare>
 }> = []
 const report = {
-  schemaVersion: 1,
+  schemaVersion: 2,
+  launchArguments: [] as Array<
+    { library: string; pid: number; argv: ReadonlyArray<string>; renderers: ReadonlyArray<ReadonlyArray<string>> }
+  >,
   startedAt: new Date().toISOString(),
   sourceHash: hash.digest("hex"),
   environment: {
@@ -107,6 +112,8 @@ const save = () => {
       "",
       ...results.map((result) => `- **${result.name}:** ${result.description}.`),
       "",
+      "Aggregate ratios describe these samples and may mix distinct modes; inspect observations by pair position and previous library before drawing an overhead conclusion.",
+      "",
       "Operation cases use a fresh context and page for every sample; setup and cleanup are outside timing. Launch excludes shutdown; page-lifecycle includes context/page creation and cleanup. Default launch flags and actionability behavior belong to each library. Browser module imports are outside all timings. Raw samples and machine/source metadata are in the JSON report. These are wall-time comparisons, not statistical significance tests or measurements of CPU/memory use.",
       ...(report.error === null ? [] : ["", "```text", report.error, "```"]),
       ""
@@ -131,9 +138,45 @@ const record = async (
     }×${comparison.passed ? "" : " (over limit)"}\n`
   )
 }
+// Linux /proc records actual browser arguments after launch, outside every operation timer.
+// Keep generated profile paths: these are exact launch records, not reconstructed defaults.
+const recordedPids = new Set<number>()
+const captureArguments = (library: string) => {
+  const processes: Array<{ pid: number; parent: number; argv: Array<string> }> = []
+  const visit = (pid: number, parent: number) => {
+    try {
+      const argv = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean)
+      if (path.basename(fs.readlinkSync(`/proc/${pid}/exe`)).includes("chromium")) processes.push({ pid, parent, argv })
+      const children = fs.readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim()
+      for (const child of children.split(/\s+/).filter(Boolean)) visit(Number(child), pid)
+    } catch {
+      // A child may have exited during this untimed snapshot.
+    }
+  }
+  visit(process.pid, 0)
+  const main = processes.filter((entry) =>
+    entry.argv.includes("--remote-debugging-pipe") &&
+    !entry.argv.some((arg) => arg.startsWith("--type=")) && !recordedPids.has(entry.pid)
+  )
+  assert.equal(main.length, 1, `Expected one newly launched ${library} browser`)
+  const browser = main[0]!
+  recordedPids.add(browser.pid)
+  const descendants = new Set([browser.pid])
+  for (const entry of processes) if (descendants.has(entry.parent)) descendants.add(entry.pid)
+  report.launchArguments.push({
+    library,
+    pid: browser.pid,
+    argv: browser.argv,
+    renderers: processes.filter((entry) => descendants.has(entry.pid) && entry.argv.includes("--type=renderer")).map((
+      entry
+    ) => entry.argv)
+  })
+}
 const makeRuntime = () =>
   ManagedRuntime.make(
-    Chromium.layer({ executablePath, headless: true }).pipe(Layer.provideMerge(NodeServices.layer))
+    Chromium.layer({ executablePath, headless: true, args: config.striderArgs }).pipe(
+      Layer.provideMerge(NodeServices.layer)
+    )
   )
 const launchPlaywright = () => chromium.launch({ executablePath, headless: true, timeout: 30_000 })
 const pageOptions = { emulation: { viewport } }
@@ -146,6 +189,7 @@ try {
         try {
           const sample = await elapsed(() => runtime.runPromise(Browser.Browser))
           assert.ok(sample.value.info.product.includes(pins.chromium.version))
+          captureArguments("strider")
           return sample.ms
         } finally {
           await runtime.dispose()
@@ -155,6 +199,7 @@ try {
         const sample = await elapsed(launchPlaywright)
         try {
           assert.equal(sample.value.version(), pins.chromium.version)
+          captureArguments("playwright")
           return sample.ms
         } finally {
           await sample.value.close()
@@ -169,9 +214,11 @@ try {
       try {
         const info = await runtime.runPromise(Browser.Browser)
         assert.ok(info.info.product.includes(pins.chromium.version))
+        captureArguments("strider")
         const browser = await launchPlaywright()
         try {
           assert.equal(browser.version(), pins.chromium.version)
+          captureArguments("playwright")
           if (chosen("page-lifecycle")) {
             await record("page-lifecycle", "Create and close an isolated context and page with a fixed viewport", {
               strider: async () => {

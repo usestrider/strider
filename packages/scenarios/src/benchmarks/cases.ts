@@ -106,13 +106,9 @@ export const cases: ReadonlyArray<Case> = [
     description: "Capture a 1280 by 720 viewport as PNG at device scale 1",
     strider: (page) => page.screenshot(),
     playwright: (page) => page.screenshot({ type: "png" }),
-    verify: (value) => {
-      assert.ok(value instanceof Uint8Array)
-      const bytes = Buffer.from(value)
-      assert.equal(bytes.subarray(0, 8).toString("hex"), "89504e470d0a1a0a")
-      assert.equal(bytes.readUInt32BE(16), viewport.width)
-      assert.equal(bytes.readUInt32BE(20), viewport.height)
-    }
+    prepareStrider: (page) => page.evaluateInMainWorld(prepareViewportCapture),
+    preparePlaywright: (page) => page.evaluate(prepareViewportCapture),
+    verify: (value) => verifyViewportPng(value)
   }
 ]
 
@@ -159,10 +155,17 @@ const verifyPng = (width: number, height: number, rgb?: ReadonlyArray<number>) =
 }
 // Reconstruct every PNG row and compare every dense-fixture pixel, outside the timer. Chromium may
 // choose RGB or RGBA and any of the five PNG row filters; compressed bytes themselves are not stable.
-const verifyDensePng = (value: unknown) => {
-  verifyPng(1280, 2880, [12, 34, 56])(value)
+const verifyPngRows = (
+  value: unknown,
+  width: number,
+  height: number,
+  visit: (row: Uint8Array, y: number, channels: number) => void
+) => {
+  verifyPng(width, height)(value)
   const bytes = Buffer.from(value as Uint8Array)
   assert.equal(bytes[28], 0, "non-interlaced PNG")
+  assert.equal(bytes[24], 8, "8-bit PNG")
+  assert.ok(bytes[25] === 2 || bytes[25] === 6, "RGB or RGBA PNG")
   const channels = bytes[25] === 6 ? 4 : 3
   const chunks = []
   for (let at = 8; at < bytes.length;) {
@@ -171,12 +174,11 @@ const verifyDensePng = (value: unknown) => {
     at += length + 12
   }
   const raw = inflateSync(Buffer.concat(chunks))
-  const stride = 1280 * channels
-  assert.equal(raw.length, (stride + 1) * 2880)
+  const stride = width * channels
+  assert.equal(raw.length, (stride + 1) * height)
   let previous = new Uint8Array(stride)
   let row = new Uint8Array(stride)
-  let seed = 42
-  for (let y = 0; y < 2880; y++) {
+  for (let y = 0; y < height; y++) {
     const offset = y * (stride + 1)
     const filter = raw[offset]!
     assert.ok(filter <= 4, "valid PNG filter")
@@ -197,6 +199,15 @@ const verifyDensePng = (value: unknown) => {
       }
       row[x] = (raw[offset + 1 + x]! + predictor) & 255
     }
+    visit(row, y, channels)
+    const swap = previous
+    previous = row
+    row = swap
+  }
+}
+const verifyDensePng = (value: unknown) => {
+  let seed = 42
+  verifyPngRows(value, 1280, 2880, (row, y, channels) => {
     for (let x = 0; x < 1280; x++) {
       seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
       const at = x * channels
@@ -209,11 +220,31 @@ const verifyDensePng = (value: unknown) => {
         assert.fail(`Dense PNG differs at ${x},${y}`)
       }
     }
-    const swap = previous
-    previous = row
-    row = swap
+  })
+}
+
+// Static marker preparation is outside timing; no frames, waits or additional capture calls are added.
+const prepareViewportCapture = () => {
+  for (const [left, color] of [[0, "rgb(200,40,60)"], [600, "rgb(30,170,90)"], [1216, "rgb(50,80,220)"]] as const) {
+    const marker = document.createElement("div")
+    marker.style.cssText =
+      `position:fixed;left:${left}px;top:650px;width:64px;height:64px;background:${color};z-index:2147483647;pointer-events:none`
+    document.body.append(marker)
   }
 }
+const verifyViewportPng = (value: unknown) =>
+  verifyPngRows(value, 1280, 720, (row, y, channels) => {
+    if (y < 650 || y >= 714) return
+    for (const [left, rgb] of [[0, [200, 40, 60]], [600, [30, 170, 90]], [1216, [50, 80, 220]]] as const) {
+      for (let x = left; x < left + 64; x++) {
+        const at = x * channels
+        if (
+          row[at] !== rgb[0] || row[at + 1] !== rgb[1] || row[at + 2] !== rgb[2] ||
+          (channels === 4 && row[at + 3] !== 255)
+        ) assert.fail(`Viewport PNG differs at ${x},${y}`)
+      }
+    }
+  })
 export const captureCases: ReadonlyArray<Case> = [
   {
     name: "screenshot-dense",
@@ -226,6 +257,8 @@ export const captureCases: ReadonlyArray<Case> = [
   },
   {
     name: "screenshot-repeated",
+    prepareStrider: (page) => page.evaluateInMainWorld(prepareViewportCapture),
+    preparePlaywright: (page) => page.evaluate(prepareViewportCapture),
     description: "Five sequential viewport PNG captures on one prepared page (ms per batch)",
     strider: (page) => Effect.forEach(Array.from({ length: 5 }), () => page.screenshot()),
     playwright: async (page) => {
@@ -236,7 +269,7 @@ export const captureCases: ReadonlyArray<Case> = [
     verify: (value) => {
       assert.ok(Array.isArray(value))
       assert.equal(value.length, 5)
-      value.forEach(verifyPng(1280, 720))
+      value.forEach(verifyViewportPng)
     }
   },
   {

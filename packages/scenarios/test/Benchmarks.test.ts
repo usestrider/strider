@@ -18,7 +18,76 @@ describe("benchmark measurements", () => {
     }
     const samples = await measure({ strider: run("S"), playwright: run("P") }, 3, 2)
     expect(order).toEqual(["S", "P", "P", "S", "S", "P", "P", "S", "S", "P"])
-    expect(samples).toEqual({ strider: [5, 8, 9], playwright: [6, 7, 10] })
+    expect(samples.strider).toEqual([5, 8, 9])
+    expect(samples.playwright).toEqual([6, 7, 10])
+    expect(samples.observations).toEqual([
+      {
+        pairIndex: 0,
+        sequenceIndex: 4,
+        library: "strider",
+        position: 0,
+        pairOrder: ["strider", "playwright"],
+        previousLibrary: "strider",
+        previousPosition: 1,
+        previousPairIndex: -1,
+        ms: 5
+      },
+      {
+        pairIndex: 0,
+        sequenceIndex: 5,
+        library: "playwright",
+        position: 1,
+        pairOrder: ["strider", "playwright"],
+        previousLibrary: "strider",
+        previousPosition: 0,
+        previousPairIndex: 0,
+        ms: 6
+      },
+      {
+        pairIndex: 1,
+        sequenceIndex: 6,
+        library: "playwright",
+        position: 0,
+        pairOrder: ["playwright", "strider"],
+        previousLibrary: "playwright",
+        previousPosition: 1,
+        previousPairIndex: 0,
+        ms: 7
+      },
+      {
+        pairIndex: 1,
+        sequenceIndex: 7,
+        library: "strider",
+        position: 1,
+        pairOrder: ["playwright", "strider"],
+        previousLibrary: "playwright",
+        previousPosition: 0,
+        previousPairIndex: 1,
+        ms: 8
+      },
+      {
+        pairIndex: 2,
+        sequenceIndex: 8,
+        library: "strider",
+        position: 0,
+        pairOrder: ["strider", "playwright"],
+        previousLibrary: "strider",
+        previousPosition: 1,
+        previousPairIndex: 1,
+        ms: 9
+      },
+      {
+        pairIndex: 2,
+        sequenceIndex: 9,
+        library: "playwright",
+        position: 1,
+        pairOrder: ["strider", "playwright"],
+        previousLibrary: "strider",
+        previousPosition: 0,
+        previousPairIndex: 2,
+        ms: 10
+      }
+    ])
   })
 
   it("stops on failed work, including during warmup", async () => {
@@ -69,12 +138,17 @@ describe("benchmark measurements", () => {
         ["--max-ratio", "0"],
         ["--runs"],
         ["--typo"],
+        ["--screenshot-surface", "typo"],
         ["--check", "--runs", "3"],
         ["--check", "--warmup", "0"]
       ]
     ) expect(() => options(args)).toThrow()
     expect(options(["--runs", "1", "--warmup", "0"]).runs).toBe(1)
     expect(options(["--check"]).maxRatio).toBe(1.1)
+    expect(options(["--screenshot-surface", "on", "--strider-arg=--enable-features=Other"]).striderArgs).toEqual([
+      "--enable-features=CDPScreenshotNewSurface",
+      "--enable-features=Other"
+    ])
   })
 })
 
@@ -220,7 +294,6 @@ it("rejects dense-image corruption away from the first pixel", () => {
   compressed.copy(chunk, 8)
   expect(() => entry.verify(Buffer.concat([header, chunk]))).toThrow()
 })
-
 
 describe("viewport capture pixels", () => {
   const image = (corrupt: boolean) => {
