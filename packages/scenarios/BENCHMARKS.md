@@ -264,3 +264,11 @@ The warmed boundary excludes first-call initialization; it is not a rendering ba
 Wire send/reply intervals include scheduling, transport and browser work and cannot identify serialization time.
 Reply-to-next-send intervals include host continuation work, observers and scheduling; their residual is not an Effect cost.
 No renderer traces are required for this host/wire partition. Historical trace options still differ despite shared categories.
+
+In these captures Strider's send observer precedes transport enqueueing; Playwright's checked send
+observer precedes its pipe write. Send-to-reply comparisons therefore include different host transport
+boundaries, including Strider's outbox/writer scheduling. Receive observers mark complete framed
+messages before protocol parsing; Strider UTF-8 decoding/framing precedes that observer. Per-call
+observers in evaluation-instrumented mode bracket public invocation through completion and add
+their own proxy/finalizer/promise work. Treat their plain/instrumented differences as distortion
+estimates with drift, never an exact correction or an attribution to the runtime.
