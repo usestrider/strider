@@ -1127,7 +1127,7 @@ describe("strider", () => {
             const server = http.createServer((_, response) => {
               response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
               response.end(
-                `<div role="textbox" aria-label="Rich" contenteditable="true"><h1>rich-heading<a href="#x">rich-link</a></h1><button onclick="document.getElementById('status').textContent = 'clicked'">rich-button</button><img alt="rich-image" src="data:,"></div><div contenteditable="true">roleless-field</div><div contenteditable="true" aria-label="Labeled">labeled-private</div><article contenteditable="true" aria-label="Article">article-private</article><h2 contenteditable="true">heading-private</h2><p contenteditable="plaintext-only">paragraph-private</p><input aria-label="Native" value="native-private"><button onclick="throw new Error('exception-private')">Throw</button><p id="status">ready</p>`
+                `<div role="textbox" aria-label="Rich" contenteditable="true"><h1>rich-heading<a href="#x">rich-link</a></h1><button onclick="document.getElementById('status').textContent = 'clicked'">rich-button</button><img alt="rich-image" src="data:,"></div><div contenteditable="true">roleless-field</div><div contenteditable="true" aria-label="Labeled">labeled-private</div><article contenteditable="true" aria-label="Article">article-private</article><h2 contenteditable="true">heading-private</h2><p contenteditable="plaintext-only">paragraph-private</p><input aria-label="Native" value="native-private"><button onclick="const error = new Error('exception-private'); error.name = 'exception-name-private'; error.stack = 'exception-stack-private'; throw error">Throw</button><p id="status">ready</p>`
               )
             })
             yield* Effect.acquireRelease(
@@ -1208,7 +1208,9 @@ describe("strider", () => {
               const exceptions = yield* page("--json", "history", "exception")
               assert.strictEqual(exceptions.code, 0, exceptions.err)
               if (capture === "strict") {
-                assert.notInclude(thrown.out + exceptions.out, "exception-private")
+                for (const text of ["exception-private", "exception-name-private", "exception-stack-private"]) {
+                  assert.notInclude(thrown.out + exceptions.out, text)
+                }
                 assert.match(exceptions.out, /uncaught.*at [0-9]/)
               } else assert.include(exceptions.out, "exception-private")
               const historyAnswers = yield* mcp(env, ["-s", capture, "mcp"], [...handshake, {
@@ -1219,7 +1221,9 @@ describe("strider", () => {
               }], 2)
               const historyResult = JSON.stringify(historyAnswers.find((answer) => answer.id === 2)?.result)
               if (capture === "strict") {
-                assert.notInclude(historyResult, "exception-private")
+                for (const text of ["exception-private", "exception-name-private", "exception-stack-private"]) {
+                  assert.notInclude(historyResult, text)
+                }
                 assert.match(historyResult, /uncaught.*at [0-9]/)
               } else assert.include(historyResult, "exception-private")
               const matches = JSON.parse(found.out).outcome.value as Array<

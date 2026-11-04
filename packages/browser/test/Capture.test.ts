@@ -1,6 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import * as CapturePolicy from "../src/ai/CapturePolicy.ts"
+import * as SnapshotImpl from "../src/internal/snapshot.ts"
 import * as Toolkit from "../src/internal/toolkit.ts"
 import * as MonotonicInstant from "../src/MonotonicInstant.ts"
 import * as Snapshot from "../src/Snapshot.ts"
@@ -18,6 +20,36 @@ const node = (options: Partial<Snapshot.Node> = {}): Snapshot.Node => ({
 })
 
 describe("capture tree", () => {
+  it("keeps the strict and local capture presets explicit", () => {
+    assert.deepStrictEqual(
+      CapturePolicy.strict,
+      new CapturePolicy.CapturePolicy({
+        screenshots: "denied",
+        snapshotText: "redacted",
+        consoleText: "omitted"
+      })
+    )
+    assert.deepStrictEqual(
+      CapturePolicy.local,
+      new CapturePolicy.CapturePolicy({
+        screenshots: "allowed",
+        snapshotText: "full",
+        consoleText: "full"
+      })
+    )
+  })
+
+  it("renders quoted labels without treating their text as masking metadata", () => {
+    for (const value of ["Label [name from: text]", "x [validationMessage=", "Label \"quoted\" \\ tail\nnext"]) {
+      const root = node({ editable: true, name: { _tag: "Accessible", value } })
+      const text = SnapshotImpl.render(Toolkit.redacted(root))
+      assert.include(text, `article ${JSON.stringify(value)}`)
+      assert.include(text, "[validationMessage=\"•••\"]")
+      assert.include(text, "[ref=e1]")
+      assert.include(text, "[invalid]")
+    }
+  })
+
   it("masks editable content independently of role, preserving labels, refs and state", () => {
     const root = node({ editable: true, children: [node({ name: { _tag: "Accessible", value: "private" } })] })
     const redacted = Toolkit.redacted(root)
