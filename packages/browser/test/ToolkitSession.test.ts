@@ -99,6 +99,7 @@ describe("Session with default context discovery", () => {
       yield* session.toolkit.handle("control", { tab: String(page.id), name: "remote" }).pipe(
         Effect.flatMap(Stream.runDrain)
       )
+      yield* assertPages([local.id, page.id], ["p1", "remote"])
       yield* page.close()
       yield* assertPages([local.id], ["p1"])
       assert.deepStrictEqual((yield* external.pages).map((each) => each.id), [uncontrolled.id])
