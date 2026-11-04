@@ -87,8 +87,10 @@ export const screenshot = Effect.fnUntraced(
     const on = Protocol.on(page.target.session)
     let clip = Option.getOrUndefined(options.clip)
     let scale = 1
+    // Renderer commands wait behind tracked navigation processing; frameNavigated alone can precede
+    // browser-side frame activation. This round trip is interruptible under the capture deadline.
+    const metrics = yield* Kit.protocol(Page.getLayoutMetrics().pipe(on))
     if ((options.fullPage && clip === undefined) || options.scale === "css") {
-      const metrics = yield* Kit.protocol(Page.getLayoutMetrics().pipe(on))
       if (options.fullPage && clip === undefined) {
         clip = { x: 0, y: 0, width: metrics.cssContentSize.width, height: metrics.cssContentSize.height }
       }
