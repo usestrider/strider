@@ -821,17 +821,24 @@ export const contents = (
                 `<body style="margin:0;background:${color}"><div id="color" style="height:1400px;background:inherit"></div></body>`
               )
             const pixel = (png: Uint8Array) =>
-              page.evaluateInMainWorld(async (encoded) => {
-                const image = new Image()
-                image.src = `data:image/png;base64,${encoded}`
-                await image.decode()
-                const canvas = document.createElement("canvas")
-                canvas.width = canvas.height = 1
-                const context = canvas.getContext("2d")!
-                context.drawImage(image, 0, 0)
-                return [...context.getImageData(0, 0, 1, 1).data]
-              }, Buffer.from(png).toString("base64"))
-            yield* page.goto(url("rgb(200,40,60)"))
+              Effect.sync(() => {
+                const view = new DataView(png.buffer, png.byteOffset, png.byteLength)
+                assert.strictEqual(png[24], 8)
+                assert.isTrue(png[25] === 2 || png[25] === 6)
+                const chunks: Array<Uint8Array> = []
+                for (let at = 8; at < png.length;) {
+                  const length = view.getUint32(at)
+                  const type = new TextDecoder().decode(png.subarray(at + 4, at + 8))
+                  if (type === "IDAT") {
+                    chunks.push(png.subarray(at + 8, at + 8 + length))
+                  }
+                  at += length + 12
+                }
+                // Every PNG row filter has zero predictors at the first pixel of the first row.
+                const raw = zlib.inflateSync(Buffer.concat(chunks))
+                return [raw[1], raw[2], raw[3], png[25] === 6 ? raw[4] : 255]
+              })
+            yield* page.goto(url("rgb(200,40,60)"), { waitUntil: "load" })
             assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [200, 40, 60, 255])
             yield* page.evaluateInMainWorld(() => {
               document.body.style.background = "rgb(30,170,90)"
@@ -845,10 +852,10 @@ export const contents = (
               ),
               [30, 170, 90, 255]
             )
-            yield* page.goto(url("rgb(50,80,220)"))
+            yield* page.goto(url("rgb(50,80,220)"), { waitUntil: "load" })
             assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [50, 80, 220, 255])
             const other = yield* Browser.newPage()
-            yield* other.goto(url("black"))
+            yield* other.goto(url("black"), { waitUntil: "load" })
             assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [50, 80, 220, 255])
           }))
         }), timeout)
