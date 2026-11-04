@@ -174,3 +174,26 @@ describe("late cleanup overflow", () => {
     for (const name of files) fs.unlinkSync(new URL(name, directory))
   }, 30_000)
 })
+
+describe("a browser shared through layer", () => {
+  it("keeps a later failing test's traffic on the connection the first test's beforeEach built", async () => {
+    const { spawnSync } = await import("node:child_process")
+    const directory = new URL("../../../.data/integration-failures/", import.meta.url)
+    const before = new Set(fs.existsSync(directory) ? fs.readdirSync(directory) : [])
+    spawnSync("pnpm", [
+      "exec",
+      "vitest",
+      "--run",
+      "--config",
+      "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+      "sharedLayer.fixture"
+    ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" })
+    const files = fs.readdirSync(directory).filter((name) => !before.has(name))
+    const tests = files.filter((name) => name.includes("-test"))
+    const contents = tests.map((name) => fs.readFileSync(new URL(name, directory), "utf8"))
+    for (const name of files) fs.unlinkSync(new URL(name, directory))
+    expect(tests.length).toBe(1)
+    expect(contents[0]).toContain("LATER_TEST")
+    expect(contents[0]).not.toContain("FIRST_TEST")
+  }, 30_000)
+})
