@@ -56,12 +56,18 @@ visible in the results and are not treated as Strider-only failures. Chromium is
 The same runner also includes four original Strider click workloads in
 [`Click.test.ts`](../test/upstream/Click.test.ts): a single ready click, twenty consecutive clicks, a role lookup
 in a large document, and an iframe click. These are additional workloads, not ports counted in the 91 cases above.
-Each checks the resulting click count. Select them with `pnpm benchmark:upstream --name clicks --samples 10 Click`.
+Each checks the resulting click count. `ActionWorkloads.test.ts` adds one and twenty check/uncheck pairs and
+one and twenty text fills, checking final state and exact change/input event counts. These ordinary native-input
+workloads exclude retries, typing, dragging and custom controls; the existing Check and Fill ports cover distinct
+paths and retain failures. Select them with `pnpm benchmark:upstream --name clicks --samples 10 Click`.
 
 `pnpm profile:click [output.json]` records the CDP command timings for 100 Strider clicks (five per fresh page),
 plus animation-frame registrations inside readiness and revalidation. It instruments the private engine only
 for this diagnostic run. Revalidation with zero frame registrations reused its stability evidence; a new
-stability sample registers frames. Use the uninstrumented benchmark commands for speed comparisons. This profile
+stability sample registers frames. Use the uninstrumented benchmark commands for speed comparisons. Pass an action after the output path (`pnpm profile:click output.json check` or `fill`) to diagnose those paths
+with the same instrumentation. The report also retains 100 pinned Playwright action durations on the same fixture;
+set `DEBUG=pw:protocol` inside the Nix command to capture its protocol chronology between `PROFILE_ACTION` markers.
+Playwright runs after Strider: these are instrumented diagnostics, not paired speed comparisons. The profile
 uses the small local benchmark fixture, and does not describe iframe or large-document costs.
 
 Each test run writes `.data/upstream/results.json` with raw samples and errors, and `.data/upstream/results.md` with

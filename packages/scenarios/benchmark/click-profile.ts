@@ -7,6 +7,7 @@ import * as Stream from "effect/Stream"
 import * as assert from "node:assert/strict"
 import * as fs from "node:fs"
 import * as path from "node:path"
+import { chromium } from "playwright-core"
 import * as BrowserImpl from "../../browser/src/internal/browser.ts"
 import * as CdpAdapter from "../../browser/src/internal/cdpAdapter.ts"
 import * as ChromiumLauncher from "../../browser/src/internal/chromiumLauncher.ts"
@@ -21,6 +22,8 @@ if (process.env["STRIDER_ENVIRONMENT"] !== "nix-integration" || executablePath =
   throw new Error("Run `pnpm profile:click` in the pinned Nix integration environment")
 }
 const output = path.resolve(process.argv[2] ?? ".data/benchmarks/click-profile.json")
+const action = process.argv[3] ?? "click"
+if (!["click", "check", "fill"].includes(action)) throw new Error("Action must be click, check or fill")
 interface Command {
   phase: string
   startMs: number
@@ -74,7 +77,7 @@ const instrument = (transport: Transport.Transport): Transport.Transport => {
         } else if (wire.params?.functionDeclaration === Engine.run) {
           const request = JSON.parse(wire.params.arguments[0].value)
           phase = request.op === "act"
-            ? request.stability === "capture" ? "readiness" : "revalidation"
+            ? request.apply ? "revalidation" : "readiness"
             : `engine.${request.op}`
         } else if (wire.method === "Input.dispatchMouseEvent") {
           phase = wire.params.type
@@ -116,16 +119,29 @@ try {
         yield* Effect.scoped(Effect.gen(function*() {
           const page = yield* Browser.newPage({ emulation: { viewport: { width: 1280, height: 720 } } })
           yield* page.goto(`${site.origin}/benchmark`, { waitUntil: "load" })
+          yield* page.evaluateInMainWorld(() => {
+            const box = document.createElement("input")
+            box.type = "checkbox"
+            box.id = "profile-check"
+            document.body.append(box)
+          })
           const button = page.getByRole("button", { name: "Increment" })
           for (let click = 0; click < 5; click++) {
             const sample: Sample = { page: pageIndex, click, ms: 0, commands: [] }
             active = { started: performance.now(), sample }
-            yield* button.click().pipe(Effect.ensuring(Effect.sync(() => {
+            const operation = action === "click" ? button.click() : action === "fill"
+              ? page.getByLabel("Name").fill(`value ${click}`)
+              : click % 2 === 0
+              ? page.locator("#profile-check").check()
+              : page.locator("#profile-check").uncheck()
+            yield* operation.pipe(Effect.ensuring(Effect.sync(() => {
               sample.ms = performance.now() - active!.started
               samples.push(sample)
               active = undefined
             })))
-            assert.equal(yield* page.locator("#count").readText, String(click + 1))
+            if (action === "click") assert.equal(yield* page.locator("#count").readText, String(click + 1))
+            else if (action === "fill") assert.equal(yield* page.getByLabel("Name").readValue, `value ${click}`)
+            else assert.equal(yield* page.locator("#profile-check").isChecked, click % 2 === 0)
           }
         }))
       }
@@ -133,6 +149,44 @@ try {
   )
 } finally {
   await site.close()
+}
+// Pinned Playwright control: DEBUG=pw:protocol preserves its raw protocol chronology on stderr.
+// These instrumented timings are diagnostic, never used as uninstrumented comparisons.
+const playwrightSamples: Array<number> = []
+const playwrightSite = await start()
+const browser = await chromium.launch({ executablePath, headless: true })
+try {
+  assert.equal(browser.version(), browsers.chromium.version)
+  for (let pageIndex = 0; pageIndex < 20; pageIndex++) {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } })
+    try {
+      const page = await context.newPage()
+      await page.goto(`${playwrightSite.origin}/benchmark`, { waitUntil: "load" })
+      await page.evaluate(() => {
+        const box = document.createElement("input")
+        box.type = "checkbox"
+        box.id = "profile-check"
+        document.body.append(box)
+      })
+      for (let i = 0; i < 5; i++) {
+        process.stderr.write(`PROFILE_ACTION_START ${action} ${pageIndex} ${i}\n`)
+        const started = performance.now()
+        if (action === "click") await page.getByRole("button", { name: "Increment" }).click()
+        else if (action === "fill") await page.getByLabel("Name").fill(`value ${i}`)
+        else await page.locator("#profile-check").setChecked(i % 2 === 0)
+        playwrightSamples.push(performance.now() - started)
+        process.stderr.write(`PROFILE_ACTION_END ${action} ${pageIndex} ${i}\n`)
+        if (action === "click") assert.equal(await page.locator("#count").textContent(), String(i + 1))
+        else if (action === "fill") assert.equal(await page.getByLabel("Name").inputValue(), `value ${i}`)
+        else assert.equal(await page.locator("#profile-check").isChecked(), i % 2 === 0)
+      }
+    } finally {
+      await context.close()
+    }
+  }
+} finally {
+  await browser.close()
+  await playwrightSite.close()
 }
 const phases = new Map<string, Array<number>>()
 let reused = 0
@@ -165,7 +219,9 @@ fs.writeFileSync(
   `${
     JSON.stringify(
       {
-        kind: "instrumented-click-diagnostic",
+        kind: "instrumented-action-diagnostic",
+        action,
+        playwright: { version: "1.64.1", samples: playwrightSamples, summary: summarize(playwrightSamples) },
         chromium: browsers.chromium.version,
         summary,
         samples
