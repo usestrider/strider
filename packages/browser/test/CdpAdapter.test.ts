@@ -720,6 +720,23 @@ describe("Chromium capture document replacement", () => {
 })
 
 describe("Chromium screenshot renderer readiness", () => {
+  it.effect("invalidates when replacement was received before a metrics error reply", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(true)
+      const page = yield* h.page.control
+      const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+      const readiness = yield* Queue.take(h.preparation)
+      yield* h.browser.receive(replacementEvent())
+      yield* h.browser.receive({
+        id: readiness.id,
+        sessionId: readiness.sessionId,
+        error: { code: -32000, message: "renderer metrics failed" }
+      })
+      const error = yield* Fiber.join(pending)
+      assert.strictEqual(error._tag, "PageError")
+      if (error._tag === "PageError") assert.strictEqual(error.reason._tag, "CaptureInvalidated")
+    }).pipe(onTestClock))
+
   for (const sizing of ["viewport", "fullPage", "css", "fullPageCss"] as const) {
     it.effect(`reads metrics once before ${sizing} capture and reuses sizing`, () =>
       Effect.gen(function*() {
