@@ -68,7 +68,10 @@ describe("query profile completion", () => {
   const sample = (library: string, names: ReadonlyArray<string>) => ({
     library,
     capture: {
-      wire: [{ direction: "receive" as const, at: 0, text: "{}" }],
+      wire: [
+        { direction: "send" as const, at: 0, text: "{}" },
+        { direction: "receive" as const, at: 1, text: "{}" }
+      ],
       spans: names.map((name) => ({ name, start: 0, end: 1 }))
     }
   })
@@ -87,6 +90,9 @@ describe("query profile completion", () => {
       expect(() => verifyCompletion([valid], 1, true)).not.toThrow()
       expect(() => verifyCompletion([{ ...valid, capture: { ...valid.capture, wire: [] } }], 1, true))
         .toThrow("wire capture")
+      for (const direction of ["send", "receive"]) {
+        expect(() => verifyCompletion([{ ...valid, capture: { ...valid.capture, wire: valid.capture.wire.filter((row) => row.direction !== direction) } }], 1, true)).toThrow("wire capture")
+      }
       for (const missing of stages) {
         expect(() => verifyCompletion([sample(library, stages.filter((name) => name !== missing))], 1, true))
           .toThrow("stage")
