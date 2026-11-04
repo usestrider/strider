@@ -98,6 +98,20 @@ describe("session files", () => {
     }
   })
 
+  it("still lists the running sessions when the named session has no directory", () => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+    try {
+      fs.mkdirSync(path.join(temporary, "strider", "other"), { recursive: true, mode: 0o700 })
+      fs.chmodSync(path.join(temporary, "strider"), 0o700)
+      fs.writeFileSync(path.join(temporary, "strider", "other", "daemon.sock"), "")
+      const result = strider({ XDG_RUNTIME_DIR: temporary, XDG_STATE_HOME: temporary }, "-s", "nope", "pages")
+      assert.strictEqual(result.status, 20)
+      assert.include(result.stderr, "running: other")
+    } finally {
+      fs.rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
   it("keeps MCP filesystem failures off stdout", () => {
     const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
     try {
