@@ -178,6 +178,7 @@ describe("session files", () => {
     }
   })
 
+  // Seven real starts of the command in a row, about a second each on a hosted runner: 7.4 s, past the default 5 s.
   it("rejects traversal from flag, environment, fork and MCP name sources without stdout", () => {
     const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
     try {
@@ -200,7 +201,7 @@ describe("session files", () => {
     } finally {
       fs.rmSync(temporary, { recursive: true, force: true })
     }
-  })
+  }, 60_000)
 
   it("still lists the running sessions when the named session has no directory", () => {
     const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
