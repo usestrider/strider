@@ -248,17 +248,43 @@ describe("CDP adapter redirect headers", () => {
   }
 })
 
+const metrics = {
+  cssLayoutViewport: { pageX: 0, pageY: 0, clientWidth: 800, clientHeight: 600 },
+  cssVisualViewport: {
+    offsetX: 0,
+    offsetY: 0,
+    pageX: 10,
+    pageY: 20,
+    clientWidth: 800,
+    clientHeight: 600,
+    scale: 1
+  },
+  cssContentSize: { x: 0, y: 0, width: 900, height: 1800 }
+}
+const replyMetrics = (browser: Effect.Success<typeof makeBrowser>, command: Sent) =>
+  browser.receive({ id: command.id, sessionId: command.sessionId, result: metrics })
+
 /** A synthetic CDP connection folded into the real public Browser layer. */
-const sentHeaders = Effect.gen(function*() {
+const sentHeaders = Effect.fnUntraced(function*(holdMetrics = false) {
   const browser = yield* makeBrowser
   const ready = yield* Deferred.make<void>()
   const settled = yield* Queue.unbounded<void>()
   const facts: Array<Adapter.Fact> = []
+  const commands: Array<Sent> = []
+  const screenshotWork = yield* Queue.unbounded<Sent>()
   const captures = yield* Queue.unbounded<Sent>()
   const preparation = yield* Queue.unbounded<Sent>()
   yield* Effect.gen(function*() {
     while (true) {
       const command = yield* browser.next
+      commands.push(command)
+      if (command.method === "Page.getLayoutMetrics" || command.method === "Page.captureScreenshot") {
+        yield* Queue.offer(screenshotWork, command)
+      }
+      if (command.method === "Page.getLayoutMetrics" && !holdMetrics) {
+        yield* replyMetrics(browser, command)
+        continue
+      }
       if (command.method === "Page.captureScreenshot") {
         yield* Queue.offer(captures, command)
         continue
@@ -270,7 +296,9 @@ const sentHeaders = Effect.gen(function*() {
         yield* Queue.offer(preparation, command)
         continue
       }
-      const result = command.method === "Browser.getVersion"
+      const result = command.method === "Runtime.evaluate"
+        ? { result: { type: "number", value: 2 } }
+        : command.method === "Browser.getVersion"
         ? {
           protocolVersion: "1.3",
           product: "Chrome/155.0.8059.79",
@@ -347,6 +375,8 @@ const sentHeaders = Effect.gen(function*() {
     send,
     barrier,
     captures,
+    commands,
+    screenshotWork,
     preparation,
     facts
   }
@@ -359,7 +389,7 @@ const onTestClock = <A, E, R>(self: Effect.Effect<A, E, R>) =>
 describe("Chromium public sent-header waiting", () => {
   it.effect("waits for attribution, then returns the network headers", () =>
     Effect.gen(function*() {
-      const { page, request, send, barrier } = yield* sentHeaders
+      const { page, request, send, barrier } = yield* sentHeaders()
       const waiting = yield* Effect.forkScoped(
         NetworkRequest.headersSent(page, request).pipe(Deadline.within("1 second"))
       )
@@ -377,7 +407,7 @@ describe("Chromium public sent-header waiting", () => {
 
   it.effect("times out at its public deadline while attribution is unavailable", () =>
     Effect.gen(function*() {
-      const { page, request, send, barrier } = yield* sentHeaders
+      const { page, request, send, barrier } = yield* sentHeaders()
       yield* send(captured[1]!)
       yield* barrier
       const waiting = yield* Effect.forkScoped(
@@ -395,7 +425,7 @@ describe("Chromium public sent-header waiting", () => {
   for (const terminal of ["fails", "is canceled", "loses its page"] as const) {
     it.effect(`settles without advancing the deadline when a request ${terminal}`, () =>
       Effect.gen(function*() {
-        const { browser, page, request, send, barrier } = yield* sentHeaders
+        const { browser, page, request, send, barrier } = yield* sentHeaders()
         // Failure attributes queued headers to the last hop; page removal cannot safely do that.
         if (terminal !== "is canceled") yield* send(captured[1]!)
         yield* barrier
@@ -454,7 +484,7 @@ describe("Chromium capture document replacement", () => {
   for (const preparation of ["native", "layout", "element"] as const) {
     it.effect(`fails promptly during ${preparation} capture preparation or dispatch`, () =>
       Effect.gen(function*() {
-        const h = yield* sentHeaders
+        const h = yield* sentHeaders(preparation === "layout")
         const reader = yield* h.page.control
         const pending = yield* Effect.forkScoped(
           reader.screenshot(
@@ -488,7 +518,7 @@ describe("Chromium capture document replacement", () => {
 
   it.effect("keeps a native reply received before replacement terminal", () =>
     Effect.gen(function*() {
-      const h = yield* sentHeaders
+      const h = yield* sentHeaders()
       const page = yield* h.page.control
       const pending = yield* Effect.forkScoped(page.screenshot())
       const command = yield* Queue.take(h.captures)
@@ -501,7 +531,7 @@ describe("Chromium capture document replacement", () => {
   for (const errorReply of [false, true]) {
     it.effect(`keeps an earlier native ${errorReply ? "error" : "success"} receipt while background cleanup is pending`, () =>
       Effect.gen(function*() {
-        const h = yield* sentHeaders
+        const h = yield* sentHeaders()
         const page = yield* h.page.control
         const pending = yield* Effect.forkScoped(Effect.exit(page.screenshot({ omitBackground: true })))
         const command = yield* Queue.take(h.captures)
@@ -530,7 +560,7 @@ describe("Chromium capture document replacement", () => {
 
   it.effect("keeps a native error reply received before replacement terminal", () =>
     Effect.gen(function*() {
-      const h = yield* sentHeaders
+      const h = yield* sentHeaders()
       const page = yield* h.page.control
       const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
       const command = yield* Queue.take(h.captures)
@@ -548,7 +578,7 @@ describe("Chromium capture document replacement", () => {
 
   it.effect("invalidates when replacement was received before a native error reply", () =>
     Effect.gen(function*() {
-      const h = yield* sentHeaders
+      const h = yield* sentHeaders()
       const page = yield* h.page.control
       const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
       const command = yield* Queue.take(h.captures)
@@ -566,7 +596,7 @@ describe("Chromium capture document replacement", () => {
 
   it.effect("keeps a page crash as TargetGone instead of capture invalidation", () =>
     Effect.gen(function*() {
-      const h = yield* sentHeaders
+      const h = yield* sentHeaders()
       const page = yield* h.page.control
       const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
       yield* Queue.take(h.captures)
@@ -578,7 +608,7 @@ describe("Chromium capture document replacement", () => {
 
   it.effect("invalidates when commit was received before the native reply", () =>
     Effect.gen(function*() {
-      const h = yield* sentHeaders
+      const h = yield* sentHeaders()
       const page = yield* h.page.control
       const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
       const command = yield* Queue.take(h.captures)
@@ -597,7 +627,7 @@ describe("Chromium capture document replacement", () => {
   for (const method of ["Page.navigatedWithinDocument", "Page.frameStartedLoading", "Page.frameStoppedLoading"]) {
     it.effect(`does not invalidate for ${method}`, () =>
       Effect.gen(function*() {
-        const h = yield* sentHeaders
+        const h = yield* sentHeaders()
         const page = yield* h.page.control
         const pending = yield* Effect.forkScoped(page.screenshot())
         const command = yield* Queue.take(h.captures)
@@ -619,7 +649,7 @@ describe("Chromium capture document replacement", () => {
 
   it.effect("does not invalidate for a committed child-frame replacement", () =>
     Effect.gen(function*() {
-      const h = yield* sentHeaders
+      const h = yield* sentHeaders()
       const page = yield* h.page.control
       const pending = yield* Effect.forkScoped(page.screenshot())
       const command = yield* Queue.take(h.captures)
@@ -636,7 +666,7 @@ describe("Chromium capture document replacement", () => {
 
   it.effect("invalidates a same-URL reload with a new document identity", () =>
     Effect.gen(function*() {
-      const h = yield* sentHeaders
+      const h = yield* sentHeaders()
       const page = yield* h.page.control
       const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
       yield* Queue.take(h.captures)
@@ -650,7 +680,7 @@ describe("Chromium capture document replacement", () => {
 
   it.effect("retains the native session-ended error instead of reporting document invalidation", () =>
     Effect.gen(function*() {
-      const h = yield* sentHeaders
+      const h = yield* sentHeaders()
       const page = yield* h.page.control
       const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
       yield* Queue.take(h.captures)
@@ -665,7 +695,7 @@ describe("Chromium capture document replacement", () => {
 
   it.effect("retains an already expired deadline across later replacement", () =>
     Effect.gen(function*() {
-      const h = yield* sentHeaders
+      const h = yield* sentHeaders()
       const page = yield* h.page.control
       const pending = yield* Effect.forkScoped(page.screenshot().pipe(Deadline.within("1 second"), Effect.flip))
       yield* Queue.take(h.captures)
@@ -678,4 +708,91 @@ describe("Chromium capture document replacement", () => {
       yield* replyCapture(h.browser, yield* Queue.take(h.captures))
       assert.deepStrictEqual(Array.from(yield* Fiber.join(next)), [0])
     }).pipe(onTestClock))
+})
+
+describe("Chromium screenshot renderer readiness", () => {
+  for (const sizing of ["viewport", "fullPage", "css", "fullPageCss"] as const) {
+    it.effect(`reads metrics once before ${sizing} capture and reuses sizing`, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders(true)
+        const page = yield* h.page.control
+        const pending = yield* Effect.forkScoped(page.screenshot({
+          ...(sizing === "fullPage" || sizing === "fullPageCss" ? { area: { _tag: "FullPage" as const } } : {}),
+          scale: sizing === "css" || sizing === "fullPageCss" ? "css" : "device"
+        }))
+        const first = yield* Queue.take(h.screenshotWork)
+        assert.strictEqual(first.method, "Page.getLayoutMetrics", "renderer metrics must precede capture")
+        assert.strictEqual(yield* Queue.size(h.captures), 0)
+        const readiness = yield* Queue.take(h.preparation)
+        assert.strictEqual(readiness.method, "Page.getLayoutMetrics")
+        yield* replyMetrics(h.browser, readiness)
+        const capture = yield* Queue.take(h.captures)
+        const clip = sizing === "viewport" ? undefined : sizing === "css"
+          ? { x: 10, y: 20, width: 800, height: 600, scale: 0.5 }
+          : { x: 0, y: 0, width: 900, height: 1800, scale: sizing === "fullPageCss" ? 0.5 : 1 }
+        assert.deepStrictEqual(capture.params?.clip, clip)
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.getLayoutMetrics").length, 1)
+        yield* replyCapture(h.browser, capture)
+        assert.deepStrictEqual(Array.from(yield* Fiber.join(pending)), [0])
+      }).pipe(onTestClock))
+  }
+
+  for (const terminal of ["timeout", "interrupt", "close", "replace", "reject"] as const) {
+    it.effect(`prevents dispatch after readiness ${terminal}, including a late metrics reply`, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders(true)
+        const page = yield* h.page.control
+        const pending = yield* Effect.forkScoped(Effect.exit(page.screenshot().pipe(Deadline.within("1 second"))))
+        const first = yield* Queue.take(h.screenshotWork)
+        assert.strictEqual(first.method, "Page.getLayoutMetrics", "viewport capture must await renderer readiness")
+        const readiness = yield* Queue.take(h.preparation)
+        if (terminal === "timeout") yield* TestClock.adjust("1 second")
+        if (terminal === "interrupt") yield* Fiber.interrupt(pending)
+        if (terminal === "close") {
+          yield* h.browser.receive({
+            method: "Target.detachedFromTarget",
+            params: {
+              sessionId: "S1",
+              targetId: "76F3487A52CF4F79FE4AD28961E44D32"
+            }
+          })
+        }
+        if (terminal === "replace") {
+          yield* h.browser.receive(replacementEvent())
+          // Queue the reply immediately behind the commit: dispatch must drain observed events.
+          yield* replyMetrics(h.browser, readiness)
+        }
+        if (terminal === "reject") {
+          yield* h.browser.receive({
+            id: readiness.id,
+            sessionId: readiness.sessionId,
+            error: { code: -32000, message: "renderer metrics failed" }
+          })
+        }
+        if (terminal !== "interrupt") {
+          const exit = yield* Fiber.join(pending)
+          assert(Exit.isFailure(exit))
+          const error = Exit.findErrorOption(exit)
+          assert(Option.isSome(error))
+          if (terminal === "timeout") {
+            assert(Deadline.isTimeout(error.value))
+            assert.strictEqual(error.value.operation, "Page.screenshot")
+            assert.strictEqual(error.value.phase, "sent")
+          } else {
+            assert.strictEqual(error.value._tag, "PageError")
+            if (error.value._tag === "PageError") {
+              assert.strictEqual(
+                error.value.reason._tag,
+                terminal === "replace" ? "CaptureInvalidated" : "BackendFailure"
+              )
+              if (terminal === "reject") assert.include(JSON.stringify(error.value), "renderer metrics failed")
+            }
+          }
+        }
+        yield* replyMetrics(h.browser, readiness)
+        yield* h.browser.delivered
+        yield* TestClock.adjust("0 millis")
+        assert.strictEqual(yield* Queue.size(h.captures), 0, "late readiness must never resume capture")
+      }).pipe(onTestClock))
+  }
 })
