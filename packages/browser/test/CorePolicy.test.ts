@@ -1,4 +1,4 @@
-/** The hosted policy comparison is exercised with shell stubs and temporary files, never sysctl writes. */
+/** The hosted policy is exercised with shell stubs and temporary files, never sysctl writes. */
 import { assert, describe, it } from "@effect/vitest"
 import { spawn, spawnSync } from "node:child_process"
 import { once } from "node:events"
@@ -21,7 +21,11 @@ cat() { if [[ "$1" == /proc/sys/kernel/core_pattern ]]; then command cat "$POLIC
 systemd() { echo 'systemd fixture-version'; }
 sudo() {
   [[ $# == 4 && "$1" == -n && "$2" == sysctl && "$3" == --write ]] || return 99
+  if [[ "\${POLICY_FAIL_RESTORE:-}" == true && "$4" == *9223372036854775808* ]]; then return 24; fi
+  if [[ "\${POLICY_SKIP_APPLY:-}" == true && "$4" != *9223372036854775808* ]]; then return 0; fi
   printf '%s\\n' "\${4#kernel.core_pattern=}" >> "$POLICY_FIXTURE/writes"
+  if [[ "\${POLICY_FAIL_RESTORE:-}" == true && "$4" == *9223372036854775808* ]]; then return 24; fi
+  if [[ "\${POLICY_SKIP_APPLY:-}" == true && "$4" != *9223372036854775808* ]]; then return 0; fi
   printf '%s\\n' "\${4#kernel.core_pattern=}" > "$POLICY_FIXTURE/pattern"
   if [[ "\${POLICY_FAIL_APPLY:-}" == true && "$4" == *9223372036854775808* ]]; then return 0; fi
   if [[ "\${POLICY_FAIL_APPLY:-}" == true ]]; then return 23; fi
@@ -45,41 +49,22 @@ sudo() {
   }
 }
 
-describe("hosted core-policy comparison", () => {
-  it("control leaves any existing pattern unchanged and records version and before/after", () => {
-    const f = fixture("unrelated pattern", false)
-    try {
-      const result = spawnSync("bash", [script, "control", "--", process.execPath, "-e", "process.exit(0)"], {
-        env: f.env,
-        encoding: "utf8"
-      })
-      assert.strictEqual(result.status, 0, result.stderr)
-      assert.strictEqual(f.writes(), "")
-      assert.strictEqual(f.pattern(), "unrelated pattern\n")
-      assert.include(result.stdout, "systemd fixture-version")
-      assert.include(result.stdout, "before=unrelated pattern")
-      assert.include(result.stdout, "restored=unrelated pattern")
-    } finally {
-      rmSync(f.path, { recursive: true })
-    }
-  })
-
-  for (const code of [0, 7]) {
-    it(`changes only the limit argument, restores the original and preserves exit ${code}`, () => {
+describe("hosted core policy", () => {
+  for (const [event, code] of [["schedule", 0], ["workflow_dispatch", 7]] as const) {
+    it(`changes only the limit argument, restores the original and preserves exit ${code} for ${event}`, () => {
       const f = fixture()
       try {
         const result = spawnSync("bash", [
           script,
-          "respect-limit",
           "--",
           process.execPath,
           "-e",
           `process.exit(${code})`
-        ], { env: f.env, encoding: "utf8" })
+        ], { env: { ...f.env, GITHUB_EVENT_NAME: event }, encoding: "utf8" })
         assert.strictEqual(result.status, code, result.stderr)
         assert.strictEqual(f.writes(), treatment + "\n" + original + "\n")
         assert.strictEqual(f.pattern(), original + "\n")
-        assert.include(result.stdout, "treatment=" + treatment)
+        assert.include(result.stdout, "applied=" + treatment)
       } finally {
         rmSync(f.path, { recursive: true })
       }
@@ -89,7 +74,7 @@ describe("hosted core-policy comparison", () => {
   it("restores even when the treatment write reports failure after changing the value", () => {
     const f = fixture()
     try {
-      const result = spawnSync("bash", [script, "respect-limit", "--", process.execPath, "-e", "process.exit(0)"], {
+      const result = spawnSync("bash", [script, "--", process.execPath, "-e", "process.exit(0)"], {
         env: { ...f.env, POLICY_FAIL_APPLY: "true" },
         encoding: "utf8"
       })
@@ -105,7 +90,7 @@ describe("hosted core-policy comparison", () => {
     it(`refuses treatment for pattern=${pattern}, hosted=${hosted}`, () => {
       const f = fixture(pattern, hosted)
       try {
-        const result = spawnSync("bash", [script, "respect-limit", "--", process.execPath, "-e", "process.exit(0)"], {
+        const result = spawnSync("bash", [script, "--", process.execPath, "-e", "process.exit(0)"], {
           env: f.env,
           encoding: "utf8"
         })
@@ -118,11 +103,65 @@ describe("hosted core-policy comparison", () => {
     })
   }
 
+  for (const code of [0, 7]) {
+    it(`reports restoration failure and preserves a prior command failure: ${code}`, () => {
+      const f = fixture()
+      try {
+        const result = spawnSync("bash", [script, "--", process.execPath, "-e", `process.exit(${code})`], {
+          env: { ...f.env, POLICY_FAIL_RESTORE: "true" },
+          encoding: "utf8"
+        })
+        assert.strictEqual(result.status, code === 0 ? 1 : code)
+        assert.include(result.stderr, "ERROR: original core_pattern could not be restored")
+        assert.include(result.stderr, "ERROR: restored core_pattern does not match original")
+      } finally {
+        rmSync(f.path, { recursive: true })
+      }
+    })
+  }
+
+  it("refuses to run the command when the applied pattern fails verification", () => {
+    const f = fixture()
+    try {
+      const result = spawnSync("bash", [script, "--", process.execPath, "-e", "console.log('COMMAND RAN')"], {
+        env: { ...f.env, POLICY_SKIP_APPLY: "true" },
+        encoding: "utf8"
+      })
+      assert.strictEqual(result.status, 1)
+      assert.include(result.stderr, "Policy verification failed")
+      assert.notInclude(result.stdout, "COMMAND RAN")
+      assert.strictEqual(f.pattern(), original + "\n")
+    } finally {
+      rmSync(f.path, { recursive: true })
+    }
+  })
+
+  for (
+    const override of [
+      { RUNNER_ENVIRONMENT: "self-hosted" },
+      { RUNNER_OS: "Windows" },
+      { GITHUB_EVENT_NAME: "push" }
+    ]
+  ) {
+    it(`refuses an unsupported runner or event: ${JSON.stringify(override)}`, () => {
+      const f = fixture()
+      try {
+        const result = spawnSync("bash", [script, "--", process.execPath, "-e", "process.exit(0)"], {
+          env: { ...f.env, ...override },
+          encoding: "utf8"
+        })
+        assert.strictEqual(result.status, 2)
+        assert.strictEqual(f.writes(), "")
+      } finally {
+        rmSync(f.path, { recursive: true })
+      }
+    })
+  }
+
   it("restores the original when the wrapper receives SIGTERM", async () => {
     const f = fixture()
     const child = spawn("bash", [
       script,
-      "respect-limit",
       "--",
       process.execPath,
       "-e",
