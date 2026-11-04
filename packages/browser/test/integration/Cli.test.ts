@@ -1311,6 +1311,9 @@ describe("strider", () => {
 <div onclick="void 0"><span contenteditable="true">clickable-descendant-private</span></div>
 <p contenteditable="true">nearby-private</p><div contenteditable="true"></div>
 <div contenteditable="true"><img alt="image-alt-private" src="${pixel}"></div>
+<select aria-label="Plan"><option id="chosen-option" selected>option-private</option></select><button aria-labelledby="chosen-option"></button>
+<div role="textbox" aria-label="Rich"><span id="inside-aria">aria-descendant-private</span></div><button aria-labelledby="inside-aria"></button>
+<div onclick="void 0"><div role="textbox" aria-label="Inner"><img alt="aria-image-private" src="${pixel}"></div></div>
 <h3>public-heading</h3>
 <div>public-nearby</div><div contenteditable="true"></div>`
             const server = http.createServer((_, response) => {
@@ -1354,7 +1357,10 @@ describe("strider", () => {
                 "reference-value-private",
                 "clickable-descendant-private",
                 "nearby-private",
-                "image-alt-private"
+                "image-alt-private",
+                "option-private",
+                "aria-descendant-private",
+                "aria-image-private"
               ]
               for (const content of [...contents, "public-heading", "public-nearby"]) {
                 if (snapshot.out.includes(content)) shown.push(content)
