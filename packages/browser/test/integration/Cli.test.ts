@@ -1017,6 +1017,214 @@ describe("strider", () => {
     timeout
   )
 
+  it.live(
+    "enforces strict capture through CLI commands and MCP tools",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const served = yield* site
+        const secret = "strict-private-field"
+        const consoleText = "strict-private-console"
+        const url = `${served.origin}/fixture?html=${
+          encodeURIComponent(
+            `<div id="note" role="textbox" aria-label="Note" contenteditable="true"></div><button onclick="console.error('${consoleText}')">Log</button>`
+          )
+        }`
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "strict", ...args)
+        const page = (...args: ReadonlyArray<string>) => run("-p", "form", ...args)
+        const started = yield* strider(
+          env,
+          "start",
+          "--name",
+          "strict",
+          "--capture",
+          "strict",
+          "--chromium",
+          chromium.executable
+        )
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          const opened = yield* run("page", "new", "--name", "form", url)
+          assert.strictEqual(opened.code, 0, opened.err)
+          const filled = yield* page("fill", "css=#note", secret)
+          assert.strictEqual(filled.code, 0, filled.err)
+          const logged = yield* page("click", "role=button[name=\"Log\"]")
+          assert.strictEqual(logged.code, 0, logged.err)
+
+          const snapshot = yield* page("snapshot")
+          assert.strictEqual(snapshot.code, 0, snapshot.err)
+          assert.include(snapshot.out, "textbox \"Note\"")
+          assert.include(snapshot.out, "text: \"•••\"")
+          assert.notInclude(snapshot.out, secret)
+          const artifacts = path.join(env.XDG_RUNTIME_DIR, "strider", "strict", "artifacts")
+          const before = fs.readdirSync(artifacts)
+          const screenshot = yield* page("screenshot")
+          assert.strictEqual(screenshot.code, 17, screenshot.err)
+          assert.include(screenshot.err, "The capture policy sends no screenshots")
+          assert.deepStrictEqual(fs.readdirSync(artifacts), before)
+
+          let history = yield* page("history", "console", "--level", "error")
+          for (let attempt = 0; attempt < 50 && !history.out.includes("console error (text not sent)"); attempt++) {
+            yield* Effect.sleep("100 millis")
+            history = yield* page("history", "console", "--level", "error")
+          }
+          assert.strictEqual(history.code, 0, history.err)
+          assert.include(history.out, "console error (text not sent)")
+          assert.notInclude(history.out, consoleText)
+          // The digest of events since the last command also leaves console text out, whichever command carries it
+          for (const result of [logged, snapshot, screenshot]) {
+            assert.notInclude(result.out + result.err, consoleText)
+          }
+
+          // Call separately: the MCP helper sends each batch concurrently, so no call depends on another here.
+          for (
+            const [name, args] of [
+              ["snapshot", { page: "form" }],
+              ["screenshot", { page: "form" }],
+              ["history", { page: "form", kind: "console", level: "error" }]
+            ] as const
+          ) {
+            const answers = yield* mcp(env, ["-s", "strict", "mcp"], [
+              ...handshake,
+              { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name, arguments: args } }
+            ], 2)
+            const answer = answers.find((answer) => answer.id === 2)
+            assert.isUndefined(answer?.error, JSON.stringify(answer))
+            const result = answer?.result
+            assert.isDefined(result, JSON.stringify(answers))
+            const output = JSON.stringify(result)
+            assert.notInclude(output, consoleText)
+            if (name === "snapshot") {
+              assert.isNotTrue(result.isError, output)
+              assert.include(output, "Note")
+              assert.include(output, "•••")
+              assert.notInclude(output, secret)
+            } else if (name === "screenshot") {
+              assert.isTrue(result.isError, output)
+              assert.include(output, "NotPermitted")
+              assert.include(output, "The capture policy sends no screenshots")
+              assert.isFalse(result.content.some((content: any) => content.type === "image"))
+            } else {
+              assert.isNotTrue(result.isError, output)
+              assert.include(output, "console error (text not sent)")
+            }
+          }
+        } finally {
+          const stopped = yield* run("stop")
+          assert.strictEqual(stopped.code, 0, stopped.err)
+        }
+      })),
+    timeout
+  )
+
+  for (const capture of ["strict", "local"]) {
+    it.live(
+      `masks all of an editable field's content with ${capture} capture`,
+      () =>
+        Effect.scoped(Effect.gen(function*() {
+          const server = http.createServer((_, response) => {
+            response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+            response.end(
+              `<div role="textbox" aria-label="Rich" contenteditable="true"><h1>rich-heading<a href="#x">rich-link</a></h1><button onclick="document.getElementById('status').textContent = 'clicked'">rich-button</button><img alt="rich-image" src="data:,"></div><div contenteditable="true">roleless-field</div><div contenteditable="true" aria-label="Labeled">labeled-private</div><p id="status">ready</p>`
+            )
+          })
+          yield* Effect.acquireRelease(
+            Effect.callback<void>((resume) => void server.listen(0, "127.0.0.1", () => resume(Effect.void))),
+            () => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
+          )
+          const { port } = server.address() as { readonly port: number }
+          const url = `http://127.0.0.1:${port}/form`
+          const env = environment()
+          const run = (...args: ReadonlyArray<string>) => strider(env, "-s", capture, ...args)
+          const page = (...args: ReadonlyArray<string>) => run("-p", "form", ...args)
+          const started = yield* strider(
+            env,
+            "start",
+            "--name",
+            capture,
+            "--capture",
+            capture,
+            "--chromium",
+            chromium.executable
+          )
+          assert.strictEqual(started.code, 0, started.err)
+          try {
+            const opened = yield* run("page", "new", "--name", "form", url)
+            assert.strictEqual(opened.code, 0, opened.err)
+            const snapshot = yield* page("snapshot")
+            assert.strictEqual(snapshot.code, 0, snapshot.err)
+            assert.include(snapshot.out, "textbox \"Rich\"")
+            const found = yield* page("--json", "find", "")
+            assert.strictEqual(found.code, 0, found.err)
+            const contents = [
+              "rich-heading",
+              "rich-link",
+              "rich-button",
+              "rich-image",
+              "roleless-field",
+              "labeled-private"
+            ]
+            const check = (output: string, find = false) => {
+              if (capture === "strict") {
+                assert.deepStrictEqual(contents.filter((content) => output.includes(content)), [], output)
+                assert.include(output, "•••")
+              } else {
+                for (const content of find ? contents.slice(0, -1) : contents) assert.include(output, content)
+              }
+            }
+            check(snapshot.out)
+            check(found.out, true)
+            const matches = JSON.parse(found.out).outcome.value as Array<
+              { ref: string; role: string; name: string; path: string }
+            >
+            assert.includeMembers(matches.map((match) => match.name), ["Rich", "Labeled"])
+            const link = matches.find((match) => match.role === "link")!
+            assert.isDefined(link)
+            assert.include(link.path, capture === "strict" ? "heading \"•••\"" : "rich-heading")
+            const button = matches.find((match) => match.role === "button")!
+            assert.match(button.ref, /^e\d+$/)
+            const clicked = yield* page("click", button.ref)
+            assert.strictEqual(clicked.code, 0, clicked.err)
+            const checked = yield* page("expect", "css=#status", "visible", "--text", "clicked")
+            assert.strictEqual(checked.code, 0, checked.err)
+
+            for (const name of ["snapshot", "find"] as const) {
+              const answers = yield* mcp(env, ["-s", capture, "mcp"], [
+                ...handshake,
+                {
+                  jsonrpc: "2.0",
+                  id: 2,
+                  method: "tools/call",
+                  params: {
+                    name,
+                    arguments: { page: "form", ...(name === "find" ? { query: "" } : {}) }
+                  }
+                }
+              ], 2)
+              const answer = answers.find((answer) => answer.id === 2)
+              assert.isUndefined(answer?.error, JSON.stringify(answer))
+              assert.isDefined(answer?.result, JSON.stringify(answers))
+              assert.isNotTrue(answer.result.isError, JSON.stringify(answer))
+              const output = JSON.stringify(answer.result)
+              check(output, name === "find")
+              assert.include(output, "Rich")
+              assert.include(output, "Labeled")
+              if (name === "find") {
+                const matches = answer.result.structuredContent.outcome
+                const link = matches.find((match: any) => match.role === "link")
+                assert.include(link.path, capture === "strict" ? "heading \"•••\"" : "rich-heading")
+                assert.match(link.ref, /^e\d+$/)
+              }
+            }
+          } finally {
+            const stopped = yield* run("stop")
+            assert.strictEqual(stopped.code, 0, stopped.err)
+          }
+        })),
+      timeout
+    )
+  }
+
   it.live("exits 0 when its MCP client closes standard input", () =>
     Effect.callback<number | null>((resume) => {
       const child = spawn(process.execPath, [bin, "-s", "nobody", "mcp"], {

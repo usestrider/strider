@@ -395,6 +395,43 @@ describe("BrowserToolkit", () => {
     }
   })
 
+  it("masks rich field names and roleless text names while retaining labels and refs", () => {
+    const text = `- document:
+  - textbox "Rich" [ref=e1]:
+    - heading "private heading" [ref=e2]:
+      - link "private link" [ref=e3]
+    - img "private image" [ref=e4]
+    - button "private button" [ref=e5]
+  - editable "private field" [ref=e6] [inferred: contentEditable] [name from: text]
+  - editable "Label" [ref=e7] [inferred: contentEditable]:
+    - text: "private value"
+  - button "Outside" [ref=e8]`
+    assert.strictEqual(
+      ToolkitImpl.masked(text),
+      `- document:
+  - textbox "Rich" [ref=e1]:
+    - heading "•••" [ref=e2]:
+      - link "•••" [ref=e3]
+    - img "•••" [ref=e4]
+    - button "•••" [ref=e5]
+  - editable "•••" [ref=e6] [inferred: contentEditable] [name from: text]
+  - editable "Label" [ref=e7] [inferred: contentEditable]:
+    - text: "•••"
+  - button "Outside" [ref=e8]`
+    )
+  })
+
+  it("keeps editable labels separate from name-origin metadata", () => {
+    for (const name of ["Label [name from: text]", "Label \"quoted\" \\ tail\nnext"]) {
+      const text = `- editable ${JSON.stringify(name)} [ref=e1] [inferred: contentEditable]`
+      assert.strictEqual(ToolkitImpl.masked(text), text)
+      assert.strictEqual(
+        ToolkitImpl.masked(`${text} [name from: text]`),
+        "- editable \"•••\" [ref=e1] [inferred: contentEditable] [name from: text]"
+      )
+    }
+  })
+
   it("masks whole custom validation messages including JSON escapes", () => {
     const message = "private \"quoted\" ] [ref=fake] \\ trailing\nprivate tail"
     for (const role of ["textbox", "combobox", "button"]) {
