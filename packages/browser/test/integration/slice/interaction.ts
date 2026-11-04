@@ -44,6 +44,52 @@ const say = (text: string) => `document.getElementById('out').textContent = ${te
 const recordsClick =
   `<script>document.addEventListener("pointerdown",e=>document.getElementById("out").textContent=JSON.stringify({target:e.target.id,x:e.clientX,y:e.clientY}));document.addEventListener("click",e=>e.preventDefault())</script>`
 
+/** Observe the real engine boundary, counting rendering callbacks only while a check is in progress. */
+const observeChecks = Effect.fnUntraced(function*(locator: LocatorImpl) {
+  const adapter = locator.owner.runtime.model.adapter
+  const original = adapter.evaluate
+  const rounds: Array<{
+    request: Extract<Engine.Request, { op: "act" }>
+    response: Engine.Response
+    frames: number
+  }> = []
+  const measured = `async function(request) {
+    let frames = 0;
+    let handle;
+    const tick = () => { frames++; handle = requestAnimationFrame(tick); };
+    handle = requestAnimationFrame(tick);
+    try {
+      const result = JSON.parse(await (${Engine.run})(request));
+      result.__testFrames = frames;
+      return JSON.stringify(result);
+    } finally { cancelAnimationFrame(handle); }
+  }`
+  const evaluate: typeof original = (realm, call) =>
+    Effect.suspend(() => {
+      const argument = call.arguments[0]
+      const request = call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
+          argument.value.type === "string"
+        ? JSON.parse(argument.value.value) as Engine.Request
+        : undefined
+      if (request?.op !== "act") return original(realm, call)
+      return original(realm, { ...call, functionDeclaration: measured }).pipe(Effect.tap((result) =>
+        Effect.sync(() => {
+          assert(result._tag === "Value" && result.value.type === "string")
+          const response = JSON.parse(result.value.value) as Engine.Response & { __testFrames: number }
+          rounds.push({ request, response, frames: response.__testFrames })
+        })
+      ))
+    })
+  yield* Effect.acquireRelease(
+    Effect.sync(() => Object.assign(adapter, { evaluate })),
+    () =>
+      Effect.sync(() => {
+        Object.assign(adapter, { evaluate: original })
+      })
+  )
+  return rounds
+})
+
 export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} interaction`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
@@ -511,78 +557,103 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
-      for (const change of ["replaced", "moved", "disabled", "covered", "interrupted", "expired"] as const) {
-        it.effect(`handles a queued click when ${change}`, () =>
-          Effect.gen(function*() {
-            const { url } = yield* fixture(() =>
-              `<button id="go" data-name="old" onclick="const out = document.getElementById('out'); out.dataset.count = String(Number(out.dataset.count ?? 0) + 1); out.textContent = this.dataset.name + ' clicked ' + out.dataset.count">Go</button>${out}`
-            )
-            yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
-              yield* page.goto(url)
-              const locator = page.locator("#go")
-              assert(locator instanceof LocatorImpl)
-              const input = locator.owner.page.input
-              const original = input.withPermit
-              const waiting = yield* Deferred.make<void>()
-              // Observe the actual permit boundary after preflight, without a sleep or a timing assumption.
-              yield* Effect.acquireRelease(
-                Effect.sync(() => {
-                  input.withPermit = (effect) => Effect.andThen(Deferred.succeed(waiting, undefined), original(effect))
-                }),
-                () =>
-                  Effect.sync(() => {
-                    input.withPermit = original
-                  })
+      for (const action of ["click", "check", "uncheck"] as const) {
+        for (const change of ["replaced", "moved", "disabled", "covered", "interrupted", "expired"] as const) {
+          it.effect(`handles a queued ${action} when ${change}`, () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<${
+                  action === "click" ? "button" : `input type="checkbox" ${action === "uncheck" ? "checked" : ""}`
+                } id="go" data-name="old" onclick="const out = document.getElementById('out'); out.dataset.count = String(Number(out.dataset.count ?? 0) + 1); out.textContent = this.dataset.name + ' clicked ' + out.dataset.count">${
+                  action === "click" ? "Go</button>" : ""
+                }${out}`
               )
-              const clicked = yield* original(Effect.gen(function*() {
-                const fiber = yield* locator.click().pipe(Deadline.within("2 seconds"), Effect.forkScoped)
-                yield* Deferred.await(waiting)
-                assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
-                if (change === "expired") {
-                  const error = yield* Fiber.join(fiber).pipe(Effect.flip)
-                  assert(Deadline.isTimeout(error), String(error))
-                  assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
-                } else if (change === "interrupted") {
-                  yield* Fiber.interrupt(fiber)
-                } else {
-                  yield* page.evaluateInMainWorld((change: string) => {
-                    const button = document.getElementById("go") as HTMLButtonElement
-                    if (change === "replaced") {
-                      const replacement = button.cloneNode(true) as HTMLButtonElement
-                      replacement.dataset["name"] = "new"
-                      button.replaceWith(replacement)
-                    } else if (change === "moved") {
-                      button.style.marginLeft = "200px"
-                    } else if (change === "disabled") {
-                      button.disabled = true
-                    } else {
-                      const cover = document.createElement("div")
-                      cover.style.cssText = "position:fixed;inset:0;z-index:1"
-                      document.body.append(cover)
-                    }
-                  }, change)
-                }
-                return fiber
-              }))
-              if (change === "disabled" || change === "covered") {
-                const error = yield* Fiber.join(clicked).pipe(Effect.flip)
-                assert(Deadline.isTimeout(error), String(error))
-                assert(error.history.some((entry) =>
-                  (entry.value as { _tag: string })._tag === (change === "disabled" ? "Disabled" : "Covered")
-                ))
-                assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
-              } else {
-                if (change === "interrupted" || change === "expired") {
-                  yield* locator.click()
-                } else yield* Fiber.join(clicked)
-                assert.strictEqual(
-                  yield* page.locator("#out").readText,
-                  `${change === "replaced" ? "new" : "old"} clicked 1`
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const locator = page.locator("#go")
+                assert(locator instanceof LocatorImpl)
+                const rounds = yield* observeChecks(locator)
+                const input = locator.owner.page.input
+                const original = input.withPermit
+                const waiting = yield* Deferred.make<void>()
+                // Observe the actual permit boundary after preflight, without a sleep or a timing assumption.
+                yield* Effect.acquireRelease(
+                  Effect.sync(() => {
+                    input.withPermit = (effect) =>
+                      Effect.andThen(Deferred.succeed(waiting, undefined), original(effect))
+                  }),
+                  () =>
+                    Effect.sync(() => {
+                      input.withPermit = original
+                    })
                 )
-              }
-            }))
-          }), timeout)
+                const clicked = yield* original(Effect.gen(function*() {
+                  const fiber = yield* locator[action]().pipe(Deadline.within("2 seconds"), Effect.forkScoped)
+                  yield* Deferred.await(waiting)
+                  assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+                  if (change === "expired") {
+                    const error = yield* Fiber.join(fiber).pipe(Effect.flip)
+                    assert(Deadline.isTimeout(error), String(error))
+                    assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+                  } else if (change === "interrupted") {
+                    yield* Fiber.interrupt(fiber)
+                  } else {
+                    yield* page.evaluateInMainWorld((change: string) => {
+                      const button = document.getElementById("go") as HTMLInputElement
+                      if (change === "replaced") {
+                        const replacement = button.cloneNode(true) as HTMLInputElement
+                        replacement.dataset["name"] = "new"
+                        button.replaceWith(replacement)
+                      } else if (change === "moved") {
+                        button.style.marginLeft = "200px"
+                      } else if (change === "disabled") {
+                        button.disabled = true
+                      } else {
+                        const cover = document.createElement("div")
+                        cover.style.cssText = "position:fixed;inset:0;z-index:1"
+                        document.body.append(cover)
+                      }
+                    }, change)
+                  }
+                  return fiber
+                }))
+                if (change === "disabled" || change === "covered") {
+                  const error = yield* Fiber.join(clicked).pipe(Effect.flip)
+                  assert(Deadline.isTimeout(error), String(error))
+                  assert(
+                    error.history.some((entry) =>
+                      (entry.value as { _tag: string })._tag === (change === "disabled" ? "Disabled" : "Covered")
+                    )
+                  )
+                  assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+                } else {
+                  if (change === "interrupted" || change === "expired") {
+                    rounds.length = 0
+                    yield* locator[action]()
+                  } else yield* Fiber.join(clicked)
+                  assert.strictEqual(
+                    yield* page.locator("#out").readText,
+                    `${change === "replaced" ? "new" : "old"} clicked 1`
+                  )
+                }
+                if (change !== "expired" && change !== "interrupted") {
+                  assert(
+                    rounds.filter((round) => round.request.apply).every((round) =>
+                      round.request.stability === undefined
+                    )
+                  )
+                }
+                if (change !== "expired" && change !== "interrupted") {
+                  const applied = rounds.find((round) => round.request.apply)
+                  if (applied?.response._tag === "Ready") assert.isAtLeast(applied.frames, 2)
+                }
+                if (action !== "click" && change !== "disabled" && change !== "covered") {
+                  assert.strictEqual(yield* locator.isChecked, action === "check")
+                }
+              }))
+            }), timeout)
+        }
       }
 
       // On stock WebKit the page sees only the press
@@ -1156,6 +1227,203 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }),
         timeout
       )
+
+      for (const action of ["check", "uncheck"] as const) {
+        it.effect(`chooses a reachable label fragment while performing ${action}`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<style>body{margin:0;font:16px/24px monospace}#wrap{position:absolute;left:20px;top:60px;width:240px}#cover{position:fixed;left:0;top:0;width:400px;height:84px}</style><input id="box" type="checkbox" ${
+                action === "uncheck" ? "checked" : ""
+              } onchange="out.textContent += event.isTrusted + ' '"><div id="wrap"><label id="label" for="box">${
+                Array(6).fill("abcdefghij").join(" ")
+              }</label></div><div id="cover"></div><output id="out" style="position:absolute;top:260px"></output>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              assert.isAbove(
+                yield* page.evaluateInMainWorld(() => document.getElementById("label")!.getClientRects().length),
+                1
+              )
+              yield* page.locator("#label")[action]().pipe(Deadline.within("2 seconds"))
+              assert.strictEqual(yield* page.locator("#box").isChecked, action === "check")
+              assert.strictEqual(yield* page.locator("#out").readText, "true")
+            }))
+          }), timeout)
+
+        for (const stable of [false, 2, 4] as const) {
+          it.effect(
+            `offers immediate ${action} stability evidence with ${stable} frames`,
+            () =>
+              Effect.gen(function*() {
+                const { url } = yield* fixture(() =>
+                  `<input id="box" type="checkbox" ${
+                    action === "uncheck" ? "checked" : ""
+                  } onchange="out.textContent += event.isTrusted + ' '"><output id="out"></output>`
+                )
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const box = page.locator("#box")
+                  assert(box instanceof LocatorImpl)
+                  const rounds = yield* observeChecks(box)
+                  yield* box[action]({ checks: { stable: stable === false ? false : { frames: stable } } })
+                  assert.strictEqual(rounds.length, 2)
+                  assert.strictEqual(rounds[0]!.request.checks.stable, stable === false ? 0 : stable)
+                  if (stable === false) {
+                    assert.strictEqual(rounds[0]!.request.stability, undefined)
+                    assert.strictEqual(rounds[1]!.request.stability, undefined)
+                    assert.isAtLeast(rounds[1]!.frames, 1)
+                  } else {
+                    assert.strictEqual(rounds[0]!.request.stability, "capture")
+                    const first = rounds[0]!.response
+                    assert(first._tag === "Ready" && typeof first.stability === "string")
+                    assert.strictEqual(rounds[1]!.request.stability, first.stability)
+                    assert.strictEqual(rounds[0]!.frames, stable)
+                  }
+                  assert.strictEqual(yield* box.isChecked, action === "check")
+                  assert.strictEqual(yield* page.locator("#out").readText, "true")
+                }))
+              }),
+            timeout
+          )
+        }
+
+        for (const trial of [false, true]) {
+          it.effect(`keeps an already-correct ${action} a no-op with trial ${trial}`, () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<input id="box" type="checkbox" ${
+                  action === "check" ? "checked" : ""
+                } onclick="out.textContent += 'click '"><output id="out"></output>`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const box = page.locator("#box")
+                assert(box instanceof LocatorImpl)
+                const rounds = yield* observeChecks(box)
+                yield* box[action]({ trial })
+                assert.strictEqual(rounds.length, 0)
+                assert.strictEqual(yield* box.isChecked, action === "check")
+                assert.strictEqual(yield* page.locator("#out").readText, "")
+              }))
+            }), timeout)
+        }
+
+        it.effect(`revalidates a trial ${action} without input or state changes`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="box" type="checkbox" ${
+                action === "uncheck" ? "checked" : ""
+              } onclick="out.textContent += 'click '"><output id="out"></output>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const box = page.locator("#box")
+              assert(box instanceof LocatorImpl)
+              const rounds = yield* observeChecks(box)
+              yield* box[action]({ trial: true })
+              assert.strictEqual(rounds.length, 2)
+              const first = rounds[0]!.response
+              assert(first._tag === "Ready" && typeof first.stability === "string")
+              assert.strictEqual(rounds[1]!.request.stability, first.stability)
+              assert(rounds.every((round) => !round.request.apply))
+              assert.strictEqual(yield* box.isChecked, action === "uncheck")
+              assert.strictEqual(yield* page.locator("#out").readText, "")
+              // A trial leaves no guard or held permit behind.
+              yield* box[action]()
+              assert.strictEqual(yield* box.isChecked, action === "check")
+              assert.strictEqual(yield* page.locator("#out").readText, "click")
+            }))
+          }), timeout)
+
+        it.effect(`resamples expired ${action} evidence under the immediate permit`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="box" type="checkbox" ${
+                action === "uncheck" ? "checked" : ""
+              } onchange="out.textContent += event.isTrusted + ' '"><output id="out"></output>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const box = page.locator("#box")
+              assert(box instanceof LocatorImpl)
+              const rounds = yield* observeChecks(box)
+              const input = box.owner.page.input
+              const original = input.withPermitsIfAvailable
+              const available = original.bind(input)
+              yield* Effect.acquireRelease(
+                Effect.sync(() => {
+                  input.withPermitsIfAvailable = (permits) => (effect) =>
+                    available(permits)(Effect.andThen(
+                      page.evaluateInMainWorld(() =>
+                        new Promise<void>((resolve) =>
+                          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+                        )
+                      ).pipe(Effect.orDie),
+                      effect
+                    ))
+                }),
+                () =>
+                  Effect.sync(() => {
+                    input.withPermitsIfAvailable = original
+                  })
+              )
+              yield* box[action]()
+              assert.strictEqual(rounds.length, 2)
+              assert.strictEqual(rounds[0]!.request.stability, "capture")
+              assert.strictEqual(typeof rounds[1]!.request.stability, "string")
+              assert.isAtLeast(rounds[1]!.frames, 2)
+              assert.strictEqual(yield* box.isChecked, action === "check")
+              assert.strictEqual(yield* page.locator("#out").readText, "true")
+            }))
+          }), timeout)
+
+        it.effect(`serializes competing ${action} actions and confirms each state`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="a" type="checkbox" ${
+                action === "uncheck" ? "checked" : ""
+              } onchange="out.textContent += this.id + ':' + event.isTrusted + ' '"><input id="b" type="checkbox" ${
+                action === "uncheck" ? "checked" : ""
+              } onchange="out.textContent += this.id + ':' + event.isTrusted + ' '"><output id="out"></output>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* Effect.all([page.locator("#a")[action](), page.locator("#b")[action]()], {
+                concurrency: "unbounded"
+              })
+              assert.strictEqual(yield* page.locator("#a").isChecked, action === "check")
+              assert.strictEqual(yield* page.locator("#b").isChecked, action === "check")
+              assert.deepStrictEqual((yield* page.locator("#out").readText).trim().split(" ").sort(), [
+                "a:true",
+                "b:true"
+              ])
+            }))
+          }), timeout)
+
+        it.effect(`reports prevented ${action} once without retrying input`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="box" type="checkbox" ${
+                action === "uncheck" ? "checked" : ""
+              } onclick="event.preventDefault(); out.textContent += event.isTrusted + ' '"><output id="out"></output>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const box = page.locator("#box")
+              const error = yield* box[action]().pipe(Effect.flip)
+              assert(Locator.isLocatorError(error) && error.reason._tag === "StateUnchanged")
+              assert.strictEqual(yield* box.isChecked, action === "uncheck")
+              assert.strictEqual(yield* page.locator("#out").readText, "true")
+            }))
+          }), timeout)
+      }
 
       it.effect("chooses options, checks boxes and sets files", () =>
         Effect.gen(function*() {
