@@ -1277,75 +1277,35 @@ export function engine(render: (root: SnapNode) => string) {
       : null
   }
 
-  /** The viewport, parent frames and overflow ancestors all constrain a fragment independently of coverage. */
-  const visibleBounds = (element: Element, inherited?: Clip): Clip => {
-    let left = Math.max(0, inherited?.left ?? 0)
-    let top = Math.max(0, inherited?.top ?? 0)
-    let right = Math.min(innerWidth, inherited?.right ?? innerWidth)
-    let bottom = Math.min(innerHeight, inherited?.bottom ?? innerHeight)
-    let position = getComputedStyle(element).position
-    let offsetParent = element instanceof HTMLElement ? element.offsetParent : null
-    let clips = position !== "fixed" && position !== "absolute"
-    for (let ancestor = composedParent(element); ancestor !== null; ancestor = composedParent(ancestor)) {
-      const style = getComputedStyle(ancestor)
-      // Positioned descendants escape overflow ancestors between themselves and their containing block.
-      if (!clips) {
-        clips = position === "absolute" ?
-          ancestor === offsetParent :
-          style.transform !== "none" || style.perspective !== "none" || style.filter !== "none" ||
-          /(?:^|\s)(?:layout|paint|strict|content)(?:\s|$)/.test(style.contain) ||
-          style.contentVisibility === "auto" || /(?:transform|perspective|filter)/.test(style.willChange)
-        if (!clips) continue
-      }
-      // Its own overflow still clips, but its containing block determines which outer ancestors can clip it.
-      if (style.position === "fixed" || style.position === "absolute") {
-        position = style.position
-        offsetParent = ancestor instanceof HTMLElement ? ancestor.offsetParent : null
-        clips = false
-      }
-      // Root overflow is applied to the viewport; body overflow can be propagated there too.
-      if (
-        ancestor === document.documentElement ||
-        (ancestor === document.body && getComputedStyle(document.documentElement).overflow === "visible")
-      ) continue
-      if (style.overflowX === "visible" && style.overflowY === "visible") continue
-      const rect = ancestor.getBoundingClientRect()
-      const scaleX = ancestor instanceof HTMLElement && ancestor.offsetWidth > 0 ? rect.width / ancestor.offsetWidth : 1
-      const scaleY = ancestor instanceof HTMLElement && ancestor.offsetHeight > 0
-        ? rect.height / ancestor.offsetHeight
-        : 1
-      const x = rect.left + ancestor.clientLeft * scaleX
-      const y = rect.top + ancestor.clientTop * scaleY
-      if (style.overflowX !== "visible") {
-        left = Math.max(left, x)
-        right = Math.min(right, x + ancestor.clientWidth * scaleX)
-      }
-      if (style.overflowY !== "visible") {
-        top = Math.max(top, y)
-        bottom = Math.min(bottom, y + ancestor.clientHeight * scaleY)
-      }
-    }
-    return { left, top, right, bottom }
-  }
+  /** Geometric bounds only; the browser's hit test determines whether ancestors or overlays block a centre. */
+  const viewportBounds = (inherited?: Clip): Clip => ({
+    left: Math.max(0, inherited?.left ?? 0),
+    top: Math.max(0, inherited?.top ?? 0),
+    right: Math.min(innerWidth, inherited?.right ?? innerWidth),
+    bottom: Math.min(innerHeight, inherited?.bottom ?? innerHeight)
+  })
 
-  const visibleFragment = (element: Element, inherited?: Clip): Clip | null => {
-    const bounds = visibleBounds(element, inherited)
+  const fragments = (element: Element, inherited?: Clip): Array<Clip> => {
+    const bounds = viewportBounds(inherited)
+    const result: Array<Clip> = []
     for (const rect of element.getClientRects()) {
       const left = Math.max(bounds.left, rect.left)
       const top = Math.max(bounds.top, rect.top)
       const right = Math.min(bounds.right, rect.right)
       const bottom = Math.min(bounds.bottom, rect.bottom)
-      if (right > left && bottom > top) return { left, top, right, bottom }
+      if (right > left && bottom > top) result.push({ left, top, right, bottom })
     }
-    return null
+    return result
   }
+
+  const visibleFragment = (element: Element, inherited?: Clip): Clip | null => fragments(element, inherited)[0] ?? null
 
   const inViewport = (element: Element): boolean => visibleFragment(element) !== null
 
   /** Oversized unions can have their centre in a gap between fragments; align an edge in that case. */
   const scrollToFragments = (element: Element, inherited?: Clip) => {
     const rect = element.getBoundingClientRect()
-    const bounds = visibleBounds(element, inherited)
+    const bounds = viewportBounds(inherited)
     element.scrollIntoView({
       block: rect.height > bounds.bottom - bounds.top ? "start" : "center",
       inline: rect.width > bounds.right - bounds.left ? "start" : "center",
@@ -1361,13 +1321,23 @@ export function engine(render: (root: SnapNode) => string) {
     return center
   }
 
-  /** The first visible fragment's centre, or an explicit offset from the padding box's top left. */
-  const actionPoint = (element: Element, position: { readonly x: number; readonly y: number } | null, clip?: Clip) => {
+  /** Probe centres only when requested; retain the first geometric point for a Covered result if none reaches. */
+  const actionPoint = (
+    element: Element,
+    position: { readonly x: number; readonly y: number } | null,
+    clip: Clip | undefined,
+    receivesPointer: boolean
+  ) => {
     if (position === null) {
-      const rect = visibleFragment(element, clip)
-      return rect === null
-        ? null
-        : { x: fragmentCenter(rect.left, rect.right), y: fragmentCenter(rect.top, rect.bottom) }
+      let first: { x: number; y: number } | null = null
+      for (const rect of fragments(element, clip)) {
+        const point = { x: fragmentCenter(rect.left, rect.right), y: fragmentCenter(rect.top, rect.bottom) }
+        first ??= point
+        if (!receivesPointer) return point
+        const hit = hitTarget(point.x, point.y)
+        if (hit !== null && composedContains(element, hit)) return point
+      }
+      return first
     }
     const rect = element.getBoundingClientRect()
     const style = getComputedStyle(element)
@@ -1599,7 +1569,7 @@ export function engine(render: (root: SnapNode) => string) {
       }
       const position = action._tag === "Point" ? action.position : null
       const point = reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)
-        ? actionPoint(element, position, request.clip)
+        ? actionPoint(element, position, request.clip, checks.receivesPointer)
         : null
       if (reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)) {
         if (point === null) reason = { _tag: "OutsideViewport" }
@@ -2300,7 +2270,7 @@ export function engine(render: (root: SnapNode) => string) {
       const hit = hitTarget(origin.x + request.point.x, origin.y + request.point.y)
       if (hit !== iframe) covered = hit === null ? "nothing at that point" : describe(hit)
     }
-    const bounds = visibleBounds(iframe, request.clip)
+    const bounds = viewportBounds(request.clip)
     const viewport = {
       left: Math.max(bounds.left, origin.x) - origin.x,
       top: Math.max(bounds.top, origin.y) - origin.y,

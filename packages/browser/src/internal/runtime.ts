@@ -531,6 +531,18 @@ export const sendRouted = (
               ...(clip === undefined ? {} : { clip })
             }, id)
             if (Option.isNone(answer)) return Option.none()
+            if (answer.value._tag === "NoMatch") {
+              return Option.some({
+                routed,
+                response: {
+                  _tag: "NotReady" as const,
+                  reason: { _tag: "NoMatch" as const },
+                  history: [{ _tag: "NoMatch" as const }],
+                  scrolled: false,
+                  checked: true
+                }
+              })
+            }
             if (answer.value._tag !== "Frame") return Option.some({ response: answer.value, routed })
             if (answer.value.scrolled) {
               return Option.some({

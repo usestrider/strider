@@ -2,7 +2,7 @@
 "@usestrider/browser": minor
 ---
 
-Change default pointer-action coordinates from the padding-box centre to the centre of the first nonempty client rectangle after viewport, overflow-ancestor and parent-frame clipping. This fixes wrapped links, including links in scrollers and cross-origin frames. When no fragment remains, the viewport check scrolls and checks again. Integer-rounded default points stay inside the rectangle when an integer coordinate fits.
+Change default pointer-action coordinates from the padding-box centre to a client-rectangle centre after viewport and parent-frame clipping. With `receivesPointer` enabled, choose the first centre that reaches the target or a descendant, including a later line when an earlier line is covered. If no centre reaches it, retain the first geometric candidate so the check reports `Covered`. Disabling `receivesPointer` selects the first geometric centre without coverage probes. This fixes wrapped links, including links in scrollers and cross-origin frames. When no fragment remains, the viewport check scrolls and checks again. Integer-rounded default points stay inside the rectangle when an integer coordinate fits.
 
 A target with no visible fragment now has no default point, even with actionability checks disabled: it waits and fails with `Timeout` if no point becomes available, rather than dispatching an offscreen point.
 
