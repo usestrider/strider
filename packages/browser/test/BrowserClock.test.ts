@@ -6,7 +6,11 @@ import { assert, describe, it } from "@effect/vitest"
 import type * as Clock from "effect/Clock"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Condition from "../src/Condition.ts"
+import * as Deadline from "../src/Deadline.ts"
+import * as Expect from "../src/Expect.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
+import * as Operation from "../src/internal/operation.ts"
 
 /** A clock whose timers fire 0.4 ms before the time they were set for, as Node's can: each sleep is counted. */
 const early = () => {
@@ -58,4 +62,50 @@ describe("BrowserClock", () => {
       yield* BrowserClock.fromClock(onTime).sleep(250)
       assert.strictEqual(sleeps, 1)
     }))
+})
+
+describe("Expect.that with an early browser timer", () => {
+  for (const shorter of [false, true]) {
+    it.effect(
+      shorter ? "preserves a shorter subject deadline" : "turns an inherited subject deadline into ExpectationFailed",
+      () =>
+        Effect.gen(function*() {
+          let nanos = 1_000_000_000n
+          let first = true
+          const clock: Clock.Clock = {
+            ...early().clock,
+            monotonicTimeNanosUnsafe: () => nanos,
+            sleep: (duration) =>
+              Effect.sync(() => {
+                const asked = Duration.toNanos(duration)
+                const wait = asked._tag === "Some" ? asked.value : 0n
+                nanos += first ? wait - 400_000n : wait
+                first = false
+              })
+          }
+          const browser = BrowserClock.fromClock(clock)
+          const subject = Effect.flatMap(Operation.record, (record) => record.bound(Effect.never)).pipe(
+            Operation.named("subject")
+          )
+          const error = yield* Expect.that(
+            shorter ? subject.pipe(Deadline.within("100 millis")) : subject,
+            Condition.make("never", () => false)
+          ).pipe(
+            Deadline.within("250 millis"),
+            Effect.provideService(BrowserClock.CurrentClock, browser),
+            Effect.flip
+          )
+          if (shorter) {
+            assert(Deadline.isTimeout(error), String(error))
+            assert.strictEqual(error.phase, "resolving")
+            assert.strictEqual(error.operation, "Expect.that")
+          } else {
+            assert(Expect.isExpectationFailed(error), String(error))
+            assert.deepStrictEqual(error.history.map((entry) => entry.value), [
+              { error: "a check was still running at the deadline" }
+            ])
+          }
+        })
+    )
+  }
 })
