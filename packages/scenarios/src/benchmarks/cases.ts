@@ -157,6 +157,63 @@ const verifyPng = (width: number, height: number, rgb?: ReadonlyArray<number>) =
     assert.deepEqual([...raw.subarray(1, 4)], rgb)
   }
 }
+// Reconstruct every PNG row and compare every dense-fixture pixel, outside the timer. Chromium may
+// choose RGB or RGBA and any of the five PNG row filters; compressed bytes themselves are not stable.
+const verifyDensePng = (value: unknown) => {
+  verifyPng(1280, 2880, [12, 34, 56])(value)
+  const bytes = Buffer.from(value as Uint8Array)
+  assert.equal(bytes[28], 0, "non-interlaced PNG")
+  const channels = bytes[25] === 6 ? 4 : 3
+  const chunks = []
+  for (let at = 8; at < bytes.length;) {
+    const length = bytes.readUInt32BE(at)
+    if (bytes.toString("ascii", at + 4, at + 8) === "IDAT") chunks.push(bytes.subarray(at + 8, at + 8 + length))
+    at += length + 12
+  }
+  const raw = inflateSync(Buffer.concat(chunks))
+  const stride = 1280 * channels
+  assert.equal(raw.length, (stride + 1) * 2880)
+  let previous = new Uint8Array(stride)
+  let row = new Uint8Array(stride)
+  let seed = 42
+  for (let y = 0; y < 2880; y++) {
+    const offset = y * (stride + 1)
+    const filter = raw[offset]!
+    assert.ok(filter <= 4, "valid PNG filter")
+    for (let x = 0; x < stride; x++) {
+      const left = x < channels ? 0 : row[x - channels]!
+      const up = previous[x]!
+      const upperLeft = x < channels ? 0 : previous[x - channels]!
+      let predictor = 0
+      if (filter === 1) predictor = left
+      else if (filter === 2) predictor = up
+      else if (filter === 3) predictor = Math.floor((left + up) / 2)
+      else if (filter === 4) {
+        const p = left + up - upperLeft
+        const a = Math.abs(p - left)
+        const b = Math.abs(p - up)
+        const c = Math.abs(p - upperLeft)
+        predictor = a <= b && a <= c ? left : b <= c ? up : upperLeft
+      }
+      row[x] = (raw[offset + 1 + x]! + predictor) & 255
+    }
+    for (let x = 0; x < 1280; x++) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+      const at = x * channels
+      const first = x === 0 && y === 0
+      // Avoid millions of assertion allocations; report the first differing coordinate.
+      if (
+        row[at] !== (first ? 12 : seed & 255) || row[at + 1] !== (first ? 34 : (seed >>> 8) & 255) ||
+        row[at + 2] !== (first ? 56 : (seed >>> 16) & 255) || (channels === 4 && row[at + 3] !== 255)
+      ) {
+        assert.fail(`Dense PNG differs at ${x},${y}`)
+      }
+    }
+    const swap = previous
+    previous = row
+    row = swap
+  }
+}
 export const captureCases: ReadonlyArray<Case> = [
   {
     name: "screenshot-dense",
@@ -165,7 +222,7 @@ export const captureCases: ReadonlyArray<Case> = [
     preparePlaywright: (page) => page.evaluate(prepareDenseCapture),
     strider: (page) => page.screenshot({ area: { _tag: "FullPage" } }),
     playwright: (page) => page.screenshot({ type: "png", fullPage: true }),
-    verify: verifyPng(1280, 2880, [12, 34, 56])
+    verify: verifyDensePng
   },
   {
     name: "screenshot-repeated",
