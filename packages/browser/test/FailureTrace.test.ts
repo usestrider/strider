@@ -204,7 +204,7 @@ describe("shared layer lifecycle attribution", () => {
   it("separates two failures and links shared acquisition and finalization", async () => {
     const { spawnSync } = await import("node:child_process")
     const directory = new URL("../../../.data/integration-failures/", import.meta.url)
-    const before = new Set(fs.readdirSync(directory))
+    const before = new Set(fs.existsSync(directory) ? fs.readdirSync(directory) : [])
     const run = spawnSync("pnpm", [
       "exec",
       "vitest",
@@ -252,7 +252,7 @@ describe("skipped task bookkeeping", () => {
   it("does not treat a skipped test as a concurrent observer", async () => {
     const { spawnSync } = await import("node:child_process")
     const directory = new URL("../../../.data/integration-failures/", import.meta.url)
-    const before = new Set(fs.readdirSync(directory))
+    const before = new Set(fs.existsSync(directory) ? fs.readdirSync(directory) : [])
     const run = spawnSync("pnpm", [
       "exec",
       "vitest",

@@ -117,6 +117,13 @@ export default class FailureTraceRunner extends TestRunner {
       if (running !== undefined) running.inBody = false
     }
   }
+  onAfterRetryTask(task: RunnerTestCase) {
+    // Runtime skip returns before onAfterRunTask; this hook still runs after per-test cleanup.
+    if ((task.result && "pending" in task.result && task.result.pending) || task.result?.state === "skip") {
+      active.get(task.id)?.trace.clear()
+      active.delete(task.id)
+    }
+  }
   override onAfterRunTask(task: RunnerTask) {
     super.onAfterRunTask(task)
     const running = active.get(task.id)
