@@ -142,3 +142,35 @@ describe("failure trace files", () => {
     for (const line of contents[0]!.replace(/\n$/, "").split("\n")) expect(() => JSON.parse(line)).not.toThrow()
   }, 30_000)
 })
+
+describe("late cleanup overflow", () => {
+  it("writes one terminal overflow marker with a new sequence number", async () => {
+    const { spawnSync } = await import("node:child_process")
+    const directory = new URL("../../../.data/integration-failures/", import.meta.url)
+    const before = new Set(fs.existsSync(directory) ? fs.readdirSync(directory) : [])
+    const run = spawnSync("pnpm", [
+      "exec",
+      "vitest",
+      "--run",
+      "--config",
+      "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+      "late.fixture"
+    ], {
+      cwd: new URL("../../../", import.meta.url),
+      encoding: "utf8"
+    })
+    expect(run.status, run.stdout + run.stderr).toBe(1)
+    const files = fs.readdirSync(directory).filter((name) => !before.has(name))
+    const tests = files.filter((name) => name.includes("-test"))
+    expect(tests.length).toBe(1)
+    const entries = fs.readFileSync(new URL(tests[0]!, directory), "utf8").replace(/\n$/, "").split("\n").map((line) =>
+      JSON.parse(line)
+    )
+    const records = entries.slice(1)
+    expect(records.map((entry) => entry.sequence)).toEqual(records.map((_, index) => index + 1))
+    expect(records.filter((entry) => entry.kind === "overflow").length).toBe(1)
+    expect(records.at(-1)?.kind).toBe("overflow")
+    expect(records.some((entry) => entry.payload === "AFTER_OVERFLOW")).toBe(false)
+    for (const name of files) fs.unlinkSync(new URL(name, directory))
+  }, 30_000)
+})
