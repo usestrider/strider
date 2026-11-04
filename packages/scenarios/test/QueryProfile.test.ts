@@ -1,13 +1,28 @@
 import { execFileSync } from "node:child_process"
 import { describe, expect, it } from "vitest"
-import { instrumentationTargets, profileOptions, verifyCompletion } from "../benchmark/query-profile-config.ts"
+import {
+  instrumentationTargets,
+  profileOptions,
+  replaceAnchor,
+  verifyCompletion
+} from "../benchmark/query-profile-config.ts"
 
 const installed = new Set<string>(instrumentationTargets)
 
 describe("query profile arguments", () => {
   it("keeps defaults and accepts every supported mode with positive integer counts", () => {
     expect(profileOptions(["report.json"]).runs).toBe(20)
-    for (const mode of ["plain", "instrumented", "trace", "boundary", "boundary-trace"]) {
+    for (
+      const mode of [
+        "plain",
+        "instrumented",
+        "trace",
+        "boundary",
+        "boundary-trace",
+        "evaluation",
+        "evaluation-instrumented"
+      ]
+    ) {
       expect(profileOptions(["report.json", mode, "1"], installed)).toMatchObject({ mode, runs: 1 })
     }
     expect(profileOptions(["report.json", "trace"], installed)).toMatchObject({ runs: 3, warmups: 1 })
@@ -51,7 +66,7 @@ describe("query profile arguments", () => {
   })
 
   it("requires every instrumentation target for instrumented modes", () => {
-    for (const mode of ["instrumented", "trace", "boundary-trace"]) {
+    for (const mode of ["instrumented", "trace", "boundary-trace", "evaluation-instrumented"]) {
       expect(() => profileOptions(["report.json", mode])).toThrow("instrumentation")
       for (const missing of instrumentationTargets) {
         expect(() =>
@@ -91,12 +106,29 @@ describe("query profile completion", () => {
       expect(() => verifyCompletion([{ ...valid, capture: { ...valid.capture, wire: [] } }], 1, true))
         .toThrow("wire capture")
       for (const direction of ["send", "receive"]) {
-        expect(() => verifyCompletion([{ ...valid, capture: { ...valid.capture, wire: valid.capture.wire.filter((row) => row.direction !== direction) } }], 1, true)).toThrow("wire capture")
+        expect(() =>
+          verifyCompletion(
+            [{
+              ...valid,
+              capture: { ...valid.capture, wire: valid.capture.wire.filter((row) => row.direction !== direction) }
+            }],
+            1,
+            true
+          )
+        ).toThrow("wire capture")
       }
       for (const missing of stages) {
         expect(() => verifyCompletion([sample(library, stages.filter((name) => name !== missing))], 1, true))
           .toThrow("stage")
       }
     }
+  })
+})
+
+describe("checked pipe anchors", () => {
+  it("rejects missing or repeated anchors and replaces exactly one", () => {
+    expect(replaceAnchor("before SEND after", "SEND", "HOOK")).toBe("before HOOK after")
+    expect(() => replaceAnchor("before after", "SEND", "HOOK")).toThrow("anchor")
+    expect(() => replaceAnchor("SEND SEND", "SEND", "HOOK")).toThrow("anchor")
   })
 })

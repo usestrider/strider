@@ -27,7 +27,7 @@ const executablePath = process.env["STRIDER_CHROMIUM"]
 if (process.env["STRIDER_ENVIRONMENT"] !== "nix-integration" || executablePath === undefined) {
   throw new Error("Use the pinned integration Nix shell")
 }
-const { output, mode, boundary, trace, instrumented, runs, warmups } = profileOptions(
+const { output, mode, evaluation, boundary, trace, instrumented, runs, warmups } = profileOptions(
   process.argv.slice(2),
   Reflect.get(globalThis, Symbol.for("strider.queryProfile.instrumentation"))
 )
@@ -195,6 +195,40 @@ const pwRun = async (page: PWPage, entry: typeof cases[number]) => {
   for (let i = 0; i < 20; i++) values.push(await page.evaluate(() => ({ answer: 42 })))
   return values
 }
+// Observer wrappers bracket each canonical call without changing its callback or result.
+const observeStrider = (page: Page.Page): Page.Page =>
+  new Proxy(page, {
+    get(target, property, receiver) {
+      if (property !== "evaluateInMainWorld") return Reflect.get(target, property, receiver)
+      return new Proxy(target.evaluateInMainWorld, {
+        apply(method, _receiver, args) {
+          const capture = state.active
+          const start = performance.now()
+          const run = Reflect.apply(method, target, args)
+          return run.pipe(Effect.ensuring(Effect.sync(() => {
+            capture?.spans.push({ name: "public.evaluate", start, end: performance.now() })
+          })))
+        }
+      })
+    }
+  })
+const observePlaywright = (page: PWPage): PWPage =>
+  new Proxy(page, {
+    get(target, property, receiver) {
+      if (property !== "evaluate") return Reflect.get(target, property, receiver)
+      return new Proxy(target.evaluate, {
+        async apply(method, _receiver, args) {
+          const capture = state.active
+          const start = performance.now()
+          try {
+            return await Reflect.apply(method, target, args)
+          } finally {
+            capture?.spans.push({ name: "public.evaluate", start, end: performance.now() })
+          }
+        }
+      })
+    }
+  })
 const site = await start()
 const runtime = ManagedRuntime.make(layer)
 let status = "incomplete"
@@ -228,9 +262,17 @@ try {
     assert.ok(!(marker as { error?: unknown }).error)
     clockSync = { before, after: performance.now() }
   }
-  for (const entry of cases.filter((entry) => !boundary || !entry.synthetic && !entry.encoded)) {
+  const selectedCases = cases.filter((entry) =>
+    evaluation ? entry.size === 0 : !boundary || !entry.synthetic && !entry.encoded
+  )
+  const selectedVariants = evaluation
+    ? ["original", "warm"]
+    : boundary
+    ? ["original", "warm", "prepared"]
+    : ["original"]
+  for (const entry of selectedCases) {
     for (let index = -warmups; index < runs; index++) {
-      const variants = boundary ? ["original", "warm", "prepared"] : ["original"]
+      const variants = selectedVariants
       const rotate = ((index % variants.length) + variants.length) % variants.length
       for (const variant of [...variants.slice(rotate), ...variants.slice(0, rotate)]) {
         for (const library of index % 2 === 0 ? ["strider", "playwright"] : ["playwright", "strider"]) {
@@ -256,7 +298,7 @@ try {
               const started = performance.now()
               Object.assign(capture, { start: started })
               if (instrumented) state.active = capture
-              const value = yield* striderRun(page, entry).pipe(
+              const value = yield* striderRun(evaluation && instrumented ? observeStrider(page) : page, entry).pipe(
                 Deadline.within("30 seconds"),
                 Effect.ensuring(Effect.sync(() => {
                   state.active = undefined
@@ -293,7 +335,7 @@ try {
               if (instrumented) state.active = capture
               let value: unknown
               try {
-                value = await pwRun(page, entry)
+                value = await pwRun(evaluation && instrumented ? observePlaywright(page) : page, entry)
                 ms = performance.now() - started
               } finally {
                 state.active = undefined
@@ -328,7 +370,7 @@ try {
       await bounded(pwCompleted)
     }
   }
-  verifyCompletion(samples, runs * (boundary ? 4 * 3 : 6) * 2, instrumented)
+  verifyCompletion(samples, runs * selectedCases.length * selectedVariants.length * 2, instrumented)
   status = "completed"
 } finally {
   state.active = undefined

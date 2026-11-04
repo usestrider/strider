@@ -190,7 +190,7 @@ warmups (trace mode uses three pairs and one warmup); a fourth argument override
 checks. Modes are exactly `plain`, `instrumented`, `trace`, `boundary` and `boundary-trace`; measured counts must
 be positive safe integers. Invalid arguments are rejected before collection. Instrumented modes require the loader
 and all required in-memory transformations; completion also requires the expected sample count and actual stage/
-wire captures. Missing instrumentation cannot produce a completed report. Repeat plain/instrumented generations in reverse order to expose instrumentation overhead and drift.
+wire captures. Completion checks require both send and receive wire rows and the named host stages in every instrumented sample; these checks do not prove that every diagnostic hook is complete or measure its overhead. Repeat plain/instrumented generations in reverse order to expose instrumentation overhead and drift.
 Neither generation is a performance gate or an optimized runtime. Preserve the scripts, source hashes, raw replies,
 spans and browser events alongside the reports outside disposable worktrees.
 
@@ -256,3 +256,11 @@ and paint. Keep traces separate from ordinary wall-time comparisons. Report whet
 in those samples, with clock-alignment uncertainty; do not turn a few absent events into a general completion
 guarantee. Original/prepared reductions can support pending-rendering overlap without identifying its entire
 causal cost. Serialization, scheduling and pre-first-byte IPC remain unallocated by subtraction.
+
+Small-evaluation attribution can use private modes `evaluation` and `evaluation-instrumented`.
+They call the canonical twenty-evaluation case on fresh pages at original and one-no-op warmed boundaries,
+alternating libraries and rotating boundary order. Existing modes and defaults are unchanged.
+The warmed boundary excludes first-call initialization; it is not a rendering barrier.
+Wire send/reply intervals include scheduling, transport and browser work and cannot identify serialization time.
+Reply-to-next-send intervals include host continuation work, observers and scheduling; their residual is not an Effect cost.
+No renderer traces are required for this host/wire partition. Historical trace options still differ despite shared categories.

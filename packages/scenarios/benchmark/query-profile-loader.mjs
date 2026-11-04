@@ -1,5 +1,6 @@
 // Opt-in in-memory transforms: no browser source or installed Playwright files are changed on disk.
 import { registerHooks } from "node:module"
+import { replaceAnchor } from "./query-profile-config.ts"
 const installed = new Set()
 Object.assign(globalThis, { [Symbol.for("strider.queryProfile.instrumentation")]: installed })
 const hooks = new URL("./query-hooks.ts", import.meta.url).href
@@ -69,13 +70,14 @@ registerHooks({
       const start = source.indexOf("// packages/playwright-core/src/server/pipeTransport.ts")
       const end = source.indexOf("// packages/playwright-core/src/server/transport.ts", start)
       if (start < 0 || end < 0) throw new Error("Pinned Playwright pipe anchors changed")
-      const section = source.slice(start, end)
-        .replace(
-          "this._pipeWrite.write(JSON.stringify(message));",
-          `${key}.out(message); this._pipeWrite.write(JSON.stringify(message));`
-        )
-        .replaceAll("JSON.parse(message)", `${key}.parse(message)`)
-        .replaceAll("JSON.parse(message2)", `${key}.parse(message2)`)
+      let section = source.slice(start, end)
+      section = replaceAnchor(
+        section,
+        "this._pipeWrite.write(JSON.stringify(message));",
+        `${key}.out(message); this._pipeWrite.write(JSON.stringify(message));`
+      )
+      section = replaceAnchor(section, "JSON.parse(message)", `${key}.parse(message)`)
+      section = replaceAnchor(section, "JSON.parse(message2)", `${key}.parse(message2)`)
       installed.add("/playwright-core/lib/coreBundle.js")
       return { ...result, source: source.slice(0, start) + section + source.slice(end) }
     }
