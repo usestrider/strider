@@ -1393,8 +1393,11 @@ describe("strider", () => {
                 assert.isNotTrue(result?.isError, JSON.stringify(answers))
                 if (result.structuredContent.outcome.length > 0) mcpMatched.push(query)
               }
-              assert.deepStrictEqual({ shown, matched }, { shown: expected, matched: expected }, snapshot.out)
-              assert.deepStrictEqual({ shown: mcpShown, matched: mcpMatched }, { shown: expected, matched: expected })
+              assert.deepStrictEqual(
+                { shown, matched, mcpShown, mcpMatched },
+                { shown: expected, matched: expected, mcpShown: expected, mcpMatched: expected },
+                snapshot.out
+              )
             } finally {
               const stopped = yield* run("stop")
               assert.strictEqual(stopped.code, 0, stopped.err)

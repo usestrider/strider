@@ -152,7 +152,7 @@ export const engine = (backend: Backend) =>
           Effect.gen(function*() {
             const { send } = yield* open(
               backend,
-              `<article contenteditable="true" aria-label="Article">private</article><p contenteditable="plaintext-only">plain</p><h2 contenteditable="true">secret heading</h2><input aria-label="Native" readonly><textarea disabled>value</textarea><select><option>Choice</option></select><div role="textbox" aria-label="ARIA">aria value</div><button>Outside</button>`
+              `<article contenteditable="true" aria-label="Article">private</article><p contenteditable="plaintext-only">plain</p><h2 contenteditable="true">secret heading</h2><input aria-label="Native" readonly><textarea disabled>value</textarea><select><option>Choice</option></select><div role="textbox" aria-label="ARIA">aria value</div><select multiple aria-label="Choices"><option>Choice</option></select><div role="slider" aria-label="Range">range value</div><button>Outside</button>`
             )
             const answer = yield* send({ op: "snapshot", steps: null, interactivity: true, depth: null })
             assert.strictEqual(answer._tag, "Snapshot")
@@ -166,15 +166,22 @@ export const engine = (backend: Backend) =>
               ["textbox", true],
               ["combobox", true],
               ["textbox", true],
+              ["listbox", true],
+              ["slider", true],
               ["button", false]
             ])
-            assert.deepStrictEqual(nodes[2]!.name, { _tag: "Accessible", value: "secret heading", from: "text" })
+            assert.deepStrictEqual(nodes[2]!.name, {
+              _tag: "Accessible",
+              value: "secret heading",
+              from: "text",
+              fieldContent: true
+            })
             assert.deepStrictEqual(nodes[0]!.name, { _tag: "Accessible", value: "Article" })
           }), timeout)
 
         it.effect("tracks chosen name contributions from fields without tainting public labels", () =>
           Effect.gen(function*() {
-            const { send } = yield* open(
+            const { send, call } = yield* open(
               backend,
               `<h2><span contenteditable>ancestor-private</span></h2><button aria-label="Public"><span contenteditable>ignored-private</span></button><input id="field" aria-label="Field" value="embedded-private"><button aria-labelledby="field"></button><div>Nearby public</div><div contenteditable></div><span id="label" contenteditable aria-label="Referenced public"></span><button aria-labelledby="label"></button>`
             )
@@ -205,6 +212,23 @@ export const engine = (backend: Backend) =>
               _tag: "Inferred",
               value: "Nearby public",
               from: "nearbyLabel"
+            })
+            const changed = yield* call(
+              `() => {
+              document.querySelector('h2').setAttribute('aria-label', 'Changed public')
+              document.querySelector('button').removeAttribute('aria-label')
+            }`,
+              []
+            )
+            assert.strictEqual(changed._tag, "Value")
+            const next = yield* send({ op: "snapshot", steps: null, interactivity: true, depth: null })
+            assert.strictEqual(next._tag, "Snapshot")
+            if (next._tag !== "Snapshot") return
+            assert.deepStrictEqual(next.root.children[0]!.name, { _tag: "Accessible", value: "Changed public" })
+            assert.deepStrictEqual(next.root.children[1]!.name, {
+              _tag: "Accessible",
+              value: "ignored-private",
+              fieldContent: true
             })
           }), timeout)
 

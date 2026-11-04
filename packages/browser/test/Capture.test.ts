@@ -105,10 +105,12 @@ describe("capture tree", () => {
   })
 
   it("masks field-content names on other nodes without changing public labels or the source tree", () => {
-    for (const name of [
-      { _tag: "Accessible" as const, value: "private", fieldContent: true },
-      { _tag: "Inferred" as const, value: "private", from: "nearbyLabel" as const, fieldContent: true }
-    ]) {
+    for (
+      const name of [
+        { _tag: "Accessible" as const, value: "private", fieldContent: true },
+        { _tag: "Inferred" as const, value: "private", from: "nearbyLabel" as const, fieldContent: true }
+      ]
+    ) {
       const root = node({ name })
       const decoded = Schema.decodeUnknownSync(Snapshot.Node)(root)
       assert.deepStrictEqual(decoded.name, name)
