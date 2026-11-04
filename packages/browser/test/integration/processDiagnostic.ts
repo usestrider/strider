@@ -6,26 +6,66 @@ import { fileURLToPath } from "node:url"
 
 const script = fileURLToPath(new URL("./processSnapshot.mjs", import.meta.url))
 
-export const snapshot = (pid: number, previous: ReadonlyArray<{ pid: number; startTime?: string | undefined }>) =>
+interface KnownProcess {
+  readonly pid: number
+  readonly startTime?: string | undefined
+  readonly role?: string | undefined
+}
+
+export const snapshot = (pid: number, previous: ReadonlyArray<KnownProcess>, collector = script) =>
   Effect.callback<unknown>((resume) => {
     let finished = false
-    const finish = (value: unknown) => {
+    let output = ""
+    let errors = ""
+    const finish = (error: unknown, metadata: unknown) => {
       if (finished) return
       finished = true
       clearTimeout(timer)
+      const processes = new Map<number, Record<string, unknown>>()
+      const value: Record<string, any> = { root: pid, host: {}, complete: false, exit: metadata }
+      let malformed = 0
+      for (const line of output.split("\n").filter(Boolean)) {
+        try {
+          const record = JSON.parse(line)
+          if (record.kind === "header" || record.kind === "complete") Object.assign(value, record)
+          if (record.kind === "complete") value.complete = true
+          if (record.kind === "host") value.host[record.path] = record.value
+          if (record.kind === "process") {
+            processes.set(record.process.pid, { ...processes.get(record.process.pid), ...record.process })
+          }
+          if (record.kind === "output-truncated") value.outputTruncated = true
+          if (record.kind === "collector-error") value.collectorError = record.error
+        } catch {
+          malformed++
+        }
+      }
+      value.processes = [...processes.values()]
+      value.partial = !value.complete
+      value.malformedRecords = malformed
+      value.stderr = errors.slice(-65536)
+      if (error) value.error = String(error)
       resume(Effect.succeed(value))
     }
-    const child = execFile(process.execPath, [script, String(pid), JSON.stringify(previous)], {
-      timeout: 1500,
-      killSignal: "SIGKILL",
-      maxBuffer: 1024 * 1024
-    }, (error, stdout, stderr) => {
-      if (error) return finish({ error: String(error), stderr, stdout })
-      try {
-        finish(JSON.parse(stdout))
-      } catch (error) {
-        finish({ error: String(error), stdout, stderr })
-      }
+    const child = execFile(
+      process.execPath,
+      [collector, String(pid), JSON.stringify(previous)],
+      {
+        timeout: 1500,
+        killSignal: "SIGKILL",
+        maxBuffer: 1024 * 1024
+      },
+      (error) =>
+        finish(error, {
+          code: error ? error.code ?? null : 0,
+          signal: error?.signal ?? null,
+          killed: error?.killed ?? false
+        })
+    )
+    child.stdout?.on("data", (chunk) => {
+      output = (output + String(chunk)).slice(0, 1024 * 1024)
+    })
+    child.stderr?.on("data", (chunk) => {
+      errors = (errors + String(chunk)).slice(-65536)
     })
     const stop = () => {
       child.kill("SIGKILL")
@@ -36,7 +76,13 @@ export const snapshot = (pid: number, previous: ReadonlyArray<{ pid: number; sta
     // Independent of execFile's completion callback, including a child blocked in a kernel read.
     const timer = setTimeout(() => {
       stop()
-      finish({ error: "process snapshot exceeded 2000ms", pid })
+      finish("process snapshot exceeded 2000ms", {
+        code: null,
+        signal: null,
+        killed: child.killed,
+        requestedSignal: "SIGKILL",
+        parentDeadline: true
+      })
     }, 2000)
     return Effect.sync(() => {
       clearTimeout(timer)
@@ -50,7 +96,7 @@ export const observeProcesses = Effect.fnUntraced(function*(
   target: string,
   capture: typeof snapshot = snapshot
 ) {
-  let previous: Array<{ pid: number; startTime?: string | undefined }> = []
+  let previous: Array<KnownProcess> = []
   const take = (phase: string) =>
     capture(pid, previous).pipe(
       Effect.matchCause({
@@ -58,7 +104,7 @@ export const observeProcesses = Effect.fnUntraced(function*(
         onSuccess: (value) => {
           note("process snapshot", { phase, target, value })
           const records = (value as { processes?: typeof previous } | undefined)?.processes
-          if (Array.isArray(records)) previous = records.map(({ pid, startTime }) => ({ pid, startTime }))
+          if (Array.isArray(records)) previous = records.map(({ pid, startTime, role }) => ({ pid, startTime, role }))
         }
       })
     )
