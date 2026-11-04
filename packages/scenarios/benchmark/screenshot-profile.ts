@@ -39,6 +39,7 @@ interface Sample {
   ms: number
   commands: Array<Command>
 }
+const payloads = new WeakMap<Command, string>()
 const samples: Array<Sample> = []
 let active: { started: number; sample: Sample } | undefined
 
@@ -72,16 +73,7 @@ const instrument = (transport: Transport.Transport): Transport.Transport => {
         entry.command.responseBytes = Buffer.byteLength(message)
         entry.command.parseMs = parseMs
         if (entry.command.phase === "Page.captureScreenshot" && typeof wire.result?.data === "string") {
-          const data = wire.result.data as string
-          const beforeEffect = performance.now()
-          const decoded = Base64.decode(data)
-          entry.command.effectDecodeMs = performance.now() - beforeEffect
-          assert.equal(decoded._tag, "Success")
-          const beforeBuffer = performance.now()
-          const buffer = Buffer.from(data, "base64")
-          entry.command.bufferDecodeMs = performance.now() - beforeBuffer
-          entry.command.decodedBytes = buffer.length
-          if (decoded._tag === "Success") assert.deepEqual(buffer, Buffer.from(decoded.success))
+          payloads.set(entry.command, wire.result.data)
         }
       }
       return message
@@ -112,6 +104,22 @@ try {
               active = undefined
             })))
             entry.verify(value)
+            // Replay decoding after the timed public operation; these are CPU-cost probes, not extra
+            // work on the measured capture path. Keep the original protocol payload out of the report.
+            for (const command of sample.commands) {
+              const data = payloads.get(command)
+              if (data === undefined) continue
+              const beforeEffect = performance.now()
+              const decoded = Base64.decode(data)
+              command.effectDecodeMs = performance.now() - beforeEffect
+              assert.equal(decoded._tag, "Success")
+              const beforeBuffer = performance.now()
+              const buffer = Buffer.from(data, "base64")
+              command.bufferDecodeMs = performance.now() - beforeBuffer
+              command.decodedBytes = buffer.length
+              if (decoded._tag === "Success") assert.deepEqual(buffer, Buffer.from(decoded.success))
+              payloads.delete(command)
+            }
           }))
         }
       }
