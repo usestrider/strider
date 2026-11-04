@@ -69,6 +69,30 @@ plus lockfile. The hash includes uncommitted source edits. A Markdown summary is
 default to `.data/benchmarks/latest.{json,md}` (gitignored); use `--output` to preserve multiple runs. An interrupted
 report may still say `running`; only a completed report can establish a result.
 
+## Launch diagnostics
+
+Use the diagnostic loader and runner to timestamp fresh launch through browser availability without changing
+launch flags or resource ownership. Run it under the browser lock in the pinned integration environment:
+
+```sh
+clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node \
+  --import ./packages/scenarios/benchmark/launch-profile-hooks.mjs \
+  packages/scenarios/benchmark/launch-profile.ts /absolute/path/launch-profile.json 20
+```
+
+The numeric argument selects measured pairs after three warmup pairs. Append `persistent` to compare with
+Playwright’s persistent launch with its initial page and native viewport; this is a distinct resource/readiness
+contract, not an equivalent replacement for the nonpersistent launch benchmark. The JSON retains phase marks, protocol
+traffic, actual process arguments, initial resource counts and source/instrumentation hashes. Samples alternate
+library order. Events after `launch.available` are verification, observation of the initial target gate finishing, and cleanup,
+outside launch timing. Browser availability can precede completion of that gate; the diagnostic wait sends no
+extra protocol command. Loader
+transforms assert their source sites and add timestamps; they do not change command arguments or ordering.
+The loader depends on the pinned Playwright bundle and must be updated if those source sites change.
+These instrumented samples are for attribution, not speed claims; use `pnpm bench` for uninstrumented comparisons.
+Protocol waits may overlap, so their individual durations cannot be summed as elapsed launch time. Exclude runs
+that overlap other suites, checks or builds even when those commands did not acquire the browser lock.
+
 ## Interpreting a result
 
 These are wall-time latency measurements. They do not measure CPU usage, memory, throughput under concurrency,
