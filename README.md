@@ -6,6 +6,10 @@ inspector protocol), so it drives browsers as they're installed, with no driver 
 
 **Documentation: [usestrider.dev](https://usestrider.dev)**
 
+```sh
+pnpm add @usestrider/browser effect @effect/platform-node
+```
+
 ```ts
 import { NodeServices } from "@effect/platform-node"
 import { Browser, Expect } from "@usestrider/browser"
@@ -27,6 +31,9 @@ const program = Effect.scoped(Effect.gen(function*() {
   yield* page.getByText("1 item").pipe(Expect.toBeVisible)
 })).pipe(Effect.provide(BrowserLive))
 ```
+
+A launch runs the executable you name; Strider never finds or installs a browser.
+[`strider browsers`](https://usestrider.dev/docs/installation#a-browser) lists the browsers on your machine.
 
 ## Why Strider
 
