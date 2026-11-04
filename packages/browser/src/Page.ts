@@ -579,8 +579,8 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
    * Every Chromium screenshot first reads renderer layout metrics, including viewport captures. This adds a
    * renderer round trip and style/layout work within the existing deadline; a paused or slow renderer can
    * exhaust that deadline before capture dispatch. Interruption stops waiting and prevents later dispatch.
-   * This synchronizes with tracked navigation processing, without waiting for load or an earlier capture;
-   * another navigation can still intervene before dispatch.
+   * The browser may hold this read while it processes a navigation. It does not wait for the page to load
+   * or an earlier screenshot to finish, and another navigation can still intervene before dispatch.
    *
    * On Chromium, committed main-document replacement before the native capture reply fails with
    * `CaptureInvalidated`, naming both documents, including a same-URL reload. Preparation belongs to the
