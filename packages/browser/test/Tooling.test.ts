@@ -395,6 +395,32 @@ describe("BrowserToolkit", () => {
     }
   })
 
+  it("masks rich field names and roleless text names while retaining labels and refs", () => {
+    const text = `- document:
+  - textbox "Rich" [ref=e1]:
+    - heading "private heading" [ref=e2]:
+      - link "private link" [ref=e3]
+    - img "private image" [ref=e4]
+    - button "private button" [ref=e5]
+  - editable "private field" [ref=e6] [inferred: contentEditable] [name from: text]
+  - editable "Label" [ref=e7] [inferred: contentEditable]:
+    - text: "private value"
+  - button "Outside" [ref=e8]`
+    assert.strictEqual(
+      ToolkitImpl.masked(text),
+      `- document:
+  - textbox "Rich" [ref=e1]:
+    - heading "•••" [ref=e2]:
+      - link "•••" [ref=e3]
+    - img "•••" [ref=e4]
+    - button "•••" [ref=e5]
+  - editable "•••" [ref=e6] [inferred: contentEditable] [name from: text]
+  - editable "Label" [ref=e7] [inferred: contentEditable]:
+    - text: "•••"
+  - button "Outside" [ref=e8]`
+    )
+  })
+
   it("masks whole custom validation messages including JSON escapes", () => {
     const message = "private \"quoted\" ] [ref=fake] \\ trailing\nprivate tail"
     for (const role of ["textbox", "combobox", "button"]) {

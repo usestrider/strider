@@ -1117,48 +1117,107 @@ describe("strider", () => {
     timeout
   )
 
-  it.live(
-    "masks all of an editable field's content under strict capture",
-    () =>
-      Effect.scoped(Effect.gen(function*() {
-        const served = yield* site
-        const url = `${served.origin}/fixture?html=${
-          encodeURIComponent(
-            `<div role="textbox" aria-label="Rich" contenteditable="true"><h1>rich-heading</h1><a href="#x">rich-link</a><button>rich-button</button><img alt="rich-image" src="data:,"></div><div contenteditable="true">roleless-field</div>`
+  for (const capture of ["strict", "local"]) {
+    it.live(
+      `masks all of an editable field's content with ${capture} capture`,
+      () =>
+        Effect.scoped(Effect.gen(function*() {
+          const served = yield* site
+          const url = `${served.origin}/fixture?html=${
+            encodeURIComponent(
+              `<div role="textbox" aria-label="Rich" contenteditable="true"><h1>rich-heading<a href="#x">rich-link</a></h1><button onclick="document.getElementById('status').textContent = 'clicked'">rich-button</button><img alt="rich-image" src="data:,"></div><div contenteditable="true">roleless-field</div><div contenteditable="true" aria-label="Labeled">labeled-private</div><p id="status">ready</p>`
+            )
+          }`
+          const env = environment()
+          const run = (...args: ReadonlyArray<string>) => strider(env, "-s", capture, ...args)
+          const page = (...args: ReadonlyArray<string>) => run("-p", "form", ...args)
+          const started = yield* strider(
+            env,
+            "start",
+            "--name",
+            capture,
+            "--capture",
+            capture,
+            "--chromium",
+            chromium.executable
           )
-        }`
-        const env = environment()
-        const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "strict", ...args)
-        const page = (...args: ReadonlyArray<string>) => run("-p", "form", ...args)
-        const started = yield* strider(
-          env,
-          "start",
-          "--name",
-          "strict",
-          "--capture",
-          "strict",
-          "--chromium",
-          chromium.executable
-        )
-        assert.strictEqual(started.code, 0, started.err)
-        try {
-          const opened = yield* run("page", "new", "--name", "form", url)
-          assert.strictEqual(opened.code, 0, opened.err)
-          const snapshot = yield* page("snapshot")
-          assert.strictEqual(snapshot.code, 0, snapshot.err)
-          assert.include(snapshot.out, "textbox \"Rich\"")
-          const found = yield* page("find", "-")
-          assert.strictEqual(found.code, 0, found.err)
-          const contents = ["rich-heading", "rich-link", "rich-button", "rich-image", "roleless-field"]
-          assert.deepStrictEqual(contents.filter((content) => snapshot.out.includes(content)), [], snapshot.out)
-          assert.deepStrictEqual(contents.filter((content) => found.out.includes(content)), [], found.out)
-        } finally {
-          const stopped = yield* run("stop")
-          assert.strictEqual(stopped.code, 0, stopped.err)
-        }
-      })),
-    timeout
-  )
+          assert.strictEqual(started.code, 0, started.err)
+          try {
+            const opened = yield* run("page", "new", "--name", "form", url)
+            assert.strictEqual(opened.code, 0, opened.err)
+            const snapshot = yield* page("snapshot")
+            assert.strictEqual(snapshot.code, 0, snapshot.err)
+            assert.include(snapshot.out, "textbox \"Rich\"")
+            const found = yield* page("--json", "find", "")
+            assert.strictEqual(found.code, 0, found.err)
+            const contents = [
+              "rich-heading",
+              "rich-link",
+              "rich-button",
+              "rich-image",
+              "roleless-field",
+              "labeled-private"
+            ]
+            const check = (output: string, find = false) => {
+              if (capture === "strict") {
+                assert.deepStrictEqual(contents.filter((content) => output.includes(content)), [], output)
+                assert.include(output, "•••")
+              } else {
+                for (const content of find ? contents.slice(0, -1) : contents) assert.include(output, content)
+              }
+            }
+            check(snapshot.out)
+            check(found.out, true)
+            const matches = JSON.parse(found.out).outcome.value as Array<
+              { ref: string; role: string; name: string; path: string }
+            >
+            assert.includeMembers(matches.map((match) => match.name), ["Rich", "Labeled"])
+            const link = matches.find((match) => match.role === "link")!
+            assert.isDefined(link)
+            assert.include(link.path, capture === "strict" ? "heading \"•••\"" : "rich-heading")
+            const button = matches.find((match) => match.role === "button")!
+            assert.match(button.ref, /^e\d+$/)
+            const clicked = yield* page("click", button.ref)
+            assert.strictEqual(clicked.code, 0, clicked.err)
+            const checked = yield* page("expect", "css=#status", "visible", "--text", "clicked")
+            assert.strictEqual(checked.code, 0, checked.err)
+
+            for (const name of ["snapshot", "find"] as const) {
+              const answers = yield* mcp(env, ["-s", capture, "mcp"], [
+                ...handshake,
+                {
+                  jsonrpc: "2.0",
+                  id: 2,
+                  method: "tools/call",
+                  params: {
+                    name,
+                    arguments: { page: "form", ...(name === "find" ? { query: "" } : {}) }
+                  }
+                }
+              ], 2)
+              const answer = answers.find((answer) => answer.id === 2)
+              assert.isUndefined(answer?.error, JSON.stringify(answer))
+              assert.isDefined(answer?.result, JSON.stringify(answers))
+              assert.isNotTrue(answer.result.isError, JSON.stringify(answer))
+              const output = JSON.stringify(answer.result)
+              check(output, name === "find")
+              assert.include(output, "Rich")
+              assert.include(output, "Labeled")
+              if (name === "find") {
+                const matches = answer.result.structuredContent.outcome
+                const link = matches.find((match: any) => match.role === "link")
+                assert.include(link.path, capture === "strict" ? "heading \"•••\"" : "rich-heading")
+                assert.match(link.ref, /^e\d+$/)
+              }
+            }
+          } finally {
+            const stopped = yield* run("stop")
+            assert.strictEqual(stopped.code, 0, stopped.err)
+          }
+        })),
+      timeout
+    )
+  }
 
   it.live("exits 0 when its MCP client closes standard input", () =>
     Effect.callback<number | null>((resume) => {
