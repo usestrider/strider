@@ -915,30 +915,28 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
-   * Checked state follows `isChecked`, including its supported ARIA roles and optional checkability.
-   * If it's already checked, nothing is sent. Otherwise it clicks, then reads the state again: a click
-   * that didn't
-   * check it fails with `StateUnchanged{expected: "checked"}`. The selected element's own checked state takes
-   * precedence. Otherwise a label, or an ordinary descendant of its nearest DOM label, reads the
-   * associated control.
-   * The click target and any relative position stay on the selected element. Descendant fallback refuses
-   * buttons, inputs, selects, textareas, details, summaries, frames, embeds, objects, links with href
-   * (including
-   * SVG links with namespaced xlink:href), images with usemap, audio/video with controls, editable
-   * content and ARIA widget roles: button, checkbox, combobox, grid,
-   * gridcell, link, listbox, menu, menubar, menuitem, menuitemcheckbox, menuitemradio, option, radio,
-   * radiogroup,
+   * Checked state follows `isChecked`, including its supported ARIA roles and optional checkability. If
+   * it's already checked, nothing is sent. Otherwise it clicks and reads the state again; a click that
+   * didn't check it fails with `StateUnchanged{expected: "checked"}`. The selected element's own checked
+   * state takes precedence. Otherwise a selected label, or an ordinary descendant's nearest DOM label,
+   * supplies its associated control. The selected element remains the click target and position origin.
+   *
+   * Association follows DOM parents without crossing a shadow root and uses only the label's control,
+   * never the ancestor label's ARIA state. Descendant fallback checks the selected node, its DOM
+   * ancestors and ancestors added by slots in open shadow roots, stopping before the associated DOM
+   * label. Interactive ancestors above that label are outside this guard.
+   *
+   * Fallback refuses buttons, inputs, selects, textareas, details, summaries, frames, embeds, objects,
+   * links with href (including SVG links with namespaced xlink:href), images with usemap, audio/video
+   * with controls, editable content and ARIA widget roles: button, checkbox, combobox, grid, gridcell,
+   * link, listbox, menu, menubar, menuitem, menuitemcheckbox, menuitemradio, option, radio, radiogroup,
    * scrollbar, searchbox, separator, slider, spinbutton, switch, tab, tablist, textbox, tree, treegrid
-   * and treeitem.
-   * Association follows DOM parents without crossing a shadow root and never borrows the label's own ARIA
-   * state.
-   * Refusal checks both DOM ancestors and the path through assigned slots and shadow hosts, stopping
-   * before that
-   * DOM label; ancestors above it are outside this guard. Slot traversal adds guards without changing
-   * association
-   * or skipping DOM guards. Refusal is `WrongElement` before input, even if the control already matches.
-   * Missing or non-checkable associations also fail with `WrongElement`. This does not change `isChecked` or
-   * checked expectations.
+   * and treeitem. Refusal is `WrongElement` before input, even when the associated control already
+   * matches. Missing or non-checkable associations also fail with `WrongElement`.
+   *
+   * Slot-added controls can be inspected only in open shadow roots. A control inside a closed shadow
+   * root can receive input before the action fails with `StateUnchanged`. Public `isChecked` and checked
+   * expectations still read only the selected element's own state.
    *
    * **Example** (Accepting the terms)
    *
@@ -953,29 +951,34 @@ export interface Locator extends ReadonlyLocator {
    */
   check(options?: PointerOptions | undefined): ActionEffect
   /**
-   * Unchecks a checkbox or an ARIA checkable, and confirms it became unchecked. Checks: the same as `click`. It
-   * works as `check` does, using the checked state and optional checkability described by `isChecked`.
-   * The selected
-   * element's own checked state takes precedence over a label's associated control. Ordinary label descendants
-   * also follow the nearest DOM label's control, keeping the selected element as the click target and
-   * position origin.
-   * As with `check`, fallback refuses buttons, inputs, selects, textareas, details, summaries, frames, embeds,
-   * objects, links with href (including SVG links with namespaced xlink:href), images with usemap, audio/video
-   * with controls, editable content and ARIA widget
-   * roles: button, checkbox, combobox, grid, gridcell, link, listbox, menu, menubar, menuitem,
-   * menuitemcheckbox,
-   * menuitemradio, option, radio, radiogroup, scrollbar, searchbox, separator, slider, spinbutton, switch, tab,
-   * tablist, textbox, tree, treegrid and treeitem. Association follows DOM parents without crossing a
-   * shadow root,
-   * using only the label's control, never its own ARIA state. Refusal checks DOM ancestors and the path through
-   * assigned slots and shadow hosts up to, excluding, that DOM label. Slot traversal adds guards without
-   * changing
-   * association or skipping DOM guards; ancestors above the label are outside this guard. It refuses
-   * before input
-   * even when the control already matches. Missing or non-checkable associations fail with
-   * `WrongElement`; `isChecked` and
-   * checked expectations remain unchanged. It fails with `StateUnchanged{expected: "unchecked"}` if the state
-   * stays checked.
+   * Unchecks a checkbox or an ARIA checkable, and confirms it became unchecked. Checks: the same as
+   * `click`.
+   *
+   * **Details**
+   *
+   * It follows `check`, using the checked state and optional checkability described by `isChecked`. The
+   * selected element's own checked state takes precedence. Otherwise a selected label, or an ordinary
+   * descendant's nearest DOM label, supplies its associated control. The selected element remains the
+   * click target and position origin. If already unchecked, nothing is sent. Otherwise it clicks and
+   * reads the state again, failing with `StateUnchanged{expected: "unchecked"}` if the state stays
+   * checked.
+   *
+   * Association follows DOM parents without crossing a shadow root and uses only the label's control,
+   * never the ancestor label's ARIA state. Descendant fallback checks the selected node, its DOM
+   * ancestors and ancestors added by slots in open shadow roots, stopping before the associated DOM
+   * label. Interactive ancestors above that label are outside this guard.
+   *
+   * Fallback refuses buttons, inputs, selects, textareas, details, summaries, frames, embeds, objects,
+   * links with href (including SVG links with namespaced xlink:href), images with usemap, audio/video
+   * with controls, editable content and ARIA widget roles: button, checkbox, combobox, grid, gridcell,
+   * link, listbox, menu, menubar, menuitem, menuitemcheckbox, menuitemradio, option, radio, radiogroup,
+   * scrollbar, searchbox, separator, slider, spinbutton, switch, tab, tablist, textbox, tree, treegrid
+   * and treeitem. Refusal is `WrongElement` before input, even when the associated control already
+   * matches. Missing or non-checkable associations also fail with `WrongElement`.
+   *
+   * Slot-added controls can be inspected only in open shadow roots. A control inside a closed shadow
+   * root can receive input before the action fails with `StateUnchanged`. Public `isChecked` and checked
+   * expectations still read only the selected element's own state.
    *
    * **Example** (Opting out of offers)
    *

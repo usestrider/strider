@@ -76,6 +76,8 @@ another label or bypass a DOM guard. An interactive ancestor above the associate
 Refusal returns `WrongElement` before input even if the associated control already matches. A missing or
 non-checkable association also fails with
 `WrongElement`. Directly selected labels keep their existing behavior.
+Slot-added controls can be inspected only in open shadow roots. A control inside a closed shadow root can
+receive input before the action fails with `StateUnchanged`.
 [`isChecked`](/docs/api/browser/Locator#Locator.isChecked) and checked expectations still read only the selected
 element's own state.
 

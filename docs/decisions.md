@@ -769,6 +769,9 @@ editable content. This conservative boundary keeps separate controls from receiv
 input meant for the associated checkbox, including when that checkbox already matches. Association uses the
 browser's label.control; missing or non-checkable controls are refused.
 
+Slot-added controls can be inspected only in open shadow roots. A control inside a closed shadow root can
+receive input before the action fails with `StateUnchanged`.
+
 Rejected: clicking the associated input directly, which loses the selected target and its relative coordinates;
 following labels for public state reads, which expands an unrelated contract; using a slot-aware path to
 choose the label, which would create associations across shadow roots; replacing
