@@ -16,7 +16,9 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
-import { createServer } from "node:net"
+import * as Random from "effect/Random"
+import * as Scope from "effect/Scope"
+import { createServer, type Server } from "node:net"
 import * as Launch from "../../src/internal/launch.ts"
 import * as WebKitAutomation from "../../src/internal/webkitAutomation.ts"
 import { site } from "./adapter/harness.ts"
@@ -56,6 +58,15 @@ const launched = Effect.fnUntraced(function*<A, E, R>(effect: Effect.Effect<A, E
   )
 }, Effect.scoped)
 
+/** Register cleanup before binding, including failed or interrupted binds. */
+const listen = Effect.fnUntraced(function*(server: Server, port: number) {
+  yield* Effect.addFinalizer(() => Effect.sync(() => server.close()))
+  yield* Effect.callback<void, Error>((resume) => {
+    server.once("error", (error) => resume(Effect.fail(error)))
+    server.listen(port, "127.0.0.1", () => resume(Effect.void))
+  })
+})
+
 describe("Stock WebKit, launched in automation mode", () => {
   layer(NodeServices.layer, { excludeTestServices: true, timeout })((it) => {
     for (const collisions of [1, 2]) {
@@ -68,29 +79,34 @@ describe("Stock WebKit, launched in automation mode", () => {
             const received: Array<number> = []
             let accepted = 0
             const ports: Array<number> = []
-            const servers = Array.from({ length: collisions }, () =>
-              createServer((socket) => {
-                accepted++
-                socket.on("data", (data) => received.push(data.length))
-                socket.on("error", () => {})
-              }))
-            yield* Effect.addFinalizer(() =>
-              Effect.sync(() => {
-                for (const server of servers) server.close()
-              })
-            )
+            const held = new Set<number>()
+            const listenersScope = yield* Scope.Scope
+            const random = yield* Random.Random
+            let first: number | undefined
+            let choices = 0
             const observing = ChildProcessSpawner.make(Effect.fnUntraced(function*(command) {
               if (command._tag === "StandardCommand") {
                 const endpoint = command.options.env?.["WEBKIT_INSPECTOR_SERVER"]
                 if (endpoint !== undefined) {
                   const port = Number(endpoint.split(":")[1])
                   ports.push(port)
-                  // Occupy each requested collision port before its child binds it.
-                  const server = servers[ports.length - 1]
-                  if (server !== undefined) {
-                    yield* Effect.callback<void>((resume) => {
-                      server.listen(port, "127.0.0.1", () => resume(Effect.void))
+                  // Repeated choices hit the existing listener; they are not new collisions.
+                  if (held.size < collisions && !held.has(port)) {
+                    const sockets = new Set<import("node:net").Socket>()
+                    const server = createServer((socket) => {
+                      accepted++
+                      sockets.add(socket)
+                      socket.on("close", () => sockets.delete(socket))
+                      socket.on("data", (data) => received.push(data.length))
+                      socket.on("error", () => {})
                     })
+                    yield* Effect.addFinalizer(() =>
+                      Effect.sync(() => {
+                        for (const socket of sockets) socket.destroy()
+                      })
+                    ).pipe(Scope.provide(listenersScope))
+                    yield* listen(server, port).pipe(Scope.provide(listenersScope), Effect.orDie)
+                    held.add(port)
                   }
                 }
               }
@@ -98,16 +114,50 @@ describe("Stock WebKit, launched in automation mode", () => {
             }))
             yield* WebKitAutomation.start({ executablePath: webkitgtk.executable }).pipe(
               Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, observing),
+              // Exercise a repeated random choice within the launcher's existing five attempts.
+              Effect.provideService(Random.Random, {
+                nextIntUnsafe: () => random.nextIntUnsafe(),
+                nextDoubleUnsafe: () => {
+                  choices++
+                  if (choices === 2) return first!
+                  const value = random.nextDoubleUnsafe()
+                  first ??= value
+                  return value
+                }
+              }),
               Effect.provide(socketConnector)
             )
-            assert.strictEqual(ports.length, 2, "the child's collision moves the launch to one other port")
-            assert.notStrictEqual(ports[0], ports[1])
+            assert.strictEqual(held.size, collisions, "all deliberate listeners were bound")
+            assert.strictEqual(ports[0], ports[1], "the repeated choice hits the same held listener")
+            assert.isAtLeast(ports.length, collisions + 2)
+            assert.isAtMost(ports.length, 5, "incidental collisions share the launcher's attempt budget")
+            assert.isFalse(held.has(ports[ports.length - 1]!), "the successful child uses no held port")
             assert.deepStrictEqual(received, [], "nothing is written to the foreign listener")
             assert.strictEqual(accepted, 0, "nor is it connected to")
           }).pipe(Effect.scoped),
         timeout
       )
     }
+
+    it.effect("fails a listener bind error and closes its scoped listeners", () =>
+      Effect.gen(function*() {
+        const server = createServer()
+        const conflicting = createServer()
+        const exit = yield* Effect.gen(function*() {
+          yield* listen(server, 0)
+          const address = server.address()
+          assert.isNotNull(address)
+          assert.isNotString(address)
+          yield* listen(conflicting, (address as { port: number }).port)
+        }).pipe(Effect.scoped, Effect.exit)
+        assert.isTrue(Exit.isFailure(exit))
+        assert.strictEqual(
+          Option.getOrUndefined(Exit.findErrorOption(exit))?.message.includes("EADDRINUSE"),
+          true
+        )
+        assert.isFalse(server.listening)
+        assert.isFalse(conflicting.listening)
+      }))
 
     it.effect(
       "refuses a real wrapper that forks the MiniBrowser rather than execing it",
