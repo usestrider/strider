@@ -232,6 +232,127 @@ export const engine = (backend: Backend) =>
             })
           }), timeout)
 
+        it.effect("marks actual name contributors under native and ARIA fields while preserving explicit labels", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<select aria-label="Plan"><option id="option" selected>option value</option></select><button aria-labelledby="option"></button><div role="textbox" aria-label="Field"><span id="nested">nested value</span><span id="public" aria-label="Explicit public">ignored value</span><input id="action" type="button" value="action value"></div><button aria-labelledby="nested"></button><button aria-labelledby="public"></button><button aria-labelledby="action"></button><article contenteditable aria-label="Editor"><span id="blocked" contenteditable="false">blocked value</span></article><button aria-labelledby="blocked"></button><div role="textbox"><span id="empty"> </span></div><button aria-labelledby="empty" aria-label="Fallback public"></button>`
+            )
+            const answer = yield* send({ op: "snapshot", steps: null, interactivity: true, depth: null })
+            assert.strictEqual(answer._tag, "Snapshot")
+            if (answer._tag !== "Snapshot") {
+              return
+            }
+            const buttons = answer.root.children.filter((node) =>
+              node.role.role === "button"
+            )
+            assert.deepStrictEqual(
+              buttons.map((node) =>
+                node.name
+              ),
+              [
+                { _tag: "Accessible", value: "option value", fieldContent: true },
+                { _tag: "Accessible", value: "nested value", fieldContent: true },
+                { _tag: "Accessible", value: "Explicit public" },
+                { _tag: "Accessible", value: "action value", fieldContent: true },
+                { _tag: "Accessible", value: "blocked value", fieldContent: true },
+                { _tag: "Accessible", value: "Fallback public" }
+              ]
+            )
+          }), timeout)
+
+        it.effect("follows field ancestry through shadow hosts and assigned slots", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<div id="host"><span id="assigned" slot="private">assigned value</span></div><button aria-labelledby="assigned"></button><div id="shadow" role="textbox" aria-label="Shadow field"></div>`,
+              `() => {
+                document.getElementById('host').attachShadow({mode:'open'}).innerHTML = '<div role="textbox" aria-label="Slot field"><slot name="private"></slot></div>'
+                document.getElementById('shadow').attachShadow({mode:'open'}).innerHTML = '<span id="source">shadow value</span><button aria-labelledby="source"></button>'
+              }`
+            )
+            const answer = yield* send({ op: "snapshot", steps: null, interactivity: true, depth: null })
+            assert.strictEqual(answer._tag, "Snapshot")
+            if (answer._tag !== "Snapshot") {
+              return
+            }
+            const buttons: Array<Engine.SnapNode["name"]> = []
+            const visit = (node: Engine.SnapNode) => {
+              if (node.role.role === "button") {
+                buttons.push(node.name)
+              }
+              for (const child of node.children) {
+                visit(child)
+              }
+            }
+            visit(answer.root)
+            assert.deepStrictEqual(buttons, [
+              { _tag: "Accessible", value: "assigned value", fieldContent: true },
+              { _tag: "Accessible", value: "shadow value", fieldContent: true }
+            ])
+          }), timeout)
+
+        it.effect("invalidates field ancestry and subtree text caches after slot, role and parent changes", () =>
+          Effect.gen(function*() {
+            const { send, call } = yield* open(
+              backend,
+              `<div id="host"><span id="moving" slot="private">moving value</span></div><button aria-labelledby="moving"></button><div id="clickable" onclick="void 0"><span id="text">inferred value</span></div>`,
+              `() => { document.getElementById('host').attachShadow({mode:'open'}).innerHTML = '<div role="textbox" aria-label="Slot field"><slot name="private"></slot></div><slot name="public"></slot>' }`
+            )
+            const check = Effect.fnUntraced(function*(privateReference: boolean, privateText: boolean) {
+              const answer = yield* send({ op: "snapshot", steps: null, interactivity: true, depth: null })
+              assert.strictEqual(answer._tag, "Snapshot")
+              if (answer._tag !== "Snapshot") {
+                return
+              }
+              const reference = answer.root.children.find((node) =>
+                node.role.role === "button"
+              )!
+              const clickable = answer.root.children.find((node) =>
+                node.role.role === "clickable"
+              )!
+              assert.deepStrictEqual(reference.name, {
+                _tag: "Accessible",
+                value: "moving value",
+                ...(privateReference ? { fieldContent: true } : {})
+              })
+              assert.deepStrictEqual(clickable.name, {
+                _tag: "Inferred",
+                value: "inferred value",
+                from: "text",
+                ...(privateText ? { fieldContent: true } : {})
+              })
+            })
+            yield* check(true, false)
+            const reassigned = yield* call(
+              `() => {
+              document.getElementById('moving').slot = 'public'
+              document.getElementById('text').setAttribute('role', 'textbox')
+            }`,
+              []
+            )
+            assert.strictEqual(reassigned._tag, "Value")
+            yield* check(false, true)
+            const reclassified = yield* call(
+              `() => {
+              document.getElementById('host').setAttribute('role', 'textbox')
+              document.getElementById('text').removeAttribute('role')
+            }`,
+              []
+            )
+            assert.strictEqual(reclassified._tag, "Value")
+            yield* check(true, false)
+            const moved = yield* call(
+              `() => {
+              document.body.appendChild(document.getElementById('moving'))
+              document.getElementById('host').removeAttribute('role')
+            }`,
+              []
+            )
+            assert.strictEqual(moved._tag, "Value")
+            yield* check(false, false)
+          }), timeout)
+
         it.effect("revalidates fresh stability without another rendering wait", () =>
           Effect.gen(function*() {
             const { call } = yield* open(backend, `<button id="go">Go</button>`, countFrames())
