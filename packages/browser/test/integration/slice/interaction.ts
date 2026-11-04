@@ -14,6 +14,7 @@ import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import { LocatorImpl } from "../../../src/internal/locator.ts"
 import { site } from "../adapter/harness.ts"
+import { type LinkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
 import { supports } from "./capabilities.ts"
 
 const timeout = 60_000
@@ -32,6 +33,72 @@ const say = (text: string) => `document.getElementById('out').textContent = ${te
 export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} interaction`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      for (const shape of wrappedLinks) {
+        for (const partial of shape.id === "three" ? [false, true] : [false]) {
+          it.effect(
+            `dispatches click to first visible fragment for wrapped link ${shape.id}${
+              partial ? " partially above viewport" : ""
+            }`,
+            () =>
+              Effect.gen(function*() {
+                const { url } = yield* fixture(() => wrappedLinkHtml(shape, partial))
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const geometry: LinkGeometry = yield* page.evaluateInMainWorld(() => ({
+                    rects: Array.from(
+                      document.querySelector("#go")!.getClientRects(),
+                      (r) => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom })
+                    ),
+                    width: innerWidth,
+                    height: innerHeight
+                  }))
+                  assert.strictEqual(geometry.rects.length, shape.fragments)
+                  if (partial) assert.isBelow(geometry.rects[0]!.bottom, 0)
+                  const first = geometry.rects.find((r) => r.bottom > 0 && r.top < geometry.height)!
+                  yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
+                  const event = JSON.parse(yield* page.locator("#out").readText) as {
+                    target: string
+                    x: number
+                    y: number
+                  }
+                  assert.strictEqual(event.target, "go")
+                  assert.strictEqual(
+                    yield* page.evaluateInMainWorld(() => document.querySelector("#out")!.getAttribute("data-clicked")),
+                    "go"
+                  )
+                  const x = (Math.max(0, first.left) + Math.min(geometry.width, first.right)) / 2
+                  const y = (Math.max(0, first.top) + Math.min(geometry.height, first.bottom)) / 2
+                  assert.closeTo(event.x, x, 1)
+                  assert.closeTo(event.y, y, 1)
+                  assert.isAtLeast(event.x, first.left)
+                  assert.isBelow(event.x, first.right)
+                  assert.isAtLeast(event.y, Math.max(0, first.top))
+                  assert.isBelow(event.y, first.bottom)
+                  if (name === "Firefox") {
+                    assert.strictEqual(event.x, Math.round(x))
+                    assert.strictEqual(event.y, Math.round(y))
+                  }
+                }))
+              }),
+            timeout
+          )
+        }
+      }
+
+      it.effect("dispatches explicit position from the padding-box origin", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<!doctype html><style>body{margin:0}#go{position:absolute;left:40px;top:60px;border-style:solid;border-width:7px 11px 13px 5px;padding:19px;width:100px;height:80px}</style><a id="go" href="#">Go</a><output id="out"></output><script>go.onpointerdown=e=>out.textContent=JSON.stringify({x:e.clientX,y:e.clientY,target:e.target.id});go.onclick=e=>e.preventDefault()</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.locator("#go").click({ position: { x: 13, y: 9 } })
+            assert.deepStrictEqual(JSON.parse(yield* page.locator("#out").readText), { x: 58, y: 76, target: "go" })
+          }))
+        }), timeout)
+
       for (const change of ["replaced", "moved", "disabled", "covered", "interrupted", "expired"] as const) {
         it.effect(`handles a queued click when ${change}`, () =>
           Effect.gen(function*() {

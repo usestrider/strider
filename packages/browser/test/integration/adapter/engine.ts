@@ -11,6 +11,7 @@ import * as Option from "effect/Option"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import * as Engine from "../../../src/internal/engine.ts"
+import { type LinkGeometry, linkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
 import { type Backend, makeRecorder, site } from "./harness.ts"
 
 const timeout = 60_000
@@ -148,6 +149,54 @@ export const engine = (backend: Backend) =>
   describe(`${backend.name} engine`, () => {
     layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
       (it) => {
+        for (const shape of wrappedLinks) {
+          for (const partial of shape.id === "three" ? [false, true] : [false]) {
+            it.effect(
+              `selects first visible fragment for wrapped link ${shape.id}${
+                partial ? " partially above viewport" : ""
+              }`,
+              () =>
+                Effect.gen(function*() {
+                  const { call, send } = yield* open(backend, wrappedLinkHtml(shape, partial))
+                  const measured = yield* call(linkGeometry, [])
+                  assert(measured._tag === "Value" && measured.value.type === "string")
+                  const geometry = JSON.parse(measured.value.value) as LinkGeometry
+                  assert.strictEqual(geometry.rects.length, shape.fragments)
+                  if (partial) assert.isBelow(geometry.rects[0]!.bottom, 0)
+                  const first = geometry.rects.find((r) => r.bottom > 0 && r.top < geometry.height)!
+                  const response = yield* send(point(0))
+                  assert(response._tag === "Ready", JSON.stringify(response))
+                  assert(response.point !== null, JSON.stringify(response))
+                  assert.closeTo(
+                    response.point.x,
+                    (Math.max(0, first.left) + Math.min(geometry.width, first.right)) / 2,
+                    1
+                  )
+                  assert.closeTo(
+                    response.point.y,
+                    (Math.max(0, first.top) + Math.min(geometry.height, first.bottom)) / 2,
+                    1
+                  )
+                }),
+              timeout
+            )
+          }
+        }
+
+        it.effect("selects explicit position from the padding-box origin", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<style>#go{position:absolute;left:40px;top:60px;border-style:solid;border-width:7px 11px 13px 5px;padding:19px;width:100px;height:80px}</style><a id="go">Go</a>`
+            )
+            const response = yield* send({
+              ...point(0),
+              action: { _tag: "Point", position: { x: 13, y: 9 }, guard: false }
+            })
+            assert(response._tag === "Ready", JSON.stringify(response))
+            assert.deepStrictEqual(response.point, { x: 58, y: 76 })
+          }), timeout)
+
         it.effect("revalidates fresh stability without another rendering wait", () =>
           Effect.gen(function*() {
             const { call } = yield* open(backend, `<button id="go">Go</button>`, countFrames())
