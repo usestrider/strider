@@ -737,6 +737,28 @@ describe("Chromium screenshot renderer readiness", () => {
       if (error._tag === "PageError") assert.strictEqual(error.reason._tag, "CaptureInvalidated")
     }).pipe(onTestClock))
 
+  for (const replace of [false, true]) {
+    it.effect(`handles a malformed metrics reply ${replace ? "after replacement" : "without replacement"}`, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders(true)
+        const page = yield* h.page.control
+        const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+        const readiness = yield* Queue.take(h.preparation)
+        if (replace) yield* h.browser.receive(replacementEvent())
+        yield* h.browser.receive({ id: readiness.id, sessionId: readiness.sessionId, result: {} })
+        const error = yield* Fiber.join(pending)
+        assert.strictEqual(error._tag, "PageError")
+        if (error._tag === "PageError") {
+          assert.strictEqual(error.reason._tag, replace ? "CaptureInvalidated" : "BackendFailure")
+          if (error.reason._tag === "BackendFailure") {
+            assert.strictEqual(error.reason.kind, "IncompatibleResponse")
+            assert.strictEqual(error.reason.method, "Page.getLayoutMetrics")
+          }
+        }
+        assert.strictEqual(yield* Queue.size(h.captures), 0)
+      }).pipe(onTestClock))
+  }
+
   for (const sizing of ["viewport", "fullPage", "css", "fullPageCss"] as const) {
     it.effect(`reads metrics once before ${sizing} capture and reuses sizing`, () =>
       Effect.gen(function*() {
