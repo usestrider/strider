@@ -745,3 +745,23 @@ Rejected: treating every addition as a minor release regardless of stability, wh
 unstable breaks the same version signal; treating every pre-1.0 change as a patch, which removes that signal; and
 inferring CLI stability from its implementation's location under `internal/`, which says nothing about its public
 contract.
+
+## Checked actions on ordinary label descendants
+
+Check and uncheck prefer the selected element's own checked state. When it has none, a directly selected label
+or an ordinary descendant's nearest label supplies the associated control. Pointer input and relative positions
+remain on the selected element; already-correct state sends nothing, and post-click verification uses the same
+checked-state lookup. Public isChecked and checked expectations continue to read only the selected element.
+
+For descendants, inspect the selected node and ancestors up to, excluding, the nearest label. Refuse
+buttons, inputs, selects, textareas, details, summaries, frames, embeds, objects, links with href, images with
+usemap, audio/video with controls, ARIA widget roles (button, checkbox, combobox, grid, gridcell, link,
+listbox, menu, menubar, menuitem, menuitemcheckbox, menuitemradio, option, radio, radiogroup, scrollbar,
+searchbox, separator, slider, spinbutton, switch, tab, tablist, textbox, tree, treegrid and treeitem) and
+editable content. This conservative boundary keeps separate controls from receiving
+input meant for the associated checkbox, including when that checkbox already matches. Association uses the
+browser's label.control; missing or non-checkable controls are refused.
+
+Rejected: clicking the associated input directly, which loses the selected target and its relative coordinates;
+following labels for public state reads, which expands an unrelated contract; and copying Playwright's activation
+of links before reporting unchanged state, which sends input to a separate control unnecessarily.

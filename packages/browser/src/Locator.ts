@@ -917,10 +917,17 @@ export interface Locator extends ReadonlyLocator {
    *
    * Checked state follows `isChecked`, including its supported ARIA roles and optional checkability.
    * If it's already checked, nothing is sent. Otherwise it clicks, then reads the state again: a click that didn't
-   * check it fails with `StateUnchanged{expected: "checked"}`. A label uses its own checked state when it is an
-   * ARIA checkable; otherwise it reads its associated control's state. The click and any position remain on the
-   * label. A label with neither its own checked state nor a checkable control, or any other non-checkable element,
-   * fails at once with `WrongElement`. This does not change `isChecked` or checked expectations on labels.
+   * check it fails with `StateUnchanged{expected: "checked"}`. The selected element's own checked state takes
+   * precedence. Otherwise a label, or an ordinary descendant of its nearest label, reads the associated control.
+   * The click target and any relative position stay on the selected element. Descendant fallback refuses
+   * buttons, inputs, selects, textareas, details, summaries, frames, embeds, objects, links with href, images with
+   * usemap, audio/video with controls, editable content and ARIA widget roles: button, checkbox, combobox, grid,
+   * gridcell, link, listbox, menu, menubar, menuitem, menuitemcheckbox, menuitemradio, option, radio, radiogroup,
+   * scrollbar, searchbox, separator, slider, spinbutton, switch, tab, tablist, textbox, tree, treegrid and treeitem.
+   * This checks the selected node and each ancestor before the nearest label. Refusal is `WrongElement` before
+   * input, even if the control already matches.
+   * Missing or non-checkable associations also fail with `WrongElement`. This does not change `isChecked` or
+   * checked expectations.
    *
    * **Example** (Accepting the terms)
    *
@@ -936,9 +943,17 @@ export interface Locator extends ReadonlyLocator {
   check(options?: PointerOptions | undefined): ActionEffect
   /**
    * Unchecks a checkbox or an ARIA checkable, and confirms it became unchecked. Checks: the same as `click`. It
-   * works as `check` does, using the checked state and optional checkability described by `isChecked`. A label's
-   * own checked state takes precedence over its associated control's state, while the click stays at the requested
-   * label-relative position. It fails with `StateUnchanged{expected: "unchecked"}` if the state stays checked.
+   * works as `check` does, using the checked state and optional checkability described by `isChecked`. The selected
+   * element's own checked state takes precedence over a label's associated control. Ordinary label descendants
+   * also follow the nearest label's control, keeping the selected element as the click target and position origin.
+   * As with `check`, fallback refuses buttons, inputs, selects, textareas, details, summaries, frames, embeds,
+   * objects, links with href, images with usemap, audio/video with controls, editable content and ARIA widget
+   * roles: button, checkbox, combobox, grid, gridcell, link, listbox, menu, menubar, menuitem, menuitemcheckbox,
+   * menuitemradio, option, radio, radiogroup, scrollbar, searchbox, separator, slider, spinbutton, switch, tab,
+   * tablist, textbox, tree, treegrid and treeitem, on the selected node or any ancestor before the nearest label.
+   * It refuses before input even when the control already matches. Missing or non-checkable associations fail with `WrongElement`; `isChecked` and
+   * checked expectations remain unchanged. It fails with `StateUnchanged{expected: "unchecked"}` if the state
+   * stays checked.
    *
    * **Example** (Opting out of offers)
    *

@@ -803,7 +803,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   const targetTag = kind === "inert-link"
                     ? "a"
                     : kind === "inert-media"
-                    ? "audio"
+                    ? "video"
                     : kind === "image"
                     ? "img"
                     : tag

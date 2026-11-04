@@ -46,6 +46,34 @@ const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: st
 An action sends its input at most once. If it fails after the input may have reached the page, the error's
 [`diagnostics.dispatch`](/docs/errors#diagnostics) says so.
 
+A text descendant of a label can check or uncheck its associated checkbox. For
+`<input id="terms" type="checkbox"><label for="terms"><span>Accept terms</span></label>`:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const acceptTerms = Effect.fn("acceptTerms")(function*(page: Page.Page) {
+  yield* page.getByText("Accept terms").check()
+  yield* page.getByText("Accept terms").uncheck()
+})
+```
+
+The selected element's own checked state takes precedence; otherwise these actions read the nearest label's
+associated control. The click and any relative position stay on the selected element. An already-correct state
+sends no input; a click that does not change the state fails with `StateUnchanged`.
+
+Descendant fallback refuses buttons, inputs, selects, textareas, details, summaries, frames, embeds, objects,
+links with href, images with usemap, audio/video with controls, ARIA widget roles (button, checkbox, combobox,
+grid, gridcell, link, listbox, menu, menubar, menuitem, menuitemcheckbox, menuitemradio, option, radio,
+radiogroup, scrollbar, searchbox, separator, slider, spinbutton, switch, tab, tablist, textbox, tree, treegrid
+and treeitem) and editable content.
+It checks the selected node and each ancestor before the nearest label, and returns `WrongElement` before input
+even if the associated control already matches. A missing or non-checkable association also fails with
+`WrongElement`. Directly selected labels keep their existing behavior.
+[`isChecked`](/docs/api/browser/Locator#Locator.isChecked) and checked expectations still read only the selected
+element's own state.
+
 ## Checks
 
 Before sending anything, an action waits, checking at each animation frame, until its element is ready:

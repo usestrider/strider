@@ -1244,6 +1244,53 @@ export function engine(render: (root: SnapNode) => string) {
     return state === "true"
   }
 
+  const LABEL_WIDGET_ROLES = new Set([
+    "button",
+    "checkbox",
+    "combobox",
+    "grid",
+    "gridcell",
+    "link",
+    "listbox",
+    "menu",
+    "menubar",
+    "menuitem",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "option",
+    "radio",
+    "radiogroup",
+    "scrollbar",
+    "searchbox",
+    "separator",
+    "slider",
+    "spinbutton",
+    "switch",
+    "tab",
+    "tablist",
+    "textbox",
+    "tree",
+    "treegrid",
+    "treeitem"
+  ])
+
+  /** Action-only label fallback; the selected element still receives the pointer input. */
+  const checkedForAction = (element: Element): boolean | null => {
+    const own = checkedOf(element)
+    if (own !== null) return own
+    let ancestor: Element | null = element
+    while (ancestor !== null && !(ancestor instanceof HTMLLabelElement)) {
+      const role = roleOf(ancestor)
+      if (
+        ancestor.matches(
+          "button, input, select, textarea, details, summary, iframe, frame, embed, object, a[href], area[href], img[usemap], audio[controls], video[controls]"
+        ) || contentEditable(ancestor) || (role !== null && LABEL_WIDGET_ROLES.has(role))
+      ) return null
+      ancestor = ancestor.parentElement
+    }
+    return ancestor instanceof HTMLLabelElement && ancestor.control !== null ? checkedOf(ancestor.control) : null
+  }
+
   /** The element with focus, through open shadow roots. */
   const deepActive = (): Element | null => {
     let active: Element | null = document.activeElement
@@ -1651,11 +1698,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Enabled":
         return { _tag: "Read", value: enabled(element) }
       case "Checked": {
-        let checked = checkedOf(element)
-        if (checked === null && request.read.followLabel && element instanceof HTMLLabelElement) {
-          const control = element.control
-          checked = control === null ? null : checkedOf(control)
-        }
+        const checked = request.read.followLabel ? checkedForAction(element) : checkedOf(element)
         return checked === null ? wrong("a checkbox, a radio or an ARIA checkable") : { _tag: "Read", value: checked }
       }
     }
