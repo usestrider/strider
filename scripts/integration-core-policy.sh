@@ -32,6 +32,8 @@ if [[ "$mode" == respect-limit ]]; then
 fi
 changed=false
 child=''
+# Invoked by EXIT; also exercised by CorePolicy.test.ts.
+# shellcheck disable=SC2329
 restore() {
   local result=$?
   trap - EXIT
@@ -50,6 +52,8 @@ restore() {
   fi
   exit "$result"
 }
+# Invoked by signal traps; also exercised by CorePolicy.test.ts.
+# shellcheck disable=SC2329
 interrupt() {
   local signal=$1 result=$2
   if [[ -n "$child" ]]; then kill -s "$signal" "$child" 2>/dev/null || true; fi
