@@ -1,4 +1,5 @@
 /** Bounded diagnostic history; independent of the optional drift fixture sampler. */
+import { Buffer } from "node:buffer"
 export interface Entry {
   readonly sequence: number
   readonly timestamp: string
@@ -21,7 +22,8 @@ export class TraceBuffer {
       timestamp: new Date().toISOString(),
       connection,
       kind,
-      payload: payload.slice(0, this.messageLimit),
+      // V8 sliced strings can retain the entire screenshot/body behind a small substring.
+      payload: Buffer.from(payload.slice(0, this.messageLimit), "utf16le").toString("utf16le"),
       ...(payload.length > this.messageLimit ? { truncated: true, originalLength: payload.length } : {})
     }
     const size = JSON.stringify(entry).length * 2

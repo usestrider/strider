@@ -8,7 +8,7 @@ import { install, TraceBuffer } from "./failureTrace.ts"
 
 const directory = path.resolve(import.meta.dirname, "../../../../.data/integration-failures")
 const shared = new TraceBuffer()
-const active = new Map<string, { task: RunnerTestCase; trace: TraceBuffer }>()
+const active = new Map<string, { trace: TraceBuffer }>()
 const completed = new Map<string, { file?: string | undefined; sequence: number; bytes: number; overflow: boolean }>()
 let nextConnection = 0
 const serialize = (value: unknown): string =>
@@ -51,7 +51,7 @@ install({
             if (done.bytes + line.length * 2 <= 256 * 1024) {
               fs.appendFileSync(done.file, line)
               done.bytes += line.length * 2
-            } else if (!done.overflow) {
+            } else {
               fs.appendFileSync(
                 done.file,
                 JSON.stringify({
@@ -90,7 +90,7 @@ export default class FailureTraceRunner extends TestRunner {
   }
   override async onBeforeRunTask(task: RunnerTask) {
     await super.onBeforeRunTask(task)
-    if (task.type === "test") active.set(task.id, { task, trace: new TraceBuffer() })
+    if (task.type === "test") active.set(task.id, { trace: new TraceBuffer() })
   }
   override onAfterRunTask(task: RunnerTask) {
     super.onAfterRunTask(task)
