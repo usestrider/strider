@@ -948,6 +948,67 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      // A slot places light DOM inside a shadow tree's control, and SVG links may carry only xlink:href; the pointer
+      // reaches that control or link, so each is an interactive ancestor the parent chain alone doesn't show.
+      const slotted = `<span id="host"><span id="target">Toggle</span></span>`
+      const shadowed = (inner: string) =>
+        `document.querySelector("#host").attachShadow({mode:"open"}).innerHTML=${JSON.stringify(inner)};`
+      for (
+        const [kind, content, script] of [
+          ["slotted into a shadow button", slotted, shadowed("<button><slot></slot></button>")],
+          ["slotted into a shadow link", slotted, shadowed(`<a href="#away"><slot></slot></a>`)],
+          [
+            "in an SVG xlink:href link",
+            `<svg width="100" height="30" xmlns:xlink="http://www.w3.org/1999/xlink"><a xlink:href="#away"><rect id="target" width="100" height="30"/></a></svg>`,
+            ""
+          ]
+        ] as const
+      ) {
+        it.effect(`label descendant refuses before input when ${kind}`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="box" type="checkbox"><label for="box">${content}</label>${out}<script>${script}
+              document.addEventListener('pointerdown', () => { ${say("'pointer sent'")} }, true)</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const target = page.locator("#target")
+              for (const state of [false, true]) {
+                yield* page.evaluateInMainWorld((value: boolean) => {
+                  ;(document.querySelector("#box") as HTMLInputElement).checked = value
+                }, state)
+                for (const action of [target.check(), target.uncheck()]) {
+                  const error = yield* action.pipe(Effect.flip)
+                  assert(Locator.isLocatorError(error) && error.reason._tag === "WrongElement", String(error))
+                }
+                assert.strictEqual(yield* page.locator("#box").isChecked, state)
+              }
+              assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+              assert.strictEqual(yield* page.evaluateInMainWorld(() => location.hash), "")
+            }))
+          }), timeout)
+      }
+
+      it.effect(
+        "label descendant slotted into an ordinary shadow element follows the label",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="box" type="checkbox"><label for="box">${slotted}</label><script>${
+                shadowed("<b><slot></slot></b>")
+              }</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#target").check()
+              assert.strictEqual(yield* page.locator("#box").isChecked, true)
+            }))
+          }),
+        timeout
+      )
+
       // State belongs to the control; pointer input still belongs to the label.
       for (const association of ["explicit", "wrapping"] as const) {
         for (const checked of [true, false]) {
