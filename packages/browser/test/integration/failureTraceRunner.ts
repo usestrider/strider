@@ -21,12 +21,15 @@ const save = (file: string, trace: TraceBuffer, scope: string) => {
   fs.mkdirSync(directory, { recursive: true })
   fs.writeFileSync(
     file,
-    JSON.stringify({
-      kind: "context",
-      scope,
-      note:
-        "Bounded tail; send records attempted writes. Shared connections can deliver background events during a test."
-    }) + "\n" + trace.entries().map((entry) => JSON.stringify(entry)).join("\n") + "\n"
+    [
+      JSON.stringify({
+        kind: "context",
+        scope,
+        note:
+          "Bounded tail; send records attempted writes. Shared connections can deliver background events during a test."
+      }),
+      ...trace.entries().map((entry) => JSON.stringify(entry))
+    ].join("\n") + "\n"
   )
   console.error(`Integration failure trace: ${file}`)
 }

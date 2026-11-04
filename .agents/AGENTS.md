@@ -124,6 +124,12 @@ stays in the shared context with the active test IDs. Separately executed CLI/da
 Vitest's module graph, so their internal protocol is not captured. Owned Node child process stderr is observed
 where an existing consumer drains it; ignored or inherited stderr is marked unavailable. No extra reader is added.
 
+Buffers are saved when Vitest reports a failed test or suite. An unhandled error without a failed test or suite,
+or a worker that dies before those callbacks run, leaves no trace because its buffers remain in memory.
+Connections created inside a test remain owned by that creator. If a later test reuses one, its traffic stays
+with the failed creator or is discarded after a passing creator; it is absent from the later test's trace.
+Create shared connections in suite setup so their traffic can be observed during each test.
+
 ## Conventions
 
 Strider follows the Effect core team's conventions; `docs/conventions.md` records them, and API.md's Conventions
