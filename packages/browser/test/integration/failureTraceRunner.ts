@@ -101,7 +101,10 @@ export default class FailureTraceRunner extends TestRunner {
   }
   override async onBeforeRunTask(task: RunnerTask) {
     await super.onBeforeRunTask(task)
-    if (task.type === "test") active.set(task.id, { trace: new TraceBuffer(), inBody: false })
+    // Vitest returns early for skipped/todo tasks without calling onAfterRunTask.
+    if (task.type === "test" && (task.mode === "run" || task.mode === "queued")) {
+      active.set(task.id, { trace: new TraceBuffer(), inBody: false })
+    }
   }
   async runTask(task: RunnerTestCase) {
     const running = active.get(task.id)
