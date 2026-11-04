@@ -688,6 +688,9 @@ export interface ActionOptions {
 export interface PointerOptions extends ActionOptions {
   /**
    * Where to point, from the top left of the element's padding box.
+   * With no position, the point stays inside the first visible client rectangle after integer rounding
+   * when that rectangle contains an integer point. A target with no visible rectangle has no default point,
+   * even when actionability checks are disabled.
    *
    * @default the centre of the first nonempty viewport-clipped client rectangle
    */
@@ -726,6 +729,7 @@ export interface ClickOptions extends PointerOptions {
 export interface DragOptions extends PointerOptions {
   /**
    * Where to drop, from the top left of the target's padding box.
+   * The default point follows the same visible-rectangle and rounding rules as `position`.
    *
    * @default the centre of the target's first nonempty viewport-clipped client rectangle
    */

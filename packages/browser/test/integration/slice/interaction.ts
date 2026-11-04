@@ -86,6 +86,23 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         }
       }
 
+      it.effect("dispatches click inside a one-pixel fragment after rounding", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<!doctype html><a id="go" style="position:fixed;left:0;top:20px;width:1px;height:10px"></a><output id="out"></output><script>go.onpointerdown=e=>out.textContent=JSON.stringify({x:e.clientX,y:e.clientY,target:e.target.id});go.onclick=()=>out.dataset.clicked="go"</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
+            assert.deepStrictEqual(JSON.parse(yield* page.locator("#out").readText), { x: 0, y: 25, target: "go" })
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => document.querySelector("#out")!.getAttribute("data-clicked")),
+              "go"
+            )
+          }))
+        }), timeout)
+
       it.effect("dispatches explicit position from the padding-box origin", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
