@@ -124,6 +124,9 @@ export const sessions = Command.make(
   Effect.fnUntraced(function*({ json }) {
     const fs = yield* FileSystem.FileSystem
     const rootDir = yield* Client.sessionRoot
+    if ((yield* Session.validateRoot(rootDir)) === undefined) {
+      return yield* Console.log(json ? "[]" : "No sessions. strider start starts one.")
+    }
     const names = (yield* fs.readDirectory(rootDir).pipe(Effect.orElseSucceed(() => []))).filter((name) =>
       Session.nameRule.test(name)
     ).sort()
@@ -234,10 +237,15 @@ export const prune = Command.make(
   Effect.fnUntraced(function*({ name: given, yes }) {
     if (Option.isNone(given)) return yield* pruneLedger(yes)
     const name = given.value
+    yield* Session.validateName(name)
     const fs = yield* FileSystem.FileSystem
     const rootDir = yield* Client.sessionRoot
     const paths = Session.paths(rootDir, name)
-    yield* Session.validateRoot(paths.dir)
+    if (
+      (yield* Session.validateRoot(rootDir)) === undefined || (yield* Session.validateRoot(paths.dir)) === undefined
+    ) {
+      return yield* Console.log(`No session named ${name} is left behind`)
+    }
     if (!(yield* fs.exists(paths.dir).pipe(Effect.orElseSucceed(() => false)))) {
       return yield* Console.log(`No session named ${name} is left behind`)
     }

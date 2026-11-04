@@ -18,7 +18,6 @@ import type * as RpcClientError from "effect/rpc/RpcClientError"
 import * as RpcSerialization from "effect/rpc/RpcSerialization"
 import * as Runtime from "effect/Runtime"
 import * as Schema from "effect/Schema"
-import type * as Scope from "effect/Scope"
 import * as Socket from "effect/socket/Socket"
 import * as Stream from "effect/Stream"
 import * as Node from "./node.ts"
@@ -42,15 +41,17 @@ export class Exit extends Data.TaggedError("Exit")<{ readonly code: number }> {
 export const sessionRoot = Effect.flatMap(
   Effect.promise(() => Node.os()),
   (os) => {
-    const root = Session.root(Node.process.env, os.tmpdir())
-    return Effect.as(Session.validateRoot(root), root)
+    return Effect.gen(function*() {
+      const root = yield* Effect.try({ try: () => Session.root(Node.process.env, os.tmpdir()), catch: Session.failure })
+      return (yield* Session.validateRoot(root)) ?? root
+    })
   }
 )
 
 /** The sessions whose sockets exist. */
 export const running = Effect.fnUntraced(function*(rootDir: string) {
   const fs = yield* FileSystem.FileSystem
-  yield* Session.validateRoot(rootDir)
+  if ((yield* Session.validateRoot(rootDir)) === undefined) return []
   const names = yield* fs.readDirectory(rootDir).pipe(Effect.orElseSucceed(() => []))
   const sessions = names.filter((name) => Session.nameRule.test(name))
   for (const name of sessions) yield* Session.validateRoot(Session.paths(rootDir, name).dir)
@@ -63,11 +64,14 @@ export const running = Effect.fnUntraced(function*(rootDir: string) {
 /** A client of the daemon serving a socket, for the scope. It connects as its first call is made. */
 export const connect = Effect.fnUntraced(function*(socket: string) {
   const directory = socket.slice(0, socket.lastIndexOf("/"))
-  yield* Session.validateRoot(directory.slice(0, directory.lastIndexOf("/")))
-  yield* Session.validateRoot(directory)
+  yield* Session.validateRoot(directory.slice(0, directory.lastIndexOf("/")), false, true)
+  const resolved = yield* Session.validateRoot(directory, false, true)
   const protocol = yield* Layer.build(
     RpcClient.layerProtocolSocket().pipe(
-      Layer.provide([Layer.effect(Socket.Socket)(NodeSocket.makeNet({ path: socket })), RpcSerialization.layerNdjson])
+      Layer.provide([
+        Layer.effect(Socket.Socket)(NodeSocket.makeNet({ path: resolved + socket.slice(socket.lastIndexOf("/")) })),
+        RpcSerialization.layerNdjson
+      ])
     )
   )
   return yield* RpcClient.make(Protocol.Rpcs, { disableTracing: true }).pipe(Effect.provideContext(protocol))
@@ -76,8 +80,16 @@ export const connect = Effect.fnUntraced(function*(socket: string) {
 export type Client = Effect.Success<ReturnType<typeof connect>>
 
 /** A session's client, for the scope. */
-export const session = (rootDir: string, name: string): Effect.Effect<Client, never, Scope.Scope> =>
-  connect(Session.paths(rootDir, name).socket)
+export const session = Effect.fnUntraced(function*(rootDir: string, name: string) {
+  yield* Session.validateName(name)
+  return yield* connect(Session.paths(rootDir, name).socket).pipe(
+    Effect.mapError((error) =>
+      error.reason === "Missing"
+        ? new Session.SessionError({ reason: "Missing", message: "No session named " + name + " is running" })
+        : error
+    )
+  )
+})
 
 /** Whether a call failed because no daemon serves the socket: it's gone, or it never started. */
 export const unreachable = (error: RpcClientError.RpcClientError): boolean => error.reason._tag === "SocketOpenError"
@@ -96,6 +108,7 @@ export const forward = Effect.fnUntraced(function*(argv: ReadonlyArray<string>) 
     )
     return yield* new Exit({ code: Session.exitCodes.NoSession! })
   }
+  yield* Session.validateName(name)
   // The environment's session is the shared flag when no explicit one was given
   const args = named === undefined ? ["-s", name, ...argv] : [...argv]
   yield* Effect.scoped(Effect.gen(function*() {
@@ -145,15 +158,26 @@ export const start = Effect.fnUntraced(function*(
   bin: string,
   say: (text: string) => Effect.Effect<void> = Console.log
 ) {
+  // Reject every supplied name before creating startup files or spawning the daemon.
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index]!
+    if (arg === "--") break
+    if (["--name", "--fork", "--session", "-s"].includes(arg)) {
+      const name = argv[++index]
+      if (name !== undefined) yield* Session.validateName(name)
+    } else if (/^(--name|--fork|--session|-s)=/.test(arg)) {
+      yield* Session.validateName(arg.slice(arg.indexOf("=") + 1))
+    }
+  }
   const process = Node.process
   const fs = yield* FileSystem.FileSystem
-  const rootDir = yield* sessionRoot
+  const selectedRoot = yield* sessionRoot
   yield* Effect.scoped(Effect.gen(function*() {
-    yield* Session.validateRoot(rootDir, true)
+    const rootDir = (yield* Session.validateRoot(selectedRoot, true))!
     const startup = yield* Session.startupDirectory(rootDir)
     yield* Effect.addFinalizer(() => fs.remove(startup, { recursive: true }).pipe(Effect.ignore))
     const path = startup + "/ready.sock"
-    const server = yield* NodeSocketServer.make({ path }).pipe(Effect.orDie)
+    const server = yield* NodeSocketServer.make({ path }).pipe(Effect.mapError(Session.failure))
     const said = yield* Deferred.make<string>()
     yield* server.run((socket) =>
       Socket.toStream(socket).pipe(

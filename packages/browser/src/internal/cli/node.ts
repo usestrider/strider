@@ -46,6 +46,10 @@ export interface Stat {
 export const files = () =>
   load("node:fs/promises") as Promise<{
     lstat(path: string): Promise<Stat>
+    readlink(path: string): Promise<string>
     mkdir(path: string, options: { readonly mode: number }): Promise<unknown>
     mkdtemp(prefix: string): Promise<string>
   }>
+
+export const path = () =>
+  load("node:path") as Promise<{ resolve(...paths: Array<string>): string; dirname(path: string): string }>

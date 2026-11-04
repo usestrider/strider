@@ -219,8 +219,23 @@ A session's browser runs until the session stops, so list what's running and sto
 | `strider -s s stop`                            | ends the session and deletes its directory; `--keep` keeps the directory     |
 | `strider prune`                                | lists browsers and profile directories left by programs that were killed; `--yes` removes them |
 
-A session's profile, downloads and artifacts are in `$XDG_RUNTIME_DIR/strider/<name>/`, deleted when it stops. A
+A session's profile, downloads and artifacts are in `$XDG_RUNTIME_DIR/strider/<name>/`, or
+`<OS temp directory>/strider-<uid>/<name>/` when the runtime directory is unset, deleted when it stops. A
 session idle for an hour stops itself; `start --idle "30 minutes"` changes that. Both `start` and `sessions` print the validated idle timeout with whitespace normalized to spaces, so you can copy it into `--idle` with quotes.
+
+Session roots and session directories must belong to your Unix user, have no group or other permissions, and
+cannot be symlinks. Ancestors must be owned by you or root and prevent replacement by other users; root-owned
+sticky directories such as /tmp are allowed. Trusted ancestor aliases, including macOS's /tmp and /var, are
+resolved with the same checks on the target ancestry. Unsafe existing directories are refused without changing
+their permissions. Missing parents are created privately. The CLI session service requires Unix ownership metadata.
+
+The old fallback, `<OS temp directory>/strider`, is never searched or migrated. Before upgrading, stop old daemons
+with the old CLI, then restart sessions with the new CLI. Inspect old directories and their ownership before
+removing them separately; do not copy sockets or locks into the new root.
+
+A client killed during startup can leave a private `.start-*` directory. Listings and named prune exclude it.
+After all clients and daemons using the root have stopped, inspect and remove only identified stale startup
+directories; prune does not sweep startup entries.
 
 
 ## Attaching
