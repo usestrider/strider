@@ -1,6 +1,7 @@
 import * as fs from "node:fs"
 import { describe, expect, it } from "vitest"
 import { TraceBuffer } from "./integration/failureTrace.ts"
+import { pipeObserver } from "./integration/tracePipe.ts"
 import { instrument } from "./integration/tracePlugin.ts"
 
 describe("failure trace buffer", () => {
@@ -83,10 +84,32 @@ describe("failure trace runner lifecycle", () => {
     expect(payloads).not.toContain("LATE_PASS_ONLY")
     expect(read("setup.fixture")).toContain("SETUP_FAILURE_ONLY")
     expect(read("process.fixture")).toContain("OWNED_STDERR")
+    expect(read("process.fixture")).toContain("\"kind\":\"pipe-send\"")
+    expect(read("process.fixture")).toContain("PIPE_SEND")
+    expect(read("process.fixture")).toContain("\"kind\":\"pipe-receive\"")
+    expect(read("process.fixture")).toContain("PIPE_RECEIVE")
     expect(read("process.fixture")).toContain("\"kind\":\"process-exit\"")
     expect(read("process.fixture")).toContain("\\\"code\\\":7")
     expect(run.stderr).toContain("Integration failure trace:")
     // A failed outer assertion leaves the diagnostic files available for inspection.
     for (const name of files) fs.unlinkSync(new URL(name, directory))
   }, 30_000)
+})
+
+describe("owned Chromium pipe framing", () => {
+  it("orders split and joined frames and explicitly marks bounded payload prefixes", () => {
+    const entries: Array<[string, unknown]> = []
+    const observe = pipeObserver((kind, payload) => entries.push([kind, payload]), "pipe-receive")
+    observe("one\0tw")
+    observe("o\0" + "x".repeat(40 * 1024))
+    observe("x\0last\0")
+    expect(entries.slice(0, 2)).toEqual([["pipe-receive", "one"], ["pipe-receive", "two"]])
+    expect((entries[2]![1] as string).length).toBe(32 * 1024)
+    expect(entries[3]).toEqual(["wire-truncation", {
+      direction: "pipe-receive",
+      originalBytes: 40 * 1024 + 1,
+      retainedBytes: 32 * 1024
+    }])
+    expect(entries[4]).toEqual(["pipe-receive", "last"])
+  })
 })

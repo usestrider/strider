@@ -116,7 +116,9 @@ history; individual payloads keep 32 Ki characters, and late failed-test cleanup
 The optional `STRIDER_RECORD` drift sampler is separate and unchanged.
 
 Capture covers Strider pipe and WebSocket transports and decoded stock WebKit inspector messages in Vitest,
-including public-layer slices and the upstream cases selected by the integration configuration. Shared connections
+including public-layer slices and the Strider upstream cases selected by the integration configuration.
+Owned Chromium child-process pipes also cover the selected upstream Playwright baselines; their `pipe-send` and
+`pipe-receive` records are below Strider's transport records and may duplicate those messages. Shared connections
 may deliver background events during a test; the trace records observation, not causation. Concurrent shared traffic
 stays in the shared context with the active test IDs. Separately executed CLI/daemon processes do not run in
 Vitest's module graph, so their internal protocol is not captured. Owned Node child process stderr is observed
