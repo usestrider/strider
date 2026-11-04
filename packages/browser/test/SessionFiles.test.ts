@@ -2,7 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
-import { spawnSync } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as net from "node:net"
 import * as os from "node:os"
@@ -108,6 +108,26 @@ describe("session files", () => {
       assert.strictEqual(result.status, 20)
       assert.include(result.stderr, "running: other")
     } finally {
+      fs.rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it("prunes a session without killing a process of another whose name starts the same", async () => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-files-"))
+    // A real process whose command line names the other session's profile, as a browser's does
+    const other = path.join(temporary, "strider", "ab", "profile")
+    const browser = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", other], { stdio: "ignore" })
+    const exited = new Promise<NodeJS.Signals | null>((resolve) => browser.once("exit", (_, signal) => resolve(signal)))
+    try {
+      await new Promise((resolve) => browser.once("spawn", resolve))
+      fs.mkdirSync(path.join(temporary, "strider", "a"), { recursive: true, mode: 0o700 })
+      fs.chmodSync(path.join(temporary, "strider"), 0o700)
+      strider({ XDG_RUNTIME_DIR: temporary, XDG_STATE_HOME: temporary }, "prune", "a")
+      assert.isFalse(fs.existsSync(path.join(temporary, "strider", "a")))
+      const killed = await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve("alive"), 500))])
+      assert.strictEqual(killed, "alive")
+    } finally {
+      browser.kill("SIGKILL")
       fs.rmSync(temporary, { recursive: true, force: true })
     }
   })
