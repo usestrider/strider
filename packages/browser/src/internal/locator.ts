@@ -965,7 +965,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     return other
   }
 
-  /** The action point of the one match, now: a drag's target, which must be visible and reachable. */
+  /** A drag target's point, with visibility/viewport checks and without pointer coverage or stability checks. */
   pointOf(position: Mouse.Point | undefined) {
     return Effect.gen({ self: this }, function*() {
       yield* Access.check(this.owner.grant)
@@ -1170,7 +1170,11 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     checks: { readonly inViewport: boolean; readonly receivesPointer: boolean },
     id: Diagnostics.OperationId
   ): Effect.Effect<
-    | { readonly _tag: "Point"; readonly point: { x: number; y: number }; readonly origin: { x: number; y: number } }
+    | {
+      readonly _tag: "Point"
+      readonly point: { x: number; y: number }
+      readonly origin: { x: number; y: number }
+    }
     | { readonly _tag: "NotReady"; readonly reason: Engine.NotReady },
     Runtime.SendFailure
   > {
@@ -1314,19 +1318,29 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
               if (answer.routed.hops.length === 0 || response.point === null) {
                 return Option.some<Ready>({ response, routed: answer.routed, origin: { x: 0, y: 0 } })
               }
-              const translated = yield* this.translate(answer.routed, response.point, checks, id).pipe(
-                Effect.mapError((failure) =>
-                  failure._tag === "Deadline"
-                    ? failure
-                    : this.sendFailure(operation, failure, record)
+              const points = checks.receivesPointer && action._tag === "Point" && action.position === null &&
+                  response.candidates !== undefined && response.candidates.length > 0
+                ? response.candidates
+                : [response.point]
+              let covered: Engine.NotReady | undefined
+              for (const point of points) {
+                const translated = yield* this.translate(answer.routed, point, checks, id).pipe(
+                  Effect.mapError((failure) =>
+                    failure._tag === "Deadline" ? failure : this.sendFailure(operation, failure, record)
+                  )
                 )
-              )
-              if (translated._tag === "NotReady") return notReady(translated.reason)
-              return Option.some<Ready>({
-                response: { ...response, point: translated.point },
-                routed: answer.routed,
-                origin: translated.origin
-              })
+                if (translated._tag === "NotReady") {
+                  if (translated.reason._tag !== "Covered") return notReady(translated.reason)
+                  covered ??= translated.reason
+                  continue
+                }
+                return Option.some<Ready>({
+                  response: { ...response, point: translated.point },
+                  routed: answer.routed,
+                  origin: translated.origin
+                })
+              }
+              return notReady(covered!)
             }
             default:
               return yield* this.unmatched(operation, response, id)

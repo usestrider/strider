@@ -4,12 +4,15 @@
  */
 import * as path from "node:path"
 import { defineConfig } from "vitest/config"
+import { failureTracePlugin } from "./packages/browser/test/integration/tracePlugin.ts"
 import { resolve } from "./vitest.config.ts"
 import { upstreamTest } from "./vitest.upstream.config.ts"
 
 export default defineConfig({
   resolve,
+  plugins: [failureTracePlugin()],
   test: {
+    runner: path.join(import.meta.dirname, "packages/browser/test/integration/failureTraceRunner.ts"),
     projects: [{
       extends: true,
       test: {

@@ -235,6 +235,9 @@ export const Final = Schema.Union([
 ])
 export type Final = typeof Final.Type
 
+const Clip = Schema.Struct({ left: Schema.Number, top: Schema.Number, right: Schema.Number, bottom: Schema.Number })
+export type Clip = typeof Clip.Type
+
 /** A request to the engine. */
 export type Request =
   | { readonly op: "count"; readonly steps: ReadonlyArray<Step> }
@@ -243,6 +246,8 @@ export type Request =
     readonly op: "act"
     readonly steps: ReadonlyArray<Step>
     readonly checks: Checks
+    /** Visible bounds inherited from parent frames, in this document’s viewport coordinates. */
+    readonly clip?: Clip
     /** Milliseconds this round may wait for the checks to pass. */
     readonly cap: number
     readonly action: Action
@@ -275,6 +280,7 @@ export type Request =
     readonly op: "frame"
     readonly steps: ReadonlyArray<Step>
     readonly scroll: boolean
+    readonly clip?: Clip
     readonly point: { readonly x: number; readonly y: number } | null
   }
   /**
@@ -312,6 +318,8 @@ export const Response = Schema.Union([
     scrolled: Schema.Boolean,
     /** Stability evidence for an immediate check of the same element and rectangle. */
     stability: Schema.optionalKey(Schema.String),
+    /** Locally reachable default candidates for parent hit tests. */
+    candidates: Schema.optionalKey(Schema.Array(Point)),
     /** The action point, for `Point`. */
     point: Schema.NullOr(Point),
     /** Whether an HTML drag would start from it: it or an ancestor is `draggable`. */
@@ -352,6 +360,8 @@ export const Response = Schema.Union([
   Schema.TaggedStruct("Frame", {
     /** The iframe's content box, in this document's viewport. */
     origin: Point,
+    /** Visible content bounds, in the child viewport’s coordinates. */
+    viewport: Clip,
     /** Whether it was scrolled into view. */
     scrolled: Schema.Boolean,
     /** What covers the iframe at the point given, or `null` when the iframe itself is hit there. */
@@ -1329,24 +1339,78 @@ export function engine(render: (root: SnapNode) => string) {
       : null
   }
 
-  const inViewport = (element: Element): boolean => {
-    const rect = element.getBoundingClientRect()
-    const width = Math.min(rect.right, innerWidth) - Math.max(rect.left, 0)
-    const height = Math.min(rect.bottom, innerHeight) - Math.max(rect.top, 0)
-    return width > 0 && height > 0 && width * height > 0.99
+  /** Geometric bounds only; the browser's hit test determines whether ancestors or overlays block a centre. */
+  const viewportBounds = (inherited?: Clip): Clip => ({
+    left: Math.max(0, inherited?.left ?? 0),
+    top: Math.max(0, inherited?.top ?? 0),
+    right: Math.min(innerWidth, inherited?.right ?? innerWidth),
+    bottom: Math.min(innerHeight, inherited?.bottom ?? innerHeight)
+  })
+
+  const fragments = (element: Element, inherited?: Clip): Array<Clip> => {
+    const bounds = viewportBounds(inherited)
+    const result: Array<Clip> = []
+    for (const rect of element.getClientRects()) {
+      const left = Math.max(bounds.left, rect.left)
+      const top = Math.max(bounds.top, rect.top)
+      const right = Math.min(bounds.right, rect.right)
+      const bottom = Math.min(bounds.bottom, rect.bottom)
+      if (right > left && bottom > top) result.push({ left, top, right, bottom })
+    }
+    return result
   }
 
-  /** The action point, in viewport CSS pixels: the padding box's centre, or `position` from its top left. */
-  const actionPoint = (element: Element, position: { readonly x: number; readonly y: number } | null) => {
+  const visibleFragment = (element: Element, inherited?: Clip): Clip | null => fragments(element, inherited)[0] ?? null
+
+  const inViewport = (element: Element): boolean => visibleFragment(element) !== null
+
+  /** Oversized unions can have their centre in a gap between fragments; align an edge in that case. */
+  const scrollToFragments = (element: Element, inherited?: Clip) => {
+    const rect = element.getBoundingClientRect()
+    const bounds = viewportBounds(inherited)
+    element.scrollIntoView({
+      block: rect.height > bounds.bottom - bounds.top ? "start" : "center",
+      inline: rect.width > bounds.right - bounds.left ? "start" : "center",
+      behavior: "instant"
+    })
+  }
+
+  /** Keep integer-coordinate backends inside the fragment whenever it contains an integer point. */
+  const fragmentCenter = (min: number, max: number): number => {
+    const center = (min + max) / 2
+    const rounded = Math.round(center)
+    if (rounded >= max && Math.floor(center) >= min) return Math.floor(center)
+    return center
+  }
+
+  /** Probe centres only when requested; retain the first geometric point for a Covered result if none reaches. */
+  const actionPoints = (
+    element: Element,
+    position: { readonly x: number; readonly y: number } | null,
+    clip: Clip | undefined,
+    receivesPointer: boolean
+  ) => {
+    if (position === null) {
+      let first: { x: number; y: number } | null = null
+      const points: Array<{ x: number; y: number }> = []
+      for (const rect of fragments(element, clip)) {
+        const point = { x: fragmentCenter(rect.left, rect.right), y: fragmentCenter(rect.top, rect.bottom) }
+        first ??= point
+        if (!receivesPointer) return [point]
+        const hit = hitTarget(point.x, point.y)
+        if (hit !== null && composedContains(element, hit)) {
+          if (clip === undefined) return [point]
+          points.push(point)
+        }
+      }
+      return points.length > 0 ? points : first === null ? [] : [first]
+    }
     const rect = element.getBoundingClientRect()
     const style = getComputedStyle(element)
-    const left = rect.left + parseFloat(style.borderLeftWidth)
-    const top = rect.top + parseFloat(style.borderTopWidth)
-    const width = rect.width - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth)
-    const height = rect.height - parseFloat(style.borderTopWidth) - parseFloat(style.borderBottomWidth)
-    return position === null
-      ? { x: left + width / 2, y: top + height / 2 }
-      : { x: left + position.x, y: top + position.y }
+    return [{
+      x: rect.left + parseFloat(style.borderLeftWidth) + position.x,
+      y: rect.top + parseFloat(style.borderTopWidth) + position.y
+    }]
   }
 
   /** What the pointer would hit at a point, through open shadow roots. */
@@ -1551,10 +1615,10 @@ export function engine(render: (root: SnapNode) => string) {
       else if (checks.enabled && !enabled(element)) reason = { _tag: "Disabled" }
       else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
       else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
-      else if (checks.inViewport && !inViewport(element)) {
+      else if (checks.inViewport && visibleFragment(element, request.clip) === null) {
         reason = { _tag: "OutsideViewport" }
         if (!scrolled) {
-          element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
+          scrollToFragments(element, request.clip)
           scrolled = true
         }
       } else if (checks.stable > 0) {
@@ -1568,11 +1632,17 @@ export function engine(render: (root: SnapNode) => string) {
         }
       }
       const position = action._tag === "Point" ? action.position : null
-      if (reason === null && element !== undefined && checks.receivesPointer) {
-        const point = actionPoint(element, position)
-        const hit = hitTarget(point.x, point.y)
-        if (hit === null || !composedContains(element, hit)) {
-          reason = { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
+      const points = reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)
+        ? actionPoints(element, position, request.clip, checks.receivesPointer)
+        : []
+      const point = points[0] ?? null
+      if (reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)) {
+        if (point === null) reason = { _tag: "OutsideViewport" }
+        else if (checks.receivesPointer) {
+          const hit = hitTarget(point.x, point.y)
+          if (hit === null || !composedContains(element, hit)) {
+            reason = { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
+          }
         }
       }
       if (reason === null && element !== undefined && action._tag === "Select") {
@@ -1583,7 +1653,13 @@ export function engine(render: (root: SnapNode) => string) {
         if (missing !== undefined) reason = { _tag: "NoSuchOption", option: describeChoice(missing) }
       }
       if (reason === null && element !== undefined) {
-        const response = ready(element, action, request.apply, scrolled)
+        let response = ready(element, action, request.apply, scrolled, point)
+        if (
+          response._tag === "Ready" && action._tag === "Point" && action.position === null &&
+          checks.receivesPointer && request.clip !== undefined && points.length > 1
+        ) {
+          response = { ...response, candidates: points }
+        }
         if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
           const captured = {
             token: `${generation}:${++stabilitySequence}`,
@@ -1608,7 +1684,13 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /** Does what the action asks of the element, now that its checks pass. */
-  const ready = (element: Element, action: Action, apply: boolean, scrolled: boolean): Response => {
+  const ready = (
+    element: Element,
+    action: Action,
+    apply: boolean,
+    scrolled: boolean,
+    point: { x: number; y: number } | null
+  ): Response => {
     const answer = {
       _tag: "Ready" as const,
       element: describe(element),
@@ -1625,7 +1707,7 @@ export function engine(render: (root: SnapNode) => string) {
           if (current.getAttribute("draggable") === "true") draggable = true
         }
         if (apply && action.guard) arm(element)
-        return { ...answer, point: actionPoint(element, action.position), draggable }
+        return { ...answer, point, draggable }
       }
       case "Checked":
         return { ...answer, checked: checkedOf(element) }
@@ -2340,8 +2422,8 @@ export function engine(render: (root: SnapNode) => string) {
     const iframe = found[0]
     if (iframe === undefined) return { _tag: "NoMatch" }
     let scrolled = false
-    if (request.scroll && !inViewport(iframe)) {
-      iframe.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
+    if (request.scroll && visibleFragment(iframe, request.clip) === null) {
+      scrollToFragments(iframe, request.clip)
       scrolled = true
     }
     const rect = iframe.getBoundingClientRect()
@@ -2355,7 +2437,17 @@ export function engine(render: (root: SnapNode) => string) {
       const hit = hitTarget(origin.x + request.point.x, origin.y + request.point.y)
       if (hit !== iframe) covered = hit === null ? "nothing at that point" : describe(hit)
     }
-    return { _tag: "Frame", origin, scrolled, covered, scroll: { x: scrollX, y: scrollY } }
+    const bounds = viewportBounds(request.clip)
+    const viewport = {
+      left: Math.max(bounds.left, origin.x) - origin.x,
+      top: Math.max(bounds.top, origin.y) - origin.y,
+      right: Math.min(bounds.right, rect.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight)) -
+        origin.x,
+      bottom:
+        Math.min(bounds.bottom, rect.bottom - parseFloat(style.borderBottomWidth) - parseFloat(style.paddingBottom)) -
+        origin.y
+    }
+    return { _tag: "Frame", origin, viewport, scrolled, covered, scroll: { x: scrollX, y: scrollY } }
   }
 
   const run = async (text: string): Promise<string> => {

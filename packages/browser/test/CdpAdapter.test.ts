@@ -1,6 +1,6 @@
 /** Deterministic CDP event ordering regressions, without launching a browser. */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Deadline, NetworkRequest } from "@usestrider/browser"
+import { Browser, Capability, Deadline, NetworkRequest } from "@usestrider/browser"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
@@ -10,6 +10,8 @@ import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
+import * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import { TestClock } from "effect/testing"
 import type * as Adapter from "../src/internal/adapter.ts"
@@ -265,7 +267,7 @@ const replyMetrics = (browser: Effect.Success<typeof makeBrowser>, command: Sent
   browser.receive({ id: command.id, sessionId: command.sessionId, result: metrics })
 
 /** A synthetic CDP connection folded into the real public Browser layer. */
-const sentHeaders = Effect.fnUntraced(function*(holdMetrics = false) {
+const sentHeaders = Effect.fnUntraced(function*(holdMetrics = false, holdStart = false) {
   const browser = yield* makeBrowser
   const ready = yield* Deferred.make<void>()
   const settled = yield* Queue.unbounded<void>()
@@ -278,7 +280,10 @@ const sentHeaders = Effect.fnUntraced(function*(holdMetrics = false) {
     while (true) {
       const command = yield* browser.next
       commands.push(command)
-      if (command.method === "Page.getLayoutMetrics" || command.method === "Page.captureScreenshot") {
+      if (
+        command.method === "Page.getLayoutMetrics" || command.method === "Page.captureScreenshot" ||
+        command.method === "Page.startScreencast"
+      ) {
         yield* Queue.offer(screenshotWork, command)
       }
       if (command.method === "Page.getLayoutMetrics" && !holdMetrics) {
@@ -296,6 +301,7 @@ const sentHeaders = Effect.fnUntraced(function*(holdMetrics = false) {
         yield* Queue.offer(preparation, command)
         continue
       }
+      if (holdStart && command.method === "Page.startScreencast") continue
       const result = command.method === "Runtime.evaluate"
         ? { result: { type: "number", value: 2 } }
         : command.method === "Browser.getVersion"
@@ -845,6 +851,127 @@ describe("Chromium screenshot renderer readiness", () => {
         yield* h.browser.delivered
         yield* TestClock.adjust("0 millis")
         assert.strictEqual(yield* Queue.size(h.captures), 0, "late readiness must never resume capture")
+      }).pipe(onTestClock))
+  }
+})
+
+describe("Chromium screencast renderer readiness", () => {
+  it.effect("holds start until one valid metrics reply, then acknowledges frames and stops normally", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(true)
+      const page = yield* h.page.control
+      const closedFrames = yield* Effect.scoped(Effect.gen(function*() {
+        const pending = yield* Effect.forkScoped(page.capability(Capability.Screencast))
+        const first = yield* Queue.take(h.screenshotWork)
+        assert.strictEqual(first.method, "Page.getLayoutMetrics")
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.startScreencast").length, 0)
+        yield* replyMetrics(h.browser, first)
+        const acquired = yield* Fiber.join(pending)
+        const collecting = yield* Effect.forkScoped(acquired.frames.pipe(Stream.take(1), Stream.runCollect))
+        yield* h.browser.receive({
+          method: "Page.screencastFrame",
+          sessionId: "S1",
+          params: {
+            data: "/9j/2Q==",
+            sessionId: 7,
+            metadata: {
+              offsetTop: 0,
+              pageScaleFactor: 1,
+              deviceWidth: 800,
+              deviceHeight: 600,
+              scrollOffsetX: 0,
+              scrollOffsetY: 0
+            }
+          }
+        })
+        assert.strictEqual((yield* Fiber.join(collecting)).length, 1)
+        return acquired.frames
+      }))
+      assert.deepStrictEqual(yield* Stream.runCollect(closedFrames), [], "caller scope closes the frame subscription")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.getLayoutMetrics").length, 1)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.startScreencast").length, 1)
+      assert.deepStrictEqual(h.commands.find((c) => c.method === "Page.screencastFrameAck")?.params, { sessionId: 7 })
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  it.effect("spends the same acquisition deadline on metrics and start", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(true, true)
+      const page = yield* h.page.control
+      const pending = yield* Effect.forkScoped(Effect.exit(
+        page.capability(Capability.Screencast).pipe(
+          Deadline.within("1 second")
+        )
+      ))
+      const first = yield* Queue.take(h.screenshotWork)
+      assert.strictEqual(first.method, "Page.getLayoutMetrics")
+      yield* TestClock.adjust("750 millis")
+      yield* replyMetrics(h.browser, first)
+      assert.strictEqual((yield* Queue.take(h.screenshotWork)).method, "Page.startScreencast")
+      yield* TestClock.adjust("250 millis")
+      const exit = yield* Fiber.join(pending)
+      assert(Exit.isFailure(exit))
+      const error = Exit.findErrorOption(exit)
+      assert(Option.isSome(error) && Deadline.isTimeout(error.value))
+      assert.strictEqual(error.value.phase, "dispatchedUnconfirmed")
+    }).pipe(onTestClock))
+
+  for (const terminal of ["reject", "malformed", "detach", "deadline", "interrupt"] as const) {
+    it.effect(`prevents start after metrics ${terminal} and a late reply, closing the caller scope`, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders(true)
+        const page = yield* h.page.control
+        const scope = yield* Scope.make()
+        const pending = yield* Effect.forkScoped(Effect.exit(
+          page.capability(Capability.Screencast).pipe(
+            Deadline.within("1 second"),
+            Effect.provideService(Scope.Scope, scope)
+          )
+        ))
+        const first = yield* Queue.take(h.screenshotWork)
+        assert.strictEqual(first.method, "Page.getLayoutMetrics")
+        if (terminal === "deadline") yield* TestClock.adjust("1 second")
+        if (terminal === "interrupt") yield* Fiber.interrupt(pending)
+        if (terminal === "detach") {
+          yield* h.browser.receive({
+            method: "Target.detachedFromTarget",
+            params: { sessionId: "S1", targetId: "76F3487A52CF4F79FE4AD28961E44D32" }
+          })
+        }
+        if (terminal === "reject") {
+          yield* h.browser.receive({
+            id: first.id,
+            sessionId: first.sessionId,
+            error: { code: -32000, message: "renderer metrics failed" }
+          })
+        }
+        if (terminal === "malformed") yield* h.browser.receive({ id: first.id, sessionId: first.sessionId, result: {} })
+        if (terminal !== "interrupt") {
+          const exit = yield* Fiber.join(pending)
+          assert(Exit.isFailure(exit))
+          const error = Exit.findErrorOption(exit)
+          assert(Option.isSome(error))
+          if (terminal === "deadline") {
+            assert(Deadline.isTimeout(error.value))
+            assert.strictEqual(error.value.phase, "dispatchedUnconfirmed")
+          } else {
+            assert(Capability.isCapabilityError(error.value))
+            assert.strictEqual(error.value.reason._tag, "BackendFailure")
+            if (error.value.reason._tag === "BackendFailure") {
+              assert.strictEqual(error.value.reason.method, terminal === "detach" ? "unknown" : "Page.getLayoutMetrics")
+              assert.strictEqual(
+                error.value.reason.kind,
+                terminal === "malformed" ? "IncompatibleResponse" : "Rejected"
+              )
+            }
+          }
+        }
+        yield* Scope.close(scope, Exit.void)
+        yield* replyMetrics(h.browser, first)
+        yield* h.browser.delivered
+        yield* TestClock.adjust("0 millis")
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.startScreencast").length, 0)
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 0)
       }).pipe(onTestClock))
   }
 })
