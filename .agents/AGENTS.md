@@ -126,9 +126,21 @@ where an existing consumer drains it; ignored or inherited stderr is marked unav
 
 Buffers are saved when Vitest reports a failed test or suite. An unhandled error without a failed test or suite,
 or a worker that dies before those callbacks run, leaves no trace because its buffers remain in memory.
-Connections created inside a test remain owned by that creator. If a later test reuses one, its traffic stays
-with the failed creator or is discarded after a passing creator; it is absent from the later test's trace.
-Create shared connections in suite setup so their traffic can be observed during each test.
+Connections and processes acquired during setup hooks are shared, including anonymous Effect layers that acquire
+in the first test's `beforeEach`. Shared traffic observed during a single running test belongs to that test;
+setup and suite cleanup stay in the linked shared artifact. Concurrent shared observations stay shared with the
+active test IDs. Connections created in a test body remain owned by that creator, so late messages from a passing
+test do not enter another test's trace. Reusing a body-created connection in another test keeps that creator
+attribution; shared resources should be acquired by setup hooks.
+
+Low-level `closed` records contain an initiator and description, not the original Effect Cause or a malformed
+WebKit frame. They precede the link's first-loss filtering: the first closure is effective, and later closure or
+receive observations may be ignored by the link. Failures above the inspector socket are not instrumented;
+interruption can read as ordinary scope closure. Inspector connection/process pairing is inferred from ordering,
+pids and process arguments, rather than an explicit connection-to-process identifier. Launch and page-creation
+preludes can be evicted from bounded histories; no protected head is kept. Shared-artifact links identify context
+files but do not guarantee their prelude survives eviction. No real abnormal-loss probe has validated browser kill
+or malformed-frame capture end to end. Traces assist investigation without guaranteeing a complete loss cause.
 
 ## Conventions
 

@@ -87,6 +87,8 @@ describe("failure trace runner lifecycle", () => {
       .map((name) => fs.readFileSync(new URL(name, directory), "utf8")).join("\n")
     expect(concurrentShared).toContain("CONCURRENT_A")
     expect(concurrentShared).toContain("CONCURRENT_B")
+    expect(concurrentShared).toContain("CONCURRENT_SHARED_A")
+    expect(concurrentShared).toContain("CONCURRENT_SHARED_B")
     for (const name of files.filter((name) => name.startsWith("concurrent.fixture") && name.includes("-test"))) {
       expect(fs.readFileSync(new URL(name, directory), "utf8")).not.toContain("CONCURRENT_")
     }
@@ -209,7 +211,8 @@ describe("shared layer lifecycle attribution", () => {
       "--run",
       "--config",
       "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
-      "sharedLifecycle.fixture"
+      "sharedLifecycle.fixture",
+      "sharedSetupFailure.fixture"
     ], {
       cwd: new URL("../../../", import.meta.url),
       encoding: "utf8"
@@ -218,7 +221,9 @@ describe("shared layer lifecycle attribution", () => {
     const files = fs.readdirSync(directory).filter((name) => !before.has(name))
     const parse = (name: string) =>
       fs.readFileSync(new URL(name, directory), "utf8").trimEnd().split("\n").map((line) => JSON.parse(line))
-    const tests = files.filter((name) => name.includes("-test")).map(parse)
+    const tests = files.filter((name) => name.startsWith("sharedLifecycle.fixture") && name.includes("-test")).map(
+      parse
+    )
     expect(tests.length).toBe(2)
     const first = tests.find((entries) => entries[0].scope === "first shared test fails")!
     const second = tests.find((entries) => entries[0].scope === "later shared test fails")!
@@ -227,13 +232,18 @@ describe("shared layer lifecycle attribution", () => {
     expect(second.map((entry) => entry.payload)).toContain("SECOND_FAIL_SEND")
     expect(second.map((entry) => entry.payload)).toContain("SECOND_FAIL_RECEIVE")
     expect(second.map((entry) => entry.payload)).not.toContain("FIRST_FAIL_ONLY")
-    const sharedName = files.find((name) => name.includes("-shared"))!
+    const sharedName = files.find((name) => name.startsWith("sharedLifecycle.fixture") && name.includes("-shared"))!
     expect(first[0].sharedArtifact).toBe(sharedName)
     expect(second[0].sharedArtifact).toBe(sharedName)
     const shared = parse(sharedName).map((entry) => entry.payload)
+    const setupName = files.find((name) => name.startsWith("sharedSetupFailure.fixture") && name.includes("-shared"))!
+    expect(parse(setupName).map((entry) => entry.payload)).toContain("LAYER_SETUP_FAILURE")
     expect(shared).toContain("SHARED_SETUP")
     expect(shared).toContain("SHARED_CLEANUP_STDERR")
     expect(shared).toContain("SHARED_EXIT")
+    expect(shared).toContain("REAL_SHARED_READY")
+    expect(shared).toContain("REAL_SHARED_CLEANUP_STDERR")
+    expect(parse(sharedName).some((entry) => entry.kind === "process-exit")).toBe(true)
     for (const name of files) fs.unlinkSync(new URL(name, directory))
   }, 30_000)
 })

@@ -8,7 +8,8 @@ import { install, TraceBuffer } from "./failureTrace.ts"
 
 const directory = path.resolve(import.meta.dirname, "../../../../.data/integration-failures")
 const shared = new TraceBuffer()
-const active = new Map<string, { trace: TraceBuffer }>()
+const active = new Map<string, { trace: TraceBuffer; inBody: boolean }>()
+let sharedFile = ""
 const completed = new Map<string, { file?: string | undefined; sequence: number; bytes: number; overflow: boolean }>()
 let nextConnection = 0
 const serialize = (value: unknown): string =>
@@ -25,6 +26,7 @@ const save = (file: string, trace: TraceBuffer, scope: string) => {
       JSON.stringify({
         kind: "context",
         scope,
+        ...(file === sharedFile ? {} : { sharedArtifact: path.basename(sharedFile) }),
         note:
           "Bounded tail; send records attempted writes. Shared connections can deliver background events during a test."
       }),
@@ -38,7 +40,10 @@ install({
     const id = `${++nextConnection}:${label}`
     // Vitest exposes one global current test, so it cannot identify a concurrent creator safely.
     const ambiguous = active.size > 1
-    const owner = ambiguous ? undefined : TestRunner.getCurrentTest<RunnerTestCase | undefined>()?.id
+    const current = TestRunner.getCurrentTest<RunnerTestCase | undefined>()?.id
+    // Anonymous Effect layers acquire once in beforeEach, then keep their resources until afterAll.
+    // Setup acquisitions follow the observing test rather than becoming owned by the first test.
+    const owner = !ambiguous && current !== undefined && active.get(current)?.inBody === true ? current : undefined
     const record = (kind: string, value: unknown) => {
       const payload = serialize(value)
       // A connection created by a test remains that test's, even after its completion.
@@ -72,7 +77,7 @@ install({
         }
         return
       }
-      if (active.size === 1 && !ambiguous) {
+      if (active.size === 1 && !ambiguous && active.values().next().value!.inBody) {
         active.values().next().value!.trace.record(id, kind, payload)
       } else {
         shared.record(id, kind, payload)
@@ -89,13 +94,25 @@ install({
 export default class FailureTraceRunner extends TestRunner {
   override onCollectStart(file: RunnerTestFile) {
     super.onCollectStart(file)
+    sharedFile = filename(file, "shared")
     shared.clear()
     active.clear()
     completed.clear()
   }
   override async onBeforeRunTask(task: RunnerTask) {
     await super.onBeforeRunTask(task)
-    if (task.type === "test") active.set(task.id, { trace: new TraceBuffer() })
+    if (task.type === "test") active.set(task.id, { trace: new TraceBuffer(), inBody: false })
+  }
+  async runTask(task: RunnerTestCase) {
+    const running = active.get(task.id)
+    if (running !== undefined) running.inBody = true
+    // Invoke the same collected callback as Vitest's default runner, inside its existing hook/deadline handling.
+    try {
+      await TestRunner.getTestFn(task)()
+    } finally {
+      // Anonymous Effect layers release in onTestFinished, before onAfterRunTask.
+      if (running !== undefined) running.inBody = false
+    }
   }
   override onAfterRunTask(task: RunnerTask) {
     super.onAfterRunTask(task)
