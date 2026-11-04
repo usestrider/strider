@@ -1293,6 +1293,90 @@ describe("strider", () => {
     }
   }
 
+  for (const backend of ["chromium", "firefox", "webkit"] as const) {
+    it.live(
+      `keeps editable content out of other nodes' names with strict capture on ${backend}`,
+      () =>
+        Effect.scoped(Effect.gen(function*() {
+          if (backend === "webkit") yield* useXvfb()
+          const pixel = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+          // Each private string reaches the name of a node other than the field's own text: an ancestor named from
+          // its content, an empty field named from the field before it, a field labelled by itself, an image's alt.
+          const pages: Record<string, string> = {
+            "/form": `<h2><span contenteditable="true">heading-descendant-private</span></h2>
+<a href="#x"><span contenteditable="plaintext-only">link-descendant-private</span></a>
+<table><tr><td><input aria-label="Card" value="cell-value-private"></td></tr></table>
+<p contenteditable="true">nearby-private</p><div contenteditable="true"></div>
+<div id="self" role="textbox" aria-labelledby="self" contenteditable="true">self-label-private</div>
+<div contenteditable="true"><img alt="image-alt-private" src="${pixel}"></div>`,
+            "/design": `<p>design-mode-private</p><script>document.designMode = "on"</script>`
+          }
+          const server = http.createServer((request, response) => {
+            response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+            response.end(`<title>probe</title>${pages[request.url ?? ""] ?? ""}`)
+          })
+          yield* Effect.acquireRelease(
+            Effect.callback<void>((resume) => void server.listen(0, "127.0.0.1", () => resume(Effect.void))),
+            () => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
+          )
+          const { port } = server.address() as { readonly port: number }
+          const env = environment()
+          const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "names", ...args)
+          const started = yield* strider(
+            env,
+            "start",
+            "--name",
+            "names",
+            "--capture",
+            "strict",
+            `--${backend}`,
+            backend === "chromium"
+              ? chromium.executable
+              : backend === "firefox"
+              ? firefox.executable
+              : webkitgtk.executable
+          )
+          assert.strictEqual(started.code, 0, started.err)
+          try {
+            const leaks: Array<string> = []
+            const check = (page: string, contents: ReadonlyArray<string>) =>
+              Effect.gen(function*() {
+                const snapshot = yield* run("-p", page, "snapshot")
+                assert.strictEqual(snapshot.code, 0, snapshot.err)
+                for (const content of contents) {
+                  if (snapshot.out.includes(content)) leaks.push(`snapshot: ${content}`)
+                  const found = yield* run("-p", page, "--json", "find", content)
+                  assert.strictEqual(found.code, 0, found.err)
+                  if (JSON.parse(found.out).outcome.value.length > 0) leaks.push(`find: ${content}`)
+                }
+                console.log(`PROBE ${backend} ${page}\n${snapshot.out}`)
+              })
+            for (const name of ["form", "design"]) {
+              const opened = yield* run("page", "new", "--name", name, `http://127.0.0.1:${port}/${name}`)
+              assert.strictEqual(opened.code, 0, opened.err)
+            }
+            yield* check("form", [
+              "heading-descendant-private",
+              "link-descendant-private",
+              "cell-value-private",
+              "nearby-private",
+              "self-label-private",
+              "image-alt-private"
+            ])
+            yield* check("design", ["design-mode-private"])
+            const held = yield* run("-p", "form", "expect", "css=p", "visible", "--text", "nearby-private")
+            const wrong = yield* run("-p", "form", "expect", "css=p", "visible", "--text", "wrong-guess")
+            console.log(`PROBE ${backend} expect right=${held.code} ${held.out}\nwrong=${wrong.code} ${wrong.out} ${wrong.err}`)
+            assert.deepStrictEqual(leaks, [])
+          } finally {
+            const stopped = yield* run("stop")
+            assert.strictEqual(stopped.code, 0, stopped.err)
+          }
+        })).pipe(Effect.provide(NodeServices.layer)),
+      timeout
+    )
+  }
+
   it.live("exits 0 when its MCP client closes standard input", () =>
     Effect.callback<number | null>((resume) => {
       const child = spawn(process.execPath, [bin, "-s", "nobody", "mcp"], {
