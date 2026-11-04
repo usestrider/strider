@@ -11,7 +11,7 @@ afterAll(async () => {
   await site?.close()
 })
 
-// Compatibility probes, not an approved expansion of Strider's contract.
+// Ordinary descendants share the compatibility contract; interactive links deliberately differ.
 for (const library of ["playwright", "strider"] as const) {
   describe(`label descendant / ${library}`, () => {
     const scenario = inputCase(library, () => site)
@@ -61,7 +61,7 @@ for (const library of ["playwright", "strider"] as const) {
                 el instanceof HTMLInputElement ? el.checked : el.getAttribute("aria-checked")
               )
               console.log(name, JSON.stringify({ result, state, own, pointer }))
-              // Observed boundary behavior; no compatibility expansion proposed here.
+              // Strider refuses interactive descendants before input, including links.
               if (kind === "button" || kind === "link") {
                 expect(result).toMatchObject({ _tag: "Failure", failure: { reason: { _tag: "WrongElement" } } })
                 expect(state).toBe(initial)
@@ -72,7 +72,7 @@ for (const library of ["playwright", "strider"] as const) {
                 expect(own).toBe(kind === "own-input" ? checked : String(checked))
                 expect(state).toBe(initial)
               }
-              // The simple span cases deliberately expose the compatibility gap.
+              // Ordinary descendants preserve the pointer target and position.
               if (kind === "span" || kind === "position" || kind === "already") {
                 expect(result).toMatchObject({ _tag: "Success" })
                 expect(state).toBe(checked)
