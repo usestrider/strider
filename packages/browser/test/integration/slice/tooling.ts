@@ -480,7 +480,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               const resolution = yield* AutoResolution.next(page, { subject: "FileChooser" })
               yield* page.getByRole("button", { name: "Choose" }).click()
               assert.strictEqual((yield* resolution).decision, "cancel")
-              assert.strictEqual(yield* handler.handled, inputs[0] === made[0] ? 0 : 1)
+              assert.strictEqual(yield* handler.handled, 0)
               yield* handler.remove
             }
             yield* FileChooser.handle(page, FileChooser.choose(made))

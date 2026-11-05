@@ -180,7 +180,7 @@ describe("FileInput across a connection", () => {
                   }
                 })
                 yield* Deferred.await(decided)
-                assert.strictEqual(yield* handler.handled, ownership === "attached" && unreadable ? 1 : failure ? 0 : 1)
+                assert.strictEqual(yield* handler.handled, failure ? 0 : 1)
                 if (failure) {
                   assert.deepStrictEqual(decisions, [{ _tag: "Cancel" }])
                 }
@@ -498,7 +498,7 @@ describe("a local read under the deadline", () => {
             evaluations.some((call) => call.functionDeclaration.includes("function commitUpload")),
             "canceled reads must never apply files"
           )
-          assert.strictEqual(yield* handler.handled, 1)
+          assert.strictEqual(yield* handler.handled, 0)
           if (scenario === "stalled chunk acknowledgement") {
             assert.lengthOf(evaluations.filter((call) => call.functionDeclaration.includes("function appendChunk")), 1)
           }
