@@ -227,3 +227,41 @@ The comparative timing cases exercise successful completion only. These checks e
 outcomes and continued usability; they do not count retained observers/listeners or prove absence of residual
 browser work after cancellation. Reconnect semantics, pending locator navigation, target closure, nested
 frames, very short transients and renderer CPU/wakeups remain outside these measurements.
+
+### Bounded observation diagnostics
+
+After preserving an uninstrumented baseline, run the opt-in observation profiler under the browser lock:
+
+```sh
+clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node \
+  --import ./packages/scenarios/benchmark/observation-profile-hooks.mjs \
+  packages/scenarios/benchmark/observation-profile.ts /absolute/path/profile.json
+clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node \
+  packages/scenarios/benchmark/observation-profile.ts /absolute/path/control.json control
+```
+
+The fixed stopping bound is five alternating library pairs after one warmup pair at each combination of
+35/100/160/240 ms insertion delay and one/twenty independent visibility waits. Every wait must succeed and
+the resulting text is checked. These smaller diagnostic cells are not a performance gate. The separate control
+uses the same workload without the page counters or Playwright loader; the four existing `pnpm bench` cases
+remain the current uninstrumented baseline with twenty pairs and three warmups. Cell order is fixed, not
+randomized, and separate runs cannot isolate drift from instrumentation overhead.
+
+The instrumented run counts Strider expectation rounds, evaluations, observer creations, active observers,
+mutation callbacks and animation callbacks, and measures time inside evaluation with the page clock. It
+adds counters to the installed engine in memory, not to the library sources. Snapshots read that isolated
+world through additional protocol commands after timing. Callback counts include the final already-scheduled
+animation callback even if it does no check. Evaluation time excludes observer allocation, dispatch, host
+orchestration and other callback overhead; page-clock resolution and the added clock reads limit precision.
+The pinned Playwright loader records protocol traffic and host selector-attempt starts, without changing
+retry intervals or command arguments. A host attempt is not a count of every internal page evaluation.
+Both protocols retain timestamps and full payloads so overlapping command durations can be examined without
+adding them as elapsed time. These are instrumented diagnoses, not speedup measurements or renderer CPU profiles.
+
+Two additional Strider probes start one/twenty missing-condition waits with a one-second deadline. They
+poll page counters for at most 250 ms to confirm all observers are active before interrupting the consumer
+fiber, then snapshot immediately and after 100/700 ms. They fail if that acknowledgment is absent. The reads
+and waiting perturb timing; retained work describes only this bounded page expectation path, and does not
+by itself establish a public-contract violation. No browser restart, reconnect, navigation, nested frame or
+transient condition is covered. JSON preserves source and pinned-bundle hashes, raw protocol events,
+counters, warmup-independent measured cells and failures; preserve the exact tooling source beside the report.
