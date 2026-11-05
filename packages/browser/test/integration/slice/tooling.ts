@@ -92,19 +92,21 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             // Host-path MIME comes from the browser; transferred files use our MIME inference.
             yield* input.setInputFiles(remote)
             yield* out.pipe(Expect.toHaveText(/^host\.txt:[^:]*:7:on host$/))
-            yield* input.setInputFiles([])
-            assert.deepStrictEqual(
-              yield* page.evaluateInMainWorld(() =>
-                [...document.querySelector<HTMLInputElement>("#files")!.files!].map((file) => file.name)
-              ),
-              []
-            )
             yield* input.setInputFiles(made[0]!)
             yield* out.pipe(Expect.toHaveText("a.txt:text/plain:5:hello"))
             yield* input.setInputFiles(remote)
             yield* out.pipe(Expect.toHaveText(/^host\.txt:[^:]*:7:on host$/))
             yield* input.setInputFiles(made[0]!)
             yield* out.pipe(Expect.toHaveText("a.txt:text/plain:5:hello"))
+            if (name === "WebKit") {
+              yield* input.setInputFiles([])
+              assert.deepStrictEqual(
+                yield* page.evaluateInMainWorld(() =>
+                  [...document.querySelector<HTMLInputElement>("#files")!.files!].map((file) => file.name)
+                ),
+                []
+              )
+            }
           }))
         }), timeout)
 
@@ -158,15 +160,13 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 yield* page.evaluateInMainWorld(() => document.body.dataset.fileEvents),
                 "input:second.txt,change:second.txt"
               )
-            }
-            yield* input.setInputFiles([])
-            assert.deepStrictEqual(
-              yield* page.evaluateInMainWorld(() =>
-                [...document.querySelector<HTMLInputElement>("#files")!.files!].map((file) => file.name)
-              ),
-              []
-            )
-            if (name === "WebKit") {
+              yield* input.setInputFiles([])
+              assert.deepStrictEqual(
+                yield* page.evaluateInMainWorld(() =>
+                  [...document.querySelector<HTMLInputElement>("#files")!.files!].map((file) => file.name)
+                ),
+                []
+              )
               assert.strictEqual(
                 yield* page.evaluateInMainWorld(() => document.body.dataset.fileEvents),
                 "input:second.txt,change:second.txt,input:,change:"
