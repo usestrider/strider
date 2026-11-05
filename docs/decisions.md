@@ -293,14 +293,15 @@ input permit, so a queued action never uses the preliminary check's stale geomet
   before rendering; and skipping the check under the input permit, since another action may change the target
   while this one waits for the permit.
 
-**An unqueued click may reuse stability within the same rendering frame.** Its preliminary check returns a
+**An unqueued click, check or uncheck may reuse stability within the same rendering frame.** Its preliminary check returns a
 single-use token. Under the input permit, the engine resolves the locator again and checks every condition; only
 the stability wait can be reused, and only for the same element, rectangle and requested frame count. The next
 rendering update or another action attempt invalidates the token. The engine retains at most one such record.
 
 - **Why.** Repeating the observation window for a target just observed to be stable adds two frames to an ordinary
-  click. Immediate revalidation retains that observation while checking the conditions that could have changed.
-  A queued click always takes new samples; an expired token, moved target or replacement also takes new samples.
+  click or an acting check/uncheck. Immediate revalidation retains that observation while checking the conditions
+  that could have changed. Check and uncheck still read the initial state and confirm the result after input.
+  A queued action always takes new samples; an expired token, moved target or replacement also takes new samples.
 - **Rejected:** dropping the second check, sharing evidence across rendering updates, or treating matching
   rectangles on different elements as the same observation. Each can dispatch input using stale readiness.
   Moving the entire wait under the input permit would also block other actions while a target isn't ready.
@@ -762,7 +763,7 @@ search what it can show. Preserve label searches and role filters; keep local ca
 Carry optional field editability separately from role in engine and public snapshot data. Semantic articles,
 paragraphs and headings can be contenteditable, including plaintext-only. Native and ARIA fields count even
 when disabled or read-only: capture concerns their data, not whether an action may edit them. Absent editability
-means false for compatibility with older snapshot data. Accessible names derived from editable content carry
+can mean that metadata was not collected or that the node is not a field; older snapshot data remains valid. Accessible names derived from editable content carry
 optional text provenance without changing local text rendering. Track field contributions through the chosen
 accessible or inferred name, including ancestor content, embedded values, referenced controls, nearby fields
 and image-alt inference. Optional `fieldContent` on names lets shared redaction mask these copies outside the
@@ -807,3 +808,35 @@ from a preset's identity. Clear naming caches between requests and scope cached 
 policy, so switching modes cannot reuse an unannotated tree for masking. Always computing provenance imposed
 material cost on ordinary snapshots without benefiting their output. Keep the same precise naming algorithm
 when requested rather than introducing separate name strings or speculative optimizations.
+
+## Checked actions on ordinary label descendants
+
+Check and uncheck prefer the selected element's own checked state. When it has none, a directly selected label
+or an ordinary descendant's nearest DOM label supplies the associated control. Pointer input and relative positions
+remain on the selected element; already-correct state sends nothing, and post-click verification uses the same
+checked-state lookup. Public isChecked and checked expectations continue to read only the selected element.
+
+Association follows only DOM parents, without crossing a shadow root. It uses the label's control, never the
+ancestor label's own ARIA state. A selected element inside a shadow root cannot borrow an outside label.
+
+For descendants, check both DOM ancestors and the path through assigned slots and shadow hosts, up to, excluding,
+that associated DOM label. Interactive ancestors above the label remain outside this guard. The slot-aware walk
+adds refusals without introducing associations or replacing the DOM guard: a shadow label encountered along that
+path must neither choose another control nor hide a DOM interactive ancestor. Refuse
+buttons, inputs, selects, textareas, details, summaries, frames, embeds, objects, links with href (including
+SVG links with namespaced xlink:href), images with
+usemap, audio/video with controls, ARIA widget roles (button, checkbox, combobox, grid, gridcell, link,
+listbox, menu, menubar, menuitem, menuitemcheckbox, menuitemradio, option, radio, radiogroup, scrollbar,
+searchbox, separator, slider, spinbutton, switch, tab, tablist, textbox, tree, treegrid and treeitem) and
+editable content. This conservative boundary keeps separate controls from receiving
+input meant for the associated checkbox, including when that checkbox already matches. Association uses the
+browser's label.control; missing or non-checkable controls are refused.
+
+Slot-added controls can be inspected only in open shadow roots. A control inside a closed shadow root can
+receive input before the action fails with `StateUnchanged`.
+
+Rejected: clicking the associated input directly, which loses the selected target and its relative coordinates;
+following labels for public state reads, which expands an unrelated contract; using a slot-aware path to
+choose the label, which would create associations across shadow roots; replacing
+DOM guards with slot traversal, which can skip DOM ancestors; and copying Playwright's activation
+of links before reporting unchanged state, which sends input to a separate control unnecessarily.
