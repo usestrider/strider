@@ -126,8 +126,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 assert.include(error.reason.hint ?? "", "pressed")
               }
             }
-            const assertion = yield* invalid.pipe(Expect.toHaveCount(0), Effect.flip)
-            assert.strictEqual(assertion._tag, "ExpectationFailed")
+            for (const candidate of [invalid, missingFrame]) {
+              const assertion = yield* candidate.pipe(Expect.toHaveCount(0), Effect.flip)
+              assert.strictEqual(assertion._tag, "ExpectationFailed")
+            }
+            assert.strictEqual(yield* page.frame(page.locator("#absent-frame")).getByRole("link").count, 0)
             assert.strictEqual(yield* page.getByRole("link").count, 1)
           })),
         timeout
