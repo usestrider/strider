@@ -221,6 +221,8 @@ export const next = <A, B, PE, PR, DE = never>(
     // Kept until the first match or the deadline, so it needs no bound
     const subscriber = yield* subscribe(channel, accepts, Number.POSITIVE_INFINITY)
     const deferred = Deferred.makeUnsafe<B, PE | DE | Target.TargetGone | Deadline.Timeout>()
+    // The worker may be interrupted before it starts, before its interruption handler is installed.
+    yield* Effect.addFinalizer(() => Deferred.interrupt(deferred))
     // The entry being delivered, if the deadline passes while it is
     let delivering: Option.Option<A> = Option.none()
     const take: Effect.Effect<B, PE | DE | Target.TargetGone | Subscription.EventOverflow | Cause.Done> = Effect.gen(
