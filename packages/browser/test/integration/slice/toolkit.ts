@@ -4,7 +4,7 @@
  * the previous call, waits across calls, declared routes and dialog decisions, and failures returned as data.
  */
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Deadline, Expect, type Locator, Snapshot } from "@usestrider/browser"
+import { Browser, Condition, Deadline, Expect, type Locator, Snapshot } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
 import type * as Toolkit from "effect/ai/Toolkit"
 import * as Deferred from "effect/Deferred"
@@ -155,8 +155,10 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               const locator = yield* new Function(
                 "page",
                 "Effect",
+                "Expect",
+                "Condition",
                 `return Effect.gen(function*() { return ${query} })`
-              )(page, Effect) as Effect.Effect<Locator.Locator>
+              )(page, Effect, Expect, Condition) as Effect.Effect<Locator.Locator>
               assert.strictEqual(yield* locator.count, 1, query)
             })),
           timeout
@@ -221,8 +223,10 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 const locator = yield* new Function(
                   "page",
                   "Effect",
+                  "Expect",
+                  "Condition",
                   `return Effect.gen(function*() { return ${query} })`
-                )(page, Effect) as Effect.Effect<Locator.Locator>
+                )(page, Effect, Expect, Condition) as Effect.Effect<Locator.Locator>
                 assert.strictEqual(yield* locator.count, 1, query)
                 assert.deepEqual((yield* locator.snapshot()).root.name, field.name, query)
               }
@@ -230,12 +234,9 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               const first = fields[0]!
               const query = ExportTest.locatorOf("page", Option.getOrThrow(first.ref), snapshot)
               yield* page.evaluateInMainWorld(() => document.querySelector("input[type=\"password\"]")!.remove())
-              const missing = yield* new Function(
-                "page",
-                "Effect",
-                `return Effect.gen(function*() { return ${query} })`
-              )(page, Effect) as Effect.Effect<Locator.Locator>
-              assert.strictEqual(yield* missing.count, 0, query)
+              const missing = exportedLocator(query, page)
+              const failure = yield* missing.pipe(Deadline.within("200 millis"), Effect.flip)
+              assert.isTrue(Expect.isExpectationFailed(failure), query)
             })),
           timeout
         )
@@ -260,8 +261,10 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 const locator = yield* new Function(
                   "page",
                   "Effect",
+                  "Expect",
+                  "Condition",
                   `return Effect.gen(function*() { return ${query} })`
-                )(page, Effect) as Effect.Effect<Locator.Locator>
+                )(page, Effect, Expect, Condition) as Effect.Effect<Locator.Locator>
                 assert.strictEqual(yield* locator.count, 2, query)
                 const error = yield* locator.fill("must-not-fill").pipe(Effect.flip)
                 assert(error._tag === "LocatorError")
@@ -273,9 +276,11 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
       }
 
       const exportedLocator = (query: string, page: unknown) =>
-        new Function("page", "Effect", `return Effect.gen(function*() { return ${query} })`)(
+        new Function("page", "Effect", "Expect", "Condition", `return Effect.gen(function*() { return ${query} })`)(
           page,
-          Effect
+          Effect,
+          Expect,
+          Condition
         ) as Effect.Effect<Locator.Locator>
 
       it.effect(

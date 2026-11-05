@@ -474,7 +474,9 @@ export const engine = (backend: Backend) =>
             assert.notInclude(rendered, "private-labeled")
             assert.strictEqual(nodes.length, 2, rendered)
             assert.isTrue(
-              nodes.some((node) => node.name._tag === "Accessible" && node.name.value === "Account password"),
+              nodes.some((node) =>
+                node.name._tag === "Accessible" && node.name.value === "Account password"
+              ),
               rendered
             )
           }), timeout)

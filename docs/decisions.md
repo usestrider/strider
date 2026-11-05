@@ -940,15 +940,16 @@ elements. Explicit ARIA roles remain intact.
 
 Find matches the literal designation `password` under its existing case and exact rules, separately from the
 accessible name, and filters these nodes as `editable`. Snapshot diffs already compare role evidence.
-Exported named password refs take a fresh snapshot and combine the ref locators of inferred password controls
-whose computed accessible name matches exactly. This uses the engine's naming precedence without duplicating it
-in generated selectors or inventing a role. No match remains empty; duplicate names remain ambiguous rather than
-choosing one control. Unnamed refs retain a password input selector and can require narrowing.
+Exported named password refs use `Expect.that` to wait for a snapshot containing inferred password controls
+whose computed accessible name matches exactly, then combine their ref locators. This uses the engine's naming precedence without duplicating it
+in generated selectors or inventing a role. A missing name waits under the current deadline and check interval; duplicate names remain ambiguous rather than
+choosing one control. The first matching ref supplies the frame context, so a single framed match is supported;
+combining matches from different frames still requires manual narrowing. Unnamed refs retain a password input selector and can require narrowing.
 
 Rejected: dropping every name, which makes ordinary new/confirm forms ambiguous; treating every name as a label,
 which misses title and placeholder names; and joining label/title/placeholder queries, which can match another
-field's overridden hint even when its accessible name differs. The fresh snapshot adds a read when the exported
-test resolves a named password target, and its returned refs retain their normal stale-ref guarantees.
+field's overridden hint even when its accessible name differs. The snapshot reads use the existing expectation wait rather than freezing an empty result before a late field
+appears. Returned refs retain their normal stale-ref guarantees if a field is replaced after resolution.
 
 Rejected: inventing an implicit textbox role, which would change ordinary role queries; naming the field
 "Password", which would replace or invent an accessible name; and including its value, even under local capture.

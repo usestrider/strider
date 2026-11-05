@@ -142,15 +142,20 @@ const isRef = Schema.is(Tools.Ref)
 
 /**
  * A target as a query on its page, such as `getByRole("button")`; a ref as its snapshot named it. The test puts the
- * page's variable before it, which a page renamed later changes. A named password query resolves a fresh
+ * page's variable before it, which a page renamed later changes. A named password query waits for a matching
  * snapshot, so its pipe expression returns an effect of the locator.
  */
 export const queryOf = (
   target: string,
   snapshot: Snapshot.Snapshot | undefined
 ): string => {
-  if (isRef(target)) {
-    const node = snapshot?.refs.get(target)
+  const recorded = snapshot === undefined ? undefined : [...snapshot.refs.keys()].find((ref) => ref === target)
+  const node = recorded === undefined ? undefined : snapshot?.refs.get(recorded)
+  // Only named password exports resolve framed refs through a fresh snapshot.
+  if (
+    isRef(target) ||
+    (node?.role._tag === "Inferred" && node.role.evidence.includes("password") && node.name._tag !== "None")
+  ) {
     if (node === undefined) return `locator("*") /* ${target}: no snapshot named it */`
     const name = node.name._tag === "None" ? undefined : node.name.value
     if (node.role._tag === "Aria") {
@@ -161,16 +166,22 @@ export const queryOf = (
     if (node.role.evidence.includes("password")) {
       if (name === undefined) return "locator(\"input[type=password]\")"
       // Match computed names, not overridden label/title/placeholder strings.
-      return `pipe((page) => page.snapshot().pipe(Effect.map((snapshot) => {
+      return `pipe((page) => Effect.gen(function*() {
           let matches = page.locator(":not(*)")
-          for (const [ref, node] of snapshot.refs) {
-            if (node.role._tag === "Inferred" && node.role.evidence.includes("password") &&
-              node.name._tag !== "None" && node.name.value === ${quote(name)}) {
-              matches = matches.or(snapshot.ref(ref))
+          yield* Expect.that(page.snapshot().pipe(Effect.map((snapshot) => {
+            let found = false
+            for (const [ref, node] of snapshot.refs) {
+              if (node.role._tag === "Inferred" && node.role.evidence.includes("password") &&
+                node.name._tag !== "None" && node.name.value === ${quote(name)}) {
+                const current = snapshot.ref(ref)
+                matches = found ? matches.or(current) : current
+                found = true
+              }
             }
-          }
+            return found
+          })), Condition.make("a password control with the recorded accessible name", (found) => found))
           return matches
-        })))`
+        }))`
     }
     return name === undefined
       ? `locator("*") /* ${target}: a ${node.role.role} element with no name */`
@@ -201,7 +212,7 @@ export const queryOf = (
   }
 }
 
-/** A named password query resolves its snapshot before returning the ref locators. */
+/** A named password query waits for its computed name before returning the ref locators. */
 const queryOn = (page: string, query: string): string =>
   query.startsWith("pipe(") ? `(yield* ${page}.${query})` : `${page}.${query}`
 
@@ -488,6 +499,10 @@ export const render = (options: {
     }
     const pageName = pageOf(step)
     const page = pageName === undefined ? "page" : use(pageName)
+    if (step.target?.startsWith("pipe(")) {
+      used.add("Condition")
+      used.add("Expect")
+    }
     const target = step.target === undefined ? "" : queryOn(page, step.target)
     // Through strider mcp, newPage opens a page under the name the toolkit gave it
     const opens = step.tool === "newPage" ? step.result ?? step.params.name ?? "page" : undefined
