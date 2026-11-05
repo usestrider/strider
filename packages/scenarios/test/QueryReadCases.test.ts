@@ -46,7 +46,7 @@ describe("query/read fixtures and case verification", () => {
             return { readValue: Effect.sync(() => input.value), inputValue: async () => input.value }
           }
         }
-        const strider = await Effect.runPromise(entry.strider(page as unknown as Page.Page, site.origin))
+        const strider = await Effect.runPromise(Effect.scoped(entry.strider(page as unknown as Page.Page, site.origin)))
         entry.verify(strider)
         const playwright = await entry.playwright(page as unknown as Playwright.Page, site.origin)
         entry.verify(playwright)
