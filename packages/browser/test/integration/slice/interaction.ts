@@ -93,6 +93,184 @@ const observeChecks = Effect.fnUntraced(function*(locator: LocatorImpl) {
 export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} interaction`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      for (const ancestor of [false, true]) {
+        for (const action of ["click", "check", "fill"] as const) {
+          it.effect(
+            `acts on transparent controls with ${ancestor ? "ancestor" : "own"} opacity using ${action}`,
+            () =>
+              Effect.gen(function*() {
+                const { url } = yield* fixture(() =>
+                  `<!doctype html><div style="opacity:${ancestor ? 0 : 1}"><input id="target" type="${
+                    action === "check" ? "checkbox" : "text"
+                  }" style="opacity:${
+                    ancestor ? 1 : 0
+                  }" onclick="document.querySelector('#out').textContent='clicked'"></div><output id="out"></output>`
+                )
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const target = page.locator("#target")
+                  assert.strictEqual(yield* target.isVisible, false)
+                  yield* target.filter({ visible: true }).pipe(Expect.toHaveCount(0))
+                  yield* target.filter({ visible: false }).pipe(Expect.toHaveCount(1))
+                  yield* target.pipe(Expect.toBeHidden)
+                  const unseen = yield* target.pipe(Expect.toBeVisible, Deadline.within("200 millis"), Effect.flip)
+                  assert.strictEqual(unseen._tag, "ExpectationFailed")
+                  if (action === "fill") {
+                    yield* target.fill("Ada").pipe(Deadline.within("1 second"))
+                    yield* target.pipe(Expect.toHaveValue("Ada"))
+                  } else {
+                    yield* target[action]().pipe(Deadline.within("1 second"))
+                    yield* page.locator("#out").pipe(Expect.toHaveText("clicked"))
+                    if (action === "check") yield* target.pipe(Expect.toBeChecked)
+                  }
+                }))
+              }),
+            timeout
+          )
+        }
+      }
+
+      for (const ancestor of [false, true]) {
+        for (
+          const action of ["clear", "focus", "press", "pressSequentially", "selectOption", "scrollIntoView"] as const
+        ) {
+          it.effect(
+            `runs ${action} on transparent controls with ${ancestor ? "ancestor" : "own"} opacity`,
+            () =>
+              Effect.gen(function*() {
+                const opacity = ancestor ? 1 : 0
+                const control = action === "selectOption"
+                  ? `<select id="target" style="opacity:${opacity}"><option>a</option><option>b</option></select>`
+                  : `<input id="target" value="${action === "clear" ? "x" : ""}" style="opacity:${opacity}">`
+                const { url } = yield* fixture(() =>
+                  `<!doctype html>${
+                    action === "scrollIntoView" ? "<div style=\"height:3000px\"></div>" : ""
+                  }<div style="opacity:${ancestor ? 0 : 1}">${control}</div>`
+                )
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const target = page.locator("#target")
+                  const within = Deadline.within("3 seconds")
+                  if (action === "clear") {
+                    yield* target.clear().pipe(within)
+                    yield* target.pipe(Expect.toHaveValue(""))
+                  } else if (action === "focus") {
+                    yield* target.focus().pipe(within)
+                    yield* target.pipe(Expect.toBeFocused)
+                  } else if (action === "press") {
+                    yield* target.press("a").pipe(within)
+                    yield* target.pipe(Expect.toHaveValue("a"))
+                  } else if (action === "pressSequentially") {
+                    yield* target.pressSequentially("a").pipe(within)
+                    yield* target.pipe(Expect.toHaveValue("a"))
+                  } else if (action === "selectOption") {
+                    yield* target.selectOption({ label: "b" }).pipe(within)
+                    yield* target.pipe(Expect.toHaveValue("b"))
+                  } else {
+                    yield* target.scrollIntoView().pipe(within)
+                    assert.isAbove(yield* page.evaluateInMainWorld(() => globalThis.scrollY), 0)
+                  }
+                }))
+              }),
+            timeout
+          )
+        }
+      }
+
+      for (
+        const [layout, html] of [
+          [
+            "behind",
+            `<label style="position:relative;display:block;padding:10px"><input id="target" type="checkbox" style="position:absolute;opacity:0;z-index:-1"><span>Accept terms</span></label>`
+          ],
+          [
+            "under",
+            `<input id="target" type="checkbox" style="position:absolute;opacity:0"><label for="target" style="position:relative;display:block;padding:10px"><span>Accept terms</span></label>`
+          ]
+        ] as const
+      ) {
+        it.effect(
+          `checks a transparent control ${layout} its label through the label's text`,
+          () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() => `<!doctype html>${html}`)
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const control = page.locator("#target")
+                const error = yield* control.check().pipe(Deadline.within("1 second"), Effect.flip)
+                assert.strictEqual(error._tag, "Timeout")
+                assert.include(
+                  String((error as Deadline.Timeout).hint.pipe(Option.getOrUndefined)),
+                  "covers the element's action point"
+                )
+                yield* page.getByText("Accept terms").check().pipe(Deadline.within("3 seconds"))
+                yield* control.pipe(Expect.toBeChecked)
+                yield* page.getByText("Accept terms").uncheck().pipe(Deadline.within("3 seconds"))
+                assert.strictEqual(yield* control.isChecked, false)
+              }))
+            }),
+          timeout
+        )
+      }
+
+      it.effect("fills a transparent control under a cover, with no pointer to hit-test", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<!doctype html><input id="target" style="opacity:0;position:absolute;left:20px;top:20px"><div style="position:absolute;inset:0;background:white"></div>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const target = page.locator("#target")
+            yield* target.fill("Ada").pipe(Deadline.within("3 seconds"))
+            yield* target.pipe(Expect.toHaveValue("Ada"))
+          }))
+        }), timeout)
+
+      for (const state of ["covered", "display", "visibility", "disabled", "readonly", "inert"] as const) {
+        for (const action of ["click", "fill"] as const) {
+          if (state === "covered" && action === "fill" || state === "readonly" && action === "click") continue
+          it.effect(`blocks transparent ${state} controls for ${action}`, () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<!doctype html><input id="target" style="opacity:0;position:absolute;left:20px;top:20px;${
+                  state === "display" ? "display:none" : state === "visibility" ? "visibility:hidden" : ""
+                }" ${
+                  state === "disabled" || state === "readonly" || state === "inert" ? state : ""
+                } onclick="document.querySelector('#out').textContent='clicked'">${
+                  state === "covered" ? "<div style=\"position:absolute;inset:0;background:white\"></div>" : ""
+                }<output id="out"></output>`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const target = page.locator("#target")
+                const error = yield* (action === "fill" ? target.fill("Ada") : target.click()).pipe(
+                  Deadline.within("1 second"),
+                  Effect.flip
+                )
+                assert.strictEqual(error._tag, "Timeout")
+                assert.include(
+                  String((error as Deadline.Timeout).hint.pipe(Option.getOrUndefined)),
+                  {
+                    covered: "covers the element's action point",
+                    display: "isn't visible",
+                    visibility: "isn't visible",
+                    disabled: "disabled",
+                    readonly: "read-only",
+                    inert: "inert"
+                  }[state]
+                )
+                yield* target.pipe(Expect.toHaveValue(""))
+                yield* page.locator("#out").pipe(Expect.toHaveText(""))
+              }))
+            }), timeout)
+        }
+      }
+
       for (const shape of wrappedLinks) {
         for (const partial of shape.id === "three" ? [false, true] : [false]) {
           it.effect(
