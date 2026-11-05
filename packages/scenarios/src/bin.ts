@@ -24,6 +24,7 @@ import { chromium } from "playwright-core"
 import type * as Playwright from "playwright-core"
 import { browserArgs, descendants, rendererCpu, type Stats, stats } from "./measure.ts"
 import { type Measurements, report } from "./report.ts"
+import { publish, runScenarios } from "./runner.ts"
 import { type Files, recordings, scenarios, type StriderNeeds } from "./scenarios.ts"
 import { start } from "./site.ts"
 
@@ -132,37 +133,10 @@ const strider = <A>(effect: Effect.Effect<A, unknown, StriderNeeds>) => runtime.
 
 // ── The scenarios ─────────────────────────────────────────────────────────────
 
-const normalize = (text: string) => text.replace(/\s+/g, " ").trim()
-const outcomeOf = async (run: () => Promise<string>) => {
-  try {
-    return { _tag: "Read" as const, text: normalize(await run()) }
-  } catch (error) {
-    return { _tag: "Failed" as const, error: normalize(String((error as Error)?.message ?? error)).slice(0, 300) }
-  }
-}
-
-const results: Array<Measurements["scenarios"][number]> = []
-for (const scenario of chosen) {
-  log(`scenario ${scenario.name}`)
-  const runStrider = () => strider(scenario.strider(origin))
-  const runPlaywright = () => scenario.playwright(browser, origin, files)
-  // The first run of each is its outcome, and warms it up
-  const outcome = { strider: await outcomeOf(runStrider), playwright: await outcomeOf(runPlaywright) }
-  const times = { strider: [] as Array<number>, playwright: [] as Array<number> }
-  for (let i = 0; i < runs; i++) {
-    // Alternating which goes first, so neither always follows the other
-    const order = i % 2 === 0 ? (["strider", "playwright"] as const) : (["playwright", "strider"] as const)
-    for (const library of order) {
-      if (outcome[library]._tag === "Failed") continue
-      times[library].push(await elapsed(library === "strider" ? runStrider : runPlaywright))
-    }
-  }
-  results.push({
-    scenario,
-    outcome,
-    times: { strider: stats(times.strider), playwright: stats(times.playwright) }
-  })
-}
+const results = await runScenarios(chosen, runs, (scenario) => ({
+  strider: () => strider(scenario.strider(origin)),
+  playwright: () => scenario.playwright(browser, origin, files)
+}), log)
 
 // ── Q82: what an expectation waiting costs the page ──────────────────────────
 
@@ -319,10 +293,12 @@ const written = report({
   source: fs.readFileSync(path.join(import.meta.dirname, "scenarios.ts"), "utf8")
 })
 // One scenario is a check, printed; RESULTS.md is the full run's record
-if (only === undefined) {
-  const out = path.join(import.meta.dirname, "../RESULTS.md")
-  fs.writeFileSync(out, written)
-  log(`wrote ${path.relative(root, out)}`)
-} else {
-  process.stdout.write(written)
-}
+process.exitCode = publish(results, () => {
+  if (only === undefined) {
+    const out = path.join(import.meta.dirname, "../RESULTS.md")
+    fs.writeFileSync(out, written)
+    log(`wrote ${path.relative(root, out)}`)
+  } else {
+    process.stdout.write(written)
+  }
+})
