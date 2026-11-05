@@ -4,15 +4,18 @@
  * the previous call, waits across calls, declared routes and dialog decisions, and failures returned as data.
  */
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Snapshot } from "@usestrider/browser"
+import { Browser, Deadline, Snapshot } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
 import type * as Toolkit from "effect/ai/Toolkit"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as Handles from "../../../src/internal/handles.ts"
+import * as Runtime from "../../../src/internal/runtime.ts"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
 
@@ -283,6 +286,12 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 assert.lengthOf(lines, 1)
                 assert.include(lines[0], "validation observed during click: textbox")
                 assert.notInclude(lines[0], "blocked")
+                assert.strictEqual(
+                  lines[0],
+                  capture.snapshotText === "redacted"
+                    ? "p1 validation observed during click: textbox validationMessage=\"•••\""
+                    : "p1 validation observed during click: textbox \"private-label\" validationMessage=\"private-message\""
+                )
                 if (capture.snapshotText === "redacted") assert.notInclude(lines[0], "private")
                 else assert.include(lines[0], "validationMessage=\"private-message\"")
                 // An event outside a click must not be retained by a later observer.
@@ -292,6 +301,105 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 const quiet = yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Quiet\"]" })
                 assert.notInclude(quiet.value.sinceLast.join("\n"), "validation observed")
               }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "observes existing open shadow roots but excludes closed roots and child frames",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const html =
+                `<div id="open"></div><div id="closed"></div><iframe srcdoc='<input required aria-label="Frame">'></iframe>
+<button onclick="openField.checkValidity();closedField.checkValidity();document.querySelector('iframe').contentDocument.querySelector('input').checkValidity()">Check</button>
+<script>
+for (const mode of ["open", "closed"]) {
+  const root = document.getElementById(mode).attachShadow({ mode })
+  root.innerHTML = '<input required aria-label="' + mode + '">'
+  window[mode + "Field"] = root.querySelector("input")
+}
+</script>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.evaluateInMainWorld(async () => {
+                const frame = document.querySelector("iframe")!
+                if (frame.contentDocument?.querySelector("input") === null) {
+                  await new Promise<void>((resolve) => frame.addEventListener("load", () => resolve(), { once: true }))
+                }
+              })
+              const tools = yield* BrowserToolkit.make({
+                context: page.context,
+                secrets: {},
+                capture: CapturePolicy.local
+              })
+              const result = yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Check\"]" })
+              const lines = result.value.sinceLast.filter((line: string) => line.includes("validation observed"))
+              assert.lengthOf(lines, 1)
+              assert.include(lines[0], "validation observed during click: textbox \"open\"")
+              assert.notInclude(lines[0], "closed")
+              assert.notInclude(lines[0], "Frame")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "removes click validation listeners on success failure and interruption",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent("<button>Quiet</button>")}`)
+              const { runtime, entry } = Handles.page(page)
+              const document = yield* runtime.model.documentOf(entry.id)
+              assert(Option.isSome(document))
+              const realm = yield* runtime.model.adapter.realm(document.value, yield* Runtime.engineWorld(runtime))
+              const evaluate = (functionDeclaration: string) =>
+                runtime.model.adapter.evaluate(realm, {
+                  functionDeclaration,
+                  arguments: [],
+                  awaitPromise: true,
+                  result: "value",
+                  userActivation: false
+                })
+              yield* evaluate(`() => {
+              globalThis.activeValidationListeners = new Set()
+              const add = EventTarget.prototype.addEventListener
+              const remove = EventTarget.prototype.removeEventListener
+              EventTarget.prototype.addEventListener = function(type, listener, options) {
+                if (type === "invalid") globalThis.activeValidationListeners.add(listener)
+                return add.call(this, type, listener, options)
+              }
+              EventTarget.prototype.removeEventListener = function(type, listener, options) {
+                if (type === "invalid") globalThis.activeValidationListeners.delete(listener)
+                return remove.call(this, type, listener, options)
+              }
+            }`)
+              const active = Effect.gen(function*() {
+                const result = yield* evaluate("() => globalThis.activeValidationListeners.size")
+                assert(result._tag === "Value" && result.value.type === "number")
+                return result.value.value
+              })
+              const tools = yield* BrowserToolkit.make({
+                context: page.context,
+                secrets: {},
+                capture: CapturePolicy.local
+              })
+              yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Quiet\"]" })
+              assert.strictEqual(yield* active, 0)
+              const failed = yield* call(tools, "click", { page: "p1", target: "#missing" }).pipe(
+                Deadline.within("1 second")
+              )
+              assert.isTrue(failed.failed)
+              assert.strictEqual(yield* active, 0)
+              const pending = yield* call(tools, "click", { page: "p1", target: "#missing" }).pipe(Effect.forkChild)
+              yield* active.pipe(Effect.repeat({ until: (count) => Number(count) > 0 }), Effect.timeout("5 seconds"))
+              yield* Fiber.interrupt(pending)
+              assert.strictEqual(yield* active, 0)
             }))
           }),
         timeout
