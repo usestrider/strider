@@ -226,7 +226,8 @@ export type Handler<E, R, P extends Phase = "request"> = (
  */
 export interface Options<P extends Phase = "request"> {
   /**
-   * Which phase the route sees.
+   * Which phase the route sees. Response-only handlers require an explicit `"response"`, and authentication
+   * handlers require an explicit `"auth"`. If this may be omitted, the handler must also handle `"request"`.
    *
    * @default "request"
    */
