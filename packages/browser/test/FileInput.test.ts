@@ -499,6 +499,9 @@ describe("a local read under the deadline", () => {
             "canceled reads must never apply files"
           )
           assert.strictEqual(yield* handler.handled, 1)
+          if (scenario === "stalled chunk acknowledgement") {
+            assert.lengthOf(evaluations.filter((call) => call.functionDeclaration.includes("function appendChunk")), 1)
+          }
           assert.strictEqual(released, 1)
           assert.strictEqual(closed, 1)
         }).pipe(
