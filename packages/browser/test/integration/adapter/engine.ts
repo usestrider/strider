@@ -149,6 +149,292 @@ export const engine = (backend: Backend) =>
   describe(`${backend.name} engine`, () => {
     layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
       (it) => {
+        it.effect("collects field metadata only for masking snapshots and clears it across mode switches", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(
+              backend,
+              `<h2 contenteditable>private</h2><div onclick="void 0"><div role="textbox"><span>nested</span></div></div>`,
+              `() => {
+                globalThis.fieldReads = 0
+                globalThis.editabilityReads = 0
+                const heading = document.querySelector("h2")
+                const editable = heading.isContentEditable
+                Object.defineProperty(heading, "isContentEditable", { get() { globalThis.editabilityReads++; return editable } })
+                const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "assignedSlot")
+                Object.defineProperty(Element.prototype, "assignedSlot", {
+                  ...descriptor, get() { globalThis.fieldReads++; return descriptor.get.call(this) }
+                })
+              }`
+            )
+            for (const provenance of [false, true, false, true]) {
+              yield* call(`() => { globalThis.fieldReads = 0; globalThis.editabilityReads = 0 }`, [])
+              const response = yield* send(
+                { op: "snapshot", steps: null, interactivity: true, depth: null, provenance } as Engine.Request
+              )
+              assert.strictEqual(response._tag, "Snapshot")
+              if (response._tag !== "Snapshot") {
+                return
+              }
+              assert.strictEqual(JSON.stringify(response.root).includes("\"fieldContent\":true"), provenance)
+              assert.strictEqual(JSON.stringify(response.root).includes("\"editable\":true"), provenance)
+              const reads = yield* call(`() => String(globalThis.fieldReads)`, [])
+              assert(reads._tag === "Value" && reads.value.type === "string")
+              if (provenance) {
+                assert.isAbove(Number(reads.value.value), 0)
+              } else assert.strictEqual(Number(reads.value.value), 0)
+              const classifications = yield* call(`() => String(globalThis.editabilityReads)`, [])
+              assert(classifications._tag === "Value" && classifications.value.type === "string")
+              if (provenance) {
+                assert.isAbove(Number(classifications.value.value), 0)
+              } else assert.strictEqual(Number(classifications.value.value), 0)
+            }
+          }), timeout)
+
+        it.effect("carries field editability independently of semantics and enabled state", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<article contenteditable="true" aria-label="Article">private</article><p contenteditable="plaintext-only">plain</p><h2 contenteditable="true">secret heading</h2><input aria-label="Native" readonly><textarea disabled>value</textarea><select><option>Choice</option></select><div role="textbox" aria-label="ARIA">aria value</div><select multiple aria-label="Choices"><option>Choice</option></select><div role="slider" aria-label="Range">range value</div><button>Outside</button>`
+            )
+            const answer = yield* send({
+              op: "snapshot",
+              steps: null,
+              interactivity: true,
+              depth: null,
+              provenance: true
+            })
+            assert.strictEqual(answer._tag, "Snapshot")
+            if (answer._tag !== "Snapshot") {
+              return
+            }
+            const nodes = answer.root.children
+            assert.deepStrictEqual(nodes.map((node) => [node.role.role, node.editable === true]), [
+              ["article", true],
+              ["paragraph", true],
+              ["heading", true],
+              ["textbox", true],
+              ["textbox", true],
+              ["combobox", true],
+              ["textbox", true],
+              ["listbox", true],
+              ["slider", true],
+              ["button", false]
+            ])
+            assert.deepStrictEqual(nodes[2]!.name, {
+              _tag: "Accessible",
+              value: "secret heading",
+              from: "text",
+              fieldContent: true
+            })
+            assert.deepStrictEqual(nodes[0]!.name, { _tag: "Accessible", value: "Article" })
+          }), timeout)
+
+        it.effect("tracks chosen name contributions from fields without tainting public labels", () =>
+          Effect.gen(function*() {
+            const { send, call } = yield* open(
+              backend,
+              `<h2><span contenteditable>ancestor-private</span></h2><button aria-label="Public"><span contenteditable>ignored-private</span></button><input id="field" aria-label="Field" value="embedded-private"><button aria-labelledby="field"></button><div>Nearby public</div><div contenteditable></div><span id="label" contenteditable aria-label="Referenced public"></span><button aria-labelledby="label"></button>`
+            )
+            const answer = yield* send({
+              op: "snapshot",
+              steps: null,
+              interactivity: true,
+              depth: null,
+              provenance: true
+            })
+            assert.strictEqual(answer._tag, "Snapshot")
+            if (answer._tag !== "Snapshot") {
+              return
+            }
+            const names = new Map(
+              answer.root.children.flatMap((node) =>
+                node.name._tag === "None" ? [] : [[node.name.value, node.name]]
+              )
+            )
+            assert.deepStrictEqual(names.get("ancestor-private"), {
+              _tag: "Accessible",
+              value: "ancestor-private",
+              fieldContent: true
+            })
+            assert.deepStrictEqual(names.get("embedded-private"), {
+              _tag: "Accessible",
+              value: "embedded-private",
+              fieldContent: true
+            })
+            assert.deepStrictEqual(names.get("Public"), { _tag: "Accessible", value: "Public" })
+            assert.deepStrictEqual(names.get("Field"), { _tag: "Accessible", value: "Field" })
+            assert.deepStrictEqual(names.get("Referenced public"), { _tag: "Accessible", value: "Referenced public" })
+            assert.deepStrictEqual(names.get("Nearby public"), {
+              _tag: "Inferred",
+              value: "Nearby public",
+              from: "nearbyLabel"
+            })
+            const changed = yield* call(
+              `() => {
+              document.querySelector('h2').setAttribute('aria-label', 'Changed public')
+              document.querySelector('button').removeAttribute('aria-label')
+            }`,
+              []
+            )
+            assert.strictEqual(changed._tag, "Value")
+            const next = yield* send({
+              op: "snapshot",
+              steps: null,
+              interactivity: true,
+              depth: null,
+              provenance: true
+            })
+            assert.strictEqual(next._tag, "Snapshot")
+            if (next._tag !== "Snapshot") {
+              return
+            }
+            assert.deepStrictEqual(next.root.children[0]!.name, { _tag: "Accessible", value: "Changed public" })
+            assert.deepStrictEqual(next.root.children[1]!.name, {
+              _tag: "Accessible",
+              value: "ignored-private",
+              fieldContent: true
+            })
+          }), timeout)
+
+        it.effect("marks actual name contributors under native and ARIA fields while preserving explicit labels", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<select aria-label="Plan"><option id="option" selected>option value</option></select><button aria-labelledby="option"></button><div role="textbox" aria-label="Field"><span id="nested">nested value</span><span id="public" aria-label="Explicit public">ignored value</span><input id="action" type="button" value="action value"></div><button aria-labelledby="nested"></button><button aria-labelledby="public"></button><button aria-labelledby="action"></button><article contenteditable aria-label="Editor"><span id="blocked" contenteditable="false">blocked value</span></article><button aria-labelledby="blocked"></button><div role="textbox"><span id="empty"> </span></div><button aria-labelledby="empty" aria-label="Fallback public"></button>`
+            )
+            const answer = yield* send({
+              op: "snapshot",
+              steps: null,
+              interactivity: true,
+              depth: null,
+              provenance: true
+            })
+            assert.strictEqual(answer._tag, "Snapshot")
+            if (answer._tag !== "Snapshot") {
+              return
+            }
+            const buttons = answer.root.children.filter((node) =>
+              node.role.role === "button"
+            )
+            assert.deepStrictEqual(
+              buttons.map((node) =>
+                node.name
+              ),
+              [
+                { _tag: "Accessible", value: "option value", fieldContent: true },
+                { _tag: "Accessible", value: "nested value", fieldContent: true },
+                { _tag: "Accessible", value: "Explicit public" },
+                { _tag: "Accessible", value: "action value", fieldContent: true },
+                { _tag: "Accessible", value: "blocked value", fieldContent: true },
+                { _tag: "Accessible", value: "Fallback public" }
+              ]
+            )
+          }), timeout)
+
+        it.effect("follows field ancestry through shadow hosts and assigned slots", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<div id="host"><span id="assigned" slot="private">assigned value</span></div><button aria-labelledby="assigned"></button><div id="shadow" role="textbox" aria-label="Shadow field"></div>`,
+              `() => {
+                document.getElementById('host').attachShadow({mode:'open'}).innerHTML = '<div role="textbox" aria-label="Slot field"><slot name="private"></slot></div>'
+                document.getElementById('shadow').attachShadow({mode:'open'}).innerHTML = '<span id="source">shadow value</span><button aria-labelledby="source"></button>'
+              }`
+            )
+            const answer = yield* send({
+              op: "snapshot",
+              steps: null,
+              interactivity: true,
+              depth: null,
+              provenance: true
+            })
+            assert.strictEqual(answer._tag, "Snapshot")
+            if (answer._tag !== "Snapshot") {
+              return
+            }
+            const buttons: Array<Engine.SnapNode["name"]> = []
+            const visit = (node: Engine.SnapNode) => {
+              if (node.role.role === "button") {
+                buttons.push(node.name)
+              }
+              for (const child of node.children) {
+                visit(child)
+              }
+            }
+            visit(answer.root)
+            assert.deepStrictEqual(buttons, [
+              { _tag: "Accessible", value: "assigned value", fieldContent: true },
+              { _tag: "Accessible", value: "shadow value", fieldContent: true }
+            ])
+          }), timeout)
+
+        it.effect("invalidates field ancestry and subtree text caches after slot, role and parent changes", () =>
+          Effect.gen(function*() {
+            const { send, call } = yield* open(
+              backend,
+              `<div id="host"><span id="moving" slot="private">moving value</span></div><button aria-labelledby="moving"></button><div id="clickable" onclick="void 0"><span id="text">inferred value</span></div>`,
+              `() => { document.getElementById('host').attachShadow({mode:'open'}).innerHTML = '<div role="textbox" aria-label="Slot field"><slot name="private"></slot></div><slot name="public"></slot>' }`
+            )
+            const check = Effect.fnUntraced(function*(privateReference: boolean, privateText: boolean) {
+              const answer = yield* send({
+                op: "snapshot",
+                steps: null,
+                interactivity: true,
+                depth: null,
+                provenance: true
+              })
+              assert.strictEqual(answer._tag, "Snapshot")
+              if (answer._tag !== "Snapshot") {
+                return
+              }
+              const reference = answer.root.children.find((node) =>
+                node.role.role === "button"
+              )!
+              const clickable = answer.root.children.find((node) =>
+                node.role.role === "clickable"
+              )!
+              assert.deepStrictEqual(reference.name, {
+                _tag: "Accessible",
+                value: "moving value",
+                ...(privateReference ? { fieldContent: true } : {})
+              })
+              assert.deepStrictEqual(clickable.name, {
+                _tag: "Inferred",
+                value: "inferred value",
+                from: "text",
+                ...(privateText ? { fieldContent: true } : {})
+              })
+            })
+            yield* check(true, false)
+            const reassigned = yield* call(
+              `() => {
+              document.getElementById('moving').slot = 'public'
+              document.getElementById('text').setAttribute('role', 'textbox')
+            }`,
+              []
+            )
+            assert.strictEqual(reassigned._tag, "Value")
+            yield* check(false, true)
+            const reclassified = yield* call(
+              `() => {
+              document.getElementById('host').setAttribute('role', 'textbox')
+              document.getElementById('text').removeAttribute('role')
+            }`,
+              []
+            )
+            assert.strictEqual(reclassified._tag, "Value")
+            yield* check(true, false)
+            const moved = yield* call(
+              `() => {
+              document.body.appendChild(document.getElementById('moving'))
+              document.getElementById('host').removeAttribute('role')
+            }`,
+              []
+            )
+            assert.strictEqual(moved._tag, "Value")
+            yield* check(false, false)
+          }), timeout)
+
         for (const shape of wrappedLinks) {
           for (const partial of shape.id === "three" ? [false, true] : [false]) {
             it.effect(
@@ -162,8 +448,12 @@ export const engine = (backend: Backend) =>
                   assert(measured._tag === "Value" && measured.value.type === "string")
                   const geometry = JSON.parse(measured.value.value) as LinkGeometry
                   assert.strictEqual(geometry.rects.length, shape.fragments)
-                  if (partial) assert.isBelow(geometry.rects[0]!.bottom, 0)
-                  const first = geometry.rects.find((r) => r.bottom > 0 && r.top < geometry.height)!
+                  if (partial) {
+                    assert.isBelow(geometry.rects[0]!.bottom, 0)
+                  }
+                  const first = geometry.rects.find((r) =>
+                    r.bottom > 0 && r.top < geometry.height
+                  )!
                   const response = yield* send(point(0))
                   assert(response._tag === "Ready", JSON.stringify(response))
                   assert(response.point !== null, JSON.stringify(response))
@@ -215,7 +505,9 @@ export const engine = (backend: Backend) =>
               )
               assert(geometry._tag === "Value" && geometry.value.type === "string")
               const centers = JSON.parse(geometry.value.value) as Array<{ x: number; y: number }>
-              if (mode !== "partial ancestor") assert.strictEqual(centers.length, 3)
+              if (mode !== "partial ancestor") {
+                assert.strictEqual(centers.length, 3)
+              }
               const response = yield* send({
                 ...point(0),
                 cap: 150,
