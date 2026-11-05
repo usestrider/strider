@@ -267,6 +267,65 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         )
       }
 
+      const exportedLocator = (query: string, page: unknown) =>
+        new Function("page", "Effect", `return Effect.gen(function*() { return ${query} })`)(
+          page,
+          Effect
+        ) as Effect.Effect<Locator.Locator>
+
+      it.effect(
+        "exports a named password query that still finds a field appearing after it runs",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* Browser.newPage()
+            const field = "<label>Late secret<input type=\"password\"></label>"
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(field)}`)
+            const snapshot = yield* page.snapshot()
+            const [node] = [...snapshot.refs.values()].filter((each) =>
+              each.role._tag === "Inferred" && each.role.evidence.includes("password")
+            )
+            const query = ExportTest.locatorOf("page", Option.getOrThrow(node!.ref), snapshot)
+            // Replayed, the step before this one revealed the field: it arrives just after the query runs
+            yield* page.goto(`${served.origin}/fixture?html=${
+              encodeURIComponent(
+                `<script>setTimeout(() => document.body.insertAdjacentHTML("beforeend", ${
+                  JSON.stringify(field)
+                }), 500)</script>`
+              )
+            }`)
+            const locator = yield* exportedLocator(query, page)
+            yield* locator.fill("private-late")
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => document.querySelector("input")!.value),
+              "private-late"
+            )
+          })),
+        timeout
+      )
+
+      it.effect(
+        "exports a named password query that finds a field inside a frame",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* Browser.newPage()
+            yield* page.goto(
+              `${served.origin}/fixture?html=${
+                encodeURIComponent("<iframe srcdoc='<label>Framed secret<input type=password></label>'></iframe>")
+              }`
+            )
+            const snapshot = yield* page.snapshot()
+            const [node] = [...snapshot.refs.values()].filter((each) =>
+              each.role._tag === "Inferred" && each.role.evidence.includes("password")
+            )
+            const query = ExportTest.locatorOf("page", Option.getOrThrow(node!.ref), snapshot)
+            const locator = yield* exportedLocator(query, page)
+            assert.strictEqual(yield* locator.count, 1, query)
+          })),
+        timeout
+      )
+
       it.effect(
         "drives a page as a model would: names, refs, secrets, the digest and waits",
         () =>
