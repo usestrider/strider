@@ -19,9 +19,10 @@
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Deadline from "../Deadline.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
@@ -218,11 +219,25 @@ export const next = <A, B, PE, PR, DE = never>(
     const context = yield* Effect.context<PR>()
     const since = channel.published
     const subscribed = now()
-    // Kept until the first match or the deadline, so it needs no bound
-    const subscriber = yield* subscribe(channel, accepts, Number.POSITIVE_INFINITY)
+    // A child scope releases completed waits before their acquiring scope closes.
+    const lifetime = yield* Effect.flatMap(Effect.scope, (scope) => Scope.fork(scope))
+    const subscriber = yield* subscribe(channel, accepts, Number.POSITIVE_INFINITY).pipe(
+      Effect.provideService(Scope.Scope, lifetime)
+    )
+    const release = Effect.sync(() => {
+      channel.subscribers.delete(subscriber)
+      Queue.shutdownUnsafe(subscriber.queue)
+    })
     const deferred = Deferred.makeUnsafe<B, PE | DE | Target.TargetGone | Deadline.Timeout>()
-    // The worker may be interrupted before it starts, before its interruption handler is installed.
-    yield* Effect.addFinalizer(() => Deferred.interrupt(deferred))
+    let outcome: Exit.Exit<B, PE | DE | Target.TargetGone | Deadline.Timeout> | undefined
+    // Scope closure also completes the wait when its worker never starts.
+    yield* Scope.addFinalizer(
+      lifetime,
+      Effect.andThen(
+        release,
+        Effect.suspend(() => outcome === undefined ? Deferred.interrupt(deferred) : Deferred.done(deferred, outcome))
+      )
+    )
     // The entry being delivered, if the deadline passes while it is
     let delivering: Option.Option<A> = Option.none()
     const take: Effect.Effect<B, PE | DE | Target.TargetGone | Subscription.EventOverflow | Cause.Done> = Effect.gen(
@@ -247,22 +262,24 @@ export const next = <A, B, PE, PR, DE = never>(
     }
     yield* take.pipe(
       (waiting) => record.bound(waiting, missed, "waitingForEvent"),
-      Effect.flatMap((event) => Deferred.succeed(deferred, event)),
-      Effect.catch((failure) => {
-        if (Deadline.isTimeout(failure) || Target.isTargetGone(failure)) return Deferred.fail(deferred, failure)
+      Effect.catch((failure): Effect.Effect<never, PE | DE | Target.TargetGone | Deadline.Timeout> => {
+        if (Deadline.isTimeout(failure) || Target.isTargetGone(failure)) return Effect.fail(failure)
         if (Cause.isDone(failure)) {
           // Its target ended normally, which a wait still fails on; or its scope closed, which interrupts it
           return Option.isSome(channel.end)
-            ? Deferred.fail(deferred, gone(channel.target, channel.end.value.reason))
-            : Deferred.interrupt(deferred)
+            ? Effect.fail(gone(channel.target, channel.end.value.reason))
+            : Effect.interrupt
         }
         // A `next` buffer has no bound, so it never overflows
         return Subscription.isEventOverflow(failure)
-          ? Deferred.interrupt(deferred)
-          : Deferred.fail(deferred, failure as PE | DE)
+          ? Effect.interrupt
+          : Effect.fail(failure as PE | DE)
       }),
-      Effect.onInterrupt(() => Deferred.interrupt(deferred)),
-      Effect.forkScoped
+      Effect.onExit((exit) => {
+        outcome = exit
+        return Scope.close(lifetime, Exit.void)
+      }),
+      Effect.forkIn(lifetime)
     )
     // The read side only: an effect that awaits it, which nothing can complete. Awaited inside an operation, the
     // wait is a step of it
