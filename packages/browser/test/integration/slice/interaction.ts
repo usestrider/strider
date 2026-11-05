@@ -1406,6 +1406,63 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }))
           }), timeout)
 
+        it.effect(`takes new evidence and acts once after the guard stops a ${action}`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="box" type="checkbox" ${
+                action === "uncheck" ? "checked" : ""
+              } onclick="out.textContent += 'click '"><output id="out"></output>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const box = page.locator("#box")
+              assert(box instanceof LocatorImpl)
+              const rounds = yield* observeChecks(box)
+              const adapter = box.owner.runtime.model.adapter
+              const original = adapter.dispatchInput
+              const toggleCover = (present: boolean) =>
+                page.evaluateInMainWorld((present: boolean) => {
+                  if (!present) return document.getElementById("cover")!.remove()
+                  const cover = document.createElement("div")
+                  cover.id = "cover"
+                  cover.style.cssText = "position:fixed;inset:0;z-index:1"
+                  document.body.append(cover)
+                }, present).pipe(Effect.orDie)
+              let dispatches = 0
+              const dispatchInput: typeof original = (...args) =>
+                ++dispatches === 1
+                  // The cover arrives after the check under the permit, so only the armed guard can stop the gesture
+                  ? toggleCover(true).pipe(
+                    Effect.andThen(original(...args)),
+                    Effect.tap(() => toggleCover(false))
+                  )
+                  : original(...args)
+              yield* Effect.acquireRelease(
+                Effect.sync(() => Object.assign(adapter, { dispatchInput })),
+                () =>
+                  Effect.sync(() => {
+                    Object.assign(adapter, { dispatchInput: original })
+                  })
+              )
+              yield* box[action]()
+              assert.strictEqual(dispatches, 2)
+              assert.strictEqual(yield* box.isChecked, action === "check")
+              assert.strictEqual(yield* page.locator("#out").readText, "click")
+              const tokens = rounds.flatMap((round) =>
+                round.response._tag === "Ready" && round.response.stability !== undefined
+                  ? [round.response.stability]
+                  : []
+              )
+              assert.strictEqual(tokens.length, 2)
+              assert.notStrictEqual(tokens[0], tokens[1])
+              assert.deepStrictEqual(
+                rounds.filter((round) => round.request.apply).map((round) => round.request.stability),
+                tokens
+              )
+            }))
+          }), timeout)
+
         it.effect(`reports prevented ${action} once without retrying input`, () =>
           Effect.gen(function*() {
             const { url } = yield* fixture(() =>
