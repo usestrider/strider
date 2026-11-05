@@ -272,7 +272,7 @@ interface ScreencastOwner {
 }
 interface ScreencastOwners {
   readonly active: Set<ScreencastOwner>
-  /** Starts awaiting an outcome; abandoned entries leave this set after their bounded grace interval. */
+  /** Starts awaiting an outcome, including abandoned commands retained until reply or session end. */
   readonly pending: Set<ScreencastOwner>
   readonly run: (effect: Effect.Effect<void>) => unknown
   stopping: Deferred.Deferred<void> | undefined
@@ -366,19 +366,10 @@ export const screencast = Effect.fnUntraced(function*(state: State, id: L1Target
     owner.released = true
     owners.active.delete(owner)
     if (owner.status === "pending") {
-      // A missing reply must neither pin an ownership count nor block the caller. Allow a bounded interval
-      // for a late rejection/success, then attempt cleanup of a start whose outcome remains unknown.
-      owners.run(
-        BrowserClock.sleep(1000).pipe(
-          Effect.andThen(Effect.suspend(() => {
-            owners.pending.delete(owner)
-            if (owner.status !== "pending" || owners.ended || owner.stopAtDispatch !== owners.stops) return Effect.void
-            if (owners.stopping === undefined) owners.needsStop = true
-            return stop
-          })),
-          Operation.detached
-        )
-      )
+      // Abandonment itself is cleanup evidence; a missing reply must not retain a consumer or add a delay.
+      // An exchange already dispatched after this start covers its uncertain outcome. A later success
+      // is fresh evidence, reported separately by ReplyOutcome even after this owner has been released.
+      if (owner.stopAtDispatch === owners.stops && owners.stopping === undefined) owners.needsStop = true
     }
     return stop
   })
@@ -419,7 +410,7 @@ export const screencast = Effect.fnUntraced(function*(state: State, id: L1Target
                   owner.status = outcome
                   if (outcome === "success") {
                     owners.needsStop = true
-                    if (owners.stopping === undefined) owners.confirmed = true
+                    if (owners.stopping === undefined && owner.stopAtDispatch === owners.stops) owners.confirmed = true
                     if (owner.released) owners.run(stop)
                   }
                 }),

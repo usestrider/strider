@@ -843,10 +843,14 @@ This preserves the existing session-loss error mapping rather than introducing a
 
 A session's live and acquiring consumers suppress stop. Confirmation for sharing is separate from uncertain
 start evidence requiring best-effort cleanup. The last release stops a known stream; an abandoned
-unconfirmed start releases its reservation immediately, with a one-second browser-clock grace interval for a
-late outcome. If no outcome arrives, cleanup treats it as potentially started, unless another stop was already attempted after
-it. This retains no consumer count indefinitely. A later success can establish another cleanup need; it still
-cannot stop a newer consumer. Command metadata retained for a late reply lasts until that reply or session end,
+unconfirmed start releases its reservation and supplies uncertain-start cleanup evidence immediately, unless
+another stop was already attempted after it. Abandonment, last release, reply outcome and session end drive
+cleanup; no grace interval or reply wait precedes the cleanup claim. This retains no consumer count indefinitely
+and cleans even a start that never replies. A later rejection adds no cleanup, but cannot undo a stop already
+issued for uncertainty. A stop before a future consumer reserves ownership is valid; a stop while that consumer
+is acquiring or live is forbidden. A later success can establish another cleanup need; it still
+cannot stop a newer consumer. Sharing requires confirmation from a start with no stop dispatched since it;
+a late reply from before a cleanup exchange cannot prove the stream survived that stop. Command metadata retained for a late reply lasts until that reply or session end,
 as it does for other resource-creating commands. Session end clears the ownership state.
 
 Stop claims the session synchronously before its exchange begins. New consumers may reserve and read metrics,
@@ -859,7 +863,8 @@ The built-in pipe and WebSocket transports preserve command order on their conne
 subscriptions and acknowledgments remain independent.
 
 Rejected: issuing another start for every confirmed-stream consumer, which Chromium rejects; independent finalizers or unconditional late-success stops, which stop another consumer's stream;
-counting abandoned acquisitions until their reply arrives, which can retain ownership forever; serializing entire
+counting abandoned acquisitions until their reply arrives, which can retain ownership forever; waiting a grace
+interval for an unknown outcome, which adds a hidden delay without proving success or failure; serializing entire
 start/reply exchanges, which blocks a newer acquisition behind an abandoned start; registering cleanup after
 consuming a reply, which needs a separate interruption-safe ownership transfer; and timing only stop's reply
 wait, which leaves a blocked write outside the cleanup budget. The acquisition's renderer readiness read and
