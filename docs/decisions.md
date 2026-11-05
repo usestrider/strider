@@ -847,3 +847,16 @@ following labels for public state reads, which expands an unrelated contract; us
 choose the label, which would create associations across shadow roots; replacing
 DOM guards with slot traversal, which can skip DOM ancestors; and copying Playwright's activation
 of links before reporting unchanged state, which sends input to a separate control unnecessarily.
+
+
+**Actions accept transparent controls; visible observations mean seen.** Action readiness ignores opacity on the
+element and its ancestors, retaining every other check. Styled controls commonly put a transparent real input over
+their decoration. Pointer reception establishes whether pointer input can reach them. Non-pointer actions such as
+fill also accept transparency, retaining their enabled, editable and inert checks without adding a hit test.
+Visibility assertions and filters retain opacity-sensitive visibility, so they continue to describe what a person
+can see.
+
+- **Rejected:** ignoring opacity in the shared visibility observation, which would make assertions and filters
+  count unseen elements as seen; requiring callers to disable the visible check, which also drops useful checks
+  for CSS visibility and missing boxes; and limiting the exception to pointer actions, which would leave transparent
+  text fields unusable by fill despite being enabled and editable.

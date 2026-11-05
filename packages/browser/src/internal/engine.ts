@@ -827,17 +827,19 @@ export function engine(render: (root: SnapNode) => string) {
     return !element.checkVisibility({ visibilityProperty: true })
   }
 
-  /** CONCEPTS.md §8, Visible. */
-  const visible = (element: Element): boolean => {
+  /** CONCEPTS.md §8: observations include opacity; action readiness ignores it. */
+  const rendered = (element: Element, opacityProperty: boolean): boolean => {
     if (getComputedStyle(element).display === "contents") {
-      return flatChildElements(element).some(visible)
+      return flatChildElements(element).some((child) => rendered(child, opacityProperty))
     }
-    if (!element.checkVisibility({ contentVisibilityAuto: true, opacityProperty: true, visibilityProperty: true })) {
+    if (!element.checkVisibility({ contentVisibilityAuto: true, opacityProperty, visibilityProperty: true })) {
       return false
     }
     const rect = element.getBoundingClientRect()
     return rect.width > 0 && rect.height > 0
   }
+
+  const visible = (element: Element): boolean => rendered(element, true)
 
   // ── Accessible names (accname 1.2) ────────────────────────────────────────────────────────────────────
 
@@ -1620,7 +1622,7 @@ export function engine(render: (root: SnapNode) => string) {
       previous = null
       let reason: NotReady | null = null
       if (element === undefined) reason = { _tag: "NoMatch" }
-      else if (checks.visible && !visible(element)) reason = { _tag: "NotVisible" }
+      else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
       else if (checks.enabled && !enabled(element)) reason = { _tag: "Disabled" }
       else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
       else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)

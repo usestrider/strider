@@ -629,6 +629,13 @@ export interface ReadonlyLocator
  * the element's box to stay the same for 2 animation frames, or as many as `{ frames }` says, and a timeout says
  * how many.
  *
+ * The action's `visible` check ignores zero opacity on the element and its ancestors, but still requires CSS
+ * visibility, content visibility and a nonempty box. Actions need the element reachable; visibility observations
+ * and filters mean it can be seen and remain opacity-sensitive. Pointer actions also check that the point receives
+ * input. Non-pointer actions do not hit-test: `fill` and `clear` still check enabled, editable and not inert;
+ * `focus`, `press` and `pressSequentially` check not inert; `selectOption` checks enabled; `scrollIntoView`
+ * checks stability. `setInputFiles` runs no readiness checks.
+ *
  * **Example** (Clicking a button that keeps pulsing)
  *
  * ```ts import.meta.vitest
