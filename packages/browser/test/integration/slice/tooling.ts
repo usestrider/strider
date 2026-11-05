@@ -120,6 +120,9 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 if (chooser) {
                   const handler = yield* FileChooser.handle(page, FileChooser.choose(inputs))
                   yield* page.getByRole("button", { name: "Choose" }).click()
+                  yield* page.getByText(
+                    "caller.txt:text/plain:14:caller content|unknown.strider-unknown:application/octet-stream:3:raw|b.csv:text/csv:3:x,y"
+                  ).pipe(Expect.toBeVisible)
                   assert.strictEqual(yield* handler.handled, 1)
                   yield* handler.remove
                 } else yield* page.getByLabel("Files").setInputFiles(inputs)
@@ -135,7 +138,12 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 yield* page.getByText(
                   "caller.txt:text/plain:14:caller content|unknown.strider-unknown:application/octet-stream:3:raw|b.csv:text/csv:3:x,y"
                 ).pipe(Expect.toBeVisible)
-                yield* page.getByLabel("Files").setInputFiles([])
+                if (chooser) {
+                  const clear = yield* FileChooser.handle(page, FileChooser.choose([]))
+                  yield* page.getByRole("button", { name: "Choose" }).click()
+                  yield* page.locator("#out").pipe(Expect.toHaveText(""))
+                  assert.strictEqual(yield* clear.handled, 1)
+                } else yield* page.getByLabel("Files").setInputFiles([])
                 assert.strictEqual(
                   yield* page.getByLabel("Files").evaluate((input) => (input as HTMLInputElement).files!.length),
                   0

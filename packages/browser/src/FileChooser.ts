@@ -270,6 +270,12 @@ export const handle = <E, R>(
  * A `Single` chooser given several files fails the handler with `InvalidInput`, so the chooser is canceled
  * rather than given the first file.
  *
+ * Local files require Effect's `FileSystem` and `Path` services when the browser layer is built. Local files
+ * and bytes may be combined; remote paths must be selected separately. Preparation failures are reported
+ * through the handler's existing failure reporting and cancel the chooser. Local files and bytes require the
+ * browser to identify the input that opened the chooser; otherwise preparation fails with `Unsupported`. An
+ * empty selection for a multiple chooser clears through the same mechanism and also needs that input.
+ *
  * **Example** (Choosing two photos)
  *
  * ```ts import.meta.vitest

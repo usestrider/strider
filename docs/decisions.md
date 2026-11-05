@@ -886,3 +886,18 @@ and visibility filters count the element as hidden. Opacity alone does not make 
   count unseen elements as seen; requiring callers to disable the visible check, which also drops useful checks
   for CSS visibility and missing boxes; and limiting the exception to pointer actions, which would leave transparent
   text fields unusable by fill despite being enabled and editable.
+
+## Caller-local uploads transfer contents
+
+`FileInput.local` reads files on the caller on every connection, through the captured Effect `FileSystem` and
+`Path` services, then uses the same page-side file construction as `FileInput.bytes`. Connection ownership says
+who closes the browser, not whether it shares storage. A launched-path fast path or new connection classification
+would make the meaning depend on deployment, so neither is used. Basenames are preserved; Effect MIME lookup
+infers types from extensions, with `application/octet-stream` for unknown extensions.
+
+`FileInput.remote` alone gives paths to the browser host. Remote paths cannot be combined with local files or
+bytes: path selection and page-side construction each replace the selection, so accepting a mixture would lose
+files. Preparation rejects mixtures before selection changes. Empty lists clear through page-side construction too: Chromium can leave page-created files selected after an empty protocol path selection.
+Missing caller services fail explicitly, locator read failures remain `FileUnreadable`, and chooser preparation
+failures use the existing reported handler failure and cancellation path. No implicit service or shared storage
+is assumed.

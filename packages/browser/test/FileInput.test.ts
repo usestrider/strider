@@ -4,6 +4,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Browser, FileChooser, FileInput, FilePath, Target } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as fs from "node:fs"
 import * as os from "node:os"
@@ -12,6 +13,7 @@ import { vi } from "vitest"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as Fake from "../src/internal/fake.ts"
+import * as Preparation from "../src/internal/fileInput.ts"
 import * as Handles from "../src/internal/handles.ts"
 import * as Runtime from "../src/internal/runtime.ts"
 
@@ -21,8 +23,10 @@ const routed: Runtime.Routed = { document, hops: [] }
 
 describe("FileInput across a connection", () => {
   for (const operation of ["Locator.setInputFiles", "FileChooser.choose"] as const) {
-    for (const source of ["local", "remote"] as const) {
-      it.effect(`${operation} ${source === "local" ? "transfers caller-local contents" : "preserves a browser-host path"}`, () =>
+    for (
+      const source of ["local", "remote", "unreadable", "missing-services", "mixed", "empty", "no-element"] as const
+    ) {
+      it.effect(`${operation}: ${source}`, () =>
         Effect.scoped(Effect.gen(function*() {
           const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-upload-"))
           yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
@@ -31,6 +35,7 @@ describe("FileInput across a connection", () => {
           fs.writeFileSync(file, contents)
           const paths: Array<string> = []
           const evaluations: Array<Adapter.EvaluationCall> = []
+          const decisions: Array<Adapter.Decision> = []
           let send!: Adapter.Sink
           const decided = yield* Deferred.make<void>()
           // No shared filesystem is implemented by this peer: paths refer to its own host.
@@ -55,6 +60,7 @@ describe("FileInput across a connection", () => {
                   paths.push(...files)
                 }),
               resolve: Effect.fnUntraced(function*(_obligation, decision) {
+                decisions.push(decision)
                 if (decision._tag === "SetFiles") paths.push(...decision.files)
                 yield* Deferred.succeed(decided, undefined)
               })
@@ -82,21 +88,51 @@ describe("FileInput across a connection", () => {
           )
           yield* Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            const input = source === "local" ? FileInput.local(file) : FileInput.remote(FilePath.Remote.make(file))
-            if (operation === "Locator.setInputFiles") yield* page.locator("#file").setInputFiles(input)
-            else {
-              yield* FileChooser.handle(page, FileChooser.choose(input))
+            if (source === "missing-services") Object.assign(Handles.page(page).runtime, { fileSystem: Option.none() })
+            const input = source === "remote" ?
+              FileInput.remote(FilePath.Remote.make(file))
+              : source === "unreadable" ?
+              FileInput.local(path.join(directory, "missing.txt"))
+              : source === "mixed" ?
+              [FileInput.local(file), FileInput.remote(FilePath.Remote.make(file))]
+              : source === "empty"
+              ? []
+              : FileInput.local(file)
+            const failure = source === "missing-services" || source === "unreadable" || source === "mixed" ||
+              (source === "no-element" && operation === "FileChooser.choose")
+            if (operation === "Locator.setInputFiles") {
+              const action = page.locator("#file").setInputFiles(input)
+              if (failure) {
+                const error = yield* action.pipe(Effect.flip)
+                assert.strictEqual(error._tag, "LocatorError")
+                if (error._tag === "LocatorError") {
+                  assert.strictEqual(error.reason._tag, source === "unreadable" ? "FileUnreadable" : "InvalidInput")
+                }
+              } else yield* action
+            } else {
+              const handler = yield* FileChooser.handle(page, FileChooser.choose(input))
               yield* send({
                 _tag: "ObligationOpened",
                 obligation: "upload-chooser" as Adapter.ObligationId,
                 subject: {
                   _tag: "FileChooser",
                   navigable: Handles.page(page).entry.id,
-                  multiple: false,
-                  element: Option.some(node)
+                  multiple: true,
+                  element: source === "no-element" ? Option.none() : Option.some(node)
                 }
               })
               yield* Deferred.await(decided)
+              assert.strictEqual(yield* handler.handled, failure ? 0 : 1)
+              if (failure) {
+                assert.deepStrictEqual(decisions, [{ _tag: "Cancel" }])
+              }
+              yield* handler.remove
+            }
+            if (failure || source === "empty") {
+              assert.deepStrictEqual(paths, [])
+              if (failure) assert.deepStrictEqual(evaluations, [])
+              else assert.strictEqual(evaluations.length, 1)
+              return
             }
             if (source === "remote") assert.deepStrictEqual(paths, [file])
             else {
@@ -107,4 +143,68 @@ describe("FileInput across a connection", () => {
         })).pipe(Effect.provide(NodeServices.layer)))
     }
   }
+})
+
+describe("file preparation", () => {
+  const connection = BrowserImpl.layer(
+    Fake.connect([], {
+      info: new Browser.Info(Fake.info),
+      capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+    })
+  )
+  const run = (test: (runtime: Runtime.Runtime) => Effect.Effect<void, unknown>) =>
+    Effect.scoped(Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      yield* test(Handles.page(page).runtime)
+    })).pipe(Effect.provide(Layer.provide(connection, NodeServices.layer)))
+
+  it.effect("resolves relative paths, preserves names and infers MIME alongside bytes", () =>
+    run((runtime) =>
+      Effect.gen(function*() {
+        const file = FileInput.local(path.relative(process.cwd(), import.meta.filename))
+        const prepared = yield* Preparation.prepare(runtime, [
+          file,
+          FileInput.bytes("empty.bin", "x/test", new Uint8Array())
+        ])
+        assert.strictEqual(prepared._tag, "Made")
+        if (prepared._tag !== "Made") return
+        assert.strictEqual(prepared.files[0]!.name, "FileInput.test.ts")
+        assert.deepStrictEqual(prepared.files[0]!.data, new Uint8Array(fs.readFileSync(import.meta.filename)))
+        assert.strictEqual(prepared.files[1]!.mimeType, "x/test")
+      })
+    ))
+
+  it.effect("requires both captured caller services even for absolute local paths", () =>
+    run((runtime) =>
+      Effect.gen(function*() {
+        for (const missing of [{ fileSystem: Option.none() }, { path: Option.none() }]) {
+          const failure = yield* Preparation.prepare({ ...runtime, ...missing }, [
+            FileInput.local(import.meta.filename)
+          ]).pipe(Effect.flip)
+          assert.strictEqual(failure._tag, "InvalidInput")
+          assert.include(String(failure), "FileSystem and Path")
+        }
+      })
+    ))
+
+  it.effect("reports read failures and rejects remote mixtures before reading", () =>
+    run((runtime) =>
+      Effect.gen(function*() {
+        const missing = FileInput.local("/nowhere/upload-file.txt")
+        const failure = yield* Preparation.prepare(runtime, [missing]).pipe(Effect.flip)
+        assert.strictEqual(failure._tag, "FileUnreadable")
+        const directory = yield* Preparation.prepare(runtime, [FileInput.local(path.dirname(import.meta.filename))])
+          .pipe(Effect.flip)
+        assert.strictEqual(directory._tag, "FileUnreadable")
+        for (const file of [missing, FileInput.bytes("a", "text/plain", new Uint8Array())]) {
+          const mixed = yield* Preparation.prepare(runtime, [
+            file,
+            FileInput.remote(FilePath.Remote.make("/remote/file"))
+          ]).pipe(Effect.flip)
+          assert.strictEqual(mixed._tag, "InvalidInput")
+        }
+        const empty = yield* Preparation.prepare({ ...runtime, fileSystem: Option.none(), path: Option.none() }, [])
+        assert.deepStrictEqual(empty, { _tag: "Made", files: [] })
+      })
+    ))
 })

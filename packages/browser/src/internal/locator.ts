@@ -594,27 +594,9 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       (_ready, _io, record) =>
         Effect.gen({ self: this }, function*() {
           const id = record.id
-          const given = yield* FileInputImpl.partition(list, "files").pipe(
+          const given = yield* FileInputImpl.prepare(owner.runtime, list).pipe(
             Effect.mapError((reason) => this.error("Locator.setInputFiles", reason, id))
           )
-          const paths: Array<string> = []
-          for (const file of given._tag === "Paths" ? given.files : []) {
-            const path = yield* FileInputImpl.path(owner.runtime, file).pipe(
-              Effect.mapError((reason) => this.error("Locator.setInputFiles", reason, id))
-            )
-            const fs = owner.runtime.fileSystem
-            if (FileInputImpl.source(file)._tag === "Local" && Option.isSome(fs)) {
-              const exists = yield* fs.value.exists(path).pipe(Effect.orElseSucceed(() => false))
-              if (!exists) {
-                return yield* Effect.fail(this.error(
-                  "Locator.setInputFiles",
-                  new Locator.FileUnreadable({ path, hint: "No file is at that path on this machine" }),
-                  id
-                ))
-              }
-            }
-            paths.push(path)
-          }
           const budget = record.budget
           const found = yield* Runtime.element(owner.runtime, owner.page, this.steps, id, budget.at).pipe(
             Effect.mapError((failure) => this.sendFailure("Locator.setInputFiles", failure, record))
@@ -638,7 +620,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             ))
             return "done" as const
           }
-          yield* owner.runtime.model.adapter.setInputFiles(found.node, paths).pipe(
+          yield* owner.runtime.model.adapter.setInputFiles(found.node, given.files).pipe(
             Effect.mapError((error) => this.adapterFailure("Locator.setInputFiles", error, id))
           )
           return "done" as const

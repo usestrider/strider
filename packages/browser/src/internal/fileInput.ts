@@ -1,20 +1,16 @@
-/**
- * Files to upload, as the library reads them: where their bytes come from, and the
- * path the browser is given. A local path is on this machine and a remote one on the browser's host; a launched
- * browser shares this machine, so both reach it as they are, once a relative local path is resolved. A file of
- * bytes is made in the page instead, so it needs no file system the browser shares.
- */
+/** Shared preparation of caller-local files, in-memory files and browser-host paths. */
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/encoding/Base64"
+import * as Mime from "effect/http/Mime"
 import * as Option from "effect/Option"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as FileInput from "../FileInput.ts"
+import * as Locator from "../Locator.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Reason from "../Reason.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Evaluation from "./evaluation.ts"
 import type * as Model from "./model.ts"
-import { isAbsolute } from "./paths.ts"
 import * as Runtime from "./runtime.ts"
 
 /** A file made in the page: its name, MIME type and bytes. */
@@ -43,57 +39,50 @@ export const source = (input: FileInput.FileInput): Source => (input as unknown 
  * A list's files as the browser gets them: the paths it reads, or the files made in the page. One call can't
  * mix them, since the browser sets the paths and the page the made ones, each replacing the other's.
  */
-export const partition = (
-  files: ReadonlyArray<FileInput.FileInput>,
-  input: string
-): Effect.Effect<
-  { readonly _tag: "Paths"; readonly files: ReadonlyArray<FileInput.FileInput> } | {
-    readonly _tag: "Made"
-    readonly files: ReadonlyArray<Made>
-  },
-  Reason.InvalidInput
-> => {
-  const made = files.map(source).filter((from): from is Made => from._tag === "Bytes")
-  if (made.length === 0) return Effect.succeed({ _tag: "Paths", files })
-  if (made.length === files.length) return Effect.succeed({ _tag: "Made", files: made })
-  return Effect.fail(
-    new Reason.InvalidInput({
-      input,
-      expected: "files that are all FileInput.bytes, or all paths",
-      hint: "The browser sets files from paths and the page makes files from bytes, each replacing the other's; " +
-        "give every file as bytes, or every file as a path"
-    })
-  )
-}
-
-/** The path the browser is given for a file; a relative local path is resolved with Effect's `Path`. */
-export const path = (
+export const prepare = Effect.fnUntraced(function*(
   runtime: Runtime.Runtime,
-  input: FileInput.FileInput
-): Effect.Effect<string, Reason.InvalidInput> => {
-  const from = source(input)
-  if (from._tag === "Bytes") {
-    return Effect.fail(
+  files: ReadonlyArray<FileInput.FileInput>
+) {
+  const sources = files.map(source)
+  const remote = sources.filter((from) => from._tag === "Remote")
+  if (remote.length > 0 && remote.length !== sources.length) {
+    return yield* Effect.fail(
       new Reason.InvalidInput({
-        input: "FileInput.bytes",
-        expected: "a file with a path",
-        hint: `${JSON.stringify(from.name)} is made in the page and has no path`
+        input: "files",
+        expected: "browser-host paths alone, or caller-local files and bytes",
+        hint: "FileInput.remote cannot be mixed with FileInput.local or FileInput.bytes"
       })
     )
   }
-  if (from._tag === "Remote" || isAbsolute(from.path)) return Effect.succeed(from.path)
-  return Option.match(runtime.path, {
-    onNone: () =>
-      Effect.fail(
-        new Reason.InvalidInput({
-          input: "FileInput.local",
-          expected: "an absolute path, or Effect's Path to resolve a relative one",
-          hint: `${JSON.stringify(from.path)} is relative, and the browser's layer was built without Path`
-        })
-      ),
-    onSome: (path) => Effect.succeed(path.resolve(from.path))
-  })
-}
+  if (remote.length > 0) return { _tag: "Paths", files: remote.map((from) => from.path) } as const
+  const made = yield* Effect.forEach(
+    sources,
+    (from): Effect.Effect<Made, Reason.InvalidInput | Locator.FileUnreadable> => {
+      if (from._tag === "Bytes") return Effect.succeed(from)
+      if (Option.isNone(runtime.fileSystem) || Option.isNone(runtime.path)) {
+        return Effect.fail(
+          new Reason.InvalidInput({
+            input: "FileInput.local",
+            expected: "Effect's FileSystem and Path services when building the browser layer",
+            hint: "Local files are read on the caller and transferred to the browser"
+          })
+        )
+      }
+      const path = runtime.path.value.resolve(from.path)
+      const name = runtime.path.value.basename(path)
+      return runtime.fileSystem.value.readFile(path).pipe(
+        Effect.mapError((error) => new Locator.FileUnreadable({ path, hint: String(error) })),
+        Effect.map((data): Made => ({
+          _tag: "Bytes",
+          name,
+          data,
+          mimeType: Option.getOrElse(Mime.getType(name), () => "application/octet-stream")
+        }))
+      )
+    }
+  )
+  return { _tag: "Made", files: made } as const
+})
 
 /** Runs in the caller's isolated world: makes each file, sets them on the input, and dispatches as a choice does. */
 function setMadeFiles(

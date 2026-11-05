@@ -67,9 +67,13 @@ export interface FileInput {
  *
  * **Details**
  *
- * The browser is given the path and reads the file itself, so it must see this machine's files, as a launched
- * browser does; for one that doesn't, use `bytes`. A relative path is resolved against the working directory with
- * Effect's `Path`, so the browser's layer must be built with `Path` to accept one.
+ * The caller reads and transfers the file on every connection, including launched browsers. Build the browser's
+ * layer with Effect's `FileSystem` and `Path` services; relative paths resolve against the caller's working
+ * directory. The file keeps its basename and gets its MIME type from its extension, falling back to
+ * `application/octet-stream`. Unreadable files fail with `FileUnreadable` in locator operations; chooser handlers
+ * report preparation failures and cancel the chooser.
+ *
+ * Local files may be mixed with `bytes`. Mixing either with `remote` fails before the selection changes.
  *
  * **Example** (Uploading an avatar)
  *
@@ -128,8 +132,8 @@ export const remote = (path: FilePath.Remote): FileInput => FileInputImpl.make({
  *
  * **Gotchas**
  *
- * One call takes files that are all bytes or all paths, because each kind replaces the other's; a mix fails with
- * `InvalidInput`.
+ * One call may combine bytes and local files. Mixing either with remote paths fails with `InvalidInput`
+ * before the selection changes.
  *
  * **Example** (Uploading a generated report)
  *
